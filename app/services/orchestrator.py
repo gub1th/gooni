@@ -1,21 +1,12 @@
-from typing import Optional
-
 from ..llm.client import llm_client
-from .conversation_service import ConversationService
 from .interaction_service import InteractionService
 from .memory_service import MemoryService
 
 
 class Orchestrator:
-    def handle_chat(self, message: str, conversation_id: Optional[int], db):
-        # create a new conversation if there is no existing conversation
-        if conversation_id is None:
-            new_convo = ConversationService.create_conversation(db)
-            conversation_id = new_convo.id
-
+    def handle_chat(self, message: str, db):
         # create new user interaction
         interaction_input_user = {
-            "conversation_id": conversation_id,
             "role": "user",
             "content": message,
         }
@@ -29,7 +20,6 @@ class Orchestrator:
 
         # save assistant interaction
         interaction_input_assistant = {
-            "conversation_id": conversation_id,
             "role": "assistant",
             "content": response,
         }
