@@ -20,7 +20,7 @@ class InteractionResponse(BaseModel):
 
 class MemoryCreate(BaseModel):
     content: str
-    metadata: Optional[str] = None
+    extra: Optional[str] = None
 
 
 class MemoryResponse(BaseModel):

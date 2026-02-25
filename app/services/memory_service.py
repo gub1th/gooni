@@ -12,12 +12,12 @@ class MemoryService:
     def create_memory(self, memory_input: MemoryCreate, db: Session) -> Memory:
         """Create a new memory and return it"""
         # Generate embedding for content
-        embedding = llm_client.generate_embedding(memory_input.content)
+        embedding, _ = llm_client.generate_embedding(memory_input.content)
 
         memory = Memory(
             content=memory_input.content,
             embedding=json.dumps(embedding),
-            metadata=memory_input.metadata,
+            extra=memory_input.extra,
         )
         db.add(memory)
         db.commit()
@@ -35,7 +35,7 @@ class MemoryService:
     def search_similar(self, query: str, limit: int, db: Session) -> list[Memory]:
         """Search for similar memories using vector similarity"""
         # Generate embedding for query
-        query_embedding = llm_client.generate_embedding(query)
+        query_embedding, _ = llm_client.generate_embedding(query)
 
         if not query_embedding:
             return []
@@ -100,7 +100,7 @@ class MemoryService:
                         if len(important_text) > 20:  # Only store substantial content
                             memory_data = MemoryCreate(
                                 content=important_text,
-                                metadata=json.dumps(
+                                extra=json.dumps(
                                     {"source": "conversation_extraction"}
                                 ),
                             )

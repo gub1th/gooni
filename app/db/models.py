@@ -18,5 +18,5 @@ class Memory(Base):
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
     embedding = Column(Text, nullable=True)  # Store as JSON string for now
-    metadata = Column(Text, nullable=True)  # Store as JSON string for now
+    extra = Column(Text, nullable=True)  # Store as JSON string for now
     timestamp = Column(DateTime(timezone=True), server_default=func.now())

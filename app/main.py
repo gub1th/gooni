@@ -28,7 +28,8 @@ async def root():
 
 @app.post("/chat", response_model=InteractionResponse)
 async def chat(interaction: InteractionCreate, db: Session = Depends(get_db)):
-    return orchestrator.handle_chat(interaction.content, db)
+    response, usage = orchestrator.handle_chat(interaction.content, db)
+    return response
 
 
 @app.get("/interactions", response_model=list[InteractionResponse])
