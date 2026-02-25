@@ -20,7 +20,6 @@ class InteractionResponse(BaseModel):
 
 class MemoryCreate(BaseModel):
     content: str
-    embedding: Optional[str] = None
     metadata: Optional[str] = None
 
 
