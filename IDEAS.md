@@ -2,6 +2,9 @@
 
 > Random thoughts, features, and things worth exploring
 
+## personal list (AI do not touch)
+- can you start tracking .....
+
 ## Features
 
 - Todo list management — read, create, update, delete a central todo list (good first tool call)

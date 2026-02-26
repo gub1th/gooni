@@ -13,6 +13,16 @@ class LLMClient:
         self.chat_model = "gpt-4o-mini"  # Cost-effective for Phase 1
         self.embedding_model = "text-embedding-3-small"
 
+    def synthesize(self, text: str) -> bytes:
+        """Convert text to speech. Returns raw PCM audio bytes (24kHz, 16-bit, mono)."""
+        response = self.client.audio.speech.create(
+            model="tts-1",
+            voice="alloy",
+            input=text,
+            response_format="pcm",
+        )
+        return response.content
+
     def transcribe(self, audio_path: str) -> str:
         """Transcribe an audio file to text using Whisper."""
         with open(audio_path, "rb") as f:
