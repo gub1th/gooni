@@ -13,6 +13,15 @@ class LLMClient:
         self.chat_model = "gpt-4o-mini"  # Cost-effective for Phase 1
         self.embedding_model = "text-embedding-3-small"
 
+    def transcribe(self, audio_path: str) -> str:
+        """Transcribe an audio file to text using Whisper."""
+        with open(audio_path, "rb") as f:
+            result = self.client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f,
+            )
+        return result.text
+
     def generate_embedding(self, text: str) -> tuple[List[float], dict]:
         """Generate embedding for text"""
         try:
