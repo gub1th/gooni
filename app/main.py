@@ -1,3 +1,5 @@
+import json
+
 from dotenv import load_dotenv
 
 from fastapi import Depends, FastAPI
@@ -26,10 +28,10 @@ async def root():
     return {"message": "Hello World"}
 
 
-@app.post("/chat", response_model=InteractionResponse)
+@app.post("/chat")
 async def chat(interaction: InteractionCreate, db: Session = Depends(get_db)):
-    response, usage = orchestrator.handle_chat(interaction.content, db)
-    return response
+    content, usage = orchestrator.handle_chat(interaction.content, db)
+    return {"content": content, "usage": usage}
 
 
 @app.get("/interactions", response_model=list[InteractionResponse])
@@ -51,6 +53,40 @@ async def create_memory(memory: MemoryCreate, db: Session = Depends(get_db)):
 async def get_memories(db: Session = Depends(get_db)):
     memories = db.query(EpisodicMemory).order_by(EpisodicMemory.timestamp.desc()).all()
     return memories
+
+
+@app.get("/debug/memories/profile")
+async def debug_profile_memories(db: Session = Depends(get_db)):
+    memories = db.query(UserProfileMemory).filter(
+        UserProfileMemory.is_active
+    ).order_by(UserProfileMemory.memory_type).all()
+    return [
+        {
+            "id": m.id,
+            "type": m.memory_type.value,
+            "key": m.key,
+            "value": m.value,
+            "context": json.loads(m.context) if m.context else None,
+            "confidence": m.confidence,
+            "created_at": m.created_at,
+            "updated_at": m.updated_at,
+        }
+        for m in memories
+    ]
+
+
+@app.get("/debug/memories/episodic")
+async def debug_episodic_memories(db: Session = Depends(get_db)):
+    memories = db.query(EpisodicMemory).order_by(EpisodicMemory.timestamp.desc()).all()
+    return [
+        {
+            "id": m.id,
+            "content": m.content,
+            "extra": json.loads(m.extra) if m.extra else None,
+            "timestamp": m.timestamp,
+        }
+        for m in memories
+    ]
 
 
 # health check

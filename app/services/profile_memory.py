@@ -68,6 +68,12 @@ class ProfileMemoryService:
 
         return new_memory
 
+    def get_all_active(self, db: Session) -> List[UserProfileMemory]:
+        """Get all active profile memories"""
+        return db.query(UserProfileMemory).filter(
+            UserProfileMemory.is_active
+        ).order_by(UserProfileMemory.memory_type).all()
+
     def get_global_memories(self, db: Session) -> List[UserProfileMemory]:
         """Get all global scope active memories"""
         memories = db.query(UserProfileMemory).filter(

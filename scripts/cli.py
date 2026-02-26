@@ -12,7 +12,8 @@ def main():
     session_interactions = 0
 
     print("🤖 Gooni CLI - Building Jarvis's Brain")
-    print("Type 'exit' or 'quit' to end session\n")
+    print("Type 'exit' or 'quit' to end session")
+    print("Commands: /profile  /episodic\n")
 
     while True:
         message = input("You: ")
@@ -26,16 +27,32 @@ def main():
 
         db = SessionLocal()
         try:
-            response, usage = Orchestrator.handle_chat(message, db)
+            content, usage = Orchestrator.handle_chat(message, db)
 
-            # Update session tracking
-            session_cost += usage['total_cost']
-            session_tokens += usage['total_tokens']
-            session_interactions += 1
+            if usage is None:
+                # Slash command — just print the result, no cost tracking
+                print(f"\n{content}\n")
+            else:
+                session_cost += usage['total_cost']
+                session_tokens += usage['total_tokens']
+                session_interactions += 1
 
-            print(f"Assistant: {response.content}")
-            print(f"💰 This: ${usage['total_cost']:.6f} | Tokens: {usage['total_tokens']} (in:{usage['input_tokens']} out:{usage['output_tokens']})")
-            print(f"📊 Session: ${session_cost:.6f} | {session_tokens} tokens | {session_interactions} interactions\n")
+                print(f"Assistant: {content}")
+
+                # Memory indicator
+                mem = usage.get("memory", {})
+                parts = []
+                if mem.get("profile_updated"):
+                    n = mem["profile_updated"]
+                    parts.append(f"{n} profile {'memory' if n == 1 else 'memories'} updated")
+                if mem.get("episodic_added"):
+                    parts.append(f"{mem['episodic_added']} episodic stored")
+                if parts:
+                    print(f"[memory] {' · '.join(parts)}")
+
+                print(f"💰 This: ${usage['total_cost']:.6f} | Tokens: {usage['total_tokens']} (in:{usage['input_tokens']} out:{usage['output_tokens']})")
+                print(f"📊 Session: ${session_cost:.6f} | {session_tokens} tokens | {session_interactions} interactions\n")
+
         except Exception as e:
             print(f"Error: {e}")
             with open("error.log", "a") as f:
