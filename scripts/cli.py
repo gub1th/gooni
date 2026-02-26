@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import itertools
@@ -9,6 +10,7 @@ import time
 import traceback
 
 import questionary
+
 from app.db.database import SessionLocal
 from app.services.orchestrator import Orchestrator
 from app.services.profile_memory import profile_memory_service
@@ -108,7 +110,7 @@ def main():
     while True:
         message = input("You: ")
         if message.lower() in ["exit", "quit"]:
-            print(f"\n🎯 Session Summary:")
+            print("\n🎯 Session Summary:")
             print(f"   💰 Total Cost: ${session_cost:.6f}")
             print(f"   🪙 Total Tokens: {session_tokens}")
             print(f"   💬 Interactions: {session_interactions}")
@@ -145,8 +147,8 @@ def main():
             # Slash commands (/episodic etc.)
             print(f"\n{content}\n")
         else:
-            session_cost += usage['total_cost']
-            session_tokens += usage['total_tokens']
+            session_cost += usage["total_cost"]
+            session_tokens += usage["total_tokens"]
             session_interactions += 1
 
             print(f"Assistant: {content}")
@@ -155,14 +157,20 @@ def main():
             parts = []
             if mem.get("profile_updated"):
                 n = mem["profile_updated"]
-                parts.append(f"{n} profile {'memory' if n == 1 else 'memories'} updated")
+                parts.append(
+                    f"{n} profile {'memory' if n == 1 else 'memories'} updated"
+                )
             if mem.get("episodic_added"):
                 parts.append(f"{mem['episodic_added']} episodic stored")
             if parts:
                 print(f"[memory] {' · '.join(parts)}")
 
-            print(f"💰 This: ${usage['total_cost']:.6f} | Tokens: {usage['total_tokens']} (in:{usage['input_tokens']} out:{usage['output_tokens']})")
-            print(f"📊 Session: ${session_cost:.6f} | {session_tokens} tokens | {session_interactions} interactions\n")
+            print(
+                f"💰 This: ${usage['total_cost']:.6f} | Tokens: {usage['total_tokens']} (in:{usage['input_tokens']} out:{usage['output_tokens']})"
+            )
+            print(
+                f"📊 Session: ${session_cost:.6f} | {session_tokens} tokens | {session_interactions} interactions\n"
+            )
 
 
 if __name__ == "__main__":
