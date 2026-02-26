@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI
 from sqlalchemy.orm import Session
 
 from .db.database import engine, get_db
-from .db.models import Base, Interaction, Memory
+from .db.models import Base, Interaction, EpisodicMemory, UserProfileMemory
 from .db.schemas import (
     InteractionCreate,
     InteractionResponse,
@@ -40,7 +40,7 @@ async def get_interactions(db: Session = Depends(get_db)):
 
 @app.post("/memories", response_model=MemoryResponse)
 async def create_memory(memory: MemoryCreate, db: Session = Depends(get_db)):
-    db_memory = Memory(**memory.model_dump())
+    db_memory = EpisodicMemory(**memory.model_dump())
     db.add(db_memory)
     db.commit()
     db.refresh(db_memory)
@@ -49,7 +49,7 @@ async def create_memory(memory: MemoryCreate, db: Session = Depends(get_db)):
 
 @app.get("/memories", response_model=list[MemoryResponse])
 async def get_memories(db: Session = Depends(get_db)):
-    memories = db.query(Memory).order_by(Memory.timestamp.desc()).all()
+    memories = db.query(EpisodicMemory).order_by(EpisodicMemory.timestamp.desc()).all()
     return memories
 
 

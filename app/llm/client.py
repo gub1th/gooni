@@ -3,7 +3,6 @@ from typing import List
 
 from openai import OpenAI
 
-from ..db.models import Memory
 from .pricing import calculate_chat_cost, calculate_embedding_cost
 from .prompts import build_chat_system_prompt
 
@@ -30,16 +29,21 @@ class LLMClient:
             print(f"Embedding Error: {e}")
             return [], {"embedding_tokens": 0, "embedding_cost": 0}
 
-    def generate_chat_response(
-        self, message: str, relevant_memories: List[Memory]
+    def generate_chat_response_with_memory(
+        self, message: str, profile_context: str, episodic_context: str
     ) -> tuple[str, dict]:
-        """Generate response with memory context"""
+        """Generate response with enhanced memory context"""
 
-        # Build context from memories
-        memory_context = self._build_memory_context(relevant_memories)
+        # Create enhanced prompt
+        system_prompt = f"""You are an intelligent AI assistant with access to the user's profile and conversation history.
 
-        # Create prompt with memory
-        system_prompt = build_chat_system_prompt(memory_context)
+{profile_context}
+
+Recent relevant conversations:
+{episodic_context}
+
+Use this information to provide personalized, contextual responses. Reference the user's preferences and past conversations when relevant.
+Keep responses natural and conversational while being helpful and accurate."""
 
         try:
             response = self.client.chat.completions.create(
@@ -74,16 +78,42 @@ class LLMClient:
             print(f"LLM Error: {e}")
             return "I'm having trouble generating a response right now.", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "total_cost": 0}
 
-    def _build_memory_context(self, memories: List[Memory]) -> str:
-        """Build formatted context from memories"""
-        if not memories:
-            return "No relevant memories found."
+    def generate_chat_response(self, message: str) -> tuple[str, dict]:
+        """Generate a response without memory context"""
+        system_prompt = build_chat_system_prompt("")
 
-        context_parts = []
-        for memory in memories:
-            context_parts.append(f"- {memory.content}")
+        try:
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message},
+                ],
+                temperature=0.7,
+                max_tokens=500,
+            )
 
-        return "\n".join(context_parts)
+            # Calculate cost using pricing module
+            costs = calculate_chat_cost(
+                self.chat_model,
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens
+            )
+
+            usage = {
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+                "input_cost": costs["input_cost"],
+                "output_cost": costs["output_cost"],
+                "total_cost": costs["total_cost"]
+            }
+
+            return response.choices[0].message.content, usage
+
+        except Exception as e:
+            print(f"LLM Error: {e}")
+            return "I'm having trouble generating a response right now.", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "total_cost": 0}
 
 
 # Global instance for easy import

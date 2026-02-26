@@ -3,18 +3,18 @@ import math
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Memory
+from ..db.models import EpisodicMemory
 from ..db.schemas import MemoryCreate
 from ..llm.client import llm_client
 
 
-class MemoryService:
-    def create_memory(self, memory_input: MemoryCreate, db: Session) -> Memory:
+class EpisodicMemoryService:
+    def create_memory(self, memory_input: MemoryCreate, db: Session) -> EpisodicMemory:
         """Create a new memory and return it"""
         # Generate embedding for content
         embedding, _ = llm_client.generate_embedding(memory_input.content)
 
-        memory = Memory(
+        memory = EpisodicMemory(
             content=memory_input.content,
             embedding=json.dumps(embedding),
             extra=memory_input.extra,
@@ -24,15 +24,15 @@ class MemoryService:
         db.refresh(memory)
         return memory
 
-    def get_memory(self, memory_id: int, db: Session) -> Memory:
+    def get_memory(self, memory_id: int, db: Session) -> EpisodicMemory:
         """Get a memory by ID"""
-        return db.query(Memory).filter(Memory.id == memory_id).first()
+        return db.query(EpisodicMemory).filter(EpisodicMemory.id == memory_id).first()
 
-    def get_all_memories(self, db: Session) -> list[Memory]:
+    def get_all_memories(self, db: Session) -> list[EpisodicMemory]:
         """Get all memories"""
-        return db.query(Memory).order_by(Memory.timestamp.desc()).all()
+        return db.query(EpisodicMemory).order_by(EpisodicMemory.timestamp.desc()).all()
 
-    def search_similar(self, query: str, limit: int, db: Session) -> list[Memory]:
+    def search_similar(self, query: str, limit: int, db: Session) -> list[EpisodicMemory]:
         """Search for similar memories using vector similarity"""
         # Generate embedding for query
         query_embedding, _ = llm_client.generate_embedding(query)
@@ -42,7 +42,7 @@ class MemoryService:
 
         # Get all memories with embeddings
         memories_with_embeddings = (
-            db.query(Memory).filter(Memory.embedding.isnot(None)).all()
+            db.query(EpisodicMemory).filter(EpisodicMemory.embedding.isnot(None)).all()
         )
 
         # Calculate similarities
@@ -55,6 +55,12 @@ class MemoryService:
         # Sort by similarity and return top N
         similarities.sort(key=lambda x: x[1], reverse=True)
         return [memory for memory, _ in similarities[:limit]]
+
+    def build_episodic_context(self, memories: list[EpisodicMemory]) -> str:
+        """Build formatted episodic context string for prompt injection"""
+        if not memories:
+            return "No relevant past conversations."
+        return "\n".join(f"- {memory.content}" for memory in memories)
 
     def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
         """Calculate cosine similarity between two vectors"""
@@ -70,41 +76,4 @@ class MemoryService:
 
         return dot_product / (magnitude1 * magnitude2)
 
-    def extract_and_store(
-        self, user_message: str, assistant_response: str, db: Session
-    ) -> None:
-        """Extract important information from conversation and store as memory"""
-        # Simple rule-based extraction for Phase 1
-        important_keywords = [
-            "remember",
-            "important",
-            "note that",
-            "my goal",
-            "prefer",
-            "like",
-        ]
-
-        combined_text = f"{user_message} {assistant_response}"
-
-        if any(keyword in combined_text.lower() for keyword in important_keywords):
-            # Extract the important part
-            for keyword in important_keywords:
-                if keyword in combined_text.lower():
-                    start_idx = combined_text.lower().find(keyword)
-                    if start_idx != -1:
-                        # Extract surrounding context
-                        start = max(0, start_idx - 10)
-                        end = min(len(combined_text), start_idx + 100)
-                        important_text = combined_text[start:end].strip()
-
-                        if len(important_text) > 20:  # Only store substantial content
-                            memory_data = MemoryCreate(
-                                content=important_text,
-                                extra=json.dumps(
-                                    {"source": "conversation_extraction"}
-                                ),
-                            )
-                            self.create_memory(memory_data, db)
-                        break
-
-MemoryService = MemoryService()
+episodic_memory_service = EpisodicMemoryService()

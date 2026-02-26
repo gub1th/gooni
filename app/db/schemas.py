@@ -27,7 +27,7 @@ class MemoryResponse(BaseModel):
     id: int
     content: str
     embedding: Optional[str]
-    metadata: Optional[str]
+    extra: Optional[str]
     timestamp: datetime
 
     class Config:
