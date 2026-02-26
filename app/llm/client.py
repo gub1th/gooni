@@ -30,28 +30,31 @@ class LLMClient:
             return [], {"embedding_tokens": 0, "embedding_cost": 0}
 
     def generate_chat_response_with_memory(
-        self, message: str, profile_context: str, episodic_context: str
+        self, message: str, profile_context: str, episodic_context: str,
+        history: list = None
     ) -> tuple[str, dict]:
         """Generate response with enhanced memory context"""
 
-        # Create enhanced prompt
         system_prompt = f"""You are an intelligent AI assistant with access to the user's profile and conversation history.
 
 {profile_context}
 
-Recent relevant conversations:
+Relevant past conversations:
 {episodic_context}
 
 Use this information to provide personalized, contextual responses. Reference the user's preferences and past conversations when relevant.
 Keep responses natural and conversational while being helpful and accurate."""
 
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            for interaction in history:
+                messages.append({"role": interaction.role, "content": interaction.content})
+        messages.append({"role": "user", "content": message})
+
         try:
             response = self.client.chat.completions.create(
                 model=self.chat_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message},
-                ],
+                messages=messages,
                 temperature=0.7,
                 max_tokens=500,
             )

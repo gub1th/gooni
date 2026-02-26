@@ -10,33 +10,37 @@ import json
 class Orchestrator:
     def handle_chat(self, message: str, db) -> tuple[str, dict | None]:
         # Handle slash commands before touching the LLM
-        command = message.strip().lower()
+        stripped = message.strip()
+        command = stripped.lower()
         if command == "/profile":
             return self._handle_profile_command(db), None
         if command == "/episodic":
             return self._handle_episodic_command(db), None
 
-        # Step 1: Create user interaction
+        # Step 1: Grab recent history BEFORE saving current message
+        recent_history = InteractionService.get_recent(db, limit=6)
+
+        # Step 2: Create user interaction
         interaction_input_user = InteractionCreate(role="user", content=message)
         InteractionService.create_interaction(interaction_input_user, db)
 
-        # Step 2: Retrieve Profile Memory
+        # Step 3: Retrieve Profile Memory
         profile_context = profile_memory_service.build_profile_context(message, db)
 
-        # Step 3: Retrieve Episodic Memory (RAG)
+        # Step 4: Retrieve Episodic Memory (RAG)
         relevant_episodes = episodic_memory_service.search_similar(message, 3, db)
         episodic_context = episodic_memory_service.build_episodic_context(relevant_episodes)
 
-        # Step 4: Generate Response with enhanced context
+        # Step 5: Generate Response with enhanced context
         response, usage = llm_client.generate_chat_response_with_memory(
-            message, profile_context, episodic_context
+            message, profile_context, episodic_context, recent_history
         )
 
-        # Step 5: Save assistant interaction
+        # Step 6: Save assistant interaction
         interaction_input_assistant = InteractionCreate(role="assistant", content=response)
         InteractionService.create_interaction(interaction_input_assistant, db)
 
-        # Step 6: Extract and store memories
+        # Step 7: Extract and store memories
         memory_summary = self._process_memories(message, response, db)
         usage["memory"] = memory_summary
 

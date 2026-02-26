@@ -17,6 +17,11 @@ class InteractionService:
         """Get an interaction by ID"""
         return db.query(Interaction).filter(Interaction.id == interaction_id).first()
 
+    def get_recent(self, db: Session, limit: int = 6) -> list[Interaction]:
+        """Get the most recent interactions in chronological order"""
+        results = db.query(Interaction).order_by(Interaction.timestamp.desc()).limit(limit).all()
+        return list(reversed(results))
+
     def get_all_interactions(self, db: Session) -> list[Interaction]:
         """Get all interactions"""
         return db.query(Interaction).order_by(Interaction.timestamp.desc()).all()

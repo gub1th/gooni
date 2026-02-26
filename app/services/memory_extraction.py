@@ -1,4 +1,5 @@
 import json
+import re
 from typing import List, Dict, Any
 
 from ..llm.client import llm_client
@@ -49,8 +50,12 @@ Extract memories:"""
         try:
             response, _ = llm_client.generate_chat_response(extraction_prompt)
 
-            # Parse JSON response
-            memories = json.loads(response.strip())
+            # Strip markdown code fences if present
+            clean = response.strip()
+            clean = re.sub(r'^```(?:json)?\s*', '', clean)
+            clean = re.sub(r'\s*```$', '', clean).strip()
+
+            memories = json.loads(clean)
 
             # Validate structure
             if not isinstance(memories, list):

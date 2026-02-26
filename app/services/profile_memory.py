@@ -68,6 +68,19 @@ class ProfileMemoryService:
 
         return new_memory
 
+    def delete_by_key(self, key: str, db: Session) -> bool:
+        """Deactivate all memories with the given key. Returns True if any were found."""
+        memories = db.query(UserProfileMemory).filter(
+            UserProfileMemory.key == key,
+            UserProfileMemory.is_active
+        ).all()
+        if not memories:
+            return False
+        for m in memories:
+            m.is_active = False
+        db.commit()
+        return True
+
     def get_all_active(self, db: Session) -> List[UserProfileMemory]:
         """Get all active profile memories"""
         return db.query(UserProfileMemory).filter(
