@@ -1,10 +1,13 @@
+import json
 import os
+from datetime import datetime
 from typing import List
 
 from openai import OpenAI
 
-from .pricing import calculate_chat_cost, calculate_embedding_cost
+from .pricing import calculate_chat_cost, calculate_embedding_cost, UsageTracker
 from .prompts import build_chat_system_prompt
+from ..tools import registry as tools, tool_map
 
 
 class LLMClient:
@@ -52,9 +55,12 @@ class LLMClient:
         self, message: str, profile_context: str, episodic_context: str,
         history: list = None
     ) -> tuple[str, dict]:
-        """Generate response with enhanced memory context"""
+        """Generate response with enhanced memory context and tool use."""
 
+        now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
         system_prompt = f"""You are an intelligent AI assistant with access to the user's profile and conversation history.
+
+Current date and time: {now}
 
 {profile_context}
 
@@ -70,35 +76,44 @@ Keep responses natural and conversational while being helpful and accurate."""
                 messages.append({"role": interaction.role, "content": interaction.content})
         messages.append({"role": "user", "content": message})
 
+        tool_schemas = [t.to_openai_schema() for t in tools]
+        tracker = UsageTracker(self.chat_model)
+        tools_used = []
+
         try:
-            response = self.client.chat.completions.create(
-                model=self.chat_model,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=500,
-            )
+            for _ in range(5):  # cap tool call iterations
+                response = self.client.chat.completions.create(
+                    model=self.chat_model,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=500,
+                    tools=tool_schemas,
+                )
 
-            # Calculate cost using pricing module
-            costs = calculate_chat_cost(
-                self.chat_model,
-                response.usage.prompt_tokens,
-                response.usage.completion_tokens
-            )
+                tracker.add(response.usage)
+                choice = response.choices[0]
 
-            usage = {
-                "input_tokens": response.usage.prompt_tokens,
-                "output_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-                "input_cost": costs["input_cost"],
-                "output_cost": costs["output_cost"],
-                "total_cost": costs["total_cost"]
-            }
+                if choice.finish_reason == "tool_calls":
+                    messages.append(choice.message)
+                    for tool_call in choice.message.tool_calls:
+                        tool_name = tool_call.function.name
+                        tool_args = json.loads(tool_call.function.arguments)
+                        tool = tool_map.get(tool_name)
+                        result = tool.execute(**tool_args) if tool else f"Unknown tool: {tool_name}"
+                        tools_used.append(tool_name)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result,
+                        })
+                else:
+                    return choice.message.content, tracker.finalize(tools_used)
 
-            return response.choices[0].message.content, usage
+            return "I got stuck processing tool results.", tracker.finalize(tools_used)
 
         except Exception as e:
             print(f"LLM Error: {e}")
-            return "I'm having trouble generating a response right now.", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "total_cost": 0}
+            return "I'm having trouble generating a response right now.", tracker.finalize(tools_used)
 
     def generate_chat_response(self, message: str) -> tuple[str, dict]:
         """Generate a response without memory context"""

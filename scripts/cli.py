@@ -195,6 +195,10 @@ def handle_message(message, session_cost, session_tokens, session_interactions):
         if parts:
             print(f"[memory] {' · '.join(parts)}")
 
+        tools_used = usage.get("tools_used", [])
+        if tools_used:
+            print(f"[tools] {', '.join(tools_used)}")
+
         print(f"💰 This: ${usage['total_cost']:.6f} | Tokens: {usage['total_tokens']} (in:{usage['input_tokens']} out:{usage['output_tokens']})")
         print(f"📊 Session: ${session_cost:.6f} | {session_tokens} tokens | {session_interactions} interactions\n")
 

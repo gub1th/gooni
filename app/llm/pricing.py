@@ -95,3 +95,24 @@ def calculate_embedding_cost(model_name: str, tokens: int) -> float:
     """Calculate cost for embedding"""
     pricing = get_embedding_pricing(model_name)
     return (tokens / 1000) * pricing
+
+
+class UsageTracker:
+    def __init__(self, model: str):
+        self.model = model
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+
+    def add(self, usage) -> None:
+        self.prompt_tokens += usage.prompt_tokens
+        self.completion_tokens += usage.completion_tokens
+
+    def finalize(self, tools_used: list = None) -> dict:
+        costs = calculate_chat_cost(self.model, self.prompt_tokens, self.completion_tokens)
+        return {
+            "input_tokens": self.prompt_tokens,
+            "output_tokens": self.completion_tokens,
+            "total_tokens": self.prompt_tokens + self.completion_tokens,
+            **costs,
+            "tools_used": tools_used or [],
+        }
