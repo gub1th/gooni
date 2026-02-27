@@ -45,3 +45,13 @@ class EpisodicMemory(Base):
     embedding = Column(Text, nullable=True)  # Store as JSON string
     extra = Column(Text, nullable=True)  # Store as JSON string (renamed from metadata)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Todo(Base):
+    __tablename__ = "todos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    content = Column(Text, nullable=False)
+    is_done = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
