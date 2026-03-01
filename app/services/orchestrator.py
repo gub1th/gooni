@@ -1,10 +1,11 @@
+import json
+
 from ..db.schemas import InteractionCreate, MemoryCreate
 from ..llm.client import llm_client
+from .episodic_memory_service import episodic_memory_service
 from .interaction_service import InteractionService
-from .memory_service import episodic_memory_service
-from .profile_memory import profile_memory_service
-from .memory_extraction import memory_extraction_service
-import json
+from .memory_extraction_service import memory_extraction_service
+from .profile_memory_service import profile_memory_service
 
 
 class Orchestrator:
@@ -29,7 +30,9 @@ class Orchestrator:
 
         # Step 4: Retrieve Episodic Memory (RAG)
         relevant_episodes = episodic_memory_service.search_similar(message, 3, db)
-        episodic_context = episodic_memory_service.build_episodic_context(relevant_episodes)
+        episodic_context = episodic_memory_service.build_episodic_context(
+            relevant_episodes
+        )
 
         # Step 5: Generate Response with enhanced context
         response, usage = llm_client.generate_chat_response_with_memory(
@@ -37,7 +40,9 @@ class Orchestrator:
         )
 
         # Step 6: Save assistant interaction
-        interaction_input_assistant = InteractionCreate(role="assistant", content=response)
+        interaction_input_assistant = InteractionCreate(
+            role="assistant", content=response
+        )
         InteractionService.create_interaction(interaction_input_assistant, db)
 
         # Step 7: Extract and store memories
@@ -52,7 +57,9 @@ class Orchestrator:
             return "No profile memories yet."
         lines = [f"Profile Memory ({len(memories)} entries):"]
         for m in memories:
-            lines.append(f"  [{m.memory_type.value}] {m.key}: {m.value}  (confidence: {m.confidence:.1f})")
+            lines.append(
+                f"  [{m.memory_type.value}] {m.key}: {m.value}  (confidence: {m.confidence:.1f})"
+            )
         return "\n".join(lines)
 
     def _handle_episodic_command(self, db) -> str:
@@ -83,11 +90,13 @@ class Orchestrator:
         if len(user_message.strip()) > 10:
             episodic_data = MemoryCreate(
                 content=f"User: {user_message}\nAssistant: {assistant_response}",
-                extra=json.dumps({
-                    "source": "conversation",
-                    "user_message": user_message,
-                    "assistant_response": assistant_response
-                })
+                extra=json.dumps(
+                    {
+                        "source": "conversation",
+                        "user_message": user_message,
+                        "assistant_response": assistant_response,
+                    }
+                ),
             )
             episodic_memory_service.create_memory(episodic_data, db)
             episodic_added = 1

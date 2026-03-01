@@ -20,13 +20,21 @@ from pynput import keyboard
 
 from app.db.database import SessionLocal
 from app.llm.client import llm_client
-from app.services.orchestrator import Orchestrator
-from app.services.profile_memory import profile_memory_service
 from app.services.audio.audio_output_service import audio_output_service
+from app.services.orchestrator import Orchestrator
+from app.services.profile_memory_service import profile_memory_service
 
 THINKING_PHRASES = [
-    "Thinking", "Pondering", "Gallivanting", "Musing", "Cogitating",
-    "Ruminating", "Deliberating", "Contemplating", "Noodling", "Percolating",
+    "Thinking",
+    "Pondering",
+    "Gallivanting",
+    "Musing",
+    "Cogitating",
+    "Ruminating",
+    "Deliberating",
+    "Contemplating",
+    "Noodling",
+    "Percolating",
 ]
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -38,19 +46,23 @@ _tts_enabled = True
 
 # ── Voice recording worker ─────────────────────────────────────────────────
 
+
 def recording_worker():
     """Background thread: waits for toggle, records, transcribes, queues transcript."""
     while True:
         _recording.wait()  # block until Ctrl+Shift+Space pressed
 
         frames = []
+
         def callback(indata, *_):
             frames.append(indata.copy())
 
         sys.stdout.write("\n🎙 Recording… (Ctrl+Shift+Space to stop)\nYou: ")
         sys.stdout.flush()
 
-        with sd.InputStream(samplerate=16000, channels=1, dtype="int16", callback=callback):
+        with sd.InputStream(
+            samplerate=16000, channels=1, dtype="int16", callback=callback
+        ):
             while _recording.is_set():
                 time.sleep(0.05)
 
@@ -72,6 +84,7 @@ def recording_worker():
 
 
 # ── Input: typed or voice ──────────────────────────────────────────────────
+
 
 def get_input(prompt) -> str:
     """Return next message from either keyboard typing or voice queue."""
@@ -100,6 +113,7 @@ def get_input(prompt) -> str:
 
 
 # ── Spinner ────────────────────────────────────────────────────────────────
+
 
 def run_with_spinner(fn):
     result = [None]
@@ -130,6 +144,7 @@ def run_with_spinner(fn):
 
 # ── Profile ────────────────────────────────────────────────────────────────
 
+
 def handle_profile_interactive(db):
     memories = profile_memory_service.get_all_active(db)
     if not memories:
@@ -158,6 +173,7 @@ def handle_profile_interactive(db):
 
 
 # ── Message handler ────────────────────────────────────────────────────────
+
 
 def handle_message(message, session_cost, session_tokens, session_interactions):
     def chat_fn():
@@ -199,8 +215,12 @@ def handle_message(message, session_cost, session_tokens, session_interactions):
         if tools_used:
             print(f"[tools] {', '.join(tools_used)}")
 
-        print(f"💰 This: ${usage['total_cost']:.6f} | Tokens: {usage['total_tokens']} (in:{usage['input_tokens']} out:{usage['output_tokens']})")
-        print(f"📊 Session: ${session_cost:.6f} | {session_tokens} tokens | {session_interactions} interactions\n")
+        print(
+            f"💰 This: ${usage['total_cost']:.6f} | Tokens: {usage['total_tokens']} (in:{usage['input_tokens']} out:{usage['output_tokens']})"
+        )
+        print(
+            f"📊 Session: ${session_cost:.6f} | {session_tokens} tokens | {session_interactions} interactions\n"
+        )
 
         if _tts_enabled:
             try:
@@ -213,6 +233,7 @@ def handle_message(message, session_cost, session_tokens, session_interactions):
 
 # ── Main ───────────────────────────────────────────────────────────────────
 
+
 def main():
     session_cost = 0.0
     session_tokens = 0
@@ -223,7 +244,11 @@ def main():
         global _tts_enabled
         _held_keys.add(key)
         ctrl = keyboard.Key.ctrl_l in _held_keys or keyboard.Key.ctrl_r in _held_keys
-        shift = keyboard.Key.shift in _held_keys or keyboard.Key.shift_l in _held_keys or keyboard.Key.shift_r in _held_keys
+        shift = (
+            keyboard.Key.shift in _held_keys
+            or keyboard.Key.shift_l in _held_keys
+            or keyboard.Key.shift_r in _held_keys
+        )
         if ctrl and shift and key == keyboard.Key.space:
             if _recording.is_set():
                 _recording.clear()
