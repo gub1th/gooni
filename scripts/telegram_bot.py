@@ -8,6 +8,7 @@ import tempfile
 
 from telegram import Update
 from telegram.ext import (
+    Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
@@ -17,22 +18,56 @@ from telegram.ext import (
 
 from app.db.database import SessionLocal
 from app.llm.client import llm_client
+from app.messaging.telegram_transport import TelegramTransport
+from app.services.onboarding_service import onboarding_service
 from app.services.orchestrator import Orchestrator
-from app.services.todo_service import todo_service
+from app.services.scheduler import schedule_checkins, scheduler
 
+
+# ---------------------------------------------------------------------------
+# Scheduler lifecycle hooks
+# ---------------------------------------------------------------------------
+
+async def _post_init(app: Application) -> None:
+    transport = TelegramTransport()
+    user_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    if user_chat_id:
+        schedule_checkins(transport, user_chat_id)
+    if not scheduler.running:
+        scheduler.start()
+
+
+async def _post_shutdown(app: Application) -> None:
+    if scheduler.running:
+        scheduler.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
 
 async def _respond(update: Update, message: str) -> None:
-    """Pass message through orchestrator and reply."""
+    """Pass message through orchestrator, reply, and handle onboarding completion."""
+
     def chat_fn():
         db = SessionLocal()
         try:
-            return Orchestrator.handle_chat(message, db)
+            was_complete = onboarding_service.is_complete(db)
+            response, usage = Orchestrator.handle_chat(message, db)
+            is_complete_now = onboarding_service.is_complete(db)
+            return response, usage, was_complete, is_complete_now
         finally:
             db.close()
 
-    response, usage = await asyncio.to_thread(chat_fn)
+    response, usage, was_complete, is_complete_now = await asyncio.to_thread(chat_fn)
 
     await update.message.reply_text(response)
+
+    # Onboarding just finished — wire up proactive check-ins
+    if not was_complete and is_complete_now:
+        transport = TelegramTransport()
+        chat_id = str(update.effective_chat.id)
+        schedule_checkins(transport, chat_id)
 
     if usage:
         tools_used = usage.get("tools_used", [])
@@ -96,23 +131,16 @@ async def cmd_episodic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(response)
 
 
-async def cmd_todos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     def fn():
         db = SessionLocal()
         try:
-            return todo_service.list_open(db)
+            return Orchestrator.handle_chat("/goals", db)
         finally:
             db.close()
 
-    todos = await asyncio.to_thread(fn)
-    if not todos:
-        await update.message.reply_text("No open todos!")
-        return
-
-    lines = ["Open todos:"]
-    for t in todos:
-        lines.append(f"  #{t.id} {t.content}")
-    await update.message.reply_text("\n".join(lines))
+    response, _ = await asyncio.to_thread(fn)
+    await update.message.reply_text(response)
 
 
 def main():
@@ -120,11 +148,17 @@ def main():
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN is not set. Add it to your .env file.")
 
-    app = ApplicationBuilder().token(token).build()
+    app = (
+        ApplicationBuilder()
+        .token(token)
+        .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
+        .build()
+    )
 
     app.add_handler(CommandHandler("profile", cmd_profile))
     app.add_handler(CommandHandler("episodic", cmd_episodic))
-    app.add_handler(CommandHandler("todos", cmd_todos))
+    app.add_handler(CommandHandler("goals", cmd_goals))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 

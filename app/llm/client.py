@@ -16,16 +16,6 @@ class LLMClient:
         self.chat_model = "gpt-4o-mini"  # Cost-effective for Phase 1
         self.embedding_model = "text-embedding-3-small"
 
-    def synthesize(self, text: str) -> bytes:
-        """Convert text to speech. Returns raw PCM audio bytes (24kHz, 16-bit, mono)."""
-        response = self.client.audio.speech.create(
-            model="tts-1",
-            voice="alloy",
-            input=text,
-            response_format="pcm",
-        )
-        return response.content
-
     def transcribe(self, audio_path: str) -> str:
         """Transcribe an audio file to text using Whisper."""
         with open(audio_path, "rb") as f:
@@ -60,15 +50,15 @@ class LLMClient:
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
         system_prompt = f"""You are an intelligent AI assistant with access to the user's profile and conversation history.
 
-Current date and time: {now}
+        Current date and time: {now}
 
-{profile_context}
+        {profile_context}
 
-Relevant past conversations:
-{episodic_context}
+        Relevant past conversations:
+        {episodic_context}
 
-Use this information to provide personalized, contextual responses. Reference the user's preferences and past conversations when relevant.
-Keep responses natural and conversational while being helpful and accurate."""
+        Use this information to provide personalized, contextual responses. Reference the user's preferences and past conversations when relevant.
+        Keep responses natural and conversational while being helpful and accurate."""
 
         messages = [{"role": "system", "content": system_prompt}]
         if history:
@@ -114,6 +104,69 @@ Keep responses natural and conversational while being helpful and accurate."""
         except Exception as e:
             print(f"LLM Error: {e}")
             return "I'm having trouble generating a response right now.", tracker.finalize(tools_used)
+
+    def generate_response_with_image(
+        self,
+        message: str,
+        image_url: str,
+        profile_context: str = "",
+        episodic_context: str = "",
+        history: list = None,
+    ) -> tuple[str, dict]:
+        """Generate an accountability response that includes an image (MMS proof).
+
+        Uses gpt-4o for vision capability. image_url can be an https:// URL or a
+        base64 data URI (data:image/jpeg;base64,...).
+        """
+        vision_model = "gpt-4o"
+        now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+
+        system_prompt = (
+            f"You are Gooni, an accountability partner. "
+            f"Current date and time: {now}\n\n"
+            f"{profile_context}\n\n"
+            f"Relevant past conversations:\n{episodic_context}\n\n"
+            "The user has sent you an image as proof or for feedback. "
+            "Analyze it in the context of their goals and respond with honest, "
+            "encouraging accountability coaching."
+        )
+
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            for interaction in history:
+                messages.append(
+                    {"role": interaction.role, "content": interaction.content}
+                )
+
+        user_content = []
+        if message.strip():
+            user_content.append({"type": "text", "text": message})
+        user_content.append({"type": "image_url", "image_url": {"url": image_url}})
+        messages.append({"role": "user", "content": user_content})
+
+        tracker = UsageTracker(vision_model)
+        try:
+            response = self.client.chat.completions.create(
+                model=vision_model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=500,
+            )
+            tracker.add(response.usage)
+            return response.choices[0].message.content, tracker.finalize([])
+        except Exception as e:
+            print(f"LLM Vision Error: {e}")
+            return "I couldn't analyze that image right now.", tracker.finalize([])
+
+    def chat_raw(self, messages: list[dict], temperature: float = 0.8, max_tokens: int = 500) -> str:
+        """Minimal chat call — no memory, no tools, no cost tracking. Used for onboarding."""
+        response = self.client.chat.completions.create(
+            model=self.chat_model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content
 
     def generate_chat_response(self, message: str) -> tuple[str, dict]:
         """Generate a response without memory context"""

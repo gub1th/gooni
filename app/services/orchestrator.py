@@ -3,13 +3,17 @@ import json
 from ..db.schemas import InteractionCreate, MemoryCreate
 from ..llm.client import llm_client
 from .episodic_memory_service import episodic_memory_service
+from .goal_service import goal_service
 from .interaction_service import InteractionService
 from .memory_extraction_service import memory_extraction_service
+from .onboarding_service import onboarding_service
 from .profile_memory_service import profile_memory_service
 
 
 class Orchestrator:
-    def handle_chat(self, message: str, db) -> tuple[str, dict | None]:
+    def handle_chat(
+        self, message: str, db, image_url: str = None
+    ) -> tuple[str, dict | None]:
         # Handle slash commands before touching the LLM
         stripped = message.strip()
         command = stripped.lower()
@@ -17,36 +21,59 @@ class Orchestrator:
             return self._handle_profile_command(db), None
         if command == "/episodic":
             return self._handle_episodic_command(db), None
+        if command == "/goals":
+            return self._handle_goals_command(db), None
+
+        # Route to onboarding if setup isn't complete yet
+        if not onboarding_service.is_complete(db):
+            response = onboarding_service.handle_step(message, db)
+            InteractionService.create_interaction(
+                InteractionCreate(role="user", content=message), db
+            )
+            InteractionService.create_interaction(
+                InteractionCreate(role="assistant", content=response), db
+            )
+            return response, None
 
         # Step 1: Grab recent history BEFORE saving current message
         recent_history = InteractionService.get_recent(db, limit=6)
 
         # Step 2: Create user interaction
-        interaction_input_user = InteractionCreate(role="user", content=message)
-        InteractionService.create_interaction(interaction_input_user, db)
+        InteractionService.create_interaction(
+            InteractionCreate(role="user", content=message), db
+        )
 
-        # Step 3: Retrieve Profile Memory
-        profile_context = profile_memory_service.build_profile_context(message, db)
+        # Step 3: Retrieve Profile Memory + Goal context
+        query = message if message.strip() else "image"
+        profile_context = profile_memory_service.build_profile_context(query, db)
+        goal_context = goal_service.build_goal_context(db)
+        full_profile_context = "\n\n".join(filter(None, [profile_context, goal_context]))
 
         # Step 4: Retrieve Episodic Memory (RAG)
-        relevant_episodes = episodic_memory_service.search_similar(message, 3, db)
+        relevant_episodes = episodic_memory_service.search_similar(query, 3, db)
         episodic_context = episodic_memory_service.build_episodic_context(
             relevant_episodes
         )
 
-        # Step 5: Generate Response with enhanced context
-        response, usage = llm_client.generate_chat_response_with_memory(
-            message, profile_context, episodic_context, recent_history
-        )
+        # Step 5: Generate response — vision path or text path
+        if image_url:
+            response, usage = llm_client.generate_response_with_image(
+                message, image_url, full_profile_context, episodic_context, recent_history
+            )
+        else:
+            response, usage = llm_client.generate_chat_response_with_memory(
+                message, full_profile_context, episodic_context, recent_history
+            )
 
         # Step 6: Save assistant interaction
-        interaction_input_assistant = InteractionCreate(
-            role="assistant", content=response
+        InteractionService.create_interaction(
+            InteractionCreate(role="assistant", content=response), db
         )
-        InteractionService.create_interaction(interaction_input_assistant, db)
 
         # Step 7: Extract and store memories
-        memory_summary = self._process_memories(message, response, db)
+        memory_summary = self._process_memories(
+            message if message.strip() else "[Image]", response, db
+        )
         usage["memory"] = memory_summary
 
         return response, usage
@@ -73,6 +100,19 @@ class Orchestrator:
                 snippet += "..."
             ts = m.timestamp.strftime("%m/%d %H:%M") if m.timestamp else "?"
             lines.append(f"  [{ts}] {snippet}")
+        return "\n".join(lines)
+
+    def _handle_goals_command(self, db) -> str:
+        goals = goal_service.get_active(db)
+        if not goals:
+            return "No goals yet."
+        lines = [f"Goals ({len(goals)}):"]
+        for g in goals:
+            lines.append(f"  - {g.title}")
+            if g.motivation:
+                lines.append(f"    Why: {g.motivation}")
+            if g.blocker:
+                lines.append(f"    Blocker: {g.blocker}")
         return "\n".join(lines)
 
     def _process_memories(self, user_message: str, assistant_response: str, db) -> dict:

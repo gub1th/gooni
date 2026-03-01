@@ -15,7 +15,6 @@ class Interaction(Base):
 
 class MemoryType(enum.Enum):
     PREFERENCE = "preference"
-    GOAL = "goal"
     FACT = "fact"
     ROUTINE = "routine"
     CONSTRAINT = "constraint"
@@ -47,11 +46,22 @@ class EpisodicMemory(Base):
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class Todo(Base):
-    __tablename__ = "todos"
+class Goal(Base):
+    __tablename__ = "goals"
 
     id = Column(Integer, primary_key=True, index=True)
-    content = Column(Text, nullable=False)
-    is_done = Column(Boolean, nullable=False, default=False)
+    title = Column(Text, nullable=False)
+    motivation = Column(Text, nullable=True)   # why they want it
+    blocker = Column(Text, nullable=True)      # what's been holding them back
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class OnboardingState(Base):
+    __tablename__ = "onboarding_state"
+
+    id = Column(Integer, primary_key=True)
+    is_complete = Column(Boolean, default=False, nullable=False)
+    current_step = Column(Integer, default=0, nullable=False)
+    checkin_time = Column(String, nullable=True)       # authoritative scheduler config
+    checkin_frequency = Column(String, nullable=True)  # authoritative scheduler config

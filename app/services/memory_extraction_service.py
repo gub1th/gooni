@@ -20,7 +20,7 @@ Extract only persistent, stable information about the user. Return JSON array wi
 
 [
   {{
-    "memory_type": "preference | goal | fact | routine | constraint",
+    "memory_type": "preference | fact | routine | constraint",
     "key": "snake_case_key",
     "value": "descriptive value",
     "context": {{
@@ -35,6 +35,7 @@ Extract only persistent, stable information about the user. Return JSON array wi
 
 Rules:
 - Only extract persistent traits, NOT temporary states
+- Do NOT extract goals — those are tracked separately
 - Use snake_case for keys (e.g., "coffee_temperature_preference")
 - scope "global" = always applies, "contextual" = situation-specific
 - confidence 0.8+ for explicit statements, 0.6-0.7 for inferences
@@ -43,7 +44,7 @@ Rules:
 Examples:
 - "I prefer hot coffee" → preference, coffee_temperature, hot, global, 0.9
 - "I work from home on Tuesdays" → routine, tuesday_work_location, home, contextual, 0.8
-- "My goal is to build an AI assistant" → goal, primary_project, ai_assistant, global, 0.9
+- "I'm lactose intolerant" → constraint, dietary_lactose, lactose intolerant, global, 0.9
 
 Extract memories:"""
 
@@ -79,7 +80,7 @@ Extract memories:"""
         if not all(field in memory for field in required_fields):
             return False
 
-        valid_types = ["preference", "goal", "fact", "routine", "constraint"]
+        valid_types = ["preference", "fact", "routine", "constraint"]
         if memory["memory_type"] not in valid_types:
             return False
 

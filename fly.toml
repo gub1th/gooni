@@ -1,0 +1,16 @@
+app = "gooni-bot"
+primary_region = "sjc"
+
+[build]
+
+[mounts]
+  source = "gooni_data"
+  destination = "/app/db"
+
+[processes]
+  app = "python scripts/telegram_bot.py"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
