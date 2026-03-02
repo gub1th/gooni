@@ -62,6 +62,3 @@ class OnboardingState(Base):
 
     id = Column(Integer, primary_key=True)
     is_complete = Column(Boolean, default=False, nullable=False)
-    current_step = Column(Integer, default=0, nullable=False)
-    checkin_time = Column(String, nullable=True)       # authoritative scheduler config
-    checkin_frequency = Column(String, nullable=True)  # authoritative scheduler config

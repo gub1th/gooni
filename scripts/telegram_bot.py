@@ -8,7 +8,6 @@ import tempfile
 
 from telegram import Update
 from telegram.ext import (
-    Application,
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
@@ -18,56 +17,19 @@ from telegram.ext import (
 
 from app.db.database import SessionLocal
 from app.llm.client import llm_client
-from app.messaging.telegram_transport import TelegramTransport
-from app.services.onboarding_service import onboarding_service
 from app.services.orchestrator import Orchestrator
-from app.services.scheduler import schedule_checkins, scheduler
 
-
-# ---------------------------------------------------------------------------
-# Scheduler lifecycle hooks
-# ---------------------------------------------------------------------------
-
-async def _post_init(app: Application) -> None:
-    transport = TelegramTransport()
-    user_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-    if user_chat_id:
-        schedule_checkins(transport, user_chat_id)
-    if not scheduler.running:
-        scheduler.start()
-
-
-async def _post_shutdown(app: Application) -> None:
-    if scheduler.running:
-        scheduler.shutdown()
-
-
-# ---------------------------------------------------------------------------
-# Handlers
-# ---------------------------------------------------------------------------
 
 async def _respond(update: Update, message: str) -> None:
-    """Pass message through orchestrator, reply, and handle onboarding completion."""
-
     def chat_fn():
         db = SessionLocal()
         try:
-            was_complete = onboarding_service.is_complete(db)
-            response, usage = Orchestrator.handle_chat(message, db)
-            is_complete_now = onboarding_service.is_complete(db)
-            return response, usage, was_complete, is_complete_now
+            return Orchestrator.handle_chat(message, db)
         finally:
             db.close()
 
-    response, usage, was_complete, is_complete_now = await asyncio.to_thread(chat_fn)
-
+    response, usage = await asyncio.to_thread(chat_fn)
     await update.message.reply_text(response)
-
-    # Onboarding just finished — wire up proactive check-ins
-    if not was_complete and is_complete_now:
-        transport = TelegramTransport()
-        chat_id = str(update.effective_chat.id)
-        schedule_checkins(transport, chat_id)
 
     if usage:
         tools_used = usage.get("tools_used", [])
@@ -148,13 +110,7 @@ def main():
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN is not set. Add it to your .env file.")
 
-    app = (
-        ApplicationBuilder()
-        .token(token)
-        .post_init(_post_init)
-        .post_shutdown(_post_shutdown)
-        .build()
-    )
+    app = ApplicationBuilder().token(token).build()
 
     app.add_handler(CommandHandler("profile", cmd_profile))
     app.add_handler(CommandHandler("episodic", cmd_episodic))
