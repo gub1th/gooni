@@ -3,11 +3,11 @@ import re
 
 from sqlalchemy.orm import Session
 
-from ..db.models import MemoryType, OnboardingState
+from ..db.models import OnboardingState
 from ..llm.client import llm_client
 from .goal_service import goal_service
 from .interaction_service import InteractionService
-from .profile_memory_service import profile_memory_service
+from .memory_service import memory_service
 
 
 ONBOARDING_SYSTEM = """You are Gooni, an AI accountability partner. This is your first time meeting this user.
@@ -108,12 +108,10 @@ class OnboardingService:
 
     def _complete(self, state: OnboardingState, fields: dict, db: Session) -> None:
         if fields.get("name"):
-            profile_memory_service.upsert_memory(
+            memory_service.upsert_profile_fact(
                 {
                     "key": "name",
-                    "memory_type": MemoryType.FACT.value,
-                    "value": fields["name"],
-                    "context": {"source": "onboarding", "scope": "global"},
+                    "content": f"User's name is {fields['name']}",
                     "confidence": 1.0,
                 },
                 db,

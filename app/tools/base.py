@@ -7,8 +7,10 @@ class BaseTool(ABC):
     parameters: dict  # JSON Schema for the tool's arguments
 
     @abstractmethod
-    def execute(self, **kwargs) -> str:
-        """Run the tool and return a string result."""
+    def execute(self, db=None, **kwargs) -> str:
+        """Run the tool and return a string result.
+        db is injected for tools that need database access; ignore it if not needed.
+        """
         ...
 
     def to_openai_schema(self) -> dict:

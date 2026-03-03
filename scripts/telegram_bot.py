@@ -15,9 +15,12 @@ from telegram.ext import (
     filters,
 )
 
-from app.db.database import SessionLocal
+from app.db.database import SessionLocal, engine
+from app.db.models import Base
 from app.llm.client import llm_client
 from app.services.orchestrator import Orchestrator
+
+Base.metadata.create_all(bind=engine)
 
 
 async def _respond(update: Update, message: str) -> None:
@@ -37,10 +40,10 @@ async def _respond(update: Update, message: str) -> None:
             print(f"[tools] {', '.join(tools_used)}")
         mem = usage.get("memory", {})
         parts = []
-        if mem.get("profile_updated"):
-            parts.append(f"{mem['profile_updated']} profile updated")
-        if mem.get("episodic_added"):
-            parts.append(f"{mem['episodic_added']} episodic stored")
+        if mem.get("memories_saved"):
+            parts.append(f"{mem['memories_saved']} memories")
+        if mem.get("note_saved"):
+            parts.append("note logged")
         if parts:
             print(f"[memory] {' · '.join(parts)}")
 
@@ -69,23 +72,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await _respond(update, text)
 
 
-async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     def fn():
         db = SessionLocal()
         try:
-            return Orchestrator.handle_chat("/profile", db)
-        finally:
-            db.close()
-
-    response, _ = await asyncio.to_thread(fn)
-    await update.message.reply_text(response)
-
-
-async def cmd_episodic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    def fn():
-        db = SessionLocal()
-        try:
-            return Orchestrator.handle_chat("/episodic", db)
+            return Orchestrator.handle_chat("/memory", db)
         finally:
             db.close()
 
@@ -105,6 +96,20 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(response)
 
 
+async def cmd_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    name = " ".join(context.args) if context.args else ""
+
+    def fn():
+        db = SessionLocal()
+        try:
+            return Orchestrator.handle_chat(f"/goal {name}", db)
+        finally:
+            db.close()
+
+    response, _ = await asyncio.to_thread(fn)
+    await update.message.reply_text(response)
+
+
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -112,9 +117,9 @@ def main():
 
     app = ApplicationBuilder().token(token).build()
 
-    app.add_handler(CommandHandler("profile", cmd_profile))
-    app.add_handler(CommandHandler("episodic", cmd_episodic))
+    app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("goals", cmd_goals))
+    app.add_handler(CommandHandler("goal", cmd_goal))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 

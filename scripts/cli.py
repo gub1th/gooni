@@ -9,24 +9,16 @@ import sys
 import threading
 import traceback
 
-import questionary
-
-from app.db.database import SessionLocal
+from app.db.database import SessionLocal, engine
+from app.db.models import Base
+from app.services.memory_service import memory_service
 from app.services.orchestrator import Orchestrator
-from app.services.profile_memory_service import profile_memory_service
 
+Base.metadata.create_all(bind=engine)
 
 THINKING_PHRASES = [
-    "Thinking",
-    "Pondering",
-    "Gallivanting",
-    "Musing",
-    "Cogitating",
-    "Ruminating",
-    "Deliberating",
-    "Contemplating",
-    "Noodling",
-    "Percolating",
+    "Thinking", "Pondering", "Gallivanting", "Musing", "Cogitating",
+    "Ruminating", "Deliberating", "Contemplating", "Noodling", "Percolating",
 ]
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -58,33 +50,6 @@ def run_with_spinner(fn):
     return result[0], error[0]
 
 
-def handle_profile_interactive(db):
-    memories = profile_memory_service.get_all_active(db)
-    if not memories:
-        print("\nNo profile memories yet.\n")
-        return
-
-    choices = [
-        questionary.Choice(
-            title=f"[{m.memory_type.value}] {m.key}: {m.value}  (confidence: {m.confidence:.1f})",
-            value=m.key,
-        )
-        for m in memories
-    ]
-    to_delete = questionary.checkbox(
-        f"Profile Memory ({len(memories)} entries) — space to select, enter to delete, ctrl+c to cancel:",
-        choices=choices,
-    ).ask()
-
-    if not to_delete:
-        print()
-        return
-    for key in to_delete:
-        profile_memory_service.delete_by_key(key, db)
-    noun = "memory" if len(to_delete) == 1 else "memories"
-    print(f"Deleted {len(to_delete)} profile {noun}.\n")
-
-
 def handle_message(message, session_cost, session_tokens, session_interactions):
     def chat_fn():
         db = SessionLocal()
@@ -105,19 +70,20 @@ def handle_message(message, session_cost, session_tokens, session_interactions):
     if usage is None:
         print(f"\n{content}\n")
     else:
-        session_cost += usage["total_cost"]
-        session_tokens += usage["total_tokens"]
+        session_cost += usage.get("total_cost", 0)
+        session_tokens += usage.get("total_tokens", 0)
         session_interactions += 1
 
         print(f"Assistant: {content}")
 
         mem = usage.get("memory", {})
         parts = []
-        if mem.get("profile_updated"):
-            n = mem["profile_updated"]
-            parts.append(f"{n} profile {'memory' if n == 1 else 'memories'} updated")
-        if mem.get("episodic_added"):
-            parts.append(f"{mem['episodic_added']} episodic stored")
+        if mem.get("memories_saved"):
+            parts.append(f"{mem['memories_saved']} memories")
+        if mem.get("note_saved"):
+            parts.append("note logged")
+        if mem.get("goal_created"):
+            parts.append(f"goal created: {mem['goal_created']}")
         if parts:
             print(f"[memory] {' · '.join(parts)}")
 
@@ -126,7 +92,9 @@ def handle_message(message, session_cost, session_tokens, session_interactions):
             print(f"[tools] {', '.join(tools_used)}")
 
         print(
-            f"💰 This: ${usage['total_cost']:.6f} | Tokens: {usage['total_tokens']} (in:{usage['input_tokens']} out:{usage['output_tokens']})"
+            f"💰 This: ${usage.get('total_cost', 0):.6f} | "
+            f"Tokens: {usage.get('total_tokens', 0)} "
+            f"(in:{usage.get('input_tokens', 0)} out:{usage.get('output_tokens', 0)})"
         )
         print(
             f"📊 Session: ${session_cost:.6f} | {session_tokens} tokens | {session_interactions} interactions\n"
@@ -141,7 +109,7 @@ def main():
     session_interactions = 0
 
     print("Gooni CLI")
-    print("Commands: /profile  /episodic  /goals\n")
+    print("Commands: /memory  /goals  /goal <name>\n")
 
     while True:
         try:
@@ -152,14 +120,6 @@ def main():
         if message.lower() in ["exit", "quit"]:
             print(f"\nSession: ${session_cost:.6f} | {session_tokens} tokens | {session_interactions} interactions")
             break
-
-        if message.strip().lower() == "/profile":
-            db = SessionLocal()
-            try:
-                handle_profile_interactive(db)
-            finally:
-                db.close()
-            continue
 
         session_cost, session_tokens, session_interactions = handle_message(
             message, session_cost, session_tokens, session_interactions

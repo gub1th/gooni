@@ -43,22 +43,30 @@ class LLMClient:
 
     def generate_chat_response_with_memory(
         self, message: str, profile_context: str, episodic_context: str,
-        history: list = None
+        history: list = None, is_first_time: bool = False, db=None,
     ) -> tuple[str, dict]:
         """Generate response with enhanced memory context and tool use."""
 
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
-        system_prompt = f"""You are an intelligent AI assistant with access to the user's profile and conversation history.
+        system_prompt = f"""You are Gooni, an AI accountability partner. You have persistent memory — you remember everything across conversations. You track goals, log daily progress, and hold users accountable over time.
 
-        Current date and time: {now}
+Current date and time: {now}
 
-        {profile_context}
+{profile_context}
 
-        Relevant past conversations:
-        {episodic_context}
+{episodic_context}
 
-        Use this information to provide personalized, contextual responses. Reference the user's preferences and past conversations when relevant.
-        Keep responses natural and conversational while being helpful and accurate."""
+How you work:
+- You remember the user's goals, preferences, and history permanently
+- When users report activity ("hit the gym", "vaped today"), you log it automatically
+- When users express a new goal or habit to track, you create it and confirm
+- You never ask more than one question at a time
+- Be direct and real — like a coach who knows you well, not a therapist running through a checklist
+
+When users express intent to track or achieve something, confirm it simply: "Got it, tracking that." Keep responses short."""
+
+        if is_first_time:
+            system_prompt += "\n\nYou're meeting this user for the first time. Introduce yourself in one sentence and ask for their name."
 
         messages = [{"role": "system", "content": system_prompt}]
         if history:
@@ -89,7 +97,7 @@ class LLMClient:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
                         tool = tool_map.get(tool_name)
-                        result = tool.execute(**tool_args) if tool else f"Unknown tool: {tool_name}"
+                        result = tool.execute(db=db, **tool_args) if tool else f"Unknown tool: {tool_name}"
                         tools_used.append(tool_name)
                         messages.append({
                             "role": "tool",

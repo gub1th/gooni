@@ -1,8 +1,10 @@
-from .web_search import WebSearchTool
-from .fetch_url import FetchUrlTool
+from .goal_tools import GetGoalsTool, CreateGoalTool, LogProgressTool
+from .memory_tools import SaveMemoryTool
 
 registry = [
-    WebSearchTool(),
-    FetchUrlTool(),
+    GetGoalsTool(),
+    CreateGoalTool(),
+    LogProgressTool(),
+    SaveMemoryTool(),
 ]
 tool_map = {t.name: t for t in registry}
