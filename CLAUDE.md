@@ -2,84 +2,81 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## About the Developer
+
+Daniel is a young, eager software engineer actively learning. When working with him:
+- **Explain terminal commands** — if a command has flags or non-obvious syntax, briefly explain what they do
+- **Teach system design concepts** as they come up naturally in the code (e.g. why we use singletons, why CORS exists, what a message queue would buy us)
+- Keep explanations concise but educational — don't just do the thing, say why it's done that way
+
 ## Project Overview
 
-This is Gooni, a conversational AI system built with FastAPI that implements memory-based chat functionality. The system stores user interactions and creates retrievable memories using OpenAI embeddings for context-aware responses.
+Gooni is a goals + accountability AI companion. It has:
+- A **FastAPI backend** (port 8000) with chat, memory, goals, and notes
+- A **React/Vite frontend** (port 5173) that shows goals, streaks, and a feed
+- An **OpenAI LLM** layer for chat responses and embeddings
 
 ## Architecture
 
-### Core Components
+### Backend (`app/`)
 
-- **FastAPI Application** (`app/main.py`): REST API with endpoints for chat, interactions, and memory management
-- **Orchestrator** (`app/services/orchestrator.py`): Main business logic coordinator that handles the chat flow
-- **Memory Service** (`app/services/memory_service.py`): Vector-based memory storage and retrieval using cosine similarity
-- **Interaction Service** (`app/services/interaction_service.py`): Manages conversation history
-- **LLM Client** (`app/llm/client.py`): OpenAI integration for chat responses and embeddings
-- **Database Models** (`app/db/`): SQLAlchemy models for Interactions and Memories
+- **`app/main.py`** — FastAPI app. Registers all routes. Also adds CORS middleware so the frontend (on port 5173) can call the backend (on port 8000).
+- **`app/services/orchestrator.py`** — Central brain. Routes incoming chat to the right services. Exported as `Orchestrator` (instance, not class).
+- **`app/services/goal_service.py`** — CRUD for goals
+- **`app/services/note_service.py`** — Notes per goal, streak calculation, 7-day activity window
+- **`app/services/memory_service.py`** — Vector-based memory using cosine similarity + OpenAI embeddings
+- **`app/llm/client.py`** — OpenAI wrapper. Instance: `llm_client`. Model: `gpt-4o-mini` (default), `gpt-4o` for vision
+- **`app/db/models.py`** — SQLAlchemy models: Interaction, UserProfileMemory, EpisodicMemory, Todo, OnboardingState, Goal, Note
+- **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
 
-### Chat Flow
+### Frontend (`frontend/`)
 
-1. User sends message via `/chat` endpoint
-2. Orchestrator creates user interaction record
-3. Memory Service searches for relevant memories using vector similarity
-4. LLM Client generates response with memory context
-5. Orchestrator saves assistant response and extracts new memories
+- React + TypeScript, bundled with Vite
+- `src/services/api.ts` — all fetch calls to the backend
+- `src/routes/` — TanStack Router file-based routes
+- `src/stores/` — Zustand state stores
+- `src/components/` — UI components using Chakra UI
 
-### Memory System
+### Messaging Layer (secondary)
+- `app/messaging/` — Telegram and Twilio transports for proactive outbound messages
+- `scripts/telegram_bot.py` — Telegram bot entry point
+- `app/services/scheduler.py` — APScheduler for check-ins
 
-- Memories are extracted from conversations based on keywords ("remember", "important", "prefer", etc.)
-- Each memory has an embedding generated via OpenAI's `text-embedding-3-small` model
-- Vector similarity search retrieves relevant memories for context
+## Running the App
 
-## Development Commands
-
-### Environment Setup
+### Backend
 ```bash
-# Create and activate virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env to add your OPENAI_API_KEY
+source venv/bin/activate   # activate Python virtual environment
+uvicorn app.main:app --reload  # --reload means it restarts on code changes
 ```
+Backend available at http://localhost:8000. Docs at http://localhost:8000/docs.
 
-### Running the Application
+### Frontend
 ```bash
-# Activate virtual environment first
-source venv/bin/activate
-
-# Run development server
-uvicorn app.main:app --reload
-
-# The API will be available at http://localhost:8000
-# Interactive docs at http://localhost:8000/docs
+cd frontend
+npm run dev   # starts Vite dev server
 ```
+Frontend available at http://localhost:5173.
 
-### Database
-- Uses SQLite by default (`sqlite:///./db/gooni.db`)
-- Tables are auto-created on startup via `Base.metadata.create_all()`
-- Can be configured via `DATABASE_URL` environment variable
+### Both together
+Run each in a separate terminal tab.
 
 ## API Endpoints
 
-- `POST /chat`: Send message and get AI response with memory context
-- `GET /interactions`: Retrieve conversation history
-- `GET /memories`: Retrieve stored memories
-- `POST /memories`: Manually create a memory
-- `GET /health`: Health check endpoint
+- `POST /chat` — send message, get AI response
+- `GET /goals` — list active goals with streak + 7-day activity
+- `GET /feed` — recent notes across all goals
+- `GET /interactions` — conversation history
+- `GET /memories` — stored memories
+- `GET /health` — health check
 
 ## Environment Variables
 
-- `OPENAI_API_KEY`: Required for LLM and embedding functionality
-- `DATABASE_URL`: Optional, defaults to SQLite (see `.env.example`)
+- `OPENAI_API_KEY` — required for LLM + embeddings
+- `DATABASE_URL` — optional, defaults to `sqlite:///./db/gooni.db`
 
 ## Code Patterns
 
-- Services use singleton pattern (instantiated at module level)
-- Database sessions managed via FastAPI dependency injection
-- Error handling with try/catch blocks that return user-friendly messages
-- JSON serialization for complex data types (embeddings, metadata)
+- **Singleton services**: each service file creates one instance at the bottom and exports it. This means the whole app shares one instance (one DB connection pool, one cache, etc.) — efficient and simple.
+- **FastAPI dependency injection**: `db: Session = Depends(get_db)` — FastAPI automatically creates and closes a DB session per request.
+- **CORS**: needed because frontend and backend run on different ports. The browser blocks cross-origin requests by default; the middleware tells it to allow them.

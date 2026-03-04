@@ -43,3 +43,12 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# app
+app/misc/

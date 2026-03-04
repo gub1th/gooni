@@ -67,4 +67,18 @@ class NoteService:
         }
 
 
+    def get_last_7_days(self, goal_id: int, db: Session) -> list[bool]:
+        """Returns list of 7 bools [6 days ago → today], True = note logged that day."""
+        from datetime import timedelta
+        today = date.today()
+        days = [(today - timedelta(days=i)) for i in range(6, -1, -1)]
+        logged = {
+            n.log_date
+            for n in db.query(Note)
+            .filter(Note.goal_id == goal_id, Note.log_date.isnot(None))
+            .all()
+        }
+        return [d in logged for d in days]
+
+
 note_service = NoteService()
