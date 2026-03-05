@@ -55,6 +55,7 @@ class Note(Base):
     id = Column(Integer, primary_key=True, index=True)
     content = Column(Text, nullable=False)
     goal_id = Column(Integer, ForeignKey("goals.id"), nullable=True)
+    interaction_id = Column(Integer, ForeignKey("interactions.id"), nullable=True)
     outcome = Column(Enum(NoteOutcome), nullable=True)
     log_date = Column(Date, nullable=True)
     meta = Column(Text, nullable=True)

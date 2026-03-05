@@ -5,7 +5,8 @@ interface Props {
 }
 
 function formatTime(iso: string): string {
-  const d = new Date(iso);
+  const normalized = iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z";
+  const d = new Date(normalized);
   return d.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",

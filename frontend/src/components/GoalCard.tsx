@@ -9,8 +9,8 @@ interface Props {
 
 export function GoalCard({ goal }: Props) {
   const isAvoid = goal.goal_type === "avoid";
-  const filledColor = isAvoid ? "#9f7aea" : "#48bb78"; // purple.400 / green.400
-  const emptyColor = "#e2e8f0"; // gray.100
+  const filledColor = isAvoid ? "#9f7aea" : "#48bb78";
+  const emptyColor = "#e2e8f0";
 
   return (
     <div

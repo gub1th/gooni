@@ -52,3 +52,6 @@ frontend/.vite/
 
 # app
 app/misc/
+
+# Local AI session memory
+.claude/
