@@ -36,11 +36,11 @@ function Dashboard() {
       }}
     >
       <CaptureBar onSent={() => { macrosRef.current?.refresh(); workoutRef.current?.refresh(); }} />
+      <Feed />
+      <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: 0 }} />
+      <GoalsRow />
       <MacrosBar ref={macrosRef} />
       <WorkoutBar ref={workoutRef} />
-      <GoalsRow />
-      <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: 0 }} />
-      <Feed />
     </div>
   );
 }
