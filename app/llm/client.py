@@ -4,6 +4,12 @@ from datetime import datetime
 from typing import List
 
 from openai import OpenAI
+from pydantic import BaseModel
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    log_note: str
 
 from .pricing import calculate_chat_cost, calculate_embedding_cost, UsageTracker
 from .prompts import build_chat_system_prompt
@@ -48,7 +54,7 @@ class LLMClient:
         """Generate response with enhanced memory context and tool use."""
 
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
-        system_prompt = f"""You are Gooni, an AI accountability partner. You have persistent memory — you remember everything across conversations. You track goals, log daily progress, and hold users accountable over time.
+        system_prompt = f"""You are a personal AI fitness coach with persistent memory. You remember every workout, meal, PR, and goal across conversations.
 
 Current date and time: {now}
 
@@ -57,13 +63,14 @@ Current date and time: {now}
 {episodic_context}
 
 How you work:
-- You remember the user's goals, preferences, and history permanently
-- When users report activity ("hit the gym", "vaped today"), you log it automatically
-- When users express a new goal or habit to track, you create it and confirm
-- You never ask more than one question at a time
-- Be direct and real — like a coach who knows you well, not a therapist running through a checklist
-
-When users express intent to track or achieve something, confirm it simply: "Got it, tracking that." Keep responses short."""
+- When users log food ("had chicken breast and rice", or send a photo), call log_meal — break it into individual items and estimate macros for each
+- When users log a workout, call log_workout with ONLY the exercises explicitly mentioned in the current message — never re-log exercises from previous messages or conversation history
+- When users ask about macros ("how much protein today?"), call get_daily_macros
+- When users ask about exercise progress, call get_exercise_history
+- When a PR is hit, call it out explicitly
+- Normalize exercise names only when obviously the same movement — when unsure, use the user's exact words
+- Keep responses short and direct — confirm what was logged, note progress if relevant
+- Never ask more than one question at a time"""
 
         if is_first_time:
             system_prompt += "\n\nYou're meeting this user for the first time. Introduce yourself in one sentence and ask for their name."
@@ -105,7 +112,23 @@ When users express intent to track or achieve something, confirm it simply: "Got
                             "content": result,
                         })
                 else:
-                    return choice.message.content, tracker.finalize(tools_used)
+                    # Tools are done — make one structured call for reply + log_note
+                    messages.append({"role": "assistant", "content": choice.message.content})
+                    messages.append({
+                        "role": "user",
+                        "content": "Now respond with your final reply and a one-sentence journal log_note summarizing what happened (past tense, first person).",
+                    })
+                    structured = self.client.beta.chat.completions.parse(
+                        model=self.chat_model,
+                        messages=messages,
+                        response_format=ChatResponse,
+                        max_tokens=300,
+                    )
+                    tracker.add(structured.usage)
+                    parsed = structured.choices[0].message.parsed
+                    usage = tracker.finalize(tools_used)
+                    usage["log_note"] = parsed.log_note
+                    return parsed.reply, usage
 
             return "I got stuck processing tool results.", tracker.finalize(tools_used)
 
@@ -120,23 +143,26 @@ When users express intent to track or achieve something, confirm it simply: "Got
         profile_context: str = "",
         episodic_context: str = "",
         history: list = None,
+        db=None,
     ) -> tuple[str, dict]:
-        """Generate an accountability response that includes an image (MMS proof).
+        """Generate a fitness coaching response that includes an image.
 
-        Uses gpt-4o for vision capability. image_url can be an https:// URL or a
+        Uses gpt-4o for vision + tool support. image_url can be an https:// URL or a
         base64 data URI (data:image/jpeg;base64,...).
         """
         vision_model = "gpt-4o"
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
 
         system_prompt = (
-            f"You are Gooni, an accountability partner. "
+            f"You are a personal AI fitness coach with persistent memory. "
             f"Current date and time: {now}\n\n"
             f"{profile_context}\n\n"
             f"Relevant past conversations:\n{episodic_context}\n\n"
-            "The user has sent you an image as proof or for feedback. "
-            "Analyze it in the context of their goals and respond with honest, "
-            "encouraging accountability coaching."
+            "The user has sent you a food or workout photo. "
+            "Identify what you see, estimate macros for each item if it's food, "
+            "then call log_meal with your best estimates. "
+            "If the meal type is unclear, make a reasonable guess based on the time of day. "
+            "Keep your response short — confirm what you logged."
         )
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -152,19 +178,42 @@ When users express intent to track or achieve something, confirm it simply: "Got
         user_content.append({"type": "image_url", "image_url": {"url": image_url}})
         messages.append({"role": "user", "content": user_content})
 
+        tool_schemas = [t.to_openai_schema() for t in tools]
         tracker = UsageTracker(vision_model)
+        tools_used = []
+
         try:
-            response = self.client.chat.completions.create(
-                model=vision_model,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=500,
-            )
-            tracker.add(response.usage)
-            return response.choices[0].message.content, tracker.finalize([])
+            for _ in range(5):
+                response = self.client.chat.completions.create(
+                    model=vision_model,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=500,
+                    tools=tool_schemas,
+                )
+                tracker.add(response.usage)
+                choice = response.choices[0]
+
+                if choice.finish_reason == "tool_calls":
+                    messages.append(choice.message)
+                    for tool_call in choice.message.tool_calls:
+                        tool_name = tool_call.function.name
+                        tool_args = json.loads(tool_call.function.arguments)
+                        tool = tool_map.get(tool_name)
+                        result = tool.execute(db=db, **tool_args) if tool else f"Unknown tool: {tool_name}"
+                        tools_used.append(tool_name)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result,
+                        })
+                else:
+                    return choice.message.content, tracker.finalize(tools_used)
+
+            return "I got stuck processing tool results.", tracker.finalize(tools_used)
         except Exception as e:
             print(f"LLM Vision Error: {e}")
-            return "I couldn't analyze that image right now.", tracker.finalize([])
+            return "I couldn't analyze that image right now.", tracker.finalize(tools_used)
 
     def chat_raw(self, messages: list[dict], temperature: float = 0.8, max_tokens: int = 500) -> str:
         """Minimal chat call — no memory, no tools, no cost tracking. Used for onboarding."""

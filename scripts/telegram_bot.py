@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import asyncio
+import base64
 import os
 import tempfile
 
@@ -46,6 +47,31 @@ async def _respond(update: Update, message: str) -> None:
             parts.append("note logged")
         if parts:
             print(f"[memory] {' · '.join(parts)}")
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Get highest-resolution photo (Telegram sends multiple sizes; last = largest)
+    tg_file = await update.message.photo[-1].get_file()
+    photo_bytes = await tg_file.download_as_bytearray()
+    b64 = base64.b64encode(photo_bytes).decode("utf-8")
+    data_uri = f"data:image/jpeg;base64,{b64}"
+
+    caption = update.message.caption or ""
+
+    def chat_fn():
+        db = SessionLocal()
+        try:
+            return Orchestrator.handle_chat(caption, db, image_url=data_uri)
+        finally:
+            db.close()
+
+    response, usage = await asyncio.to_thread(chat_fn)
+    await update.message.reply_text(response)
+
+    if usage:
+        tools_used = usage.get("tools_used", [])
+        if tools_used:
+            print(f"[tools] {', '.join(tools_used)}")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -120,6 +146,7 @@ def main():
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("goals", cmd_goals))
     app.add_handler(CommandHandler("goal", cmd_goal))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 

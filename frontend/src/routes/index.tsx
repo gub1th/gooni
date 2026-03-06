@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { CaptureBar } from "../components/CaptureBar";
 import { GoalsRow } from "../components/GoalsRow";
 import { Feed } from "../components/Feed";
+import { MacrosBar } from "../components/MacrosBar";
+import { WorkoutBar } from "../components/WorkoutBar";
 import { useGoalsStore } from "../stores/useGoalsStore";
 import { useFeedStore } from "../stores/useFeedStore";
 
@@ -13,6 +15,8 @@ export const Route = createFileRoute("/")({
 function Dashboard() {
   const fetchGoals = useGoalsStore((s) => s.fetch);
   const fetchFeed = useFeedStore((s) => s.fetch);
+  const macrosRef = useRef<{ refresh: () => void } | null>(null);
+  const workoutRef = useRef<{ refresh: () => void } | null>(null);
 
   useEffect(() => {
     fetchGoals();
@@ -31,7 +35,9 @@ function Dashboard() {
         gap: 24,
       }}
     >
-      <CaptureBar />
+      <CaptureBar onSent={() => { macrosRef.current?.refresh(); workoutRef.current?.refresh(); }} />
+      <MacrosBar ref={macrosRef} />
+      <WorkoutBar ref={workoutRef} />
       <GoalsRow />
       <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: 0 }} />
       <Feed />

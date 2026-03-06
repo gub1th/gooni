@@ -1,4 +1,6 @@
-from ..db.models import GoalType
+from datetime import date
+
+from ..db.models import GoalType, Note
 from ..db.schemas import InteractionCreate
 from ..llm.client import llm_client
 from .goal_service import goal_service
@@ -35,7 +37,7 @@ class Orchestrator:
 
         if image_url:
             response, usage = llm_client.generate_response_with_image(
-                message, image_url, full_context, "", recent_history
+                message, image_url, full_context, "", recent_history, db=db
             )
         else:
             response, usage = llm_client.generate_chat_response_with_memory(
@@ -47,14 +49,19 @@ class Orchestrator:
             InteractionCreate(role="assistant", content=response), db
         )
 
+        # Save structured log_note from the LLM response
+        log_note = usage.pop("log_note", None)
+        if log_note:
+            db.add(Note(content=log_note, log_date=date.today()))
+            db.commit()
+
         # Auto-save episode for future context retrieval (no LLM call needed)
         if message.strip() and len(message.strip()) > 10:
             memory_service.create_episode(
                 f"User: {message}\nAssistant: {response}", goal_id=None, db=db
             )
 
-        tools_used = usage.get("tools_used", [])
-        usage["memory"] = {"episode_saved": True, "tools_used": tools_used}
+        usage["memory"] = {"episode_saved": True}
 
         return response, usage
 

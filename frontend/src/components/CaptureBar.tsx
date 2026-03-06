@@ -3,7 +3,7 @@ import { sendChat } from "../services/api";
 import { useGoalsStore } from "../stores/useGoalsStore";
 import { useFeedStore } from "../stores/useFeedStore";
 
-export function CaptureBar() {
+export function CaptureBar({ onSent }: { onSent?: () => void }) {
   const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
   const fetchGoals = useGoalsStore((s) => s.fetch);
@@ -17,6 +17,7 @@ export function CaptureBar() {
     try {
       await sendChat(msg);
       await Promise.all([fetchGoals(), fetchFeed()]);
+      onSent?.();
     } finally {
       setLoading(false);
     }
@@ -45,7 +46,7 @@ export function CaptureBar() {
           background: "transparent",
           color: "#1a202c",
         }}
-        placeholder="What's on your mind?"
+        placeholder="Log food, a workout, or ask..."
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {

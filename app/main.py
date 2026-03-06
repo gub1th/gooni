@@ -10,11 +10,16 @@ from .db.database import engine, get_db
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Interaction,
+    Meal,
     Memory,
     Note,
+    Workout,
+    WorkoutSet,
 )
 from .db.schemas import InteractionCreate, InteractionResponse
 from .services.goal_service import goal_service
+from .services.meal_service import meal_service
+from .services.workout_service import workout_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
@@ -113,6 +118,18 @@ def get_feed(db: Session = Depends(get_db)):
         }
         for n in notes
     ]
+
+
+@app.get("/workout/today")
+def get_workout_today(db: Session = Depends(get_db)):
+    from datetime import date
+    return workout_service.get_daily_workout(date.today(), db)
+
+
+@app.get("/macros/today")
+def get_macros_today(db: Session = Depends(get_db)):
+    from datetime import date
+    return meal_service.get_daily_totals(date.today(), db)
 
 
 @app.get("/health")
