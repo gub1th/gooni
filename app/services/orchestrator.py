@@ -1,10 +1,9 @@
 from datetime import date
 
 from ..db.models import GoalType, Note
-from ..db.schemas import InteractionCreate
 from ..llm.client import llm_client
 from .goal_service import goal_service
-from .interaction_service import InteractionService
+from .conversation_service import conversation_service
 from .memory_service import memory_service
 
 
@@ -25,10 +24,13 @@ class Orchestrator:
 
         is_first_time = not memory_service.get_name(db)
 
-        recent_history = InteractionService.get_recent(db, limit=6)
-        InteractionService.create_interaction(
-            InteractionCreate(role="user", content=message), db
-        )
+        # Find or create a Telegram session (2hr gap + same-day = new session)
+        conv = conversation_service.find_or_create_telegram_session(db)
+        conversation_service.add_message(conv.id, "user", message, db)
+
+        # Build recent history from current session for context window
+        recent_messages = conversation_service.get_recent_messages(conv.id, limit=10, db=db)
+        recent_history = [{"role": m.role, "content": m.content} for m in recent_messages]
 
         query = message if message.strip() else "image"
         memory_context = memory_service.build_memory_context(query, db)
@@ -45,17 +47,19 @@ class Orchestrator:
                 is_first_time=is_first_time, db=db,
             )
 
-        InteractionService.create_interaction(
-            InteractionCreate(role="assistant", content=response), db
-        )
+        conversation_service.add_message(conv.id, "assistant", response, db)
 
-        # Save structured log_note from the LLM response
+        # Extract a short note from the LLM's log_note if present
         log_note = usage.pop("log_note", None)
         if log_note:
             db.add(Note(content=log_note, log_date=date.today()))
             db.commit()
 
-        # Auto-save episode for future context retrieval (no LLM call needed)
+        # Save any profile facts the LLM extracted
+        for fact in usage.pop("profile_facts", []):
+            memory_service.upsert_profile_fact(fact, db)
+
+        # Auto-save episode for future context retrieval
         if message.strip() and len(message.strip()) > 10:
             memory_service.create_episode(
                 f"User: {message}\nAssistant: {response}", goal_id=None, db=db

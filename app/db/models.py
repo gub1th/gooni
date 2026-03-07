@@ -12,15 +12,6 @@ class MealType(enum.Enum):
     SNACK = "snack"
 
 
-class Interaction(Base):
-    __tablename__ = "interactions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    role = Column(String, nullable=False)  # "user" or "assistant"
-    content = Column(Text, nullable=False)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
-
-
 class GoalStatus(enum.Enum):
     ACTIVE = "active"
     COMPLETED = "completed"
@@ -57,15 +48,40 @@ class Goal(Base):
 
 
 class Note(Base):
+    """A written record — created in the web editor or extracted from a Telegram log."""
     __tablename__ = "notes"
 
     id = Column(Integer, primary_key=True, index=True)
-    content = Column(Text, nullable=False)
     goal_id = Column(Integer, ForeignKey("goals.id"), nullable=True)
-    interaction_id = Column(Integer, ForeignKey("interactions.id"), nullable=True)
-    outcome = Column(Enum(NoteOutcome), nullable=True)
+    content = Column(Text, nullable=False)
+    title = Column(Text, nullable=True)          # auto-generated short title
+    outcome = Column(Enum(NoteOutcome), nullable=True)  # for streak tracking
     log_date = Column(Date, nullable=True)
     meta = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Conversation(Base):
+    """A session container for a back-and-forth with Claude."""
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    goal_id = Column(Integer, ForeignKey("goals.id"), nullable=True)
+    title = Column(Text, nullable=True)          # auto-generated short title
+    summary = Column(Text, nullable=True)        # auto-generated after session ends
+    source = Column(String, nullable=False, default="web")  # 'web' | 'telegram' | 'cli'
+    last_message_at = Column(DateTime(timezone=True), nullable=True)  # for session lookup
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Message(Base):
+    """A single turn in a Conversation. Replaces the old Interaction model."""
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
+    role = Column(String, nullable=False)   # "user" | "assistant"
+    content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -98,7 +114,7 @@ class WorkoutSet(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     workout_id = Column(Integer, ForeignKey("workouts.id"), nullable=False)
-    exercise = Column(String, nullable=False)  # normalized canonical name
+    exercise = Column(String, nullable=False)
     sets = Column(Integer, nullable=True)
     reps = Column(Integer, nullable=True)
     weight = Column(Float, nullable=True)

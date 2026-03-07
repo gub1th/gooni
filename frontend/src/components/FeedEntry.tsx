@@ -1,7 +1,7 @@
-import { FeedEntry as FeedEntryType } from "../services/api";
+import { ApiFeedItem } from "../services/api";
 
 interface Props {
-  entry: FeedEntryType;
+  entry: ApiFeedItem;
 }
 
 function formatTime(iso: string): string {
@@ -15,6 +15,11 @@ function formatTime(iso: string): string {
 }
 
 export function FeedEntry({ entry }: Props) {
+  const displayContent =
+    entry.type === "note"
+      ? entry.content
+      : `💬 ${entry.title ?? "Untitled conversation"}`;
+
   return (
     <div
       style={{
@@ -43,7 +48,7 @@ export function FeedEntry({ entry }: Props) {
         {formatTime(entry.created_at)}
       </span>
       <span style={{ fontSize: 14, color: "#1a202c", lineHeight: 1.5 }}>
-        {entry.content}
+        {displayContent}
       </span>
     </div>
   );

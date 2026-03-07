@@ -1,34 +1,8 @@
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel
 
-class InteractionCreate(BaseModel):
-    role: str  # "user" or "assistant"
+
+class ChatRequest(BaseModel):
     content: str
-
-
-class InteractionResponse(BaseModel):
-    id: int
-    role: str
-    content: str
-    timestamp: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class MemoryCreate(BaseModel):
-    content: str
-    extra: Optional[str] = None
-
-
-class MemoryResponse(BaseModel):
-    id: int
-    content: str
-    embedding: Optional[str]
-    extra: Optional[str]
-    timestamp: datetime
-
-    class Config:
-        from_attributes = True
+    image_url: Optional[str] = None

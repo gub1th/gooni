@@ -7,9 +7,15 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 
+class ProfileFact(BaseModel):
+    key: str
+    content: str
+
+
 class ChatResponse(BaseModel):
     reply: str
     log_note: str
+    profile_facts: list[ProfileFact] = []
 
 from .pricing import calculate_chat_cost, calculate_embedding_cost, UsageTracker
 from .prompts import build_chat_system_prompt
@@ -116,7 +122,12 @@ How you work:
                     messages.append({"role": "assistant", "content": choice.message.content})
                     messages.append({
                         "role": "user",
-                        "content": "Now respond with your final reply and a one-sentence journal log_note summarizing what happened (past tense, first person).",
+                        "content": (
+                            "Now respond with your final reply, a one-sentence journal log_note "
+                            "(past tense, first person), and any profile_facts newly learned about "
+                            "the user (e.g. name, weight, height, dietary restrictions, preferences). "
+                            "Only include facts explicitly stated in this conversation."
+                        ),
                     })
                     structured = self.client.beta.chat.completions.parse(
                         model=self.chat_model,
@@ -128,6 +139,7 @@ How you work:
                     parsed = structured.choices[0].message.parsed
                     usage = tracker.finalize(tools_used)
                     usage["log_note"] = parsed.log_note
+                    usage["profile_facts"] = [{"key": f.key, "content": f.content} for f in parsed.profile_facts]
                     return parsed.reply, usage
 
             return "I got stuck processing tool results.", tracker.finalize(tools_used)
@@ -214,6 +226,61 @@ How you work:
         except Exception as e:
             print(f"LLM Vision Error: {e}")
             return "I couldn't analyze that image right now.", tracker.finalize(tools_used)
+
+    async def generate_title(self, content: str) -> str:
+        """Generate a short 5-word title for a note entry."""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"Generate a short 5-word title for this note. Return only the title, no quotes:\n{content}",
+                    }
+                ],
+                temperature=0.5,
+                max_tokens=20,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Title generation error: {e}")
+            return content[:40].strip()
+
+    async def generate_web_chat_response(
+        self, entry_content: str, messages: list[dict], goal_context: str = "", is_seed: bool = False
+    ) -> str:
+        """Generate a conversational response for an in-app chat thread seeded by a note."""
+        from datetime import datetime
+        now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+
+        opening = (
+            "The user just wrote this note and wants to discuss it. "
+            "Open the conversation — share your initial reaction, ask one clarifying question, "
+            "or offer something useful. Be concise."
+            if is_seed else
+            "Continue the conversation naturally. Be concise and helpful."
+        )
+
+        system_prompt = (
+            f"You are a personal AI coach. Current date: {now}\n\n"
+            f"{goal_context}\n\n"
+            f"Context — note the user wrote:\n\"\"\"{entry_content}\"\"\"\n\n"
+            f"{opening}"
+        )
+
+        chat_messages = [{"role": "system", "content": system_prompt}] + messages
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=chat_messages,
+                temperature=0.7,
+                max_tokens=500,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Web chat error: {e}")
+            return "I'm having trouble responding right now."
 
     def chat_raw(self, messages: list[dict], temperature: float = 0.8, max_tokens: int = 500) -> str:
         """Minimal chat call — no memory, no tools, no cost tracking. Used for onboarding."""

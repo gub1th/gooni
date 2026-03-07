@@ -1,8 +1,8 @@
 import { create } from "zustand";
-import { FeedEntry, fetchFeed } from "../services/api";
+import { ApiFeedItem, fetchGeneralFeed } from "../services/api";
 
 interface FeedStore {
-  entries: FeedEntry[];
+  entries: ApiFeedItem[];
   loading: boolean;
   fetch: () => Promise<void>;
 }
@@ -13,8 +13,10 @@ export const useFeedStore = create<FeedStore>((set) => ({
   fetch: async () => {
     set({ loading: true });
     try {
-      const entries = await fetchFeed();
+      const entries = await fetchGeneralFeed();
       set({ entries });
+    } catch (e) {
+      console.error("fetchFeed error:", e);
     } finally {
       set({ loading: false });
     }

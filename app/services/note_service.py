@@ -15,6 +15,7 @@ class NoteService:
         outcome: Optional[NoteOutcome] = None,
         log_date: Optional[date] = None,
         meta: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> Note:
         note = Note(
             content=content,
@@ -22,23 +23,35 @@ class NoteService:
             outcome=outcome,
             log_date=log_date or (date.today() if outcome is not None else None),
             meta=meta,
+            title=title,
         )
         db.add(note)
         db.commit()
         db.refresh(note)
         return note
 
+    def update(self, note_id: int, content: str, db: Session) -> Note:
+        note = db.query(Note).filter(Note.id == note_id).first()
+        if not note:
+            raise ValueError(f"Note {note_id} not found")
+        note.content = content
+        db.commit()
+        db.refresh(note)
+        return note
+
+    def get_recent(self, db: Session, goal_id: Optional[int] = None, limit: int = 20) -> List[Note]:
+        q = db.query(Note)
+        if goal_id is not None:
+            q = q.filter(Note.goal_id == goal_id)
+        else:
+            q = q.filter(Note.goal_id.is_(None))
+        return q.order_by(Note.created_at.desc()).limit(limit).all()
+
+    # kept for backward compat with /goals endpoint
     def get_recent_for_goal(self, goal_id: int, limit: int, db: Session) -> List[Note]:
-        return (
-            db.query(Note)
-            .filter(Note.goal_id == goal_id)
-            .order_by(Note.created_at.desc())
-            .limit(limit)
-            .all()
-        )
+        return self.get_recent(db, goal_id=goal_id, limit=limit)
 
     def calculate_streak(self, goal_id: int, db: Session) -> dict:
-        """Calculate current streak and totals for a goal."""
         logs = (
             db.query(Note)
             .filter(Note.goal_id == goal_id, Note.outcome.isnot(None))
@@ -66,9 +79,7 @@ class NoteService:
             "total_failure": total_failure,
         }
 
-
     def get_last_7_days(self, goal_id: int, db: Session) -> list[bool]:
-        """Returns list of 7 bools [6 days ago → today], True = note logged that day."""
         from datetime import timedelta
         today = date.today()
         days = [(today - timedelta(days=i)) for i in range(6, -1, -1)]

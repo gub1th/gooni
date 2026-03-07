@@ -1,6 +1,6 @@
+import { ApiFeedItem } from "../services/api";
 import { useFeedStore } from "../stores/useFeedStore";
 import { FeedEntry } from "./FeedEntry";
-import { FeedEntry as FeedEntryType } from "../services/api";
 
 function getDateLabel(iso: string): string {
   const d = new Date(iso);
@@ -13,8 +13,8 @@ function getDateLabel(iso: string): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function groupByDate(entries: FeedEntryType[]): [string, FeedEntryType[]][] {
-  const groups: Map<string, FeedEntryType[]> = new Map();
+function groupByDate(entries: ApiFeedItem[]): [string, ApiFeedItem[]][] {
+  const groups: Map<string, ApiFeedItem[]> = new Map();
   for (const e of entries) {
     const label = getDateLabel(e.created_at);
     if (!groups.has(label)) groups.set(label, []);

@@ -1,46 +1,82 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
-import { CaptureBar } from "../components/CaptureBar";
-import { GoalsRow } from "../components/GoalsRow";
-import { Feed } from "../components/Feed";
-import { MacrosBar } from "../components/MacrosBar";
-import { WorkoutBar } from "../components/WorkoutBar";
+import { useEffect } from "react";
+import { Editor } from "../components/notes/Editor";
+import { Sidebar } from "../components/notes/Sidebar";
 import { useGoalsStore } from "../stores/useGoalsStore";
-import { useFeedStore } from "../stores/useFeedStore";
+import { useNotesStore } from "../stores/notesStore";
+import { useWindowWidth } from "../hooks/useWindowWidth";
 
 export const Route = createFileRoute("/")({
-  component: Dashboard,
+  component: NotesPage,
 });
 
-function Dashboard() {
+function NotesPage() {
   const fetchGoals = useGoalsStore((s) => s.fetch);
-  const fetchFeed = useFeedStore((s) => s.fetch);
-  const macrosRef = useRef<{ refresh: () => void } | null>(null);
-  const workoutRef = useRef<{ refresh: () => void } | null>(null);
+  const goals = useGoalsStore((s) => s.goals);
+  const selectedSpaceId = useNotesStore((s) => s.selectedSpaceId);
+  const selectSpace = useNotesStore((s) => s.selectSpace);
+  const loadFeed = useNotesStore((s) => s.loadFeed);
+  const windowWidth = useWindowWidth();
+
+  // Breakpoints:
+  // >= 1320: full layout (220px side margins, 600px center, right panel)
+  // 875–1319: no margins, 600px center, no right panel
+  // < 875: no margins, center is flex:1 (shrinks with sidebar)
+  const isLarge = windowWidth >= 1320;
+  const isMedium = windowWidth >= 875 && windowWidth < 1320;
+  const isSmall = windowWidth < 875;
 
   useEffect(() => {
     fetchGoals();
-    fetchFeed();
-  }, [fetchGoals, fetchFeed]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-select first goal if nothing selected OR selected space no longer valid
+  useEffect(() => {
+    if (goals.length === 0) return;
+    const isValid = goals.some((g) => selectedSpaceId === `goal-${g.id}`);
+    if (!isValid) {
+      const first = goals[0];
+      const spaceId = `goal-${first.id}`;
+      selectSpace(spaceId);
+      loadFeed(spaceId, first.id);
+    }
+  }, [goals]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
       style={{
-        maxWidth: 680,
-        margin: "0 auto",
-        padding: "40px 24px",
-        fontFamily: "Inter, system-ui, sans-serif",
         display: "flex",
-        flexDirection: "column",
-        gap: 24,
+        flexDirection: "row",
+        height: "100vh",
+        overflow: "hidden",
+        background: "#FFFFFF",
+        marginLeft: isLarge ? 220 : 0,
+        marginRight: isLarge ? 220 : 0,
       }}
     >
-      <CaptureBar onSent={() => { macrosRef.current?.refresh(); workoutRef.current?.refresh(); }} />
-      <Feed />
-      <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: 0 }} />
-      <GoalsRow />
-      <MacrosBar ref={macrosRef} />
-      <WorkoutBar ref={workoutRef} />
+      <Sidebar />
+      <div
+        style={{
+          width: isSmall ? undefined : 600,
+          minWidth: isSmall ? 0 : 600,
+          flex: isSmall ? 1 : undefined,
+          flexShrink: isSmall ? 1 : 0,
+          height: "100vh",
+          display: "flex",
+        }}
+      >
+        <Editor />
+      </div>
+      {isLarge && (
+        <div
+          style={{
+            flex: 1,
+            height: "100vh",
+            borderLeft: "1px solid rgba(0,0,0,0.08)",
+            background: "#FFFFFF",
+          }}
+        />
+      )}
     </div>
   );
 }
