@@ -12,71 +12,133 @@ Daniel is a young, eager software engineer actively learning. When working with 
 ## Project Overview
 
 Gooni is a goals + accountability AI companion. It has:
-- A **FastAPI backend** (port 8000) with chat, memory, goals, and notes
-- A **React/Vite frontend** (port 5173) that shows goals, streaks, and a feed
+- A **FastAPI backend** (port 8000) with chat, memory, goals, notes, and conversations
+- A **React/Vite frontend** (port 5173) — notes editor with goal spaces and AI conversation threads
 - An **OpenAI LLM** layer for chat responses and embeddings
+- A **Telegram bot** for mobile input and proactive check-ins
 
 ## Architecture
 
 ### Backend (`app/`)
 
-- **`app/main.py`** — FastAPI app. Registers all routes. Also adds CORS middleware so the frontend (on port 5173) can call the backend (on port 8000).
-- **`app/services/orchestrator.py`** — Central brain. Routes incoming chat to the right services. Exported as `Orchestrator` (instance, not class).
-- **`app/services/goal_service.py`** — CRUD for goals
-- **`app/services/note_service.py`** — Notes per goal, streak calculation, 7-day activity window
-- **`app/services/memory_service.py`** — Vector-based memory using cosine similarity + OpenAI embeddings
+- **`app/main.py`** — FastAPI app. All routes registered here. CORS middleware allows frontend (5173) to call backend (8000).
+- **`app/services/orchestrator.py`** — Central brain for Telegram/CLI chat. Exported as `Orchestrator` (singleton instance).
+- **`app/services/goal_service.py`** — CRUD for goals, streak calculation, 7-day activity window
+- **`app/services/note_service.py`** — Notes CRUD per goal or general
+- **`app/services/conversation_service.py`** — Conversation + Message CRUD. Handles Telegram session grouping (Option C: 2hr gap + same calendar day = new session).
+- **`app/services/memory_service.py`** — Vector-based long-term memory using cosine similarity + OpenAI embeddings
 - **`app/llm/client.py`** — OpenAI wrapper. Instance: `llm_client`. Model: `gpt-4o-mini` (default), `gpt-4o` for vision
-- **`app/db/models.py`** — SQLAlchemy models: Interaction, UserProfileMemory, EpisodicMemory, Todo, OnboardingState, Goal, Note
+- **`app/db/models.py`** — SQLAlchemy models: `Note`, `Conversation`, `Message`, `Goal`, `UserProfileMemory`, `EpisodicMemory`, `Meal`, `Workout`, `WorkoutSet`
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
+- **`app/db/schemas.py`** — Pydantic request/response schemas
 
-### Frontend (`frontend/`)
+### Frontend (`frontend/src/`)
 
-- React + TypeScript, bundled with Vite
-- `src/services/api.ts` — all fetch calls to the backend
-- `src/routes/` — TanStack Router file-based routes
-- `src/stores/` — Zustand state stores
-- `src/components/` — UI components using Chakra UI
+- **`routes/index.tsx`** — Main Notes page (`/`). Responsive 3-breakpoint layout. Auto-selects first goal on load.
+- **`components/notes/Editor.tsx`** — Compose area + scrollable feed. ⌘↵ saves note, ⌘⇧↵ starts conversation.
+- **`components/notes/Sidebar.tsx`** — Goal spaces list. `+` button to create new goal inline.
+- **`services/api.ts`** — All `fetch()` calls to the backend. Single source of truth for API shape.
+- **`stores/notesStore.ts`** — Zustand store for feed items and messages. Persist key: `gooni-notes-v4`.
+- **`stores/useGoalsStore.ts`** — Goals list + create. Fetched once on mount.
+- **`stores/useFeedStore.ts`** — General feed (cross-goal). Separate from per-goal feed.
+- **`types/notes.ts`** — Core types: `Note`, `ConversationFeedItem`, `FeedItem` (union), `Message`
+- **`hooks/useWindowWidth.ts`** — Returns live window width for responsive layout breakpoints
 
-### Messaging Layer (secondary)
-- `app/messaging/` — Telegram and Twilio transports for proactive outbound messages
-- `scripts/telegram_bot.py` — Telegram bot entry point
-- `app/services/scheduler.py` — APScheduler for check-ins
+### Messaging Layer
+- **`scripts/telegram_bot.py`** — Telegram bot entry point. Run with `PYTHONPATH=.`
+- **`app/messaging/`** — Telegram and Twilio transports
+- **`app/services/scheduler.py`** — APScheduler for proactive check-ins
 
 ## Running the App
 
-### Backend
+### All at once (recommended)
 ```bash
-source venv/bin/activate   # activate Python virtual environment
-uvicorn app.main:app --reload  # --reload means it restarts on code changes
+./dev.sh   # kills stale ports, opens 4 iTerm2 tabs: backend, frontend, telegram, datasette
 ```
-Backend available at http://localhost:8000. Docs at http://localhost:8000/docs.
 
-### Frontend
+### Individually
 ```bash
-cd frontend
-npm run dev   # starts Vite dev server
-```
-Frontend available at http://localhost:5173.
+# Backend
+source venv/bin/activate
+uvicorn app.main:app --reload
 
-### Both together
-Run each in a separate terminal tab.
+# Frontend
+cd frontend && npm run dev
+
+# Telegram bot
+PYTHONPATH=. python scripts/telegram_bot.py
+
+# Datasette (DB browser)
+datasette db/gooni.db -p 8002
+```
+
+## Build & Validation
+
+Always run these before considering frontend work done:
+
+```bash
+# TypeScript — must be zero errors
+cd frontend && npx tsc --noEmit
+
+# Python import check — catches broken imports fast
+python -c "from app.main import app; print('OK')"
+```
+
+Full smoke test checklist:
+1. `GET /goals` returns goals list
+2. `GET /goals/1/feed` returns mixed notes + conversations
+3. Web ⌘↵ → Note appears in feed
+4. Web ⌘⇧↵ → Conversation appears, Claude's seed message visible
+5. Telegram message → creates/reuses a Conversation, response returned
 
 ## API Endpoints
 
-- `POST /chat` — send message, get AI response
-- `GET /goals` — list active goals with streak + 7-day activity
-- `GET /feed` — recent notes across all goals
-- `GET /interactions` — conversation history
-- `GET /memories` — stored memories
+### Goals
+- `GET /goals` — list goals with streak + 7-day activity
+- `POST /goals` — create goal `{ title }`
+
+### Notes
+- `POST /goals/{id}/notes` — create goal note `{ content }`
+- `POST /notes` — create general note `{ content }`
+- `PATCH /notes/{id}` — update note `{ content }`
+
+### Conversations
+- `POST /goals/{id}/conversations` — create goal conversation `{ content }`
+- `POST /conversations` — create general conversation `{ content }`
+- `GET /conversations/{id}/messages` — list messages
+- `POST /conversations/{id}/messages` — send message `{ content, goal_id, entry_content }`
+- `POST /conversations/{id}/seed` — Claude opens unprompted `{ goal_id, entry_content }`
+
+### Feed
+- `GET /goals/{id}/feed` — notes + conversations for a goal, sorted by created_at desc
+- `GET /feed` — general feed (no goal_id), notes + conversations
+
+### Other
+- `POST /chat` — direct chat `{ content, image_url? }`
 - `GET /health` — health check
+
+## Data Model
+
+```
+Note         { id, goal_id?, content, title?, outcome?, log_date?, created_at }
+Conversation { id, goal_id?, title?, summary?, source, last_message_at, created_at }
+Message      { id, conversation_id → conversations, role, content, created_at }
+Goal         { id, title, goal_type, streak, last_7_days }
+```
+
+Feed endpoints add `"type": "note"` or `"type": "conversation"` in the serializer — it's NOT a DB column, it's set when building the response.
 
 ## Environment Variables
 
 - `OPENAI_API_KEY` — required for LLM + embeddings
 - `DATABASE_URL` — optional, defaults to `sqlite:///./db/gooni.db`
+- `TELEGRAM_BOT_TOKEN` — required for Telegram bot
 
 ## Code Patterns
 
-- **Singleton services**: each service file creates one instance at the bottom and exports it. This means the whole app shares one instance (one DB connection pool, one cache, etc.) — efficient and simple.
-- **FastAPI dependency injection**: `db: Session = Depends(get_db)` — FastAPI automatically creates and closes a DB session per request.
-- **CORS**: needed because frontend and backend run on different ports. The browser blocks cross-origin requests by default; the middleware tells it to allow them.
+- **Singleton services**: each service file creates one instance at the bottom and exports it. Whole app shares one instance — efficient and avoids multiple DB connection pools.
+- **FastAPI dependency injection**: `db: Session = Depends(get_db)` — FastAPI creates and closes a DB session per request automatically.
+- **CORS**: frontend and backend run on different ports. The browser blocks cross-origin requests by default; `CORSMiddleware` tells it to allow them.
+- **Discriminated union in frontend**: `FeedItem = Note | ConversationFeedItem` — the `type` field lets TypeScript narrow the type safely in `if (item.type === "conversation")` checks.
+- **Zustand persist**: stores survive page refresh. If you change store shape, bump the persist key (e.g. `gooni-notes-v4` → `gooni-notes-v5`) to avoid stale state bugs.
+- **React StrictMode**: kept intentionally — double-fires effects in dev to catch bugs. Never remove it; fix the root cause instead.

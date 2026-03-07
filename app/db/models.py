@@ -1,6 +1,18 @@
-from sqlalchemy import Column, DateTime, Date, Integer, String, Text, Float, Boolean, Enum, ForeignKey
-from sqlalchemy.sql import func
 import enum
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.sql import func
 
 from .database import Base
 
@@ -35,6 +47,16 @@ class MemoryType(enum.Enum):
     EPISODE = "episode"
 
 
+class Space(Base):
+    """A container for organizing notes and conversations."""
+
+    __tablename__ = "spaces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class Goal(Base):
     __tablename__ = "goals"
 
@@ -44,17 +66,20 @@ class Goal(Base):
     status = Column(Enum(GoalStatus), default=GoalStatus.ACTIVE, nullable=False)
     motivation = Column(Text, nullable=True)
     blocker = Column(Text, nullable=True)
+    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Note(Base):
     """A written record — created in the web editor or extracted from a Telegram log."""
+
     __tablename__ = "notes"
 
     id = Column(Integer, primary_key=True, index=True)
     goal_id = Column(Integer, ForeignKey("goals.id"), nullable=True)
+    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     content = Column(Text, nullable=False)
-    title = Column(Text, nullable=True)          # auto-generated short title
+    title = Column(Text, nullable=True)  # auto-generated short title
     outcome = Column(Enum(NoteOutcome), nullable=True)  # for streak tracking
     log_date = Column(Date, nullable=True)
     meta = Column(Text, nullable=True)
@@ -63,24 +88,29 @@ class Note(Base):
 
 class Conversation(Base):
     """A session container for a back-and-forth with Claude."""
+
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, index=True)
     goal_id = Column(Integer, ForeignKey("goals.id"), nullable=True)
-    title = Column(Text, nullable=True)          # auto-generated short title
-    summary = Column(Text, nullable=True)        # auto-generated after session ends
+    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
+    title = Column(Text, nullable=True)  # auto-generated short title
+    summary = Column(Text, nullable=True)  # auto-generated after session ends
     source = Column(String, nullable=False, default="web")  # 'web' | 'telegram' | 'cli'
-    last_message_at = Column(DateTime(timezone=True), nullable=True)  # for session lookup
+    last_message_at = Column(
+        DateTime(timezone=True), nullable=True
+    )  # for session lookup
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Message(Base):
     """A single turn in a Conversation. Replaces the old Interaction model."""
+
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, index=True)
     conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
-    role = Column(String, nullable=False)   # "user" | "assistant"
+    role = Column(String, nullable=False)  # "user" | "assistant"
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -95,7 +125,9 @@ class Meal(Base):
     total_protein = Column(Float, nullable=True)
     total_carbs = Column(Float, nullable=True)
     total_fat = Column(Float, nullable=True)
-    items = Column(Text, nullable=True)  # JSON array: [{name, calories, protein, carbs, fat}]
+    items = Column(
+        Text, nullable=True
+    )  # JSON array: [{name, calories, protein, carbs, fat}]
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -2,17 +2,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { Editor } from "../components/notes/Editor";
 import { Sidebar } from "../components/notes/Sidebar";
-import { useGoalsStore } from "../stores/useGoalsStore";
-import { useNotesStore } from "../stores/notesStore";
 import { useWindowWidth } from "../hooks/useWindowWidth";
+import { useNotesStore } from "../stores/notesStore";
+import { useSpacesStore } from "../stores/useSpacesStore";
 
 export const Route = createFileRoute("/")({
   component: NotesPage,
 });
 
 function NotesPage() {
-  const fetchGoals = useGoalsStore((s) => s.fetch);
-  const goals = useGoalsStore((s) => s.goals);
+  const fetchSpaces = useSpacesStore((s) => s.fetch);
   const selectedSpaceId = useNotesStore((s) => s.selectedSpaceId);
   const selectSpace = useNotesStore((s) => s.selectSpace);
   const loadFeed = useNotesStore((s) => s.loadFeed);
@@ -23,24 +22,19 @@ function NotesPage() {
   // 875–1319: no margins, 600px center, no right panel
   // < 875: no margins, center is flex:1 (shrinks with sidebar)
   const isLarge = windowWidth >= 1320;
-  const isMedium = windowWidth >= 875 && windowWidth < 1320;
   const isSmall = windowWidth < 875;
 
   useEffect(() => {
-    fetchGoals();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchSpaces();
+  }, []);
 
-  // Auto-select first goal if nothing selected OR selected space no longer valid
+  // Auto-select General if nothing selected
   useEffect(() => {
-    if (goals.length === 0) return;
-    const isValid = goals.some((g) => selectedSpaceId === `goal-${g.id}`);
-    if (!isValid) {
-      const first = goals[0];
-      const spaceId = `goal-${first.id}`;
-      selectSpace(spaceId);
-      loadFeed(spaceId, first.id);
+    if (selectedSpaceId === null) {
+      selectSpace("general");
+      loadFeed("general");
     }
-  }, [goals]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedSpaceId, selectSpace, loadFeed]);
 
   return (
     <div

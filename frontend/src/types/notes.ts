@@ -13,6 +13,7 @@ export interface Note {
   content: string;
   title: string | null;
   goal_id: number | null;
+  space_id: number | null;
   outcome: string | null;
   created_at: string;
 }
@@ -23,6 +24,7 @@ export interface ConversationFeedItem {
   title: string | null;
   summary: string | null;
   goal_id: number | null;
+  space_id: number | null;
   source: string;
   created_at: string;
 }
@@ -45,16 +47,16 @@ export interface NotesState {
 
   // Feed entries keyed by spaceId
   feedEntries: Record<string, FeedItem[]>;
-  loadFeed: (spaceId: string, goalId?: number) => Promise<void>;
-  submitNote: (spaceId: string, goalId: number | null, content: string) => Promise<void>;
-  startConversation: (spaceId: string, goalId: number | null, content: string) => Promise<FeedItem | null>;
-  seedConversation: (conversationId: number, goalId: number | null) => Promise<void>;
+  loadFeed: (spaceId: string) => Promise<void>;
+  submitNote: (spaceId: string, content: string) => Promise<void>;
+  startConversation: (spaceId: string, content: string) => Promise<FeedItem | null>;
+  seedConversation: (conversationId: number) => Promise<void>;
   updateEntry: (noteId: number, content: string) => Promise<void>;
 
   // Conversation messages keyed by conversationId
   messages: Record<number, Message[]>;
   loadMessages: (conversationId: number) => Promise<void>;
-  sendMessage: (conversationId: number, content: string, goalId: number | null) => Promise<void>;
+  sendMessage: (conversationId: number, content: string) => Promise<void>;
 
   // Which entry has conversation expanded; which is loaded in editor for editing
   expandedEntryId: number | null;

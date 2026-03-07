@@ -282,6 +282,42 @@ How you work:
             print(f"Web chat error: {e}")
             return "I'm having trouble responding right now."
 
+    def classify_note_to_space(self, content: str, spaces: list[dict]) -> dict:
+        """Return {space_id: int|None, new_space_name: str|None} for a note."""
+        if not spaces:
+            return {"space_id": None, "new_space_name": None}
+        space_list = "\n".join(f"- id:{s['id']} name:{s['name']}" for s in spaces)
+        try:
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a note classifier. Given a list of spaces and a note, "
+                            "decide which space the note belongs to. "
+                            "Respond with JSON only: "
+                            '{"space_id": <int or null>, "new_space_name": <string or null>}. '
+                            "Use space_id if an existing space fits well. "
+                            "Use new_space_name if none fit and a new space should be created. "
+                            "Return null for both only if the note is truly general."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Spaces:\n{space_list}\n\nNote:\n{content}",
+                    },
+                ],
+                temperature=0.2,
+                max_tokens=60,
+                response_format={"type": "json_object"},
+            )
+            import json as _json
+            return _json.loads(response.choices[0].message.content)
+        except Exception as e:
+            print(f"classify_note_to_space error: {e}")
+            return {"space_id": None, "new_space_name": None}
+
     def chat_raw(self, messages: list[dict], temperature: float = 0.8, max_tokens: int = 500) -> str:
         """Minimal chat call — no memory, no tools, no cost tracking. Used for onboarding."""
         response = self.client.chat.completions.create(

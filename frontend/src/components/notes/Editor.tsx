@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react"; // useRef kept for messagesEndRef
-import { useEditor, EditorContent } from "@tiptap/react";
+import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { useEffect, useRef, useState } from "react"; // useRef kept for messagesEndRef
 import { useNotesStore } from "../../stores/notesStore";
 import type { FeedItem, Message } from "../../types/notes";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  const d = new Date(hasOffset ? iso : iso + "Z");
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
   const yesterday = new Date(now);
@@ -230,13 +231,7 @@ export function Editor() {
 
   const [sendingFor, setSendingFor] = useState<number | null>(null);
 
-  // Derive goalId from selectedSpaceId
-  const selectedGoalId = (() => {
-    if (!selectedSpaceId?.startsWith("goal-")) return null;
-    return parseInt(selectedSpaceId.replace("goal-", ""), 10) || null;
-  })();
-
-  const isBackendSpace = selectedSpaceId?.startsWith("goal-");
+  const isBackendSpace = selectedSpaceId != null && selectedSpaceId !== "general";
   const entries = (selectedSpaceId ? feedEntries[selectedSpaceId] : undefined) ?? [];
   const activeEditEntry = activeEditEntryId != null
     ? entries.find((e) => e.id === activeEditEntryId) ?? null
@@ -265,7 +260,7 @@ export function Editor() {
   // Load feed when space changes
   useEffect(() => {
     if (selectedSpaceId) {
-      loadFeed(selectedSpaceId, selectedGoalId ?? undefined);
+      loadFeed(selectedSpaceId);
     }
   }, [selectedSpaceId]);
 
@@ -300,7 +295,7 @@ export function Editor() {
       updateEntry(activeEditEntryId, text);
       setActiveEditEntry(null);
     } else {
-      submitNote(selectedSpaceId!, selectedGoalId, text);
+      submitNote(selectedSpaceId!, text);
     }
     composeEditor?.commands.clearContent();
   };
@@ -335,10 +330,20 @@ export function Editor() {
 
   async function handleDiscuss(entry: FeedItem) {
     if (entry.type !== "note") return;
-    const conv = await startConversation(selectedSpaceId!, selectedGoalId, entry.content);
-    if (conv && conv.type === "conversation") {
-      setSendingFor(conv.id);
-      await seedConversation(conv.id, selectedGoalId);
+    
+    // Prevent multiple simultaneous discussions on the same note
+    if (sendingFor !== null) return;
+    
+    try {
+      const conv = await startConversation(selectedSpaceId!, entry.content);
+      if (conv && conv.type === "conversation") {
+        setExpandedEntry(conv.id);
+        setSendingFor(conv.id);
+        await seedConversation(conv.id);
+      }
+    } catch (error) {
+      console.error("Failed to start conversation:", error);
+    } finally {
       setSendingFor(null);
     }
   }
@@ -347,15 +352,17 @@ export function Editor() {
     if (entry.type !== "conversation") return;
     if (expandedEntryId === entry.id) {
       setExpandedEntry(null);
+      setSendingFor(null);
     } else {
       setExpandedEntry(entry.id);
+      setSendingFor(null);
       if (!messages[entry.id]) await loadMessages(entry.id);
     }
   }
 
   async function handleSendInConversation(entryId: number, content: string) {
     setSendingFor(entryId);
-    await sendMessage(entryId, content, selectedGoalId);
+    await sendMessage(entryId, content);
     setSendingFor(null);
   }
 
@@ -385,10 +392,10 @@ export function Editor() {
             if (!text) return;
             if (e.shiftKey) {
               if (!isBackendSpace) return;
-              startConversation(selectedSpaceId!, selectedGoalId, text).then((item) => {
+              startConversation(selectedSpaceId!, text).then((item) => {
                 if (item?.type === "conversation") {
                   setSendingFor(item.id);
-                  seedConversation(item.id, selectedGoalId).then(() => setSendingFor(null));
+                  seedConversation(item.id).then(() => setSendingFor(null));
                 }
               });
             } else {
@@ -396,7 +403,7 @@ export function Editor() {
                 updateEntry(activeEditEntryId, text);
                 setActiveEditEntry(null);
               } else {
-                submitNote(selectedSpaceId!, selectedGoalId, text);
+                submitNote(selectedSpaceId!, text);
               }
             }
             composeEditor?.commands.clearContent();

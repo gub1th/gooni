@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useNotesStore } from "../../stores/notesStore";
-import { useGoalsStore } from "../../stores/useGoalsStore";
+import { useSpacesStore } from "../../stores/useSpacesStore";
 
 function TargetIcon() {
   return (
@@ -32,7 +32,7 @@ function ActivityDots({ days }: { days: boolean[] }) {
 
 export function Sidebar() {
   const { feedEntries, selectedSpaceId, selectSpace } = useNotesStore();
-  const { goals, create: createGoal } = useGoalsStore();
+  const { spaces, create: createSpace } = useSpacesStore();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -45,7 +45,7 @@ export function Sidebar() {
 
   async function submitNewSpace() {
     const name = newName.trim();
-    if (name) await createGoal(name);
+    if (name) await createSpace(name);
     setAdding(false);
     setNewName("");
   }
@@ -55,12 +55,12 @@ export function Sidebar() {
     if (e.key === "Escape") { setAdding(false); setNewName(""); }
   }
 
-  const goalSpaces = goals.map((g) => ({
-    id: `goal-${g.id}`,
-    name: g.title,
-    goalId: g.id,
-    streak: g.streak,
-    last7days: g.last_7_days,
+  // useSpacesStore already injects General at index 0, with streak data from API
+  const allSpaces = spaces.map((s) => ({
+    id: String(s.id),
+    name: s.name,
+    streak: s.streak,
+    last7days: s.last_7_days,
   }));
 
   const totalNotes = Object.values(feedEntries).reduce((acc, arr) => acc + arr.length, 0);
@@ -152,15 +152,15 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Goal spaces */}
+      {/* Spaces */}
       <div style={{ padding: "4px 6px" }}>
-        {goalSpaces.map((space) => {
+        {allSpaces.map((space) => {
           const selected = selectedSpaceId === space.id;
           const count = feedEntries[space.id]?.length ?? 0;
           return (
             <div
               key={space.id}
-              onClick={() => selectSpace(space.id)}
+              onClick={() => selectSpace(space.id.toString())}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -181,7 +181,11 @@ export function Sidebar() {
               }}
             >
               <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
-                <TargetIcon />
+                {space.id === "general" ? (
+                  <span style={{ fontSize: 16 }}>📥</span>
+                ) : (
+                  <TargetIcon />
+                )}
               </div>
               <span
                 style={{

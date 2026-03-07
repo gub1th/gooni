@@ -8,6 +8,7 @@ export interface ApiNote {
   content: string;
   title: string | null;
   goal_id: number | null;
+  space_id: number | null;
   outcome: string | null;
   created_at: string;
 }
@@ -18,11 +19,20 @@ export interface ApiConversation {
   title: string | null;
   summary: string | null;
   goal_id: number | null;
+  space_id: number | null;
   source: string;
   created_at: string;
 }
 
 export type ApiFeedItem = ApiNote | ApiConversation;
+
+export interface ApiSpace {
+  id: number;
+  name: string;
+  goal_id: number | null;
+  streak: number;
+  last_7_days: boolean[];
+}
 
 export interface ApiMessage {
   id: number;
@@ -102,13 +112,12 @@ export async function createGeneralConversation(content: string): Promise<ApiCon
 
 export async function seedConversation(
   conversationId: number,
-  goalId: number | null,
   entryContent: string
 ): Promise<ApiMessage[]> {
   const res = await fetch(`${BASE}/conversations/${conversationId}/seed`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ goal_id: goalId, entry_content: entryContent }),
+    body: JSON.stringify({ entry_content: entryContent }),
   });
   if (!res.ok) throw new Error("Failed to seed conversation");
   return res.json();
@@ -123,13 +132,12 @@ export async function fetchConversationMessages(conversationId: number): Promise
 export async function sendConversationMessage(
   conversationId: number,
   content: string,
-  goalId: number | null,
   entryContent = ""
 ): Promise<ApiMessage[]> {
   const res = await fetch(`${BASE}/conversations/${conversationId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, goal_id: goalId, entry_content: entryContent }),
+    body: JSON.stringify({ content, entry_content: entryContent }),
   });
   if (!res.ok) throw new Error("Failed to send message");
   return res.json();
@@ -231,3 +239,48 @@ export async function sendChat(message: string, imageUrl?: string): Promise<{ co
   if (!res.ok) throw new Error("Failed to send message");
   return res.json();
 }
+
+// ── Spaces ─────────────────────────────────────────────────────────────────────
+
+export async function fetchSpaces(): Promise<ApiSpace[]> {
+  const res = await fetch(`${BASE}/spaces`);
+  if (!res.ok) throw new Error("Failed to fetch spaces");
+  return res.json();
+}
+
+export async function createSpace(name: string): Promise<ApiSpace> {
+  const res = await fetch(`${BASE}/spaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error("Failed to create space");
+  return res.json();
+}
+
+export async function fetchSpaceFeed(spaceId: number): Promise<ApiFeedItem[]> {
+  const res = await fetch(`${BASE}/spaces/${spaceId}/feed`);
+  if (!res.ok) throw new Error("Failed to fetch space feed");
+  return res.json();
+}
+
+export async function createSpaceNote(spaceId: number | "general", content: string): Promise<ApiNote> {
+  const res = await fetch(`${BASE}/spaces/${spaceId}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Failed to create space note");
+  return res.json();
+}
+
+export async function createSpaceConversation(spaceId: number, content: string): Promise<ApiConversation> {
+  const res = await fetch(`${BASE}/spaces/${spaceId}/conversations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Failed to create space conversation");
+  return res.json();
+}
+
