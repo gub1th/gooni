@@ -1,3 +1,12 @@
+export interface Note {
+  id: number;
+  title: string | null;
+  content: string | null;
+  space_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ConversationFeedItem {
   id: number;
   type: "conversation";

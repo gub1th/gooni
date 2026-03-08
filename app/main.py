@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
+from datetime import datetime
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -16,6 +18,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Meal,
     Memory,
     Message,
+    Note,
     Space,
     Workout,
     WorkoutSet,
@@ -253,10 +256,14 @@ async def create_space_conversation(
     numeric_id = None if space_id == "general" else int(space_id)
     goal = (
         db.query(Goal).filter(Goal.space_id == numeric_id).first()
-        if numeric_id else None
+        if numeric_id
+        else None
     )
     conv = Conversation(
-        title=title, source="web", space_id=numeric_id, goal_id=goal.id if goal else None
+        title=title,
+        source="web",
+        space_id=numeric_id,
+        goal_id=goal.id if goal else None,
     )
     db.add(conv)
     db.commit()
@@ -271,9 +278,7 @@ def get_conversation_messages(conversation_id: int, db: Session = Depends(get_db
 
 
 @app.post("/conversations/{conversation_id}/seed")
-def seed_conversation(
-    conversation_id: int, body: dict, db: Session = Depends(get_db)
-):
+def seed_conversation(conversation_id: int, body: dict, db: Session = Depends(get_db)):
     """Entry content becomes the first user message; Orchestrator generates Claude's reply."""
     entry_content = body.get("entry_content", "").strip()
     if not entry_content:
@@ -297,7 +302,8 @@ def send_conversation_message(
     entry_content = body.get("entry_content", "")
     try:
         Orchestrator.handle_chat(
-            user_content, db,
+            user_content,
+            db,
             conversation_id=conversation_id,
             entry_content=entry_content,
         )
@@ -305,6 +311,148 @@ def send_conversation_message(
         raise HTTPException(status_code=404, detail=str(e))
     msgs = conversation_service.get_messages(conversation_id, db)
     return [_serialize_message(m) for m in msgs]
+
+
+# ── Note endpoints ───────────────────────────────────────────────────────────
+
+
+@app.get("/spaces/{space_id}/notes")
+def get_space_notes(space_id: str, db: Session = Depends(get_db)):
+    """List notes for space, sorted updated_at desc."""
+    if space_id == "general":
+        notes = db.query(Note).filter(Note.space_id.is_(None)).all()
+    else:
+        notes = db.query(Note).filter(Note.space_id == int(space_id)).all()
+
+    notes.sort(key=lambda n: n.updated_at or n.created_at, reverse=True)
+    return [
+        {
+            "id": n.id,
+            "title": n.title,
+            "content": n.content,
+            "space_id": n.space_id,
+            "created_at": n.created_at,
+            "updated_at": n.updated_at,
+        }
+        for n in notes
+    ]
+
+
+@app.get("/notes")
+def get_general_notes(db: Session = Depends(get_db)):
+    """General notes (space_id IS NULL)."""
+    notes = db.query(Note).filter(Note.space_id.is_(None)).all()
+    notes.sort(key=lambda n: n.updated_at or n.created_at, reverse=True)
+    return [
+        {
+            "id": n.id,
+            "title": n.title,
+            "content": n.content,
+            "space_id": n.space_id,
+            "created_at": n.created_at,
+            "updated_at": n.updated_at,
+        }
+        for n in notes
+    ]
+
+
+@app.post("/spaces/{space_id}/notes")
+async def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
+    """Create note in space."""
+    content = body.get("content", "").strip()
+    title = body.get("title")
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+
+    note = Note(
+        title=title,
+        content=content,
+        space_id=None if space_id == "general" else int(space_id),
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+
+    # Create memory episode for Jarvis context if content is substantial
+    if len(content) > 10:
+        memory_service.create_episode(content, goal_id=None, db=db)
+
+    return {
+        "id": note.id,
+        "title": note.title,
+        "content": note.content,
+        "space_id": note.space_id,
+        "created_at": note.created_at,
+        "updated_at": note.updated_at,
+    }
+
+
+@app.post("/notes")
+async def create_general_note(body: dict, db: Session = Depends(get_db)):
+    """Create general note."""
+    content = body.get("content", "").strip()
+    title = body.get("title")
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+
+    note = Note(title=title, content=content, space_id=None)
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+
+    # Create memory episode for Jarvis context
+    if len(content) > 10:
+        memory_service.create_episode(content, goal_id=None, db=db)
+
+    return {
+        "id": note.id,
+        "title": note.title,
+        "content": note.content,
+        "space_id": note.space_id,
+        "created_at": note.created_at,
+        "updated_at": note.updated_at,
+    }
+
+
+@app.patch("/notes/{note_id}")
+def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
+    """Update note and embed content into memory."""
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    title = body.get("title", note.title)
+    content = body.get("content", note.content)
+
+    note.title = title
+    note.content = content
+    note.updated_at = datetime.utcnow()
+    db.commit()
+
+    # Create memory episode if content is substantial
+    if content and len(content) > 10:
+        memory_service.create_episode(content, goal_id=None, db=db)
+
+    return {
+        "id": note.id,
+        "title": note.title,
+        "content": note.content,
+        "space_id": note.space_id,
+        "created_at": note.created_at,
+        "updated_at": note.updated_at,
+    }
+
+
+@app.delete("/notes/{note_id}")
+def delete_note(note_id: int, db: Session = Depends(get_db)):
+    """Delete note."""
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    db.delete(note)
+    db.commit()
+    return {"message": "Note deleted"}
 
 
 # ── Workout / Macros ───────────────────────────────────────────────────────────

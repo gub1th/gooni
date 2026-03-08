@@ -11,8 +11,8 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    func,
 )
-from sqlalchemy.sql import func
 
 from .database import Base
 
@@ -41,6 +41,12 @@ class MemoryType(enum.Enum):
     EPISODE = "episode"
 
 
+class NoteOutcome(enum.Enum):
+    SUCCESS = "success"
+    FAILURE = "failure"
+    NEUTRAL = "neutral"
+
+
 class Space(Base):
     """A container for organizing notes and conversations."""
 
@@ -62,6 +68,19 @@ class Goal(Base):
     blocker = Column(Text, nullable=True)
     space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Note(Base):
+    """A written record — created in web editor or extracted from a Telegram log."""
+
+    __tablename__ = "notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(Text, nullable=True)
+    content = Column(Text, nullable=True)
+    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
 class Conversation(Base):

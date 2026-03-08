@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 import { useNotesStore } from "../../stores/notesStore";
+import { useJarvisStore } from "../../stores/useJarvisStore";
+import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 
 function TargetIcon() {
@@ -12,30 +14,18 @@ function TargetIcon() {
   );
 }
 
-function ActivityDots({ days }: { days: boolean[] }) {
-  return (
-    <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-      {days.slice(-7).map((active, i) => (
-        <div
-          key={i}
-          style={{
-            width: 5,
-            height: 5,
-            borderRadius: "50%",
-            background: active ? "#34C759" : "#D1D1D6",
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
 export function Sidebar() {
   const { feedEntries, selectedSpaceId, selectSpace } = useNotesStore();
+  const { notes, activeNoteId, selectNote, createNote: createNoteInStore } = useNotesContentStore();
+  const { isOpen: jarvisOpen, toggle: toggleJarvis } = useJarvisStore();
   const { spaces, create: createSpace } = useSpacesStore();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const selectedSpaceIdForNotes = selectedSpaceId || "general";
+
+  const currentNotes = notes.notes[selectedSpaceIdForNotes] ?? [];
 
   function startAdding() {
     setAdding(true);
@@ -55,13 +45,12 @@ export function Sidebar() {
     if (e.key === "Escape") { setAdding(false); setNewName(""); }
   }
 
-  // Hardcoded General space + backend spaces
   const allSpaces = [
     { id: "general", name: "General", streak: 0, last7days: [] as boolean[] },
     ...spaces.map((s) => ({ ...s, streak: 0, last7days: [] as boolean[] })), // TODO: add streak data to spaces
   ];
 
-  const totalNotes = Object.values(feedEntries).reduce((acc, arr) => acc + arr.length, 0);
+  const totalNotes = Object.values(notes.notes).reduce((acc, arr: any) => acc + arr.length, 0);
 
   return (
     <div
@@ -88,31 +77,26 @@ export function Sidebar() {
               color: "#1C1C1E",
             }}
           >
-            Notes
+            Gooni
           </div>
           <button
-            onClick={startAdding}
-            title="New space"
+            onClick={toggleJarvis}
+            title="Toggle Jarvis"
             style={{
               width: 26,
               height: 26,
               borderRadius: "50%",
-              background: "rgba(0,0,0,0.06)",
               border: "none",
+              background: jarvisOpen ? "#34C759" : "transparent",
+              color: jarvisOpen ? "#fff" : "#8E8E93",
               cursor: "pointer",
-              fontSize: 18,
+              fontSize: 14,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#1C1C1E",
-              padding: 0,
-              flexShrink: 0,
-              transition: "background 0.1s ease",
             }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
           >
-            +
+            💬
           </button>
         </div>
         <div
@@ -123,7 +107,7 @@ export function Sidebar() {
             marginTop: 1,
           }}
         >
-          {totalNotes} notes
+          {totalNotes > 0 ? `${totalNotes} notes` : ""}
         </div>
         {adding && (
           <input
@@ -150,15 +134,162 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Spaces */}
-      <div style={{ padding: "4px 6px" }}>
+      {/* Notes Section */}
+      <div style={{ flexShrink: 0, padding: "4px 16px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#8E8E93",
+            textTransform: "uppercase",
+            letterSpacing: "0.5px",
+            padding: "0 4px",
+          }}
+        >
+          Notes
+          <button
+            onClick={async () => {
+              const newNote = await createNoteInStore(selectedSpaceIdForNotes);
+              if (newNote) {
+                selectNote(newNote.id);
+              }
+            }}
+            style={{
+              padding: "4px 8px",
+              border: "none",
+              background: "transparent",
+              color: "#8E8E93",
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      {/* Notes List */}
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        {currentNotes.map((note: any) => (
+          <div
+            key={note.id}
+            onClick={() => selectNote(note.id)}
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid rgba(0,0,0,0.06)",
+              background: activeNoteId === note.id ? "rgba(29,155,240,0.04)" : "transparent",
+              cursor: "pointer",
+              transition: "background 0.1s",
+            }}
+          >
+            <div style={{ fontSize: 15, color: "#0f1419", fontWeight: 500 }}>
+              {note.title || "Untitled"}
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                color: "#536471",
+                marginTop: 4,
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                wordBreak: "break-word",
+              }}
+            >
+              {note.content}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Conversations Section */}
+      <div style={{ flexShrink: 0, padding: "0 16px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#8E8E93",
+            textTransform: "uppercase",
+            letterSpacing: "0.5px",
+            padding: "0 4px",
+          }}
+        >
+          Conversations
+        </div>
+      </div>
+
+      {/* Conversations List */}
+      <div style={{ flex: 1, overflowY: "auto" }}>
+        {feedEntries[selectedSpaceIdForNotes]?.map((entry: any) => (
+          <div
+            key={entry.id}
+            onClick={() => {
+              // TODO: Could open expanded view or link out
+              console.log("Open conversation:", entry.id);
+            }}
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid rgba(0,0,0,0.06)",
+              cursor: "pointer",
+              transition: "background 0.1s",
+            }}
+          >
+            <div style={{ fontSize: 15, color: "#0f1419", fontWeight: 500 }}>
+              💬 {entry.title ?? "Untitled conversation"}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Spaces Section */}
+      <div style={{ flexShrink: 0, padding: "0 16px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#8E8E93",
+            textTransform: "uppercase",
+            letterSpacing: "0.5px",
+            padding: "0 4px",
+          }}
+        >
+          Spaces
+          <button
+            onClick={startAdding}
+            style={{
+              padding: "4px 8px",
+              border: "none",
+              background: "transparent",
+              color: "#8E8E93",
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      {/* Spaces List */}
+      <div style={{ flex: 1, overflowY: "auto" }}>
         {allSpaces.map((space) => {
           const selected = selectedSpaceId === space.id;
           const count = feedEntries[space.id]?.length ?? 0;
           return (
             <div
               key={space.id}
-              onClick={() => selectSpace(space.id.toString())}
+              onClick={() => selectSpace(String(space.id))}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -169,24 +300,13 @@ export function Sidebar() {
                 cursor: "pointer",
                 background: selected ? "rgba(0,0,0,0.09)" : "transparent",
                 transition: "background 0.12s",
-                userSelect: "none",
-              }}
-              onMouseEnter={(e) => {
-                if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)";
-              }}
-              onMouseLeave={(e) => {
-                if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent";
               }}
             >
-              <div style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
-                {space.id === "general" ? (
-                  <span style={{ fontSize: 16 }}>📥</span>
-                ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                 {space.id === "general" ? (
                   <span style={{ fontSize: 16 }}>📥</span>
                 ) : (
                   <TargetIcon />
-                )}
                 )}
               </div>
               <span
@@ -203,20 +323,17 @@ export function Sidebar() {
               >
                 {space.name}
               </span>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <ActivityDots days={space.last7days} />
-                <span
-                  style={{
-                    fontSize: 13,
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-                    color: "#8E8E93",
-                    minWidth: 16,
-                    textAlign: "right",
-                  }}
-                >
-                  {count > 0 ? count : ""}
-                </span>
-              </div>
+              <span
+                style={{
+                  fontSize: 13,
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  color: "#8E8E93",
+                  minWidth: 16,
+                  textAlign: "right",
+                }}
+              >
+                {count > 0 ? count : ""}
+              </span>
             </div>
           );
         })}

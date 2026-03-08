@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { Editor } from "../components/notes/Editor";
+import { JarvisPanel } from "../components/JarvisPanel";
+import { NoteEditor } from "../components/notes/NoteEditor";
 import { Sidebar } from "../components/notes/Sidebar";
-import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useNotesStore } from "../stores/notesStore";
+import { useJarvisStore } from "../stores/useJarvisStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
 
 export const Route = createFileRoute("/")({
@@ -15,62 +16,54 @@ function NotesPage() {
   const selectedSpaceId = useNotesStore((s) => s.selectedSpaceId);
   const selectSpace = useNotesStore((s) => s.selectSpace);
   const loadFeed = useNotesStore((s) => s.loadFeed);
-  const windowWidth = useWindowWidth();
-
-  // Breakpoints:
-  // >= 1320: full layout (220px side margins, 600px center, right panel)
-  // 875–1319: no margins, 600px center, no right panel
-  // < 875: no margins, center is flex:1 (shrinks with sidebar)
-  const isLarge = windowWidth >= 1320;
-  const isSmall = windowWidth < 875;
+  const { isOpen: jarvisOpen } = useJarvisStore();
 
   useEffect(() => {
     fetchSpaces();
   }, []);
 
-  // Auto-select General if nothing selected
   useEffect(() => {
+    // Auto-select General if nothing selected
     if (selectedSpaceId === null) {
       selectSpace("general");
       loadFeed("general");
     }
   }, [selectedSpaceId, selectSpace, loadFeed]);
 
+  useEffect(() => {
+    // Load notes for the selected space
+    if (selectedSpaceId) {
+      // notes.loadNotes(selectedSpaceId);
+    }
+  }, [selectedSpaceId]);
+
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        height: "100vh",
-        overflow: "hidden",
-        background: "#FFFFFF",
-        marginLeft: isLarge ? 220 : 0,
-        marginRight: isLarge ? 220 : 0,
-      }}
-    >
-      <Sidebar />
-      <div
-        style={{
-          width: isSmall ? undefined : 600,
-          minWidth: isSmall ? 0 : 600,
-          flex: isSmall ? 1 : undefined,
-          flexShrink: isSmall ? 1 : 0,
-          height: "100vh",
-          display: "flex",
-        }}
-      >
-        <Editor />
+    <div style={{ display: "flex", height: "100vh", backgroundColor: "#FFFFFF" }}>
+      {/* Sidebar */}
+      <div style={{ width: 275, flexShrink: 0 }}>
+        <Sidebar />
       </div>
-      {isLarge && (
-        <div
-          style={{
-            flex: 1,
+
+      {/* Main Content */}
+      <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
+        <NoteEditor />
+
+        {/* Jarvis Panel - overlay on large screens, sidebar on small */}
+        {jarvisOpen && (
+          <div style={{
+            position: "absolute",
+            right: 0,
+            top: 0,
+            width: 300,
             height: "100vh",
-            borderLeft: "1px solid rgba(0,0,0,0.08)",
             background: "#FFFFFF",
-          }}
-        />
-      )}
+            borderLeft: "1px solid rgba(0,0,0,0.08)",
+            boxShadow: "-4px 0px 12px rgba(0,0,0,0.1)",
+          }}>
+            <JarvisPanel />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -14,7 +14,7 @@ export const useNotesStore = create<NotesState>()(
   persist(
     (set) => ({
       spaces: [],
-      selectedSpaceId: null,
+      selectedSpaceId: null as string | null,
 
       selectSpace: (id) => {
         set({
@@ -122,7 +122,7 @@ export const useNotesStore = create<NotesState>()(
 
       // ── UI state ──────────────────────────────────────────────────────────
 
-      expandedEntryId: null,
+      expandedEntryId: null as number | null,
       setExpandedEntry: (id) => set({ expandedEntryId: id }),
     }),
     {
