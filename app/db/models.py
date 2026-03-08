@@ -1,6 +1,19 @@
-from sqlalchemy import Column, DateTime, Date, Integer, String, Text, Float, Boolean, Enum, ForeignKey
-from sqlalchemy.sql import func
 import enum
+from datetime import datetime
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
+from sqlalchemy.sql import func
 
 from .database import Base
 
@@ -10,15 +23,6 @@ class MealType(enum.Enum):
     LUNCH = "lunch"
     DINNER = "dinner"
     SNACK = "snack"
-
-
-class Interaction(Base):
-    __tablename__ = "interactions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    role = Column(String, nullable=False)  # "user" or "assistant"
-    content = Column(Text, nullable=False)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class GoalStatus(enum.Enum):
@@ -33,15 +37,20 @@ class GoalType(enum.Enum):
     AVOID = "avoid"
 
 
-class NoteOutcome(enum.Enum):
-    SUCCESS = "success"
-    FAILURE = "failure"
-    NEUTRAL = "neutral"
-
-
 class MemoryType(enum.Enum):
     PROFILE_FACT = "profile_fact"
     EPISODE = "episode"
+
+
+class Space(Base):
+    """A container for organizing notes and conversations."""
+
+    __tablename__ = "spaces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(Text, nullable=False)
+    emoji = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Goal(Base):
@@ -53,19 +62,36 @@ class Goal(Base):
     status = Column(Enum(GoalStatus), default=GoalStatus.ACTIVE, nullable=False)
     motivation = Column(Text, nullable=True)
     blocker = Column(Text, nullable=True)
+    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class Note(Base):
-    __tablename__ = "notes"
+class Conversation(Base):
+    """A session container for a back-and-forth with Claude."""
+
+    __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, index=True)
-    content = Column(Text, nullable=False)
     goal_id = Column(Integer, ForeignKey("goals.id"), nullable=True)
-    interaction_id = Column(Integer, ForeignKey("interactions.id"), nullable=True)
-    outcome = Column(Enum(NoteOutcome), nullable=True)
-    log_date = Column(Date, nullable=True)
-    meta = Column(Text, nullable=True)
+    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
+    title = Column(Text, nullable=True)  # auto-generated short title
+    summary = Column(Text, nullable=True)  # auto-generated after session ends
+    source = Column(String, nullable=False, default="web")  # 'web' | 'telegram' | 'cli'
+    last_message_at = Column(
+        DateTime(timezone=True), nullable=True
+    )  # for session lookup
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Message(Base):
+    """A single turn in a Conversation. Replaces the old Interaction model."""
+
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
+    role = Column(String, nullable=False)  # "user" | "assistant"
+    content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -79,7 +105,9 @@ class Meal(Base):
     total_protein = Column(Float, nullable=True)
     total_carbs = Column(Float, nullable=True)
     total_fat = Column(Float, nullable=True)
-    items = Column(Text, nullable=True)  # JSON array: [{name, calories, protein, carbs, fat}]
+    items = Column(
+        Text, nullable=True
+    )  # JSON array: [{name, calories, protein, carbs, fat}]
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -98,12 +126,24 @@ class WorkoutSet(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     workout_id = Column(Integer, ForeignKey("workouts.id"), nullable=False)
-    exercise = Column(String, nullable=False)  # normalized canonical name
+    exercise = Column(String, nullable=False)
     sets = Column(Integer, nullable=True)
     reps = Column(Integer, nullable=True)
     weight = Column(Float, nullable=True)
     weight_unit = Column(String, default="lbs")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Note(Base):
+    __tablename__ = "notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(Text, nullable=True)
+    content = Column(Text, nullable=True)
+    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    last_opened_at = Column(DateTime, nullable=True)
 
 
 class Memory(Base):

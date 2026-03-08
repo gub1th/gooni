@@ -2,28 +2,69 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db.database import engine, get_db
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
-    Interaction,
+    Conversation,
+    Goal,
+    GoalStatus,
     Meal,
     Memory,
+    Message,
     Note,
+    Space,
     Workout,
     WorkoutSet,
 )
-from .db.schemas import InteractionCreate, InteractionResponse
+from .db.schemas import ChatRequest
+from .llm.client import llm_client
+from .services.conversation_service import conversation_service
 from .services.goal_service import goal_service
 from .services.meal_service import meal_service
-from .services.workout_service import workout_service
 from .services.memory_service import memory_service
-from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
+from .services.workout_service import workout_service
 
+
+def _run_column_migrations(engine):
+    """Add space_id to existing tables. Only runs ALTER if table exists but column is missing."""
+    with engine.connect() as conn:
+        existing_tables = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
+        # (table, col, sql_type)
+        for table, col, col_type in [
+            ("goals", "space_id", "INTEGER"),
+            ("conversations", "space_id", "INTEGER"),
+            ("notes", "space_id", "INTEGER"),
+            ("notes", "updated_at", "INTEGER"),
+            ("notes", "last_opened_at", "INTEGER"),
+            ("spaces", "emoji", "TEXT"),
+        ]:
+            if table not in existing_tables:
+                continue  # fresh DB: create_all will add the column via model definition
+            existing_cols = [
+                r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))
+            ]
+            if col not in existing_cols:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+                print(f"Migration: added {table}.{col}")
+        conn.commit()
+
+
+# 1. Create spaces table first (so FK references are valid)
+Base.metadata.create_all(bind=engine, tables=[Space.__table__])
+# 2. Add space_id to any existing tables that predate this change
+_run_column_migrations(engine)
+# 3. Create remaining tables (they already have space_id in their model definition)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
@@ -42,15 +83,11 @@ async def root():
 
 
 @app.post("/chat")
-async def chat(interaction: InteractionCreate, db: Session = Depends(get_db)):
-    content, usage = Orchestrator.handle_chat(interaction.content, db)
+async def chat(body: ChatRequest, db: Session = Depends(get_db)):
+    content, usage = Orchestrator.handle_chat(
+        body.content, db, image_url=body.image_url, source="web"
+    )
     return {"content": content, "usage": usage}
-
-
-@app.get("/interactions", response_model=list[InteractionResponse])
-async def get_interactions(db: Session = Depends(get_db)):
-    interactions = db.query(Interaction).order_by(Interaction.timestamp.desc()).all()
-    return interactions
 
 
 @app.get("/debug/memories")
@@ -70,65 +107,385 @@ async def debug_memories(db: Session = Depends(get_db)):
     ]
 
 
-@app.get("/debug/notes")
-async def debug_notes(db: Session = Depends(get_db)):
-    notes = db.query(Note).order_by(Note.created_at.desc()).limit(50).all()
-    return [
-        {
-            "id": n.id,
-            "content": n.content,
-            "goal_id": n.goal_id,
-            "outcome": n.outcome.value if n.outcome else None,
-            "log_date": n.log_date,
-            "created_at": n.created_at,
-        }
-        for n in notes
-    ]
+@app.post("/goals")
+def create_goal(body: dict, db: Session = Depends(get_db)):
+    title = body.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    goal = goal_service.create(title=title, db=db)
+    return {
+        "id": goal.id,
+        "title": goal.title,
+        "goal_type": goal.goal_type.value,
+    }
 
 
 @app.get("/goals")
 def get_goals(db: Session = Depends(get_db)):
     goals = goal_service.get_active(db)
-    result = []
-    for g in goals:
-        streak = note_service.calculate_streak(g.id, db)
-        days = note_service.get_last_7_days(g.id, db)
-        result.append(
-            {
-                "id": g.id,
-                "title": g.title,
-                "goal_type": g.goal_type.value,
-                "streak": streak["current_streak"],
-                "last_7_days": days,
-            }
-        )
-    return result
+    return [
+        {
+            "id": g.id,
+            "title": g.title,
+            "goal_type": g.goal_type.value,
+        }
+        for g in goals
+    ]
+
+
+# ── Spaces ────────────────────────────────────────────────────────────────────
+
+
+def _serialize_space(s: Space, db: Session) -> dict:
+    goal = (
+        db.query(Goal)
+        .filter(Goal.space_id == s.id, Goal.status == GoalStatus.ACTIVE)
+        .first()
+    )
+    return {
+        "id": s.id,
+        "name": s.name,
+        "emoji": s.emoji,
+        "goal_id": goal.id if goal else None,
+    }
+
+
+@app.get("/spaces")
+def get_spaces(db: Session = Depends(get_db)):
+    spaces = db.query(Space).order_by(Space.id).all()
+    space_ids = [s.id for s in spaces]
+    active_goals = (
+        db.query(Goal)
+        .filter(Goal.space_id.in_(space_ids), Goal.status == GoalStatus.ACTIVE)
+        .all()
+    )
+    goal_by_space = {g.space_id: g.id for g in active_goals}
+    return [
+        {"id": s.id, "name": s.name, "emoji": s.emoji, "goal_id": goal_by_space.get(s.id)}
+        for s in spaces
+    ]
+
+
+@app.post("/spaces")
+def create_space(body: dict, db: Session = Depends(get_db)):
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    space = Space(name=name)
+    db.add(space)
+    db.commit()
+    db.refresh(space)
+    return {"id": space.id, "name": space.name, "emoji": space.emoji, "goal_id": None}
+
+
+@app.patch("/spaces/{space_id}")
+def update_space(space_id: int, body: dict, db: Session = Depends(get_db)):
+    space = db.query(Space).filter(Space.id == space_id).first()
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+    if "name" in body:
+        name = body["name"].strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name cannot be empty")
+        space.name = name
+    if "emoji" in body:
+        space.emoji = body["emoji"] or None
+    db.commit()
+    db.refresh(space)
+    return _serialize_space(space, db)
+
+
+@app.delete("/spaces/{space_id}")
+def delete_space(space_id: int, db: Session = Depends(get_db)):
+    space = db.query(Space).filter(Space.id == space_id).first()
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+    db.query(Note).filter(Note.space_id == space_id).delete()
+    db.delete(space)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Notes ─────────────────────────────────────────────────────────────────────
+
+
+def _serialize_note(n: Note) -> dict:
+    return {
+        "id": n.id,
+        "title": n.title,
+        "content": n.content,
+        "space_id": n.space_id,
+        "created_at": n.created_at,
+        "updated_at": n.updated_at,
+        "last_opened_at": n.last_opened_at,
+    }
+
+
+def _notes_order():
+    from sqlalchemy import func
+    return func.coalesce(Note.last_opened_at, Note.updated_at, Note.created_at).desc()
+
+
+@app.get("/spaces/{space_id}/notes")
+def get_space_notes(space_id: str, db: Session = Depends(get_db)):
+    if space_id == "general":
+        notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(_notes_order()).all()
+    else:
+        notes = db.query(Note).filter(Note.space_id == int(space_id)).order_by(_notes_order()).all()
+    return [_serialize_note(n) for n in notes]
+
+
+@app.get("/notes")
+def get_general_notes(db: Session = Depends(get_db)):
+    notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(_notes_order()).all()
+    return [_serialize_note(n) for n in notes]
+
+
+@app.post("/spaces/{space_id}/notes")
+def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    numeric_id = None if space_id == "general" else int(space_id)
+    note = Note(
+        title=body.get("title") or "",
+        content=body.get("content") or "",
+        space_id=numeric_id,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return _serialize_note(note)
+
+
+@app.post("/notes")
+def create_general_note(body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    note = Note(
+        title=body.get("title") or "",
+        content=body.get("content") or "",
+        space_id=None,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return _serialize_note(note)
+
+
+@app.patch("/notes/{note_id}")
+def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if "title" in body:
+        note.title = body["title"]
+    if "content" in body:
+        note.content = body["content"]
+    note.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(note)
+    return _serialize_note(note)
+
+
+@app.post("/notes/{note_id}/touch")
+def touch_note(note_id: int, db: Session = Depends(get_db)):
+    """Update last_opened_at. Called whenever a note is selected."""
+    from datetime import datetime
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    note.last_opened_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/notes/{note_id}/memorize")
+def memorize_note(note_id: int, db: Session = Depends(get_db)):
+    """Extract a memory episode from the note's current content. Called when user leaves the note."""
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    content = (note.content or "").strip()
+    try:
+        result = memory_service.process_content(content, db)
+    except Exception:
+        result = {}
+    return {"ok": True, **result}
+
+
+@app.delete("/notes/{note_id}")
+def delete_note(note_id: int, db: Session = Depends(get_db)):
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    db.delete(note)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Serializers ────────────────────────────────────────────────────────────────
+
+
+def _serialize_conversation(c: Conversation) -> dict:
+    return {
+        "id": c.id,
+        "type": "conversation",
+        "title": c.title,
+        "summary": c.summary,
+        "goal_id": c.goal_id,
+        "space_id": c.space_id,
+        "source": c.source,
+        "created_at": c.created_at,
+    }
+
+
+def _serialize_message(m: Message) -> dict:
+    return {
+        "id": m.id,
+        "conversation_id": m.conversation_id,
+        "role": m.role,
+        "content": m.content,
+        "created_at": m.created_at,
+    }
+
+
+def _build_feed(
+    db: Session,
+    goal_id: int | None = None,
+    space_id: int | None = None,
+    general: bool = False,
+    limit: int = 100,
+) -> list[dict]:
+    """Conversations sorted newest first.
+
+    - general=True: return everything (no filter)
+    - space_id set: filter by space
+    - goal_id set: filter by goal (legacy)
+    """
+    q = db.query(Conversation).filter(Conversation.source != "telegram")
+
+    if not general:
+        if space_id is not None:
+            q = q.filter(Conversation.space_id == space_id)
+        elif goal_id is not None:
+            q = q.filter(Conversation.goal_id == goal_id)
+
+    items = [_serialize_conversation(c) for c in q.all()]
+    items.sort(key=lambda x: x["created_at"] or "", reverse=True)
+    return items[:limit]
+
+
+# ── Feed ───────────────────────────────────────────────────────────────────────
 
 
 @app.get("/feed")
 def get_feed(db: Session = Depends(get_db)):
-    notes = db.query(Note).order_by(Note.created_at.desc()).limit(100).all()
-    return [
-        {
-            "id": n.id,
-            "content": n.content,
-            "goal_id": n.goal_id,
-            "outcome": n.outcome.value if n.outcome else None,
-            "created_at": n.created_at,
-        }
-        for n in notes
-    ]
+    return _build_feed(db, general=True)
+
+
+@app.get("/goals/{goal_id}/feed")
+def get_goal_feed(goal_id: int, db: Session = Depends(get_db)):
+    return _build_feed(db, goal_id=goal_id)
+
+
+@app.get("/spaces/{space_id}/feed")
+def get_space_feed(space_id: str, db: Session = Depends(get_db)):
+    if space_id == "general":
+        return _build_feed(db, general=True)
+    return _build_feed(db, space_id=int(space_id))
+
+
+# ── Conversation endpoints ─────────────────────────────────────────────────────
+
+
+@app.post("/conversations")
+async def create_general_conversation(body: dict, db: Session = Depends(get_db)):
+    content = body.get("content", "")
+    title = await llm_client.generate_title(content) if content.strip() else None
+    conv = conversation_service.create(db=db, goal_id=None, source="web", title=title)
+    return _serialize_conversation(conv)
+
+
+@app.post("/spaces/{space_id}/conversations")
+async def create_space_conversation(
+    space_id: str, body: dict, db: Session = Depends(get_db)
+):
+    content = body.get("content", "")
+    title = await llm_client.generate_title(content) if content.strip() else None
+    numeric_id = None if space_id == "general" else int(space_id)
+    goal = (
+        db.query(Goal).filter(Goal.space_id == numeric_id).first()
+        if numeric_id else None
+    )
+    conv = Conversation(
+        title=title, source="web", space_id=numeric_id, goal_id=goal.id if goal else None
+    )
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return _serialize_conversation(conv)
+
+
+@app.get("/conversations/{conversation_id}/messages")
+def get_conversation_messages(conversation_id: int, db: Session = Depends(get_db)):
+    msgs = conversation_service.get_messages(conversation_id, db)
+    return [_serialize_message(m) for m in msgs]
+
+
+@app.post("/conversations/{conversation_id}/seed")
+def seed_conversation(
+    conversation_id: int, body: dict, db: Session = Depends(get_db)
+):
+    """Entry content becomes the first user message; Orchestrator generates Claude's reply."""
+    entry_content = body.get("entry_content", "").strip()
+    if not entry_content:
+        return []
+    try:
+        Orchestrator.handle_chat(entry_content, db, conversation_id=conversation_id)
+        msgs = conversation_service.get_messages(conversation_id, db)
+        return [_serialize_message(m) for m in msgs]
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/conversations/{conversation_id}/messages")
+def send_conversation_message(
+    conversation_id: int, body: dict, db: Session = Depends(get_db)
+):
+    """Send a user message; returns full thread after Claude replies."""
+    user_content = body.get("content", "").strip()
+    if not user_content:
+        raise HTTPException(status_code=400, detail="content is required")
+    entry_content = body.get("entry_content", "")
+    try:
+        Orchestrator.handle_chat(
+            user_content, db,
+            conversation_id=conversation_id,
+            entry_content=entry_content,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    msgs = conversation_service.get_messages(conversation_id, db)
+    return [_serialize_message(m) for m in msgs]
+
+
+# ── Workout / Macros ───────────────────────────────────────────────────────────
 
 
 @app.get("/workout/today")
 def get_workout_today(db: Session = Depends(get_db)):
     from datetime import date
+
     return workout_service.get_daily_workout(date.today(), db)
 
 
 @app.get("/macros/today")
 def get_macros_today(db: Session = Depends(get_db)):
     from datetime import date
+
     return meal_service.get_daily_totals(date.today(), db)
 
 

@@ -1,13 +1,13 @@
-from .base import BaseTool
+import urllib.request
 
-MAX_CHARS = 5000
+from .base import BaseTool
 
 
 class FetchUrlTool(BaseTool):
     name = "fetch_url"
     description = (
-        "Fetch and read the contents of a URL. Use this when the user provides "
-        "a specific link or when you need the full content of a webpage."
+        "Fetch the content of a URL and return it as text. "
+        "Use this to read articles, documentation, or any web page the user references."
     )
     parameters = {
         "type": "object",
@@ -15,34 +15,19 @@ class FetchUrlTool(BaseTool):
             "url": {
                 "type": "string",
                 "description": "The URL to fetch",
-            }
+            },
         },
         "required": ["url"],
     }
 
-    def execute(self, url: str) -> str:
+    def execute(self, url: str = "", db=None, **kwargs) -> str:
         try:
-            import httpx
-
-            response = httpx.get(url, follow_redirects=True, timeout=10)
-            response.raise_for_status()
-
-            content_type = response.headers.get("content-type", "")
-            if "html" in content_type:
-                return self._extract_text(response.text)
-            return response.text[:MAX_CHARS]
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                content = resp.read().decode("utf-8", errors="replace")
+            # Trim to avoid flooding the context window
+            return content[:8000] if len(content) > 8000 else content
         except Exception as e:
-            return f"Failed to fetch URL: {e}"
-
-    def _extract_text(self, html: str) -> str:
-        try:
-            from bs4 import BeautifulSoup
-
-            soup = BeautifulSoup(html, "html.parser")
-            for tag in soup(["script", "style", "nav", "footer", "header"]):
-                tag.decompose()
-            text = soup.get_text(separator="\n", strip=True)
-            lines = [line for line in text.splitlines() if line.strip()]
-            return "\n".join(lines)[:MAX_CHARS]
-        except Exception:
-            return html[:MAX_CHARS]
+            return f"Failed to fetch {url}: {e}"

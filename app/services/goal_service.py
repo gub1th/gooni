@@ -29,14 +29,6 @@ class GoalService:
             .first()
         )
 
-    def set_status(self, goal_id: int, status: GoalStatus, db: Session) -> bool:
-        goal = db.query(Goal).filter(Goal.id == goal_id).first()
-        if not goal:
-            return False
-        goal.status = status
-        db.commit()
-        return True
-
     def build_goal_context(self, db: Session) -> str:
         goals = self.get_active(db)
         if not goals:
@@ -52,8 +44,6 @@ class GoalService:
         return "\n".join(lines)
 
     def build_single_goal_context(self, goal: Goal, db: Session) -> str:
-        from .note_service import note_service
-
         type_label = "AVOID" if goal.goal_type == GoalType.AVOID else "ACHIEVE"
         lines = [
             f"Goal: {goal.title}",
@@ -64,22 +54,6 @@ class GoalService:
             lines.append(f"Why: {goal.motivation}")
         if goal.blocker:
             lines.append(f"Blocker: {goal.blocker}")
-
-        streak = note_service.calculate_streak(goal.id, db)
-        if streak["current_streak"] > 0:
-            lines.append(
-                f"Streak: {streak['current_streak']} day(s) of {streak['streak_outcome']} "
-                f"({streak['total_success']} success / {streak['total_failure']} failure total)"
-            )
-
-        recent = note_service.get_recent_for_goal(goal.id, 5, db)
-        if recent:
-            lines.append("Recent notes:")
-            for n in recent:
-                ts = n.created_at.strftime("%m/%d") if n.created_at else "?"
-                outcome_str = f" [{n.outcome.value.upper()}]" if n.outcome else ""
-                lines.append(f"  [{ts}]{outcome_str} {n.content[:120]}")
-
         return "\n".join(lines)
 
 

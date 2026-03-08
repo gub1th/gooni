@@ -7,12 +7,20 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 
+class ProfileFact(BaseModel):
+    key: str
+    content: str
+
+
+class ProfileFactsOnly(BaseModel):
+    profile_facts: list[ProfileFact] = []
+
+
 class ChatResponse(BaseModel):
     reply: str
-    log_note: str
+    profile_facts: list[ProfileFact] = []
 
-from .pricing import calculate_chat_cost, calculate_embedding_cost, UsageTracker
-from .prompts import build_chat_system_prompt
+from .pricing import calculate_embedding_cost, UsageTracker
 from ..tools import registry as tools, tool_map
 
 
@@ -77,8 +85,7 @@ How you work:
 
         messages = [{"role": "system", "content": system_prompt}]
         if history:
-            for interaction in history:
-                messages.append({"role": interaction.role, "content": interaction.content})
+            messages.extend(history)
         messages.append({"role": "user", "content": message})
 
         tool_schemas = [t.to_openai_schema() for t in tools]
@@ -116,7 +123,11 @@ How you work:
                     messages.append({"role": "assistant", "content": choice.message.content})
                     messages.append({
                         "role": "user",
-                        "content": "Now respond with your final reply and a one-sentence journal log_note summarizing what happened (past tense, first person).",
+                        "content": (
+                            "Now respond with your final reply and any profile_facts newly learned "
+                            "about the user (e.g. name, weight, height, dietary restrictions, "
+                            "preferences). Only include facts explicitly stated in this conversation."
+                        ),
                     })
                     structured = self.client.beta.chat.completions.parse(
                         model=self.chat_model,
@@ -127,7 +138,7 @@ How you work:
                     tracker.add(structured.usage)
                     parsed = structured.choices[0].message.parsed
                     usage = tracker.finalize(tools_used)
-                    usage["log_note"] = parsed.log_note
+                    usage["profile_facts"] = [{"key": f.key, "content": f.content} for f in parsed.profile_facts]
                     return parsed.reply, usage
 
             return "I got stuck processing tool results.", tracker.finalize(tools_used)
@@ -167,10 +178,7 @@ How you work:
 
         messages = [{"role": "system", "content": system_prompt}]
         if history:
-            for interaction in history:
-                messages.append(
-                    {"role": interaction.role, "content": interaction.content}
-                )
+            messages.extend(history)
 
         user_content = []
         if message.strip():
@@ -215,52 +223,53 @@ How you work:
             print(f"LLM Vision Error: {e}")
             return "I couldn't analyze that image right now.", tracker.finalize(tools_used)
 
-    def chat_raw(self, messages: list[dict], temperature: float = 0.8, max_tokens: int = 500) -> str:
-        """Minimal chat call — no memory, no tools, no cost tracking. Used for onboarding."""
-        response = self.client.chat.completions.create(
-            model=self.chat_model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content
+    def extract_profile_facts(self, content: str) -> list[dict]:
+        """Extract structured profile facts from any text (note, message, etc.).
+        Returns [{ key, content }] — same shape as chat path profile_facts.
+        """
+        try:
+            structured = self.client.beta.chat.completions.parse(
+                model=self.chat_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extract profile facts about the user from the text. "
+                            "Profile facts are durable personal attributes: name, age, weight, height, "
+                            "dietary restrictions, fitness goals, preferences, injuries, etc. "
+                            "Do NOT extract transient events (e.g. 'went to gym today'). "
+                            "Return an empty list if nothing durable is found."
+                        ),
+                    },
+                    {"role": "user", "content": content},
+                ],
+                response_format=ProfileFactsOnly,
+                max_tokens=200,
+            )
+            parsed = structured.choices[0].message.parsed
+            return [{"key": f.key, "content": f.content} for f in parsed.profile_facts]
+        except Exception as e:
+            print(f"Profile fact extraction error: {e}")
+            return []
 
-    def generate_chat_response(self, message: str) -> tuple[str, dict]:
-        """Generate a response without memory context"""
-        system_prompt = build_chat_system_prompt("")
-
+    async def generate_title(self, content: str) -> str:
+        """Generate a short 5-word title for a note entry."""
         try:
             response = self.client.chat.completions.create(
                 model=self.chat_model,
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message},
+                    {
+                        "role": "user",
+                        "content": f"Generate a short 5-word title for this note. Return only the title, no quotes:\n{content}",
+                    }
                 ],
-                temperature=0.7,
-                max_tokens=500,
+                temperature=0.5,
+                max_tokens=20,
             )
-
-            # Calculate cost using pricing module
-            costs = calculate_chat_cost(
-                self.chat_model,
-                response.usage.prompt_tokens,
-                response.usage.completion_tokens
-            )
-
-            usage = {
-                "input_tokens": response.usage.prompt_tokens,
-                "output_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-                "input_cost": costs["input_cost"],
-                "output_cost": costs["output_cost"],
-                "total_cost": costs["total_cost"]
-            }
-
-            return response.choices[0].message.content, usage
-
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"LLM Error: {e}")
-            return "I'm having trouble generating a response right now.", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "total_cost": 0}
+            print(f"Title generation error: {e}")
+            return content[:40].strip()
 
 
 # Global instance for easy import

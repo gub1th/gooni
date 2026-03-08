@@ -1,39 +1,65 @@
-from datetime import date
-
-from ..db.models import GoalType, Note
-from ..db.schemas import InteractionCreate
+from ..db.models import Conversation as ConvModel, GoalType
 from ..llm.client import llm_client
 from .goal_service import goal_service
-from .interaction_service import InteractionService
+from .conversation_service import conversation_service
 from .memory_service import memory_service
 
 
 class Orchestrator:
     def handle_chat(
-        self, message: str, db, image_url: str = None
+        self,
+        message: str,
+        db,
+        image_url: str = None,
+        conversation_id: int = None,
+        source: str = "telegram",
+        entry_content: str = "",
     ) -> tuple[str, dict | None]:
+        """Unified chat handler for all sources.
+
+        - conversation_id=None  → find/create session by source + gap logic
+        - conversation_id=<id>  → use that conversation directly (note threads)
+        - source                → 'telegram' | 'web' (determines session bucket)
+        - entry_content         → original note text injected as context (web only)
+        """
         stripped = message.strip()
         command = stripped.lower()
 
-        if command == "/memory":
-            return self._handle_memory_command(db), None
-        if command == "/goals":
-            return self._handle_goals_command(db), None
-        if command.startswith("/goal "):
-            name = stripped[6:].strip()
-            return self._handle_goal_detail_command(name, db), None
+        # Slash commands only apply for Telegram
+        if source == "telegram":
+            if command == "/memory":
+                return self._handle_memory_command(db), None
+            if command == "/goals":
+                return self._handle_goals_command(db), None
+            if command.startswith("/goal "):
+                name = stripped[6:].strip()
+                return self._handle_goal_detail_command(name, db), None
 
-        is_first_time = not memory_service.get_name(db)
+        # First-time greeting only for Telegram
+        is_first_time = source == "telegram" and not memory_service.get_name(db)
 
-        recent_history = InteractionService.get_recent(db, limit=6)
-        InteractionService.create_interaction(
-            InteractionCreate(role="user", content=message), db
-        )
+        # Session management
+        if conversation_id is not None:
+            conv = db.query(ConvModel).filter(ConvModel.id == conversation_id).first()
+            if conv is None:
+                raise ValueError(f"Conversation {conversation_id} not found")
+        else:
+            conv = conversation_service.find_or_create_session(source, db)
+
+        conversation_service.add_message(conv.id, "user", message, db)
+
+        # Build recent history from this conversation
+        recent_messages = conversation_service.get_recent_messages(conv.id, limit=10, db=db)
+        recent_history = [{"role": m.role, "content": m.content} for m in recent_messages]
 
         query = message if message.strip() else "image"
         memory_context = memory_service.build_memory_context(query, db)
         goal_context = goal_service.build_goal_context(db)
-        full_context = "\n\n".join(filter(None, [memory_context, goal_context]))
+        entry_context = (
+            f"Note the user wrote:\n\"\"\"{entry_content}\"\"\""
+            if entry_content.strip() else ""
+        )
+        full_context = "\n\n".join(filter(None, [memory_context, goal_context, entry_context]))
 
         if image_url:
             response, usage = llm_client.generate_response_with_image(
@@ -45,20 +71,18 @@ class Orchestrator:
                 is_first_time=is_first_time, db=db,
             )
 
-        InteractionService.create_interaction(
-            InteractionCreate(role="assistant", content=response), db
-        )
+        conversation_service.add_message(conv.id, "assistant", response, db)
 
-        # Save structured log_note from the LLM response
-        log_note = usage.pop("log_note", None)
-        if log_note:
-            db.add(Note(content=log_note, log_date=date.today()))
-            db.commit()
+        # Save any profile facts the LLM extracted
+        for fact in usage.pop("profile_facts", []):
+            memory_service.upsert_profile_fact(fact, db)
 
-        # Auto-save episode for future context retrieval (no LLM call needed)
+        # Auto-save episode for future context retrieval
         if message.strip() and len(message.strip()) > 10:
             memory_service.create_episode(
-                f"User: {message}\nAssistant: {response}", goal_id=None, db=db
+                f"User: {message}\nAssistant: {response}",
+                goal_id=getattr(conv, "goal_id", None),
+                db=db,
             )
 
         usage["memory"] = {"episode_saved": True}

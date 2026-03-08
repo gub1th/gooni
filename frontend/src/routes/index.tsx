@@ -1,46 +1,87 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
-import { CaptureBar } from "../components/CaptureBar";
-import { GoalsRow } from "../components/GoalsRow";
-import { Feed } from "../components/Feed";
-import { MacrosBar } from "../components/MacrosBar";
-import { WorkoutBar } from "../components/WorkoutBar";
-import { useGoalsStore } from "../stores/useGoalsStore";
-import { useFeedStore } from "../stores/useFeedStore";
+import { useEffect, useState } from "react";
+import { JarvisPanel } from "../components/JarvisPanel";
+import { Sidebar } from "../components/notes/Sidebar";
+import { NotesList } from "../components/notes/NotesList";
+import { NoteEditor } from "../components/notes/NoteEditor";
+import { useWindowWidth } from "../hooks/useWindowWidth";
+import { useSpacesStore } from "../stores/useSpacesStore";
+import { useNotesContentStore } from "../stores/useNotesContentStore";
+import { useJarvisStore } from "../stores/useJarvisStore";
 
 export const Route = createFileRoute("/")({
-  component: Dashboard,
+  component: NotesPage,
 });
 
-function Dashboard() {
-  const fetchGoals = useGoalsStore((s) => s.fetch);
-  const fetchFeed = useFeedStore((s) => s.fetch);
-  const macrosRef = useRef<{ refresh: () => void } | null>(null);
-  const workoutRef = useRef<{ refresh: () => void } | null>(null);
+// Sidebar auto-collapses below this width
+const SIDEBAR_BREAKPOINT = 768;
+
+function NotesPage() {
+  const fetchSpaces = useSpacesStore((s) => s.fetch);
+  const { selectedSpaceId, selectSpace, loadNotes } = useNotesContentStore();
+  const isJarvisOpen = useJarvisStore((s) => s.isOpen);
+  const windowWidth = useWindowWidth();
+
+  // Start open on wide screens, closed on narrow
+  const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
+
+  // Auto-collapse sidebar when window narrows past breakpoint
+  useEffect(() => {
+    setSidebarOpen(windowWidth >= SIDEBAR_BREAKPOINT);
+  }, [windowWidth >= SIDEBAR_BREAKPOINT]);
 
   useEffect(() => {
-    fetchGoals();
-    fetchFeed();
-  }, [fetchGoals, fetchFeed]);
+    fetchSpaces();
+  }, []);
+
+  // On mount: load notes for whatever space is already selected (or default to general)
+  useEffect(() => {
+    const spaceId = selectedSpaceId ?? "general";
+    if (!selectedSpaceId) selectSpace("general");
+    loadNotes(spaceId);
+  }, []);
+
+  // Jarvis overlays on small screens
+  const isSmall = windowWidth < 1100;
 
   return (
     <div
       style={{
-        maxWidth: 680,
-        margin: "0 auto",
-        padding: "40px 24px",
-        fontFamily: "Inter, system-ui, sans-serif",
         display: "flex",
-        flexDirection: "column",
-        gap: 24,
+        height: "100vh",
+        overflow: "hidden",
+        background: "#FFFFFF",
+        position: "relative",
       }}
     >
-      <CaptureBar onSent={() => { macrosRef.current?.refresh(); workoutRef.current?.refresh(); }} />
-      <Feed />
-      <hr style={{ border: "none", borderTop: "1px solid #e2e8f0", margin: 0 }} />
-      <GoalsRow />
-      <MacrosBar ref={macrosRef} />
-      <WorkoutBar ref={workoutRef} />
+      {/* Sidebar — conditionally rendered based on sidebarOpen */}
+      {sidebarOpen && <Sidebar />}
+
+      <NotesList
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+      />
+
+      <NoteEditor />
+
+      {isJarvisOpen && (
+        isSmall ? (
+          <div
+            style={{
+              position: "absolute",
+              right: 0,
+              top: 0,
+              height: "100%",
+              zIndex: 50,
+              boxShadow: "-4px 0 20px rgba(0,0,0,0.12)",
+            }}
+          >
+            <JarvisPanel />
+          </div>
+        ) : (
+          <JarvisPanel />
+        )
+      )}
     </div>
   );
 }

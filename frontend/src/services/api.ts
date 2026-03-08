@@ -1,98 +1,113 @@
 const BASE = "http://localhost:8000";
 
-export interface Goal {
+// ── Spaces ─────────────────────────────────────────────────────────────────────
+
+export interface ApiSpace {
   id: number;
-  title: string;
-  goal_type: "achieve" | "avoid";
-  streak: number;
-  last_7_days: boolean[];
-}
-
-export interface FeedEntry {
-  id: number;
-  content: string;
-  goal_id: number | null;
-  outcome: string | null;
-  created_at: string;
-}
-
-export async function fetchGoals(): Promise<Goal[]> {
-  const res = await fetch(`${BASE}/goals`);
-  if (!res.ok) throw new Error("Failed to fetch goals");
-  return res.json();
-}
-
-export async function fetchFeed(): Promise<FeedEntry[]> {
-  const res = await fetch(`${BASE}/feed`);
-  if (!res.ok) throw new Error("Failed to fetch feed");
-  return res.json();
-}
-
-export interface MacroItem {
   name: string;
-  calories: number | null;
-  protein: number | null;
-  carbs: number | null;
-  fat: number | null;
+  emoji: string | null;
+  goal_id: number | null;
 }
 
-export interface MealBreakdown {
-  meal_type: string;
-  calories: number | null;
-  protein: number | null;
-  carbs: number | null;
-  fat: number | null;
-  items: MacroItem[];
-  logged_at: string | null;
+export async function fetchSpaces(): Promise<ApiSpace[]> {
+  const res = await fetch(`${BASE}/spaces`);
+  if (!res.ok) throw new Error("Failed to fetch spaces");
+  return res.json();
 }
 
-export interface DailyMacros {
-  date: string;
-  totals: { calories: number; protein: number; carbs: number; fat: number };
-  meals: MealBreakdown[];
+export async function updateSpace(id: number, patch: { name?: string; emoji?: string | null }): Promise<ApiSpace> {
+  const res = await fetch(`${BASE}/spaces/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update space");
+  return res.json();
 }
 
-export interface WorkoutSetEntry {
-  exercise: string;
-  sets: number | null;
-  reps: number | null;
-  weight: number | null;
-  weight_unit: string;
+// Keep old name as alias for backwards compat within this session
+export const renameSpace = (id: number, name: string) => updateSpace(id, { name });
+
+export async function deleteSpace(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/spaces/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete space");
 }
 
-export interface WorkoutEntry {
+export async function createSpace(name: string): Promise<ApiSpace> {
+  const res = await fetch(`${BASE}/spaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error("Failed to create space");
+  return res.json();
+}
+
+// ── Notes ──────────────────────────────────────────────────────────────────────
+
+export interface ApiNote {
   id: number;
-  duration_minutes: number | null;
-  logged_at: string | null;
-  sets: WorkoutSetEntry[];
+  title: string | null;
+  content: string | null;
+  space_id: number | null;
+  created_at: string;
+  updated_at: string;
+  last_opened_at: string | null;
 }
 
-export interface DailyWorkout {
-  date: string;
-  workouts: WorkoutEntry[];
-  total_exercises: number;
-  total_sets: number;
-  total_duration: number | null;
-}
-
-export async function fetchTodayWorkout(): Promise<DailyWorkout> {
-  const res = await fetch(`${BASE}/workout/today`);
-  if (!res.ok) throw new Error("Failed to fetch workout");
+export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiNote[]> {
+  const res = await fetch(`${BASE}/spaces/${spaceId}/notes`);
+  if (!res.ok) throw new Error("Failed to fetch notes");
   return res.json();
 }
 
-export async function fetchTodayMacros(): Promise<DailyMacros> {
-  const res = await fetch(`${BASE}/macros/today`);
-  if (!res.ok) throw new Error("Failed to fetch macros");
+export async function createNote(spaceId: number | "general"): Promise<ApiNote> {
+  const res = await fetch(`${BASE}/spaces/${spaceId}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error("Failed to create note");
   return res.json();
 }
 
-export async function sendChat(message: string): Promise<{ content: string }> {
+export async function updateNote(id: number, title: string, content: string): Promise<ApiNote> {
+  const res = await fetch(`${BASE}/notes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, content }),
+    keepalive: true, // survives tab close
+  });
+  if (!res.ok) throw new Error("Failed to update note");
+  return res.json();
+}
+
+export async function touchNote(id: number): Promise<void> {
+  // Fire-and-forget — updates last_opened_at for relevancy sorting
+  await fetch(`${BASE}/notes/${id}/touch`, { method: "POST" });
+}
+
+export async function memorizeNote(id: number): Promise<void> {
+  // Fire-and-forget — called when leaving a note to extract a memory episode
+  await fetch(`${BASE}/notes/${id}/memorize`, { method: "POST" });
+}
+
+export async function deleteNote(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/notes/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete note");
+}
+
+// ── Jarvis ─────────────────────────────────────────────────────────────────────
+
+export async function sendJarvisMessage(
+  content: string,
+  noteContent?: string
+): Promise<{ content: string }> {
   const res = await fetch(`${BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", content: message }),
+    body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
   });
-  if (!res.ok) throw new Error("Failed to send message");
+  if (!res.ok) throw new Error("Failed to send Jarvis message");
   return res.json();
 }

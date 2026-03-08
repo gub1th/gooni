@@ -48,6 +48,7 @@ Thumbs.db
 node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/.tanstack/
 *.tsbuildinfo
 
 # app
