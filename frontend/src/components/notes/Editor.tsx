@@ -1,6 +1,6 @@
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { useEffect, useRef, useState } from "react"; // useRef kept for messagesEndRef
+import { useEffect, useRef, useState } from "react";
 import { useNotesStore } from "../../stores/notesStore";
 import type { FeedItem, Message } from "../../types/notes";
 
@@ -25,13 +25,12 @@ function formatTimestamp(iso: string): string {
 // ── InlineConversation ────────────────────────────────────────────────────────
 
 interface InlineConversationProps {
-  entry: FeedItem;
   messages: Message[];
   sending: boolean;
   onSendMessage: (content: string) => Promise<void>;
 }
 
-function InlineConversation({ entry, messages, sending, onSendMessage }: InlineConversationProps) {
+function InlineConversation({ messages, sending, onSendMessage }: InlineConversationProps) {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -48,25 +47,10 @@ function InlineConversation({ entry, messages, sending, onSendMessage }: InlineC
 
   return (
     <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-      {entry.type === "note" && entry.content && (
-        <div style={{
-          fontSize: 12,
-          color: "#536471",
-          marginBottom: 8,
-          padding: "6px 10px",
-          background: "rgba(0,0,0,0.03)",
-          borderRadius: 8,
-          fontStyle: "italic",
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-        }}>
-          {entry.content}
-        </div>
-      )}
-
       <div style={{ maxHeight: 240, overflowY: "auto", marginBottom: 8 }}>
         {messages.length === 0 && !sending && (
           <div style={{ color: "#94a3b8", fontSize: 13, padding: "4px 0", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
-            Ask Claude about this...
+            Claude is thinking...
           </div>
         )}
         {messages.map((m) => (
@@ -134,32 +118,25 @@ function InlineConversation({ entry, messages, sending, onSendMessage }: InlineC
 interface FeedEntryProps {
   entry: FeedItem;
   isExpanded: boolean;
-  isActiveEdit: boolean;
   messages: Message[];
   sendingFor: number | null;
-  onDiscuss: () => void;
-  onToggleConversation: () => void;
+  onToggle: () => void;
   onSendMessage: (content: string) => Promise<void>;
 }
 
-function FeedEntryRow({ entry, isExpanded, isActiveEdit, messages, sendingFor, onDiscuss, onToggleConversation, onSendMessage }: FeedEntryProps) {
-  const isConversation = entry.type === "conversation";
-  const content = isConversation ? (entry.title ?? "Untitled conversation") : entry.content;
-
+function FeedEntryRow({ entry, isExpanded, messages, sendingFor, onToggle, onSendMessage }: FeedEntryProps) {
   return (
     <div
       style={{
         padding: "14px 32px",
         borderBottom: "1px solid rgba(0,0,0,0.07)",
-        background: isActiveEdit ? "rgba(29,155,240,0.04)" : "transparent",
-        cursor: isConversation ? "pointer" : "default",
+        cursor: "pointer",
         transition: "background 0.1s",
       }}
-      onClick={isConversation ? onToggleConversation : undefined}
-      onMouseEnter={(e) => { if (!isActiveEdit) (e.currentTarget as HTMLDivElement).style.background = "#f7f9f9"; }}
-      onMouseLeave={(e) => { if (!isActiveEdit) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+      onClick={onToggle}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "#f7f9f9"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
     >
-      {/* Content */}
       <div style={{
         fontSize: 15,
         color: "#0f1419",
@@ -169,12 +146,11 @@ function FeedEntryRow({ entry, isExpanded, isActiveEdit, messages, sendingFor, o
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",
       }}>
-        {isConversation && <span style={{ marginRight: 6, opacity: 0.6, fontSize: 13 }}>💬</span>}
-        {content}
+        <span style={{ marginRight: 6, opacity: 0.6, fontSize: 13 }}>💬</span>
+        {entry.title ?? "Untitled conversation"}
       </div>
 
-      {/* Meta row */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ display: "flex", alignItems: "center" }}>
         <span style={{
           fontSize: 13,
           color: "#536471",
@@ -182,24 +158,10 @@ function FeedEntryRow({ entry, isExpanded, isActiveEdit, messages, sendingFor, o
         }}>
           {formatTimestamp(entry.created_at)}
         </span>
-        {!isConversation && (
-          <span
-            onClick={(e) => { e.stopPropagation(); onDiscuss(); }}
-            style={{
-              fontSize: 13,
-              color: "#1d9bf0",
-              cursor: "pointer",
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-            }}
-          >
-            Discuss ↗
-          </span>
-        )}
       </div>
 
       {isExpanded && (
         <InlineConversation
-          entry={entry}
           messages={messages}
           sending={sendingFor === entry.id}
           onSendMessage={onSendMessage}
@@ -217,25 +179,17 @@ export function Editor() {
     feedEntries,
     messages,
     expandedEntryId,
-    activeEditEntryId,
     loadFeed,
-    submitNote,
     startConversation,
     seedConversation,
-    updateEntry,
     loadMessages,
     sendMessage,
     setExpandedEntry,
-    setActiveEditEntry,
   } = useNotesStore();
 
   const [sendingFor, setSendingFor] = useState<number | null>(null);
 
-  const isBackendSpace = selectedSpaceId != null && selectedSpaceId !== "general";
   const entries = (selectedSpaceId ? feedEntries[selectedSpaceId] : undefined) ?? [];
-  const activeEditEntry = activeEditEntryId != null
-    ? entries.find((e) => e.id === activeEditEntryId) ?? null
-    : null;
 
   // Inject ProseMirror styles once
   useEffect(() => {
@@ -286,70 +240,39 @@ export function Editor() {
     [selectedSpaceId]
   );
 
-  // ── Save logic (ref so the DOM listener always has fresh values) ─────────────
-  const handleSaveRef = useRef<() => void>(() => {});
-  handleSaveRef.current = () => {
+  // ── Submit handler ──────────────────────────────────────────────────────────
+
+  const handleSubmitRef = useRef<() => Promise<void>>(async () => {});
+  handleSubmitRef.current = async () => {
     const text = composeEditor?.state.doc.textContent.trim() ?? "";
-    if (!text) return;
-    if (activeEditEntryId != null) {
-      updateEntry(activeEditEntryId, text);
-      setActiveEditEntry(null);
-    } else {
-      submitNote(selectedSpaceId!, text);
+    if (!text || !selectedSpaceId) return;
+    const item = await startConversation(selectedSpaceId, text);
+    if (item?.type === "conversation") {
+      setSendingFor(item.id);
+      await seedConversation(item.id, text);
+      setSendingFor(null);
     }
     composeEditor?.commands.clearContent();
   };
 
-  // Native DOM listener on the actual editor element — most reliable
+  // Native DOM listener — most reliable for catching ⌘↵ inside ProseMirror
   useEffect(() => {
     const el = composeEditor?.view?.dom;
     if (!el) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter" && e.metaKey && !e.shiftKey) {
+      if (e.key === "Enter" && e.metaKey) {
         e.preventDefault();
         e.stopPropagation();
-        handleSaveRef.current();
+        handleSubmitRef.current().catch(console.error);
       }
     };
     el.addEventListener("keydown", onKey, true);
     return () => el.removeEventListener("keydown", onKey, true);
   }, [composeEditor]);
 
-  // When switching to edit mode, load entry content into editor
-  useEffect(() => {
-    if (activeEditEntry && composeEditor) {
-      const content = activeEditEntry.type === "note" ? activeEditEntry.content : "";
-      composeEditor.commands.setContent(content);
-      composeEditor.commands.focus("end");
-    } else if (!activeEditEntry && composeEditor) {
-      composeEditor.commands.clearContent();
-    }
-  }, [activeEditEntryId]);
-
   // ── Handlers ────────────────────────────────────────────────────────────────
 
-  async function handleDiscuss(entry: FeedItem) {
-    if (entry.type !== "note") return;
-    
-    // Prevent multiple simultaneous discussions on the same note
-    if (sendingFor !== null) return;
-    
-    try {
-      const conv = await startConversation(selectedSpaceId!, entry.content);
-      if (conv && conv.type === "conversation") {
-        setExpandedEntry(conv.id);
-        setSendingFor(conv.id);
-        await seedConversation(conv.id);
-      }
-    } catch (error) {
-      console.error("Failed to start conversation:", error);
-    } finally {
-      setSendingFor(null);
-    }
-  }
-
-  async function handleToggleConversation(entry: FeedItem) {
-    if (entry.type !== "conversation") return;
+  async function handleToggle(entry: FeedItem) {
     if (expandedEntryId === entry.id) {
       setExpandedEntry(null);
       setSendingFor(null);
@@ -366,58 +289,21 @@ export function Editor() {
     setSendingFor(null);
   }
 
-  const isEditMode = activeEditEntryId != null;
-
   return (
     <div style={{ flex: 1, height: "100vh", backgroundColor: "#FFFFFF", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
       {/* ── Compose area ─────────────────────────────────────────────────────── */}
       <div style={{ flexShrink: 0, padding: "20px 32px 16px", borderBottom: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box" }}>
-        {isEditMode && (
-          <div style={{ fontSize: 12, color: "#536471", marginBottom: 8, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
-            <span
-              onClick={() => { setActiveEditEntry(null); composeEditor?.commands.clearContent(); }}
-              style={{ color: "#f4212e", cursor: "pointer" }}
-            >
-              ✕ Cancel edit
-            </span>
-          </div>
-        )}
-
-        <div
-          onKeyDownCapture={(e) => {
-            if (!e.metaKey || e.key !== "Enter") return;
-            e.preventDefault();
-            const text = composeEditor?.state.doc.textContent.trim() ?? "";
-            if (!text) return;
-            if (e.shiftKey) {
-              if (!isBackendSpace) return;
-              startConversation(selectedSpaceId!, text).then((item) => {
-                if (item?.type === "conversation") {
-                  setSendingFor(item.id);
-                  seedConversation(item.id).then(() => setSendingFor(null));
-                }
-              });
-            } else {
-              if (activeEditEntryId != null) {
-                updateEntry(activeEditEntryId, text);
-                setActiveEditEntry(null);
-              } else {
-                submitNote(selectedSpaceId!, text);
-              }
-            }
-            composeEditor?.commands.clearContent();
-          }}
-        >
+        <div>
           <EditorContent editor={composeEditor} />
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
           <span style={{ fontSize: 12, color: "#aab8c2", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
-            {isEditMode ? "⌘↵ save edit" : isBackendSpace ? "⌘↵ · ⌘⇧↵ discuss" : ""}
+            {selectedSpaceId ? "⌘↵ to chat" : ""}
           </span>
           <button
-            onClick={() => handleSaveRef.current()}
+            onClick={() => handleSubmitRef.current().catch(console.error)}
             style={{
               padding: "7px 20px",
               borderRadius: 20,
@@ -433,7 +319,7 @@ export function Editor() {
             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#272c30")}
             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "#0f1419")}
           >
-            {isEditMode ? "Save" : "Post"}
+            Chat
           </button>
         </div>
       </div>
@@ -442,7 +328,7 @@ export function Editor() {
       <div style={{ flex: 1, overflowY: "auto" }}>
         {entries.length === 0 && (
           <div style={{ padding: "32px", textAlign: "center", color: "#aab8c2", fontSize: 14, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
-            No notes yet. Start writing above.
+            No conversations yet. Start writing above.
           </div>
         )}
         {entries.map((entry) => (
@@ -450,11 +336,9 @@ export function Editor() {
             key={entry.id}
             entry={entry}
             isExpanded={expandedEntryId === entry.id}
-            isActiveEdit={activeEditEntryId === entry.id}
             messages={messages[entry.id] ?? []}
             sendingFor={sendingFor}
-            onDiscuss={() => handleDiscuss(entry)}
-            onToggleConversation={() => handleToggleConversation(entry)}
+            onToggle={() => handleToggle(entry)}
             onSendMessage={(content) => handleSendInConversation(entry.id, content)}
           />
         ))}

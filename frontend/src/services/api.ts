@@ -2,17 +2,6 @@ const BASE = "http://localhost:8000";
 
 // ── Feed item types ────────────────────────────────────────────────────────────
 
-export interface ApiNote {
-  id: number;
-  type: "note";
-  content: string;
-  title: string | null;
-  goal_id: number | null;
-  space_id: number | null;
-  outcome: string | null;
-  created_at: string;
-}
-
 export interface ApiConversation {
   id: number;
   type: "conversation";
@@ -24,14 +13,12 @@ export interface ApiConversation {
   created_at: string;
 }
 
-export type ApiFeedItem = ApiNote | ApiConversation;
+export type ApiFeedItem = ApiConversation;
 
 export interface ApiSpace {
   id: number;
   name: string;
   goal_id: number | null;
-  streak: number;
-  last_7_days: boolean[];
 }
 
 export interface ApiMessage {
@@ -53,38 +40,6 @@ export async function fetchGoalFeed(goalId: number, limit = 100): Promise<ApiFee
 export async function fetchGeneralFeed(limit = 100): Promise<ApiFeedItem[]> {
   const res = await fetch(`${BASE}/feed?limit=${limit}`);
   if (!res.ok) throw new Error("Failed to fetch general feed");
-  return res.json();
-}
-
-// ── Notes ──────────────────────────────────────────────────────────────────────
-
-export async function createGoalNote(goalId: number, content: string): Promise<ApiNote> {
-  const res = await fetch(`${BASE}/goals/${goalId}/notes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
-  if (!res.ok) throw new Error("Failed to create goal note");
-  return res.json();
-}
-
-export async function createGeneralNote(content: string): Promise<ApiNote> {
-  const res = await fetch(`${BASE}/notes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
-  if (!res.ok) throw new Error("Failed to create note");
-  return res.json();
-}
-
-export async function updateNote(noteId: number, content: string): Promise<ApiNote> {
-  const res = await fetch(`${BASE}/notes/${noteId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
-  if (!res.ok) throw new Error("Failed to update note");
   return res.json();
 }
 
@@ -149,8 +104,6 @@ export interface Goal {
   id: number;
   title: string;
   goal_type: "achieve" | "avoid";
-  streak: number;
-  last_7_days: boolean[];
 }
 
 export async function fetchGoals(): Promise<Goal[]> {
@@ -264,17 +217,7 @@ export async function fetchSpaceFeed(spaceId: number): Promise<ApiFeedItem[]> {
   return res.json();
 }
 
-export async function createSpaceNote(spaceId: number | "general", content: string): Promise<ApiNote> {
-  const res = await fetch(`${BASE}/spaces/${spaceId}/notes`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
-  if (!res.ok) throw new Error("Failed to create space note");
-  return res.json();
-}
-
-export async function createSpaceConversation(spaceId: number, content: string): Promise<ApiConversation> {
+export async function createSpaceConversation(spaceId: number | "general", content: string): Promise<ApiConversation> {
   const res = await fetch(`${BASE}/spaces/${spaceId}/conversations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

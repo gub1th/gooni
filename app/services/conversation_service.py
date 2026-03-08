@@ -94,45 +94,5 @@ class ConversationService:
             q = q.filter(Conversation.goal_id.is_(None))
         return q.order_by(Conversation.created_at.desc()).limit(limit).all()
 
-    # ── LLM chat ───────────────────────────────────────────────────────────────
-
-    async def chat(
-        self,
-        conversation_id: int,
-        user_content: str,
-        goal_context: str,
-        db: Session,
-        entry_content: str = "",
-    ) -> Message:
-        """Save user message, call LLM, save and return assistant message."""
-        from ..llm.client import llm_client
-
-        self.add_message(conversation_id, "user", user_content, db)
-
-        history = self.get_messages(conversation_id, db)
-        history_dicts = [{"role": m.role, "content": m.content} for m in history]
-
-        reply = await llm_client.generate_web_chat_response(
-            entry_content=entry_content,
-            messages=history_dicts,
-            goal_context=goal_context,
-        )
-
-        return self.add_message(conversation_id, "assistant", reply, db)
-
-    async def seed(
-        self, conversation_id: int, goal_context: str, db: Session, entry_content: str = ""
-    ) -> Message:
-        """Claude opens the conversation unprompted (used for ⌘⇧↵ from web editor)."""
-        from ..llm.client import llm_client
-
-        reply = await llm_client.generate_web_chat_response(
-            entry_content=entry_content,
-            messages=[],
-            goal_context=goal_context,
-            is_seed=True,
-        )
-        return self.add_message(conversation_id, "assistant", reply, db)
-
 
 conversation_service = ConversationService()

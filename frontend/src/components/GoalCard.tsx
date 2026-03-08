@@ -1,17 +1,10 @@
 import { Goal } from "../services/api";
 
-const SQUARE_SIZE = 8;
-const SQUARE_GAP = 2;
-
 interface Props {
   goal: Goal;
 }
 
 export function GoalCard({ goal }: Props) {
-  const isAvoid = goal.goal_type === "avoid";
-  const filledColor = isAvoid ? "#9f7aea" : "#48bb78";
-  const emptyColor = "#e2e8f0";
-
   return (
     <div
       style={{
@@ -22,30 +15,6 @@ export function GoalCard({ goal }: Props) {
         flexShrink: 0,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <div style={{ display: "flex", gap: SQUARE_GAP }}>
-          {goal.last_7_days.map((filled, i) => (
-            <div
-              key={i}
-              style={{
-                width: SQUARE_SIZE,
-                height: SQUARE_SIZE,
-                borderRadius: 2,
-                background: filled ? filledColor : emptyColor,
-              }}
-            />
-          ))}
-        </div>
-        <span
-          style={{
-            fontWeight: 600,
-            fontSize: 13,
-            color: goal.streak > 0 ? filledColor : "#a0aec0",
-          }}
-        >
-          {goal.streak}d
-        </span>
-      </div>
       <div
         style={{
           fontSize: 12,
@@ -57,6 +26,9 @@ export function GoalCard({ goal }: Props) {
         }}
       >
         {goal.title}
+      </div>
+      <div style={{ fontSize: 11, color: "#a0aec0", marginTop: 2 }}>
+        {goal.goal_type === "avoid" ? "avoid" : "achieve"}
       </div>
     </div>
   );

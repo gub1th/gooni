@@ -55,13 +55,11 @@ export function Sidebar() {
     if (e.key === "Escape") { setAdding(false); setNewName(""); }
   }
 
-  // useSpacesStore already injects General at index 0, with streak data from API
-  const allSpaces = spaces.map((s) => ({
-    id: String(s.id),
-    name: s.name,
-    streak: s.streak,
-    last7days: s.last_7_days,
-  }));
+  // Hardcoded General space + backend spaces
+  const allSpaces = [
+    { id: "general", name: "General", streak: 0, last7days: [] as boolean[] },
+    ...spaces.map((s) => ({ ...s, streak: 0, last7days: [] as boolean[] })), // TODO: add streak data to spaces
+  ];
 
   const totalNotes = Object.values(feedEntries).reduce((acc, arr) => acc + arr.length, 0);
 
@@ -184,7 +182,11 @@ export function Sidebar() {
                 {space.id === "general" ? (
                   <span style={{ fontSize: 16 }}>📥</span>
                 ) : (
+                {space.id === "general" ? (
+                  <span style={{ fontSize: 16 }}>📥</span>
+                ) : (
                   <TargetIcon />
+                )}
                 )}
               </div>
               <span

@@ -3,14 +3,12 @@ import { persist } from "zustand/middleware";
 import {
   seedConversation as apiSeedConversation,
   createSpaceConversation,
-  createSpaceNote,
   fetchConversationMessages,
   fetchGeneralFeed,
   fetchSpaceFeed,
   sendConversationMessage,
-  updateNote,
 } from "../services/api";
-import type { FeedItem, NotesState, Space } from "../types/notes";
+import type { FeedItem, NotesState } from "../types/notes";
 
 export const useNotesStore = create<NotesState>()(
   persist(
@@ -19,23 +17,11 @@ export const useNotesStore = create<NotesState>()(
       selectedSpaceId: null,
 
       selectSpace: (id) => {
-        set({ 
-          selectedSpaceId: id, 
-          expandedEntryId: null, 
-          activeEditEntryId: null,
-          // Clean up messages from previous space to prevent cross-contamination
-          messages: {}
+        set({
+          selectedSpaceId: id,
+          expandedEntryId: null,
+          messages: {},
         });
-      },
-
-      createSpace: (name, section = "iCloud") => {
-        const space: Space = {
-          id: Math.random().toString(36).slice(2) + Date.now().toString(36),
-          name,
-          type: "folder",
-          section,
-        };
-        set((s) => ({ spaces: [...s.spaces, space] }));
       },
 
       // ── Feed ──────────────────────────────────────────────────────────────
@@ -44,71 +30,18 @@ export const useNotesStore = create<NotesState>()(
 
       loadFeed: async (spaceId) => {
         try {
-          const items = spaceId === "general"
-            ? await fetchGeneralFeed()
-            : await fetchSpaceFeed(parseInt(spaceId, 10));
+          const items =
+            spaceId === "general"
+              ? await fetchGeneralFeed()
+              : await fetchSpaceFeed(parseInt(spaceId, 10));
           set((s) => ({ feedEntries: { ...s.feedEntries, [spaceId]: items } }));
         } catch (e) {
           console.error("loadFeed error:", e);
         }
       },
 
-      submitNote: async (spaceId, content) => {
-        const tempId = -Date.now(); // negative to avoid collision with real IDs
-        const tempItem: FeedItem = {
-          id: tempId,
-          type: "note",
-          content,
-          title: null,
-          goal_id: null,
-          space_id: null,
-          outcome: null,
-          created_at: new Date().toISOString(),
-        };
-        
-        // 1. Show immediately
-        set((s) => ({ 
-          feedEntries: { 
-            ...s.feedEntries, 
-            [spaceId]: [tempItem, ...(s.feedEntries[spaceId] ?? [])] 
-          } 
-        }));
-        
-        try {
-          const apiSpaceId: number | "general" = spaceId === "general" ? "general" : parseInt(spaceId, 10);
-          const item = await createSpaceNote(apiSpaceId, content);
-
-          // 2. Replace temp with real
-          set((s) => ({
-            feedEntries: {
-              ...s.feedEntries,
-              [spaceId]: s.feedEntries[spaceId].map((e) => (e.id === tempId ? item : e)),
-            },
-          }));
-
-          // 3. If general note was classified into a specific space, mirror it there too
-          if (spaceId === "general" && item.space_id != null) {
-            const resolvedKey = String(item.space_id);
-            set((s) => ({
-              feedEntries: {
-                ...s.feedEntries,
-                [resolvedKey]: [item, ...(s.feedEntries[resolvedKey] ?? [])],
-              },
-            }));
-          }
-        } catch {
-          // 3. Rollback on failure
-          set((s) => ({
-            feedEntries: { 
-              ...s.feedEntries, 
-              [spaceId]: s.feedEntries[spaceId].filter((e) => e.id !== tempId) 
-            },
-          }));
-        }
-      },
-
       startConversation: async (spaceId, content) => {
-        const tempId = -Date.now(); // negative to avoid collision with real IDs
+        const tempId = -Date.now();
         const tempItem: FeedItem = {
           id: tempId,
           type: "conversation",
@@ -119,41 +52,32 @@ export const useNotesStore = create<NotesState>()(
           source: "web",
           created_at: new Date().toISOString(),
         };
-        
-        // 1. Show immediately
-        set((s) => ({ 
-          feedEntries: { 
-            ...s.feedEntries, 
-            [spaceId]: [tempItem, ...(s.feedEntries[spaceId] ?? [])] 
+
+        // Show immediately
+        set((s) => ({
+          feedEntries: {
+            ...s.feedEntries,
+            [spaceId]: [tempItem, ...(s.feedEntries[spaceId] ?? [])],
           },
           expandedEntryId: tempId,
         }));
-        
-        try {
-          if (spaceId === "general") {
-            // Conversations from General not yet supported — rollback and skip
-            set((s) => ({
-              feedEntries: {
-                ...s.feedEntries,
-                [spaceId]: s.feedEntries[spaceId].filter((e) => e.id !== tempId),
-              },
-              expandedEntryId: null,
-            }));
-            return null;
-          }
-          const item = await createSpaceConversation(parseInt(spaceId, 10), content);
 
-          // 2. Replace temp with real
+        try {
+          const apiSpaceId: number | "general" =
+            spaceId === "general" ? "general" : parseInt(spaceId, 10);
+          const item = await createSpaceConversation(apiSpaceId, content);
+
           set((s) => ({
             feedEntries: {
               ...s.feedEntries,
-              [spaceId]: s.feedEntries[spaceId].map((e) => (e.id === tempId ? item : e)),
+              [spaceId]: s.feedEntries[spaceId].map((e) =>
+                e.id === tempId ? item : e
+              ),
             },
             expandedEntryId: item.id,
           }));
           return item;
         } catch {
-          // 3. Rollback on failure
           set((s) => ({
             feedEntries: {
               ...s.feedEntries,
@@ -162,23 +86,6 @@ export const useNotesStore = create<NotesState>()(
             expandedEntryId: null,
           }));
           return null;
-        }
-      },
-
-      updateEntry: async (noteId, content) => {
-        try {
-          const updated = await updateNote(noteId, content);
-          set((s) => {
-            const next: Record<string, FeedItem[]> = {};
-            for (const [sid, items] of Object.entries(s.feedEntries)) {
-              next[sid] = items.map((item) =>
-                item.id === noteId ? { ...item, ...updated } : item
-              );
-            }
-            return { feedEntries: next };
-          });
-        } catch (e) {
-          console.error("updateEntry error:", e);
         }
       },
 
@@ -204,9 +111,9 @@ export const useNotesStore = create<NotesState>()(
         }
       },
 
-      seedConversation: async (conversationId) => {
+      seedConversation: async (conversationId, entryContent) => {
         try {
-          const msgs = await apiSeedConversation(conversationId, "");
+          const msgs = await apiSeedConversation(conversationId, entryContent);
           set((s) => ({ messages: { ...s.messages, [conversationId]: msgs } }));
         } catch (e) {
           console.error("seedConversation error:", e);
@@ -217,12 +124,9 @@ export const useNotesStore = create<NotesState>()(
 
       expandedEntryId: null,
       setExpandedEntry: (id) => set({ expandedEntryId: id }),
-
-      activeEditEntryId: null,
-      setActiveEditEntry: (id) => set({ activeEditEntryId: id }),
     }),
     {
-      name: "gooni-notes-v4",
+      name: "gooni-notes-v5",
       partialize: (s) => ({
         selectedSpaceId: s.selectedSpaceId,
       }),

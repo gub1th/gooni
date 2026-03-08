@@ -14,11 +14,9 @@ class ProfileFact(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
-    log_note: str
     profile_facts: list[ProfileFact] = []
 
-from .pricing import calculate_chat_cost, calculate_embedding_cost, UsageTracker
-from .prompts import build_chat_system_prompt
+from .pricing import calculate_embedding_cost, UsageTracker
 from ..tools import registry as tools, tool_map
 
 
@@ -83,8 +81,7 @@ How you work:
 
         messages = [{"role": "system", "content": system_prompt}]
         if history:
-            for interaction in history:
-                messages.append({"role": interaction.role, "content": interaction.content})
+            messages.extend(history)
         messages.append({"role": "user", "content": message})
 
         tool_schemas = [t.to_openai_schema() for t in tools]
@@ -123,10 +120,9 @@ How you work:
                     messages.append({
                         "role": "user",
                         "content": (
-                            "Now respond with your final reply, a one-sentence journal log_note "
-                            "(past tense, first person), and any profile_facts newly learned about "
-                            "the user (e.g. name, weight, height, dietary restrictions, preferences). "
-                            "Only include facts explicitly stated in this conversation."
+                            "Now respond with your final reply and any profile_facts newly learned "
+                            "about the user (e.g. name, weight, height, dietary restrictions, "
+                            "preferences). Only include facts explicitly stated in this conversation."
                         ),
                     })
                     structured = self.client.beta.chat.completions.parse(
@@ -138,7 +134,6 @@ How you work:
                     tracker.add(structured.usage)
                     parsed = structured.choices[0].message.parsed
                     usage = tracker.finalize(tools_used)
-                    usage["log_note"] = parsed.log_note
                     usage["profile_facts"] = [{"key": f.key, "content": f.content} for f in parsed.profile_facts]
                     return parsed.reply, usage
 
@@ -179,10 +174,7 @@ How you work:
 
         messages = [{"role": "system", "content": system_prompt}]
         if history:
-            for interaction in history:
-                messages.append(
-                    {"role": interaction.role, "content": interaction.content}
-                )
+            messages.extend(history)
 
         user_content = []
         if message.strip():
@@ -245,125 +237,6 @@ How you work:
         except Exception as e:
             print(f"Title generation error: {e}")
             return content[:40].strip()
-
-    async def generate_web_chat_response(
-        self, entry_content: str, messages: list[dict], goal_context: str = "", is_seed: bool = False
-    ) -> str:
-        """Generate a conversational response for an in-app chat thread seeded by a note."""
-        from datetime import datetime
-        now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
-
-        opening = (
-            "The user just wrote this note and wants to discuss it. "
-            "Open the conversation — share your initial reaction, ask one clarifying question, "
-            "or offer something useful. Be concise."
-            if is_seed else
-            "Continue the conversation naturally. Be concise and helpful."
-        )
-
-        system_prompt = (
-            f"You are a personal AI coach. Current date: {now}\n\n"
-            f"{goal_context}\n\n"
-            f"Context — note the user wrote:\n\"\"\"{entry_content}\"\"\"\n\n"
-            f"{opening}"
-        )
-
-        chat_messages = [{"role": "system", "content": system_prompt}] + messages
-
-        try:
-            response = self.client.chat.completions.create(
-                model=self.chat_model,
-                messages=chat_messages,
-                temperature=0.7,
-                max_tokens=500,
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            print(f"Web chat error: {e}")
-            return "I'm having trouble responding right now."
-
-    def classify_note_to_space(self, content: str, spaces: list[dict]) -> dict:
-        """Return {space_id: int|None, new_space_name: str|None} for a note."""
-        if not spaces:
-            return {"space_id": None, "new_space_name": None}
-        space_list = "\n".join(f"- id:{s['id']} name:{s['name']}" for s in spaces)
-        try:
-            response = self.client.chat.completions.create(
-                model=self.chat_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a note classifier. Given a list of spaces and a note, "
-                            "decide which space the note belongs to. "
-                            "Respond with JSON only: "
-                            '{"space_id": <int or null>, "new_space_name": <string or null>}. '
-                            "Use space_id if an existing space fits well. "
-                            "Use new_space_name if none fit and a new space should be created. "
-                            "Return null for both only if the note is truly general."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Spaces:\n{space_list}\n\nNote:\n{content}",
-                    },
-                ],
-                temperature=0.2,
-                max_tokens=60,
-                response_format={"type": "json_object"},
-            )
-            import json as _json
-            return _json.loads(response.choices[0].message.content)
-        except Exception as e:
-            print(f"classify_note_to_space error: {e}")
-            return {"space_id": None, "new_space_name": None}
-
-    def chat_raw(self, messages: list[dict], temperature: float = 0.8, max_tokens: int = 500) -> str:
-        """Minimal chat call — no memory, no tools, no cost tracking. Used for onboarding."""
-        response = self.client.chat.completions.create(
-            model=self.chat_model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content
-
-    def generate_chat_response(self, message: str) -> tuple[str, dict]:
-        """Generate a response without memory context"""
-        system_prompt = build_chat_system_prompt("")
-
-        try:
-            response = self.client.chat.completions.create(
-                model=self.chat_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message},
-                ],
-                temperature=0.7,
-                max_tokens=500,
-            )
-
-            # Calculate cost using pricing module
-            costs = calculate_chat_cost(
-                self.chat_model,
-                response.usage.prompt_tokens,
-                response.usage.completion_tokens
-            )
-
-            usage = {
-                "input_tokens": response.usage.prompt_tokens,
-                "output_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-                "input_cost": costs["input_cost"],
-                "output_cost": costs["output_cost"],
-                "total_cost": costs["total_cost"]
-            }
-
-            return response.choices[0].message.content, usage
-
-        except Exception as e:
-            print(f"LLM Error: {e}")
-            return "I'm having trouble generating a response right now.", {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "total_cost": 0}
 
 
 # Global instance for easy import

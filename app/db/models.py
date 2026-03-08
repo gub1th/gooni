@@ -36,12 +36,6 @@ class GoalType(enum.Enum):
     AVOID = "avoid"
 
 
-class NoteOutcome(enum.Enum):
-    SUCCESS = "success"
-    FAILURE = "failure"
-    NEUTRAL = "neutral"
-
-
 class MemoryType(enum.Enum):
     PROFILE_FACT = "profile_fact"
     EPISODE = "episode"
@@ -67,22 +61,6 @@ class Goal(Base):
     motivation = Column(Text, nullable=True)
     blocker = Column(Text, nullable=True)
     space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class Note(Base):
-    """A written record — created in the web editor or extracted from a Telegram log."""
-
-    __tablename__ = "notes"
-
-    id = Column(Integer, primary_key=True, index=True)
-    goal_id = Column(Integer, ForeignKey("goals.id"), nullable=True)
-    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
-    content = Column(Text, nullable=False)
-    title = Column(Text, nullable=True)  # auto-generated short title
-    outcome = Column(Enum(NoteOutcome), nullable=True)  # for streak tracking
-    log_date = Column(Date, nullable=True)
-    meta = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

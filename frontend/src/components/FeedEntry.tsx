@@ -15,11 +15,6 @@ function formatTime(iso: string): string {
 }
 
 export function FeedEntry({ entry }: Props) {
-  const displayContent =
-    entry.type === "note"
-      ? entry.content
-      : `💬 ${entry.title ?? "Untitled conversation"}`;
-
   return (
     <div
       style={{
@@ -48,7 +43,7 @@ export function FeedEntry({ entry }: Props) {
         {formatTime(entry.created_at)}
       </span>
       <span style={{ fontSize: 14, color: "#1a202c", lineHeight: 1.5 }}>
-        {displayContent}
+        💬 {entry.title ?? "Untitled conversation"}
       </span>
     </div>
   );
