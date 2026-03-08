@@ -3,9 +3,9 @@ import { persist } from "zustand/middleware";
 import {
   fetchSpaceNotes,
   fetchGeneralNotes,
-  createNote,
-  updateNote,
-  deleteNote,
+  createNote as apiCreateNote,
+  updateNote as apiUpdateNote,
+  deleteNote as apiDeleteNote,
 } from "../services/api";
 import type { Note } from "../types/notes";
 
@@ -21,23 +21,19 @@ interface NotesContentState {
 
 export const useNotesContentStore = create<NotesContentState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       notes: {},
       activeNoteId: null,
 
       loadNotes: async (spaceId: string) => {
-        try {
-          const notes = spaceId === "general"
+        const fetched =
+          spaceId === "general"
             ? await fetchGeneralNotes()
             : await fetchSpaceNotes(parseInt(spaceId, 10));
-          set({ notes: { ...get().notes, [spaceId]: notes } });
-        } catch (e) {
-          console.error("loadNotes error:", e);
-        }
+        set((s) => ({ notes: { ...s.notes, [spaceId]: fetched } }));
       },
 
       createNote: async (spaceId: string) => {
-        // Optimistically add empty note
         const tempId = -Date.now();
         const tempNote: Note = {
           id: tempId,
@@ -54,29 +50,20 @@ export const useNotesContentStore = create<NotesContentState>()(
         }));
 
         try {
-          const realNote = await createNote(
-            spaceId === "general" ? "general" : parseInt(spaceId, 10)
-          );
-
-          // Replace temp with real
+          const realNote = await apiCreateNote(spaceId === "general" ? "general" : parseInt(spaceId, 10));
           set((s) => ({
             notes: {
               ...s.notes,
-              [spaceId]: s.notes[spaceId].map((n) =>
-                n.id === tempId ? realNote : n
-              ),
+              [spaceId]: (s.notes[spaceId] ?? []).map((n) => (n.id === tempId ? realNote : n)),
             },
             activeNoteId: realNote.id,
           }));
-
           return realNote;
-        } catch (e) {
-          console.error("createNote error:", e);
-          // Rollback on failure
+        } catch {
           set((s) => ({
             notes: {
               ...s.notes,
-              [spaceId]: s.notes[spaceId].filter((n) => n.id !== tempId),
+              [spaceId]: (s.notes[spaceId] ?? []).filter((n) => n.id !== tempId),
             },
             activeNoteId: null,
           }));
@@ -85,49 +72,32 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
 
       updateNote: async (id: number, title: string, content: string) => {
-        try {
-          await updateNote(id, title, content);
-
-          // Update in all spaces that might contain this note
-          set((s) => {
-            const next: Record<string, Note[]> = {};
-            for (const [spaceId, notes] of Object.entries(s.notes)) {
-              next[spaceId] = notes.map((note) =>
-                note.id === id ? { ...note, title, content, updated_at: new Date().toISOString() } : note
-              );
-            }
-            return { notes: next };
-          });
-        } catch (e) {
-          console.error("updateNote error:", e);
-        }
+        const updated = await apiUpdateNote(id, title, content);
+        set((s) => {
+          const next: Record<string, Note[]> = {};
+          for (const [spaceId, items] of Object.entries(s.notes)) {
+            next[spaceId] = items.map((n) => (n.id === id ? updated : n));
+          }
+          return { notes: next };
+        });
       },
 
       deleteNote: async (id: number, spaceId: string) => {
-        try {
-          await deleteNote(id);
-
-          set((s) => ({
-            notes: {
-              ...s.notes,
-              [spaceId]: s.notes[spaceId].filter((n) => n.id !== id),
-            },
-            activeNoteId: s.activeNoteId === id ? null : s.activeNoteId,
-          }));
-        } catch (e) {
-          console.error("deleteNote error:", e);
-        }
+        await apiDeleteNote(id);
+        set((s) => ({
+          notes: {
+            ...s.notes,
+            [spaceId]: (s.notes[spaceId] ?? []).filter((n) => n.id !== id),
+          },
+          activeNoteId: s.activeNoteId === id ? null : s.activeNoteId,
+        }));
       },
 
-      selectNote: (id: number | null) => {
-        set({ activeNoteId: id });
-      },
+      selectNote: (id: number | null) => set({ activeNoteId: id }),
     }),
     {
       name: "gooni-notes-content-v1",
-      partialize: (s) => ({
-        activeNoteId: s.activeNoteId,
-      }),
+      partialize: (s) => ({ activeNoteId: s.activeNoteId }),
     }
   )
 );

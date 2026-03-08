@@ -3,63 +3,54 @@ import { useEffect } from "react";
 import { JarvisPanel } from "../components/JarvisPanel";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { Sidebar } from "../components/notes/Sidebar";
+import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useNotesStore } from "../stores/notesStore";
 import { useJarvisStore } from "../stores/useJarvisStore";
+import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
 
-export const Route = createFileRoute("/")({
-  component: NotesPage,
-});
+export const Route = createFileRoute("/")({ component: NotesPage });
 
 function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
   const selectedSpaceId = useNotesStore((s) => s.selectedSpaceId);
   const selectSpace = useNotesStore((s) => s.selectSpace);
   const loadFeed = useNotesStore((s) => s.loadFeed);
-  const { isOpen: jarvisOpen } = useJarvisStore();
+  const loadNotes = useNotesContentStore((s) => s.loadNotes);
+  const selectNote = useNotesContentStore((s) => s.selectNote);
+  const jarvisOpen = useJarvisStore((s) => s.isOpen);
+  const width = useWindowWidth();
 
   useEffect(() => {
     fetchSpaces();
-  }, []);
+  }, [fetchSpaces]);
 
   useEffect(() => {
-    // Auto-select General if nothing selected
-    if (selectedSpaceId === null) {
-      selectSpace("general");
-      loadFeed("general");
-    }
-  }, [selectedSpaceId, selectSpace, loadFeed]);
+    if (selectedSpaceId === null) selectSpace("general");
+  }, [selectedSpaceId, selectSpace]);
 
   useEffect(() => {
-    // Load notes for the selected space
-    if (selectedSpaceId) {
-      // notes.loadNotes(selectedSpaceId);
-    }
-  }, [selectedSpaceId]);
+    const spaceId = selectedSpaceId || "general";
+    loadFeed(spaceId);
+    loadNotes(spaceId);
+    selectNote(null);
+  }, [selectedSpaceId, loadFeed, loadNotes, selectNote]);
+
+  const mobileJarvis = width < 1320;
 
   return (
-    <div style={{ display: "flex", height: "100vh", backgroundColor: "#FFFFFF" }}>
-      {/* Sidebar */}
-      <div style={{ width: 275, flexShrink: 0 }}>
-        <Sidebar />
-      </div>
-
-      {/* Main Content */}
-      <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
+    <div style={{ display: "flex", height: "100vh", background: "#fff" }}>
+      <Sidebar />
+      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
         <NoteEditor />
-
-        {/* Jarvis Panel - overlay on large screens, sidebar on small */}
         {jarvisOpen && (
-          <div style={{
-            position: "absolute",
-            right: 0,
-            top: 0,
-            width: 300,
-            height: "100vh",
-            background: "#FFFFFF",
-            borderLeft: "1px solid rgba(0,0,0,0.08)",
-            boxShadow: "-4px 0px 12px rgba(0,0,0,0.1)",
-          }}>
+          <div
+            style={
+              mobileJarvis
+                ? { position: "absolute", right: 0, top: 0, height: "100%", zIndex: 50, boxShadow: "-8px 0 20px rgba(0,0,0,0.16)" }
+                : { position: "absolute", right: 0, top: 0, height: "100%" }
+            }
+          >
             <JarvisPanel />
           </div>
         )}

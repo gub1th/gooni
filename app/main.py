@@ -82,7 +82,7 @@ async def root():
 @app.post("/chat")
 async def chat(body: ChatRequest, db: Session = Depends(get_db)):
     content, usage = Orchestrator.handle_chat(
-        body.content, db, image_url=body.image_url
+        body.content, db, image_url=body.image_url, entry_content=body.entry_content or ""
     )
     return {"content": content, "usage": usage}
 
@@ -316,6 +316,17 @@ def send_conversation_message(
 # ── Note endpoints ───────────────────────────────────────────────────────────
 
 
+def _serialize_note(n: Note) -> dict:
+    return {
+        "id": n.id,
+        "title": n.title,
+        "content": n.content,
+        "space_id": n.space_id,
+        "created_at": n.created_at,
+        "updated_at": n.updated_at,
+    }
+
+
 @app.get("/spaces/{space_id}/notes")
 def get_space_notes(space_id: str, db: Session = Depends(get_db)):
     """List notes for space, sorted updated_at desc."""
@@ -325,17 +336,7 @@ def get_space_notes(space_id: str, db: Session = Depends(get_db)):
         notes = db.query(Note).filter(Note.space_id == int(space_id)).all()
 
     notes.sort(key=lambda n: n.updated_at or n.created_at, reverse=True)
-    return [
-        {
-            "id": n.id,
-            "title": n.title,
-            "content": n.content,
-            "space_id": n.space_id,
-            "created_at": n.created_at,
-            "updated_at": n.updated_at,
-        }
-        for n in notes
-    ]
+    return [_serialize_note(n) for n in notes]
 
 
 @app.get("/notes")
@@ -343,26 +344,14 @@ def get_general_notes(db: Session = Depends(get_db)):
     """General notes (space_id IS NULL)."""
     notes = db.query(Note).filter(Note.space_id.is_(None)).all()
     notes.sort(key=lambda n: n.updated_at or n.created_at, reverse=True)
-    return [
-        {
-            "id": n.id,
-            "title": n.title,
-            "content": n.content,
-            "space_id": n.space_id,
-            "created_at": n.created_at,
-            "updated_at": n.updated_at,
-        }
-        for n in notes
-    ]
+    return [_serialize_note(n) for n in notes]
 
 
 @app.post("/spaces/{space_id}/notes")
 async def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
     """Create note in space."""
-    content = body.get("content", "").strip()
     title = body.get("title")
-    if not content:
-        raise HTTPException(status_code=400, detail="content is required")
+    content = body.get("content")
 
     note = Note(
         title=title,
@@ -373,45 +362,21 @@ async def create_space_note(space_id: str, body: dict, db: Session = Depends(get
     db.commit()
     db.refresh(note)
 
-    # Create memory episode for Jarvis context if content is substantial
-    if len(content) > 10:
-        memory_service.create_episode(content, goal_id=None, db=db)
-
-    return {
-        "id": note.id,
-        "title": note.title,
-        "content": note.content,
-        "space_id": note.space_id,
-        "created_at": note.created_at,
-        "updated_at": note.updated_at,
-    }
+    return _serialize_note(note)
 
 
 @app.post("/notes")
 async def create_general_note(body: dict, db: Session = Depends(get_db)):
     """Create general note."""
-    content = body.get("content", "").strip()
     title = body.get("title")
-    if not content:
-        raise HTTPException(status_code=400, detail="content is required")
+    content = body.get("content")
 
     note = Note(title=title, content=content, space_id=None)
     db.add(note)
     db.commit()
     db.refresh(note)
 
-    # Create memory episode for Jarvis context
-    if len(content) > 10:
-        memory_service.create_episode(content, goal_id=None, db=db)
-
-    return {
-        "id": note.id,
-        "title": note.title,
-        "content": note.content,
-        "space_id": note.space_id,
-        "created_at": note.created_at,
-        "updated_at": note.updated_at,
-    }
+    return _serialize_note(note)
 
 
 @app.patch("/notes/{note_id}")
@@ -428,19 +393,13 @@ def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
     note.content = content
     note.updated_at = datetime.utcnow()
     db.commit()
+    db.refresh(note)
 
     # Create memory episode if content is substantial
     if content and len(content) > 10:
         memory_service.create_episode(content, goal_id=None, db=db)
 
-    return {
-        "id": note.id,
-        "title": note.title,
-        "content": note.content,
-        "space_id": note.space_id,
-        "created_at": note.created_at,
-        "updated_at": note.updated_at,
-    }
+    return _serialize_note(note)
 
 
 @app.delete("/notes/{note_id}")

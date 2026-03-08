@@ -1,6 +1,6 @@
-const BASE = "http://localhost:8000";
+import type { Note } from "../types/notes";
 
-// ── Feed item types ────────────────────────────────────────────────────────────
+const BASE = "http://localhost:8000";
 
 export interface ApiConversation {
   id: number;
@@ -29,7 +29,21 @@ export interface ApiMessage {
   created_at: string;
 }
 
-// ── Feed ───────────────────────────────────────────────────────────────────────
+export async function fetchSpaces(): Promise<ApiSpace[]> {
+  const res = await fetch(`${BASE}/spaces`);
+  if (!res.ok) throw new Error("Failed to fetch spaces");
+  return res.json();
+}
+
+export async function createSpace(name: string): Promise<ApiSpace> {
+  const res = await fetch(`${BASE}/spaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error("Failed to create space");
+  return res.json();
+}
 
 export async function fetchGoalFeed(goalId: number, limit = 100): Promise<ApiFeedItem[]> {
   const res = await fetch(`${BASE}/goals/${goalId}/feed?limit=${limit}`);
@@ -43,7 +57,11 @@ export async function fetchGeneralFeed(limit = 100): Promise<ApiFeedItem[]> {
   return res.json();
 }
 
-// ── Conversations ──────────────────────────────────────────────────────────────
+export async function fetchSpaceFeed(spaceId: number): Promise<ApiFeedItem[]> {
+  const res = await fetch(`${BASE}/spaces/${spaceId}/feed`);
+  if (!res.ok) throw new Error("Failed to fetch space feed");
+  return res.json();
+}
 
 export async function createGoalConversation(goalId: number, content: string): Promise<ApiConversation> {
   const res = await fetch(`${BASE}/goals/${goalId}/conversations`, {
@@ -62,6 +80,16 @@ export async function createGeneralConversation(content: string): Promise<ApiCon
     body: JSON.stringify({ content }),
   });
   if (!res.ok) throw new Error("Failed to create conversation");
+  return res.json();
+}
+
+export async function createSpaceConversation(spaceId: number | "general", content: string): Promise<ApiConversation> {
+  const res = await fetch(`${BASE}/spaces/${spaceId}/conversations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Failed to create space conversation");
   return res.json();
 }
 
@@ -98,31 +126,57 @@ export async function sendConversationMessage(
   return res.json();
 }
 
-// ── Goals ──────────────────────────────────────────────────────────────────────
-
-export interface Goal {
-  id: number;
-  title: string;
-  goal_type: "achieve" | "avoid";
-}
-
-export async function fetchGoals(): Promise<Goal[]> {
-  const res = await fetch(`${BASE}/goals`);
-  if (!res.ok) throw new Error("Failed to fetch goals");
+export async function fetchSpaceNotes(spaceId: number): Promise<Note[]> {
+  const res = await fetch(`${BASE}/spaces/${spaceId}/notes`);
+  if (!res.ok) throw new Error("Failed to fetch space notes");
   return res.json();
 }
 
-export async function createGoal(title: string): Promise<Goal> {
-  const res = await fetch(`${BASE}/goals`, {
+export async function fetchGeneralNotes(): Promise<Note[]> {
+  const res = await fetch(`${BASE}/notes`);
+  if (!res.ok) throw new Error("Failed to fetch general notes");
+  return res.json();
+}
+
+export async function createNote(spaceId: number | "general"): Promise<Note> {
+  const url = spaceId === "general" ? `${BASE}/notes` : `${BASE}/spaces/${spaceId}/notes`;
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title: "", content: "" }),
   });
-  if (!res.ok) throw new Error("Failed to create goal");
+  if (!res.ok) throw new Error("Failed to create note");
   return res.json();
 }
 
-// ── Macros / Workout ───────────────────────────────────────────────────────────
+export async function updateNote(id: number, title: string, content: string): Promise<Note> {
+  const res = await fetch(`${BASE}/notes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, content }),
+  });
+  if (!res.ok) throw new Error("Failed to update note");
+  return res.json();
+}
+
+export async function deleteNote(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/notes/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete note");
+}
+
+export async function sendJarvisMessage(
+  content: string,
+  noteContent?: string
+): Promise<{ content: string }> {
+  const res = await fetch(`${BASE}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
+  });
+  if (!res.ok) throw new Error("Failed to send Jarvis message");
+  return res.json();
+}
+
 
 export interface MacroItem {
   name: string;
@@ -193,84 +247,24 @@ export async function sendChat(message: string, imageUrl?: string): Promise<{ co
   return res.json();
 }
 
-// ── Notes ──────────────────────────────────────────────────────────────────────
-
-export interface Note {
+export interface Goal {
   id: number;
-  title: string | null;
-  content: string | null;
-  space_id: number | null;
-  created_at: string;
-  updated_at: string;
+  title: string;
+  goal_type: "achieve" | "avoid";
 }
 
-export async function fetchSpaceNotes(spaceId: number): Promise<Note[]> {
-  const res = await fetch(`${BASE}/spaces/${spaceId}/notes`);
-  if (!res.ok) throw new Error("Failed to fetch space notes");
+export async function fetchGoals(): Promise<Goal[]> {
+  const res = await fetch(`${BASE}/goals`);
+  if (!res.ok) throw new Error("Failed to fetch goals");
   return res.json();
 }
 
-export async function fetchGeneralNotes(): Promise<Note[]> {
-  const res = await fetch(`${BASE}/notes`);
-  if (!res.ok) throw new Error("Failed to fetch general notes");
-  return res.json();
-}
-
-export async function createNote(spaceId: number | "general"): Promise<Note> {
-  const url = spaceId === "general" ? `${BASE}/notes` : `${BASE}/spaces/${spaceId}/notes`;
-  const res = await fetch(url, {
+export async function createGoal(title: string): Promise<Goal> {
+  const res = await fetch(`${BASE}/goals`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: "", title: "" }),
+    body: JSON.stringify({ title }),
   });
-  if (!res.ok) throw new Error("Failed to create note");
+  if (!res.ok) throw new Error("Failed to create goal");
   return res.json();
 }
-
-export async function updateNote(id: number, title: string, content: string): Promise<Note> {
-  const res = await fetch(`${BASE}/notes/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, content }),
-  });
-  if (!res.ok) throw new Error("Failed to update note");
-  return res.json();
-}
-
-export async function deleteNote(id: number): Promise<void> {
-  const res = await fetch(`${BASE}/notes/${id}`, {
-    method: "DELETE",
-  });
-  if (!res.ok) throw new Error("Failed to delete note");
-}
-
-// For Jarvis panel — reuses existing POST /chat
-export async function sendJarvisMessage(
-  content: string,
-  noteContent?: string
-): Promise<{ content: string }> {
-  const res = await fetch(`${BASE}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
-  });
-  if (!res.ok) throw new Error("Failed to send Jarvis message");
-  return res.json();
-}
-
-export async function fetchSpaceFeed(spaceId: number): Promise<ApiFeedItem[]> {
-  const res = await fetch(`${BASE}/spaces/${spaceId}/feed`);
-  if (!res.ok) throw new Error("Failed to fetch space feed");
-  return res.json();
-}
-
-export async function createSpaceConversation(spaceId: number | "general", content: string): Promise<ApiConversation> {
-  const res = await fetch(`${BASE}/spaces/${spaceId}/conversations`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
-  if (!res.ok) throw new Error("Failed to create space conversation");
-  return res.json();
-}
-

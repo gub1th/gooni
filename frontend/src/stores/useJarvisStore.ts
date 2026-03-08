@@ -12,7 +12,7 @@ interface JarvisState {
 
 export const useJarvisStore = create<JarvisState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       messages: [],
       sending: false,
       isOpen: false,
