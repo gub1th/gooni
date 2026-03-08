@@ -16,6 +16,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Meal,
     Memory,
     Message,
+    Note,
     Space,
     Workout,
     WorkoutSet,
@@ -159,6 +160,100 @@ def create_space(body: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(space)
     return {"id": space.id, "name": space.name, "goal_id": None}
+
+
+# ── Notes ─────────────────────────────────────────────────────────────────────
+
+
+def _serialize_note(n: Note) -> dict:
+    return {
+        "id": n.id,
+        "title": n.title,
+        "content": n.content,
+        "space_id": n.space_id,
+        "created_at": n.created_at,
+        "updated_at": n.updated_at,
+    }
+
+
+@app.get("/spaces/{space_id}/notes")
+def get_space_notes(space_id: str, db: Session = Depends(get_db)):
+    if space_id == "general":
+        notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(Note.updated_at.desc()).all()
+    else:
+        notes = db.query(Note).filter(Note.space_id == int(space_id)).order_by(Note.updated_at.desc()).all()
+    return [_serialize_note(n) for n in notes]
+
+
+@app.get("/notes")
+def get_general_notes(db: Session = Depends(get_db)):
+    notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(Note.updated_at.desc()).all()
+    return [_serialize_note(n) for n in notes]
+
+
+@app.post("/spaces/{space_id}/notes")
+def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    numeric_id = None if space_id == "general" else int(space_id)
+    note = Note(
+        title=body.get("title"),
+        content=body.get("content"),
+        space_id=numeric_id,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return _serialize_note(note)
+
+
+@app.post("/notes")
+def create_general_note(body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    note = Note(
+        title=body.get("title"),
+        content=body.get("content"),
+        space_id=None,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return _serialize_note(note)
+
+
+@app.patch("/notes/{note_id}")
+def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if "title" in body:
+        note.title = body["title"]
+    if "content" in body:
+        note.content = body["content"]
+    note.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(note)
+    content = body.get("content", "") or ""
+    if len(content) > 10:
+        try:
+            memory_service.create_episode(content, None, db)
+        except Exception:
+            pass
+    return _serialize_note(note)
+
+
+@app.delete("/notes/{note_id}")
+def delete_note(note_id: int, db: Session = Depends(get_db)):
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    db.delete(note)
+    db.commit()
+    return {"ok": True}
 
 
 # ── Serializers ────────────────────────────────────────────────────────────────

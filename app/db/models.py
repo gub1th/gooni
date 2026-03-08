@@ -1,4 +1,5 @@
 import enum
+from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
@@ -130,6 +131,17 @@ class WorkoutSet(Base):
     weight = Column(Float, nullable=True)
     weight_unit = Column(String, default="lbs")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Note(Base):
+    __tablename__ = "notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(Text, nullable=True)
+    content = Column(Text, nullable=True)
+    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Memory(Base):
