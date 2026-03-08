@@ -34,12 +34,12 @@ function NotesPage() {
     fetchSpaces();
   }, []);
 
+  // On mount: load notes for whatever space is already selected (or default to general)
   useEffect(() => {
-    if (selectedSpaceId === null) {
-      selectSpace("general");
-      loadNotes("general");
-    }
-  }, [selectedSpaceId, selectSpace, loadNotes]);
+    const spaceId = selectedSpaceId ?? "general";
+    if (!selectedSpaceId) selectSpace("general");
+    loadNotes(spaceId);
+  }, []);
 
   // Jarvis overlays on small screens
   const isSmall = windowWidth < 1100;

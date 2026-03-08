@@ -1,6 +1,7 @@
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
+import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useJarvisStore } from "../../stores/useJarvisStore";
 
@@ -26,7 +27,8 @@ function useEditorStyles() {
   }, []);
 }
 
-function formatNoteDate(iso: string): string {
+function formatNoteDate(iso: string | null): string {
+  if (!iso) return "";
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
   const d = new Date(hasOffset ? iso : iso + "Z");
   const now = new Date();
@@ -38,6 +40,8 @@ function formatNoteDate(iso: string): string {
     " at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
+type SaveStatus = "idle" | "saving" | "saved";
+
 export function NoteEditor() {
   useEditorStyles();
 
@@ -48,15 +52,59 @@ export function NoteEditor() {
   const activeNote = (notes[spaceId] ?? []).find((n) => n.id === activeNoteId) ?? null;
 
   const [localTitle, setLocalTitle] = useState(activeNote?.title ?? "");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const bodyRef = useRef<string>(activeNote?.content ?? "");
   const titleRef = useRef<string>(activeNote?.title ?? "");
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevActiveNoteId = useRef<number | null>(activeNoteId);
+  const titleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLocalTitle(activeNote?.title ?? "");
     bodyRef.current = activeNote?.content ?? "";
     titleRef.current = activeNote?.title ?? "";
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+    setSaveStatus("idle");
+    setLastSavedTime(null);
+  }, [activeNoteId]);
+
+  // Memorize previous note on leave; touch new note on enter — catches ALL navigation paths
+  useEffect(() => {
+    const prev = prevActiveNoteId.current;
+    prevActiveNoteId.current = activeNoteId;
+    if (prev === activeNoteId) return; // initial mount, no change
+
+    if (prev && prev > 0) {
+      if (useNotesContentStore.getState().isDirty) {
+        apiMemorizeNote(prev).catch(() => {});
+      }
+      useNotesContentStore.setState({ isDirty: false });
+    }
+    if (activeNoteId && activeNoteId > 0) {
+      apiTouchNote(activeNoteId).catch(() => {});
+    }
+  }, [activeNoteId]);
+
+  // Auto-focus title when a new empty note is created
+  useEffect(() => {
+    if (activeNoteId && activeNote && !activeNote.title?.trim()) {
+      setTimeout(() => titleInputRef.current?.focus(), 0);
+    }
+  }, [activeNoteId]);
+
+  // Flush pending save on tab close (keepalive: true in api.ts ensures the request survives)
+  useEffect(() => {
+    function onBeforeUnload() {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      if (activeNoteId && activeNoteId > 0) {
+        apiUpdateNote(activeNoteId, titleRef.current, bodyRef.current);
+      }
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [activeNoteId]);
 
   const editor = useEditor(
@@ -99,9 +147,19 @@ export function NoteEditor() {
     debounceTimer.current = setTimeout(save, 1500);
   }
 
-  function save() {
+  async function save() {
     if (!activeNoteId || activeNoteId < 0) return;
-    updateNote(activeNoteId, titleRef.current, bodyRef.current);
+    setSaveStatus("saving");
+    try {
+      await updateNote(activeNoteId, titleRef.current, bodyRef.current);
+      const time = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+      setLastSavedTime(time);
+      setSaveStatus("saved");
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSaveStatus("idle"), 3000);
+    } catch {
+      setSaveStatus("idle");
+    }
   }
 
   function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -145,11 +203,18 @@ export function NoteEditor() {
         <span
           style={{
             fontSize: 12,
-            color: "#8E8E93",
+            color: saveStatus === "saving" ? "#8E8E93" : saveStatus === "saved" ? "#34C759" : "#8E8E93",
             fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            transition: "color 0.2s",
           }}
         >
-          {activeNote ? formatNoteDate(activeNote.updated_at) : ""}
+          {saveStatus === "saving"
+            ? "Saving…"
+            : saveStatus === "saved"
+            ? `Saved ${lastSavedTime}`
+            : activeNote
+            ? formatNoteDate(activeNote.updated_at)
+            : ""}
         </span>
 
         <button
@@ -210,6 +275,7 @@ export function NoteEditor() {
           }}
         >
           <input
+            ref={titleInputRef}
             value={localTitle}
             onChange={handleTitleChange}
             onBlur={save}

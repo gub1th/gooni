@@ -6,33 +6,32 @@ from sqlalchemy.orm import Session
 from ..db.models import Conversation, Message
 
 
-SESSION_GAP_HOURS = 2  # new session if last message was > 2 hours ago
+SESSION_GAP_MINUTES = 10  # new session if last message was > 10 minutes ago
 
 
 class ConversationService:
 
     # ── Session management ─────────────────────────────────────────────────────
 
-    def find_or_create_telegram_session(self, db: Session) -> Conversation:
-        """Option C: reuse the active Telegram conversation if last message was
-        < SESSION_GAP_HOURS ago AND it started today. Otherwise create a new one."""
+    def find_or_create_session(self, source: str, db: Session) -> Conversation:
+        """Reuse the active conversation for the given source if the last message
+        was < SESSION_GAP_MINUTES ago. Otherwise start a new one.
+        Works for both 'telegram' and 'web' sources."""
         now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        cutoff = now - timedelta(hours=SESSION_GAP_HOURS)
+        cutoff = now - timedelta(minutes=SESSION_GAP_MINUTES)
 
         existing = (
             db.query(Conversation)
             .filter(
-                Conversation.source == "telegram",
+                Conversation.source == source,
                 Conversation.last_message_at >= cutoff,
-                Conversation.created_at >= today_start,
             )
             .order_by(Conversation.last_message_at.desc())
             .first()
         )
         if existing:
             return existing
-        return self.create(goal_id=None, source="telegram", db=db)
+        return self.create(goal_id=None, source=source, db=db)
 
     def create(
         self,

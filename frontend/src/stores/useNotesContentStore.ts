@@ -16,19 +16,23 @@ interface NotesContentState {
   // Notes per space
   notes: Record<string, ApiNote[]>;       // keyed by spaceId string
   activeNoteId: number | null;
+  isDirty: boolean;                        // true if active note has unsaved/unmemorized changes
   loadNotes: (spaceId: string) => Promise<void>;
   createNote: (spaceId: string) => Promise<ApiNote | null>;
   updateNote: (id: number, title: string, content: string) => Promise<void>;
   deleteNote: (id: number, spaceId: string) => Promise<void>;
+  removeSpace: (spaceId: string) => void;
   selectNote: (id: number | null) => void;
+  markDirty: () => void;
 }
 
 export const useNotesContentStore = create<NotesContentState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       selectedSpaceId: null,
       notes: {},
       activeNoteId: null,
+      isDirty: false,
 
       selectSpace: (id: string) => {
         set({ selectedSpaceId: id, activeNoteId: null });
@@ -55,13 +59,12 @@ export const useNotesContentStore = create<NotesContentState>()(
           space_id: spaceId === "general" ? null : parseInt(spaceId),
           created_at: now,
           updated_at: now,
+          last_opened_at: null,
         };
+        // Go through selectNote so the prev note gets memorized if dirty
+        get().selectNote(tempId);
         set((s) => ({
-          notes: {
-            ...s.notes,
-            [spaceId]: [optimistic, ...(s.notes[spaceId] ?? [])],
-          },
-          activeNoteId: tempId,
+          notes: { ...s.notes, [spaceId]: [optimistic, ...(s.notes[spaceId] ?? [])] },
         }));
         try {
           const real = await apiCreateNote(
@@ -88,18 +91,15 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
 
       updateNote: async (id: number, title: string, content: string) => {
-        try {
-          const updated = await apiUpdateNote(id, title, content);
-          set((s) => {
-            const newNotes: Record<string, ApiNote[]> = {};
-            for (const [key, list] of Object.entries(s.notes)) {
-              newNotes[key] = list.map((n) => (n.id === id ? updated : n));
-            }
-            return { notes: newNotes };
-          });
-        } catch (e) {
-          console.error("updateNote error:", e);
-        }
+        set({ isDirty: true });
+        const updated = await apiUpdateNote(id, title, content); // throws on failure
+        set((s) => {
+          const newNotes: Record<string, ApiNote[]> = {};
+          for (const [key, list] of Object.entries(s.notes)) {
+            newNotes[key] = list.map((n) => (n.id === id ? updated : n));
+          }
+          return { notes: newNotes };
+        });
       },
 
       deleteNote: async (id: number, spaceId: string) => {
@@ -115,16 +115,25 @@ export const useNotesContentStore = create<NotesContentState>()(
         }
       },
 
+      removeSpace: (spaceId: string) => {
+        set((s) => {
+          const newNotes = { ...s.notes };
+          delete newNotes[spaceId];
+          const selectedSpaceId = s.selectedSpaceId === spaceId ? "general" : s.selectedSpaceId;
+          const activeNoteId = s.selectedSpaceId === spaceId ? null : s.activeNoteId;
+          return { notes: newNotes, selectedSpaceId, activeNoteId };
+        });
+      },
+
       selectNote: (id: number | null) => {
         set({ activeNoteId: id });
       },
+
+      markDirty: () => set({ isDirty: true }),
     }),
     {
-      name: "gooni-notes-content-v1",
-      partialize: (s) => ({
-        selectedSpaceId: s.selectedSpaceId,
-        activeNoteId: s.activeNoteId,
-      }),
+      name: "gooni-notes-content-v2",
+      partialize: (s) => ({ selectedSpaceId: s.selectedSpaceId }),
     }
   )
 );

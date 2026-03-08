@@ -67,6 +67,29 @@ class MemoryService:
         db.refresh(memory)
         return memory
 
+    def process_content(self, content: str, db: Session) -> dict:
+        """Extract and save both an episode and any profile facts from a piece of text.
+
+        Use this for notes, imported messages, or any non-chat content.
+        The chat path (orchestrator) does its own extraction inline for efficiency.
+
+        Returns { "episode_saved": bool, "facts_saved": int }
+        """
+        result = {"episode_saved": False, "facts_saved": 0}
+        content = content.strip()
+        if len(content) <= 10:
+            return result
+
+        self.create_episode(content, None, db)
+        result["episode_saved"] = True
+
+        facts = llm_client.extract_profile_facts(content)
+        for fact in facts:
+            self.upsert_profile_fact(fact, db)
+        result["facts_saved"] = len(facts)
+
+        return result
+
     def search_similar(self, query: str, limit: int, db: Session) -> List[Memory]:
         """Search all active memories by embedding similarity."""
         query_embedding, _ = llm_client.generate_embedding(query)

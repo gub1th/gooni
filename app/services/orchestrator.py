@@ -12,19 +12,21 @@ class Orchestrator:
         db,
         image_url: str = None,
         conversation_id: int = None,
+        source: str = "telegram",
         entry_content: str = "",
     ) -> tuple[str, dict | None]:
-        """Unified chat handler for Telegram and web.
+        """Unified chat handler for all sources.
 
-        - conversation_id=None  → Telegram mode: find/create session, handle slash cmds
-        - conversation_id=<id>  → Web mode: use that conversation directly
-        - entry_content         → Web only: original note text injected as context
+        - conversation_id=None  → find/create session by source + gap logic
+        - conversation_id=<id>  → use that conversation directly (note threads)
+        - source                → 'telegram' | 'web' (determines session bucket)
+        - entry_content         → original note text injected as context (web only)
         """
         stripped = message.strip()
         command = stripped.lower()
 
-        # Slash commands only apply in Telegram mode
-        if conversation_id is None:
+        # Slash commands only apply for Telegram
+        if source == "telegram":
             if command == "/memory":
                 return self._handle_memory_command(db), None
             if command == "/goals":
@@ -34,7 +36,7 @@ class Orchestrator:
                 return self._handle_goal_detail_command(name, db), None
 
         # First-time greeting only for Telegram
-        is_first_time = conversation_id is None and not memory_service.get_name(db)
+        is_first_time = source == "telegram" and not memory_service.get_name(db)
 
         # Session management
         if conversation_id is not None:
@@ -42,7 +44,7 @@ class Orchestrator:
             if conv is None:
                 raise ValueError(f"Conversation {conversation_id} not found")
         else:
-            conv = conversation_service.find_or_create_telegram_session(db)
+            conv = conversation_service.find_or_create_session(source, db)
 
         conversation_service.add_message(conv.id, "user", message, db)
 

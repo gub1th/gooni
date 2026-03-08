@@ -49,6 +49,7 @@ class Space(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(Text, nullable=False)
+    emoji = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -142,6 +143,7 @@ class Note(Base):
     space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
+    last_opened_at = Column(DateTime, nullable=True)
 
 
 class Memory(Base):

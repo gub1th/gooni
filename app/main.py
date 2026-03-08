@@ -40,9 +40,14 @@ def _run_column_migrations(engine):
                 text("SELECT name FROM sqlite_master WHERE type='table'")
             )
         }
-        for table, col in [
-            ("goals", "space_id"),
-            ("conversations", "space_id"),
+        # (table, col, sql_type)
+        for table, col, col_type in [
+            ("goals", "space_id", "INTEGER"),
+            ("conversations", "space_id", "INTEGER"),
+            ("notes", "space_id", "INTEGER"),
+            ("notes", "updated_at", "INTEGER"),
+            ("notes", "last_opened_at", "INTEGER"),
+            ("spaces", "emoji", "TEXT"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -50,7 +55,7 @@ def _run_column_migrations(engine):
                 r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))
             ]
             if col not in existing_cols:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} INTEGER"))
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
                 print(f"Migration: added {table}.{col}")
         conn.commit()
 
@@ -80,7 +85,7 @@ async def root():
 @app.post("/chat")
 async def chat(body: ChatRequest, db: Session = Depends(get_db)):
     content, usage = Orchestrator.handle_chat(
-        body.content, db, image_url=body.image_url
+        body.content, db, image_url=body.image_url, source="web"
     )
     return {"content": content, "usage": usage}
 
@@ -140,6 +145,7 @@ def _serialize_space(s: Space, db: Session) -> dict:
     return {
         "id": s.id,
         "name": s.name,
+        "emoji": s.emoji,
         "goal_id": goal.id if goal else None,
     }
 
@@ -147,7 +153,17 @@ def _serialize_space(s: Space, db: Session) -> dict:
 @app.get("/spaces")
 def get_spaces(db: Session = Depends(get_db)):
     spaces = db.query(Space).order_by(Space.id).all()
-    return [_serialize_space(s, db) for s in spaces]
+    space_ids = [s.id for s in spaces]
+    active_goals = (
+        db.query(Goal)
+        .filter(Goal.space_id.in_(space_ids), Goal.status == GoalStatus.ACTIVE)
+        .all()
+    )
+    goal_by_space = {g.space_id: g.id for g in active_goals}
+    return [
+        {"id": s.id, "name": s.name, "emoji": s.emoji, "goal_id": goal_by_space.get(s.id)}
+        for s in spaces
+    ]
 
 
 @app.post("/spaces")
@@ -159,7 +175,35 @@ def create_space(body: dict, db: Session = Depends(get_db)):
     db.add(space)
     db.commit()
     db.refresh(space)
-    return {"id": space.id, "name": space.name, "goal_id": None}
+    return {"id": space.id, "name": space.name, "emoji": space.emoji, "goal_id": None}
+
+
+@app.patch("/spaces/{space_id}")
+def update_space(space_id: int, body: dict, db: Session = Depends(get_db)):
+    space = db.query(Space).filter(Space.id == space_id).first()
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+    if "name" in body:
+        name = body["name"].strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name cannot be empty")
+        space.name = name
+    if "emoji" in body:
+        space.emoji = body["emoji"] or None
+    db.commit()
+    db.refresh(space)
+    return _serialize_space(space, db)
+
+
+@app.delete("/spaces/{space_id}")
+def delete_space(space_id: int, db: Session = Depends(get_db)):
+    space = db.query(Space).filter(Space.id == space_id).first()
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+    db.query(Note).filter(Note.space_id == space_id).delete()
+    db.delete(space)
+    db.commit()
+    return {"ok": True}
 
 
 # ── Notes ─────────────────────────────────────────────────────────────────────
@@ -173,21 +217,27 @@ def _serialize_note(n: Note) -> dict:
         "space_id": n.space_id,
         "created_at": n.created_at,
         "updated_at": n.updated_at,
+        "last_opened_at": n.last_opened_at,
     }
+
+
+def _notes_order():
+    from sqlalchemy import func
+    return func.coalesce(Note.last_opened_at, Note.updated_at, Note.created_at).desc()
 
 
 @app.get("/spaces/{space_id}/notes")
 def get_space_notes(space_id: str, db: Session = Depends(get_db)):
     if space_id == "general":
-        notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(Note.updated_at.desc()).all()
+        notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(_notes_order()).all()
     else:
-        notes = db.query(Note).filter(Note.space_id == int(space_id)).order_by(Note.updated_at.desc()).all()
+        notes = db.query(Note).filter(Note.space_id == int(space_id)).order_by(_notes_order()).all()
     return [_serialize_note(n) for n in notes]
 
 
 @app.get("/notes")
 def get_general_notes(db: Session = Depends(get_db)):
-    notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(Note.updated_at.desc()).all()
+    notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(_notes_order()).all()
     return [_serialize_note(n) for n in notes]
 
 
@@ -196,8 +246,8 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
     from datetime import datetime
     numeric_id = None if space_id == "general" else int(space_id)
     note = Note(
-        title=body.get("title"),
-        content=body.get("content"),
+        title=body.get("title") or "",
+        content=body.get("content") or "",
         space_id=numeric_id,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
@@ -212,8 +262,8 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
 def create_general_note(body: dict, db: Session = Depends(get_db)):
     from datetime import datetime
     note = Note(
-        title=body.get("title"),
-        content=body.get("content"),
+        title=body.get("title") or "",
+        content=body.get("content") or "",
         space_id=None,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
@@ -237,13 +287,33 @@ def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
     note.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(note)
-    content = body.get("content", "") or ""
-    if len(content) > 10:
-        try:
-            memory_service.create_episode(content, None, db)
-        except Exception:
-            pass
     return _serialize_note(note)
+
+
+@app.post("/notes/{note_id}/touch")
+def touch_note(note_id: int, db: Session = Depends(get_db)):
+    """Update last_opened_at. Called whenever a note is selected."""
+    from datetime import datetime
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    note.last_opened_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/notes/{note_id}/memorize")
+def memorize_note(note_id: int, db: Session = Depends(get_db)):
+    """Extract a memory episode from the note's current content. Called when user leaves the note."""
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    content = (note.content or "").strip()
+    try:
+        result = memory_service.process_content(content, db)
+    except Exception:
+        result = {}
+    return {"ok": True, **result}
 
 
 @app.delete("/notes/{note_id}")

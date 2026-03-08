@@ -12,6 +12,10 @@ class ProfileFact(BaseModel):
     content: str
 
 
+class ProfileFactsOnly(BaseModel):
+    profile_facts: list[ProfileFact] = []
+
+
 class ChatResponse(BaseModel):
     reply: str
     profile_facts: list[ProfileFact] = []
@@ -218,6 +222,35 @@ How you work:
         except Exception as e:
             print(f"LLM Vision Error: {e}")
             return "I couldn't analyze that image right now.", tracker.finalize(tools_used)
+
+    def extract_profile_facts(self, content: str) -> list[dict]:
+        """Extract structured profile facts from any text (note, message, etc.).
+        Returns [{ key, content }] — same shape as chat path profile_facts.
+        """
+        try:
+            structured = self.client.beta.chat.completions.parse(
+                model=self.chat_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Extract profile facts about the user from the text. "
+                            "Profile facts are durable personal attributes: name, age, weight, height, "
+                            "dietary restrictions, fitness goals, preferences, injuries, etc. "
+                            "Do NOT extract transient events (e.g. 'went to gym today'). "
+                            "Return an empty list if nothing durable is found."
+                        ),
+                    },
+                    {"role": "user", "content": content},
+                ],
+                response_format=ProfileFactsOnly,
+                max_tokens=200,
+            )
+            parsed = structured.choices[0].message.parsed
+            return [{"key": f.key, "content": f.content} for f in parsed.profile_facts]
+        except Exception as e:
+            print(f"Profile fact extraction error: {e}")
+            return []
 
     async def generate_title(self, content: str) -> str:
         """Generate a short 5-word title for a note entry."""
