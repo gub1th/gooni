@@ -171,12 +171,7 @@ function SectionHeader({ label }: { label: string }) {
   );
 }
 
-interface NotesListProps {
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
-}
-
-export function NotesList({ sidebarOpen, onToggleSidebar }: NotesListProps) {
+export function NotesList() {
   const { selectedSpaceId, notes, activeNoteId, createNote, selectNote, deleteNote } = useNotesContentStore();
   const spaces = useSpacesStore((s) => s.spaces);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
@@ -231,15 +226,6 @@ export function NotesList({ sidebarOpen, onToggleSidebar }: NotesListProps) {
     >
       {/* Header */}
       <div style={{ height: 52, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 8 }}>
-        <button
-          onClick={onToggleSidebar}
-          title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-          style={{ width: 26, height: 26, borderRadius: 6, background: "transparent", border: "none", cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", color: "#636366", padding: 0, flexShrink: 0, transition: "background 0.1s" }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-        >
-          {sidebarOpen ? "⟨" : "⟩"}
-        </button>
         <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: "#1C1C1E", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" }}>
           Notes
         </span>

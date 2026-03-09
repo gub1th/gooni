@@ -99,10 +99,7 @@ function NotesPage() {
         <Dashboard onGoToNote={handleGoToNote} />
       ) : (
         <>
-          <NotesList
-            sidebarOpen={sidebarOpen}
-            onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
-          />
+          <NotesList />
 
           <NoteEditor />
 
