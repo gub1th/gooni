@@ -54,7 +54,7 @@ def handle_message(message, session_cost, session_tokens, session_interactions):
     def chat_fn():
         db = SessionLocal()
         try:
-            return Orchestrator.handle_chat(message, db)
+            return Orchestrator.handle_chat(message, db, source="cli")
         finally:
             db.close()
 

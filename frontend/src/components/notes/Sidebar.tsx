@@ -13,13 +13,14 @@ interface ContextMenu {
 
 export function Sidebar() {
   const { spaces, create: createSpace, remove: removeSpace, rename: renameSpace, setEmoji } = useSpacesStore();
-  const { selectedSpaceId, selectSpace, loadNotes, removeSpace: clearSpaceNotes } = useNotesContentStore();
+  const { selectedSpaceId, selectSpace, loadNotes, removeSpace: clearSpaceNotes, moveNote } = useNotesContentStore();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [emojiPicker, setEmojiPicker] = useState<{ spaceId: string; anchor: DOMRect } | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -170,6 +171,21 @@ export function Sidebar() {
               onClick={() => { if (!isEditing) handleSelectSpace(space.id); }}
               onDoubleClick={() => { if (space.deletable) startEditing(space); }}
               onContextMenu={(e) => handleContextMenu(e, space)}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+              onDragEnter={(e) => { e.preventDefault(); setDragOverId(space.id); }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverId(null);
+                try {
+                  const data = JSON.parse(e.dataTransfer.getData("text/plain"));
+                  if (data.noteId && data.fromSpaceId !== space.id) {
+                    moveNote(data.noteId, data.fromSpaceId, space.id);
+                  }
+                } catch {}
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -178,12 +194,16 @@ export function Sidebar() {
                 height: 32,
                 borderRadius: 8,
                 cursor: "pointer",
-                background: selected ? "rgba(0,0,0,0.09)" : "transparent",
+                background: dragOverId === space.id
+                  ? "rgba(0,122,255,0.12)"
+                  : selected ? "rgba(0,0,0,0.09)" : "transparent",
+                outline: dragOverId === space.id ? "2px solid rgba(0,122,255,0.35)" : "none",
+                outlineOffset: -2,
                 transition: "background 0.12s",
                 userSelect: "none",
               }}
-              onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
-              onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+              onMouseEnter={(e) => { if (!selected && dragOverId !== space.id) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
+              onMouseLeave={(e) => { if (!selected && dragOverId !== space.id) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
             >
               <span
                 title={space.deletable ? "Double-click to change emoji" : undefined}

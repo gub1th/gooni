@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import type { ApiNote } from "../../services/api";
 
+// Module-level drag state so Sidebar can read it without prop drilling
+export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
+
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
@@ -29,25 +32,41 @@ interface ContextMenu {
 interface NoteRowProps {
   note: ApiNote;
   active: boolean;
+  spaceId: string;
+  dragging: boolean;
   onSelect: () => void;
+  onDragStart: (id: number) => void;
+  onDragEnd: () => void;
   onContextMenu: (e: React.MouseEvent, noteId: number) => void;
 }
 
-function NoteRow({ note, active, onSelect, onContextMenu }: NoteRowProps) {
+function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDragEnd, onContextMenu }: NoteRowProps) {
   const preview = note.content ? stripHtml(note.content).slice(0, 60) : "";
   const title = note.title?.trim() || "New Note";
 
   return (
     <div
+      draggable={note.id > 0}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", JSON.stringify({ noteId: note.id, fromSpaceId: spaceId }));
+        e.dataTransfer.effectAllowed = "move";
+        draggingNotePayload = { noteId: note.id, fromSpaceId: spaceId };
+        onDragStart(note.id);
+      }}
+      onDragEnd={() => {
+        draggingNotePayload = null;
+        onDragEnd();
+      }}
       onClick={onSelect}
       onContextMenu={(e) => onContextMenu(e, note.id)}
       style={{
         padding: "10px 14px",
         borderBottom: "1px solid rgba(0,0,0,0.06)",
-        cursor: "pointer",
+        cursor: note.id > 0 ? "grab" : "pointer",
         background: active ? "rgba(0,0,0,0.07)" : "transparent",
-        transition: "background 0.1s",
+        transition: "background 0.1s, opacity 0.15s",
         userSelect: "none",
+        opacity: dragging ? 0.4 : 1,
       }}
       onMouseEnter={(e) => {
         if (!active) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.04)";
@@ -92,6 +111,7 @@ interface NotesListProps {
 export function NotesList({ sidebarOpen, onToggleSidebar }: NotesListProps) {
   const { selectedSpaceId, notes, activeNoteId, createNote, selectNote, deleteNote } = useNotesContentStore();
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const [draggingId, setDraggingId] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const spaceId = selectedSpaceId ?? "general";
@@ -166,7 +186,11 @@ export function NotesList({ sidebarOpen, onToggleSidebar }: NotesListProps) {
             key={note.id}
             note={note}
             active={activeNoteId === note.id}
+            spaceId={spaceId}
+            dragging={draggingId === note.id}
             onSelect={() => selectNote(note.id)}
+            onDragStart={(id) => setDraggingId(id)}
+            onDragEnd={() => setDraggingId(null)}
             onContextMenu={handleContextMenu}
           />
         ))}

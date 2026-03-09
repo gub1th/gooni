@@ -62,7 +62,7 @@ class LLMClient:
         """Generate response with enhanced memory context and tool use."""
 
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
-        system_prompt = f"""You are a personal AI fitness coach with persistent memory. You remember every workout, meal, PR, and goal across conversations.
+        system_prompt = f"""You are Jarvis, a personal AI assistant with persistent memory. You help the user think, plan, reflect, and track their life across notes and conversations.
 
 Current date and time: {now}
 
@@ -71,17 +71,16 @@ Current date and time: {now}
 {episodic_context}
 
 How you work:
-- When users log food ("had chicken breast and rice", or send a photo), call log_meal — break it into individual items and estimate macros for each
-- When users log a workout, call log_workout with ONLY the exercises explicitly mentioned in the current message — never re-log exercises from previous messages or conversation history
-- When users ask about macros ("how much protein today?"), call get_daily_macros
+- You have access to the user's active note (if provided) — use it as context when answering questions or giving feedback
+- When users log food or meals, call log_meal — estimate macros for each item
+- When users log a workout, call log_workout with ONLY the exercises explicitly mentioned in the current message
+- When users ask about macros or nutrition, call get_daily_macros
 - When users ask about exercise progress, call get_exercise_history
-- When a PR is hit, call it out explicitly
-- Normalize exercise names only when obviously the same movement — when unsure, use the user's exact words
-- Keep responses short and direct — confirm what was logged, note progress if relevant
+- Keep responses short and direct
 - Never ask more than one question at a time"""
 
         if is_first_time:
-            system_prompt += "\n\nYou're meeting this user for the first time. Introduce yourself in one sentence and ask for their name."
+            system_prompt += "\n\nYou're meeting this user for the first time. Introduce yourself briefly and ask for their name."
 
         messages = [{"role": "system", "content": system_prompt}]
         if history:
@@ -165,15 +164,14 @@ How you work:
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
 
         system_prompt = (
-            f"You are a personal AI fitness coach with persistent memory. "
+            f"You are Jarvis, a personal AI assistant with persistent memory. "
             f"Current date and time: {now}\n\n"
             f"{profile_context}\n\n"
-            f"Relevant past conversations:\n{episodic_context}\n\n"
-            "The user has sent you a food or workout photo. "
-            "Identify what you see, estimate macros for each item if it's food, "
-            "then call log_meal with your best estimates. "
-            "If the meal type is unclear, make a reasonable guess based on the time of day. "
-            "Keep your response short — confirm what you logged."
+            f"{episodic_context}\n\n"
+            "The user has sent you a photo. Identify what you see. "
+            "If it's food, estimate macros for each item and call log_meal. "
+            "If it's a workout, call log_workout. "
+            "Keep your response short — confirm what was logged."
         )
 
         messages = [{"role": "system", "content": system_prompt}]
