@@ -1,18 +1,18 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
-  type ApiNote,
-  fetchSpaceNotes,
   createNote as apiCreateNote,
-  updateNote as apiUpdateNote,
   deleteNote as apiDeleteNote,
   moveNote as apiMoveNote,
+  type ApiNote,
+  updateNote as apiUpdateNote,
+  fetchSpaceNotes,
 } from "../services/api";
 
 interface NotesContentState {
   // Space selection (replaces notesStore)
   selectedSpaceId: string | null;
-  selectSpace: (id: string) => void;
+  selectSpace: (id: string | null) => void;
 
   // Notes per space
   notes: Record<string, ApiNote[]>;       // keyed by spaceId string
@@ -36,7 +36,7 @@ export const useNotesContentStore = create<NotesContentState>()(
       activeNoteId: null,
       isDirty: false,
 
-      selectSpace: (id: string) => {
+      selectSpace: (id: string | null) => {
         set({ selectedSpaceId: id, activeNoteId: null });
       },
 

@@ -85,8 +85,11 @@ async def root():
 @app.post("/chat")
 async def chat(body: ChatRequest, db: Session = Depends(get_db)):
     content, usage = Orchestrator.handle_chat(
-        body.content, db, image_url=body.image_url,
-        source="web", entry_content=body.entry_content or "",
+        body.content,
+        db,
+        image_url=body.image_url,
+        source="web",
+        entry_content=body.entry_content or "",
     )
     return {"content": content, "usage": usage}
 
@@ -162,7 +165,12 @@ def get_spaces(db: Session = Depends(get_db)):
     )
     goal_by_space = {g.space_id: g.id for g in active_goals}
     return [
-        {"id": s.id, "name": s.name, "emoji": s.emoji, "goal_id": goal_by_space.get(s.id)}
+        {
+            "id": s.id,
+            "name": s.name,
+            "emoji": s.emoji,
+            "goal_id": goal_by_space.get(s.id),
+        }
         for s in spaces
     ]
 
@@ -224,27 +232,41 @@ def _serialize_note(n: Note) -> dict:
 
 def _notes_order():
     from sqlalchemy import func
+
     return func.coalesce(Note.updated_at, Note.created_at).desc()
 
 
 @app.get("/spaces/{space_id}/notes")
 def get_space_notes(space_id: str, db: Session = Depends(get_db)):
     if space_id == "general":
-        notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(_notes_order()).all()
+        notes = (
+            db.query(Note)
+            .filter(Note.space_id.is_(None))
+            .order_by(_notes_order())
+            .all()
+        )
     else:
-        notes = db.query(Note).filter(Note.space_id == int(space_id)).order_by(_notes_order()).all()
+        notes = (
+            db.query(Note)
+            .filter(Note.space_id == int(space_id))
+            .order_by(_notes_order())
+            .all()
+        )
     return [_serialize_note(n) for n in notes]
 
 
 @app.get("/notes")
 def get_general_notes(db: Session = Depends(get_db)):
-    notes = db.query(Note).filter(Note.space_id.is_(None)).order_by(_notes_order()).all()
+    notes = (
+        db.query(Note).filter(Note.space_id.is_(None)).order_by(_notes_order()).all()
+    )
     return [_serialize_note(n) for n in notes]
 
 
 @app.post("/spaces/{space_id}/notes")
 def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
     from datetime import datetime
+
     numeric_id = None if space_id == "general" else int(space_id)
     note = Note(
         title=body.get("title") or "",
@@ -262,6 +284,7 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
 @app.post("/notes")
 def create_general_note(body: dict, db: Session = Depends(get_db)):
     from datetime import datetime
+
     note = Note(
         title=body.get("title") or "",
         content=body.get("content") or "",
@@ -278,6 +301,7 @@ def create_general_note(body: dict, db: Session = Depends(get_db)):
 @app.patch("/notes/{note_id}")
 def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
     from datetime import datetime
+
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
@@ -299,6 +323,7 @@ def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
 def touch_note(note_id: int, db: Session = Depends(get_db)):
     """Update last_opened_at. Called whenever a note is selected."""
     from datetime import datetime
+
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
@@ -423,10 +448,14 @@ async def create_space_conversation(
     numeric_id = None if space_id == "general" else int(space_id)
     goal = (
         db.query(Goal).filter(Goal.space_id == numeric_id).first()
-        if numeric_id else None
+        if numeric_id
+        else None
     )
     conv = Conversation(
-        title=title, source="web", space_id=numeric_id, goal_id=goal.id if goal else None
+        title=title,
+        source="web",
+        space_id=numeric_id,
+        goal_id=goal.id if goal else None,
     )
     db.add(conv)
     db.commit()
@@ -441,9 +470,7 @@ def get_conversation_messages(conversation_id: int, db: Session = Depends(get_db
 
 
 @app.post("/conversations/{conversation_id}/seed")
-def seed_conversation(
-    conversation_id: int, body: dict, db: Session = Depends(get_db)
-):
+def seed_conversation(conversation_id: int, body: dict, db: Session = Depends(get_db)):
     """Entry content becomes the first user message; Orchestrator generates Claude's reply."""
     entry_content = body.get("entry_content", "").strip()
     if not entry_content:
@@ -467,7 +494,8 @@ def send_conversation_message(
     entry_content = body.get("entry_content", "")
     try:
         Orchestrator.handle_chat(
-            user_content, db,
+            user_content,
+            db,
             conversation_id=conversation_id,
             entry_content=entry_content,
         )
@@ -497,3 +525,117 @@ def get_macros_today(db: Session = Depends(get_db)):
 @app.get("/health")
 async def health():
     return {"message": "Health check"}
+
+
+# ── Dashboard ──────────────────────────────────────────────────────────────────
+
+
+@app.get("/dashboard")
+def get_dashboard_stats(db: Session = Depends(get_db)):
+    from datetime import date, datetime, timedelta
+
+    from sqlalchemy import func as sqlfunc
+
+    today = datetime.utcnow().date()
+    week_ago = datetime.utcnow() - timedelta(days=7)
+
+    notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
+
+    try:
+        workouts_this_week = (
+            db.query(Workout).filter(Workout.date >= today - timedelta(days=7)).count()
+        )
+    except Exception:
+        workouts_this_week = 0
+
+    active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
+
+    recent_notes = (
+        db.query(Note)
+        .order_by(sqlfunc.coalesce(Note.updated_at, Note.created_at).desc())
+        .limit(5)
+        .all()
+    )
+
+    # Streak: consecutive days with note activity ending today
+    try:
+        date_rows = db.execute(
+            text(
+                "SELECT DISTINCT date(updated_at) as d FROM notes "
+                "WHERE updated_at IS NOT NULL ORDER BY d DESC LIMIT 30"
+            )
+        ).fetchall()
+        streak = 0
+        for i, row in enumerate(date_rows):
+            note_date = date.fromisoformat(row[0])
+            if note_date == today - timedelta(days=i):
+                streak += 1
+            else:
+                break
+    except Exception:
+        streak = 0
+
+    return {
+        "notes_this_week": notes_this_week,
+        "workouts_this_week": workouts_this_week,
+        "active_goals_count": len(active_goals),
+        "active_goals": [
+            {"id": g.id, "title": g.title, "goal_type": g.goal_type.value}
+            for g in active_goals
+        ],
+        "recent_notes": [_serialize_note(n) for n in recent_notes],
+        "streak": streak,
+    }
+
+
+@app.get("/dashboard/insight")
+def get_dashboard_insight(db: Session = Depends(get_db)):
+    from datetime import datetime, timedelta
+
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
+    recent_notes = (
+        db.query(Note)
+        .filter(Note.title.isnot(None), Note.title != "")
+        .order_by(Note.updated_at.desc())
+        .limit(5)
+        .all()
+    )
+    active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
+
+    parts = [f"Notes written this week: {notes_this_week}"]
+    if recent_notes:
+        parts.append(
+            f"Recent note titles: {', '.join(n.title for n in recent_notes if n.title)}"
+        )
+    if active_goals:
+        parts.append(f"Active goals: {', '.join(g.title for g in active_goals)}")
+    context = "\n".join(parts)
+
+    today_str = datetime.now().strftime("%A, %B %d, %Y")
+    try:
+        response = llm_client.client.chat.completions.create(
+            model=llm_client.chat_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"You are Jarvis. Today is {today_str}. "
+                        "Write a brief 2-3 sentence daily briefing based on the user's recent activity. "
+                        "Be specific and personal, not generic. Keep it under 60 words."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"My recent activity:\n{context}\n\nGive me my daily briefing.",
+                },
+            ],
+            temperature=0.7,
+            max_tokens=120,
+        )
+        insight = response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Dashboard insight error: {e}")
+        insight = None
+
+    return {"insight": insight}

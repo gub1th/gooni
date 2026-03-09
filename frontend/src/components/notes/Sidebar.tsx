@@ -11,7 +11,13 @@ interface ContextMenu {
   confirming: boolean;
 }
 
-export function Sidebar() {
+interface SidebarProps {
+  isDashboard: boolean;
+  onLogoClick: () => void;
+  onSpaceSelect: () => void;
+}
+
+export function Sidebar({ isDashboard, onLogoClick, onSpaceSelect }: SidebarProps) {
   const { spaces, create: createSpace, remove: removeSpace, rename: renameSpace, setEmoji } = useSpacesStore();
   const { selectedSpaceId, selectSpace, loadNotes, removeSpace: clearSpaceNotes, moveNote } = useNotesContentStore();
   const [adding, setAdding] = useState(false);
@@ -58,6 +64,7 @@ export function Sidebar() {
   function handleSelectSpace(id: string) {
     selectSpace(id);
     loadNotes(id);
+    onSpaceSelect();
   }
 
   function startEditing(space: { id: string; name: string }) {
@@ -131,9 +138,26 @@ export function Sidebar() {
           borderBottom: "1px solid rgba(0,0,0,0.06)",
         }}
       >
-        <span style={{ fontSize: 15, fontWeight: 700, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif", color: "#1C1C1E" }}>
+        <button
+          onClick={onLogoClick}
+          title={isDashboard ? "Back to notes" : "Dashboard"}
+          style={{
+            background: isDashboard ? "rgba(0,0,0,0.08)" : "transparent",
+            border: "none",
+            borderRadius: 6,
+            padding: "3px 7px",
+            cursor: "pointer",
+            fontSize: 15,
+            fontWeight: 700,
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
+            color: "#1C1C1E",
+            transition: "background 0.1s",
+          }}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.06)")}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.08)" : "transparent")}
+        >
           Gooni
-        </span>
+        </button>
         <button
           onClick={startAdding}
           title="New space"
