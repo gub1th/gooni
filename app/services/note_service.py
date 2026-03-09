@@ -4,7 +4,7 @@ from datetime import datetime, date as date_type
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Note
+from ..db.models import Note, Space
 from ..llm.client import llm_client
 from .memory_service import memory_service
 
@@ -57,6 +57,42 @@ class NoteService:
                 pass
         scored.sort(key=lambda x: x[1], reverse=True)
         return [n for n, _ in scored[:limit]]
+
+    def suggest_space(self, note_id: int, db: Session) -> dict:
+        """Return best-matching space for a note based on embedding similarity.
+        Only suggests when the note is in General (space_id is None).
+        """
+        note = db.query(Note).filter(Note.id == note_id).first()
+        if not note or not note.embedding or note.space_id is not None:
+            return {"suggested_space_id": None, "suggested_space_name": None, "suggested_space_emoji": None}
+
+        note_vec = json.loads(note.embedding)
+        spaces = db.query(Space).all()
+        best_space = None
+        best_sim = 0.75  # minimum threshold to suggest
+
+        for space in spaces:
+            space_notes = (
+                db.query(Note)
+                .filter(Note.space_id == space.id, Note.id != note_id, Note.embedding.isnot(None))
+                .all()
+            )
+            if not space_notes:
+                continue
+            vecs = [json.loads(n.embedding) for n in space_notes]
+            centroid = [sum(v[i] for v in vecs) / len(vecs) for i in range(len(vecs[0]))]
+            sim = memory_service._cosine_similarity(note_vec, centroid)
+            if sim > best_sim:
+                best_sim = sim
+                best_space = space
+
+        if best_space:
+            return {
+                "suggested_space_id": best_space.id,
+                "suggested_space_name": best_space.name,
+                "suggested_space_emoji": best_space.emoji,
+            }
+        return {"suggested_space_id": None, "suggested_space_name": None, "suggested_space_emoji": None}
 
     def append_to_daily_note(self, user_msg: str, jarvis_reply: str, db: Session) -> None:
         """Create or append to today's daily note (General space, title = date).

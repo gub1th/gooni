@@ -1,20 +1,7 @@
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
-// Basic auth header — only built when credentials are provided (i.e. in production).
-// In local dev, leave VITE_AUTH_USERNAME unset and auth is skipped on both sides.
-const _authHeader = (() => {
-  const u = import.meta.env.VITE_AUTH_USERNAME;
-  const p = import.meta.env.VITE_AUTH_PASSWORD ?? "";
-  if (!u) return undefined;
-  return `Basic ${btoa(`${u}:${p}`)}`;
-})();
-
 function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
-  if (!_authHeader) return fetch(url, init);
-  return fetch(url, {
-    ...init,
-    headers: { ...init.headers, Authorization: _authHeader },
-  });
+  return fetch(url, init);
 }
 
 // ── Spaces ─────────────────────────────────────────────────────────────────────
@@ -118,6 +105,32 @@ export async function moveNote(id: number, toSpaceId: string): Promise<ApiNote> 
   });
   if (!res.ok) throw new Error("Failed to move note");
   return res.json();
+}
+
+export interface SpaceSuggestion {
+  suggested_space_id: number | null;
+  suggested_space_name: string | null;
+  suggested_space_emoji: string | null;
+}
+
+export async function embedNote(id: number): Promise<SpaceSuggestion> {
+  try {
+    const res = await apiFetch(`${BASE}/notes/${id}/embed`, { method: "POST" });
+    if (!res.ok) return { suggested_space_id: null, suggested_space_name: null, suggested_space_emoji: null };
+    return res.json();
+  } catch {
+    return { suggested_space_id: null, suggested_space_name: null, suggested_space_emoji: null };
+  }
+}
+
+export async function fetchRelatedNotes(id: number): Promise<ApiNote[]> {
+  try {
+    const res = await apiFetch(`${BASE}/notes/${id}/related?limit=3`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
 }
 
 export async function deleteNote(id: number): Promise<void> {

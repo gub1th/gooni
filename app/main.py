@@ -1,14 +1,11 @@
 import os
-import secrets
-from typing import Optional
 
 from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -74,26 +71,7 @@ _run_column_migrations(engine)
 # 3. Create remaining tables (they already have space_id in their model definition)
 Base.metadata.create_all(bind=engine)
 
-_security = HTTPBasic(auto_error=False)
-
-
-def _verify(credentials: Optional[HTTPBasicCredentials] = Depends(_security)) -> None:
-    """Global auth guard. Skipped when AUTH_USERNAME is not set (local dev)."""
-    username = os.getenv("AUTH_USERNAME", "")
-    password = os.getenv("AUTH_PASSWORD", "")
-    if not username:
-        return  # auth disabled — safe for local dev
-    if credentials is None:
-        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
-    ok = (
-        secrets.compare_digest(credentials.username, username)
-        and secrets.compare_digest(credentials.password, password)
-    )
-    if not ok:
-        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
-
-
-app = FastAPI(dependencies=[Depends(_verify)])
+app = FastAPI()
 
 _origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 
@@ -325,7 +303,6 @@ def create_general_note(body: dict, db: Session = Depends(get_db)):
 def update_note(
     note_id: int,
     body: dict,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     from datetime import datetime
@@ -339,13 +316,26 @@ def update_note(
         note.content = body["content"]
     if "title" in body or "content" in body:
         note.updated_at = datetime.utcnow()
-        background_tasks.add_task(note_service.update_embedding, note_id)
     if "space_id" in body:
         sid = body["space_id"]
         note.space_id = None if (sid is None or sid == "general") else int(sid)
     db.commit()
     db.refresh(note)
     return _serialize_note(note)
+
+
+@app.post("/notes/{note_id}/embed")
+def embed_note(note_id: int, db: Session = Depends(get_db)):
+    """Generate embedding for a note and check for space suggestion.
+    Called on blur (not on every save) to avoid wasteful API calls.
+    """
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    note_service.update_embedding(note_id)  # opens/closes its own session
+    db.expire_all()  # invalidate cache so suggest_space sees fresh embedding
+    suggestion = note_service.suggest_space(note_id, db)
+    return {"ok": True, **suggestion}
 
 
 @app.post("/notes/{note_id}/touch")

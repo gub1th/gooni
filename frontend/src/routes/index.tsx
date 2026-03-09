@@ -9,10 +9,6 @@ import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useJarvisStore } from "../stores/useJarvisStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
-import { LoginScreen } from "../components/LoginScreen";
-
-// Simple password protection
-const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD || "gooni2026";
 
 export const Route = createFileRoute("/")({
   component: NotesPage,
@@ -29,7 +25,6 @@ function NotesPage() {
 
   const [view, setView] = useState<"notes" | "dashboard">("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   useEffect(() => {
     setSidebarOpen(windowWidth >= SIDEBAR_BREAKPOINT);
@@ -61,20 +56,6 @@ function NotesPage() {
     await loadNotes(spaceId);
     selectNote(noteId);
     setView("notes");
-  }
-
-  // Handle login
-  function handleLogin(password: string): boolean {
-    if (password === APP_PASSWORD) {
-      setIsLoggedIn(true);
-      return true;
-    }
-    return false;
-  }
-
-  // Show login screen if not authenticated
-  if (!isLoggedIn) {
-    return <LoginScreen onLogin={handleLogin} />;
   }
 
   return (

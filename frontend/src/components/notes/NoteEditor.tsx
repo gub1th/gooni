@@ -1,7 +1,7 @@
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
-import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote } from "../../services/api";
+import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useJarvisStore } from "../../stores/useJarvisStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
@@ -46,7 +46,7 @@ type SaveStatus = "idle" | "saving" | "saved";
 export function NoteEditor() {
   useEditorStyles();
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace } = useNotesContentStore();
   const { isOpen: jarvisOpen, toggle: toggleJarvis } = useJarvisStore();
   const { spaces } = useSpacesStore();
 
@@ -56,6 +56,8 @@ export function NoteEditor() {
   const [localTitle, setLocalTitle] = useState(activeNote?.title ?? "");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [movePicker, setMovePicker] = useState(false);
+  const [relatedNotes, setRelatedNotes] = useState<ApiNote[]>([]);
+  const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
   const movePickerRef = useRef<HTMLDivElement>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const bodyRef = useRef<string>(activeNote?.content ?? "");
@@ -73,6 +75,18 @@ export function NoteEditor() {
     if (savedTimer.current) clearTimeout(savedTimer.current);
     setSaveStatus("idle");
     setLastSavedTime(null);
+    setSpaceSuggestion(null);
+    setRelatedNotes([]);
+  }, [activeNoteId]);
+
+  // Load related notes after note settles (quiet, non-blocking)
+  useEffect(() => {
+    if (!activeNoteId || activeNoteId < 0) return;
+    const t = setTimeout(async () => {
+      const notes = await fetchRelatedNotes(activeNoteId);
+      setRelatedNotes(notes.filter((n) => n.id !== activeNoteId));
+    }, 1000);
+    return () => clearTimeout(t);
   }, [activeNoteId]);
 
   // Memorize previous note on leave; touch new note on enter — catches ALL navigation paths
@@ -82,6 +96,7 @@ export function NoteEditor() {
     if (prev === activeNoteId) return; // initial mount, no change
 
     if (prev && prev > 0) {
+      embedAndCheck(prev);
       if (useNotesContentStore.getState().isDirty) {
         apiMemorizeNote(prev).catch(() => {});
       }
@@ -144,6 +159,10 @@ export function NoteEditor() {
         bodyRef.current = editor.getHTML();
         scheduleSave();
       },
+      onBlur: async () => {
+        await save();
+        embedAndCheck(activeNoteId);
+      },
     },
     [activeNoteId]
   );
@@ -175,6 +194,14 @@ export function NoteEditor() {
       savedTimer.current = setTimeout(() => setSaveStatus("idle"), 3000);
     } catch {
       setSaveStatus("idle");
+    }
+  }
+
+  async function embedAndCheck(noteId: number | null) {
+    if (!noteId || noteId < 0) return;
+    const result = await apiEmbedNote(noteId);
+    if (result.suggested_space_id) {
+      setSpaceSuggestion(result);
     }
   }
 
@@ -240,6 +267,20 @@ export function NoteEditor() {
         </span>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Space suggestion */}
+          {spaceSuggestion?.suggested_space_id && activeNote?.space_id === null && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 14, background: "rgba(0,122,255,0.08)", fontSize: 12, color: "#007AFF", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+              <span>{spaceSuggestion.suggested_space_emoji ?? "🗂️"} {spaceSuggestion.suggested_space_name}?</span>
+              <button
+                onClick={() => { if (activeNoteId) moveNote(activeNoteId, currentSpaceId, String(spaceSuggestion.suggested_space_id)); setSpaceSuggestion(null); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#007AFF", fontWeight: 600, fontSize: 12, padding: 0 }}
+              >Move</button>
+              <button
+                onClick={() => setSpaceSuggestion(null)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 13, padding: 0, lineHeight: 1 }}
+              >×</button>
+            </div>
+          )}
           {/* Move to... button */}
           {activeNote && moveTargets.length > 0 && (
             <div ref={movePickerRef} style={{ position: "relative" }}>
@@ -394,6 +435,32 @@ export function NoteEditor() {
             }}
           />
           <EditorContent editor={editor} />
+
+          {/* Related notes */}
+          {relatedNotes.length > 0 && (
+            <div style={{ marginTop: 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>RELATED</p>
+              {relatedNotes.map((n) => {
+                const targetSpaceId = n.space_id ? String(n.space_id) : "general";
+                return (
+                  <button
+                    key={n.id}
+                    onClick={async () => { selectSpace(targetSpaceId); await loadNotes(targetSpaceId); selectNote(n.id); }}
+                    style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", width: "100%", padding: "7px 0", background: "none", border: "none", cursor: "pointer", gap: 12, borderRadius: 6 }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)")}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
+                  >
+                    <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {n.title || "Untitled"}
+                    </span>
+                    <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+                      {formatNoteDate(n.updated_at)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
