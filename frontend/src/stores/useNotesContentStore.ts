@@ -6,6 +6,7 @@ import {
   createNote as apiCreateNote,
   updateNote as apiUpdateNote,
   deleteNote as apiDeleteNote,
+  moveNote as apiMoveNote,
 } from "../services/api";
 
 interface NotesContentState {
@@ -24,6 +25,7 @@ interface NotesContentState {
   removeSpace: (spaceId: string) => void;
   selectNote: (id: number | null) => void;
   markDirty: () => void;
+  moveNote: (noteId: number, fromSpaceId: string, toSpaceId: string) => Promise<void>;
 }
 
 export const useNotesContentStore = create<NotesContentState>()(
@@ -130,6 +132,43 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
 
       markDirty: () => set({ isDirty: true }),
+
+      moveNote: async (noteId: number, fromSpaceId: string, toSpaceId: string) => {
+        if (fromSpaceId === toSpaceId) return;
+        const note = (get().notes[fromSpaceId] ?? []).find((n) => n.id === noteId);
+        if (!note) return;
+
+        const movedNote = { ...note, space_id: toSpaceId === "general" ? null : Number(toSpaceId) };
+
+        // Optimistic: move note, switch to target space
+        set((s) => ({
+          notes: {
+            ...s.notes,
+            [fromSpaceId]: (s.notes[fromSpaceId] ?? []).filter((n) => n.id !== noteId),
+            [toSpaceId]: [movedNote, ...(s.notes[toSpaceId] ?? [])],
+          },
+          selectedSpaceId: toSpaceId,
+          activeNoteId: noteId,
+        }));
+
+        try {
+          await apiMoveNote(noteId, toSpaceId);
+          // Refresh target space to pick up any notes not yet loaded
+          get().loadNotes(toSpaceId);
+        } catch (e) {
+          // Rollback
+          set((s) => ({
+            notes: {
+              ...s.notes,
+              [fromSpaceId]: [note, ...(s.notes[fromSpaceId] ?? []).filter((n) => n.id !== noteId)],
+              [toSpaceId]: (s.notes[toSpaceId] ?? []).filter((n) => n.id !== noteId),
+            },
+            selectedSpaceId: fromSpaceId,
+            activeNoteId: noteId,
+          }));
+          console.error("moveNote error:", e);
+        }
+      },
     }),
     {
       name: "gooni-notes-content-v2",

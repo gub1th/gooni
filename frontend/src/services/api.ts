@@ -92,6 +92,17 @@ export async function memorizeNote(id: number): Promise<void> {
   await fetch(`${BASE}/notes/${id}/memorize`, { method: "POST" });
 }
 
+export async function moveNote(id: number, toSpaceId: string): Promise<ApiNote> {
+  const space_id = toSpaceId === "general" ? null : parseInt(toSpaceId);
+  const res = await fetch(`${BASE}/notes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ space_id }),
+  });
+  if (!res.ok) throw new Error("Failed to move note");
+  return res.json();
+}
+
 export async function deleteNote(id: number): Promise<void> {
   const res = await fetch(`${BASE}/notes/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete note");

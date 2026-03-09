@@ -285,7 +285,11 @@ def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
         note.title = body["title"]
     if "content" in body:
         note.content = body["content"]
-    note.updated_at = datetime.utcnow()
+    if "title" in body or "content" in body:
+        note.updated_at = datetime.utcnow()
+    if "space_id" in body:
+        sid = body["space_id"]
+        note.space_id = None if (sid is None or sid == "general") else int(sid)
     db.commit()
     db.refresh(note)
     return _serialize_note(note)

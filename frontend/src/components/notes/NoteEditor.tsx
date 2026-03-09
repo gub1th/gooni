@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useJarvisStore } from "../../stores/useJarvisStore";
+import { useSpacesStore } from "../../stores/useSpacesStore";
 
 function useEditorStyles() {
   useEffect(() => {
@@ -45,14 +46,17 @@ type SaveStatus = "idle" | "saving" | "saved";
 export function NoteEditor() {
   useEditorStyles();
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote } = useNotesContentStore();
   const { isOpen: jarvisOpen, toggle: toggleJarvis } = useJarvisStore();
+  const { spaces } = useSpacesStore();
 
   const spaceId = selectedSpaceId ?? "general";
   const activeNote = (notes[spaceId] ?? []).find((n) => n.id === activeNoteId) ?? null;
 
   const [localTitle, setLocalTitle] = useState(activeNote?.title ?? "");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [movePicker, setMovePicker] = useState(false);
+  const movePickerRef = useRef<HTMLDivElement>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const bodyRef = useRef<string>(activeNote?.content ?? "");
   const titleRef = useRef<string>(activeNote?.title ?? "");
@@ -94,6 +98,18 @@ export function NoteEditor() {
       setTimeout(() => titleInputRef.current?.focus(), 0);
     }
   }, [activeNoteId]);
+
+  // Close move picker on outside click
+  useEffect(() => {
+    if (!movePicker) return;
+    function handle(e: MouseEvent) {
+      if (movePickerRef.current && !movePickerRef.current.contains(e.target as Node)) {
+        setMovePicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [movePicker]);
 
   // Flush pending save on tab close (keepalive: true in api.ts ensures the request survives)
   useEffect(() => {
@@ -176,6 +192,12 @@ export function NoteEditor() {
     }
   }
 
+  // Spaces the note can be moved to (all except the current one)
+  const currentSpaceId = selectedSpaceId ?? "general";
+  const moveTargets = spaces
+    .map((s) => ({ id: String(s.id), name: s.name, emoji: s.id === "general" ? "📥" : (s.emoji ?? "🗂️") }))
+    .filter((s) => s.id !== currentSpaceId);
+
   return (
     <div
       style={{
@@ -217,6 +239,80 @@ export function NoteEditor() {
             : ""}
         </span>
 
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Move to... button */}
+          {activeNote && moveTargets.length > 0 && (
+            <div ref={movePickerRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setMovePicker((p) => !p)}
+                title="Move note to another space"
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 14,
+                  border: "none",
+                  background: movePicker ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  color: "#636366",
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.10)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = movePicker ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)")}
+              >
+                Move to ↗
+              </button>
+              {movePicker && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 6px)",
+                    right: 0,
+                    background: "#FFFFFF",
+                    borderRadius: 10,
+                    boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
+                    padding: 6,
+                    minWidth: 160,
+                    zIndex: 100,
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  }}
+                >
+                  {moveTargets.map((space) => (
+                    <button
+                      key={space.id}
+                      onClick={() => {
+                        if (activeNoteId) moveNote(activeNoteId, currentSpaceId, space.id);
+                        setMovePicker(false);
+                      }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        width: "100%",
+                        padding: "7px 10px",
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        borderRadius: 6,
+                        fontSize: 13.5,
+                        color: "#1C1C1E",
+                        textAlign: "left",
+                      }}
+                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+                    >
+                      <span style={{ fontSize: 14 }}>{space.emoji}</span>
+                      {space.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
         <button
           onClick={toggleJarvis}
           title={jarvisOpen ? "Close Jarvis" : "Open Jarvis"}
@@ -240,6 +336,7 @@ export function NoteEditor() {
         >
           💬 Jarvis
         </button>
+        </div>
       </div>
 
       {/* Editor content */}
