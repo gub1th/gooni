@@ -7,6 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p db
+RUN mkdir -p db && chmod +x start.sh
 
-CMD ["python", "scripts/telegram_bot.py"]
+CMD ["./start.sh"]

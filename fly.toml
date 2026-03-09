@@ -3,12 +3,19 @@ primary_region = "sjc"
 
 [build]
 
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1  # keep alive so the Telegram bot keeps polling
+
 [mounts]
   source = "gooni_data"
   destination = "/app/db"
 
 [processes]
-  app = "python scripts/telegram_bot.py"
+  app = "./start.sh"
 
 [[vm]]
   memory = "256mb"
