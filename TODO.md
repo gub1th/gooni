@@ -13,10 +13,11 @@
 - [ ] Keyboard shortcut: ⌘N creates a new note in the current space
 - [ ] Mobile: Jarvis panel as a bottom sheet on narrow screens
 - [ ] Note tags / search
-- [ ] Emoji picker for the spaces
+
 - [ ] Dark mode
 
 ## Done
+- [x] Emoji picker for the spaces
 - [x] 3-panel Apple Notes layout (Sidebar + NotesList + NoteEditor)
 - [x] Jarvis panel with note context
 - [x] Note CRUD (create, auto-save, delete)

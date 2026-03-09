@@ -22,6 +22,7 @@ function NotesPage() {
   const isJarvisOpen = useJarvisStore((s) => s.isOpen);
   const windowWidth = useWindowWidth();
 
+
   // Start open on wide screens, closed on narrow
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
 

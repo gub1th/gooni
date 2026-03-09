@@ -85,7 +85,8 @@ async def root():
 @app.post("/chat")
 async def chat(body: ChatRequest, db: Session = Depends(get_db)):
     content, usage = Orchestrator.handle_chat(
-        body.content, db, image_url=body.image_url, source="web"
+        body.content, db, image_url=body.image_url,
+        source="web", entry_content=body.entry_content or "",
     )
     return {"content": content, "usage": usage}
 
@@ -223,7 +224,7 @@ def _serialize_note(n: Note) -> dict:
 
 def _notes_order():
     from sqlalchemy import func
-    return func.coalesce(Note.last_opened_at, Note.updated_at, Note.created_at).desc()
+    return func.coalesce(Note.updated_at, Note.created_at).desc()
 
 
 @app.get("/spaces/{space_id}/notes")

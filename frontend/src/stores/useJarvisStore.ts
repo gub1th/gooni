@@ -12,7 +12,9 @@ interface JarvisState {
   messages: JarvisMessage[];
   sending: boolean;
   isOpen: boolean;
+  width: number;
   toggle: () => void;
+  setWidth: (w: number) => void;
   send: (content: string, noteContent?: string) => Promise<void>;
 }
 
@@ -22,8 +24,10 @@ export const useJarvisStore = create<JarvisState>()(
       messages: [],
       sending: false,
       isOpen: false,
+      width: 300,
 
       toggle: () => set((s) => ({ isOpen: !s.isOpen })),
+      setWidth: (w: number) => set({ width: Math.min(600, Math.max(220, w)) }),
 
       send: async (content: string, noteContent?: string) => {
         const userMsg: JarvisMessage = {
@@ -48,8 +52,8 @@ export const useJarvisStore = create<JarvisState>()(
       },
     }),
     {
-      name: "gooni-jarvis-v1",
-      partialize: (s) => ({ isOpen: s.isOpen }),
+      name: "gooni-jarvis-v2",
+      partialize: (s) => ({ isOpen: s.isOpen, width: s.width }),
     }
   )
 );

@@ -1,12 +1,19 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { useJarvisStore } from "../stores/useJarvisStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 
-export function JarvisPanel() {
-  const { messages, sending, toggle, send } = useJarvisStore();
+interface JarvisPanelProps {
+  fullscreen?: boolean;
+}
+
+export function JarvisPanel({ fullscreen = false }: JarvisPanelProps) {
+  const { messages, sending, toggle, send, width, setWidth } = useJarvisStore();
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -19,8 +26,7 @@ export function JarvisPanel() {
     const text = input.trim();
     if (!text || sending) return;
     setInput("");
-    const noteContent = activeNote?.content ?? undefined;
-    await send(text, noteContent);
+    await send(text, activeNote?.content ?? undefined);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -30,23 +36,80 @@ export function JarvisPanel() {
     }
   }
 
-  return (
-    <div
-      style={{
-        width: 300,
-        minWidth: 300,
+  // Drag-to-resize (only in sidebar mode)
+  const onDragMouseDown = useCallback((e: React.MouseEvent) => {
+    if (fullscreen) return;
+    e.preventDefault();
+    isDragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = width;
+
+    function onMouseMove(e: MouseEvent) {
+      if (!isDragging.current) return;
+      const delta = dragStartX.current - e.clientX; // drag left = wider
+      setWidth(dragStartWidth.current + delta);
+    }
+    function onMouseUp() {
+      isDragging.current = false;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    }
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [fullscreen, width, setWidth]);
+
+  const containerStyle: React.CSSProperties = fullscreen
+    ? {
+        flex: 1,
         height: "100vh",
         background: "#FFFFFF",
         borderLeft: "1px solid rgba(0,0,0,0.08)",
         display: "flex",
         flexDirection: "column",
         boxSizing: "border-box",
-      }}
-    >
+        position: "relative",
+      }
+    : {
+        width,
+        minWidth: width,
+        height: "100vh",
+        background: "#FFFFFF",
+        borderLeft: "1px solid rgba(0,0,0,0.08)",
+        display: "flex",
+        flexDirection: "column",
+        boxSizing: "border-box",
+        position: "relative",
+      };
+
+  return (
+    <div style={containerStyle}>
+      {/* Drag handle — left edge, sidebar only */}
+      {!fullscreen && (
+        <div
+          onMouseDown={onDragMouseDown}
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 4,
+            height: "100%",
+            cursor: "col-resize",
+            zIndex: 10,
+            background: "transparent",
+          }}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.08)")}
+          onMouseLeave={(e) => {
+            if (!isDragging.current)
+              (e.currentTarget as HTMLDivElement).style.background = "transparent";
+          }}
+        />
+      )}
+
       {/* Header */}
       <div
         style={{
-          padding: "16px 16px 12px",
+          height: 52,
+          padding: "0 16px",
           borderBottom: "1px solid rgba(0,0,0,0.08)",
           display: "flex",
           alignItems: "center",
@@ -64,29 +127,31 @@ export function JarvisPanel() {
         >
           Jarvis
         </span>
-        <button
-          onClick={toggle}
-          title="Close Jarvis"
-          style={{
-            width: 24,
-            height: 24,
-            borderRadius: "50%",
-            background: "rgba(0,0,0,0.06)",
-            border: "none",
-            cursor: "pointer",
-            fontSize: 13,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#636366",
-            padding: 0,
-            transition: "background 0.1s",
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
-        >
-          ×
-        </button>
+        {!fullscreen && (
+          <button
+            onClick={toggle}
+            title="Close Jarvis"
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              background: "rgba(0,0,0,0.06)",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#636366",
+              padding: 0,
+              transition: "background 0.1s",
+            }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+          >
+            ×
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -94,7 +159,7 @@ export function JarvisPanel() {
         style={{
           flex: 1,
           overflowY: "auto",
-          padding: "12px 12px",
+          padding: "12px 16px",
           display: "flex",
           flexDirection: "column",
           gap: 8,
@@ -107,10 +172,12 @@ export function JarvisPanel() {
               fontSize: 13,
               fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
               textAlign: "center",
-              marginTop: 32,
+              marginTop: fullscreen ? 80 : 32,
             }}
           >
-            Ask Jarvis anything. Your active note is shared as context.
+            {fullscreen
+              ? "Ask Jarvis anything, or open a note to get feedback on it."
+              : "Ask Jarvis anything. Your active note is shared as context."}
           </div>
         )}
         {messages.map((m) => (
@@ -124,7 +191,7 @@ export function JarvisPanel() {
           >
             <div
               style={{
-                maxWidth: "88%",
+                maxWidth: fullscreen ? 640 : "88%",
                 padding: "8px 12px",
                 borderRadius: 14,
                 fontSize: 13.5,
@@ -155,14 +222,50 @@ export function JarvisPanel() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
+      {/* Input area */}
       <div
         style={{
-          padding: "8px 12px 12px",
+          padding: "8px 16px 16px",
           borderTop: "1px solid rgba(0,0,0,0.08)",
           flexShrink: 0,
+          maxWidth: fullscreen ? 720 : undefined,
+          width: "100%",
+          boxSizing: "border-box",
+          alignSelf: fullscreen ? "center" : undefined,
         }}
       >
+        {/* Active note context chip */}
+        {activeNote && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 8,
+              padding: "5px 10px",
+              borderRadius: 8,
+              background: "rgba(0,0,0,0.04)",
+              border: "1px solid rgba(0,0,0,0.07)",
+              width: "fit-content",
+              maxWidth: "100%",
+            }}
+          >
+            <span style={{ fontSize: 12 }}>📄</span>
+            <span
+              style={{
+                fontSize: 12,
+                color: "#636366",
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {activeNote.title?.trim() || "Untitled note"}
+            </span>
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           <textarea
             value={input}
