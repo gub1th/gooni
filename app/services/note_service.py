@@ -94,41 +94,51 @@ class NoteService:
             }
         return {"suggested_space_id": None, "suggested_space_name": None, "suggested_space_emoji": None}
 
+    def _get_or_create_journal_space(self, db: Session) -> int:
+        """Get or create the Journal space for daily Telegram notes."""
+        space = db.query(Space).filter(Space.name == "Journal").first()
+        if not space:
+            space = Space(name="Journal", emoji="📓")
+            db.add(space)
+            db.commit()
+            db.refresh(space)
+        return space.id
+
     def append_to_daily_note(self, user_msg: str, jarvis_reply: str, db: Session) -> None:
-        """Create or append to today's daily note (General space, title = date).
+        """Create or append to today's daily note (Journal space, title = date).
         Called after every Telegram exchange.
         """
         today = date_type.today()
         title = f"{today.strftime('%B')} {today.day}, {today.year}"  # "March 9, 2026"
+        journal_space_id = self._get_or_create_journal_space(db)
 
         note = db.query(Note).filter(
             Note.title == title,
-            Note.space_id.is_(None),
+            Note.space_id == journal_space_id,
         ).first()
 
         time_str = datetime.now().strftime("%I:%M %p").lstrip("0")  # "9:41 AM"
-        reply_snippet = jarvis_reply if len(jarvis_reply) <= 300 else jarvis_reply[:297] + "…"
+        user_snippet = user_msg if len(user_msg) <= 80 else user_msg[:77] + "…"
+        reply_snippet = jarvis_reply if len(jarvis_reply) <= 100 else jarvis_reply[:97] + "…"
 
         is_new = note is None
-        block = (
-            ("" if is_new else "<hr>")
-            + f"<p><strong>{time_str}</strong></p>"
-            + f"<p>{user_msg}</p>"
-            + f"<p><em>Jarvis: {reply_snippet}</em></p>"
-        )
+        bullet = f"<li><span style='color:#8E8E93'>{time_str}</span>&nbsp;&nbsp;{user_snippet}&nbsp;&nbsp;<em style='color:#636366'>→ {reply_snippet}</em></li>"
+        block = f"<ul>{bullet}</ul>" if is_new else bullet
 
         try:
             if is_new:
                 note = Note(
                     title=title,
                     content=block,
-                    space_id=None,
+                    space_id=journal_space_id,
                     created_at=datetime.utcnow(),
                     updated_at=datetime.utcnow(),
                 )
                 db.add(note)
             else:
-                note.content = (note.content or "") + block
+                # Insert new <li> before closing </ul>
+                content = note.content or "<ul></ul>"
+                note.content = content.replace("</ul>", bullet + "</ul>", 1)
                 note.updated_at = datetime.utcnow()
             db.commit()
         except Exception as e:
