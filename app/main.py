@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -27,6 +27,7 @@ from .services.conversation_service import conversation_service
 from .services.goal_service import goal_service
 from .services.meal_service import meal_service
 from .services.memory_service import memory_service
+from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
 from .services.workout_service import workout_service
 
@@ -48,6 +49,7 @@ def _run_column_migrations(engine):
             ("notes", "updated_at", "INTEGER"),
             ("notes", "last_opened_at", "INTEGER"),
             ("spaces", "emoji", "TEXT"),
+            ("notes", "embedding", "TEXT"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -239,12 +241,7 @@ def _notes_order():
 @app.get("/spaces/{space_id}/notes")
 def get_space_notes(space_id: str, db: Session = Depends(get_db)):
     if space_id == "general":
-        notes = (
-            db.query(Note)
-            .filter(Note.space_id.is_(None))
-            .order_by(_notes_order())
-            .all()
-        )
+        notes = db.query(Note).order_by(_notes_order()).all()
     else:
         notes = (
             db.query(Note)
@@ -299,7 +296,12 @@ def create_general_note(body: dict, db: Session = Depends(get_db)):
 
 
 @app.patch("/notes/{note_id}")
-def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
+def update_note(
+    note_id: int,
+    body: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     from datetime import datetime
 
     note = db.query(Note).filter(Note.id == note_id).first()
@@ -311,6 +313,7 @@ def update_note(note_id: int, body: dict, db: Session = Depends(get_db)):
         note.content = body["content"]
     if "title" in body or "content" in body:
         note.updated_at = datetime.utcnow()
+        background_tasks.add_task(note_service.update_embedding, note_id)
     if "space_id" in body:
         sid = body["space_id"]
         note.space_id = None if (sid is None or sid == "general") else int(sid)
@@ -334,16 +337,25 @@ def touch_note(note_id: int, db: Session = Depends(get_db)):
 
 @app.post("/notes/{note_id}/memorize")
 def memorize_note(note_id: int, db: Session = Depends(get_db)):
-    """Extract a memory episode from the note's current content. Called when user leaves the note."""
+    """Extract profile facts from a note when the user leaves it.
+    Note embeddings are handled by the PATCH endpoint background task —
+    we no longer create Memory episodes from notes (episodes are for chat only).
+    """
+    import re
+
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-    content = (note.content or "").strip()
+    raw = re.sub(r"<[^>]+>", " ", note.content or "").strip()
+    if len(raw) <= 10:
+        return {"ok": True, "facts_saved": 0}
     try:
-        result = memory_service.process_content(content, db)
+        facts = llm_client.extract_profile_facts(raw)
+        for fact in facts:
+            memory_service.upsert_profile_fact(fact, db)
     except Exception:
-        result = {}
-    return {"ok": True, **result}
+        facts = []
+    return {"ok": True, "facts_saved": len(facts)}
 
 
 @app.delete("/notes/{note_id}")
@@ -354,6 +366,13 @@ def delete_note(note_id: int, db: Session = Depends(get_db)):
     db.delete(note)
     db.commit()
     return {"ok": True}
+
+
+@app.get("/notes/{note_id}/related")
+def get_related_notes(note_id: int, limit: int = 5, db: Session = Depends(get_db)):
+    """Return notes similar to the given note, ranked by embedding cosine similarity."""
+    related = note_service.get_related(note_id, limit, db)
+    return [_serialize_note(n) for n in related]
 
 
 # ── Serializers ────────────────────────────────────────────────────────────────

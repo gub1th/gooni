@@ -144,6 +144,7 @@ class Note(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
     last_opened_at = Column(DateTime, nullable=True)
+    embedding = Column(Text, nullable=True)  # JSON-serialised float list
 
 
 class Memory(Base):
