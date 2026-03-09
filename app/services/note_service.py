@@ -69,7 +69,7 @@ class NoteService:
         note_vec = json.loads(note.embedding)
         spaces = db.query(Space).all()
         best_space = None
-        best_sim = 0.75  # minimum threshold to suggest
+        best_sim = 0.60  # minimum threshold to suggest
 
         for space in spaces:
             space_notes = (
