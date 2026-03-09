@@ -1,23 +1,30 @@
-app = "gooni-bot"
-primary_region = "sjc"
+# fly.toml app configuration file generated for gooni-bot on 2026-03-09T00:40:41-07:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'gooni-bot'
+primary_region = 'sjc'
 
 [build]
+
+[processes]
+  app = './start.sh'
+
+[[mounts]]
+  source = 'gooni_data'
+  destination = '/app/db'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 1  # keep alive so the Telegram bot keeps polling
-
-[mounts]
-  source = "gooni_data"
-  destination = "/app/db"
-
-[processes]
-  app = "./start.sh"
+  min_machines_running = 1
+  processes = ["app"]
 
 [[vm]]
-  memory = "256mb"
-  cpu_kind = "shared"
+  memory = '256mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
