@@ -3,6 +3,7 @@ from ..llm.client import llm_client
 from .goal_service import goal_service
 from .conversation_service import conversation_service
 from .memory_service import memory_service
+from .note_service import note_service
 
 
 class Orchestrator:
@@ -84,6 +85,10 @@ class Orchestrator:
                 goal_id=getattr(conv, "goal_id", None),
                 db=db,
             )
+
+        # Append Telegram exchanges to today's daily note
+        if source == "telegram":
+            note_service.append_to_daily_note(message, response, db)
 
         usage["memory"] = {"episode_saved": True}
 

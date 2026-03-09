@@ -108,6 +108,29 @@ export async function deleteNote(id: number): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete note");
 }
 
+// ── Dashboard ──────────────────────────────────────────────────────────────────
+
+export interface DashboardStats {
+  notes_this_week: number;
+  workouts_this_week: number;
+  active_goals_count: number;
+  active_goals: { id: number; title: string; goal_type: string }[];
+  recent_notes: ApiNote[];
+  streak: number;
+}
+
+export async function fetchDashboardStats(): Promise<DashboardStats> {
+  const res = await fetch(`${BASE}/dashboard`);
+  if (!res.ok) throw new Error("Failed to fetch dashboard stats");
+  return res.json();
+}
+
+export async function fetchDashboardInsight(): Promise<{ insight: string | null }> {
+  const res = await fetch(`${BASE}/dashboard/insight`);
+  if (!res.ok) throw new Error("Failed to fetch dashboard insight");
+  return res.json();
+}
+
 // ── Jarvis ─────────────────────────────────────────────────────────────────────
 
 export async function sendJarvisMessage(

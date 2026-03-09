@@ -1,25 +1,70 @@
 import { useEffect, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
+import { useSpacesStore } from "../../stores/useSpacesStore";
 import type { ApiNote } from "../../services/api";
 
 // Module-level drag state so Sidebar can read it without prop drilling
 export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "";
+function parseDate(iso: string | null): Date | null {
+  if (!iso) return null;
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
+  return new Date(hasOffset ? iso : iso + "Z");
+}
+
+function formatTime(iso: string | null): string {
+  const d = parseDate(iso);
+  if (!d) return "";
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
   if (isToday) return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
   if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return d.toLocaleDateString("en-US", { weekday: "short" });
 }
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
+}
+
+function groupNotes(notes: ApiNote[]): { label: string; notes: ApiNote[] }[] {
+  const now = new Date();
+  const todayStr = now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const yesterdayStr = yesterday.toDateString();
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(now.getDate() - 7);
+
+  const buckets: Record<string, ApiNote[]> = {
+    Today: [],
+    Yesterday: [],
+    "Previous 7 Days": [],
+    Older: [],
+  };
+
+  for (const note of notes) {
+    const d = parseDate(note.updated_at);
+    if (!d) { buckets.Older.push(note); continue; }
+    const ds = d.toDateString();
+    if (ds === todayStr) buckets.Today.push(note);
+    else if (ds === yesterdayStr) buckets.Yesterday.push(note);
+    else if (d >= sevenDaysAgo) buckets["Previous 7 Days"].push(note);
+    else buckets.Older.push(note);
+  }
+
+  return Object.entries(buckets)
+    .filter(([, arr]) => arr.length > 0)
+    .map(([label, notes]) => ({ label, notes }));
+}
+
+function FolderIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M1 3.5C1 2.948 1.448 2.5 2 2.5H4.5L5.5 3.5H10C10.552 3.5 11 3.948 11 4.5V9C11 9.552 10.552 10 10 10H2C1.448 10 1 9.552 1 9V3.5Z" stroke="#636366" strokeWidth="1.2" fill="none"/>
+    </svg>
+  );
 }
 
 interface ContextMenu {
@@ -34,13 +79,14 @@ interface NoteRowProps {
   active: boolean;
   spaceId: string;
   dragging: boolean;
+  spaceBadge?: string | null; // "emoji name" or just "name" — shown when in all-notes view
   onSelect: () => void;
   onDragStart: (id: number) => void;
   onDragEnd: () => void;
   onContextMenu: (e: React.MouseEvent, noteId: number) => void;
 }
 
-function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDragEnd, onContextMenu }: NoteRowProps) {
+function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDragStart, onDragEnd, onContextMenu }: NoteRowProps) {
   const preview = note.content ? stripHtml(note.content).slice(0, 60) : "";
   const title = note.title?.trim() || "New Note";
 
@@ -91,7 +137,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
         <span style={{ fontSize: 12, color: "#8E8E93", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", flexShrink: 0 }}>
-          {formatDate(note.updated_at)}
+          {formatTime(note.updated_at)}
         </span>
         {preview && (
           <span style={{ fontSize: 12, color: "#AEAEB2", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -99,6 +145,28 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
           </span>
         )}
       </div>
+      {spaceBadge && (
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5, background: "rgba(0,0,0,0.07)", borderRadius: 5, padding: "2px 7px 2px 5px" }}>
+          <FolderIcon />
+          <span style={{ fontSize: 11.5, color: "#3C3C43", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", fontWeight: 500 }}>
+            {spaceBadge}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <div style={{
+      padding: "14px 14px 6px",
+      fontSize: 20,
+      fontWeight: 700,
+      color: "#1C1C1E",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
+    }}>
+      {label}
     </div>
   );
 }
@@ -110,12 +178,22 @@ interface NotesListProps {
 
 export function NotesList({ sidebarOpen, onToggleSidebar }: NotesListProps) {
   const { selectedSpaceId, notes, activeNoteId, createNote, selectNote, deleteNote } = useNotesContentStore();
+  const spaces = useSpacesStore((s) => s.spaces);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const spaceId = selectedSpaceId ?? "general";
+  const isAllNotes = spaceId === "general";
   const noteList = notes[spaceId] ?? [];
+
+  // Build a lookup from numeric space_id → display label
+  const spaceLabel = (numericId: number | null): string | null => {
+    if (!numericId) return null;
+    const sp = spaces.find((s) => s.id === numericId);
+    if (!sp) return null;
+    return sp.emoji ? `${sp.emoji} ${sp.name}` : sp.name;
+  };
 
   // Dismiss context menu on outside click
   useEffect(() => {
@@ -144,6 +222,8 @@ export function NotesList({ sidebarOpen, onToggleSidebar }: NotesListProps) {
     setContextMenu(null);
     await deleteNote(id, spaceId);
   }
+
+  const groups = isAllNotes ? groupNotes(noteList) : null;
 
   return (
     <div
@@ -181,19 +261,40 @@ export function NotesList({ sidebarOpen, onToggleSidebar }: NotesListProps) {
             No notes yet. Press + to create one.
           </div>
         )}
-        {noteList.map((note) => (
-          <NoteRow
-            key={note.id}
-            note={note}
-            active={activeNoteId === note.id}
-            spaceId={spaceId}
-            dragging={draggingId === note.id}
-            onSelect={() => selectNote(note.id)}
-            onDragStart={(id) => setDraggingId(id)}
-            onDragEnd={() => setDraggingId(null)}
-            onContextMenu={handleContextMenu}
-          />
-        ))}
+
+        {groups
+          ? groups.map(({ label, notes: sectionNotes }) => (
+              <div key={label}>
+                <SectionHeader label={label} />
+                {sectionNotes.map((note) => (
+                  <NoteRow
+                    key={note.id}
+                    note={note}
+                    active={activeNoteId === note.id}
+                    spaceId={spaceId}
+                    dragging={draggingId === note.id}
+                    spaceBadge={spaceLabel(note.space_id)}
+                    onSelect={() => selectNote(note.id)}
+                    onDragStart={(id) => setDraggingId(id)}
+                    onDragEnd={() => setDraggingId(null)}
+                    onContextMenu={handleContextMenu}
+                  />
+                ))}
+              </div>
+            ))
+          : noteList.map((note) => (
+              <NoteRow
+                key={note.id}
+                note={note}
+                active={activeNoteId === note.id}
+                spaceId={spaceId}
+                dragging={draggingId === note.id}
+                onSelect={() => selectNote(note.id)}
+                onDragStart={(id) => setDraggingId(id)}
+                onDragEnd={() => setDraggingId(null)}
+                onContextMenu={handleContextMenu}
+              />
+            ))}
       </div>
 
       {/* Context menu */}

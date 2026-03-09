@@ -1,13 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { Dashboard } from "../components/Dashboard";
 import { JarvisPanel } from "../components/JarvisPanel";
-import { Sidebar } from "../components/notes/Sidebar";
-import { NotesList } from "../components/notes/NotesList";
 import { NoteEditor } from "../components/notes/NoteEditor";
+import { NotesList } from "../components/notes/NotesList";
+import { Sidebar } from "../components/notes/Sidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
-import { useSpacesStore } from "../stores/useSpacesStore";
-import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useJarvisStore } from "../stores/useJarvisStore";
+import { useNotesContentStore } from "../stores/useNotesContentStore";
+import { useSpacesStore } from "../stores/useSpacesStore";
 
 export const Route = createFileRoute("/")({
   component: NotesPage,
@@ -18,15 +19,13 @@ const SIDEBAR_BREAKPOINT = 768;
 
 function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
-  const { selectedSpaceId, selectSpace, loadNotes } = useNotesContentStore();
+  const { selectedSpaceId, selectSpace, loadNotes, selectNote } = useNotesContentStore();
   const isJarvisOpen = useJarvisStore((s) => s.isOpen);
   const windowWidth = useWindowWidth();
 
-
-  // Start open on wide screens, closed on narrow
+  const [view, setView] = useState<"notes" | "dashboard">("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
 
-  // Auto-collapse sidebar when window narrows past breakpoint
   useEffect(() => {
     setSidebarOpen(windowWidth >= SIDEBAR_BREAKPOINT);
   }, [windowWidth >= SIDEBAR_BREAKPOINT]);
@@ -35,15 +34,29 @@ function NotesPage() {
     fetchSpaces();
   }, []);
 
-  // On mount: load notes for whatever space is already selected (or default to general)
   useEffect(() => {
-    const spaceId = selectedSpaceId ?? "general";
-    if (!selectedSpaceId) selectSpace("general");
-    loadNotes(spaceId);
-  }, []);
+    // Only select a space when we're in notes view, not dashboard
+    if (view === "notes") {
+      const spaceId = selectedSpaceId ?? "general";
+      if (!selectedSpaceId) selectSpace("general");
+      loadNotes(spaceId);
+    }
+  }, [view]);
 
-  // Jarvis overlays on small screens
+  // Clear selected space when switching to dashboard
+  useEffect(() => {
+    if (view === "dashboard" && selectedSpaceId) {
+      selectSpace(null);
+    }
+  }, [view, selectedSpaceId]);
   const isSmall = windowWidth < 1100;
+
+  async function handleGoToNote(noteId: number, spaceId: string) {
+    selectSpace(spaceId);
+    await loadNotes(spaceId);
+    selectNote(noteId);
+    setView("notes");
+  }
 
   return (
     <div
@@ -55,33 +68,44 @@ function NotesPage() {
         position: "relative",
       }}
     >
-      {/* Sidebar — conditionally rendered based on sidebarOpen */}
-      {sidebarOpen && <Sidebar />}
+      {sidebarOpen && (
+        <Sidebar
+          isDashboard={view === "dashboard"}
+          onLogoClick={() => setView((v) => (v === "dashboard" ? "notes" : "dashboard"))}
+          onSpaceSelect={() => setView("notes")}
+        />
+      )}
 
-      <NotesList
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
-      />
+      {view === "dashboard" ? (
+        <Dashboard onGoToNote={handleGoToNote} />
+      ) : (
+        <>
+          <NotesList
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+          />
 
-      <NoteEditor />
+          <NoteEditor />
 
-      {isJarvisOpen && (
-        isSmall ? (
-          <div
-            style={{
-              position: "absolute",
-              right: 0,
-              top: 0,
-              height: "100%",
-              zIndex: 50,
-              boxShadow: "-4px 0 20px rgba(0,0,0,0.12)",
-            }}
-          >
-            <JarvisPanel />
-          </div>
-        ) : (
-          <JarvisPanel />
-        )
+          {isJarvisOpen && (
+            isSmall ? (
+              <div
+                style={{
+                  position: "absolute",
+                  right: 0,
+                  top: 0,
+                  height: "100%",
+                  zIndex: 50,
+                  boxShadow: "-4px 0 20px rgba(0,0,0,0.12)",
+                }}
+              >
+                <JarvisPanel />
+              </div>
+            ) : (
+              <JarvisPanel />
+            )
+          )}
+        </>
       )}
     </div>
   );
