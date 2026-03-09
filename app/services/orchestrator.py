@@ -47,7 +47,12 @@ class Orchestrator:
         else:
             conv = conversation_service.find_or_create_session(source, db)
 
-        conversation_service.add_message(conv.id, "user", message, db)
+        # For photos, save a descriptive placeholder so follow-up messages have context
+        if image_url:
+            saved_message = f"[Photo: {message}]" if message.strip() else "[Photo]"
+        else:
+            saved_message = message
+        conversation_service.add_message(conv.id, "user", saved_message, db)
 
         # Build recent history from this conversation
         recent_messages = conversation_service.get_recent_messages(conv.id, limit=10, db=db)
@@ -79,16 +84,16 @@ class Orchestrator:
             memory_service.upsert_profile_fact(fact, db)
 
         # Auto-save episode for future context retrieval
-        if message.strip() and len(message.strip()) > 10:
+        if saved_message.strip() and len(saved_message.strip()) > 10:
             memory_service.create_episode(
-                f"User: {message}\nAssistant: {response}",
+                f"User: {saved_message}\nAssistant: {response}",
                 goal_id=getattr(conv, "goal_id", None),
                 db=db,
             )
 
         # Append Telegram exchanges to today's daily note
         if source == "telegram":
-            note_service.append_to_daily_note(message, response, db)
+            note_service.append_to_daily_note(saved_message, response, db)
 
         usage["memory"] = {"episode_saved": True}
 
