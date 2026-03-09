@@ -1,9 +1,14 @@
+import os
+import secrets
+from typing import Optional
+
 from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -69,11 +74,32 @@ _run_column_migrations(engine)
 # 3. Create remaining tables (they already have space_id in their model definition)
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+_security = HTTPBasic(auto_error=False)
+
+
+def _verify(credentials: Optional[HTTPBasicCredentials] = Depends(_security)) -> None:
+    """Global auth guard. Skipped when AUTH_USERNAME is not set (local dev)."""
+    username = os.getenv("AUTH_USERNAME", "")
+    password = os.getenv("AUTH_PASSWORD", "")
+    if not username:
+        return  # auth disabled — safe for local dev
+    if credentials is None:
+        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
+    ok = (
+        secrets.compare_digest(credentials.username, username)
+        and secrets.compare_digest(credentials.password, password)
+    )
+    if not ok:
+        raise HTTPException(status_code=401, headers={"WWW-Authenticate": "Basic"})
+
+
+app = FastAPI(dependencies=[Depends(_verify)])
+
+_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
