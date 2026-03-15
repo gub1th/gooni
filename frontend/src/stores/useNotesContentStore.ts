@@ -9,6 +9,7 @@ import {
   fetchSpaceNotes,
 } from "../services/api";
 
+
 interface NotesContentState {
   // Space selection (replaces notesStore)
   selectedSpaceId: string | null;
@@ -26,6 +27,7 @@ interface NotesContentState {
   selectNote: (id: number | null) => void;
   markDirty: () => void;
   moveNote: (noteId: number, fromSpaceId: string, toSpaceId: string) => Promise<void>;
+  patchNoteGoal: (noteId: number, goalId: number | null) => void;
 }
 
 export const useNotesContentStore = create<NotesContentState>()(
@@ -59,6 +61,7 @@ export const useNotesContentStore = create<NotesContentState>()(
           title: null,
           content: null,
           space_id: spaceId === "general" ? null : parseInt(spaceId),
+          goal_id: null,
           created_at: now,
           updated_at: now,
           last_opened_at: null,
@@ -73,9 +76,11 @@ export const useNotesContentStore = create<NotesContentState>()(
             spaceId === "general" ? "general" : parseInt(spaceId)
           );
           set((s) => {
-            const list = (s.notes[spaceId] ?? []).map((n) =>
-              n.id === tempId ? real : n
-            );
+            const existing = s.notes[spaceId] ?? [];
+            // If a concurrent loadNotes cleared the optimistic entry, still add the real note
+            const list = existing.some((n) => n.id === tempId)
+              ? existing.map((n) => n.id === tempId ? real : n)
+              : [real, ...existing];
             return { notes: { ...s.notes, [spaceId]: list }, activeNoteId: real.id };
           });
           return real;
@@ -132,6 +137,16 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
 
       markDirty: () => set({ isDirty: true }),
+
+      patchNoteGoal: (noteId: number, goalId: number | null) => {
+        set((s) => {
+          const updated: Record<string, ApiNote[]> = {};
+          for (const [key, list] of Object.entries(s.notes)) {
+            updated[key] = list.map((n) => n.id === noteId ? { ...n, goal_id: goalId } : n);
+          }
+          return { notes: updated };
+        });
+      },
 
       moveNote: async (noteId: number, fromSpaceId: string, toSpaceId: string) => {
         if (fromSpaceId === toSpaceId) return;

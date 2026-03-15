@@ -1,3 +1,4 @@
+import json
 import os
 
 from dotenv import load_dotenv
@@ -15,6 +16,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Conversation,
     Goal,
     GoalStatus,
+    GoalType,
     Meal,
     Memory,
     Message,
@@ -46,10 +48,12 @@ def _run_column_migrations(engine):
         # (table, col, sql_type)
         for table, col, col_type in [
             ("goals", "space_id", "INTEGER"),
+            ("goals", "milestones", "TEXT"),
             ("conversations", "space_id", "INTEGER"),
             ("notes", "space_id", "INTEGER"),
             ("notes", "updated_at", "INTEGER"),
             ("notes", "last_opened_at", "INTEGER"),
+            ("notes", "goal_id", "INTEGER"),
             ("spaces", "emoji", "TEXT"),
             ("notes", "embedding", "TEXT"),
         ]:
@@ -117,30 +121,83 @@ async def debug_memories(db: Session = Depends(get_db)):
     ]
 
 
-@app.post("/goals")
-def create_goal(body: dict, db: Session = Depends(get_db)):
-    title = body.get("title", "").strip()
-    if not title:
-        raise HTTPException(status_code=400, detail="title is required")
-    goal = goal_service.create(title=title, db=db)
+def _serialize_goal(g: Goal) -> dict:
     return {
-        "id": goal.id,
-        "title": goal.title,
-        "goal_type": goal.goal_type.value,
+        "id": g.id,
+        "title": g.title,
+        "goal_type": g.goal_type.value,
+        "status": g.status.value,
+        "motivation": g.motivation,
+        "blocker": g.blocker,
+        "milestones": json.loads(g.milestones) if g.milestones else [],
     }
 
 
 @app.get("/goals")
 def get_goals(db: Session = Depends(get_db)):
     goals = goal_service.get_active(db)
-    return [
-        {
-            "id": g.id,
-            "title": g.title,
-            "goal_type": g.goal_type.value,
-        }
-        for g in goals
-    ]
+    return [_serialize_goal(g) for g in goals]
+
+
+@app.post("/goals")
+def create_goal(body: dict, db: Session = Depends(get_db)):
+    title = body.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    goal_type_str = body.get("goal_type", "achieve")
+    motivation = body.get("motivation", None)
+    goal = Goal(
+        title=title,
+        goal_type=GoalType(goal_type_str),
+        status=GoalStatus.ACTIVE,
+        motivation=motivation,
+    )
+    db.add(goal)
+    db.commit()
+    db.refresh(goal)
+    return _serialize_goal(goal)
+
+
+@app.patch("/goals/{goal_id}")
+def update_goal(goal_id: int, body: dict, db: Session = Depends(get_db)):
+    goal = db.query(Goal).filter(Goal.id == goal_id).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    if "title" in body:
+        goal.title = body["title"]
+    if "motivation" in body:
+        goal.motivation = body["motivation"]
+    if "blocker" in body:
+        goal.blocker = body["blocker"]
+    if "status" in body:
+        goal.status = GoalStatus(body["status"])
+    if "milestones" in body:
+        goal.milestones = json.dumps(body["milestones"])
+    db.commit()
+    db.refresh(goal)
+    return _serialize_goal(goal)
+
+
+@app.delete("/goals/{goal_id}")
+def delete_goal(goal_id: int, db: Session = Depends(get_db)):
+    goal = db.query(Goal).filter(Goal.id == goal_id).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    db.query(Note).filter(Note.goal_id == goal_id).update({"goal_id": None})
+    db.delete(goal)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/goals/{goal_id}/notes")
+def get_goal_notes(goal_id: int, db: Session = Depends(get_db)):
+    notes = (
+        db.query(Note)
+        .filter(Note.goal_id == goal_id)
+        .order_by(Note.updated_at.desc())
+        .all()
+    )
+    return [_serialize_note(n) for n in notes]
 
 
 # ── Spaces ────────────────────────────────────────────────────────────────────
@@ -230,6 +287,7 @@ def _serialize_note(n: Note) -> dict:
         "title": n.title,
         "content": n.content,
         "space_id": n.space_id,
+        "goal_id": n.goal_id,
         "created_at": n.created_at,
         "updated_at": n.updated_at,
         "last_opened_at": n.last_opened_at,
@@ -319,6 +377,9 @@ def update_note(
     if "space_id" in body:
         sid = body["space_id"]
         note.space_id = None if (sid is None or sid == "general") else int(sid)
+    if "goal_id" in body:
+        gid = body["goal_id"]
+        note.goal_id = None if gid is None else int(gid)
     db.commit()
     db.refresh(note)
     return _serialize_note(note)

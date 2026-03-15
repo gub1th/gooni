@@ -18,6 +18,16 @@ Telegram bot exists for mobile capture — messages become notes/conversations i
 
 See **TODO.md** for current priorities.
 
+## North Star
+Evolving toward an ambient physical assistant — 
+a device that knows you passively and proactively 
+surfaces relevant context. Jarvis is the brain.
+
+## Rules
+- Don't add new features without being asked
+- Don't change the DB schema without flagging it
+- Don't install new dependencies without asking first
+
 ## Architecture
 
 ### Backend (`app/`)
@@ -76,3 +86,5 @@ GET  /debug/memories       → inspect stored memories
 - **FastAPI `db: Session = Depends(get_db)`** — session created/closed per request automatically
 - **Optimistic UI**: `createNote` adds a temp note instantly, replaces with real API response
 - **React StrictMode**: kept intentionally — double-fires effects in dev to expose bugs; never remove it
+
+## Known Issues

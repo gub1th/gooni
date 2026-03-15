@@ -1,10 +1,11 @@
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
-import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, type ApiNote, type SpaceSuggestion } from "../../services/api";
+import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, linkNoteToGoal as apiLinkNoteToGoal, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useJarvisStore } from "../../stores/useJarvisStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
+import { useGoalsStore } from "../../stores/useGoalsStore";
 
 function useEditorStyles() {
   useEffect(() => {
@@ -46,9 +47,10 @@ type SaveStatus = "idle" | "saving" | "saved";
 export function NoteEditor() {
   useEditorStyles();
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, patchNoteGoal, deleteNote } = useNotesContentStore();
   const { isOpen: jarvisOpen, toggle: toggleJarvis } = useJarvisStore();
   const { spaces } = useSpacesStore();
+  const { goals } = useGoalsStore();
 
   const spaceId = selectedSpaceId ?? "general";
   const activeNote = (notes[spaceId] ?? []).find((n) => n.id === activeNoteId) ?? null;
@@ -56,9 +58,12 @@ export function NoteEditor() {
   const [localTitle, setLocalTitle] = useState(activeNote?.title ?? "");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [movePicker, setMovePicker] = useState(false);
+  const [goalPicker, setGoalPicker] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [relatedNotes, setRelatedNotes] = useState<ApiNote[]>([]);
   const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
   const movePickerRef = useRef<HTMLDivElement>(null);
+  const goalPickerRef = useRef<HTMLDivElement>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const bodyRef = useRef<string>(activeNote?.content ?? "");
   const titleRef = useRef<string>(activeNote?.title ?? "");
@@ -77,6 +82,7 @@ export function NoteEditor() {
     setLastSavedTime(null);
     setSpaceSuggestion(null);
     setRelatedNotes([]);
+    setDeleteConfirm(false);
   }, [activeNoteId]);
 
   // Load related notes after note settles (quiet, non-blocking)
@@ -125,6 +131,25 @@ export function NoteEditor() {
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, [movePicker]);
+
+  // Close goal picker on outside click
+  useEffect(() => {
+    if (!goalPicker) return;
+    function handle(e: MouseEvent) {
+      if (goalPickerRef.current && !goalPickerRef.current.contains(e.target as Node)) {
+        setGoalPicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [goalPicker]);
+
+  async function handleLinkGoal(goalId: number | null) {
+    if (!activeNoteId) return;
+    patchNoteGoal(activeNoteId, goalId);
+    await apiLinkNoteToGoal(activeNoteId, goalId);
+    setGoalPicker(false);
+  }
 
   // Flush pending save on tab close (keepalive: true in api.ts ensures the request survives)
   useEffect(() => {
@@ -199,9 +224,13 @@ export function NoteEditor() {
 
   async function embedAndCheck(noteId: number | null) {
     if (!noteId || noteId < 0) return;
-    const result = await apiEmbedNote(noteId);
-    if (result.suggested_space_id) {
-      setSpaceSuggestion(result);
+    try {
+      const result = await apiEmbedNote(noteId);
+      if (result.suggested_space_id) {
+        setSpaceSuggestion(result);
+      }
+    } catch {
+      // note may have been deleted — ignore
     }
   }
 
@@ -281,6 +310,58 @@ export function NoteEditor() {
               >×</button>
             </div>
           )}
+          {/* Goal chip */}
+          {activeNote && (
+            <div ref={goalPickerRef} style={{ position: "relative" }}>
+              <button
+                onClick={() => setGoalPicker((p) => !p)}
+                title="Link note to a goal"
+                style={{
+                  padding: "4px 10px", borderRadius: 14, border: "none",
+                  background: activeNote.goal_id ? "rgba(0,122,255,0.10)" : "rgba(0,0,0,0.05)",
+                  cursor: "pointer", fontSize: 12,
+                  color: activeNote.goal_id ? "#007AFF" : "#636366",
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  display: "flex", alignItems: "center", gap: 4,
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = activeNote.goal_id ? "rgba(0,122,255,0.16)" : "rgba(0,0,0,0.10)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = activeNote.goal_id ? "rgba(0,122,255,0.10)" : "rgba(0,0,0,0.05)")}
+              >
+                🎯 {activeNote.goal_id ? (goals.find((g) => g.id === activeNote.goal_id)?.title ?? "Goal") : "Goal"}
+              </button>
+              {goalPicker && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 6px)", right: 0,
+                  background: "#FFFFFF", borderRadius: 10,
+                  boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
+                  padding: 6, minWidth: 180, zIndex: 100,
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                }}>
+                  <button
+                    onClick={() => handleLinkGoal(null)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#636366", textAlign: "left" }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+                  >
+                    — No goal
+                  </button>
+                  {goals.filter((g) => g.status === "active").map((goal) => (
+                    <button
+                      key={goal.id}
+                      onClick={() => handleLinkGoal(goal.id)}
+                      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: activeNote.goal_id === goal.id ? "rgba(0,122,255,0.08)" : "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#1C1C1E", textAlign: "left" }}
+                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = activeNote.goal_id === goal.id ? "rgba(0,122,255,0.08)" : "transparent")}
+                    >
+                      <span style={{ fontSize: 14 }}>{goal.goal_type === "avoid" ? "🚫" : "🎯"}</span>
+                      {goal.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Move to... button */}
           {activeNote && moveTargets.length > 0 && (
             <div ref={movePickerRef} style={{ position: "relative" }}>
@@ -349,6 +430,61 @@ export function NoteEditor() {
                       {space.name}
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Delete button */}
+          {activeNote && activeNote.id > 0 && (
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setDeleteConfirm((p) => !p)}
+                title="Delete note"
+                style={{
+                  padding: "4px 10px", borderRadius: 14, border: "none",
+                  background: deleteConfirm ? "rgba(255,59,48,0.10)" : "rgba(0,0,0,0.05)",
+                  cursor: "pointer", fontSize: 12,
+                  color: deleteConfirm ? "#FF3B30" : "#636366",
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  display: "flex", alignItems: "center", gap: 4,
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.10)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = deleteConfirm ? "rgba(255,59,48,0.10)" : "rgba(0,0,0,0.05)")}
+              >
+                🗑 Delete
+              </button>
+              {deleteConfirm && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 6px)", right: 0,
+                  background: "#FFFFFF", borderRadius: 10,
+                  boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
+                  padding: 6, minWidth: 160, zIndex: 100,
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                }}>
+                  <div style={{ padding: "6px 10px 8px", fontSize: 12.5, color: "#636366" }}>
+                    Delete this note?
+                  </div>
+                  <button
+                    onClick={async () => {
+                      await deleteNote(activeNote.id, selectedSpaceId ?? "general");
+                      setDeleteConfirm(false);
+                    }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#FF3B30", textAlign: "left" }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.08)")}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+                  >
+                    Yes, delete
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirm(false)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#636366", textAlign: "left" }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+                  >
+                    Cancel
+                  </button>
                 </div>
               )}
             </div>
