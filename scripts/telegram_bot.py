@@ -1,12 +1,9 @@
-from dotenv import load_dotenv
-
-load_dotenv()
-
 import asyncio
 import base64
 import os
 import tempfile
 
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -20,6 +17,8 @@ from app.db.database import SessionLocal, engine
 from app.db.models import Base
 from app.llm.client import llm_client
 from app.services.orchestrator import Orchestrator
+
+load_dotenv()
 
 Base.metadata.create_all(bind=engine)
 

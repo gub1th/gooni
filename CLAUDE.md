@@ -9,45 +9,49 @@ Daniel is an eager software engineer actively learning. When working with him:
 
 ## Goal
 
-Gooni is a **personal AI notebook**. The core loop:
-1. You write notes (structured like Apple Notes — spaces → notes list → editor)
+Gooni is a **personal AI notebook** evolving toward an ambient home assistant. The core loop:
+1. You write notes (Apple Notes layout — spaces → notes list → editor)
 2. Jarvis (GPT-4o-mini) reads your active note and answers questions / gives feedback
-3. Over time, Jarvis builds a memory from your notes (episodes stored in SQLite)
+3. Over time, Jarvis builds a memory from your notes (stored in SQLite)
 
 Telegram bot exists for mobile capture — messages become notes/conversations in the DB.
 
-See **TODO.md** for current priorities.
-
 ## North Star
-Evolving toward an ambient physical assistant — 
-a device that knows you passively and proactively 
-surfaces relevant context. Jarvis is the brain.
+Evolving toward an ambient physical assistant — a device that knows you passively and proactively surfaces relevant context. Jarvis is the brain. See `docs/VISION.md`.
 
 ## Rules
 - Don't add new features without being asked
 - Don't change the DB schema without flagging it
 - Don't install new dependencies without asking first
 
+## Current Priorities
+See **`docs/TODO.md`** for the full backlog. Top items:
+- Deploy Telegram bot
+- GoalView redesign (living document feel, inline note creation)
+- Memory refactor (replace hardcoded meals/workouts with flexible Memory entities)
+
 ## Architecture
 
 ### Backend (`app/`)
-- **`app/main.py`** — All FastAPI routes. CORS allows `localhost:5173`.
-- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note`, `Conversation`, `Message`, `Goal`, `Memory`, `Meal`, `Workout`, `WorkoutSet`
+- **`app/main.py`** — All FastAPI routes + startup migrations. CORS allows `localhost:5173`.
+- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Goal`, `Note`, `Conversation`, `Message`, `Memory`, `Meal`, `Workout`, `WorkoutSet`
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
-- **`app/services/memory_service.py`** — Vector memory (cosine similarity + OpenAI embeddings). `create_episode()` saves note content as long-term memory.
+- **`app/services/memory_service.py`** — Vector memory (cosine similarity + OpenAI embeddings).
 - **`app/services/orchestrator.py`** — Handles Telegram/CLI chat. `Orchestrator` singleton.
 - **`app/llm/client.py`** — OpenAI wrapper (`llm_client`). Default model: `gpt-4o-mini`.
 
 ### Frontend (`frontend/src/`)
-- **`routes/index.tsx`** — 4-panel layout: Sidebar | NotesList | NoteEditor | JarvisPanel (optional)
-- **`components/notes/Sidebar.tsx`** — Space list (200px). 💬 toggles Jarvis.
-- **`components/notes/NotesList.tsx`** — Notes for selected space (260px). + creates note.
-- **`components/notes/NoteEditor.tsx`** — Title + TipTap body. Auto-saves after 1.5s.
+- **`routes/index.tsx`** — Layout: Sidebar | NotesList | NoteEditor | JarvisPanel (optional). View state: `"notes" | "dashboard" | "goal"`.
+- **`components/notes/Sidebar.tsx`** — Goals section + Spaces section (200px).
+- **`components/notes/NotesList.tsx`** — Notes for selected space (260px).
+- **`components/notes/NoteEditor.tsx`** — Title + TipTap body. Auto-saves after 1.5s. Goal chip in header.
+- **`components/GoalView.tsx`** — Goal detail: title, motivation, milestones, linked notes, Jarvis briefing.
 - **`components/JarvisPanel.tsx`** — Chat panel (300px). Passes active note as context.
-- **`stores/useNotesContentStore.ts`** — Single source of truth: selected space, notes per space, active note. Persist key: `gooni-notes-content-v1`.
+- **`stores/useNotesContentStore.ts`** — Selected space, notes per space, active note. Persist key: `gooni-notes-content-v2`.
 - **`stores/useSpacesStore.ts`** — Space list from backend.
-- **`stores/useJarvisStore.ts`** — Chat messages + `isOpen`. Persist key: `gooni-jarvis-v1`.
-- **`services/api.ts`** — All fetch calls. Spaces, Notes, Jarvis only.
+- **`stores/useGoalsStore.ts`** — Goals list + selected goal from backend.
+- **`stores/useJarvisStore.ts`** — Chat messages + `isOpen`. Persist key: `gooni-jarvis-v2`.
+- **`services/api.ts`** — All fetch calls.
 
 ## Running
 
@@ -63,20 +67,25 @@ cd frontend && npm run dev                                   # port 5173
 
 ```bash
 cd frontend && npx tsc --noEmit          # zero errors required
-python -c "from app.main import app; print('OK')"
+source venv/bin/activate && python -c "from app.main import app; print('OK')"
 ```
 
 ## Key API Endpoints
 
 ```
-GET  /spaces               → list spaces
-POST /spaces               → create space { name }
-GET  /spaces/{id}/notes    → notes for space (sorted by updated_at desc)
-POST /spaces/{id}/notes    → create note { title?, content? }
-PATCH /notes/{id}          → update note { title?, content? }  (also saves memory episode)
-DELETE /notes/{id}         → delete note
-POST /chat                 → Jarvis chat { content, entry_content? }
-GET  /debug/memories       → inspect stored memories
+GET  /spaces                    → list spaces
+POST /spaces                    → create space { name }
+GET  /spaces/{id}/notes         → notes for space
+POST /spaces/{id}/notes         → create note
+PATCH /notes/{id}               → update note { title?, content?, space_id?, goal_id? }
+DELETE /notes/{id}              → delete note
+GET  /goals                     → list active goals (full data)
+POST /goals                     → create goal { title, goal_type?, motivation? }
+PATCH /goals/{id}               → update goal { title?, motivation?, status?, milestones? }
+DELETE /goals/{id}              → delete goal (unlinks notes)
+GET  /goals/{id}/notes          → notes linked to this goal
+POST /chat                      → Jarvis chat { content, entry_content? }
+GET  /debug/memories            → inspect stored memories
 ```
 
 ## Code Patterns
@@ -84,6 +93,7 @@ GET  /debug/memories       → inspect stored memories
 - **Zustand persist**: if you change a store's shape, bump the persist key to avoid stale state (e.g. `v1` → `v2`)
 - **Singleton services**: each `app/services/*.py` creates one instance at the bottom — whole app shares it
 - **FastAPI `db: Session = Depends(get_db)`** — session created/closed per request automatically
+- **Startup migrations**: `_run_column_migrations()` in `main.py` runs ALTER TABLE for new columns on existing DBs
 - **Optimistic UI**: `createNote` adds a temp note instantly, replaces with real API response
 - **React StrictMode**: kept intentionally — double-fires effects in dev to expose bugs; never remove it
 
