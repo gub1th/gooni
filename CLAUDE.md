@@ -37,7 +37,7 @@ See **`docs/TODO.md`** for the full backlog. Top items:
 - **`app/db/models.py`** — SQLAlchemy models: `Space`, `Goal`, `Note`, `Conversation`, `Message`, `Memory`, `Meal`, `Workout`, `WorkoutSet`
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
 - **`app/services/memory_service.py`** — Vector memory (cosine similarity + OpenAI embeddings).
-- **`app/services/orchestrator.py`** — Handles Telegram/CLI chat. `Orchestrator` singleton.
+- **`app/services/orchestrator.py`** — Unified chat handler (web + Telegram). `Orchestrator` singleton.
 - **`app/llm/client.py`** — OpenAI wrapper (`llm_client`). Default model: `gpt-4o-mini`.
 
 ### Frontend (`frontend/src/`)
