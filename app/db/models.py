@@ -62,6 +62,7 @@ class Goal(Base):
     status = Column(Enum(GoalStatus), default=GoalStatus.ACTIVE, nullable=False)
     motivation = Column(Text, nullable=True)
     blocker = Column(Text, nullable=True)
+    milestones = Column(Text, nullable=True)  # JSON: [{id, text, done}]
     space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -72,6 +73,7 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, index=True)
+    # dani_comment: why conversation has goal_id?
     goal_id = Column(Integer, ForeignKey("goals.id"), nullable=True)
     space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     title = Column(Text, nullable=True)  # auto-generated short title
@@ -141,6 +143,7 @@ class Note(Base):
     title = Column(Text, nullable=True)
     content = Column(Text, nullable=True)
     space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
+    goal_id = Column(Integer, ForeignKey("goals.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
     last_opened_at = Column(DateTime, nullable=True)

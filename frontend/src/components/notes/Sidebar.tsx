@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { EmojiPicker } from "../EmojiPicker";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
+import { useGoalsStore } from "../../stores/useGoalsStore";
 
 interface ContextMenu {
   x: number;
@@ -13,15 +14,31 @@ interface ContextMenu {
 
 interface SidebarProps {
   isDashboard: boolean;
+  showCompose: boolean;
   onLogoClick: () => void;
   onSpaceSelect: () => void;
+  onGoalSelect: () => void;
+  onCompose: () => void;
 }
 
-export function Sidebar({ isDashboard, onLogoClick, onSpaceSelect }: SidebarProps) {
+function ComposeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M11 1.5L13.5 4L6.5 11H4V8.5L11 1.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none"/>
+      <path d="M2 13.5H13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onGoalSelect, onCompose }: SidebarProps) {
   const { spaces, create: createSpace, remove: removeSpace, rename: renameSpace, setEmoji } = useSpacesStore();
   const { selectedSpaceId, selectSpace, loadNotes, removeSpace: clearSpaceNotes, moveNote } = useNotesContentStore();
+  const { goals, create: createGoal, selectedGoalId, selectGoal } = useGoalsStore();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
+  const [addingGoal, setAddingGoal] = useState(false);
+  const [newGoalName, setNewGoalName] = useState("");
+  const goalInputRef = useRef<HTMLInputElement>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -62,9 +79,41 @@ export function Sidebar({ isDashboard, onLogoClick, onSpaceSelect }: SidebarProp
   }
 
   function handleSelectSpace(id: string) {
+    selectGoal(null);
     selectSpace(id);
     loadNotes(id);
     onSpaceSelect();
+  }
+
+  function startAddingGoal() {
+    setAddingGoal(true);
+    setNewGoalName("");
+    setTimeout(() => goalInputRef.current?.focus(), 0);
+  }
+
+  async function submitNewGoal() {
+    const name = newGoalName.trim();
+    if (name) {
+      const goal = await createGoal(name);
+      if (goal) {
+        selectSpace(null);
+        selectGoal(goal.id);
+        onGoalSelect();
+      }
+    }
+    setAddingGoal(false);
+    setNewGoalName("");
+  }
+
+  function handleGoalKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter") submitNewGoal();
+    if (e.key === "Escape") { setAddingGoal(false); setNewGoalName(""); }
+  }
+
+  function handleSelectGoal(id: number) {
+    selectSpace(null);
+    selectGoal(id);
+    onGoalSelect();
   }
 
   function startEditing(space: { id: string; name: string }) {
@@ -158,16 +207,88 @@ export function Sidebar({ isDashboard, onLogoClick, onSpaceSelect }: SidebarProp
         >
           Gooni
         </button>
-        <button
-          onClick={startAdding}
-          title="New space"
-          style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(0,0,0,0.06)", border: "none", cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center", color: "#1C1C1E", padding: 0, flexShrink: 0, transition: "background 0.1s" }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
-        >
-          +
-        </button>
+        {showCompose && (
+          <button
+            onClick={onCompose}
+            title="New note"
+            style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(0,0,0,0.06)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s" }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+          >
+            <ComposeIcon />
+          </button>
+        )}
       </div>
+
+      {/* Scrollable content */}
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+
+      {/* Goals section */}
+      <div style={{ padding: "10px 6px 4px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 6px", marginBottom: 2 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>GOALS</span>
+          <button
+            onClick={startAddingGoal}
+            title="Add goal"
+            style={{ width: 20, height: 20, borderRadius: "50%", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: "#8E8E93", padding: 0 }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#1C1C1E")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#8E8E93")}
+          >+</button>
+        </div>
+        {addingGoal && (
+          <div style={{ padding: "4px 4px" }}>
+            <input
+              ref={goalInputRef}
+              value={newGoalName}
+              onChange={(e) => setNewGoalName(e.target.value)}
+              onKeyDown={handleGoalKeyDown}
+              onBlur={submitNewGoal}
+              placeholder="Goal name..."
+              style={{ width: "100%", boxSizing: "border-box", padding: "5px 8px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.15)", fontSize: 13, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", outline: "none", background: "#fff", color: "#1C1C1E" }}
+            />
+          </div>
+        )}
+        {goals.map((goal) => {
+          const selected = selectedGoalId === goal.id;
+          return (
+            <div
+              key={goal.id}
+              onClick={() => handleSelectGoal(goal.id)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "0 10px",
+                height: 32,
+                borderRadius: 8,
+                cursor: "pointer",
+                background: selected ? "rgba(0,0,0,0.09)" : "transparent",
+                transition: "background 0.12s",
+                userSelect: "none",
+              }}
+              onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
+              onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+            >
+              <span style={{ fontSize: 14, flexShrink: 0 }}>{goal.goal_type === "avoid" ? "🚫" : "🎯"}</span>
+              <span style={{
+                flex: 1,
+                fontSize: 13.5,
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                fontWeight: selected ? 600 : 400,
+                color: "#1C1C1E",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}>
+                {goal.title}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Divider */}
+      <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "4px 12px 4px" }} />
 
       {/* New space input */}
       {adding && (
@@ -184,8 +305,20 @@ export function Sidebar({ isDashboard, onLogoClick, onSpaceSelect }: SidebarProp
         </div>
       )}
 
+      {/* Spaces section label */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px 2px" }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>SPACES</span>
+        <button
+          onClick={startAdding}
+          title="Add space"
+          style={{ width: 20, height: 20, borderRadius: "50%", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: "#8E8E93", padding: 0 }}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#1C1C1E")}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#8E8E93")}
+        >+</button>
+      </div>
+
       {/* Spaces list */}
-      <div style={{ padding: "6px 6px", flex: 1, overflowY: "auto" }}>
+      <div style={{ padding: "2px 6px", flex: 1 }}>
         {allSpaces.map((space) => {
           const selected = selectedSpaceId === space.id;
           const isEditing = editingId === space.id;
@@ -282,6 +415,8 @@ export function Sidebar({ isDashboard, onLogoClick, onSpaceSelect }: SidebarProp
           );
         })}
       </div>
+
+      </div>{/* end scrollable content */}
 
       {/* Emoji picker */}
       {emojiPicker && (
