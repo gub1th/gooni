@@ -15,8 +15,7 @@ class ConversationService:
 
     def find_or_create_session(self, source: str, db: Session) -> Conversation:
         """Reuse the active conversation for the given source if the last message
-        was < SESSION_GAP_MINUTES ago. Otherwise start a new one.
-        Works for both 'telegram' and 'web' sources."""
+        was < SESSION_GAP_MINUTES ago. Otherwise start a new one."""
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=SESSION_GAP_MINUTES)
 

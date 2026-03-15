@@ -26,15 +26,14 @@ class Orchestrator:
         stripped = message.strip()
         command = stripped.lower()
 
-        # Slash commands only apply for Telegram
-        if source == "telegram":
-            if command == "/memory":
-                return self._handle_memory_command(db), None
-            if command == "/goals":
-                return self._handle_goals_command(db), None
-            if command.startswith("/goal "):
-                name = stripped[6:].strip()
-                return self._handle_goal_detail_command(name, db), None
+        # Slash commands work from any source (web, Telegram)
+        if command == "/memory":
+            return self._handle_memory_command(db), None
+        if command == "/goals":
+            return self._handle_goals_command(db), None
+        if command.startswith("/goal "):
+            name = stripped[6:].strip()
+            return self._handle_goal_detail_command(name, db), None
 
         # First-time greeting only for Telegram
         is_first_time = source == "telegram" and not memory_service.get_name(db)
