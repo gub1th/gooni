@@ -23,11 +23,11 @@ load_dotenv()
 Base.metadata.create_all(bind=engine)
 
 
-async def _respond(update: Update, message: str) -> None:
+async def _respond(update: Update, message: str, image_url: str | None = None) -> None:
     def chat_fn():
         db = SessionLocal()
         try:
-            return Orchestrator.handle_chat(message, db)
+            return Orchestrator.handle_chat(message, db, image_url=image_url)
         finally:
             db.close()
 
@@ -54,23 +54,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     photo_bytes = await tg_file.download_as_bytearray()
     b64 = base64.b64encode(photo_bytes).decode("utf-8")
     data_uri = f"data:image/jpeg;base64,{b64}"
-
-    caption = update.message.caption or ""
-
-    def chat_fn():
-        db = SessionLocal()
-        try:
-            return Orchestrator.handle_chat(caption, db, image_url=data_uri)
-        finally:
-            db.close()
-
-    response, usage = await asyncio.to_thread(chat_fn)
-    await update.message.reply_text(response)
-
-    if usage:
-        tools_used = usage.get("tools_used", [])
-        if tools_used:
-            print(f"[tools] {', '.join(tools_used)}")
+    await _respond(update, update.message.caption or "", image_url=data_uri)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -98,41 +82,16 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    def fn():
-        db = SessionLocal()
-        try:
-            return Orchestrator.handle_chat("/memory", db)
-        finally:
-            db.close()
-
-    response, _ = await asyncio.to_thread(fn)
-    await update.message.reply_text(response)
+    await _respond(update, "/memory")
 
 
 async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    def fn():
-        db = SessionLocal()
-        try:
-            return Orchestrator.handle_chat("/goals", db)
-        finally:
-            db.close()
-
-    response, _ = await asyncio.to_thread(fn)
-    await update.message.reply_text(response)
+    await _respond(update, "/goals")
 
 
 async def cmd_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     name = " ".join(context.args) if context.args else ""
-
-    def fn():
-        db = SessionLocal()
-        try:
-            return Orchestrator.handle_chat(f"/goal {name}", db)
-        finally:
-            db.close()
-
-    response, _ = await asyncio.to_thread(fn)
-    await update.message.reply_text(response)
+    await _respond(update, f"/goal {name}")
 
 
 def main():
