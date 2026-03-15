@@ -29,14 +29,7 @@ tell application "iTerm2"
       write text "cd '$DIR/frontend' && npm run dev"
     end tell
 
-    -- Tab 3: Telegram bot
-    create tab with default profile
-    tell current session
-      set name to "telegram"
-      write text "cd '$DIR' && source venv/bin/activate && PYTHONPATH='$DIR' python scripts/telegram_bot.py"
-    end tell
-
-    -- Tab 4: Datasette
+    -- Tab 3: Datasette
     create tab with default profile
     tell current session
       set name to "datasette"
