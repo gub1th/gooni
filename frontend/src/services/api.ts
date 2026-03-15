@@ -219,9 +219,9 @@ export async function fetchDashboardInsight(): Promise<{ insight: string | null 
   return res.json();
 }
 
-// ── Jarvis ─────────────────────────────────────────────────────────────────────
+// ── Gooni ─────────────────────────────────────────────────────────────────────
 
-export async function sendJarvisMessage(
+export async function sendGooniMessage(
   content: string,
   noteContent?: string
 ): Promise<{ content: string }> {
@@ -230,6 +230,6 @@ export async function sendJarvisMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
   });
-  if (!res.ok) throw new Error("Failed to send Jarvis message");
+  if (!res.ok) throw new Error("Failed to send Gooni message");
   return res.json();
 }

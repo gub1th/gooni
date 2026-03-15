@@ -2,12 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Dashboard } from "../components/Dashboard";
 import { GoalView } from "../components/GoalView";
-import { JarvisPanel } from "../components/JarvisPanel";
+import { GooniPanel } from "../components/GooniPanel";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { Sidebar } from "../components/notes/Sidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
-import { useJarvisStore } from "../stores/useJarvisStore";
+import { useGooniStore } from "../stores/useGooniStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
 import { useGoalsStore } from "../stores/useGoalsStore";
@@ -23,7 +23,7 @@ function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
   const fetchGoals = useGoalsStore((s) => s.fetch);
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, createNote } = useNotesContentStore();
-  const isJarvisOpen = useJarvisStore((s) => s.isOpen);
+  const isGooniOpen = useGooniStore((s) => s.isOpen);
   const windowWidth = useWindowWidth();
 
   const [view, setView] = useState<"notes" | "dashboard" | "goal">("dashboard");
@@ -104,13 +104,13 @@ function NotesPage() {
       ) : view === "goal" ? (
         <>
           <GoalView onOpenNote={handleOpenNote} />
-          {isJarvisOpen && (
+          {isGooniOpen && (
             isSmall ? (
               <div style={{ position: "absolute", right: 0, top: 0, height: "100%", zIndex: 50, boxShadow: "-4px 0 20px rgba(0,0,0,0.12)" }}>
-                <JarvisPanel />
+                <GooniPanel />
               </div>
             ) : (
-              <JarvisPanel />
+              <GooniPanel />
             )
           )}
         </>
@@ -120,7 +120,7 @@ function NotesPage() {
 
           <NoteEditor />
 
-          {isJarvisOpen && (
+          {isGooniOpen && (
             isSmall ? (
               <div
                 style={{
@@ -132,10 +132,10 @@ function NotesPage() {
                   boxShadow: "-4px 0 20px rgba(0,0,0,0.12)",
                 }}
               >
-                <JarvisPanel />
+                <GooniPanel />
               </div>
             ) : (
-              <JarvisPanel />
+              <GooniPanel />
             )
           )}
         </>

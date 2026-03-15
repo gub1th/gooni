@@ -3,7 +3,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
 import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, linkNoteToGoal as apiLinkNoteToGoal, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
-import { useJarvisStore } from "../../stores/useJarvisStore";
+import { useGooniStore } from "../../stores/useGooniStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { useGoalsStore } from "../../stores/useGoalsStore";
 
@@ -48,7 +48,7 @@ export function NoteEditor() {
   useEditorStyles();
 
   const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, patchNoteGoal, deleteNote } = useNotesContentStore();
-  const { isOpen: jarvisOpen, toggle: toggleJarvis } = useJarvisStore();
+  const { isOpen: gooniOpen, toggle: toggleGooni } = useGooniStore();
   const { spaces } = useSpacesStore();
   const { goals } = useGoalsStore();
 
@@ -491,27 +491,27 @@ export function NoteEditor() {
           )}
 
         <button
-          onClick={toggleJarvis}
-          title={jarvisOpen ? "Close Jarvis" : "Open Jarvis"}
+          onClick={toggleGooni}
+          title={gooniOpen ? "Close Gooni" : "Open Gooni"}
           style={{
             padding: "5px 12px",
             borderRadius: 16,
             border: "none",
-            background: jarvisOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)",
+            background: gooniOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)",
             cursor: "pointer",
             fontSize: 13,
-            color: jarvisOpen ? "#1C1C1E" : "#636366",
+            color: gooniOpen ? "#1C1C1E" : "#636366",
             fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-            fontWeight: jarvisOpen ? 600 : 400,
+            fontWeight: gooniOpen ? 600 : 400,
             display: "flex",
             alignItems: "center",
             gap: 5,
             transition: "background 0.1s",
           }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.10)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = jarvisOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)")}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = gooniOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)")}
         >
-          💬 Jarvis
+          💬 Gooni
         </button>
         </div>
       </div>

@@ -716,7 +716,7 @@ def get_dashboard_insight(db: Session = Depends(get_db)):
                 {
                     "role": "system",
                     "content": (
-                        f"You are Jarvis. Today is {today_str}. "
+                        f"You are Gooni. Today is {today_str}. "
                         "Write a brief 2-3 sentence daily briefing based on the user's recent activity. "
                         "Be specific and personal, not generic. Keep it under 60 words."
                     ),

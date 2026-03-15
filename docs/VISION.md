@@ -12,10 +12,10 @@ The moat isn't device control. Anyone can turn a light on. The moat is *knowing 
 
 Gooni is one brain, multiple access points:
 
-- **Web UI** — notes-first, Jarvis always accessible (current)
+- **Web UI** — notes-first, Gooni always accessible (current)
 - **CLI** — development and testing
 - **Telegram** — on your phone, in the real world, away from home
-- **Voice** — hands-free, in-room, feels like Jarvis
+- **Voice** — hands-free, in-room, feels like Gooni
 - **Physical device** — a Raspberry Pi with a mic and speaker, always on, wake-word activated
 
 ## The home integration

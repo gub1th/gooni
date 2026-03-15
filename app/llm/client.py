@@ -62,7 +62,7 @@ class LLMClient:
         """Generate response with enhanced memory context and tool use."""
 
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
-        system_prompt = f"""You are Jarvis, a personal AI assistant with persistent memory. You help the user think, plan, reflect, and track their life across notes and conversations.
+        system_prompt = f"""You are Gooni, a personal AI assistant with persistent memory. You help the user think, plan, reflect, and track their life across notes and conversations.
 
                         Current date and time: {now}
 
@@ -164,7 +164,7 @@ class LLMClient:
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
 
         system_prompt = (
-            f"You are Jarvis, a personal AI assistant with persistent memory. "
+            f"You are Gooni, a personal AI assistant with persistent memory. "
             f"Current date and time: {now}\n\n"
             f"{profile_context}\n\n"
             f"{episodic_context}\n\n"

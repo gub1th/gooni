@@ -11,13 +11,13 @@ Daniel is an eager software engineer actively learning. When working with him:
 
 Gooni is a **personal AI notebook** evolving toward an ambient home assistant. The core loop:
 1. You write notes (Apple Notes layout — spaces → notes list → editor)
-2. Jarvis (GPT-4o-mini) reads your active note and answers questions / gives feedback
-3. Over time, Jarvis builds a memory from your notes (stored in SQLite)
+2. Gooni (GPT-4o-mini) reads your active note and answers questions / gives feedback
+3. Over time, Gooni builds a memory from your notes (stored in SQLite)
 
 Telegram bot exists for mobile capture — messages become notes/conversations in the DB.
 
 ## North Star
-Evolving toward an ambient physical assistant — a device that knows you passively and proactively surfaces relevant context. Jarvis is the brain. See `docs/VISION.md`.
+Evolving toward an ambient physical assistant — a device that knows you passively and proactively surfaces relevant context. Gooni is the brain. See `docs/VISION.md`.
 
 ## Rules
 - Don't add new features without being asked
@@ -41,16 +41,16 @@ See **`docs/TODO.md`** for the full backlog. Top items:
 - **`app/llm/client.py`** — OpenAI wrapper (`llm_client`). Default model: `gpt-4o-mini`.
 
 ### Frontend (`frontend/src/`)
-- **`routes/index.tsx`** — Layout: Sidebar | NotesList | NoteEditor | JarvisPanel (optional). View state: `"notes" | "dashboard" | "goal"`.
+- **`routes/index.tsx`** — Layout: Sidebar | NotesList | NoteEditor | GooniPanel (optional). View state: `"notes" | "dashboard" | "goal"`.
 - **`components/notes/Sidebar.tsx`** — Goals section + Spaces section (200px).
 - **`components/notes/NotesList.tsx`** — Notes for selected space (260px).
 - **`components/notes/NoteEditor.tsx`** — Title + TipTap body. Auto-saves after 1.5s. Goal chip in header.
-- **`components/GoalView.tsx`** — Goal detail: title, motivation, milestones, linked notes, Jarvis briefing.
-- **`components/JarvisPanel.tsx`** — Chat panel (300px). Passes active note as context.
-- **`stores/useNotesContentStore.ts`** — Selected space, notes per space, active note. Persist key: `gooni-notes-content-v2`.
+- **`components/GoalView.tsx`** — Goal detail: title, motivation, milestones, linked notes, Gooni briefing.
+- **`components/GooniPanel.tsx`** — Chat panel (300px). Passes active note as context.
+- **`stores/useNotesContentStore.ts`** — Selected space, notes per space, active note. Persist key: `gooni-notes-v1`.
 - **`stores/useSpacesStore.ts`** — Space list from backend.
 - **`stores/useGoalsStore.ts`** — Goals list + selected goal from backend.
-- **`stores/useJarvisStore.ts`** — Chat messages + `isOpen`. Persist key: `gooni-jarvis-v2`.
+- **`stores/useGooniStore.ts`** — Chat messages + `isOpen`. Persist key: `gooni-v1`.
 - **`services/api.ts`** — All fetch calls.
 
 ## Running
@@ -84,7 +84,7 @@ POST /goals                     → create goal { title, goal_type?, motivation?
 PATCH /goals/{id}               → update goal { title?, motivation?, status?, milestones? }
 DELETE /goals/{id}              → delete goal (unlinks notes)
 GET  /goals/{id}/notes          → notes linked to this goal
-POST /chat                      → Jarvis chat { content, entry_content? }
+POST /chat                      → Gooni chat { content, entry_content? }
 GET  /debug/memories            → inspect stored memories
 ```
 

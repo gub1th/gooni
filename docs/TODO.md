@@ -8,24 +8,24 @@
 
 ## Backlog
 - [ ] Note search — filter NotesList by title/content as you type
-- [ ] Jarvis memory context — include top-3 relevant memories in Jarvis prompt (not just active note)
+- [ ] Gooni memory context — include top-3 relevant memories in Gooni prompt (not just active note)
 - [ ] Telegram → note sync: messages captured via Telegram appear as notes in relevant space
 - [ ] Keyboard shortcut: ⌘N creates a new note in the current space
-- [ ] Mobile: Jarvis panel as a bottom sheet on narrow screens
+- [ ] Mobile: Gooni panel as a bottom sheet on narrow screens
 - [ ] Dark mode
 - [ ] GoalView redesign — living document feel, inline note creation, blockers as one-liner
 - [ ] Memory refactor — replace hardcoded meals/workouts tables with flexible Memory entities
 
 ## Done
 - [x] 3-panel Apple Notes layout (Sidebar + NotesList + NoteEditor)
-- [x] Jarvis panel with note context
+- [x] Gooni panel with note context
 - [x] Note CRUD (create, auto-save, delete)
 - [x] Space selection persisted across refreshes
 - [x] Memory episodes saved on note update
 - [x] Note delete — right-click context menu with two-step confirm
 - [x] Space delete — context menu with confirm, cascades to notes
 - [x] Emoji picker for spaces
-- [x] Goals feature — sidebar section, GoalView, milestone tracking, Jarvis briefing
+- [x] Goals feature — sidebar section, GoalView, milestone tracking, Gooni briefing
 - [x] Note → goal linking via 🎯 chip in NoteEditor
 
 ---

@@ -186,7 +186,7 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
     }),
     {
-      name: "gooni-notes-content-v2",
+      name: "gooni-notes-v1",
       partialize: (s) => ({ selectedSpaceId: s.selectedSpaceId }),
     }
   )

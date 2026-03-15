@@ -198,7 +198,7 @@ export function Dashboard({ onGoToNote }: DashboardProps) {
             gap: 12,
           }}
         >
-          {/* Jarvis insight */}
+          {/* Gooni insight */}
           <div
             style={{
               background: "#F8F8FA",
@@ -221,7 +221,7 @@ export function Dashboard({ onGoToNote }: DashboardProps) {
                 textTransform: "uppercase",
               }}
             >
-              Jarvis
+              Gooni
             </div>
             {insight ? (
               <p
@@ -278,7 +278,7 @@ export function Dashboard({ onGoToNote }: DashboardProps) {
                         "#1C1C1E";
                   }}
                 >
-                  {loadingInsight ? "Thinking…" : "Ask Jarvis"}
+                  {loadingInsight ? "Thinking…" : "Ask Gooni"}
                 </button>
               </>
             )}
