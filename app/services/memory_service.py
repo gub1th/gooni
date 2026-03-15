@@ -1,6 +1,6 @@
 import json
 import math
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -19,14 +19,20 @@ class MemoryService:
         embedding, _ = llm_client.generate_embedding(content)
         embedding_json = json.dumps(embedding)
 
-        existing = db.query(Memory).filter(
-            Memory.key == key,
-            Memory.memory_type == MemoryType.PROFILE_FACT,
-            Memory.is_active == True,
-        ).first()
+        existing = (
+            db.query(Memory)
+            .filter(
+                Memory.key == key,
+                Memory.memory_type == MemoryType.PROFILE_FACT,
+                Memory.is_active == True,
+            )
+            .first()
+        )
 
         if existing:
-            if self._values_are_similar(existing.content, content, existing.embedding, embedding):
+            if self._values_are_similar(
+                existing.content, content, existing.embedding, embedding
+            ):
                 existing.confidence = min(1.0, (existing.confidence or 0.8) + 0.1)
                 db.commit()
                 return existing
@@ -52,7 +58,9 @@ class MemoryService:
 
         return new_memory
 
-    def create_episode(self, content: str, goal_id: Optional[int], db: Session) -> Memory:
+    def create_episode(
+        self, content: str, goal_id: Optional[int], db: Session
+    ) -> Memory:
         """Create an EPISODE memory from a conversation."""
         embedding, _ = llm_client.generate_embedding(content)
         memory = Memory(
@@ -96,10 +104,14 @@ class MemoryService:
         if not query_embedding:
             return []
 
-        memories = db.query(Memory).filter(
-            Memory.is_active == True,
-            Memory.embedding.isnot(None),
-        ).all()
+        memories = (
+            db.query(Memory)
+            .filter(
+                Memory.is_active == True,
+                Memory.embedding.isnot(None),
+            )
+            .all()
+        )
 
         similarities = []
         for m in memories:
@@ -112,10 +124,14 @@ class MemoryService:
 
     def build_memory_context(self, query: str, db: Session) -> str:
         """Build context string from profile facts + relevant episodes."""
-        profile_facts = db.query(Memory).filter(
-            Memory.memory_type == MemoryType.PROFILE_FACT,
-            Memory.is_active == True,
-        ).all()
+        profile_facts = (
+            db.query(Memory)
+            .filter(
+                Memory.memory_type == MemoryType.PROFILE_FACT,
+                Memory.is_active == True,
+            )
+            .all()
+        )
 
         relevant = self.search_similar(query, 3, db)
         episodes = [m for m in relevant if m.memory_type == MemoryType.EPISODE]
@@ -138,11 +154,15 @@ class MemoryService:
 
     def get_name(self, db: Session) -> str | None:
         """Return the user's name if known, else None."""
-        mem = db.query(Memory).filter(
-            Memory.key == "name",
-            Memory.memory_type == MemoryType.PROFILE_FACT,
-            Memory.is_active == True,
-        ).first()
+        mem = (
+            db.query(Memory)
+            .filter(
+                Memory.key == "name",
+                Memory.memory_type == MemoryType.PROFILE_FACT,
+                Memory.is_active == True,
+            )
+            .first()
+        )
         return mem.content if mem else None
 
     def get_all_active(self, db: Session) -> List[Memory]:
@@ -154,7 +174,11 @@ class MemoryService:
         )
 
     def _values_are_similar(
-        self, content1: str, content2: str, embedding1: Optional[str], embedding2: List[float]
+        self,
+        content1: str,
+        content2: str,
+        embedding1: Optional[str],
+        embedding2: List[float],
     ) -> bool:
         if content1.lower().strip() == content2.lower().strip():
             return True

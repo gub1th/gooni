@@ -11,6 +11,7 @@ import { useGooniStore } from "../stores/useGooniStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
 import { useGoalsStore } from "../stores/useGoalsStore";
+import { useConversationsStore } from "../stores/useConversationsStore";
 
 export const Route = createFileRoute("/")({
   component: NotesPage,
@@ -25,6 +26,7 @@ function NotesPage() {
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, createNote } = useNotesContentStore();
   const isGooniOpen = useGooniStore((s) => s.isOpen);
   const windowWidth = useWindowWidth();
+  const { fetchConversations, newChat } = useConversationsStore();
 
   const [view, setView] = useState<"notes" | "dashboard" | "goal">("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
@@ -36,6 +38,7 @@ function NotesPage() {
   useEffect(() => {
     fetchSpaces();
     fetchGoals();
+    fetchConversations();
   }, []);
 
   useEffect(() => {
@@ -69,6 +72,11 @@ function NotesPage() {
     setView("notes");
   }
 
+  function handleNewChat() {
+    newChat();
+    setView("dashboard");
+  }
+
   function handleCompose() {
     const spaceId = selectedSpaceId ?? "general";
     setView("notes");
@@ -92,10 +100,11 @@ function NotesPage() {
         <Sidebar
           isDashboard={view === "dashboard"}
           showCompose={view !== "notes"}
-          onLogoClick={() => setView("dashboard")}
+          onLogoClick={handleNewChat}
           onSpaceSelect={() => setView("notes")}
           onGoalSelect={() => setView("goal")}
           onCompose={handleCompose}
+          onNewChat={handleNewChat}
         />
       )}
 
