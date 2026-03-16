@@ -40,6 +40,7 @@ class GoalType(enum.Enum):
 class MemoryType(enum.Enum):
     FACT = "fact"
     EPISODE = "episode"
+    PREFERENCE = "preference"
 
 
 class Space(Base):

@@ -1,7 +1,7 @@
 import json
 import os
 from datetime import datetime
-from typing import List
+from typing import List, Literal
 
 from openai import OpenAI
 from pydantic import BaseModel
@@ -10,29 +10,33 @@ from ..tools import registry as tools
 from ..tools import tool_map
 from .pricing import UsageTracker, calculate_embedding_cost
 
-
-FACT_EXTRACTION_PROMPT = (
-    "A fact is a discrete, specific, reusable piece of information — anything about "
-    "the user, their preferences, their projects, tools they use, decisions they've "
-    "made, things that need improvement, or any domain they're working in. "
-    "Rules: only include facts explicitly stated (not inferred); each fact must be "
+MEMORY_EXTRACTION_PROMPT = (
+    "Extract memories worth storing long-term. Each memory has a type:\n"
+    "- 'fact': discrete, specific information — about the user, their projects, "
+    "tools, decisions, domains they work in, things that need improvement.\n"
+    "- 'preference': how the user wants Gooni to behave — response style, tone, "
+    "formatting, communication preferences.\n"
+    "Examples of facts: 'building Gooni with FastAPI', 'Gooni needs better memory retrieval'\n"
+    "Examples of preferences: 'prefers concise responses', 'wants markdown formatting', 'wants to be addressed by a certain name', 'wants the system to be called Gooni', 'wants the system to use a certain tone'\n"
+    "Rules: only include things explicitly stated (not inferred); each memory must be "
     "a single specific claim; key must be snake_case and descriptive; skip generic "
-    "advice, vague statements, and conversational filler."
+    "advice, vague statements, and filler."
 )
 
 
-class Fact(BaseModel):
+class ExtractedMemory(BaseModel):
     key: str
     content: str
+    type: Literal["fact", "preference"]
 
 
-class FactsOnly(BaseModel):
-    facts: list[Fact] = []
+class ExtractedMemoriesOnly(BaseModel):
+    memories: list[ExtractedMemory] = []
 
 
 class ChatResponse(BaseModel):
     reply: str
-    facts: list[Fact] = []
+    memories: list[ExtractedMemory] = []
 
 
 class LLMClient:
@@ -149,7 +153,7 @@ class LLMClient:
                     messages.append(
                         {
                             "role": "user",
-                            "content": f"Now respond with your final reply and any facts worth remembering long-term. {FACT_EXTRACTION_PROMPT}",
+                            "content": f"Now respond with your final reply and any memories worth storing long-term. {MEMORY_EXTRACTION_PROMPT}",
                         }
                     )
                     structured = self.client.beta.chat.completions.parse(
@@ -161,8 +165,11 @@ class LLMClient:
                     tracker.add(structured.usage)
                     parsed = structured.choices[0].message.parsed
                     usage = tracker.finalize(tools_used)
-                    facts = [{"key": f.key, "content": f.content} for f in parsed.facts]
-                    return parsed.reply, usage, facts
+                    memories = [
+                        {"key": m.key, "content": m.content, "type": m.type}
+                        for m in parsed.memories
+                    ]
+                    return parsed.reply, usage, memories
 
             return "I got stuck processing tool results.", tracker.finalize(tools_used)
 
@@ -294,15 +301,18 @@ class LLMClient:
                 messages=[
                     {
                         "role": "system",
-                        "content": f"Extract facts worth remembering long-term from the text. {FACT_EXTRACTION_PROMPT}",
+                        "content": f"Extract memories worth storing long-term from the text. {MEMORY_EXTRACTION_PROMPT}",
                     },
                     {"role": "user", "content": content},
                 ],
-                response_format=FactsOnly,
+                response_format=ExtractedMemoriesOnly,
                 max_tokens=200,
             )
             parsed = structured.choices[0].message.parsed
-            return [{"key": f.key, "content": f.content} for f in parsed.facts]
+            return [
+                {"key": m.key, "content": m.content, "type": m.type}
+                for m in parsed.memories
+            ]
         except Exception as e:
             print(f"Profile fact extraction error: {e}")
             return []
