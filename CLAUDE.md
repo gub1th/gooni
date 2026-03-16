@@ -28,13 +28,12 @@ Evolving toward an ambient physical assistant — a device that knows you passiv
 See **`docs/TODO.md`** for the full backlog. Top items:
 - Deploy Telegram bot
 - GoalView redesign (living document feel, inline note creation)
-- Memory refactor (replace hardcoded meals/workouts with flexible Memory entities)
 
 ## Architecture
 
 ### Backend (`app/`)
 - **`app/main.py`** — All FastAPI routes + startup migrations. CORS allows `localhost:5173`.
-- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Goal`, `Note`, `Conversation`, `Message`, `Memory`, `Meal`, `Workout`, `WorkoutSet`
+- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Goal`, `Note`, `Conversation`, `Message`, `Memory`
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
 - **`app/services/memory_service.py`** — Vector memory (cosine similarity + OpenAI embeddings).
 - **`app/services/orchestrator.py`** — Unified chat handler (web + Telegram). `Orchestrator` singleton.

@@ -6,8 +6,8 @@ class SaveMemoryTool(BaseTool):
     description = (
         "Save a stable fact about the user that should be remembered permanently. "
         "Use this for preferences, constraints, or personal details they reveal — "
-        "'prefers morning workouts', 'is lactose intolerant', 'works night shifts'. "
-        "Do NOT use for goal progress — use log_progress for that."
+        "'works night shifts', 'prefers concise answers', 'lives in LA'. "
+        "Only use for stable, long-term facts — not transient updates or goal progress."
     )
     parameters = {
         "type": "object",

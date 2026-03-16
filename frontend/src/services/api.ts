@@ -200,7 +200,6 @@ export async function deleteNote(id: number): Promise<void> {
 
 export interface DashboardStats {
   notes_this_week: number;
-  workouts_this_week: number;
   active_goals_count: number;
   active_goals: { id: number; title: string; goal_type: string }[];
   recent_notes: ApiNote[];

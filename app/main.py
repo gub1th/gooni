@@ -17,23 +17,18 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Goal,
     GoalStatus,
     GoalType,
-    Meal,
     Memory,
     Message,
     Note,
     Space,
-    Workout,
-    WorkoutSet,
 )
 from .db.schemas import ChatRequest
 from .llm.client import llm_client
 from .services.conversation_service import conversation_service
 from .services.goal_service import goal_service
-from .services.meal_service import meal_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
-from .services.workout_service import workout_service
 
 
 def _run_column_migrations(engine):
@@ -601,22 +596,6 @@ def send_conversation_message(
     return [_serialize_message(m) for m in msgs]
 
 
-# ── Workout / Macros ───────────────────────────────────────────────────────────
-
-
-@app.get("/workout/today")
-def get_workout_today(db: Session = Depends(get_db)):
-    from datetime import date
-
-    return workout_service.get_daily_workout(date.today(), db)
-
-
-@app.get("/macros/today")
-def get_macros_today(db: Session = Depends(get_db)):
-    from datetime import date
-
-    return meal_service.get_daily_totals(date.today(), db)
-
 
 @app.get("/health")
 async def health():
@@ -636,13 +615,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     week_ago = datetime.utcnow() - timedelta(days=7)
 
     notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
-
-    try:
-        workouts_this_week = (
-            db.query(Workout).filter(Workout.date >= today - timedelta(days=7)).count()
-        )
-    except Exception:
-        workouts_this_week = 0
 
     active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
 
@@ -673,7 +645,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     return {
         "notes_this_week": notes_this_week,
-        "workouts_this_week": workouts_this_week,
         "active_goals_count": len(active_goals),
         "active_goals": [
             {"id": g.id, "title": g.title, "goal_type": g.goal_type.value}
