@@ -96,5 +96,6 @@ GET  /debug/memories            → inspect stored memories
 - **Startup migrations**: `_run_column_migrations()` in `main.py` runs ALTER TABLE for new columns on existing DBs
 - **Optimistic UI**: `createNote` adds a temp note instantly, replaces with real API response
 - **React StrictMode**: kept intentionally — double-fires effects in dev to expose bugs; never remove it
+- **Component extraction**: sub-components with their own visual logic, state, or animation belong in separate files under `components/`. Inline sub-components are fine during early iteration but should be extracted once the shape stabilizes. A component file growing past ~200 lines is a signal to extract.
 
 ## Known Issues
