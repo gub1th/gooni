@@ -84,8 +84,9 @@ class Orchestrator:
 
         # Auto-save episode for future context retrieval
         if saved_message.strip() and len(saved_message.strip()) > 10:
+            summary = llm_client.summarize_episode(saved_message, response)
             memory_service.create_episode(
-                f"User: {saved_message}\nAssistant: {response}",
+                summary,
                 goal_id=getattr(conv, "goal_id", None),
                 db=db,
             )

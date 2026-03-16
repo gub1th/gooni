@@ -256,6 +256,34 @@ class LLMClient:
                 tools_used
             )
 
+    def summarize_episode(self, user_message: str, assistant_response: str) -> str:
+        """Summarize a conversation exchange into a concise, retrievable episode."""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Summarize the following conversation exchange in 1-3 sentences. "
+                            "Be specific and concrete — capture what was discussed, any decisions made, "
+                            "problems identified, or information shared. "
+                            "Do not give generic advice. Do not editorialize. Just state the facts of what was discussed."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"User: {user_message}\nAssistant: {assistant_response}",
+                    },
+                ],
+                temperature=0.3,
+                max_tokens=150,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Episode summarization error: {e}")
+            return f"User: {user_message}\nAssistant: {assistant_response}"
+
     def extract_facts(self, content: str) -> list[dict]:
         """Extract facts from any text (note, message, etc.).
         Returns [{ key, content }] — same shape as chat path facts.
