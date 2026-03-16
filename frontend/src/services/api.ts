@@ -200,7 +200,6 @@ export async function deleteNote(id: number): Promise<void> {
 
 export interface DashboardStats {
   notes_this_week: number;
-  workouts_this_week: number;
   active_goals_count: number;
   active_goals: { id: number; title: string; goal_type: string }[];
   recent_notes: ApiNote[];
@@ -219,9 +218,63 @@ export async function fetchDashboardInsight(): Promise<{ insight: string | null 
   return res.json();
 }
 
-// ── Jarvis ─────────────────────────────────────────────────────────────────────
+// ── Conversations ──────────────────────────────────────────────────────────────
 
-export async function sendJarvisMessage(
+export interface ApiConversation {
+  id: number;
+  title: string | null;
+  source: string;
+  created_at: string;
+  last_message_at: string | null;
+}
+
+export interface ApiMessage {
+  id: number;
+  conversation_id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+export async function fetchConversations(): Promise<ApiConversation[]> {
+  const res = await apiFetch(`${BASE}/feed`);
+  if (!res.ok) throw new Error("Failed to fetch conversations");
+  return res.json();
+}
+
+export async function createConversation(content?: string): Promise<ApiConversation> {
+  const res = await apiFetch(`${BASE}/conversations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: content ?? "" }),
+  });
+  if (!res.ok) throw new Error("Failed to create conversation");
+  return res.json();
+}
+
+export async function sendConversationMessage(
+  convId: number,
+  content: string,
+  noteContent?: string
+): Promise<ApiMessage[]> {
+  const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
+  });
+  if (!res.ok) throw new Error("Failed to send message");
+  return res.json();
+}
+
+export async function fetchConversationMessages(convId: number): Promise<ApiMessage[]> {
+  const res = await apiFetch(`${BASE}/conversations/${convId}/messages`);
+  if (!res.ok) throw new Error("Failed to fetch messages");
+  return res.json();
+}
+
+// ── Gooni ─────────────────────────────────────────────────────────────────────
+
+export async function sendGooniMessage(
   content: string,
   noteContent?: string
 ): Promise<{ content: string }> {
@@ -230,6 +283,6 @@ export async function sendJarvisMessage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
   });
-  if (!res.ok) throw new Error("Failed to send Jarvis message");
+  if (!res.ok) throw new Error("Failed to send Gooni message");
   return res.json();
 }

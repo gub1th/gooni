@@ -104,7 +104,7 @@ class NoteService:
             db.refresh(space)
         return space.id
 
-    def append_to_daily_note(self, user_msg: str, jarvis_reply: str, db: Session) -> None:
+    def append_to_daily_note(self, user_msg: str, gooni_reply: str, db: Session) -> None:
         """Create or append to today's daily note (Journal space, title = date).
         Called after every Telegram exchange.
         """
@@ -119,7 +119,7 @@ class NoteService:
 
         time_str = datetime.now().strftime("%I:%M %p").lstrip("0")  # "9:41 AM"
         user_snippet = user_msg if len(user_msg) <= 80 else user_msg[:77] + "…"
-        reply_snippet = jarvis_reply if len(jarvis_reply) <= 100 else jarvis_reply[:97] + "…"
+        reply_snippet = gooni_reply if len(gooni_reply) <= 100 else gooni_reply[:97] + "…"
 
         is_new = note is None
         bullet = f"<li><span style='color:#8E8E93'>{time_str}</span>&nbsp;&nbsp;{user_snippet}&nbsp;&nbsp;<em style='color:#636366'>→ {reply_snippet}</em></li>"

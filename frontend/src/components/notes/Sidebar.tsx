@@ -3,6 +3,17 @@ import { EmojiPicker } from "../EmojiPicker";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGoalsStore } from "../../stores/useGoalsStore";
+import { useConversationsStore } from "../../stores/useConversationsStore";
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 interface ContextMenu {
   x: number;
@@ -19,6 +30,7 @@ interface SidebarProps {
   onSpaceSelect: () => void;
   onGoalSelect: () => void;
   onCompose: () => void;
+  onNewChat: () => void;
 }
 
 function ComposeIcon() {
@@ -30,10 +42,11 @@ function ComposeIcon() {
   );
 }
 
-export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onGoalSelect, onCompose }: SidebarProps) {
+export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onGoalSelect, onCompose, onNewChat }: SidebarProps) {
   const { spaces, create: createSpace, remove: removeSpace, rename: renameSpace, setEmoji } = useSpacesStore();
   const { selectedSpaceId, selectSpace, loadNotes, removeSpace: clearSpaceNotes, moveNote } = useNotesContentStore();
   const { goals, create: createGoal, selectedGoalId, selectGoal } = useGoalsStore();
+  const { conversations, activeId, selectConversation } = useConversationsStore();
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [addingGoal, setAddingGoal] = useState(false);
@@ -222,6 +235,94 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
 
       {/* Scrollable content */}
       <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+
+      {/* Conversations section */}
+      <>
+        <button
+            onClick={onNewChat}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              margin: "10px 6px 4px",
+              padding: "7px 10px",
+              borderRadius: 8,
+              border: "none",
+              background: "rgba(0,0,0,0.06)",
+              color: "#1C1C1E",
+              fontSize: 13,
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontWeight: 500,
+              cursor: "pointer",
+              width: "calc(100% - 12px)",
+              textAlign: "left",
+              transition: "background 0.1s",
+            }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.10)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+          >
+            + New Chat
+          </button>
+
+          {conversations.length > 0 && (
+            <div style={{ marginBottom: 4, padding: "0 6px" }}>
+              {conversations.slice(0, 5).map((conv) => (
+                <button
+                  key={conv.id}
+                  onClick={() => selectConversation(conv.id)}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    width: "100%",
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: activeId === conv.id ? "rgba(0,0,0,0.08)" : "transparent",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (activeId !== conv.id)
+                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeId !== conv.id)
+                      (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                      fontWeight: activeId === conv.id ? 600 : 400,
+                      color: "#1C1C1E",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      width: "100%",
+                    }}
+                  >
+                    {conv.title || "New conversation"}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "#AEAEB2",
+                      marginTop: 1,
+                      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                    }}
+                  >
+                    {relativeTime(conv.last_message_at ?? conv.created_at)}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "4px 6px 8px" }} />
+      </>
 
       {/* Goals section */}
       <div style={{ padding: "10px 6px 4px" }}>

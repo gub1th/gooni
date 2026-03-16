@@ -4,7 +4,6 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     Column,
-    Date,
     DateTime,
     Enum,
     Float,
@@ -16,13 +15,6 @@ from sqlalchemy import (
 from sqlalchemy.sql import func
 
 from .database import Base
-
-
-class MealType(enum.Enum):
-    BREAKFAST = "breakfast"
-    LUNCH = "lunch"
-    DINNER = "dinner"
-    SNACK = "snack"
 
 
 class GoalStatus(enum.Enum):
@@ -38,8 +30,9 @@ class GoalType(enum.Enum):
 
 
 class MemoryType(enum.Enum):
-    PROFILE_FACT = "profile_fact"
+    FACT = "fact"
     EPISODE = "episode"
+    PREFERENCE = "preference"
 
 
 class Space(Base):
@@ -78,7 +71,7 @@ class Conversation(Base):
     space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     title = Column(Text, nullable=True)  # auto-generated short title
     summary = Column(Text, nullable=True)  # auto-generated after session ends
-    source = Column(String, nullable=False, default="web")  # 'web' | 'telegram' | 'cli'
+    source = Column(String, nullable=False, default="web")  # 'web' | 'telegram'
     last_message_at = Column(
         DateTime(timezone=True), nullable=True
     )  # for session lookup
@@ -94,45 +87,6 @@ class Message(Base):
     conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
     role = Column(String, nullable=False)  # "user" | "assistant"
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class Meal(Base):
-    __tablename__ = "meals"
-
-    id = Column(Integer, primary_key=True, index=True)
-    meal_type = Column(Enum(MealType), nullable=False)
-    logged_date = Column(Date, nullable=False)
-    total_calories = Column(Float, nullable=True)
-    total_protein = Column(Float, nullable=True)
-    total_carbs = Column(Float, nullable=True)
-    total_fat = Column(Float, nullable=True)
-    items = Column(
-        Text, nullable=True
-    )  # JSON array: [{name, calories, protein, carbs, fat}]
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class Workout(Base):
-    __tablename__ = "workouts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    date = Column(Date, nullable=False)
-    duration_minutes = Column(Integer, nullable=True)
-    notes = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class WorkoutSet(Base):
-    __tablename__ = "workout_sets"
-
-    id = Column(Integer, primary_key=True, index=True)
-    workout_id = Column(Integer, ForeignKey("workouts.id"), nullable=False)
-    exercise = Column(String, nullable=False)
-    sets = Column(Integer, nullable=True)
-    reps = Column(Integer, nullable=True)
-    weight = Column(Float, nullable=True)
-    weight_unit = Column(String, default="lbs")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

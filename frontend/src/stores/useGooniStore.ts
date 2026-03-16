@@ -1,15 +1,15 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { sendJarvisMessage } from "../services/api";
+import { sendGooniMessage } from "../services/api";
 
-interface JarvisMessage {
+interface GooniMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
 }
 
-interface JarvisState {
-  messages: JarvisMessage[];
+interface GooniState {
+  messages: GooniMessage[];
   sending: boolean;
   isOpen: boolean;
   width: number;
@@ -18,7 +18,7 @@ interface JarvisState {
   send: (content: string, noteContent?: string) => Promise<void>;
 }
 
-export const useJarvisStore = create<JarvisState>()(
+export const useGooniStore = create<GooniState>()(
   persist(
     (set) => ({
       messages: [],
@@ -30,29 +30,29 @@ export const useJarvisStore = create<JarvisState>()(
       setWidth: (w: number) => set({ width: Math.min(600, Math.max(220, w)) }),
 
       send: async (content: string, noteContent?: string) => {
-        const userMsg: JarvisMessage = {
+        const userMsg: GooniMessage = {
           id: Date.now(),
           role: "user",
           content,
         };
         set((s) => ({ messages: [...s.messages, userMsg], sending: true }));
         try {
-          const res = await sendJarvisMessage(content, noteContent);
-          const assistantMsg: JarvisMessage = {
+          const res = await sendGooniMessage(content, noteContent);
+          const assistantMsg: GooniMessage = {
             id: Date.now() + 1,
             role: "assistant",
             content: res.content,
           };
           set((s) => ({ messages: [...s.messages, assistantMsg] }));
         } catch (e) {
-          console.error("Jarvis send error:", e);
+          console.error("Gooni send error:", e);
         } finally {
           set({ sending: false });
         }
       },
     }),
     {
-      name: "gooni-jarvis-v2",
+      name: "gooni-v1",
       partialize: (s) => ({ isOpen: s.isOpen, width: s.width }),
     }
   )

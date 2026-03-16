@@ -17,23 +17,18 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Goal,
     GoalStatus,
     GoalType,
-    Meal,
     Memory,
     Message,
     Note,
     Space,
-    Workout,
-    WorkoutSet,
 )
 from .db.schemas import ChatRequest
 from .llm.client import llm_client
 from .services.conversation_service import conversation_service
 from .services.goal_service import goal_service
-from .services.meal_service import meal_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
-from .services.workout_service import workout_service
 
 
 def _run_column_migrations(engine):
@@ -414,7 +409,7 @@ def touch_note(note_id: int, db: Session = Depends(get_db)):
 
 @app.post("/notes/{note_id}/memorize")
 def memorize_note(note_id: int, db: Session = Depends(get_db)):
-    """Extract profile facts from a note when the user leaves it.
+    """Extract facts from a note when the user leaves it.
     Note embeddings are handled by the PATCH endpoint background task —
     we no longer create Memory episodes from notes (episodes are for chat only).
     """
@@ -427,7 +422,7 @@ def memorize_note(note_id: int, db: Session = Depends(get_db)):
     if len(raw) <= 10:
         return {"ok": True, "facts_saved": 0}
     try:
-        facts = llm_client.extract_profile_facts(raw)
+        facts = llm_client.extract_facts(raw)
         for fact in facts:
             memory_service.upsert_profile_fact(fact, db)
     except Exception:
@@ -601,22 +596,6 @@ def send_conversation_message(
     return [_serialize_message(m) for m in msgs]
 
 
-# ── Workout / Macros ───────────────────────────────────────────────────────────
-
-
-@app.get("/workout/today")
-def get_workout_today(db: Session = Depends(get_db)):
-    from datetime import date
-
-    return workout_service.get_daily_workout(date.today(), db)
-
-
-@app.get("/macros/today")
-def get_macros_today(db: Session = Depends(get_db)):
-    from datetime import date
-
-    return meal_service.get_daily_totals(date.today(), db)
-
 
 @app.get("/health")
 async def health():
@@ -637,13 +616,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
 
-    try:
-        workouts_this_week = (
-            db.query(Workout).filter(Workout.date >= today - timedelta(days=7)).count()
-        )
-    except Exception:
-        workouts_this_week = 0
-
     active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
 
     recent_notes = (
@@ -653,12 +625,15 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         .all()
     )
 
-    # Streak: consecutive days with note activity ending today
+    # Streak: consecutive days with any activity (notes or conversations) ending today
     try:
         date_rows = db.execute(
             text(
-                "SELECT DISTINCT date(updated_at) as d FROM notes "
-                "WHERE updated_at IS NOT NULL ORDER BY d DESC LIMIT 30"
+                "SELECT DISTINCT d FROM ("
+                "  SELECT date(updated_at) as d FROM notes WHERE updated_at IS NOT NULL"
+                "  UNION"
+                "  SELECT date(created_at) as d FROM messages WHERE role = 'user' AND created_at IS NOT NULL"
+                ") ORDER BY d DESC LIMIT 30"
             )
         ).fetchall()
         streak = 0
@@ -673,7 +648,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     return {
         "notes_this_week": notes_this_week,
-        "workouts_this_week": workouts_this_week,
         "active_goals_count": len(active_goals),
         "active_goals": [
             {"id": g.id, "title": g.title, "goal_type": g.goal_type.value}
@@ -716,7 +690,7 @@ def get_dashboard_insight(db: Session = Depends(get_db)):
                 {
                     "role": "system",
                     "content": (
-                        f"You are Jarvis. Today is {today_str}. "
+                        f"You are Gooni. Today is {today_str}. "
                         "Write a brief 2-3 sentence daily briefing based on the user's recent activity. "
                         "Be specific and personal, not generic. Keep it under 60 words."
                     ),

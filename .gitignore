@@ -51,6 +51,9 @@ frontend/.vite/
 frontend/.tanstack/
 *.tsbuildinfo
 
+# Logs
+*.log
+
 # app
 app/misc/
 

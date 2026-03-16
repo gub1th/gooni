@@ -1,13 +1,13 @@
 import { useRef, useState, useEffect, useCallback } from "react";
-import { useJarvisStore } from "../stores/useJarvisStore";
+import { useGooniStore } from "../stores/useGooniStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 
-interface JarvisPanelProps {
+interface GooniPanelProps {
   fullscreen?: boolean;
 }
 
-export function JarvisPanel({ fullscreen = false }: JarvisPanelProps) {
-  const { messages, sending, toggle, send, width, setWidth } = useJarvisStore();
+export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
+  const { messages, sending, toggle, send, width, setWidth } = useGooniStore();
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -125,12 +125,12 @@ export function JarvisPanel({ fullscreen = false }: JarvisPanelProps) {
             fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
           }}
         >
-          Jarvis
+          Gooni
         </span>
         {!fullscreen && (
           <button
             onClick={toggle}
-            title="Close Jarvis"
+            title="Close Gooni"
             style={{
               width: 24,
               height: 24,
@@ -176,8 +176,8 @@ export function JarvisPanel({ fullscreen = false }: JarvisPanelProps) {
             }}
           >
             {fullscreen
-              ? "Ask Jarvis anything, or open a note to get feedback on it."
-              : "Ask Jarvis anything. Your active note is shared as context."}
+              ? "Ask Gooni anything, or open a note to get feedback on it."
+              : "Ask Gooni anything. Your active note is shared as context."}
           </div>
         )}
         {messages.map((m) => (
@@ -216,7 +216,7 @@ export function JarvisPanel({ fullscreen = false }: JarvisPanelProps) {
               fontStyle: "italic",
             }}
           >
-            Jarvis is thinking...
+            Gooni is thinking...
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -271,7 +271,7 @@ export function JarvisPanel({ fullscreen = false }: JarvisPanelProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Jarvis... (⌘↵)"
+            placeholder="Ask Gooni... (⌘↵)"
             rows={2}
             style={{
               flex: 1,

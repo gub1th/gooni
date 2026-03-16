@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchGoalNotes, linkNoteToGoal as apiLinkNoteToGoal, type ApiNote } from "../services/api";
 import { useGoalsStore } from "../stores/useGoalsStore";
-import { useJarvisStore } from "../stores/useJarvisStore";
+import { useGooniStore } from "../stores/useGooniStore";
 
 interface GoalViewProps {
   onOpenNote: (noteId: number, spaceId: string) => void;
@@ -16,7 +16,7 @@ function formatDate(iso: string | null): string {
 
 export function GoalView({ onOpenNote }: GoalViewProps) {
   const { goals, selectedGoalId, update: updateGoal } = useGoalsStore();
-  const { isOpen: jarvisOpen, toggle: toggleJarvis, send: sendJarvis } = useJarvisStore();
+  const { isOpen: gooniOpen, toggle: toggleGooni, send: sendGooni } = useGooniStore();
 
   const goal = goals.find((g) => g.id === selectedGoalId) ?? null;
 
@@ -100,8 +100,8 @@ export function GoalView({ onOpenNote }: GoalViewProps) {
       `\nHow am I doing on this goal? Be honest, specific, and encouraging.`,
     ].filter(Boolean).join("\n");
 
-    if (!jarvisOpen) toggleJarvis();
-    await sendJarvis(prompt);
+    if (!gooniOpen) toggleGooni();
+    await sendGooni(prompt);
   }
 
   async function handleUnlinkNote(noteId: number) {
@@ -149,20 +149,20 @@ export function GoalView({ onOpenNote }: GoalViewProps) {
           </select>
         </div>
         <button
-          onClick={toggleJarvis}
-          title={jarvisOpen ? "Close Jarvis" : "Open Jarvis"}
+          onClick={toggleGooni}
+          title={gooniOpen ? "Close Gooni" : "Open Gooni"}
           style={{
             padding: "5px 12px", borderRadius: 16, border: "none",
-            background: jarvisOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)",
+            background: gooniOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)",
             cursor: "pointer", fontSize: 13,
-            color: jarvisOpen ? "#1C1C1E" : "#636366",
-            fontFamily: font, fontWeight: jarvisOpen ? 600 : 400,
+            color: gooniOpen ? "#1C1C1E" : "#636366",
+            fontFamily: font, fontWeight: gooniOpen ? 600 : 400,
             display: "flex", alignItems: "center", gap: 5,
           }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.10)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = jarvisOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)")}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = gooniOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)")}
         >
-          💬 Jarvis
+          💬 Gooni
         </button>
       </div>
 

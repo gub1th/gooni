@@ -26,15 +26,14 @@ class Orchestrator:
         stripped = message.strip()
         command = stripped.lower()
 
-        # Slash commands only apply for Telegram
-        if source == "telegram":
-            if command == "/memory":
-                return self._handle_memory_command(db), None
-            if command == "/goals":
-                return self._handle_goals_command(db), None
-            if command.startswith("/goal "):
-                name = stripped[6:].strip()
-                return self._handle_goal_detail_command(name, db), None
+        # Slash commands work from any source (web, Telegram)
+        if command == "/memory":
+            return self._handle_memory_command(db), None
+        if command == "/goals":
+            return self._handle_goals_command(db), None
+        if command.startswith("/goal "):
+            name = stripped[6:].strip()
+            return self._handle_goal_detail_command(name, db), None
 
         # First-time greeting only for Telegram
         is_first_time = source == "telegram" and not memory_service.get_name(db)
@@ -71,22 +70,23 @@ class Orchestrator:
             response, usage = llm_client.generate_response_with_image(
                 message, image_url, full_context, "", recent_history, db=db
             )
+            memories = []
         else:
-            response, usage = llm_client.generate_chat_response_with_memory(
-                message, full_context, "", recent_history,
+            response, usage, memories = llm_client.generate_chat_response_with_memory(
+                message, full_context, recent_history,
                 is_first_time=is_first_time, db=db,
             )
 
         conversation_service.add_message(conv.id, "assistant", response, db)
 
-        # Save any profile facts the LLM extracted
-        for fact in usage.pop("profile_facts", []):
-            memory_service.upsert_profile_fact(fact, db)
+        for memory in memories:
+            memory_service.upsert_memory(memory, db)
 
         # Auto-save episode for future context retrieval
         if saved_message.strip() and len(saved_message.strip()) > 10:
+            summary = llm_client.summarize_episode(saved_message, response)
             memory_service.create_episode(
-                f"User: {saved_message}\nAssistant: {response}",
+                summary,
                 goal_id=getattr(conv, "goal_id", None),
                 db=db,
             )
