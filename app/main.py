@@ -414,7 +414,7 @@ def touch_note(note_id: int, db: Session = Depends(get_db)):
 
 @app.post("/notes/{note_id}/memorize")
 def memorize_note(note_id: int, db: Session = Depends(get_db)):
-    """Extract profile facts from a note when the user leaves it.
+    """Extract facts from a note when the user leaves it.
     Note embeddings are handled by the PATCH endpoint background task —
     we no longer create Memory episodes from notes (episodes are for chat only).
     """
@@ -427,7 +427,7 @@ def memorize_note(note_id: int, db: Session = Depends(get_db)):
     if len(raw) <= 10:
         return {"ok": True, "facts_saved": 0}
     try:
-        facts = llm_client.extract_profile_facts(raw)
+        facts = llm_client.extract_facts(raw)
         for fact in facts:
             memory_service.upsert_profile_fact(fact, db)
     except Exception:

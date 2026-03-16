@@ -6,22 +6,33 @@ from typing import List
 from openai import OpenAI
 from pydantic import BaseModel
 
+from ..tools import registry as tools
+from ..tools import tool_map
+from .pricing import UsageTracker, calculate_embedding_cost
 
-class ProfileFact(BaseModel):
+
+FACT_EXTRACTION_PROMPT = (
+    "A fact is a discrete, specific, reusable piece of information — anything about "
+    "the user, their preferences, their projects, tools they use, decisions they've "
+    "made, things that need improvement, or any domain they're working in. "
+    "Rules: only include facts explicitly stated (not inferred); each fact must be "
+    "a single specific claim; key must be snake_case and descriptive; skip generic "
+    "advice, vague statements, and conversational filler."
+)
+
+
+class Fact(BaseModel):
     key: str
     content: str
 
 
-class ProfileFactsOnly(BaseModel):
-    profile_facts: list[ProfileFact] = []
+class FactsOnly(BaseModel):
+    facts: list[Fact] = []
 
 
 class ChatResponse(BaseModel):
     reply: str
-    profile_facts: list[ProfileFact] = []
-
-from .pricing import calculate_embedding_cost, UsageTracker
-from ..tools import registry as tools, tool_map
+    facts: list[Fact] = []
 
 
 class LLMClient:
@@ -45,10 +56,12 @@ class LLMClient:
             response = self.client.embeddings.create(
                 model=self.embedding_model, input=text
             )
-            cost = calculate_embedding_cost(self.embedding_model, response.usage.total_tokens)
+            cost = calculate_embedding_cost(
+                self.embedding_model, response.usage.total_tokens
+            )
             usage = {
                 "embedding_tokens": response.usage.total_tokens,
-                "embedding_cost": cost
+                "embedding_cost": cost,
             }
             return response.data[0].embedding, usage
         except Exception as e:
@@ -56,8 +69,13 @@ class LLMClient:
             return [], {"embedding_tokens": 0, "embedding_cost": 0}
 
     def generate_chat_response_with_memory(
-        self, message: str, profile_context: str, episodic_context: str,
-        history: list = None, is_first_time: bool = False, db=None,
+        self,
+        message: str,
+        profile_context: str,
+        episodic_context: str,
+        history: list = None,
+        is_first_time: bool = False,
+        db=None,
     ) -> tuple[str, dict, list[dict]]:
         """Generate response with enhanced memory context and tool use."""
 
@@ -110,24 +128,30 @@ class LLMClient:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
                         tool = tool_map.get(tool_name)
-                        result = tool.execute(db=db, **tool_args) if tool else f"Unknown tool: {tool_name}"
+                        result = (
+                            tool.execute(db=db, **tool_args)
+                            if tool
+                            else f"Unknown tool: {tool_name}"
+                        )
                         tools_used.append(tool_name)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": result,
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": result,
+                            }
+                        )
                 else:
                     # Tools are done — make one structured call for reply + log_note
-                    messages.append({"role": "assistant", "content": choice.message.content})
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "Now respond with your final reply and any profile_facts newly learned "
-                            "about the user (e.g. name, weight, height, dietary restrictions, "
-                            "preferences). Only include facts explicitly stated in this conversation."
-                        ),
-                    })
+                    messages.append(
+                        {"role": "assistant", "content": choice.message.content}
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": f"Now respond with your final reply and any facts worth remembering long-term. {FACT_EXTRACTION_PROMPT}",
+                        }
+                    )
                     structured = self.client.beta.chat.completions.parse(
                         model=self.chat_model,
                         messages=messages,
@@ -137,14 +161,17 @@ class LLMClient:
                     tracker.add(structured.usage)
                     parsed = structured.choices[0].message.parsed
                     usage = tracker.finalize(tools_used)
-                    profile_facts = [{"key": f.key, "content": f.content} for f in parsed.profile_facts]
-                    return parsed.reply, usage, profile_facts
+                    facts = [{"key": f.key, "content": f.content} for f in parsed.facts]
+                    return parsed.reply, usage, facts
 
             return "I got stuck processing tool results.", tracker.finalize(tools_used)
 
         except Exception as e:
             print(f"LLM Error: {e}")
-            return "I'm having trouble generating a response right now.", tracker.finalize(tools_used)
+            return (
+                "I'm having trouble generating a response right now.",
+                tracker.finalize(tools_used),
+            )
 
     def generate_response_with_image(
         self,
@@ -206,24 +233,32 @@ class LLMClient:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
                         tool = tool_map.get(tool_name)
-                        result = tool.execute(db=db, **tool_args) if tool else f"Unknown tool: {tool_name}"
+                        result = (
+                            tool.execute(db=db, **tool_args)
+                            if tool
+                            else f"Unknown tool: {tool_name}"
+                        )
                         tools_used.append(tool_name)
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": result,
-                        })
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": result,
+                            }
+                        )
                 else:
                     return choice.message.content, tracker.finalize(tools_used)
 
             return "I got stuck processing tool results.", tracker.finalize(tools_used)
         except Exception as e:
             print(f"LLM Vision Error: {e}")
-            return "I couldn't analyze that image right now.", tracker.finalize(tools_used)
+            return "I couldn't analyze that image right now.", tracker.finalize(
+                tools_used
+            )
 
-    def extract_profile_facts(self, content: str) -> list[dict]:
-        """Extract structured profile facts from any text (note, message, etc.).
-        Returns [{ key, content }] — same shape as chat path profile_facts.
+    def extract_facts(self, content: str) -> list[dict]:
+        """Extract facts from any text (note, message, etc.).
+        Returns [{ key, content }] — same shape as chat path facts.
         """
         try:
             structured = self.client.beta.chat.completions.parse(
@@ -231,21 +266,15 @@ class LLMClient:
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "Extract profile facts about the user from the text. "
-                            "Profile facts are durable personal attributes: name, age, weight, height, "
-                            "dietary restrictions, fitness goals, preferences, injuries, etc. "
-                            "Do NOT extract transient events (e.g. 'went to gym today'). "
-                            "Return an empty list if nothing durable is found."
-                        ),
+                        "content": f"Extract facts worth remembering long-term from the text. {FACT_EXTRACTION_PROMPT}",
                     },
                     {"role": "user", "content": content},
                 ],
-                response_format=ProfileFactsOnly,
+                response_format=FactsOnly,
                 max_tokens=200,
             )
             parsed = structured.choices[0].message.parsed
-            return [{"key": f.key, "content": f.content} for f in parsed.profile_facts]
+            return [{"key": f.key, "content": f.content} for f in parsed.facts]
         except Exception as e:
             print(f"Profile fact extraction error: {e}")
             return []

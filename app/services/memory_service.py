@@ -9,8 +9,8 @@ from ..llm.client import llm_client
 
 
 class MemoryService:
-    def upsert_profile_fact(self, memory_data: Dict[str, Any], db: Session) -> Memory:
-        """Upsert a PROFILE_FACT memory with key-based superseding."""
+    def upsert_fact(self, memory_data: Dict[str, Any], db: Session) -> Memory:
+        """Upsert a FACT memory with key-based superseding."""
         key = memory_data["key"].lower().replace(" ", "_")
         content = memory_data["content"]
         confidence = memory_data.get("confidence", 0.8)
@@ -23,7 +23,7 @@ class MemoryService:
             db.query(Memory)
             .filter(
                 Memory.key == key,
-                Memory.memory_type == MemoryType.PROFILE_FACT,
+                Memory.memory_type == MemoryType.FACT,
                 Memory.is_active == True,
             )
             .first()
@@ -40,7 +40,7 @@ class MemoryService:
                 existing.is_active = False
 
         new_memory = Memory(
-            memory_type=MemoryType.PROFILE_FACT,
+            memory_type=MemoryType.FACT,
             key=key,
             content=content,
             goal_id=goal_id,
@@ -91,9 +91,9 @@ class MemoryService:
         self.create_episode(content, None, db)
         result["episode_saved"] = True
 
-        facts = llm_client.extract_profile_facts(content)
+        facts = llm_client.extract_facts(content)
         for fact in facts:
-            self.upsert_profile_fact(fact, db)
+            self.upsert_fact(fact, db)
         result["facts_saved"] = len(facts)
 
         return result
@@ -124,10 +124,10 @@ class MemoryService:
 
     def build_memory_context(self, query: str, db: Session) -> str:
         """Build context string from profile facts + relevant episodes."""
-        profile_facts = (
+        facts = (
             db.query(Memory)
             .filter(
-                Memory.memory_type == MemoryType.PROFILE_FACT,
+                Memory.memory_type == MemoryType.FACT,
                 Memory.is_active == True,
             )
             .all()
@@ -136,13 +136,13 @@ class MemoryService:
         relevant = self.search_similar(query, 3, db)
         episodes = [m for m in relevant if m.memory_type == MemoryType.EPISODE]
 
-        if not profile_facts and not episodes:
+        if not facts and not episodes:
             return ""
 
         lines = []
-        if profile_facts:
-            lines.append("Known about you:")
-            for m in profile_facts:
+        if facts:
+            lines.append("Known facts:")
+            for m in facts:
                 lines.append(f"- {m.content}")
         if episodes:
             lines.append("Relevant past context:")
@@ -158,7 +158,7 @@ class MemoryService:
             db.query(Memory)
             .filter(
                 Memory.key == "name",
-                Memory.memory_type == MemoryType.PROFILE_FACT,
+                Memory.memory_type == MemoryType.FACT,
                 Memory.is_active == True,
             )
             .first()

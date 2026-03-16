@@ -5,6 +5,7 @@
 
 ## Up Next
 - [ ] Deploy Telegram bot
+- [ ] Set up Alembic for versioned DB migrations (currently using manual `_run_column_migrations()` in `main.py` — no version tracking, no rollback). On prod, data migrations (e.g. `UPDATE memories SET memory_type = 'fact' WHERE memory_type = 'PROFILE_FACT'`) must be run manually over SSH before restarting the service.
 
 ## Backlog
 - [ ] Note search — filter NotesList by title/content as you type

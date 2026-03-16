@@ -70,18 +70,17 @@ class Orchestrator:
             response, usage = llm_client.generate_response_with_image(
                 message, image_url, full_context, "", recent_history, db=db
             )
-            profile_facts = []
+            facts = []
         else:
-            response, usage, profile_facts = llm_client.generate_chat_response_with_memory(
+            response, usage, facts = llm_client.generate_chat_response_with_memory(
                 message, full_context, "", recent_history,
                 is_first_time=is_first_time, db=db,
             )
 
         conversation_service.add_message(conv.id, "assistant", response, db)
 
-        # Save any profile facts the LLM extracted
-        for fact in profile_facts:
-            memory_service.upsert_profile_fact(fact, db)
+        for fact in facts:
+            memory_service.upsert_fact(fact, db)
 
         # Auto-save episode for future context retrieval
         if saved_message.strip() and len(saved_message.strip()) > 10:

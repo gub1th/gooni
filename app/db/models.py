@@ -38,7 +38,7 @@ class GoalType(enum.Enum):
 
 
 class MemoryType(enum.Enum):
-    PROFILE_FACT = "profile_fact"
+    FACT = "fact"
     EPISODE = "episode"
 
 
