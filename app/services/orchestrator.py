@@ -73,7 +73,7 @@ class Orchestrator:
             memories = []
         else:
             response, usage, memories = llm_client.generate_chat_response_with_memory(
-                message, full_context, "", recent_history,
+                message, full_context, recent_history,
                 is_first_time=is_first_time, db=db,
             )
 

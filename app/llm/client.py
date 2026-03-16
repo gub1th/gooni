@@ -1,6 +1,5 @@
 import json
 import os
-from datetime import datetime
 from typing import List, Literal
 
 from openai import OpenAI
@@ -9,18 +8,13 @@ from pydantic import BaseModel
 from ..tools import registry as tools
 from ..tools import tool_map
 from .pricing import UsageTracker, calculate_embedding_cost
-
-MEMORY_EXTRACTION_PROMPT = (
-    "Extract memories worth storing long-term. Each memory has a type:\n"
-    "- 'fact': discrete, specific information — about the user, their projects, "
-    "tools, decisions, domains they work in, things that need improvement.\n"
-    "- 'preference': how the user wants Gooni to behave — response style, tone, "
-    "formatting, communication preferences.\n"
-    "Examples of facts: 'building Gooni with FastAPI', 'Gooni needs better memory retrieval'\n"
-    "Examples of preferences: 'prefers concise responses', 'wants markdown formatting', 'wants to be addressed by a certain name', 'wants the system to be called Gooni', 'wants the system to use a certain tone'\n"
-    "Rules: only include things explicitly stated (not inferred); each memory must be "
-    "a single specific claim; key must be snake_case and descriptive; skip generic "
-    "advice, vague statements, and filler."
+from .prompts import (
+    EPISODE_SUMMARIZATION_PROMPT,
+    MEMORY_EXTRACTION_INSTRUCTION,
+    MEMORY_EXTRACTION_SYSTEM,
+    TITLE_GENERATION_PROMPT,
+    system_prompt,
+    vision_prompt,
 )
 
 
@@ -42,7 +36,7 @@ class ChatResponse(BaseModel):
 class LLMClient:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.chat_model = "gpt-4o-mini"  # Cost-effective for Phase 1
+        self.chat_model = "gpt-4o-mini"
         self.embedding_model = "text-embedding-3-small"
 
     def transcribe(self, audio_path: str) -> str:
@@ -55,7 +49,7 @@ class LLMClient:
         return result.text
 
     def generate_embedding(self, text: str) -> tuple[List[float], dict]:
-        """Generate embedding for text"""
+        """Generate embedding for text."""
         try:
             response = self.client.embeddings.create(
                 model=self.embedding_model, input=text
@@ -75,36 +69,13 @@ class LLMClient:
     def generate_chat_response_with_memory(
         self,
         message: str,
-        profile_context: str,
-        episodic_context: str,
+        memory_context: str,
         history: list = None,
         is_first_time: bool = False,
         db=None,
     ) -> tuple[str, dict, list[dict]]:
-        """Generate response with enhanced memory context and tool use."""
-
-        now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
-        system_prompt = f"""You are Gooni, a personal AI assistant with persistent memory. You help the user think, plan, reflect, and track their life across notes and conversations.
-
-                        Current date and time: {now}
-
-                        {profile_context}
-
-                        {episodic_context}
-
-                        How you work:
-                        - You have access to the user's active note (if provided) — use it as context when answering questions or giving feedback
-                        - When users log food or meals, call log_meal — estimate macros for each item
-                        - When users log a workout, call log_workout with ONLY the exercises explicitly mentioned in the current message
-                        - When users ask about macros or nutrition, call get_daily_macros
-                        - When users ask about exercise progress, call get_exercise_history
-                        - Keep responses short and direct
-                        - Never ask more than one question at a time"""
-
-        if is_first_time:
-            system_prompt += "\n\nYou're meeting this user for the first time. Introduce yourself briefly and ask for their name."
-
-        messages = [{"role": "system", "content": system_prompt}]
+        """Generate response with memory context and tool use."""
+        messages = [{"role": "system", "content": system_prompt(memory_context, is_first_time)}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": message})
@@ -114,7 +85,7 @@ class LLMClient:
         tools_used = []
 
         try:
-            for _ in range(5):  # cap tool call iterations
+            for _ in range(5):
                 response = self.client.chat.completions.create(
                     model=self.chat_model,
                     messages=messages,
@@ -122,7 +93,6 @@ class LLMClient:
                     max_tokens=500,
                     tools=tool_schemas,
                 )
-
                 tracker.add(response.usage)
                 choice = response.choices[0]
 
@@ -138,24 +108,14 @@ class LLMClient:
                             else f"Unknown tool: {tool_name}"
                         )
                         tools_used.append(tool_name)
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": result,
-                            }
-                        )
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result,
+                        })
                 else:
-                    # Tools are done — make one structured call for reply + log_note
-                    messages.append(
-                        {"role": "assistant", "content": choice.message.content}
-                    )
-                    messages.append(
-                        {
-                            "role": "user",
-                            "content": f"Now respond with your final reply and any memories worth storing long-term. {MEMORY_EXTRACTION_PROMPT}",
-                        }
-                    )
+                    messages.append({"role": "assistant", "content": choice.message.content})
+                    messages.append({"role": "user", "content": MEMORY_EXTRACTION_INSTRUCTION})
                     structured = self.client.beta.chat.completions.parse(
                         model=self.chat_model,
                         messages=messages,
@@ -164,51 +124,30 @@ class LLMClient:
                     )
                     tracker.add(structured.usage)
                     parsed = structured.choices[0].message.parsed
-                    usage = tracker.finalize(tools_used)
                     memories = [
                         {"key": m.key, "content": m.content, "type": m.type}
                         for m in parsed.memories
                     ]
-                    return parsed.reply, usage, memories
+                    return parsed.reply, tracker.finalize(tools_used), memories
 
-            return "I got stuck processing tool results.", tracker.finalize(tools_used)
+            return "I got stuck processing tool results.", tracker.finalize(tools_used), []
 
         except Exception as e:
             print(f"LLM Error: {e}")
-            return (
-                "I'm having trouble generating a response right now.",
-                tracker.finalize(tools_used),
-            )
+            return "I'm having trouble generating a response right now.", tracker.finalize(tools_used), []
 
     def generate_response_with_image(
         self,
         message: str,
         image_url: str,
-        profile_context: str = "",
+        memory_context: str = "",
         episodic_context: str = "",
         history: list = None,
         db=None,
     ) -> tuple[str, dict]:
-        """Generate a fitness coaching response that includes an image.
-
-        Uses gpt-4o for vision + tool support. image_url can be an https:// URL or a
-        base64 data URI (data:image/jpeg;base64,...).
-        """
+        """Generate a response that includes an image. Uses gpt-4o for vision."""
         vision_model = "gpt-4o"
-        now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
-
-        system_prompt = (
-            f"You are Gooni, a personal AI assistant with persistent memory. "
-            f"Current date and time: {now}\n\n"
-            f"{profile_context}\n\n"
-            f"{episodic_context}\n\n"
-            "The user has sent you a photo. Identify what you see. "
-            "If it's food, estimate macros for each item and call log_meal. "
-            "If it's a workout, call log_workout. "
-            "Keep your response short — confirm what was logged."
-        )
-
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [{"role": "system", "content": vision_prompt(memory_context)}]
         if history:
             messages.extend(history)
 
@@ -246,22 +185,18 @@ class LLMClient:
                             else f"Unknown tool: {tool_name}"
                         )
                         tools_used.append(tool_name)
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": result,
-                            }
-                        )
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result,
+                        })
                 else:
                     return choice.message.content, tracker.finalize(tools_used)
 
             return "I got stuck processing tool results.", tracker.finalize(tools_used)
         except Exception as e:
             print(f"LLM Vision Error: {e}")
-            return "I couldn't analyze that image right now.", tracker.finalize(
-                tools_used
-            )
+            return "I couldn't analyze that image right now.", tracker.finalize(tools_used)
 
     def summarize_episode(self, user_message: str, assistant_response: str) -> str:
         """Summarize a conversation exchange into a concise, retrievable episode."""
@@ -269,19 +204,8 @@ class LLMClient:
             response = self.client.chat.completions.create(
                 model=self.chat_model,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Summarize the following conversation exchange in 1-3 sentences. "
-                            "Be specific and concrete — capture what was discussed, any decisions made, "
-                            "problems identified, or information shared. "
-                            "Do not give generic advice. Do not editorialize. Just state the facts of what was discussed."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"User: {user_message}\nAssistant: {assistant_response}",
-                    },
+                    {"role": "system", "content": EPISODE_SUMMARIZATION_PROMPT},
+                    {"role": "user", "content": f"User: {user_message}\nAssistant: {assistant_response}"},
                 ],
                 temperature=0.3,
                 max_tokens=150,
@@ -292,17 +216,12 @@ class LLMClient:
             return f"User: {user_message}\nAssistant: {assistant_response}"
 
     def extract_facts(self, content: str) -> list[dict]:
-        """Extract facts from any text (note, message, etc.).
-        Returns [{ key, content }] — same shape as chat path facts.
-        """
+        """Extract memories from any text (note, message, etc.)."""
         try:
             structured = self.client.beta.chat.completions.parse(
                 model=self.chat_model,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": f"Extract memories worth storing long-term from the text. {MEMORY_EXTRACTION_PROMPT}",
-                    },
+                    {"role": "system", "content": MEMORY_EXTRACTION_SYSTEM},
                     {"role": "user", "content": content},
                 ],
                 response_format=ExtractedMemoriesOnly,
@@ -314,20 +233,15 @@ class LLMClient:
                 for m in parsed.memories
             ]
         except Exception as e:
-            print(f"Profile fact extraction error: {e}")
+            print(f"Memory extraction error: {e}")
             return []
 
     async def generate_title(self, content: str) -> str:
-        """Generate a short 5-word title for a note entry."""
+        """Generate a short 5-word title for a conversation or note."""
         try:
             response = self.client.chat.completions.create(
                 model=self.chat_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"Generate a short 5-word title for this note. Return only the title, no quotes:\n{content}",
-                    }
-                ],
+                messages=[{"role": "user", "content": f"{TITLE_GENERATION_PROMPT}{content}"}],
                 temperature=0.5,
                 max_tokens=20,
             )
@@ -337,5 +251,4 @@ class LLMClient:
             return content[:40].strip()
 
 
-# Global instance for easy import
 llm_client = LLMClient()
