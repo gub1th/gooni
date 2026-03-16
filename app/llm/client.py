@@ -58,7 +58,7 @@ class LLMClient:
     def generate_chat_response_with_memory(
         self, message: str, profile_context: str, episodic_context: str,
         history: list = None, is_first_time: bool = False, db=None,
-    ) -> tuple[str, dict]:
+    ) -> tuple[str, dict, list[dict]]:
         """Generate response with enhanced memory context and tool use."""
 
         now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
@@ -137,8 +137,8 @@ class LLMClient:
                     tracker.add(structured.usage)
                     parsed = structured.choices[0].message.parsed
                     usage = tracker.finalize(tools_used)
-                    usage["profile_facts"] = [{"key": f.key, "content": f.content} for f in parsed.profile_facts]
-                    return parsed.reply, usage
+                    profile_facts = [{"key": f.key, "content": f.content} for f in parsed.profile_facts]
+                    return parsed.reply, usage, profile_facts
 
             return "I got stuck processing tool results.", tracker.finalize(tools_used)
 
