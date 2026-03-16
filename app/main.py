@@ -625,12 +625,15 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         .all()
     )
 
-    # Streak: consecutive days with note activity ending today
+    # Streak: consecutive days with any activity (notes or conversations) ending today
     try:
         date_rows = db.execute(
             text(
-                "SELECT DISTINCT date(updated_at) as d FROM notes "
-                "WHERE updated_at IS NOT NULL ORDER BY d DESC LIMIT 30"
+                "SELECT DISTINCT d FROM ("
+                "  SELECT date(updated_at) as d FROM notes WHERE updated_at IS NOT NULL"
+                "  UNION"
+                "  SELECT date(created_at) as d FROM messages WHERE role = 'user' AND created_at IS NOT NULL"
+                ") ORDER BY d DESC LIMIT 30"
             )
         ).fetchall()
         streak = 0
