@@ -68,7 +68,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
 
     try {
       if (convId === null) {
-        const conv = await apiCreateConversation();
+        const conv = await apiCreateConversation(content);
         convId = conv.id;
         set({ activeId: convId });
       }
