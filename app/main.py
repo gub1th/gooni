@@ -424,7 +424,7 @@ def memorize_note(note_id: int, db: Session = Depends(get_db)):
     try:
         facts = llm_client.extract_facts(raw)
         for fact in facts:
-            memory_service.upsert_profile_fact(fact, db)
+            memory_service.upsert_memory(fact, db)
     except Exception:
         facts = []
     return {"ok": True, "facts_saved": len(facts)}
