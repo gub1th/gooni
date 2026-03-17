@@ -27,7 +27,7 @@ class SaveMemoryTool(BaseTool):
     def execute(self, db=None, key: str = "", content: str = "", **kwargs) -> str:
         from ..services.memory_service import memory_service
 
-        memory_service.upsert_profile_fact(
+        memory_service.upsert_memory(
             {"key": key, "content": content, "confidence": 0.9},
             db,
         )
