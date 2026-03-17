@@ -9,6 +9,8 @@ export function StatChip({ label, value }: StatChipProps) {
   return (
     <div
       style={{
+        display: "flex",
+        alignItems: "center",
         padding: "5px 12px",
         borderRadius: 20,
         background: "rgba(0,0,0,0.05)",

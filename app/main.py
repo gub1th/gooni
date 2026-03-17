@@ -625,7 +625,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         .all()
     )
 
-    # Streak: consecutive days with any activity (notes or conversations) ending today
+    # Streak: consecutive days with any activity (notes or conversations).
+    # Allows today OR yesterday as the starting point so the streak stays
+    # alive at the start of a new day before the user has done anything yet.
     try:
         date_rows = db.execute(
             text(
@@ -637,12 +639,14 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             )
         ).fetchall()
         streak = 0
-        for i, row in enumerate(date_rows):
-            note_date = date.fromisoformat(row[0])
-            if note_date == today - timedelta(days=i):
-                streak += 1
-            else:
-                break
+        if date_rows:
+            most_recent = date.fromisoformat(date_rows[0][0])
+            if most_recent >= today - timedelta(days=1):
+                for i, row in enumerate(date_rows):
+                    if date.fromisoformat(row[0]) == most_recent - timedelta(days=i):
+                        streak += 1
+                    else:
+                        break
     except Exception:
         streak = 0
 

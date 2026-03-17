@@ -94,7 +94,7 @@ export function Dashboard({ onGoToNote: _onGoToNote }: DashboardProps) {
           {getGreeting()}, Daniel
         </div>
         <div style={{ fontSize: 13, color: "#8E8E93", marginTop: 4 }}>{getDateStr()}</div>
-        <div style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
           <StatChip value={stats?.notes_this_week ?? "—"} label="notes this week" />
           <StatChip value={stats && stats.streak > 0 ? `${stats.streak} 🔥` : (stats?.streak ?? "—")} label="streak" />
           <StatChip value={stats?.active_goals_count ?? "—"} label="goals" />
