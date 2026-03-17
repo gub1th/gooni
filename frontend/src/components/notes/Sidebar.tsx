@@ -31,6 +31,7 @@ interface SidebarProps {
   onGoalSelect: () => void;
   onCompose: () => void;
   onNewChat: () => void;
+  onConversationSelect: () => void;
 }
 
 function ComposeIcon() {
@@ -42,7 +43,7 @@ function ComposeIcon() {
   );
 }
 
-export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onGoalSelect, onCompose, onNewChat }: SidebarProps) {
+export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onGoalSelect, onCompose, onNewChat, onConversationSelect }: SidebarProps) {
   const { spaces, create: createSpace, remove: removeSpace, rename: renameSpace, setEmoji } = useSpacesStore();
   const { selectedSpaceId, selectSpace, loadNotes, removeSpace: clearSpaceNotes, moveNote } = useNotesContentStore();
   const { goals, create: createGoal, selectedGoalId, selectGoal } = useGoalsStore();
@@ -269,7 +270,7 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
               {conversations.slice(0, 5).map((conv) => (
                 <button
                   key={conv.id}
-                  onClick={() => selectConversation(conv.id)}
+                  onClick={() => { selectConversation(conv.id); onConversationSelect(); }}
                   style={{
                     display: "flex",
                     flexDirection: "column",
