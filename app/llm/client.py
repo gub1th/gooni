@@ -125,7 +125,7 @@ class LLMClient:
                         model=self.chat_model,
                         messages=extract_messages,
                         response_format=ExtractedMemoriesOnly,
-                        max_tokens=200,
+                        max_tokens=500,
                     )
                     tracker.add(structured.usage)
                     memories = [
