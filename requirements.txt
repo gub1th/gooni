@@ -8,3 +8,4 @@ ddgs>=1.0.0
 beautifulsoup4>=4.12.0
 httpx>=0.27.0
 python-telegram-bot>=21.0
+mcp[cli]>=1.0.0

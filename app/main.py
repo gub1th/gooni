@@ -18,6 +18,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     GoalStatus,
     GoalType,
     Memory,
+    MemoryType,
     Message,
     Note,
     Space,
@@ -596,7 +597,6 @@ def send_conversation_message(
     return [_serialize_message(m) for m in msgs]
 
 
-
 @app.get("/health")
 async def health():
     return {"message": "Health check"}
@@ -660,6 +660,127 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         "recent_notes": [_serialize_note(n) for n in recent_notes],
         "streak": streak,
     }
+
+
+# ── MCP endpoints ─────────────────────────────────────────────────────────────
+
+
+@app.get("/mcp/context")
+def mcp_get_context(q: str = "", db: Session = Depends(get_db)):
+    """Return memory context for a query. Empty query returns preferences + goals only."""
+    if not q.strip():
+        preferences = (
+            db.query(Memory)
+            .filter(
+                Memory.memory_type == MemoryType.PREFERENCE, Memory.is_active == True
+            )
+            .all()
+        )
+        active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
+        parts = []
+        if preferences:
+            parts.append("User preferences (always apply these):")
+            for m in preferences:
+                parts.append(f"- {m.content}")
+        if active_goals:
+            parts.append("Active goals:")
+            for g in active_goals:
+                parts.append(f"- {g.title}")
+        return {"context": "\n".join(parts)}
+    context = memory_service.build_memory_context(q, db)
+    return {"context": context}
+
+
+@app.post("/mcp/memories")
+def mcp_add_memory(body: dict, db: Session = Depends(get_db)):
+    """Upsert a fact or preference memory."""
+    key = body.get("key", "").strip()
+    content = body.get("content", "").strip()
+    mem_type = body.get("type", "fact")
+    if not key or not content:
+        raise HTTPException(status_code=400, detail="key and content are required")
+    memory = memory_service.upsert_memory(
+        {"key": key, "content": content, "type": mem_type}, db
+    )
+    return {
+        "id": memory.id,
+        "key": memory.key,
+        "content": memory.content,
+        "type": memory.memory_type.value,
+    }
+
+
+@app.get("/mcp/memories/search")
+def mcp_search_memories(q: str, limit: int = 10, db: Session = Depends(get_db)):
+    """Search active memories by semantic similarity."""
+    memories = memory_service.search_similar(q, limit=limit, db=db)
+    return [
+        {"id": m.id, "key": m.key, "type": m.memory_type.value, "content": m.content}
+        for m in memories
+    ]
+
+
+@app.patch("/mcp/memories/{key}")
+def mcp_edit_memory(key: str, body: dict, db: Session = Depends(get_db)):
+    """Edit memory content in-place (re-embeds, does not supersede)."""
+    normalized = key.lower().replace(" ", "_")
+    memory = (
+        db.query(Memory)
+        .filter(Memory.key == normalized, Memory.is_active == True)
+        .first()
+    )
+    if not memory:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    content = body.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+    memory.content = content
+    embedding, _ = llm_client.generate_embedding(content)
+    memory.embedding = json.dumps(embedding)
+    db.commit()
+    db.refresh(memory)
+    return {
+        "id": memory.id,
+        "key": memory.key,
+        "type": memory.memory_type.value,
+        "content": memory.content,
+    }
+
+
+@app.delete("/mcp/memories/{key}")
+def mcp_forget_memory(key: str, db: Session = Depends(get_db)):
+    """Soft-delete a memory by key (sets is_active=False)."""
+    normalized = key.lower().replace(" ", "_")
+    memory = (
+        db.query(Memory)
+        .filter(Memory.key == normalized, Memory.is_active == True)
+        .first()
+    )
+    if not memory:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    memory.is_active = False
+    db.commit()
+    return {"ok": True, "key": normalized}
+
+
+@app.get("/mcp/notes/search")
+def mcp_search_notes(q: str, limit: int = 5, db: Session = Depends(get_db)):
+    """Search notes by semantic similarity to a query string."""
+    query_embedding, _ = llm_client.generate_embedding(q)
+    if not query_embedding:
+        return []
+    candidates = db.query(Note).filter(Note.embedding.isnot(None)).all()
+    scored = []
+    for n in candidates:
+        try:
+            sim = memory_service._cosine_similarity(
+                query_embedding, json.loads(n.embedding)
+            )
+            scored.append((n, sim))
+        except Exception:
+            pass
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [_serialize_note(n) for n, _ in scored[:limit]]
 
 
 @app.get("/dashboard/insight")
