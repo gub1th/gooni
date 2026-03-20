@@ -123,6 +123,12 @@ export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiN
   return res.json();
 }
 
+export async function fetchRecentNotes(limit = 5): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/notes/recent?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch recent notes");
+  return res.json();
+}
+
 export async function createNote(spaceId: number | "general"): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/spaces/${spaceId}/notes`, {
     method: "POST",

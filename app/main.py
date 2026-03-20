@@ -318,6 +318,17 @@ def get_general_notes(db: Session = Depends(get_db)):
     return [_serialize_note(n) for n in notes]
 
 
+@app.get("/notes/recent")
+def get_recent_notes(limit: int = 5, db: Session = Depends(get_db)):
+    notes = (
+        db.query(Note)
+        .order_by(_notes_order())
+        .limit(limit)
+        .all()
+    )
+    return [_serialize_note(n) for n in notes]
+
+
 @app.post("/spaces/{space_id}/notes")
 def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
     from datetime import datetime

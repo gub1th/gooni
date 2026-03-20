@@ -4,6 +4,7 @@ import { useSpacesStore } from "../../stores/useSpacesStore";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGoalsStore } from "../../stores/useGoalsStore";
 import { useConversationsStore } from "../../stores/useConversationsStore";
+import { fetchRecentNotes, type ApiNote } from "../../services/api";
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -45,9 +46,10 @@ function ComposeIcon() {
 
 export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onGoalSelect, onCompose, onNewChat, onConversationSelect }: SidebarProps) {
   const { spaces, create: createSpace, remove: removeSpace, rename: renameSpace, setEmoji } = useSpacesStore();
-  const { selectedSpaceId, selectSpace, loadNotes, removeSpace: clearSpaceNotes, moveNote } = useNotesContentStore();
+  const { selectedSpaceId, selectSpace, loadNotes, removeSpace: clearSpaceNotes, moveNote, selectNote, activeNoteId } = useNotesContentStore();
   const { goals, create: createGoal, selectedGoalId, selectGoal } = useGoalsStore();
   const { conversations, activeId, selectConversation } = useConversationsStore();
+  const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [addingGoal, setAddingGoal] = useState(false);
@@ -61,6 +63,10 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetchRecentNotes(5).then(setRecentNotes).catch(() => {});
+  }, []);
 
   // Dismiss context menu on outside click
   useEffect(() => {
@@ -96,6 +102,16 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
     selectGoal(null);
     selectSpace(id);
     loadNotes(id);
+    onSpaceSelect();
+  }
+
+  function handleSelectRecentNote(note: ApiNote) {
+    const spaceId = note.space_id == null ? "general" : String(note.space_id);
+    selectGoal(null);
+    selectSpace(spaceId);
+    loadNotes(spaceId).then(() => {
+      selectNote(note.id);
+    });
     onSpaceSelect();
   }
 
@@ -388,6 +404,58 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
           );
         })}
       </div>
+
+      {/* Divider */}
+      <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "4px 12px 4px" }} />
+
+      {/* Recent Notes section */}
+      {recentNotes.length > 0 && (
+        <div style={{ padding: "6px 6px 4px" }}>
+          <div style={{ padding: "0 6px", marginBottom: 2 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>RECENT</span>
+          </div>
+          {recentNotes.map((note) => {
+            const selected = activeNoteId === note.id;
+            return (
+              <button
+                key={note.id}
+                onClick={() => handleSelectRecentNote(note)}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  width: "100%",
+                  padding: "5px 10px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: selected ? "rgba(0,0,0,0.08)" : "transparent",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "background 0.1s",
+                }}
+                onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+                onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              >
+                <span style={{
+                  fontSize: 13,
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  fontWeight: selected ? 600 : 400,
+                  color: "#1C1C1E",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  width: "100%",
+                }}>
+                  {note.title || "Untitled"}
+                </span>
+                <span style={{ fontSize: 11, color: "#AEAEB2", marginTop: 1, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+                  {relativeTime(note.updated_at)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Divider */}
       <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "4px 12px 4px" }} />
