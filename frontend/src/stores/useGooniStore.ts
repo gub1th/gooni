@@ -6,6 +6,7 @@ interface GooniMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
+  intention?: string;
 }
 
 interface GooniState {
@@ -42,6 +43,7 @@ export const useGooniStore = create<GooniState>()(
             id: Date.now() + 1,
             role: "assistant",
             content: res.content,
+            intention: res.intention || undefined,
           };
           set((s) => ({ messages: [...s.messages, assistantMsg] }));
         } catch (e) {

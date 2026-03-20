@@ -4,6 +4,7 @@ import {
   createConversation as apiCreateConversation,
   sendConversationMessage as apiSendMessage,
   fetchConversationMessages as apiFetchMessages,
+  fetchIntention,
   type ApiConversation,
 } from "../services/api";
 
@@ -12,6 +13,7 @@ interface ConversationMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  intention?: string;
 }
 
 interface ConversationsStore {
@@ -19,6 +21,7 @@ interface ConversationsStore {
   activeId: number | null;
   messages: ConversationMessage[];
   sending: boolean;
+  pendingIntention: string | null;
 
   fetchConversations: () => Promise<void>;
   selectConversation: (id: number) => Promise<void>;
@@ -31,6 +34,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
   activeId: null,
   messages: [],
   sending: false,
+  pendingIntention: null,
 
   fetchConversations: async () => {
     try {
@@ -62,7 +66,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
       content,
       created_at: new Date().toISOString(),
     };
-    set((s) => ({ messages: [...s.messages, optimistic], sending: true }));
+    set((s) => ({ messages: [...s.messages, optimistic], sending: true, pendingIntention: null }));
 
     let convId = get().activeId;
 
@@ -73,14 +77,25 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
         set({ activeId: convId });
       }
 
-      const allMessages = await apiSendMessage(convId, content);
-      set({ messages: allMessages, sending: false });
+      // Fire intention fetch immediately — don't await, just update state when it resolves
+      fetchIntention(content, convId).then(({ intention }) => {
+        if (intention && get().sending) set({ pendingIntention: intention });
+      });
+
+      const { messages: allMessages, intention: fallbackIntention } = await apiSendMessage(convId, content);
+      const intentionToUse = get().pendingIntention || fallbackIntention || "";
+      const messagesWithIntention = allMessages.map((m, i) =>
+        i === allMessages.length - 1 && m.role === "assistant" && intentionToUse
+          ? { ...m, intention: intentionToUse }
+          : m
+      );
+      set({ messages: messagesWithIntention, sending: false, pendingIntention: null });
 
       const convos = await apiFetchConversations();
       set({ conversations: convos });
     } catch (e) {
       console.error(e);
-      set({ sending: false });
+      set({ sending: false, pendingIntention: null });
     }
   },
 }));

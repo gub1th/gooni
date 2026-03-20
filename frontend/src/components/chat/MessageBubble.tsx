@@ -1,19 +1,67 @@
+import { useState } from "react";
+
 const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
 
 interface MessageBubbleProps {
-  message: { id: number; role: "user" | "assistant"; content: string };
+  message: { id: number; role: "user" | "assistant"; content: string; intention?: string };
 }
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
+  const [expanded, setExpanded] = useState(false);
+
   return (
     <div
       style={{
         display: "flex",
-        justifyContent: isUser ? "flex-end" : "flex-start",
+        flexDirection: "column",
+        alignItems: isUser ? "flex-end" : "flex-start",
         marginBottom: 12,
       }}
     >
+      {!isUser && message.intention && (
+        <div style={{ marginBottom: 4, maxWidth: "80%" }}>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "2px 0",
+              color: "#AEAEB2",
+              fontSize: 12,
+              fontFamily: FONT,
+            }}
+          >
+            <span>Assessed your intention</span>
+            <span style={{ fontSize: 10 }}>{expanded ? "▾" : "▸"}</span>
+          </button>
+          {expanded && (
+            <div
+              style={{
+                marginTop: 4,
+                padding: "8px 10px",
+                borderRadius: 8,
+                background: "rgba(0,0,0,0.03)",
+                border: "1px solid rgba(0,0,0,0.07)",
+                fontFamily: FONT,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                <span style={{ color: "#AEAEB2", fontSize: 13, marginTop: 1 }}>⊙</span>
+                <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{message.intention}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>
+                <span style={{ fontSize: 12, color: "#AEAEB2" }}>Done</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <div
         style={{
           maxWidth: "80%",

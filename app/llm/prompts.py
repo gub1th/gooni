@@ -77,3 +77,9 @@ EPISODE_SUMMARIZATION_PROMPT = (
 TITLE_GENERATION_PROMPT = (
     "Generate a short 5-word title for this note. Return only the title, no quotes:\n"
 )
+
+INTENTION_GENERATION_PROMPT = (
+    "Determine the user's current intention based on their latest message and the recent conversation history. "
+    "The more recent messages are more relevant — the user may have switched topics mid-conversation. "
+    "Return only a single concise sentence describing what the user is trying to do right now. No explanation."
+)

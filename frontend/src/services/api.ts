@@ -262,7 +262,7 @@ export async function sendConversationMessage(
   convId: number,
   content: string,
   noteContent?: string
-): Promise<ApiMessage[]> {
+): Promise<{ messages: ApiMessage[]; intention: string }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -280,10 +280,27 @@ export async function fetchConversationMessages(convId: number): Promise<ApiMess
 
 // ── Gooni ─────────────────────────────────────────────────────────────────────
 
+export async function fetchIntention(
+  content: string,
+  conversationId?: number
+): Promise<{ intention: string }> {
+  try {
+    const res = await apiFetch(`${BASE}/chat/intention`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, conversation_id: conversationId }),
+    });
+    if (!res.ok) return { intention: "" };
+    return res.json();
+  } catch {
+    return { intention: "" };
+  }
+}
+
 export async function sendGooniMessage(
   content: string,
   noteContent?: string
-): Promise<{ content: string }> {
+): Promise<{ content: string; intention: string }> {
   const res = await apiFetch(`${BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

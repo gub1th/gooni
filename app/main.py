@@ -88,6 +88,21 @@ async def root():
     return {"message": "Hello World"}
 
 
+@app.post("/chat/intention")
+async def infer_intention(body: dict, db: Session = Depends(get_db)):
+    """Fast endpoint: infer user intention without running the full chat pipeline."""
+    content = body.get("content", "").strip()
+    conversation_id = body.get("conversation_id")
+    if not content:
+        return {"intention": ""}
+    recent_history = []
+    if conversation_id:
+        msgs = conversation_service.get_recent_messages(conversation_id, limit=6, db=db)
+        recent_history = [{"role": m.role, "content": m.content} for m in msgs]
+    intention = llm_client.generate_intention_context(content, recent_history)
+    return {"intention": intention}
+
+
 @app.post("/chat")
 async def chat(body: ChatRequest, db: Session = Depends(get_db)):
     content, usage = Orchestrator.handle_chat(
@@ -97,7 +112,7 @@ async def chat(body: ChatRequest, db: Session = Depends(get_db)):
         source="web",
         entry_content=body.entry_content or "",
     )
-    return {"content": content, "usage": usage}
+    return {"content": content, "usage": usage, "intention": usage.get("intention") or ""}
 
 
 @app.get("/debug/memories")
@@ -596,7 +611,7 @@ def send_conversation_message(
         raise HTTPException(status_code=400, detail="content is required")
     entry_content = body.get("entry_content", "")
     try:
-        Orchestrator.handle_chat(
+        _, usage = Orchestrator.handle_chat(
             user_content,
             db,
             conversation_id=conversation_id,
@@ -605,7 +620,10 @@ def send_conversation_message(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     msgs = conversation_service.get_messages(conversation_id, db)
-    return [_serialize_message(m) for m in msgs]
+    return {
+        "messages": [_serialize_message(m) for m in msgs],
+        "intention": usage.get("intention") or "",
+    }
 
 
 @app.get("/health")

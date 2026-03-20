@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Literal
+from typing import List, Literal, Dict
 
 from openai import OpenAI
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from .prompts import (
     EPISODE_SUMMARIZATION_PROMPT,
     MEMORY_EXTRACTION_SYSTEM,
     TITLE_GENERATION_PROMPT,
+    INTENTION_GENERATION_PROMPT,
     system_prompt,
     vision_prompt,
 )
@@ -253,6 +254,22 @@ class LLMClient:
         except Exception as e:
             print(f"Title generation error: {e}")
             return content[:40].strip()
+
+    def generate_intention_context(self, query: str, recent_history: List[Dict[str, str]]) -> str:
+        """Generate intention context for the given query and recent history."""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[{"role": "system", "content": INTENTION_GENERATION_PROMPT}] + recent_history + [
+                    {"role": "user", "content": query},
+                ],
+                temperature=0.3,
+                max_tokens=150,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Intention generation error: {e}")
+            return ""
 
 
 llm_client = LLMClient()
