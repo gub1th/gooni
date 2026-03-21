@@ -325,14 +325,6 @@ def get_space_notes(space_id: str, db: Session = Depends(get_db)):
     return [_serialize_note(n) for n in notes]
 
 
-@app.get("/notes")
-def get_general_notes(db: Session = Depends(get_db)):
-    notes = (
-        db.query(Note).filter(Note.space_id.is_(None)).order_by(_notes_order()).all()
-    )
-    return [_serialize_note(n) for n in notes]
-
-
 @app.get("/notes/recent")
 def get_recent_notes(limit: int = 5, db: Session = Depends(get_db)):
     notes = (
@@ -353,23 +345,6 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
         title=body.get("title") or "",
         content=body.get("content") or "",
         space_id=numeric_id,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    db.add(note)
-    db.commit()
-    db.refresh(note)
-    return _serialize_note(note)
-
-
-@app.post("/notes")
-def create_general_note(body: dict, db: Session = Depends(get_db)):
-    from datetime import datetime
-
-    note = Note(
-        title=body.get("title") or "",
-        content=body.get("content") or "",
-        space_id=None,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -534,17 +509,6 @@ def get_feed(db: Session = Depends(get_db)):
     return _build_feed(db, general=True)
 
 
-@app.get("/goals/{goal_id}/feed")
-def get_goal_feed(goal_id: int, db: Session = Depends(get_db)):
-    return _build_feed(db, goal_id=goal_id)
-
-
-@app.get("/spaces/{space_id}/feed")
-def get_space_feed(space_id: str, db: Session = Depends(get_db)):
-    if space_id == "general":
-        return _build_feed(db, general=True)
-    return _build_feed(db, space_id=int(space_id))
-
 
 # ── Conversation endpoints ─────────────────────────────────────────────────────
 
@@ -556,29 +520,6 @@ async def create_general_conversation(body: dict, db: Session = Depends(get_db))
     conv = conversation_service.create(db=db, goal_id=None, source="web", title=title)
     return _serialize_conversation(conv)
 
-
-@app.post("/spaces/{space_id}/conversations")
-async def create_space_conversation(
-    space_id: str, body: dict, db: Session = Depends(get_db)
-):
-    content = body.get("content", "")
-    title = await llm_client.generate_title(content) if content.strip() else None
-    numeric_id = None if space_id == "general" else int(space_id)
-    goal = (
-        db.query(Goal).filter(Goal.space_id == numeric_id).first()
-        if numeric_id
-        else None
-    )
-    conv = Conversation(
-        title=title,
-        source="web",
-        space_id=numeric_id,
-        goal_id=goal.id if goal else None,
-    )
-    db.add(conv)
-    db.commit()
-    db.refresh(conv)
-    return _serialize_conversation(conv)
 
 
 @app.get("/conversations/{conversation_id}/messages")
@@ -812,54 +753,3 @@ def mcp_search_notes(q: str, limit: int = 5, db: Session = Depends(get_db)):
     return [_serialize_note(n) for n, _ in scored[:limit]]
 
 
-@app.get("/dashboard/insight")
-def get_dashboard_insight(db: Session = Depends(get_db)):
-    from datetime import datetime, timedelta
-
-    week_ago = datetime.utcnow() - timedelta(days=7)
-    notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
-    recent_notes = (
-        db.query(Note)
-        .filter(Note.title.isnot(None), Note.title != "")
-        .order_by(Note.updated_at.desc())
-        .limit(5)
-        .all()
-    )
-    active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
-
-    parts = [f"Notes written this week: {notes_this_week}"]
-    if recent_notes:
-        parts.append(
-            f"Recent note titles: {', '.join(n.title for n in recent_notes if n.title)}"
-        )
-    if active_goals:
-        parts.append(f"Active goals: {', '.join(g.title for g in active_goals)}")
-    context = "\n".join(parts)
-
-    today_str = datetime.now().strftime("%A, %B %d, %Y")
-    try:
-        response = llm_client.client.chat.completions.create(
-            model=llm_client.chat_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"You are Gooni. Today is {today_str}. "
-                        "Write a brief 2-3 sentence daily briefing based on the user's recent activity. "
-                        "Be specific and personal, not generic. Keep it under 60 words."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"My recent activity:\n{context}\n\nGive me my daily briefing.",
-                },
-            ],
-            temperature=0.7,
-            max_tokens=120,
-        )
-        insight = response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"Dashboard insight error: {e}")
-        insight = None
-
-    return {"insight": insight}

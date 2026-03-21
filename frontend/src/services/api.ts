@@ -19,33 +19,6 @@ export async function fetchSpaces(): Promise<ApiSpace[]> {
   return res.json();
 }
 
-export async function updateSpace(id: number, patch: { name?: string; emoji?: string | null }): Promise<ApiSpace> {
-  const res = await apiFetch(`${BASE}/spaces/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error("Failed to update space");
-  return res.json();
-}
-
-// Keep old name as alias for backwards compat within this session
-export const renameSpace = (id: number, name: string) => updateSpace(id, { name });
-
-export async function deleteSpace(id: number): Promise<void> {
-  const res = await apiFetch(`${BASE}/spaces/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete space");
-}
-
-export async function createSpace(name: string): Promise<ApiSpace> {
-  const res = await apiFetch(`${BASE}/spaces`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!res.ok) throw new Error("Failed to create space");
-  return res.json();
-}
 
 // ── Notes ──────────────────────────────────────────────────────────────────────
 
@@ -218,11 +191,6 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   return res.json();
 }
 
-export async function fetchDashboardInsight(): Promise<{ insight: string | null }> {
-  const res = await apiFetch(`${BASE}/dashboard/insight`);
-  if (!res.ok) throw new Error("Failed to fetch dashboard insight");
-  return res.json();
-}
 
 // ── Conversations ──────────────────────────────────────────────────────────────
 
