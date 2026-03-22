@@ -1,5 +1,4 @@
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -36,8 +35,8 @@ class ConversationService:
         self,
         db: Session,
         source: str = "web",
-        goal_id: Optional[int] = None,
-        title: Optional[str] = None,
+        goal_id: int | None = None,
+        title: str | None = None,
     ) -> Conversation:
         conv = Conversation(goal_id=goal_id, source=source, title=title)
         db.add(conv)
@@ -61,7 +60,7 @@ class ConversationService:
         db.refresh(msg)
         return msg
 
-    def get_messages(self, conversation_id: int, db: Session) -> List[Message]:
+    def get_messages(self, conversation_id: int, db: Session) -> list[Message]:
         return (
             db.query(Message)
             .filter(Message.conversation_id == conversation_id)
@@ -71,7 +70,7 @@ class ConversationService:
 
     def get_recent_messages(
         self, conversation_id: int, limit: int, db: Session
-    ) -> List[Message]:
+    ) -> list[Message]:
         """Most recent N messages for LLM context window (returned oldest-first)."""
         rows = (
             db.query(Message)
@@ -81,16 +80,6 @@ class ConversationService:
             .all()
         )
         return list(reversed(rows))
-
-    def get_recent_conversations(
-        self, db: Session, goal_id: Optional[int] = None, limit: int = 20
-    ) -> List[Conversation]:
-        q = db.query(Conversation)
-        if goal_id is not None:
-            q = q.filter(Conversation.goal_id == goal_id)
-        else:
-            q = q.filter(Conversation.goal_id.is_(None))
-        return q.order_by(Conversation.created_at.desc()).limit(limit).all()
 
 
 conversation_service = ConversationService()
