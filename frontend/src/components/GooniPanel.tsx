@@ -10,6 +10,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
   const { messages, sending, toggle, send, width, setWidth } = useGooniStore();
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
   const [input, setInput] = useState("");
+  const [expandedIntentions, setExpandedIntentions] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
@@ -189,6 +190,53 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
               alignItems: m.role === "user" ? "flex-end" : "flex-start",
             }}
           >
+            {m.role === "assistant" && m.intention && (
+              <div style={{ marginBottom: 4, maxWidth: fullscreen ? 640 : "88%" }}>
+                <button
+                  onClick={() => setExpandedIntentions((prev) => {
+                    const next = new Set(prev);
+                    next.has(m.id) ? next.delete(m.id) : next.add(m.id);
+                    return next;
+                  })}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "2px 0",
+                    color: "#AEAEB2",
+                    fontSize: 12,
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  }}
+                >
+                  <span>Assessed your intention</span>
+                  <span style={{ fontSize: 10 }}>{expandedIntentions.has(m.id) ? "▾" : "▸"}</span>
+                </button>
+                {expandedIntentions.has(m.id) && (
+                  <div
+                    style={{
+                      marginTop: 4,
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      background: "rgba(0,0,0,0.03)",
+                      border: "1px solid rgba(0,0,0,0.07)",
+                      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                      <span style={{ color: "#AEAEB2", fontSize: 13, marginTop: 1 }}>⊙</span>
+                      <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{m.intention}</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>
+                      <span style={{ fontSize: 12, color: "#AEAEB2" }}>Done</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div
               style={{
                 maxWidth: fullscreen ? 640 : "88%",

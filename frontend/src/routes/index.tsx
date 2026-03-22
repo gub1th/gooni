@@ -105,6 +105,7 @@ function NotesPage() {
           onGoalSelect={() => setView("goal")}
           onCompose={handleCompose}
           onNewChat={handleNewChat}
+          onConversationSelect={() => setView("dashboard")}
         />
       )}
 

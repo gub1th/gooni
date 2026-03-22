@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "gooni": {
+      "command": "/Users/danielgunawan/Desktop/projects/gooni/venv/bin/python",
+      "args": ["/Users/danielgunawan/Desktop/projects/gooni/mcp/server.py"],
+      "env": {
+        "GOONI_URL": "http://localhost:8000"
+      }
+    }
+  }
+}

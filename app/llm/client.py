@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Literal
+from typing import List, Literal, Dict
 
 from openai import OpenAI
 from pydantic import BaseModel
@@ -10,9 +10,9 @@ from ..tools import tool_map
 from .pricing import UsageTracker, calculate_embedding_cost
 from .prompts import (
     EPISODE_SUMMARIZATION_PROMPT,
-    MEMORY_EXTRACTION_INSTRUCTION,
     MEMORY_EXTRACTION_SYSTEM,
     TITLE_GENERATION_PROMPT,
+    INTENTION_GENERATION_PROMPT,
     system_prompt,
     vision_prompt,
 )
@@ -114,21 +114,26 @@ class LLMClient:
                             "content": result,
                         })
                 else:
-                    messages.append({"role": "assistant", "content": choice.message.content})
-                    messages.append({"role": "user", "content": MEMORY_EXTRACTION_INSTRUCTION})
+                    final_reply = choice.message.content
+                    # Extract from just this exchange — not the full thread.
+                    # Passing the full context causes the LLM to re-extract memories
+                    # already injected via the system prompt.
+                    extract_messages = [
+                        {"role": "system", "content": MEMORY_EXTRACTION_SYSTEM},
+                        {"role": "user", "content": f"User: {message}\n\nGooni: {final_reply}"},
+                    ]
                     structured = self.client.beta.chat.completions.parse(
                         model=self.chat_model,
-                        messages=messages,
-                        response_format=ChatResponse,
-                        max_tokens=300,
+                        messages=extract_messages,
+                        response_format=ExtractedMemoriesOnly,
+                        max_tokens=500,
                     )
                     tracker.add(structured.usage)
-                    parsed = structured.choices[0].message.parsed
                     memories = [
                         {"key": m.key, "content": m.content, "type": m.type}
-                        for m in parsed.memories
+                        for m in structured.choices[0].message.parsed.memories
                     ]
-                    return parsed.reply, tracker.finalize(tools_used), memories
+                    return final_reply, tracker.finalize(tools_used), memories
 
             return "I got stuck processing tool results.", tracker.finalize(tools_used), []
 
@@ -249,6 +254,22 @@ class LLMClient:
         except Exception as e:
             print(f"Title generation error: {e}")
             return content[:40].strip()
+
+    def generate_intention_context(self, query: str, recent_history: List[Dict[str, str]]) -> str:
+        """Generate intention context for the given query and recent history."""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[{"role": "system", "content": INTENTION_GENERATION_PROMPT}] + recent_history + [
+                    {"role": "user", "content": query},
+                ],
+                temperature=0.3,
+                max_tokens=150,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Intention generation error: {e}")
+            return ""
 
 
 llm_client = LLMClient()

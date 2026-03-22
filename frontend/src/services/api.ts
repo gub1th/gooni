@@ -19,33 +19,6 @@ export async function fetchSpaces(): Promise<ApiSpace[]> {
   return res.json();
 }
 
-export async function updateSpace(id: number, patch: { name?: string; emoji?: string | null }): Promise<ApiSpace> {
-  const res = await apiFetch(`${BASE}/spaces/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error("Failed to update space");
-  return res.json();
-}
-
-// Keep old name as alias for backwards compat within this session
-export const renameSpace = (id: number, name: string) => updateSpace(id, { name });
-
-export async function deleteSpace(id: number): Promise<void> {
-  const res = await apiFetch(`${BASE}/spaces/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete space");
-}
-
-export async function createSpace(name: string): Promise<ApiSpace> {
-  const res = await apiFetch(`${BASE}/spaces`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!res.ok) throw new Error("Failed to create space");
-  return res.json();
-}
 
 // ── Notes ──────────────────────────────────────────────────────────────────────
 
@@ -120,6 +93,12 @@ export interface ApiNote {
 export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/spaces/${spaceId}/notes`);
   if (!res.ok) throw new Error("Failed to fetch notes");
+  return res.json();
+}
+
+export async function fetchRecentNotes(limit = 5): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/notes/recent?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch recent notes");
   return res.json();
 }
 
@@ -212,11 +191,6 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   return res.json();
 }
 
-export async function fetchDashboardInsight(): Promise<{ insight: string | null }> {
-  const res = await apiFetch(`${BASE}/dashboard/insight`);
-  if (!res.ok) throw new Error("Failed to fetch dashboard insight");
-  return res.json();
-}
 
 // ── Conversations ──────────────────────────────────────────────────────────────
 
@@ -256,7 +230,7 @@ export async function sendConversationMessage(
   convId: number,
   content: string,
   noteContent?: string
-): Promise<ApiMessage[]> {
+): Promise<{ messages: ApiMessage[]; intention: string }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -274,10 +248,27 @@ export async function fetchConversationMessages(convId: number): Promise<ApiMess
 
 // ── Gooni ─────────────────────────────────────────────────────────────────────
 
+export async function fetchIntention(
+  content: string,
+  conversationId?: number
+): Promise<{ intention: string }> {
+  try {
+    const res = await apiFetch(`${BASE}/chat/intention`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, conversation_id: conversationId }),
+    });
+    if (!res.ok) return { intention: "" };
+    return res.json();
+  } catch {
+    return { intention: "" };
+  }
+}
+
 export async function sendGooniMessage(
   content: string,
   noteContent?: string
-): Promise<{ content: string }> {
+): Promise<{ content: string; intention: string }> {
   const res = await apiFetch(`${BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

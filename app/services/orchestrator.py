@@ -58,13 +58,15 @@ class Orchestrator:
         recent_history = [{"role": m.role, "content": m.content} for m in recent_messages]
 
         query = message if message.strip() else "image"
+
+        intention_context = llm_client.generate_intention_context(query, recent_history[-6:])
         memory_context = memory_service.build_memory_context(query, db)
         goal_context = goal_service.build_goal_context(db)
         entry_context = (
             f"Note the user wrote:\n\"\"\"{entry_content}\"\"\""
             if entry_content.strip() else ""
         )
-        full_context = "\n\n".join(filter(None, [memory_context, goal_context, entry_context]))
+        full_context = "\n\n".join(filter(None, [intention_context, memory_context, goal_context, entry_context]))
 
         if image_url:
             response, usage = llm_client.generate_response_with_image(
@@ -96,6 +98,7 @@ class Orchestrator:
             note_service.append_to_daily_note(saved_message, response, db)
 
         usage["memory"] = {"episode_saved": True}
+        usage["intention"] = intention_context
 
         return response, usage
 

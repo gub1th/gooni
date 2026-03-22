@@ -1,6 +1,6 @@
 import json
 import math
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -9,7 +9,7 @@ from ..llm.client import llm_client
 
 
 class MemoryService:
-    def upsert_memory(self, memory_data: Dict[str, Any], db: Session) -> Memory:
+    def upsert_memory(self, memory_data: dict, db: Session) -> Memory:
         """Upsert a FACT or PREFERENCE memory with key-based superseding."""
         key = memory_data["key"].lower().replace(" ", "_")
         content = memory_data["content"]
@@ -80,36 +80,13 @@ class MemoryService:
         db.refresh(memory)
         return memory
 
-    def process_content(self, content: str, db: Session) -> dict:
-        """Extract and save both an episode and any facts from a piece of text.
-
-        Use this for notes, imported messages, or any non-chat content.
-        The chat path (orchestrator) does its own extraction inline for efficiency.
-
-        Returns { "episode_saved": bool, "facts_saved": int }
-        """
-        result = {"episode_saved": False, "facts_saved": 0}
-        content = content.strip()
-        if len(content) <= 10:
-            return result
-
-        self.create_episode(content, None, db)
-        result["episode_saved"] = True
-
-        facts = llm_client.extract_facts(content)
-        for fact in facts:
-            self.upsert_memory(fact, db)
-        result["facts_saved"] = len(facts)
-
-        return result
-
     def search_similar(
         self,
         query: str,
         limit: int,
         db: Session,
-        exclude_types: Optional[List[MemoryType]] = None,
-    ) -> List[Memory]:
+        exclude_types: list[MemoryType] | None = None,
+    ) -> list[Memory]:
         """Search active memories by embedding similarity, optionally excluding types."""
         query_embedding, _ = llm_client.generate_embedding(query)
         if not query_embedding:
@@ -188,7 +165,7 @@ class MemoryService:
         )
         return mem.content if mem else None
 
-    def get_all_active(self, db: Session) -> List[Memory]:
+    def get_all_active(self, db: Session) -> list[Memory]:
         return (
             db.query(Memory)
             .filter(Memory.is_active == True)
@@ -200,8 +177,8 @@ class MemoryService:
         self,
         content1: str,
         content2: str,
-        embedding1: Optional[str],
-        embedding2: List[float],
+        embedding1: str | None,
+        embedding2: list[float],
     ) -> bool:
         if content1.lower().strip() == content2.lower().strip():
             return True
@@ -213,7 +190,7 @@ class MemoryService:
         except Exception:
             return False
 
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
+    def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
         if not vec1 or not vec2:
             return 0.0
         dot = sum(a * b for a, b in zip(vec1, vec2))

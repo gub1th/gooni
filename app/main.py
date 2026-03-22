@@ -18,6 +18,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     GoalStatus,
     GoalType,
     Memory,
+    MemoryType,
     Message,
     Note,
     Space,
@@ -87,6 +88,21 @@ async def root():
     return {"message": "Hello World"}
 
 
+@app.post("/chat/intention")
+async def infer_intention(body: dict, db: Session = Depends(get_db)):
+    """Fast endpoint: infer user intention without running the full chat pipeline."""
+    content = body.get("content", "").strip()
+    conversation_id = body.get("conversation_id")
+    if not content:
+        return {"intention": ""}
+    recent_history = []
+    if conversation_id:
+        msgs = conversation_service.get_recent_messages(conversation_id, limit=6, db=db)
+        recent_history = [{"role": m.role, "content": m.content} for m in msgs]
+    intention = llm_client.generate_intention_context(content, recent_history)
+    return {"intention": intention}
+
+
 @app.post("/chat")
 async def chat(body: ChatRequest, db: Session = Depends(get_db)):
     content, usage = Orchestrator.handle_chat(
@@ -96,7 +112,7 @@ async def chat(body: ChatRequest, db: Session = Depends(get_db)):
         source="web",
         entry_content=body.entry_content or "",
     )
-    return {"content": content, "usage": usage}
+    return {"content": content, "usage": usage, "intention": usage.get("intention") or ""}
 
 
 @app.get("/debug/memories")
@@ -309,10 +325,13 @@ def get_space_notes(space_id: str, db: Session = Depends(get_db)):
     return [_serialize_note(n) for n in notes]
 
 
-@app.get("/notes")
-def get_general_notes(db: Session = Depends(get_db)):
+@app.get("/notes/recent")
+def get_recent_notes(limit: int = 5, db: Session = Depends(get_db)):
     notes = (
-        db.query(Note).filter(Note.space_id.is_(None)).order_by(_notes_order()).all()
+        db.query(Note)
+        .order_by(_notes_order())
+        .limit(limit)
+        .all()
     )
     return [_serialize_note(n) for n in notes]
 
@@ -326,23 +345,6 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
         title=body.get("title") or "",
         content=body.get("content") or "",
         space_id=numeric_id,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
-    )
-    db.add(note)
-    db.commit()
-    db.refresh(note)
-    return _serialize_note(note)
-
-
-@app.post("/notes")
-def create_general_note(body: dict, db: Session = Depends(get_db)):
-    from datetime import datetime
-
-    note = Note(
-        title=body.get("title") or "",
-        content=body.get("content") or "",
-        space_id=None,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -424,7 +426,7 @@ def memorize_note(note_id: int, db: Session = Depends(get_db)):
     try:
         facts = llm_client.extract_facts(raw)
         for fact in facts:
-            memory_service.upsert_profile_fact(fact, db)
+            memory_service.upsert_memory(fact, db)
     except Exception:
         facts = []
     return {"ok": True, "facts_saved": len(facts)}
@@ -507,17 +509,6 @@ def get_feed(db: Session = Depends(get_db)):
     return _build_feed(db, general=True)
 
 
-@app.get("/goals/{goal_id}/feed")
-def get_goal_feed(goal_id: int, db: Session = Depends(get_db)):
-    return _build_feed(db, goal_id=goal_id)
-
-
-@app.get("/spaces/{space_id}/feed")
-def get_space_feed(space_id: str, db: Session = Depends(get_db)):
-    if space_id == "general":
-        return _build_feed(db, general=True)
-    return _build_feed(db, space_id=int(space_id))
-
 
 # ── Conversation endpoints ─────────────────────────────────────────────────────
 
@@ -529,29 +520,6 @@ async def create_general_conversation(body: dict, db: Session = Depends(get_db))
     conv = conversation_service.create(db=db, goal_id=None, source="web", title=title)
     return _serialize_conversation(conv)
 
-
-@app.post("/spaces/{space_id}/conversations")
-async def create_space_conversation(
-    space_id: str, body: dict, db: Session = Depends(get_db)
-):
-    content = body.get("content", "")
-    title = await llm_client.generate_title(content) if content.strip() else None
-    numeric_id = None if space_id == "general" else int(space_id)
-    goal = (
-        db.query(Goal).filter(Goal.space_id == numeric_id).first()
-        if numeric_id
-        else None
-    )
-    conv = Conversation(
-        title=title,
-        source="web",
-        space_id=numeric_id,
-        goal_id=goal.id if goal else None,
-    )
-    db.add(conv)
-    db.commit()
-    db.refresh(conv)
-    return _serialize_conversation(conv)
 
 
 @app.get("/conversations/{conversation_id}/messages")
@@ -584,7 +552,7 @@ def send_conversation_message(
         raise HTTPException(status_code=400, detail="content is required")
     entry_content = body.get("entry_content", "")
     try:
-        Orchestrator.handle_chat(
+        _, usage = Orchestrator.handle_chat(
             user_content,
             db,
             conversation_id=conversation_id,
@@ -593,8 +561,10 @@ def send_conversation_message(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     msgs = conversation_service.get_messages(conversation_id, db)
-    return [_serialize_message(m) for m in msgs]
-
+    return {
+        "messages": [_serialize_message(m) for m in msgs],
+        "intention": usage.get("intention") or "",
+    }
 
 
 @app.get("/health")
@@ -625,7 +595,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         .all()
     )
 
-    # Streak: consecutive days with any activity (notes or conversations) ending today
+    # Streak: consecutive days with any activity (notes or conversations).
+    # Allows today OR yesterday as the starting point so the streak stays
+    # alive at the start of a new day before the user has done anything yet.
     try:
         date_rows = db.execute(
             text(
@@ -637,12 +609,14 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             )
         ).fetchall()
         streak = 0
-        for i, row in enumerate(date_rows):
-            note_date = date.fromisoformat(row[0])
-            if note_date == today - timedelta(days=i):
-                streak += 1
-            else:
-                break
+        if date_rows:
+            most_recent = date.fromisoformat(date_rows[0][0])
+            if most_recent >= today - timedelta(days=1):
+                for i, row in enumerate(date_rows):
+                    if date.fromisoformat(row[0]) == most_recent - timedelta(days=i):
+                        streak += 1
+                    else:
+                        break
     except Exception:
         streak = 0
 
@@ -658,54 +632,124 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     }
 
 
-@app.get("/dashboard/insight")
-def get_dashboard_insight(db: Session = Depends(get_db)):
-    from datetime import datetime, timedelta
+# ── MCP endpoints ─────────────────────────────────────────────────────────────
 
-    week_ago = datetime.utcnow() - timedelta(days=7)
-    notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
-    recent_notes = (
-        db.query(Note)
-        .filter(Note.title.isnot(None), Note.title != "")
-        .order_by(Note.updated_at.desc())
-        .limit(5)
-        .all()
+
+@app.get("/mcp/context")
+def mcp_get_context(q: str = "", db: Session = Depends(get_db)):
+    """Return memory context for a query. Empty query returns preferences + goals only."""
+    if not q.strip():
+        preferences = (
+            db.query(Memory)
+            .filter(
+                Memory.memory_type == MemoryType.PREFERENCE, Memory.is_active == True
+            )
+            .all()
+        )
+        active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
+        parts = []
+        if preferences:
+            parts.append("User preferences (always apply these):")
+            for m in preferences:
+                parts.append(f"- {m.content}")
+        if active_goals:
+            parts.append("Active goals:")
+            for g in active_goals:
+                parts.append(f"- {g.title}")
+        return {"context": "\n".join(parts)}
+    context = memory_service.build_memory_context(q, db)
+    return {"context": context}
+
+
+@app.post("/mcp/memories")
+def mcp_add_memory(body: dict, db: Session = Depends(get_db)):
+    """Upsert a fact or preference memory."""
+    key = body.get("key", "").strip()
+    content = body.get("content", "").strip()
+    mem_type = body.get("type", "fact")
+    if not key or not content:
+        raise HTTPException(status_code=400, detail="key and content are required")
+    memory = memory_service.upsert_memory(
+        {"key": key, "content": content, "type": mem_type}, db
     )
-    active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
+    return {
+        "id": memory.id,
+        "key": memory.key,
+        "content": memory.content,
+        "type": memory.memory_type.value,
+    }
 
-    parts = [f"Notes written this week: {notes_this_week}"]
-    if recent_notes:
-        parts.append(
-            f"Recent note titles: {', '.join(n.title for n in recent_notes if n.title)}"
-        )
-    if active_goals:
-        parts.append(f"Active goals: {', '.join(g.title for g in active_goals)}")
-    context = "\n".join(parts)
 
-    today_str = datetime.now().strftime("%A, %B %d, %Y")
-    try:
-        response = llm_client.client.chat.completions.create(
-            model=llm_client.chat_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        f"You are Gooni. Today is {today_str}. "
-                        "Write a brief 2-3 sentence daily briefing based on the user's recent activity. "
-                        "Be specific and personal, not generic. Keep it under 60 words."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"My recent activity:\n{context}\n\nGive me my daily briefing.",
-                },
-            ],
-            temperature=0.7,
-            max_tokens=120,
-        )
-        insight = response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"Dashboard insight error: {e}")
-        insight = None
+@app.get("/mcp/memories/search")
+def mcp_search_memories(q: str, limit: int = 10, db: Session = Depends(get_db)):
+    """Search active memories by semantic similarity."""
+    memories = memory_service.search_similar(q, limit=limit, db=db)
+    return [
+        {"id": m.id, "key": m.key, "type": m.memory_type.value, "content": m.content}
+        for m in memories
+    ]
 
-    return {"insight": insight}
+
+@app.patch("/mcp/memories/{key}")
+def mcp_edit_memory(key: str, body: dict, db: Session = Depends(get_db)):
+    """Edit memory content in-place (re-embeds, does not supersede)."""
+    normalized = key.lower().replace(" ", "_")
+    memory = (
+        db.query(Memory)
+        .filter(Memory.key == normalized, Memory.is_active == True)
+        .first()
+    )
+    if not memory:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    content = body.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+    memory.content = content
+    embedding, _ = llm_client.generate_embedding(content)
+    memory.embedding = json.dumps(embedding)
+    db.commit()
+    db.refresh(memory)
+    return {
+        "id": memory.id,
+        "key": memory.key,
+        "type": memory.memory_type.value,
+        "content": memory.content,
+    }
+
+
+@app.delete("/mcp/memories/{key}")
+def mcp_forget_memory(key: str, db: Session = Depends(get_db)):
+    """Soft-delete a memory by key (sets is_active=False)."""
+    normalized = key.lower().replace(" ", "_")
+    memory = (
+        db.query(Memory)
+        .filter(Memory.key == normalized, Memory.is_active == True)
+        .first()
+    )
+    if not memory:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    memory.is_active = False
+    db.commit()
+    return {"ok": True, "key": normalized}
+
+
+@app.get("/mcp/notes/search")
+def mcp_search_notes(q: str, limit: int = 5, db: Session = Depends(get_db)):
+    """Search notes by semantic similarity to a query string."""
+    query_embedding, _ = llm_client.generate_embedding(q)
+    if not query_embedding:
+        return []
+    candidates = db.query(Note).filter(Note.embedding.isnot(None)).all()
+    scored = []
+    for n in candidates:
+        try:
+            sim = memory_service._cosine_similarity(
+                query_embedding, json.loads(n.embedding)
+            )
+            scored.append((n, sim))
+        except Exception:
+            pass
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [_serialize_note(n) for n, _ in scored[:limit]]
+
+

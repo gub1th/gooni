@@ -43,7 +43,7 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onGoToNote: _onGoToNote }: DashboardProps) {
-  const { activeId, messages, sending, send } = useConversationsStore();
+  const { activeId, messages, sending, pendingIntention, send } = useConversationsStore();
   const [input, setInput] = useState("");
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -94,7 +94,7 @@ export function Dashboard({ onGoToNote: _onGoToNote }: DashboardProps) {
           {getGreeting()}, Daniel
         </div>
         <div style={{ fontSize: 13, color: "#8E8E93", marginTop: 4 }}>{getDateStr()}</div>
-        <div style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
           <StatChip value={stats?.notes_this_week ?? "—"} label="notes this week" />
           <StatChip value={stats && stats.streak > 0 ? `${stats.streak} 🔥` : (stats?.streak ?? "—")} label="streak" />
           <StatChip value={stats?.active_goals_count ?? "—"} label="goals" />
@@ -115,7 +115,29 @@ export function Dashboard({ onGoToNote: _onGoToNote }: DashboardProps) {
         }}
       >
         {messages.map((m) => <MessageBubble key={m.id} message={m} />)}
-        {sending && <ThinkingIndicator />}
+        {sending && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+            {pendingIntention && (
+              <div style={{ marginBottom: 6, maxWidth: "80%" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#AEAEB2", fontSize: 12, fontFamily: FONT, marginBottom: 4 }}>
+                  <span>Assessed your intention</span>
+                  <span style={{ fontSize: 10 }}>▾</span>
+                </div>
+                <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.07)", fontFamily: FONT }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                    <span style={{ color: "#AEAEB2", fontSize: 13, marginTop: 1 }}>⊙</span>
+                    <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{pendingIntention}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>
+                    <span style={{ fontSize: 12, color: "#AEAEB2" }}>Done</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            <ThinkingIndicator />
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 

@@ -190,6 +190,11 @@ export function NotesList() {
     return sp.emoji ? `${sp.emoji} ${sp.name}` : sp.name;
   };
 
+  const currentSpace = isAllNotes ? null : spaces.find((s) => String(s.id) === spaceId);
+  const headerLabel = isAllNotes
+    ? "All Notes"
+    : (currentSpace?.emoji ? `${currentSpace.emoji} ${currentSpace.name}` : currentSpace?.name ?? "Notes");
+
   // Dismiss context menu on outside click
   useEffect(() => {
     if (!contextMenu) return;
@@ -227,7 +232,7 @@ export function NotesList() {
       {/* Header */}
       <div style={{ height: 52, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 8 }}>
         <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: "#1C1C1E", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" }}>
-          Notes
+          {headerLabel}
         </span>
         <button
           onClick={() => createNote(spaceId)}
