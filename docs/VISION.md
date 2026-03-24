@@ -1,67 +1,35 @@
-# Vision & Ideas
+THE GOONI VISION.
 
-> A personal AI that lives in your home, knows you deeply over time, and makes your environment respond to you — not just a smart speaker, but a brain.
+# What is Gooni?
+Gooni is like my minion. Fully loyal. Very intelligent, but also unhinged. Gooni helps me track my life and ensures that I am progressing forward,
+to be come the ideal version of myself.
 
-## The core idea
+# What do I want Gooni to do?
+I want Gooni to be able to make X/Twitter posts daily. It would post about what it's creator (me) did today. It would call me out if I wasn't using Gooni.
+It would post content that would ideally be engaging and entertaining. It would post content regarding my usage of Gooni. Creating content has been a past
+hobby of mine which I would like to revisit. It would also be great to help me gain exposure within the tech space.
+examples:
+- "Today, my creator didn't use me. It's been a 2 day streak. He should go crawl in a hole."
+- "Today, my creator actually did work on me! He upgraded my memory system."
+- "My creator seems to ask alot of questions."
 
-Most smart home devices are stateless command routers. They respond to commands but don't know you. Every interaction starts from zero. Gooni is different: it builds a persistent model of who you are — your preferences, routines, goals, habits — and that model deepens over time.
+I want Gooni to be able to store the pristineness of notes I have. Like not everything is necessarily considered a turn in a conversation. Like the note above.
 
-The moat isn't device control. Anyone can turn a light on. The moat is *knowing when to* without being asked.
+I want Gooni to be aware of where my current efforts are geared towards. 
+- Right now, I want to find a new job at a relatively early stage startup. I want to quit my job at Atlasian. I want to challenge myself and grind.
+  I am not satisfied with my current work. I just feel like you should be working on something that has an exciting vision. Something that is dynamic. I want to work with smart people. I want to work in-person. I want to be able to call myself a startup engineer.
+- I want Gooni to actually be useful, especially to myself. I want to be able to flex how great Gooni is. I want to understand how Gooni works, and not purely vibe-code it.
+  I want Gooni to be a stepping stone in getting a job. I don't want to have continual scope creep for Gooni. I want Gooni to have very agile eval cycles. I want Gooni to be able
+  to self-improve based on my conversation with it.
+- I've been exercising much more consistently lately. I want to develop a great body. I want abs. I want to maximize my leg muscles. I want an insane upper body.
 
-## The interfaces
+I want Gooni to be able to track certain things I want to do but am procrastinating on.
+- Signing up for the tennis team.
+- Looking into doing taxes.
+- Looking into monoxidil.
+- getting PBErgo items.
 
-Gooni is one brain, multiple access points:
-
-- **Web UI** — notes-first, Gooni always accessible (current)
-- **CLI** — development and testing
-- **Telegram** — on your phone, in the real world, away from home
-- **Voice** — hands-free, in-room, feels like Gooni
-- **Physical device** — a Raspberry Pi with a mic and speaker, always on, wake-word activated
-
-## The home integration
-
-Rather than building device integrations from scratch, [Home Assistant](https://www.home-assistant.io/) acts as the device layer. It already speaks to thousands of devices (Hue, Nest, Matter, Z-Wave, etc.). Gooni is the reasoning layer on top — Home Assistant handles the plumbing.
-
-## What makes it intelligent
-
-- **Memory** — it remembers what you told it a month ago
-- **Context** — it knows the time, your patterns, whether you're home
-- **Reasoning** — "make it cozy" becomes dim lights + warm temperature + soft music, learned from how you've set things before
-- **Proactivity** — it initiates. "You usually wind down around now, want me to dim the lights?"
-
-## What this is not
-
-- A replacement for Home Assistant (it uses it)
-- A general-purpose AI product (it's personal, built for one household)
-- Finished (it's being built)
-
----
-
-## Feature ideas
-
-- Todo list management — read, create, update, delete a central todo list (good first tool call)
-- Location awareness via Telegram — if the bot knows you're away, Gooni behaves differently
-- Proactive check-ins — "you mentioned wanting to sleep better, it's 11pm, lights off?"
-- Named modes — "work mode", "movie night", "wind down" as stored presets
-- Multi-user support eventually — household members with separate profiles
-
-## Architecture thoughts
-
-- Wake word should be offline / local (Porcupine or Picovoice) — don't send audio to cloud just to detect the trigger word
-- Voice latency matters: STT → LLM → TTS needs to feel under 2-3 seconds. Streaming TTS helps.
-- Telegram as mobile access is the right call — much faster than building a mobile app
-- Consider keeping tool results out of episodic memory (don't store "weather today was 72°F" — it'll be wrong tomorrow)
-
-## Open questions
-
-- Should routines be stored as procedural memories or as explicit automation rules in Home Assistant?
-- How do we handle conflicting memories? (said "I like it hot" then later "I prefer iced coffee")
-  - Current: upsert by key with semantic similarity check — probably good enough
-- Is the cost of running memory extraction on every message worth it? Could batch or throttle.
-- At what point does SQLite become a bottleneck? Probably not for a while — single household scale.
-- Are the hardcoded `meals` and `workouts` tables the right model, or should everything flow through the flexible `Memory` entity?
-
-## Resolved
-
-- ~~Are embeddings stored correctly?~~ — Yes, as JSON strings in SQLite. O(N) search is fine at household scale.
-- ~~Is cost calculation correct with multiple API calls?~~ — Each call is tracked separately, session total is summed.
+# Why would I want to use Gooni?
+Sometimes, I feel like building Gooni feels like I'm trying to rebuild Claude, which is a very tough task to overcome. But I don't think that's truly it. Maybe a part of it is.
+Rebuilding the memory system from scratch. Why do that when Memo exists? I'm trying to build something technically challenging, so that I have something to show for.
+The main reason to use Gooni is that .... I honestly don't know right now.
