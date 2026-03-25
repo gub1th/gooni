@@ -10,7 +10,6 @@ export interface ApiSpace {
   id: number;
   name: string;
   emoji: string | null;
-  goal_id: number | null;
 }
 
 export async function fetchSpaces(): Promise<ApiSpace[]> {
@@ -22,69 +21,11 @@ export async function fetchSpaces(): Promise<ApiSpace[]> {
 
 // ── Notes ──────────────────────────────────────────────────────────────────────
 
-export interface ApiGoal {
-  id: number;
-  title: string;
-  goal_type: "achieve" | "avoid";
-  status: "active" | "completed" | "paused" | "abandoned";
-  motivation: string | null;
-  blocker: string | null;
-  milestones: { id: string; text: string; done: boolean }[];
-}
-
-export async function fetchGoals(): Promise<ApiGoal[]> {
-  const res = await apiFetch(`${BASE}/goals`);
-  if (!res.ok) throw new Error("Failed to fetch goals");
-  return res.json();
-}
-
-export async function createGoal(title: string): Promise<ApiGoal> {
-  const res = await apiFetch(`${BASE}/goals`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title }),
-  });
-  if (!res.ok) throw new Error("Failed to create goal");
-  return res.json();
-}
-
-export async function updateGoal(id: number, patch: object): Promise<ApiGoal> {
-  const res = await apiFetch(`${BASE}/goals/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error("Failed to update goal");
-  return res.json();
-}
-
-export async function deleteGoal(id: number): Promise<void> {
-  const res = await apiFetch(`${BASE}/goals/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete goal");
-}
-
-export async function fetchGoalNotes(goalId: number): Promise<ApiNote[]> {
-  const res = await apiFetch(`${BASE}/goals/${goalId}/notes`);
-  if (!res.ok) throw new Error("Failed to fetch goal notes");
-  return res.json();
-}
-
-export async function linkNoteToGoal(noteId: number, goalId: number | null): Promise<ApiNote> {
-  const res = await apiFetch(`${BASE}/notes/${noteId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ goal_id: goalId }),
-  });
-  if (!res.ok) throw new Error("Failed to link note to goal");
-  return res.json();
-}
-
 export interface ApiNote {
   id: number;
   title: string | null;
   content: string | null;
   space_id: number | null;
-  goal_id: number | null;
   created_at: string;
   updated_at: string;
   last_opened_at: string | null;
@@ -179,8 +120,6 @@ export async function deleteNote(id: number): Promise<void> {
 
 export interface DashboardStats {
   notes_this_week: number;
-  active_goals_count: number;
-  active_goals: { id: number; title: string; goal_type: string }[];
   recent_notes: ApiNote[];
   streak: number;
 }
@@ -230,7 +169,7 @@ export async function sendConversationMessage(
   convId: number,
   content: string,
   noteContent?: string
-): Promise<{ messages: ApiMessage[]; intention: string }> {
+): Promise<{ messages: ApiMessage[]; intention: string; tools_used: string[] }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -17,7 +17,7 @@ def get_context(query: str = "") -> str:
 
     Call this at the start of a conversation to understand what Gooni knows about the user.
     Pass a query string to get semantically relevant memories, or leave empty for
-    preferences + active goals only.
+    preferences only.
 
     Args:
         query: optional topic to search relevant memories for
@@ -28,22 +28,19 @@ def get_context(query: str = "") -> str:
 
 
 @mcp.tool()
-def add_memory(key: str, content: str, type: str = "fact") -> str:
+def add_memory(content: str) -> str:
     """Store a new memory about the user in Gooni.
 
     Args:
-        key: snake_case identifier (e.g. "current_project", "preferred_language")
         content: the full memory sentence (e.g. "Currently building an MCP server in Python")
-        type: "fact" (default) or "preference" (how they want Gooni to behave)
     """
     resp = httpx.post(
         f"{BASE_URL}/mcp/memories",
-        json={"key": key, "content": content, "type": type},
+        json={"content": content},
         timeout=10,
     )
     resp.raise_for_status()
-    m = resp.json()
-    return f"Saved: [{m['type']}] {m['key']} = {m['content']}"
+    return f"Saved: {content}"
 
 
 @mcp.tool()
@@ -63,39 +60,36 @@ def search_memories(query: str, limit: int = 8) -> str:
     memories = resp.json()
     if not memories:
         return "(no matching memories)"
-    return "\n".join(
-        f"[{m['type']}] {m['key']}: {m['content']}" for m in memories
-    )
+    return "\n".join(f"- {m['memory']}" for m in memories)
 
 
 @mcp.tool()
-def edit_memory(key: str, content: str) -> str:
+def edit_memory(memory_id: str, content: str) -> str:
     """Update an existing memory's content in Gooni.
 
     Args:
-        key: the memory key to update (e.g. "current_project")
+        memory_id: the memory UUID to update
         content: the new content to replace the old value
     """
     resp = httpx.patch(
-        f"{BASE_URL}/mcp/memories/{key}",
+        f"{BASE_URL}/mcp/memories/{memory_id}",
         json={"content": content},
         timeout=10,
     )
     resp.raise_for_status()
-    m = resp.json()
-    return f"Updated: {m['key']} = {m['content']}"
+    return f"Updated memory {memory_id}"
 
 
 @mcp.tool()
-def forget_memory(key: str) -> str:
-    """Remove a memory from Gooni (soft-delete — recoverable from DB if needed).
+def forget_memory(memory_id: str) -> str:
+    """Remove a memory from Gooni.
 
     Args:
-        key: the memory key to delete
+        memory_id: the memory UUID to delete
     """
-    resp = httpx.delete(f"{BASE_URL}/mcp/memories/{key}", timeout=10)
+    resp = httpx.delete(f"{BASE_URL}/mcp/memories/{memory_id}", timeout=10)
     resp.raise_for_status()
-    return f"Forgotten: {key}"
+    return f"Forgotten: {memory_id}"
 
 
 @mcp.tool()
@@ -107,7 +101,7 @@ def add_note(title: str, content: str) -> str:
         content: note body (plain text)
     """
     resp = httpx.post(
-        f"{BASE_URL}/notes",
+        f"{BASE_URL}/spaces/general/notes",
         json={"title": title, "content": content},
         timeout=10,
     )

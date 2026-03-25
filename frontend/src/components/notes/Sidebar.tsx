@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
-import { useGoalsStore } from "../../stores/useGoalsStore";
 import { useConversationsStore } from "../../stores/useConversationsStore";
 import { fetchRecentNotes, type ApiNote } from "../../services/api";
 
@@ -28,59 +27,22 @@ interface SidebarProps {
   showCompose: boolean;
   onLogoClick: () => void;
   onSpaceSelect: () => void;
-  onGoalSelect: () => void;
   onCompose: () => void;
   onNewChat: () => void;
   onConversationSelect: () => void;
 }
 
-export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onGoalSelect, onCompose, onNewChat, onConversationSelect }: SidebarProps) {
+export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onConversationSelect }: SidebarProps) {
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
-  const { goals, create: createGoal, selectedGoalId, selectGoal } = useGoalsStore();
   const { conversations, activeId, selectConversation } = useConversationsStore();
 
   const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
-  const [addingGoal, setAddingGoal] = useState(false);
-  const [newGoalName, setNewGoalName] = useState("");
-  const goalInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchRecentNotes(5).then(setRecentNotes).catch(() => {});
   }, []);
 
-  function startAddingGoal() {
-    setAddingGoal(true);
-    setNewGoalName("");
-    setTimeout(() => goalInputRef.current?.focus(), 0);
-  }
-
-  async function submitNewGoal() {
-    const name = newGoalName.trim();
-    if (name) {
-      const goal = await createGoal(name);
-      if (goal) {
-        selectSpace(null);
-        selectGoal(goal.id);
-        onGoalSelect();
-      }
-    }
-    setAddingGoal(false);
-    setNewGoalName("");
-  }
-
-  function handleGoalKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter") submitNewGoal();
-    if (e.key === "Escape") { setAddingGoal(false); setNewGoalName(""); }
-  }
-
-  function handleSelectGoal(id: number) {
-    selectSpace(null);
-    selectGoal(id);
-    onGoalSelect();
-  }
-
   function handleAllNotes() {
-    selectGoal(null);
     selectSpace("general");
     loadNotes("general");
     onSpaceSelect();
@@ -88,7 +50,6 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
 
   function handleSelectRecentNote(note: ApiNote) {
     const spaceId = note.space_id == null ? "general" : String(note.space_id);
-    selectGoal(null);
     selectSpace(spaceId);
     loadNotes(spaceId).then(() => {
       selectNote(note.id);
@@ -96,7 +57,7 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
     onSpaceSelect();
   }
 
-  const isAllNotes = selectedSpaceId === "general" || selectedSpaceId === null;
+  const isAllNotes = !isDashboard && (selectedSpaceId === "general" || selectedSpaceId === null);
 
   return (
     <div
@@ -247,73 +208,6 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
           <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "4px 6px 8px" }} />
         </>
 
-        {/* Goals section */}
-        <div style={{ padding: "10px 6px 4px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 6px", marginBottom: 2 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>GOALS</span>
-            <button
-              onClick={startAddingGoal}
-              title="Add goal"
-              style={{ width: 20, height: 20, borderRadius: "50%", background: "transparent", border: "none", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: "#8E8E93", padding: 0 }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#1C1C1E")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#8E8E93")}
-            >+</button>
-          </div>
-          {addingGoal && (
-            <div style={{ padding: "4px 4px" }}>
-              <input
-                ref={goalInputRef}
-                value={newGoalName}
-                onChange={(e) => setNewGoalName(e.target.value)}
-                onKeyDown={handleGoalKeyDown}
-                onBlur={submitNewGoal}
-                placeholder="Goal name..."
-                style={{ width: "100%", boxSizing: "border-box", padding: "5px 8px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.15)", fontSize: 13, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", outline: "none", background: "#fff", color: "#1C1C1E" }}
-              />
-            </div>
-          )}
-          {goals.map((goal) => {
-            const selected = selectedGoalId === goal.id;
-            return (
-              <div
-                key={goal.id}
-                onClick={() => handleSelectGoal(goal.id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "0 10px",
-                  height: 32,
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  background: selected ? "rgba(0,0,0,0.09)" : "transparent",
-                  transition: "background 0.12s",
-                  userSelect: "none",
-                }}
-                onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
-                onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
-              >
-                <span style={{ fontSize: 14, flexShrink: 0 }}>{goal.goal_type === "avoid" ? "🚫" : "🎯"}</span>
-                <span style={{
-                  flex: 1,
-                  fontSize: 13.5,
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-                  fontWeight: selected ? 600 : 400,
-                  color: "#1C1C1E",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}>
-                  {goal.title}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Divider */}
-        <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "4px 12px 4px" }} />
-
         {/* Notes section */}
         <div style={{ padding: "6px 6px 4px" }}>
           {/* All Notes button */}
@@ -327,20 +221,20 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
               height: 32,
               borderRadius: 8,
               cursor: "pointer",
-              background: isAllNotes && !selectedGoalId ? "rgba(0,0,0,0.09)" : "transparent",
+              background: isAllNotes ? "rgba(0,0,0,0.09)" : "transparent",
               transition: "background 0.12s",
               userSelect: "none",
               marginBottom: 2,
             }}
-            onMouseEnter={(e) => { if (!(isAllNotes && !selectedGoalId)) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
-            onMouseLeave={(e) => { if (!(isAllNotes && !selectedGoalId)) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+            onMouseEnter={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
+            onMouseLeave={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
           >
             <span style={{ fontSize: 14, flexShrink: 0 }}>📋</span>
             <span style={{
               flex: 1,
               fontSize: 13.5,
               fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-              fontWeight: isAllNotes && !selectedGoalId ? 600 : 400,
+              fontWeight: isAllNotes ? 600 : 400,
               color: "#1C1C1E",
             }}>
               All Notes

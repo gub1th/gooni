@@ -13,8 +13,19 @@ class ConversationService:
     # ── Session management ─────────────────────────────────────────────────────
 
     def find_or_create_session(self, source: str, db: Session) -> Conversation:
-        """Reuse the active conversation for the given source if the last message
-        was < SESSION_GAP_MINUTES ago. Otherwise start a new one."""
+        """For telegram: always reuse the single persistent conversation.
+        For web: reuse the active conversation if last message was < SESSION_GAP_MINUTES ago."""
+        if source == "telegram":
+            existing = (
+                db.query(Conversation)
+                .filter(Conversation.source == "telegram")
+                .order_by(Conversation.created_at.asc())
+                .first()
+            )
+            if existing:
+                return existing
+            return self.create(source="telegram", db=db)
+
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=SESSION_GAP_MINUTES)
 
@@ -29,16 +40,15 @@ class ConversationService:
         )
         if existing:
             return existing
-        return self.create(goal_id=None, source=source, db=db)
+        return self.create(source=source, db=db)
 
     def create(
         self,
         db: Session,
         source: str = "web",
-        goal_id: int | None = None,
         title: str | None = None,
     ) -> Conversation:
-        conv = Conversation(goal_id=goal_id, source=source, title=title)
+        conv = Conversation(source=source, title=title)
         db.add(conv)
         db.commit()
         db.refresh(conv)

@@ -1,9 +1,7 @@
-from ..db.models import Conversation as ConvModel, GoalType
+from ..db.models import Conversation as ConvModel
 from ..llm.client import llm_client
-from .goal_service import goal_service
 from .conversation_service import conversation_service
 from .memory_service import memory_service
-from .note_service import note_service
 
 
 class Orchestrator:
@@ -29,14 +27,9 @@ class Orchestrator:
         # Slash commands work from any source (web, Telegram)
         if command == "/memory":
             return self._handle_memory_command(db), None
-        if command == "/goals":
-            return self._handle_goals_command(db), None
-        if command.startswith("/goal "):
-            name = stripped[6:].strip()
-            return self._handle_goal_detail_command(name, db), None
 
         # First-time greeting only for Telegram
-        is_first_time = source == "telegram" and not memory_service.get_name(db)
+        is_first_time = source == "telegram" and not memory_service.has_memories()
 
         # Session management
         if conversation_id is not None:
@@ -60,79 +53,41 @@ class Orchestrator:
         query = message if message.strip() else "image"
 
         intention_context = llm_client.generate_intention_context(query, recent_history[-6:])
-        memory_context = memory_service.build_memory_context(query, db)
-        goal_context = goal_service.build_goal_context(db)
+        memory_context = memory_service.build_memory_context(query)
         entry_context = (
             f"Note the user wrote:\n\"\"\"{entry_content}\"\"\""
             if entry_content.strip() else ""
         )
-        full_context = "\n\n".join(filter(None, [intention_context, memory_context, goal_context, entry_context]))
+        full_context = "\n\n".join(filter(None, [memory_context, entry_context]))
 
         if image_url:
             response, usage = llm_client.generate_response_with_image(
-                message, image_url, full_context, "", recent_history, db=db
+                message, image_url, full_context, recent_history, db=db
             )
-            memories = []
         else:
-            response, usage, memories = llm_client.generate_chat_response_with_memory(
+            response, usage = llm_client.generate_chat_response_with_memory(
                 message, full_context, recent_history,
                 is_first_time=is_first_time, db=db,
             )
 
         conversation_service.add_message(conv.id, "assistant", response, db)
 
-        for memory in memories:
-            memory_service.upsert_memory(memory, db)
-
-        # Auto-save episode for future context retrieval
+        # Let Mem0 auto-extract and store relevant memories from this exchange
         if saved_message.strip() and len(saved_message.strip()) > 10:
-            summary = llm_client.summarize_episode(saved_message, response)
-            memory_service.create_episode(
-                summary,
-                goal_id=getattr(conv, "goal_id", None),
-                db=db,
-            )
+            memory_service.add_exchange(saved_message, response)
 
-        # Append Telegram exchanges to today's daily note
-        if source == "telegram":
-            note_service.append_to_daily_note(saved_message, response, db)
-
-        usage["memory"] = {"episode_saved": True}
         usage["intention"] = intention_context
 
         return response, usage
 
     def _handle_memory_command(self, db) -> str:
-        memories = memory_service.get_all_active(db)
+        memories = memory_service.get_all()
         if not memories:
             return "No memories yet."
         lines = [f"Memory ({len(memories)} entries):"]
         for m in memories:
-            key_part = f"{m.key}: " if m.key else ""
-            lines.append(f"  [{m.memory_type.value}] {key_part}{m.content[:120]}")
+            lines.append(f"  - {m.get('memory', '')[:120]}")
         return "\n".join(lines)
-
-    def _handle_goals_command(self, db) -> str:
-        goals = goal_service.get_active(db)
-        if not goals:
-            return "No active goals."
-        lines = [f"Active goals ({len(goals)}):"]
-        for g in goals:
-            type_label = "AVOID" if g.goal_type == GoalType.AVOID else "ACHIEVE"
-            lines.append(f"  [{type_label}] {g.title}")
-            if g.motivation:
-                lines.append(f"    Why: {g.motivation}")
-            if g.blocker:
-                lines.append(f"    Blocker: {g.blocker}")
-        return "\n".join(lines)
-
-    def _handle_goal_detail_command(self, name: str, db) -> str:
-        if not name:
-            return "Usage: /goal <name>"
-        goal = goal_service.get_by_name(name, db)
-        if not goal:
-            return f"No goal found matching '{name}'."
-        return goal_service.build_single_goal_context(goal, db)
 
 
 Orchestrator = Orchestrator()

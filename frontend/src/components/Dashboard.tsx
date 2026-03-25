@@ -9,7 +9,7 @@ import { ThinkingIndicator } from "./chat/ThinkingIndicator";
 const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
 const DISPLAY_FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
 
-const CHIPS = ["Brain dump", "Set a goal", "How am I doing?", "What should I focus on?"];
+const CHIPS = ["Brain dump", "How am I doing?", "What should I focus on?"];
 
 const chipStyle: React.CSSProperties = {
   padding: "7px 14px",
@@ -38,11 +38,7 @@ function getDateStr(): string {
   });
 }
 
-interface DashboardProps {
-  onGoToNote: (noteId: number, spaceId: string) => void;
-}
-
-export function Dashboard({ onGoToNote: _onGoToNote }: DashboardProps) {
+export function Dashboard() {
   const { activeId, messages, sending, pendingIntention, send } = useConversationsStore();
   const [input, setInput] = useState("");
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -97,7 +93,6 @@ export function Dashboard({ onGoToNote: _onGoToNote }: DashboardProps) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
           <StatChip value={stats?.notes_this_week ?? "—"} label="notes this week" />
           <StatChip value={stats && stats.streak > 0 ? `${stats.streak} 🔥` : (stats?.streak ?? "—")} label="streak" />
-          <StatChip value={stats?.active_goals_count ?? "—"} label="goals" />
         </div>
       </div>
 

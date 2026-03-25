@@ -1,36 +1,18 @@
 import json
 import os
-from typing import List, Literal, Dict
+from typing import List, Dict
 
 from openai import OpenAI
-from pydantic import BaseModel
 
 from ..tools import registry as tools
 from ..tools import tool_map
 from .pricing import UsageTracker, calculate_embedding_cost
 from .prompts import (
-    EPISODE_SUMMARIZATION_PROMPT,
-    MEMORY_EXTRACTION_SYSTEM,
     TITLE_GENERATION_PROMPT,
     INTENTION_GENERATION_PROMPT,
     system_prompt,
     vision_prompt,
 )
-
-
-class ExtractedMemory(BaseModel):
-    key: str
-    content: str
-    type: Literal["fact", "preference"]
-
-
-class ExtractedMemoriesOnly(BaseModel):
-    memories: list[ExtractedMemory] = []
-
-
-class ChatResponse(BaseModel):
-    reply: str
-    memories: list[ExtractedMemory] = []
 
 
 class LLMClient:
@@ -73,7 +55,7 @@ class LLMClient:
         history: list = None,
         is_first_time: bool = False,
         db=None,
-    ) -> tuple[str, dict, list[dict]]:
+    ) -> tuple[str, dict]:
         """Generate response with memory context and tool use."""
         messages = [{"role": "system", "content": system_prompt(memory_context, is_first_time)}]
         if history:
@@ -114,39 +96,19 @@ class LLMClient:
                             "content": result,
                         })
                 else:
-                    final_reply = choice.message.content
-                    # Extract from just this exchange — not the full thread.
-                    # Passing the full context causes the LLM to re-extract memories
-                    # already injected via the system prompt.
-                    extract_messages = [
-                        {"role": "system", "content": MEMORY_EXTRACTION_SYSTEM},
-                        {"role": "user", "content": f"User: {message}\n\nGooni: {final_reply}"},
-                    ]
-                    structured = self.client.beta.chat.completions.parse(
-                        model=self.chat_model,
-                        messages=extract_messages,
-                        response_format=ExtractedMemoriesOnly,
-                        max_tokens=500,
-                    )
-                    tracker.add(structured.usage)
-                    memories = [
-                        {"key": m.key, "content": m.content, "type": m.type}
-                        for m in structured.choices[0].message.parsed.memories
-                    ]
-                    return final_reply, tracker.finalize(tools_used), memories
+                    return choice.message.content, tracker.finalize(tools_used)
 
-            return "I got stuck processing tool results.", tracker.finalize(tools_used), []
+            return "I got stuck processing tool results.", tracker.finalize(tools_used)
 
         except Exception as e:
             print(f"LLM Error: {e}")
-            return "I'm having trouble generating a response right now.", tracker.finalize(tools_used), []
+            return "I'm having trouble generating a response right now.", tracker.finalize(tools_used)
 
     def generate_response_with_image(
         self,
         message: str,
         image_url: str,
         memory_context: str = "",
-        episodic_context: str = "",
         history: list = None,
         db=None,
     ) -> tuple[str, dict]:
@@ -203,43 +165,6 @@ class LLMClient:
             print(f"LLM Vision Error: {e}")
             return "I couldn't analyze that image right now.", tracker.finalize(tools_used)
 
-    def summarize_episode(self, user_message: str, assistant_response: str) -> str:
-        """Summarize a conversation exchange into a concise, retrievable episode."""
-        try:
-            response = self.client.chat.completions.create(
-                model=self.chat_model,
-                messages=[
-                    {"role": "system", "content": EPISODE_SUMMARIZATION_PROMPT},
-                    {"role": "user", "content": f"User: {user_message}\nAssistant: {assistant_response}"},
-                ],
-                temperature=0.3,
-                max_tokens=150,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"Episode summarization error: {e}")
-            return f"User: {user_message}\nAssistant: {assistant_response}"
-
-    def extract_facts(self, content: str) -> list[dict]:
-        """Extract memories from any text (note, message, etc.)."""
-        try:
-            structured = self.client.beta.chat.completions.parse(
-                model=self.chat_model,
-                messages=[
-                    {"role": "system", "content": MEMORY_EXTRACTION_SYSTEM},
-                    {"role": "user", "content": content},
-                ],
-                response_format=ExtractedMemoriesOnly,
-                max_tokens=200,
-            )
-            parsed = structured.choices[0].message.parsed
-            return [
-                {"key": m.key, "content": m.content, "type": m.type}
-                for m in parsed.memories
-            ]
-        except Exception as e:
-            print(f"Memory extraction error: {e}")
-            return []
 
     async def generate_title(self, content: str) -> str:
         """Generate a short 5-word title for a conversation or note."""
