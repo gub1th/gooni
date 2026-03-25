@@ -57,7 +57,7 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
     onSpaceSelect();
   }
 
-  const isAllNotes = selectedSpaceId === "general" || selectedSpaceId === null;
+  const isAllNotes = !isDashboard && (selectedSpaceId === "general" || selectedSpaceId === null);
 
   return (
     <div

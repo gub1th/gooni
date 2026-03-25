@@ -169,7 +169,7 @@ export async function sendConversationMessage(
   convId: number,
   content: string,
   noteContent?: string
-): Promise<{ messages: ApiMessage[]; intention: string }> {
+): Promise<{ messages: ApiMessage[]; intention: string; tools_used: string[] }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -14,6 +14,7 @@ interface ConversationMessage {
   content: string;
   created_at: string;
   intention?: string;
+  tools_used?: string[];
 }
 
 interface ConversationsStore {
@@ -82,14 +83,17 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
         if (intention && get().sending) set({ pendingIntention: intention });
       });
 
-      const { messages: allMessages, intention: fallbackIntention } = await apiSendMessage(convId, content);
+      const { messages: allMessages, intention: fallbackIntention, tools_used } = await apiSendMessage(convId, content);
       const intentionToUse = get().pendingIntention || fallbackIntention || "";
-      const messagesWithIntention = allMessages.map((m, i) =>
-        i === allMessages.length - 1 && m.role === "assistant" && intentionToUse
-          ? { ...m, intention: intentionToUse }
-          : m
-      );
-      set({ messages: messagesWithIntention, sending: false, pendingIntention: null });
+      const messagesWithMeta = allMessages.map((m, i) => {
+        if (i !== allMessages.length - 1 || m.role !== "assistant") return m;
+        return {
+          ...m,
+          ...(intentionToUse ? { intention: intentionToUse } : {}),
+          ...(tools_used?.length ? { tools_used } : {}),
+        };
+      });
+      set({ messages: messagesWithMeta, sending: false, pendingIntention: null });
 
       const convos = await apiFetchConversations();
       set({ conversations: convos });

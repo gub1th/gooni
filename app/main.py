@@ -431,6 +431,7 @@ def send_conversation_message(
     return {
         "messages": [_serialize_message(m) for m in msgs],
         "intention": usage.get("intention") or "",
+        "tools_used": usage.get("tools_used") or [],
     }
 
 

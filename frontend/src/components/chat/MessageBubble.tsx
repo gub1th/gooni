@@ -2,8 +2,14 @@ import { useState } from "react";
 
 const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
 
+const TOOL_LABELS: Record<string, string> = {
+  web_search: "🔍 Searched the web",
+  save_memory: "💾 Saved a memory",
+  fetch_url: "🔗 Fetched a URL",
+};
+
 interface MessageBubbleProps {
-  message: { id: number; role: "user" | "assistant"; content: string; intention?: string };
+  message: { id: number; role: "user" | "assistant"; content: string; intention?: string; tools_used?: string[] };
 }
 
 export function MessageBubble({ message }: MessageBubbleProps) {
@@ -19,6 +25,27 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         marginBottom: 12,
       }}
     >
+      {!isUser && !!message.tools_used?.length && (
+        <div style={{ marginBottom: 4 }}>
+          {message.tools_used.map((tool) => (
+            <div
+              key={tool}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "2px 0",
+                color: "#AEAEB2",
+                fontSize: 12,
+                fontFamily: FONT,
+              }}
+            >
+              <span>{TOOL_LABELS[tool] ?? tool}</span>
+              <span style={{ color: "#34C759", fontSize: 11 }}>✓</span>
+            </div>
+          ))}
+        </div>
+      )}
       {!isUser && message.intention && (
         <div style={{ marginBottom: 4, maxWidth: "80%" }}>
           <button
