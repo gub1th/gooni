@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Dashboard } from "../components/Dashboard";
-import { GoalView } from "../components/GoalView";
 import { GooniPanel } from "../components/GooniPanel";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
@@ -10,7 +9,6 @@ import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
-import { useGoalsStore } from "../stores/useGoalsStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
 
 export const Route = createFileRoute("/")({
@@ -22,13 +20,12 @@ const SIDEBAR_BREAKPOINT = 768;
 
 function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
-  const fetchGoals = useGoalsStore((s) => s.fetch);
-  const { selectedSpaceId, selectSpace, loadNotes, selectNote, createNote } = useNotesContentStore();
+  const { selectedSpaceId, selectSpace, loadNotes, createNote } = useNotesContentStore();
   const isGooniOpen = useGooniStore((s) => s.isOpen);
   const windowWidth = useWindowWidth();
   const { fetchConversations, newChat } = useConversationsStore();
 
-  const [view, setView] = useState<"notes" | "dashboard" | "goal">("dashboard");
+  const [view, setView] = useState<"notes" | "dashboard">("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
 
   useEffect(() => {
@@ -37,12 +34,11 @@ function NotesPage() {
 
   useEffect(() => {
     fetchSpaces();
-    fetchGoals();
     fetchConversations();
   }, []);
 
   useEffect(() => {
-    // Only select a space when we're in notes view, not dashboard or goal
+    // Only select a space when we're in notes view, not dashboard
     if (view === "notes") {
       const spaceId = selectedSpaceId ?? "general";
       if (!selectedSpaceId) selectSpace("general");
@@ -50,27 +46,13 @@ function NotesPage() {
     }
   }, [view]);
 
-  // Clear selected space when switching to dashboard or goal
+  // Clear selected space when switching to dashboard
   useEffect(() => {
-    if ((view === "dashboard" || view === "goal") && selectedSpaceId) {
+    if (view === "dashboard" && selectedSpaceId) {
       selectSpace(null);
     }
   }, [view, selectedSpaceId]);
   const isSmall = windowWidth < 1100;
-
-  async function handleGoToNote(noteId: number, spaceId: string) {
-    selectSpace(spaceId);
-    await loadNotes(spaceId);
-    selectNote(noteId);
-    setView("notes");
-  }
-
-  async function handleOpenNote(noteId: number, spaceId: string) {
-    selectSpace(spaceId);
-    await loadNotes(spaceId);
-    selectNote(noteId);
-    setView("notes");
-  }
 
   function handleNewChat() {
     newChat();
@@ -102,7 +84,6 @@ function NotesPage() {
           showCompose={view !== "notes"}
           onLogoClick={handleNewChat}
           onSpaceSelect={() => setView("notes")}
-          onGoalSelect={() => setView("goal")}
           onCompose={handleCompose}
           onNewChat={handleNewChat}
           onConversationSelect={() => setView("dashboard")}
@@ -110,20 +91,7 @@ function NotesPage() {
       )}
 
       {view === "dashboard" ? (
-        <Dashboard onGoToNote={handleGoToNote} />
-      ) : view === "goal" ? (
-        <>
-          <GoalView onOpenNote={handleOpenNote} />
-          {isGooniOpen && (
-            isSmall ? (
-              <div style={{ position: "absolute", right: 0, top: 0, height: "100%", zIndex: 50, boxShadow: "-4px 0 20px rgba(0,0,0,0.12)" }}>
-                <GooniPanel />
-              </div>
-            ) : (
-              <GooniPanel />
-            )
-          )}
-        </>
+        <Dashboard />
       ) : (
         <>
           <NotesList />

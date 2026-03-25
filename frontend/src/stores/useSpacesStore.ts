@@ -7,14 +7,12 @@ export interface AppSpace {
   id: SpaceId;
   name: string;
   emoji: string | null;
-  goal_id: number | null;
 }
 
 const GENERAL_SPACE: AppSpace = {
   id: "general",
   name: "General",
   emoji: null,
-  goal_id: null,
 };
 
 interface SpacesStore {

@@ -29,16 +29,15 @@ class ConversationService:
         )
         if existing:
             return existing
-        return self.create(goal_id=None, source=source, db=db)
+        return self.create(source=source, db=db)
 
     def create(
         self,
         db: Session,
         source: str = "web",
-        goal_id: int | None = None,
         title: str | None = None,
     ) -> Conversation:
-        conv = Conversation(goal_id=goal_id, source=source, title=title)
+        conv = Conversation(source=source, title=title)
         db.add(conv)
         db.commit()
         db.refresh(conv)

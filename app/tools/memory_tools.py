@@ -12,23 +12,16 @@ class SaveMemoryTool(BaseTool):
     parameters = {
         "type": "object",
         "properties": {
-            "key": {
-                "type": "string",
-                "description": "Short snake_case identifier e.g. 'workout_preference', 'dietary_restriction'",
-            },
             "content": {
                 "type": "string",
                 "description": "The fact to remember, written as a clear statement about the user",
             },
         },
-        "required": ["key", "content"],
+        "required": ["content"],
     }
 
-    def execute(self, db=None, key: str = "", content: str = "", **kwargs) -> str:
+    def execute(self, db=None, content: str = "", **kwargs) -> str:
         from ..services.memory_service import memory_service
 
-        memory_service.upsert_memory(
-            {"key": key, "content": content, "confidence": 0.9},
-            db,
-        )
-        return f"Saved: {key} = {content}"
+        memory_service.add_memory(content)
+        return "Memory saved."

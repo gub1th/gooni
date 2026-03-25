@@ -1,4 +1,3 @@
-import json
 import os
 
 from dotenv import load_dotenv
@@ -14,11 +13,6 @@ from .db.database import engine, get_db
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
-    Goal,
-    GoalStatus,
-    GoalType,
-    Memory,
-    MemoryType,
     Message,
     Note,
     Space,
@@ -26,7 +20,6 @@ from .db.models import (  # noqa: F401 — triggers table creation
 from .db.schemas import ChatRequest
 from .llm.client import llm_client
 from .services.conversation_service import conversation_service
-from .services.goal_service import goal_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
@@ -43,13 +36,10 @@ def _run_column_migrations(engine):
         }
         # (table, col, sql_type)
         for table, col, col_type in [
-            ("goals", "space_id", "INTEGER"),
-            ("goals", "milestones", "TEXT"),
             ("conversations", "space_id", "INTEGER"),
             ("notes", "space_id", "INTEGER"),
             ("notes", "updated_at", "INTEGER"),
             ("notes", "last_opened_at", "INTEGER"),
-            ("notes", "goal_id", "INTEGER"),
             ("spaces", "emoji", "TEXT"),
             ("notes", "embedding", "TEXT"),
         ]:
@@ -116,137 +106,26 @@ async def chat(body: ChatRequest, db: Session = Depends(get_db)):
 
 
 @app.get("/debug/memories")
-async def debug_memories(db: Session = Depends(get_db)):
-    memories = memory_service.get_all_active(db)
-    return [
-        {
-            "id": m.id,
-            "type": m.memory_type.value,
-            "key": m.key,
-            "content": m.content,
-            "goal_id": m.goal_id,
-            "confidence": m.confidence,
-            "created_at": m.created_at,
-        }
-        for m in memories
-    ]
-
-
-def _serialize_goal(g: Goal) -> dict:
-    return {
-        "id": g.id,
-        "title": g.title,
-        "goal_type": g.goal_type.value,
-        "status": g.status.value,
-        "motivation": g.motivation,
-        "blocker": g.blocker,
-        "milestones": json.loads(g.milestones) if g.milestones else [],
-    }
-
-
-@app.get("/goals")
-def get_goals(db: Session = Depends(get_db)):
-    goals = goal_service.get_active(db)
-    return [_serialize_goal(g) for g in goals]
-
-
-@app.post("/goals")
-def create_goal(body: dict, db: Session = Depends(get_db)):
-    title = body.get("title", "").strip()
-    if not title:
-        raise HTTPException(status_code=400, detail="title is required")
-    goal_type_str = body.get("goal_type", "achieve")
-    motivation = body.get("motivation", None)
-    goal = Goal(
-        title=title,
-        goal_type=GoalType(goal_type_str),
-        status=GoalStatus.ACTIVE,
-        motivation=motivation,
-    )
-    db.add(goal)
-    db.commit()
-    db.refresh(goal)
-    return _serialize_goal(goal)
-
-
-@app.patch("/goals/{goal_id}")
-def update_goal(goal_id: int, body: dict, db: Session = Depends(get_db)):
-    goal = db.query(Goal).filter(Goal.id == goal_id).first()
-    if not goal:
-        raise HTTPException(status_code=404, detail="Goal not found")
-    if "title" in body:
-        goal.title = body["title"]
-    if "motivation" in body:
-        goal.motivation = body["motivation"]
-    if "blocker" in body:
-        goal.blocker = body["blocker"]
-    if "status" in body:
-        goal.status = GoalStatus(body["status"])
-    if "milestones" in body:
-        goal.milestones = json.dumps(body["milestones"])
-    db.commit()
-    db.refresh(goal)
-    return _serialize_goal(goal)
-
-
-@app.delete("/goals/{goal_id}")
-def delete_goal(goal_id: int, db: Session = Depends(get_db)):
-    goal = db.query(Goal).filter(Goal.id == goal_id).first()
-    if not goal:
-        raise HTTPException(status_code=404, detail="Goal not found")
-    db.query(Note).filter(Note.goal_id == goal_id).update({"goal_id": None})
-    db.delete(goal)
-    db.commit()
-    return {"ok": True}
-
-
-@app.get("/goals/{goal_id}/notes")
-def get_goal_notes(goal_id: int, db: Session = Depends(get_db)):
-    notes = (
-        db.query(Note)
-        .filter(Note.goal_id == goal_id)
-        .order_by(Note.updated_at.desc())
-        .all()
-    )
-    return [_serialize_note(n) for n in notes]
+async def debug_memories():
+    memories = memory_service.get_all()
+    return [{"id": m.get("id"), "memory": m.get("memory")} for m in memories]
 
 
 # ── Spaces ────────────────────────────────────────────────────────────────────
 
 
-def _serialize_space(s: Space, db: Session) -> dict:
-    goal = (
-        db.query(Goal)
-        .filter(Goal.space_id == s.id, Goal.status == GoalStatus.ACTIVE)
-        .first()
-    )
+def _serialize_space(s: Space) -> dict:
     return {
         "id": s.id,
         "name": s.name,
         "emoji": s.emoji,
-        "goal_id": goal.id if goal else None,
     }
 
 
 @app.get("/spaces")
 def get_spaces(db: Session = Depends(get_db)):
     spaces = db.query(Space).order_by(Space.id).all()
-    space_ids = [s.id for s in spaces]
-    active_goals = (
-        db.query(Goal)
-        .filter(Goal.space_id.in_(space_ids), Goal.status == GoalStatus.ACTIVE)
-        .all()
-    )
-    goal_by_space = {g.space_id: g.id for g in active_goals}
-    return [
-        {
-            "id": s.id,
-            "name": s.name,
-            "emoji": s.emoji,
-            "goal_id": goal_by_space.get(s.id),
-        }
-        for s in spaces
-    ]
+    return [_serialize_space(s) for s in spaces]
 
 
 @app.post("/spaces")
@@ -258,7 +137,7 @@ def create_space(body: dict, db: Session = Depends(get_db)):
     db.add(space)
     db.commit()
     db.refresh(space)
-    return {"id": space.id, "name": space.name, "emoji": space.emoji, "goal_id": None}
+    return {"id": space.id, "name": space.name, "emoji": space.emoji}
 
 
 @app.patch("/spaces/{space_id}")
@@ -275,7 +154,7 @@ def update_space(space_id: int, body: dict, db: Session = Depends(get_db)):
         space.emoji = body["emoji"] or None
     db.commit()
     db.refresh(space)
-    return _serialize_space(space, db)
+    return _serialize_space(space)
 
 
 @app.delete("/spaces/{space_id}")
@@ -298,7 +177,6 @@ def _serialize_note(n: Note) -> dict:
         "title": n.title,
         "content": n.content,
         "space_id": n.space_id,
-        "goal_id": n.goal_id,
         "created_at": n.created_at,
         "updated_at": n.updated_at,
         "last_opened_at": n.last_opened_at,
@@ -374,9 +252,6 @@ def update_note(
     if "space_id" in body:
         sid = body["space_id"]
         note.space_id = None if (sid is None or sid == "general") else int(sid)
-    if "goal_id" in body:
-        gid = body["goal_id"]
-        note.goal_id = None if gid is None else int(gid)
     db.commit()
     db.refresh(note)
     return _serialize_note(note)
@@ -424,12 +299,10 @@ def memorize_note(note_id: int, db: Session = Depends(get_db)):
     if len(raw) <= 10:
         return {"ok": True, "facts_saved": 0}
     try:
-        facts = llm_client.extract_facts(raw)
-        for fact in facts:
-            memory_service.upsert_memory(fact, db)
+        memory_service.add_memory(raw)
     except Exception:
-        facts = []
-    return {"ok": True, "facts_saved": len(facts)}
+        pass
+    return {"ok": True, "facts_saved": 1}
 
 
 @app.delete("/notes/{note_id}")
@@ -458,7 +331,6 @@ def _serialize_conversation(c: Conversation) -> dict:
         "type": "conversation",
         "title": c.title,
         "summary": c.summary,
-        "goal_id": c.goal_id,
         "space_id": c.space_id,
         "source": c.source,
         "created_at": c.created_at,
@@ -477,7 +349,6 @@ def _serialize_message(m: Message) -> dict:
 
 def _build_feed(
     db: Session,
-    goal_id: int | None = None,
     space_id: int | None = None,
     general: bool = False,
     limit: int = 100,
@@ -486,15 +357,11 @@ def _build_feed(
 
     - general=True: return everything (no filter)
     - space_id set: filter by space
-    - goal_id set: filter by goal (legacy)
     """
     q = db.query(Conversation).filter(Conversation.source != "telegram")
 
-    if not general:
-        if space_id is not None:
-            q = q.filter(Conversation.space_id == space_id)
-        elif goal_id is not None:
-            q = q.filter(Conversation.goal_id == goal_id)
+    if not general and space_id is not None:
+        q = q.filter(Conversation.space_id == space_id)
 
     items = [_serialize_conversation(c) for c in q.all()]
     items.sort(key=lambda x: x["created_at"] or "", reverse=True)
@@ -517,7 +384,7 @@ def get_feed(db: Session = Depends(get_db)):
 async def create_general_conversation(body: dict, db: Session = Depends(get_db)):
     content = body.get("content", "")
     title = await llm_client.generate_title(content) if content.strip() else None
-    conv = conversation_service.create(db=db, goal_id=None, source="web", title=title)
+    conv = conversation_service.create(db=db, source="web", title=title)
     return _serialize_conversation(conv)
 
 
@@ -586,8 +453,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
 
-    active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
-
     recent_notes = (
         db.query(Note)
         .order_by(sqlfunc.coalesce(Note.updated_at, Note.created_at).desc())
@@ -622,11 +487,6 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     return {
         "notes_this_week": notes_this_week,
-        "active_goals_count": len(active_goals),
-        "active_goals": [
-            {"id": g.id, "title": g.title, "goal_type": g.goal_type.value}
-            for g in active_goals
-        ],
         "recent_notes": [_serialize_note(n) for n in recent_notes],
         "streak": streak,
     }
@@ -637,119 +497,54 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
 @app.get("/mcp/context")
 def mcp_get_context(q: str = "", db: Session = Depends(get_db)):
-    """Return memory context for a query. Empty query returns preferences + goals only."""
+    """Return memory context for a query."""
     if not q.strip():
-        preferences = (
-            db.query(Memory)
-            .filter(
-                Memory.memory_type == MemoryType.PREFERENCE, Memory.is_active == True
-            )
-            .all()
-        )
-        active_goals = db.query(Goal).filter(Goal.status == GoalStatus.ACTIVE).all()
-        parts = []
-        if preferences:
-            parts.append("User preferences (always apply these):")
-            for m in preferences:
-                parts.append(f"- {m.content}")
-        if active_goals:
-            parts.append("Active goals:")
-            for g in active_goals:
-                parts.append(f"- {g.title}")
-        return {"context": "\n".join(parts)}
-    context = memory_service.build_memory_context(q, db)
+        return {"context": ""}
+    context = memory_service.build_memory_context(q)
     return {"context": context}
 
 
 @app.post("/mcp/memories")
-def mcp_add_memory(body: dict, db: Session = Depends(get_db)):
-    """Upsert a fact or preference memory."""
-    key = body.get("key", "").strip()
-    content = body.get("content", "").strip()
-    mem_type = body.get("type", "fact")
-    if not key or not content:
-        raise HTTPException(status_code=400, detail="key and content are required")
-    memory = memory_service.upsert_memory(
-        {"key": key, "content": content, "type": mem_type}, db
-    )
-    return {
-        "id": memory.id,
-        "key": memory.key,
-        "content": memory.content,
-        "type": memory.memory_type.value,
-    }
-
-
-@app.get("/mcp/memories/search")
-def mcp_search_memories(q: str, limit: int = 10, db: Session = Depends(get_db)):
-    """Search active memories by semantic similarity."""
-    memories = memory_service.search_similar(q, limit=limit, db=db)
-    return [
-        {"id": m.id, "key": m.key, "type": m.memory_type.value, "content": m.content}
-        for m in memories
-    ]
-
-
-@app.patch("/mcp/memories/{key}")
-def mcp_edit_memory(key: str, body: dict, db: Session = Depends(get_db)):
-    """Edit memory content in-place (re-embeds, does not supersede)."""
-    normalized = key.lower().replace(" ", "_")
-    memory = (
-        db.query(Memory)
-        .filter(Memory.key == normalized, Memory.is_active == True)
-        .first()
-    )
-    if not memory:
-        raise HTTPException(status_code=404, detail="Memory not found")
+def mcp_add_memory(body: dict):
+    """Add a memory."""
     content = body.get("content", "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    memory.content = content
-    embedding, _ = llm_client.generate_embedding(content)
-    memory.embedding = json.dumps(embedding)
-    db.commit()
-    db.refresh(memory)
-    return {
-        "id": memory.id,
-        "key": memory.key,
-        "type": memory.memory_type.value,
-        "content": memory.content,
-    }
+    memory_service.add_memory(content)
+    return {"ok": True}
 
 
-@app.delete("/mcp/memories/{key}")
-def mcp_forget_memory(key: str, db: Session = Depends(get_db)):
-    """Soft-delete a memory by key (sets is_active=False)."""
-    normalized = key.lower().replace(" ", "_")
-    memory = (
-        db.query(Memory)
-        .filter(Memory.key == normalized, Memory.is_active == True)
-        .first()
-    )
-    if not memory:
-        raise HTTPException(status_code=404, detail="Memory not found")
-    memory.is_active = False
-    db.commit()
-    return {"ok": True, "key": normalized}
+@app.get("/mcp/memories/search")
+def mcp_search_memories(q: str, limit: int = 10):
+    """Search memories by semantic similarity."""
+    memories = memory_service.search(q, limit=limit)
+    return [{"id": m.get("id"), "memory": m.get("memory")} for m in memories]
+
+
+@app.patch("/mcp/memories/{memory_id}")
+def mcp_edit_memory(memory_id: str, body: dict):
+    """Update a memory by ID."""
+    content = body.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+    try:
+        memory_service.client.update(memory_id, data=content)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"ok": True, "id": memory_id}
+
+
+@app.delete("/mcp/memories/{memory_id}")
+def mcp_forget_memory(memory_id: str):
+    """Delete a memory by ID."""
+    memory_service.delete(memory_id)
+    return {"ok": True, "id": memory_id}
 
 
 @app.get("/mcp/notes/search")
 def mcp_search_notes(q: str, limit: int = 5, db: Session = Depends(get_db)):
     """Search notes by semantic similarity to a query string."""
-    query_embedding, _ = llm_client.generate_embedding(q)
-    if not query_embedding:
-        return []
-    candidates = db.query(Note).filter(Note.embedding.isnot(None)).all()
-    scored = []
-    for n in candidates:
-        try:
-            sim = memory_service._cosine_similarity(
-                query_embedding, json.loads(n.embedding)
-            )
-            scored.append((n, sim))
-        except Exception:
-            pass
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return [_serialize_note(n) for n, _ in scored[:limit]]
+    related = note_service.search_by_query(q, limit, db)
+    return [_serialize_note(n) for n in related]
 
 

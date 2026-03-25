@@ -49,31 +49,6 @@ def vision_prompt(memory_context: str) -> str:
     )
 
 
-MEMORY_EXTRACTION_PROMPT = (
-    "Extract memories worth storing long-term from the user's message only. Each memory has a type:\n"
-    "- 'fact': discrete information about the user — their projects, tools, decisions, "
-    "domains they work in, feedback they gave, things they want changed.\n"
-    "- 'preference': explicit statements about how the user wants the AI to communicate — "
-    "tone, response length, output format. Only use this type when the user directly says "
-    "they want Gooni to behave differently. One-time product feedback or feature requests "
-    "are facts, not preferences.\n"
-    "Rules: extract ONLY from what the user explicitly stated in their message — not from "
-    "prior context, not from the system prompt, not inferred. Each memory must be a single "
-    "specific claim. Key must be snake_case and descriptive. Skip generic observations, "
-    "vague statements, and filler."
-)
-
-MEMORY_EXTRACTION_SYSTEM = (
-    f"Extract memories worth storing long-term from the text. {MEMORY_EXTRACTION_PROMPT}"
-)
-
-EPISODE_SUMMARIZATION_PROMPT = (
-    "Summarize the following conversation exchange in 1-3 sentences. "
-    "Be specific and concrete — capture what was discussed, any decisions made, "
-    "problems identified, or information shared. "
-    "Do not give generic advice. Do not editorialize. Just state the facts of what was discussed."
-)
-
 TITLE_GENERATION_PROMPT = (
     "Generate a short 5-word title for this note. Return only the title, no quotes:\n"
 )

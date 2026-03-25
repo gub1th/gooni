@@ -1,4 +1,5 @@
 import json
+import math
 import re
 from datetime import datetime, date as date_type
 
@@ -6,7 +7,17 @@ from sqlalchemy.orm import Session
 
 from ..db.models import Note, Space
 from ..llm.client import llm_client
-from .memory_service import memory_service
+
+
+def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
+    if not vec1 or not vec2:
+        return 0.0
+    dot = sum(a * b for a, b in zip(vec1, vec2))
+    mag1 = math.sqrt(sum(a * a for a in vec1))
+    mag2 = math.sqrt(sum(b * b for b in vec2))
+    if mag1 == 0 or mag2 == 0:
+        return 0.0
+    return dot / (mag1 * mag2)
 
 
 class NoteService:
@@ -51,7 +62,7 @@ class NoteService:
         scored = []
         for n in candidates:
             try:
-                sim = memory_service._cosine_similarity(query_vec, json.loads(n.embedding))
+                sim = _cosine_similarity(query_vec, json.loads(n.embedding))
                 scored.append((n, sim))
             except Exception:
                 pass
@@ -81,7 +92,7 @@ class NoteService:
                 continue
             vecs = [json.loads(n.embedding) for n in space_notes]
             centroid = [sum(v[i] for v in vecs) / len(vecs) for i in range(len(vecs[0]))]
-            sim = memory_service._cosine_similarity(note_vec, centroid)
+            sim = _cosine_similarity(note_vec, centroid)
             if sim > best_sim:
                 best_sim = sim
                 best_space = space
@@ -93,6 +104,22 @@ class NoteService:
                 "suggested_space_emoji": best_space.emoji,
             }
         return {"suggested_space_id": None, "suggested_space_name": None, "suggested_space_emoji": None}
+
+    def search_by_query(self, query: str, limit: int, db: Session) -> list[Note]:
+        """Search notes by semantic similarity to a query string."""
+        query_embedding, _ = llm_client.generate_embedding(query)
+        if not query_embedding:
+            return []
+        candidates = db.query(Note).filter(Note.embedding.isnot(None)).all()
+        scored = []
+        for n in candidates:
+            try:
+                sim = _cosine_similarity(query_embedding, json.loads(n.embedding))
+                scored.append((n, sim))
+            except Exception:
+                pass
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [n for n, _ in scored[:limit]]
 
     def _get_or_create_journal_space(self, db: Session) -> int:
         """Get or create the Journal space for daily Telegram notes."""

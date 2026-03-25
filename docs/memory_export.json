@@ -1,0 +1,2462 @@
+[
+  {
+    "id": 253,
+    "memory_type": "FACT",
+    "key": "main_goals",
+    "content": "User's main goals are to get jacked, build muscle, and improve overall strength.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-21 21:24:25"
+  },
+  {
+    "id": 252,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user confirmed their main goals, which include building muscle, reducing time spent on Instagram and Hinge, finding a new job, enhancing productivity, studying system design, and tracking progress on cutting back vaping. The assistant offered to help adjust or explore these goals further.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-21 20:47:21"
+  },
+  {
+    "id": 251,
+    "memory_type": "FACT",
+    "key": "main_goal_track_vaping_days_without",
+    "content": "User's main goal is to track vaping days without to monitor progress in cutting back on vaping.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-21 20:47:19"
+  },
+  {
+    "id": 248,
+    "memory_type": "FACT",
+    "key": "main_goal_get_new_job",
+    "content": "User's main goal is to get a new job that is more fulfilling.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-21 20:47:18"
+  },
+  {
+    "id": 249,
+    "memory_type": "FACT",
+    "key": "main_goal_build_best_version_of_gooni",
+    "content": "User's main goal is to build the best version of Gooni to enhance productivity and assistance.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-21 20:47:18"
+  },
+  {
+    "id": 250,
+    "memory_type": "FACT",
+    "key": "main_goal_study_system_design",
+    "content": "User's main goal is to study system design to improve knowledge and skills in system architecture.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-21 20:47:18"
+  },
+  {
+    "id": 247,
+    "memory_type": "FACT",
+    "key": "main_goal_reduce_time_hinge",
+    "content": "User's main goal is to reduce time on Hinge to improve productivity and focus.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-21 20:47:17"
+  },
+  {
+    "id": 246,
+    "memory_type": "FACT",
+    "key": "main_goal_reduce_time_instagram",
+    "content": "User's main goal is to reduce time on Instagram to improve productivity and focus.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-21 20:47:16"
+  },
+  {
+    "id": 245,
+    "memory_type": "FACT",
+    "key": "main_goal_get_jacked",
+    "content": "User's main goal is to get jacked by building muscle and improving overall strength.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-21 20:47:15"
+  },
+  {
+    "id": 244,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user greeted the assistant and asked how it was doing, to which the assistant responded that it was ready to help and inquired about the user's needs or concerns for the day.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-21 20:45:42"
+  },
+  {
+    "id": 243,
+    "memory_type": "FACT",
+    "key": "user_intentions_focused_on_goals",
+    "content": "User's current intentions are focused on a mix of achieving specific goals and avoiding certain habits.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 14:04:17"
+  },
+  {
+    "id": 242,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user is seeking to clarify their current intention, and the assistant prompts the user to provide more information about their current focus.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:10:13"
+  },
+  {
+    "id": 241,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user asked for suggestions on what to work on today, and the assistant provided three specific options: planning a workout routine or meal prep for muscle building, updating the resume and checking job listings for job searching, or studying system design through reading or project work. The assistant encouraged the user to choose one of the options or request further exploration of other topics.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:02:28"
+  },
+  {
+    "id": 240,
+    "memory_type": "FACT",
+    "key": "focus_areas",
+    "content": "User is considering working on fitness ('Get Jacked'), job searching, or studying system design.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:02:26"
+  },
+  {
+    "id": 239,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about how the assistant knew their goals and preferences. The assistant explained that it tracks the information shared by the user to help them stay focused on their priorities and offered to clarify or add any additional information if needed.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:47"
+  },
+  {
+    "id": 238,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed their intentions, which include goals such as building muscle, finding a new job, studying system design, enhancing productivity with Gooni, and tracking their progress in reducing vaping. They also aim to avoid spending excessive time on Instagram and Hinge to improve their productivity and focus. The assistant offered to explore these topics further if the user desired.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:34"
+  },
+  {
+    "id": 237,
+    "memory_type": "FACT",
+    "key": "intention_reduce_time_on_hinge",
+    "content": "The user intends to reduce time on Hinge (improve productivity and focus).",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:32"
+  },
+  {
+    "id": 234,
+    "memory_type": "FACT",
+    "key": "intention_build_best_version_of_gooni",
+    "content": "The user intends to build the best version of Gooni (enhance productivity and assistance).",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:31"
+  },
+  {
+    "id": 235,
+    "memory_type": "FACT",
+    "key": "intention_track_vaping_days_without",
+    "content": "The user intends to track vaping days without (monitor progress in cutting back on vaping).",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:31"
+  },
+  {
+    "id": 236,
+    "memory_type": "FACT",
+    "key": "intention_reduce_time_on_instagram",
+    "content": "The user intends to reduce time on Instagram (improve productivity and focus).",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:31"
+  },
+  {
+    "id": 231,
+    "memory_type": "FACT",
+    "key": "intention_get_jacked",
+    "content": "The user intends to get jacked (build muscle and improve strength).",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:30"
+  },
+  {
+    "id": 232,
+    "memory_type": "FACT",
+    "key": "intention_get_new_job",
+    "content": "The user intends to get a new job (find a more fulfilling position).",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:30"
+  },
+  {
+    "id": 233,
+    "memory_type": "FACT",
+    "key": "intention_study_system_design",
+    "content": "The user intends to study system design (improve knowledge in system architecture).",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:30"
+  },
+  {
+    "id": 230,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed an intention to chat and observe improvements in the assistant's responses. The assistant acknowledged this and invited the user to share their thoughts or topics for discussion.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 08:00:05"
+  },
+  {
+    "id": 229,
+    "memory_type": "FACT",
+    "key": "current_intentions",
+    "content": "User has current intentions that they want to communicate.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:20:01"
+  },
+  {
+    "id": 228,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed a need for the assistant to understand their current intentions and emphasized the importance of the assistant being self-improving for effective collaboration. The assistant acknowledged this and requested specific details about the user's intentions and suggestions for improvement to enhance its support.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:08:20"
+  },
+  {
+    "id": 226,
+    "memory_type": "FACT",
+    "key": "user_intentions_importance",
+    "content": "User emphasizes the importance of Gooni being aware of their current intentions.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:08:19"
+  },
+  {
+    "id": 227,
+    "memory_type": "FACT",
+    "key": "user_self_improvement_expectation",
+    "content": "User expects Gooni to be self-improving as a necessary condition for effective interaction.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:08:19"
+  },
+  {
+    "id": 225,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user, Daniel, shared a system prompt for an AI named Gooni and asked for feedback on its issues. The assistant identified several problems, including repetitive user preferences, an outdated date and time, unclear goals, duplicated entries, and overly complex instructions. The assistant emphasized that these issues could negatively impact the user experience and clarity in interactions.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:16"
+  },
+  {
+    "id": 221,
+    "memory_type": "FACT",
+    "key": "user_goal_build_best_version_of_gooni",
+    "content": "User's goal is to build the best version of Gooni to enhance productivity and assistance.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:14"
+  },
+  {
+    "id": 222,
+    "memory_type": "FACT",
+    "key": "user_goal_study_system_design",
+    "content": "User's goal is to study system design to improve knowledge and skills in system architecture.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:14"
+  },
+  {
+    "id": 223,
+    "memory_type": "FACT",
+    "key": "user_goal_track_vaping_days_without",
+    "content": "User's goal is to track vaping days without to monitor progress in cutting back on vaping.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:14"
+  },
+  {
+    "id": 224,
+    "memory_type": "FACT",
+    "key": "user_goal_duplicate_build_best_version_of_gooni",
+    "content": "User has a duplicate goal to build the best version of Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:14"
+  },
+  {
+    "id": 219,
+    "memory_type": "FACT",
+    "key": "user_goal_reduce_time_on_hinge",
+    "content": "User's goal is to reduce time on Hinge to improve productivity and focus.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:13"
+  },
+  {
+    "id": 220,
+    "memory_type": "FACT",
+    "key": "user_goal_get_new_job",
+    "content": "User's goal is to get a new job for a more fulfilling or suitable position.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:13"
+  },
+  {
+    "id": 217,
+    "memory_type": "FACT",
+    "key": "user_goal_get_jacked",
+    "content": "User's goal is to get jacked to build muscle and improve overall strength.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:12"
+  },
+  {
+    "id": 218,
+    "memory_type": "FACT",
+    "key": "user_goal_reduce_time_on_instagram",
+    "content": "User's goal is to reduce time on Instagram to improve productivity and focus.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:12"
+  },
+  {
+    "id": 214,
+    "memory_type": "FACT",
+    "key": "user_preferences_markdown",
+    "content": "User wants Gooni to handle Markdown formatting in responses.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:11"
+  },
+  {
+    "id": 215,
+    "memory_type": "FACT",
+    "key": "user_preferences_concise_responses",
+    "content": "User prefers concise responses.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:11"
+  },
+  {
+    "id": 216,
+    "memory_type": "FACT",
+    "key": "user_preferences_introspective_discussions",
+    "content": "User prefers to have introspective discussions about improving Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:11"
+  },
+  {
+    "id": 213,
+    "memory_type": "FACT",
+    "key": "user_name",
+    "content": "User's name is Daniel.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:06:10"
+  },
+  {
+    "id": 212,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user, Daniel, expressed concerns about the system prompt for Gooni, highlighting issues such as repetitive user preferences regarding Markdown formatting and concise responses. He also emphasized his goal of developing Gooni into a more effective assistant, akin to Jarvis, and noted the importance of introspective discussions for improvement. Additionally, the conversation included Daniel's active goals, which focus on personal development and productivity.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 07:04:05"
+  },
+  {
+    "id": 211,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed dissatisfaction with the assistant's communication style, to which the assistant acknowledged the feedback and offered to keep the conversation straightforward, asking the user what they would like to discuss or work on.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 06:30:08"
+  },
+  {
+    "id": 210,
+    "memory_type": "FACT",
+    "key": "dislike_ai_tone",
+    "content": "User does not like the way the AI talks.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 06:30:06"
+  },
+  {
+    "id": 209,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed uncertainty about how to utilize Gooni, and the assistant proposed several options for collaboration, including goal tracking, discussing improvements for Gooni, exploring a learning topic, and finding productivity hacks. The assistant asked the user which option they preferred to pursue.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 06:22:43"
+  },
+  {
+    "id": 208,
+    "memory_type": "FACT",
+    "key": "user_desires_productivity_hacks",
+    "content": "User wants to explore ways to cut back on distractions like Instagram and Hinge.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 06:22:40"
+  },
+  {
+    "id": 207,
+    "memory_type": "FACT",
+    "key": "user_interests_system_design",
+    "content": "User is interested in learning about system design.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-20 06:22:39"
+  },
+  {
+    "id": 206,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about the assistant's identity, to which the assistant introduced itself as Gooni, a personal AI assistant designed to help with goals, provide insights, and engage in conversation.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 06:07:45"
+  },
+  {
+    "id": 205,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about their previous message, and the assistant responded that it was a question about the assistant's well-being, offering to discuss something specific if desired.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 05:12:36"
+  },
+  {
+    "id": 204,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user initiated the conversation by asking the assistant how it was doing, to which the assistant responded positively and inquired about the user's thoughts or concerns.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-20 05:10:42"
+  },
+  {
+    "id": 200,
+    "memory_type": "FACT",
+    "key": "job_finder",
+    "content": "The user wants their own job finder.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-18 06:00:49"
+  },
+  {
+    "id": 201,
+    "memory_type": "PREFERENCE",
+    "key": "note_preference",
+    "content": "The user likes taking notes.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-18 06:00:49"
+  },
+  {
+    "id": 202,
+    "memory_type": "FACT",
+    "key": "content_creation_app_function",
+    "content": "The user seeks an app to make content automatically.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-18 06:00:49"
+  },
+  {
+    "id": 199,
+    "memory_type": "FACT",
+    "key": "app_purpose",
+    "content": "The user is developing their own app for content creation.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-18 06:00:48"
+  },
+  {
+    "id": 197,
+    "memory_type": "FACT",
+    "key": "user_marketer",
+    "content": "User is their own marketer for their app.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-18 04:57:59"
+  },
+  {
+    "id": 198,
+    "memory_type": "PREFERENCE",
+    "key": "user_preference_notes",
+    "content": "User likes notes.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-18 04:57:59"
+  },
+  {
+    "id": 196,
+    "memory_type": "FACT",
+    "key": "brother_name",
+    "content": "User's brother is named Joshua.",
+    "goal_id": null,
+    "confidence": 0.9,
+    "is_active": 1,
+    "created_at": "2026-03-18 04:57:58"
+  },
+  {
+    "id": 195,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user greeted the assistant and inquired about its well-being. The assistant responded positively and expressed readiness to assist, asking what the user wanted to discuss.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:38:28"
+  },
+  {
+    "id": 194,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about the number of days since Lent started, but the assistant was unable to provide a response.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:25:30"
+  },
+  {
+    "id": 193,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about tracking their progress in quitting vaping, asking about the mechanisms in place for tracking. The assistant clarified that it does not have an automatic tracking feature and requires the user to manually provide updates on the number of days without vaping, offering to keep a count based on those updates.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:24:57"
+  },
+  {
+    "id": 192,
+    "memory_type": "FACT",
+    "key": "vaping_tracking",
+    "content": "User wants to track how many days they have gone without vaping.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:24:55"
+  },
+  {
+    "id": 191,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user asked when Lent started, indicating they are participating in it by giving something up. The assistant informed them that Lent began on February 22, 2026, which was Ash Wednesday, and inquired about how their experience has been so far.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:24:36"
+  },
+  {
+    "id": 190,
+    "memory_type": "FACT",
+    "key": "giving_up_for_lent",
+    "content": "User is giving something up for Lent.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:24:34"
+  },
+  {
+    "id": 189,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about tracking the number of days they have gone without vaping. The assistant confirmed that it has set up a goal to monitor this progress and asked the user to provide their current count of days without vaping for updates.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:23:16"
+  },
+  {
+    "id": 188,
+    "memory_type": "FACT",
+    "key": "days_without_vaping_goal",
+    "content": "User has set up a goal to track their days without vaping.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:23:14"
+  },
+  {
+    "id": 187,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user mentioned they used to vape every day, and the assistant acknowledged this by suggesting the user track their progress in reducing their vaping habit, either by counting the days without vaping or the number of times they vape now.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:22:54"
+  },
+  {
+    "id": 186,
+    "memory_type": "FACT",
+    "key": "previous_vaping_habit",
+    "content": "User used to vape every day.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:22:51"
+  },
+  {
+    "id": 185,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about tracking their vaping statistics, and the assistant confirmed that it is possible. The assistant asked the user to specify what metrics they want to track, such as frequency of vaping or duration of abstinence, to set it up accordingly.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:22:33"
+  },
+  {
+    "id": 184,
+    "memory_type": "FACT",
+    "key": "vaping_stats_tracking_interest",
+    "content": "User is interested in tracking their vaping stats, including how many times they vape or how long they go without it.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:22:31"
+  },
+  {
+    "id": 183,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about the number of times they did not \"goon\" today, but the assistant noted that no specific count was provided. The assistant suggested that the user could track it moving forward and asked if the user felt good about reducing the activity.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:22:04"
+  },
+  {
+    "id": 182,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user mentioned they did not go to the gym that day. The assistant responded positively, encouraging the user to stay motivated and asked how they felt about missing the gym.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 14:21:30"
+  },
+  {
+    "id": 181,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user requested the assistant to be more proactive about discussing goals. The assistant agreed to check in more frequently and suggested focusing on specific areas such as fitness, job hunting, or studying system design.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:37:53"
+  },
+  {
+    "id": 180,
+    "memory_type": "PREFERENCE",
+    "key": "proactive_goals_assistance",
+    "content": "User wants Gooni to be more proactive about goals.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:37:51"
+  },
+  {
+    "id": 179,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user asked for assistance, and the assistant offered to provide quick information, help organize thoughts, and track goals. The assistant also suggested that if the current support isn't sufficient, they could adjust by providing more depth on topics or better suggestions based on the user's preferences.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:37:10"
+  },
+  {
+    "id": 178,
+    "memory_type": "PREFERENCE",
+    "key": "desired_ai_communication_style",
+    "content": "User wants more depth on topics or better suggestions from Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:37:09"
+  },
+  {
+    "id": 177,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed frustration with the assistant, comparing it unfavorably to another AI, Claude. The assistant acknowledged the user's feelings and offered to improve by asking for specific feedback on how to be more helpful.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:36:56"
+  },
+  {
+    "id": 176,
+    "memory_type": "FACT",
+    "key": "user_expectations",
+    "content": "User expects Gooni to be more productive and assist with tasks more effectively.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:36:54"
+  },
+  {
+    "id": 175,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user mentioned they would be using the assistant as an alternative to Claude for a while, to which the assistant responded positively, expressing willingness to help and inviting the user to share their thoughts or questions.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:35:47"
+  },
+  {
+    "id": 174,
+    "memory_type": "FACT",
+    "key": "alternative_to_clause",
+    "content": "User will be using Gooni as an alternative to Claude for a little bit.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:35:45"
+  },
+  {
+    "id": 173,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user provided feedback on Gooni, focusing on enhancing user experience, adding features, and adjusting its goals. They also expressed a desire for Gooni to improve through conversations. The assistant offered to explore specific areas of feedback further.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:05:26"
+  },
+  {
+    "id": 172,
+    "memory_type": "FACT",
+    "key": "user_feedback_self_improvement",
+    "content": "User indicated a desire for Gooni to improve itself through conversations.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:05:23"
+  },
+  {
+    "id": 170,
+    "memory_type": "FACT",
+    "key": "user_feedback_add_features",
+    "content": "User mentioned wanting to add features to Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:05:22"
+  },
+  {
+    "id": 171,
+    "memory_type": "FACT",
+    "key": "user_feedback_adjust_goals",
+    "content": "User expressed a desire to make adjustments to Gooni's goals.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:05:22"
+  },
+  {
+    "id": 169,
+    "memory_type": "FACT",
+    "key": "user_feedback_enhance_user_experience",
+    "content": "User wants to improve Gooni by enhancing user experience.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:05:21"
+  },
+  {
+    "id": 168,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed a concern about the goals for Gooni, indicating that changes are needed. The assistant responded by asking for clarification on whether the user thinks adjustments, new goals, or a different approach is necessary.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:04:31"
+  },
+  {
+    "id": 167,
+    "memory_type": "FACT",
+    "key": "user_feedback_goals",
+    "content": "User thinks something needs to be done with goals.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 08:04:29"
+  },
+  {
+    "id": 166,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user suggested removing the conversation starter pills from the Gooni dashboard, and the assistant agreed, asking if the user wanted to replace them with something else or keep the dashboard simple.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-17 07:52:38"
+  },
+  {
+    "id": 164,
+    "memory_type": "PREFERENCE",
+    "key": "concise_responses",
+    "content": "User prefers concise responses.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 07:52:37"
+  },
+  {
+    "id": 165,
+    "memory_type": "PREFERENCE",
+    "key": "markdown_formatting",
+    "content": "User wants Gooni to handle Markdown formatting in responses.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 07:52:37"
+  },
+  {
+    "id": 163,
+    "memory_type": "PREFERENCE",
+    "key": "remove_conversation_starter_pills",
+    "content": "User wants to remove the conversation starter pills on the Gooni dashboard.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-17 07:52:35"
+  },
+  {
+    "id": 162,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user asked to see the current appearance of the loading indicator. The assistant acknowledged the request and encouraged the user to continue working on it, offering to help with further adjustments.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:09:45"
+  },
+  {
+    "id": 161,
+    "memory_type": "FACT",
+    "key": "loading_indicator_tweaking",
+    "content": "User is currently tweaking the loading indicator for Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:09:42"
+  },
+  {
+    "id": 159,
+    "memory_type": "FACT",
+    "key": "introspective_discussion_preference",
+    "content": "User wants to discuss ways for Gooni to improve in an introspective manner.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:04:57"
+  },
+  {
+    "id": 160,
+    "memory_type": "FACT",
+    "key": "development_workflow_interest",
+    "content": "User is interested in developing a workflow to quickly iterate based on chatting with Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:04:57"
+  },
+  {
+    "id": 158,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user is currently modifying the loading indicator and testing it. The assistant acknowledges this work and expresses a desire to continue enhancing the Gooni experience through a collaborative and introspective discussion.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:04:31"
+  },
+  {
+    "id": 156,
+    "memory_type": "FACT",
+    "key": "user_tweaking_loading_indicator",
+    "content": "User is currently tweaking the loading indicator for Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:04:29"
+  },
+  {
+    "id": 157,
+    "memory_type": "PREFERENCE",
+    "key": "user_preference_introspective_feedback",
+    "content": "User prefers to have introspective discussions about improving Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:04:29"
+  },
+  {
+    "id": 155,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about the creation of a goal, and the assistant clarified that it will only create goals if the user specifically requests them.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:00:42"
+  },
+  {
+    "id": 154,
+    "memory_type": "FACT",
+    "key": "user_wants_a_workflow",
+    "content": "User wants to develop a workflow to iterate based on chatting with Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:00:40"
+  },
+  {
+    "id": 153,
+    "memory_type": "FACT",
+    "key": "discuss_ways_to_improve_goo",
+    "content": "User wants to discuss ways for Gooni to improve itself.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 07:00:39"
+  },
+  {
+    "id": 152,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed disappointment in the assistant's response, expecting more introspection. The assistant acknowledged this and suggested developing a workflow for iterative idea exchange, proposing regular check-ins to assess effectiveness and adjust based on feedback.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:54:57"
+  },
+  {
+    "id": 150,
+    "memory_type": "FACT",
+    "key": "goal_discuss_improvements_for_gooni",
+    "content": "User wants to discuss ways for Gooni to improve itself through conversations.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:54:55"
+  },
+  {
+    "id": 151,
+    "memory_type": "FACT",
+    "key": "preference_workflow_for_quick_iterations",
+    "content": "User is interested in developing a workflow to quickly iterate based on chatting with Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:54:55"
+  },
+  {
+    "id": 149,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed a goal to discuss ways for the assistant to improve itself. The assistant acknowledged this goal and indicated a willingness to engage in that discussion.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:54:07"
+  },
+  {
+    "id": 147,
+    "memory_type": "FACT",
+    "key": "active_goal_chat_with_gooni",
+    "content": "User wants to discuss ways to improve Gooni.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:54:05"
+  },
+  {
+    "id": 148,
+    "memory_type": "PREFERENCE",
+    "key": "prefers_concise_responses",
+    "content": "User prefers concise responses.",
+    "goal_id": null,
+    "confidence": 0.9,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:54:05"
+  },
+  {
+    "id": 146,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user commented that Claude's loading animation resembles Nickelodeon, to which the assistant agreed, noting the bright colors and designs evoke childhood memories.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:53:36"
+  },
+  {
+    "id": 145,
+    "memory_type": "FACT",
+    "key": "claudes_loading_animation_nickelodeon",
+    "content": "Claude's loading animation looks like Nickelodeon.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:53:35"
+  },
+  {
+    "id": 144,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed dissatisfaction with the assistant's usefulness, comparing it unfavorably to another chat service. The assistant responded by asking the user to specify their goals or tasks they want to track, offering to help with accountability, tips, or organizing thoughts.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:38:32"
+  },
+  {
+    "id": 143,
+    "memory_type": "PREFERENCE",
+    "key": "user_prefers_concise_responses",
+    "content": "User prefers concise responses.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:38:30"
+  },
+  {
+    "id": 142,
+    "memory_type": "FACT",
+    "key": "user_wants_gonni_to_be_useful",
+    "content": "User wants Gooni to be genuinely useful and not a worse version of chat.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:38:29"
+  },
+  {
+    "id": 141,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user initiated the conversation with a casual greeting, and the assistant responded similarly, asking how the user was feeling and what was on their mind. No specific topics or issues were discussed beyond the initial exchange.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:35:52"
+  },
+  {
+    "id": 139,
+    "memory_type": "FACT",
+    "key": "user_feeling_good",
+    "content": "User is feeling good.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:35:50"
+  },
+  {
+    "id": 140,
+    "memory_type": "PREFERENCE",
+    "key": "user_preference_markdown_formatting",
+    "content": "User wants Gooni to handle Markdown formatting in responses.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:35:50"
+  },
+  {
+    "id": 138,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user greeted the group and inquired about their well-being. The assistant responded positively and expressed readiness to assist.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:33:58"
+  },
+  {
+    "id": 137,
+    "memory_type": "FACT",
+    "key": "user_feeling",
+    "content": "User is feeling good.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 06:33:56"
+  },
+  {
+    "id": 136,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user expressed frustration about the difficulty of building an effective memory system. The assistant acknowledged this challenge and provided specific areas to focus on, including structuring information, maintaining consistency, gathering feedback, simplifying the system, and exploring different tools or methodologies.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:58:25"
+  },
+  {
+    "id": 135,
+    "memory_type": "FACT",
+    "key": "struggles_with_memory_system",
+    "content": "Building a memory system that works well feels challenging.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:58:24"
+  },
+  {
+    "id": 134,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about improvements for the Gooni app, and the assistant suggested enhancing user experience with interface improvements, adding Markdown support for better readability, and expanding productivity features. Additionally, it was recommended to regularly review user feedback for ongoing enhancements.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:53:18"
+  },
+  {
+    "id": 133,
+    "memory_type": "PREFERENCE",
+    "key": "user_wants_markdown_formatting",
+    "content": "User wants Gooni to handle Markdown formatting in responses.",
+    "goal_id": null,
+    "confidence": 0.9,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:53:17"
+  },
+  {
+    "id": 131,
+    "memory_type": "FACT",
+    "key": "user_needs_to_improve_gooni",
+    "content": "The Gooni app needs an improved user experience, Markdown formatting support, and expanded features for productivity.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:53:16"
+  },
+  {
+    "id": 130,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user inquired about ways to improve the Gooni app, and the assistant suggested several enhancements, including improving user experience through interface navigation and loading times, adding features like auto-generating titles and Markdown support, implementing a feedback mechanism, enhancing goal tracking with reminders, and providing learning resources. The assistant offered to explore any of these suggestions further.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:51:06"
+  },
+  {
+    "id": 129,
+    "memory_type": "PREFERENCE",
+    "key": "user_preference_concise_responses",
+    "content": "User prefers concise responses.",
+    "goal_id": null,
+    "confidence": 0.9,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:51:04"
+  },
+  {
+    "id": 126,
+    "memory_type": "FACT",
+    "key": "user_goal_enhance_gooni",
+    "content": "User wants to enhance the Gooni app.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:51:03"
+  },
+  {
+    "id": 127,
+    "memory_type": "FACT",
+    "key": "gooni_needs_markdown_formatting",
+    "content": "Gooni needs to include Markdown formatting support.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:51:03"
+  },
+  {
+    "id": 128,
+    "memory_type": "FACT",
+    "key": "gooni_needs_auto_generating_titles",
+    "content": "Gooni needs to implement auto-generating titles for conversations.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:51:03"
+  },
+  {
+    "id": 125,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "The user requested that the app Gooni be able to handle Markdown formatting in responses from a language model. The assistant proposed implementing Markdown support to enhance readability, structure, and versatility of the information presented. The assistant also suggested brainstorming specific features or components that could utilize Markdown.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:49:29"
+  },
+  {
+    "id": 124,
+    "memory_type": "PREFERENCE",
+    "key": "wants_markdown_formatting",
+    "content": "User wants Gooni to handle Markdown formatting in responses.",
+    "goal_id": null,
+    "confidence": 1.0,
+    "is_active": 1,
+    "created_at": "2026-03-16 05:49:27"
+  },
+  {
+    "id": 122,
+    "memory_type": "FACT",
+    "key": "fitness_goals",
+    "content": "Get Jacked (Achieve) - To build muscle and improve overall strength.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 04:50:24"
+  },
+  {
+    "id": 123,
+    "memory_type": "FACT",
+    "key": "career_goals",
+    "content": "Get a New Job (Achieve) - To find a more fulfilling or suitable position.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-16 04:50:24"
+  },
+  {
+    "id": 121,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: let's try chatting now\nAssistant: Sure! What would you like to talk about?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 03:13:03"
+  },
+  {
+    "id": 120,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: i hope the conversation now generates a title\nAssistant: I've noted your request for conversation titles. If there are any other features you'd like to discuss or improve, let me know!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 03:10:52"
+  },
+  {
+    "id": 119,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: what do i need to improve gooni\nAssistant: To improve Gooni, consider the following areas:\n\n1. **User Experience**: Enhance the interface for easier interaction and navigation.\n2. **Features**: Add more functionalities based on user feedback, like tracking additional metrics or integrating with other apps.\n3. **Data Analysis**: Improve the ability to analyze user data for better insights and recommendations.\n4. **Performance**: Optimize response times and overall performance.\n5. **Integration**: Consider integrating with other tools or platforms for seamless user experience.\n6. **Feedback Mechanism**: Implement a way for users to provide feedback easily.\n\nWould you like to focus on any specific area or brainstorm more ideas?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-16 02:48:49"
+  },
+  {
+    "id": 118,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Also, some things to fix with Gooni: 'auto generating a title for these convos, and also , perhaps adding formatting to the responses? like i see  **Get a New Job** .\nAssistant: I've noted your suggestions for improving Gooni: auto-generating titles for conversations and adding formatting to responses. If there's anything else you'd like to add or modify, just let me know!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-15 22:56:25"
+  },
+  {
+    "id": 117,
+    "memory_type": "FACT",
+    "key": "gooni_improvements",
+    "content": "Auto-generating a title for conversations and adding formatting to responses.",
+    "goal_id": null,
+    "confidence": 1.0,
+    "is_active": 1,
+    "created_at": "2026-03-15 22:56:22"
+  },
+  {
+    "id": 116,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: My goals are also to get a new job, to build the best version of Gooni, and to study system design.\nAssistant: I've added your new goals:\n\n4. **Get a New Job** (Achieve) - To find a more fulfilling or suitable position.\n5. **Build the Best Version of Gooni** (Achieve) - To enhance your productivity and assistance.\n6. **Study System Design** (Achieve) - To improve your knowledge and skills in system architecture.\n\nHow would you like to focus on these goals?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-15 22:55:26"
+  },
+  {
+    "id": 115,
+    "memory_type": "FACT",
+    "key": "new_goal",
+    "content": "Study System Design (Achieve) - To improve my knowledge and skills in system architecture.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-15 22:55:25"
+  },
+  {
+    "id": 112,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: what are my current goals\nAssistant: Your current goals are: 1. **Get Jacked** (Achieve) - To build muscle and improve overall strength. 2. **Reduce Time on Instagram** (Avoid) - To improve productivity and focus. 3. **Reduce Time on Hinge** (Avoid) - To improve productivity and focus. How would you like to proceed with these goals?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-15 22:33:41"
+  },
+  {
+    "id": 111,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: time to start Gooni fr\nAssistant: Ready when you are! What would you like to work on today?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-15 22:33:10"
+  },
+  {
+    "id": 110,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I want to go fishing\nAssistant: That sounds like a great idea! Do you have a specific location or time in mind for your fishing trip?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-14 09:46:51"
+  },
+  {
+    "id": 109,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I want that to reduce\nAssistant: I've created goals to reduce your time on Instagram and Hinge. Let me know how I can assist you in achieving these goals!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-14 08:45:11"
+  },
+  {
+    "id": 108,
+    "memory_type": "FACT",
+    "key": "reduce_time_on_hinge",
+    "content": "To improve productivity and focus.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-14 08:45:10"
+  },
+  {
+    "id": 107,
+    "memory_type": "FACT",
+    "key": "reduce_time_on_instagram",
+    "content": "To improve productivity and focus.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-14 08:45:09"
+  },
+  {
+    "id": 106,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Time spent on hinge everyday.\nAssistant: I've saved your preference to track your time spent on Hinge every day as well! You can let me know how much time you spend on both Instagram and Hinge, and I'll keep track of it for you.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-14 08:45:02"
+  },
+  {
+    "id": 104,
+    "memory_type": "FACT",
+    "key": "instagram_tracking",
+    "content": "User wants to track their time spent on Instagram everyday.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-14 08:45:01"
+  },
+  {
+    "id": 105,
+    "memory_type": "FACT",
+    "key": "hinge_tracking",
+    "content": "User wants to track their time spent on Hinge everyday.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-14 08:45:01"
+  },
+  {
+    "id": 103,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I want to track my time spent on Instagram everyday.\nAssistant: I've saved your preference to track your time spent on Instagram every day. You can let me know how much time you spend, and I'll keep track of it for you!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-14 08:44:56"
+  },
+  {
+    "id": 102,
+    "memory_type": "FACT",
+    "key": "instagram_time_tracking",
+    "content": "User wants to track their time spent on Instagram every day.",
+    "goal_id": null,
+    "confidence": 1.0,
+    "is_active": 1,
+    "created_at": "2026-03-14 08:44:50"
+  },
+  {
+    "id": 101,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: My goal: \"get jacked\"\nWhy: To build muscle and improve overall strength.\n\n(No notes linked yet.)\n\nHow am I doing on this goal? Be honest, specific, and encouraging.\nAssistant: You're making progress towards your goal of getting jacked! Here's a quick overview of your recent workouts:\n\n1. **Isolateral Row**: \n   - You've been consistently lifting 90 lbs for 3 sets of 12 reps, which shows you're maintaining strength in this exercise. \n   - Your personal record (PR) is 90 lbs for 12 reps, indicating you have room to challenge yourself as you build muscle.\n\n2. **Back Training**: \n   - There\u2019s no recorded history yet, which suggests you might want to incorporate more variety or specific exercises targeting your back.\n\nOverall, you're on the right track! Keep pushing yourself to increase weights or reps where you can, and consider adding a few more exercises to your routine to work different muscle groups. Stay focused and motivated; you've got this!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-13 09:17:46"
+  },
+  {
+    "id": 99,
+    "memory_type": "FACT",
+    "key": "lat_pulldown",
+    "content": "1 set of 8 reps, 2 sets of 6 reps at 130 lbs",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-11 00:13:41"
+  },
+  {
+    "id": 100,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: No. 1 set of 8 reps\nAssistant: Your workout has been updated: 1 set of 8 reps and 2 sets of 6 reps for lat pulldowns at 130 lbs. Nice job! That's a solid effort!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-11 00:13:41"
+  },
+  {
+    "id": 97,
+    "memory_type": "FACT",
+    "key": "lat_pulldowns",
+    "content": "130 lbs for 8 reps and 6 reps twice.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-11 00:11:58"
+  },
+  {
+    "id": 98,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Then lat pulldowns, 130x8, then 130x6 twice. I think\nAssistant: Your workout has been logged: lat pulldowns with 3 sets of 8 reps and 2 sets of 6 reps at 130 lbs. Great job on hitting a new PR! Keep it up!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-11 00:11:58"
+  },
+  {
+    "id": 95,
+    "memory_type": "FACT",
+    "key": "isolateral_row_pr",
+    "content": "90 lbs for 12 reps",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:40:21"
+  },
+  {
+    "id": 96,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: 90lbs x 12 again\nAssistant: Your back workout has been logged: 3 sets of 12 reps on the isolateral row at 90 lbs. Congratulations on the new PR!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:40:21"
+  },
+  {
+    "id": 93,
+    "memory_type": "FACT",
+    "key": "exercise_focus",
+    "content": "back training",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:40:16"
+  },
+  {
+    "id": 94,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: But I wanted to train back\nAssistant: Let's log your back workout. Please provide the exercises you performed, including sets, reps, and weights if you have that information.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:40:16"
+  },
+  {
+    "id": 92,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Why do I feel isolateral rows on my arms? And I did like 90 each side x12\nAssistant: I've logged your isolateral row workout: 1 set of 12 reps at 90 lbs on each side. That's a new PR for you! As for feeling the exercise in your arms, isolateral rows engage your biceps and forearms significantly as they stabilize and pull the weight. If you're lifting heavy, it's normal to feel it in those muscles. Just ensure you're maintaining proper form to avoid strain. Keep it up!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:24:52"
+  },
+  {
+    "id": 91,
+    "memory_type": "FACT",
+    "key": "reps",
+    "content": "12",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:24:50"
+  },
+  {
+    "id": 89,
+    "memory_type": "FACT",
+    "key": "exercise",
+    "content": "isolateral row",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:24:49"
+  },
+  {
+    "id": 90,
+    "memory_type": "FACT",
+    "key": "weight_per_side",
+    "content": "90 lbs",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:24:49"
+  },
+  {
+    "id": 88,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Pull-ups. 11,6,3\nAssistant: I've logged your pull-up workout: 3 sets of 11 reps, 3 sets of 6 reps, and 3 sets of 3 reps. Keep up the great work!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:22:40"
+  },
+  {
+    "id": 87,
+    "memory_type": "FACT",
+    "key": "pull-up_performance",
+    "content": "3 sets of 11, 6, and 3 reps.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 23:22:38"
+  },
+  {
+    "id": 86,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Had one more of those\nAssistant: Your lunch has been logged: **Chick-fil-A Spicy Chicken Sandwich** and **Milkshake** for a total of 1040 calories and 42g of protein.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 16:49:13"
+  },
+  {
+    "id": 85,
+    "memory_type": "FACT",
+    "key": "meal_preferences",
+    "content": "User has yogurt parfait with granola for breakfast.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 16:22:11"
+  },
+  {
+    "id": 83,
+    "memory_type": "FACT",
+    "key": "interest",
+    "content": "AI video editor",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:31"
+  },
+  {
+    "id": 84,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Ai video editor\nAssistant: I understand you're interested in AI video editing. If you have specific goals or needs for this project, let me know!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:31"
+  },
+  {
+    "id": 82,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Create a way for observability for LLMs. So they can detect when a bug happens, and auto-try to fix that.\nAssistant: To create a robust observability framework for LLMs that can detect bugs and attempt to auto-fix them, consider implementing logging and monitoring, anomaly detection, error classification, an auto-fix mechanism, a feedback loop, user notifications, testing and validation, and comprehensive documentation. Let me know if you'd like to expand on any specific area!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:27"
+  },
+  {
+    "id": 80,
+    "memory_type": "FACT",
+    "key": "dynamic_thinking",
+    "content": "User is interested in creating observability for LLMs to detect and auto-fix bugs.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:26"
+  },
+  {
+    "id": 81,
+    "memory_type": "FACT",
+    "key": "goal-oriented_approach",
+    "content": "User has a structured way of setting promises to achieve personal growth.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:26"
+  },
+  {
+    "id": 79,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Promise 1: finish making letter to parents by the end of this flight.\nAssistant: I've noted your promise to finish making the letter to your parents by the end of this flight. Good luck! Let me know if you need any help with it.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:17"
+  },
+  {
+    "id": 78,
+    "memory_type": "FACT",
+    "key": "promise_1",
+    "content": "Finish making letter to parents by the end of this flight.",
+    "goal_id": null,
+    "confidence": 1.0,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:14"
+  },
+  {
+    "id": 77,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Do hard things. Make hard promises. Get points negated if you fail to commit to your promise\nAssistant: That sounds like a great strategy for personal growth! If you need help with specific challenges or setting up your point system, just let me know!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:12"
+  },
+  {
+    "id": 76,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I want a job that would help me be a people person\nAssistant: To pursue a job that enhances your people skills, consider roles in customer service, sales, human resources, event planning, or teaching. These positions involve regular interaction with others and can help you become more of a people person. Would you like to explore any of these options further?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:07"
+  },
+  {
+    "id": 75,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Test myself on gooni\nAssistant: To test yourself on gooni, consider reflecting on questions like what triggers your desire, how often you engage in it, and the emotions associated with it. Let me know if you want to explore any specific areas further!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:33:02"
+  },
+  {
+    "id": 74,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Make an insane version of meta raybans? Something for my room for now!\nAssistant: To create an insane version of Meta Ray-Bans for your room, consider these ideas:\n\n1. **3D-Printed Frames**: Design bold, futuristic frames using a 3D printer for a unique look.\n  \n2. **LED Lights**: Incorporate LED lights into the frames or lenses to create a glowing effect.\n  \n3. **Augmented Reality Features**: Use AR technology to display interactive visuals or notifications on the lenses.\n  \n4. **Custom Artwork**: Paint or apply decals that reflect your personality or interests on the frames.\n  \n5. **Sound Integration**: Add mini speakers for an immersive audio experience.\n  \n6. **Smart Features**: Integrate voice control for smart home devices or virtual assistants.\n  \nWould you like to focus on any specific aspect of this design?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:32:58"
+  },
+  {
+    "id": 73,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: How can I compete with memu? Is there some benchmark?\nAssistant: To compete with Memu, focus on performance, user experience, unique features, community support, marketing strategies, and competitive pricing. Analyzing these areas can help you find ways to stand out.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:32:49"
+  },
+  {
+    "id": 72,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Like I can\u2019t even get a message in\nAssistant: It seems you're experiencing issues with a messaging app that doesn't allow message entry when offline. If you have a specific app in mind, I might be able to provide more tailored advice!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:56"
+  },
+  {
+    "id": 71,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: It doesn\u2019t work when offline\nAssistant: It sounds like you're referring to a service or app that requires an internet connection to function. If you need assistance with anything specific related to this, let me know!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:53"
+  },
+  {
+    "id": 70,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Their logo looks like nickelodeon\nAssistant: It sounds like you might be referring to a brand or company that has a logo reminiscent of Nickelodeon's design. If you want to share more about it or discuss how it relates to something specific, feel free to elaborate!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:50"
+  },
+  {
+    "id": 69,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Why is the updating memory system not async? Why do we need to wait for memory to update before starting the response?\nAssistant: You feel lucky to have your job, which positively contributes to your overall well-being. If there's anything specific you'd like to add or discuss further, let me know!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:46"
+  },
+  {
+    "id": 67,
+    "memory_type": "FACT",
+    "key": "job_satisfaction",
+    "content": "User feels lucky to have their job.",
+    "goal_id": null,
+    "confidence": 0.9,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:41"
+  },
+  {
+    "id": 68,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I\u2019m so damn lucky to have this job\nAssistant: That's great to hear! Feeling lucky and satisfied with your job can have a positive impact on your overall well-being. If you\u2019d like to reflect on what you enjoy about your job or how it contributes to your goals, I'm here to help!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:41"
+  },
+  {
+    "id": 66,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: If you reminded me like a madman everyday\nAssistant: Let me know what specific reminders you want to receive daily, and I can help you set that up!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:35"
+  },
+  {
+    "id": 65,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: saw someone that looked like my ex boarding the same flight, in the same group. Similar earrings and a bag that someone like her would have. But I\u2019m a little beyond 5m behind and can\u2019t confirm.\nAssistant: It sounds like you had a moment of uncertainty. It can be unsettling to think you might have seen someone significant from your past, especially in unexpected places. If it\u2019s bothering you, try to focus on the present and remind yourself that it\u2019s just a coincidence. If you want to talk about how you're feeling or if this brings up any specific memories or emotions, I'm here to listen.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:30"
+  },
+  {
+    "id": 64,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I also wanna fix my hair. How do I do that\nAssistant: To fix your hair, consider the following steps based on your desired outcome:\n\n1. **Determine Your Hair Type**: Identify whether your hair is straight, wavy, curly, or coily to choose the right products and techniques.\n\n2. **Choose a Style**: Decide on the hairstyle you want. Look for inspiration online or in magazines.\n\n3. **Get the Right Products**: Use products suited for your hair type, such as shampoos, conditioners, styling gels, or creams.\n\n4. **Regular Haircuts**: Schedule regular trims to keep your hair healthy and maintain your style.\n\n5. **Healthy Hair Practices**: Protect your hair by avoiding excessive heat styling, using a heat protectant when needed, and maintaining a balanced diet for overall hair health.\n\n6. **Consult a Professional**: If you're unsure what to do, consider visiting a hairstylist for advice and a professional cut or treatment.\n\nIf you have a specific style in mind or need product recommendations, feel free to ask!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:23"
+  },
+  {
+    "id": 63,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Build on top of anthropic\nAssistant: If you're looking to build on top of Anthropic, consider the following steps:\n\n1. **Get Familiar with the API**: Review the documentation for Anthropic's API to understand its capabilities and how to integrate it into your projects.\n\n2. **Identify Use Cases**: Think about specific applications or functionalities you want to develop. This could include chatbots, content generation, or other AI-driven solutions.\n\n3. **Create a Development Plan**: Outline your goals, timeline, and resources needed for your project. Break it down into manageable tasks.\n\n4. **Start Prototyping**: Begin coding and testing your ideas. Use Anthropic's features to enhance your application.\n\n5. **Iterate and Improve**: Gather feedback and make improvements based on user experiences and performance.\n\nIf you have specific ideas or features in mind, I can help you brainstorm further!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:14:11"
+  },
+  {
+    "id": 62,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I\u2019m retarded. Why am I not using anthropic\nAssistant: It sounds like you might be feeling frustrated with your current choice of tools. Remember, it's completely normal to explore different options and figure out what works best for you. If you want to share your thoughts or concerns about using Anthropic, I'm here to help you process that!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 07:13:59"
+  },
+  {
+    "id": 61,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I\u2019m going to try and use Anthropic. And see if it\u2019s better than you\nAssistant: That's totally fine! Exploring different tools can help you find what works best for you. If you have any questions or need assistance while trying out Anthropic, feel free to come back anytime. I'm here to help!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 03:33:37"
+  },
+  {
+    "id": 59,
+    "memory_type": "FACT",
+    "key": "meal",
+    "content": "Chick-fil-A Spicy Chicken Sandwich with a Milkshake.",
+    "goal_id": null,
+    "confidence": 0.9,
+    "is_active": 1,
+    "created_at": "2026-03-10 03:05:50"
+  },
+  {
+    "id": 60,
+    "memory_type": "FACT",
+    "key": "meal_calories",
+    "content": "1040 cal for the meal.",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 03:05:50"
+  },
+  {
+    "id": 58,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I had a chilk fila spicy chicken sandwich where I replaced the drink with a milkshake\nAssistant: Your lunch has been logged:\n\n- **Chick-fil-A Spicy Chicken Sandwich**: 440 cal, 28g protein, 40g carbs, 20g fat\n- **Milkshake**: 600 cal, 15g protein, 80g carbs, 30g fat\n\nTotal for the meal: **1040 cal, 43g protein, 120g carbs, 50g fat.**\n\nYour daily totals so far for today (including this meal) are: \n- **393 cal | 41g protein | 33g carbs | 9g fat.** \n\nLet me know if you need anything else!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-10 03:05:45"
+  },
+  {
+    "id": 57,
+    "memory_type": "FACT",
+    "key": "meal_item",
+    "content": "Milkshake",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-10 03:05:44"
+  },
+  {
+    "id": 54,
+    "memory_type": "FACT",
+    "key": "protein_intake",
+    "content": "42g",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-09 20:40:54"
+  },
+  {
+    "id": 55,
+    "memory_type": "FACT",
+    "key": "carbohydrate_intake",
+    "content": "58g",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-09 20:40:54"
+  },
+  {
+    "id": 52,
+    "memory_type": "FACT",
+    "key": "weight",
+    "content": "185 lbs",
+    "goal_id": null,
+    "confidence": 1.0,
+    "is_active": 1,
+    "created_at": "2026-03-09 20:40:53"
+  },
+  {
+    "id": 53,
+    "memory_type": "FACT",
+    "key": "caloric_intake",
+    "content": "520 cal",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-09 20:40:53"
+  },
+  {
+    "id": 50,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Well what was the image description? How did you determine macros\nAssistant: I don't have access to the image description or any specific details from it. The macros were estimated based on standard values for common foods. If you provide a list of the food items you had, I can give you a more accurate breakdown of the macros.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:58:44"
+  },
+  {
+    "id": 49,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Don\u2019t you have our conversation history? You basically just logged the image I took and told me the macros. But you don\u2019t know the food . You can\u2019t reference the image\nAssistant: You're right; I logged the macros based on the image description but don't have details about the specific food items. If you let me know what you had, I can help further with any nutrition or meal planning questions!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:58:13"
+  },
+  {
+    "id": 48,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: I just sent you the image\nAssistant: I currently can't view images. If you describe the food items you had, I can help estimate the macros for that meal.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:54:22"
+  },
+  {
+    "id": 47,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: What food is this?\nAssistant: I don't have information about the specific food items you logged. If you share what you had, I can help estimate the macros for that meal.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:53:42"
+  },
+  {
+    "id": 46,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: What tools do you have\nAssistant: I have several tools to help you track and manage your goals, nutrition, and workouts. Here are some of the main functions:\n\n1. **Goal Management**: Create new goals or get your current goals.\n2. **Meal Logging**: Log meals and track macros (calories, protein, carbs, fat).\n3. **Workout Logging**: Log workouts with exercises, sets, reps, and weights.\n4. **Progress Tracking**: Check your exercise history and personal records (PRs).\n5. **Nutrition Tracking**: Get total macros for specific dates.\n6. **Web Search**: Fetch current information or articles from the internet.\n\nIf you need assistance with any specific task, just let me know!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:42:29"
+  },
+  {
+    "id": 45,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Are you able to edit or create goals?\nAssistant: Yes, I can create new goals or edit existing ones for you. If you have a specific goal in mind that you'd like to add or modify, just let me know!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:42:10"
+  },
+  {
+    "id": 44,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: What goals do I have right now?\nAssistant: Your current goal is to \"get jacked,\" which is focused on building muscle and improving overall strength. How would you like to proceed with this goal?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:41:54"
+  },
+  {
+    "id": 43,
+    "memory_type": "FACT",
+    "key": "name",
+    "content": "Daniel",
+    "goal_id": null,
+    "confidence": 1.0,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:41:36"
+  },
+  {
+    "id": 41,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Do you not know my name?\nAssistant: I still don't know your name! Please share it with me so I can remember it for future conversations.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:41:26"
+  },
+  {
+    "id": 40,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: Hey what\u2019s up\nAssistant: Hey! I'm Jarvis, your personal AI assistant. How can I assist you today? What's your name?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 19:41:12"
+  },
+  {
+    "id": 39,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<p>Focus: <br>- I want to connect this to hardware to actually talk to Jarvis<br>- I want to deploy telegram bot.<br>- I want to be able to build a plan, confirm my goals and track my progress for my fitness journey.</p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 05:03:30"
+  },
+  {
+    "id": 38,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: whats the current context\nAssistant: The current context includes your goal of getting jacked to build muscle and improve overall strength. You also want to connect your plans to hardware, deploy a Telegram bot, and build a plan to confirm your goals and track your progress for your fitness journey. If you need help with something specific, feel free to ask!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 04:42:20"
+  },
+  {
+    "id": 37,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: hey Jarvis!\nAssistant: Hey! How can I assist you today?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 04:19:42"
+  },
+  {
+    "id": 36,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: do you have context to the current note im on?\nAssistant: I don't have access to specific notes or their content. However, I can help with general thoughts or questions if you provide more details!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 03:21:08"
+  },
+  {
+    "id": 35,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: what page am i on\nAssistant: I don't have specific page numbers or references to track. If you meant something else, please clarify!",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-09 03:20:53"
+  },
+  {
+    "id": 34,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<ul><li><p>Make a global todo list?</p></li><li><p>Deploy this bish?</p></li><li><p>Check out what's going on with telegram. How would telegram chat appear here.</p></li><li><p>Moving notes between spaces ig</p></li><li><p>check out Jarvis</p></li><li><p>checklist</p></li><li><p>figure out what to do with my other models like workout stuff, goals</p></li><li><p>having LLM be able to edit notes/create notes.</p></li></ul><p></p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 18:09:13"
+  },
+  {
+    "id": 33,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<ul data-type=\"taskList\"><li data-checked=\"false\" data-type=\"taskItem\"><label><input type=\"checkbox\"><span></span></label><div><p></p></div></li></ul><p></p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 17:49:46"
+  },
+  {
+    "id": 32,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: getting jacked\nAssistant: I've set your goal to \"get jacked.\" Let's work towards building muscle and improving your overall strength! What would you like to focus on first?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:56:47"
+  },
+  {
+    "id": 31,
+    "memory_type": "FACT",
+    "key": "goal",
+    "content": "get jacked",
+    "goal_id": null,
+    "confidence": 0.8,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:56:46"
+  },
+  {
+    "id": 30,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "User: what is your goal\nAssistant: My goal is to help you achieve your fitness objectives and provide support with workouts, nutrition, and progress tracking. Is there anything specific you'd like to focus on today?",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:56:32"
+  },
+  {
+    "id": 28,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<p>Mar 8 - 3:33 AM</p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:33:56"
+  },
+  {
+    "id": 29,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<ul><li><p>Request money for utility</p></li><li><p></p></li></ul><p></p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:33:56"
+  },
+  {
+    "id": 27,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<ul><li><p>Request money for utility</p></li><li><p></p></li></ul><p></p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:33:54"
+  },
+  {
+    "id": 26,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<p>Mar 8 - 3:33 AM</p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:33:45"
+  },
+  {
+    "id": 24,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<p>Mar 8 - </p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:33:40"
+  },
+  {
+    "id": 25,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<ul><li><p>Request money for utility</p></li><li><p></p></li></ul><p></p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:33:40"
+  },
+  {
+    "id": 23,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "i think my mind is too all over the place. and this is now a mix of X and notes. can  you give me some general thoughts that I can reflect upon? Keep in mind that i do  want telegram to be one of the primary interfaces. which cwould be conversational.  but conversational based on the data that we already have if you know what i mean. i  feel like this project is just dragging with me being confused",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:29:37"
+  },
+  {
+    "id": 21,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "when is this gonna end",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:29:36"
+  },
+  {
+    "id": 22,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<ul><li><p>Request money for utility</p></li><li><p></p></li></ul><p></p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:29:36"
+  },
+  {
+    "id": 20,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<ul><li><p>Request money for utility</p></li><li><p></p></li></ul><p></p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:28:44"
+  },
+  {
+    "id": 18,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "i think my mind is too all over the place. and this is now a mix of X and notes. can  you give me some general thoughts that I can reflect upon? Keep in mind that i do  want telegram to be one of the primary interfaces. which cwould be conversational.  but conversational based on the data that we already have if you know what i mean. i  feel like this project is just dragging with me being confused",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:27:03"
+  },
+  {
+    "id": 19,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "What was the initial purpose of me building this app? It was so I could track my progress.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:27:03"
+  },
+  {
+    "id": 16,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "MY GOALS:MAKE MF JARVIS. DOESN'T THIS MEAN THIS MF SHOULD RESPOND TO ME",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:27:01"
+  },
+  {
+    "id": 17,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "Ok. Let's focus on phase 1 for this app. Nothing else. I need to have a use case and focus in on it",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:27:01"
+  },
+  {
+    "id": 15,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "ok imma start reviewing changes from now on",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:27:00"
+  },
+  {
+    "id": 14,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "MY GOALS:MAKE MF JARVIS. DOESN'T THIS MEAN THIS MF SHOULD RESPOND TO ME",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:26:59"
+  },
+  {
+    "id": 13,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "ok imma start reviewing changes from now on",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:26:55"
+  },
+  {
+    "id": 12,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "MY GOALS:MAKE MF JARVIS. DOESN'T THIS MEAN THIS MF SHOULD RESPOND TO ME",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:26:53"
+  },
+  {
+    "id": 9,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "What was the initial purpose of me building this app? It was so I could track my progress.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:26:52"
+  },
+  {
+    "id": 10,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "i think my mind is too all over the place. and this is now a mix of X and notes. can  you give me some general thoughts that I can reflect upon? Keep in mind that i do  want telegram to be one of the primary interfaces. which cwould be conversational.  but conversational based on the data that we already have if you know what i mean. i  feel like this project is just dragging with me being confused",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:26:52"
+  },
+  {
+    "id": 11,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "Ok. Let's focus on phase 1 for this app. Nothing else. I need to have a use case and focus in on it",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:26:52"
+  },
+  {
+    "id": 8,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "when is this gonna end",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:26:49"
+  },
+  {
+    "id": 7,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<p>this is my first note. I hope it lasts.</p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:12:23"
+  },
+  {
+    "id": 6,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "<p>this is my first note. I hope </p>",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 10:12:18"
+  },
+  {
+    "id": 5,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "when is this gonna end",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 01:37:23"
+  },
+  {
+    "id": 4,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "i think my mind is too all over the place. and this is now a mix of X and notes. can  you give me some general thoughts that I can reflect upon? Keep in mind that i do  want telegram to be one of the primary interfaces. which cwould be conversational.  but conversational based on the data that we already have if you know what i mean. i  feel like this project is just dragging with me being confused",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 01:06:08"
+  },
+  {
+    "id": 3,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "What was the initial purpose of me building this app? It was so I could track my progress.",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 00:59:56"
+  },
+  {
+    "id": 2,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "Ok. Let's focus on phase 1 for this app. Nothing else. I need to have a use case and focus in on it",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-08 00:53:35"
+  },
+  {
+    "id": 1,
+    "memory_type": "EPISODE",
+    "key": null,
+    "content": "MY GOALS:MAKE MF JARVIS. DOESN'T THIS MEAN THIS MF SHOULD RESPOND TO ME",
+    "goal_id": null,
+    "confidence": null,
+    "is_active": 1,
+    "created_at": "2026-03-07 18:52:43"
+  }
+]
