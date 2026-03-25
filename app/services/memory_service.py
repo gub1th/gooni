@@ -5,6 +5,13 @@ from mem0 import MemoryClient
 USER_ID = "daniel"
 
 
+def _unwrap(raw) -> list[dict]:
+    """Mem0 v2 returns either a bare list or {'results': [...]}. Normalize to list."""
+    if isinstance(raw, dict):
+        return raw.get("results", [])
+    return raw or []
+
+
 class MemoryService:
     def __init__(self):
         self.client = MemoryClient(api_key=os.getenv("MEM0_API_KEY"))
@@ -29,7 +36,7 @@ class MemoryService:
     def build_memory_context(self, query: str) -> str:
         """Search Mem0 and format results for system prompt injection."""
         try:
-            results = self.client.search(query, user_id=USER_ID, limit=8)
+            results = _unwrap(self.client.search(query, filters={"user_id": USER_ID}, limit=8))
             if not results:
                 return ""
             lines = ["What Gooni knows about Daniel:"]
@@ -42,14 +49,14 @@ class MemoryService:
 
     def get_all(self) -> list[dict]:
         try:
-            return self.client.get_all(user_id=USER_ID)
+            return _unwrap(self.client.get_all(filters={"user_id": USER_ID}))
         except Exception as e:
             print(f"Memory get_all error: {e}")
             return []
 
     def search(self, query: str, limit: int = 8) -> list[dict]:
         try:
-            return self.client.search(query, user_id=USER_ID, limit=limit)
+            return _unwrap(self.client.search(query, filters={"user_id": USER_ID}, limit=limit))
         except Exception as e:
             print(f"Memory search error: {e}")
             return []
@@ -63,7 +70,7 @@ class MemoryService:
     def has_memories(self) -> bool:
         """Returns True if any memories exist (used for first-time Telegram detection)."""
         try:
-            return bool(self.client.get_all(user_id=USER_ID))
+            return bool(_unwrap(self.client.get_all(filters={"user_id": USER_ID})))
         except Exception as e:
             print(f"Memory has_memories error: {e}")
             return False

@@ -23,6 +23,7 @@ Evolving toward an ambient physical assistant — a device that knows you passiv
 - Don't add new features without being asked
 - Don't change the DB schema without flagging it
 - Don't install new dependencies without asking first
+- **Call `mcp__gooni__add_memory` after meaningful work or product discussions** — code changes, architectural decisions, feature ideas, design directions. Gooni should know what was built AND what Daniel is thinking about, even if he never told it directly
 
 ## Current Priorities
 See **`docs/TODO.md`** for the full backlog. Top items:

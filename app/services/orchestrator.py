@@ -2,7 +2,6 @@ from ..db.models import Conversation as ConvModel
 from ..llm.client import llm_client
 from .conversation_service import conversation_service
 from .memory_service import memory_service
-from .note_service import note_service
 
 
 class Orchestrator:
@@ -76,10 +75,6 @@ class Orchestrator:
         # Let Mem0 auto-extract and store relevant memories from this exchange
         if saved_message.strip() and len(saved_message.strip()) > 10:
             memory_service.add_exchange(saved_message, response)
-
-        # Append Telegram exchanges to today's daily note
-        if source == "telegram":
-            note_service.append_to_daily_note(saved_message, response, db)
 
         usage["intention"] = intention_context
 
