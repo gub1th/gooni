@@ -7,6 +7,7 @@ import {
   fetchIntention,
   type ApiConversation,
 } from "../services/api";
+import { useModelStore } from "./useModelStore";
 
 interface ConversationMessage {
   id: number;
@@ -27,7 +28,7 @@ interface ConversationsStore {
   fetchConversations: () => Promise<void>;
   selectConversation: (id: number) => Promise<void>;
   newChat: () => void;
-  send: (content: string) => Promise<void>;
+  send: (content: string, noteContent?: string) => Promise<void>;
 }
 
 export const useConversationsStore = create<ConversationsStore>((set, get) => ({
@@ -60,7 +61,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
     set({ activeId: null, messages: [] });
   },
 
-  send: async (content) => {
+  send: async (content, noteContent) => {
     const optimistic: ConversationMessage = {
       id: Date.now(),
       role: "user",
@@ -83,7 +84,8 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
         if (intention && get().sending) set({ pendingIntention: intention });
       });
 
-      const { messages: allMessages, intention: fallbackIntention, tools_used } = await apiSendMessage(convId, content);
+      const model = useModelStore.getState().model;
+      const { messages: allMessages, intention: fallbackIntention, tools_used } = await apiSendMessage(convId, content, noteContent, model);
       const intentionToUse = get().pendingIntention || fallbackIntention || "";
       const messagesWithMeta = allMessages.map((m, i) => {
         if (i !== allMessages.length - 1 || m.role !== "assistant") return m;

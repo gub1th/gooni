@@ -101,6 +101,7 @@ async def chat(body: ChatRequest, db: Session = Depends(get_db)):
         image_url=body.image_url,
         source="web",
         entry_content=body.entry_content or "",
+        model=body.model,
     )
     return {"content": content, "usage": usage, "intention": usage.get("intention") or ""}
 
@@ -418,12 +419,14 @@ def send_conversation_message(
     if not user_content:
         raise HTTPException(status_code=400, detail="content is required")
     entry_content = body.get("entry_content", "")
+    model = body.get("model") or None
     try:
         _, usage = Orchestrator.handle_chat(
             user_content,
             db,
             conversation_id=conversation_id,
             entry_content=entry_content,
+            model=model,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

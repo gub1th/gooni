@@ -55,6 +55,7 @@ class LLMClient:
         history: list = None,
         is_first_time: bool = False,
         db=None,
+        model: str = None,
     ) -> tuple[str, dict]:
         """Generate response with memory context and tool use."""
         messages = [{"role": "system", "content": system_prompt(memory_context, is_first_time)}]
@@ -62,14 +63,15 @@ class LLMClient:
             messages.extend(history)
         messages.append({"role": "user", "content": message})
 
+        active_model = model or self.chat_model
         tool_schemas = [t.to_openai_schema() for t in tools]
-        tracker = UsageTracker(self.chat_model)
+        tracker = UsageTracker(active_model)
         tools_used = []
 
         try:
             for _ in range(5):
                 response = self.client.chat.completions.create(
-                    model=self.chat_model,
+                    model=active_model,
                     messages=messages,
                     temperature=0.7,
                     max_tokens=500,

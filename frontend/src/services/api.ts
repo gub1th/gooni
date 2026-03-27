@@ -168,12 +168,13 @@ export async function createConversation(content?: string): Promise<ApiConversat
 export async function sendConversationMessage(
   convId: number,
   content: string,
-  noteContent?: string
+  noteContent?: string,
+  model?: string
 ): Promise<{ messages: ApiMessage[]; intention: string; tools_used: string[] }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
+    body: JSON.stringify({ role: "user", content, entry_content: noteContent, model }),
   });
   if (!res.ok) throw new Error("Failed to send message");
   return res.json();
@@ -204,15 +205,3 @@ export async function fetchIntention(
   }
 }
 
-export async function sendGooniMessage(
-  content: string,
-  noteContent?: string
-): Promise<{ content: string; intention: string }> {
-  const res = await apiFetch(`${BASE}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
-  });
-  if (!res.ok) throw new Error("Failed to send Gooni message");
-  return res.json();
-}
