@@ -182,6 +182,20 @@ class LLMClient:
             print(f"Title generation error: {e}")
             return content[:40].strip()
 
+    def generate_simple_completion(self, prompt: str, max_tokens: int = 300) -> str:
+        """Single-turn completion. Used for briefings, commentary, and other ad-hoc tasks."""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.chat_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=max_tokens,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Completion error: {e}")
+            return ""
+
     def generate_intention_context(self, query: str, recent_history: List[Dict[str, str]]) -> str:
         """Generate intention context for the given query and recent history."""
         try:

@@ -13,6 +13,7 @@ from .db.database import engine, get_db
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
+    Focus,
     Message,
     Note,
     Space,
@@ -20,6 +21,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
 from .db.schemas import ChatRequest
 from .llm.client import llm_client
 from .services.conversation_service import conversation_service
+from .services.focus_service import focus_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
@@ -446,6 +448,7 @@ async def health():
 # ── Dashboard ──────────────────────────────────────────────────────────────────
 
 
+
 @app.get("/dashboard")
 def get_dashboard_stats(db: Session = Depends(get_db)):
     from datetime import date, datetime, timedelta
@@ -489,11 +492,64 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception:
         streak = 0
 
+    all_focuses = db.query(Focus).order_by(Focus.created_at).all()
+    active_focuses = [f for f in all_focuses if f.commitment in ("committed", "pending")]
+
+    def _due_status(f):
+        if not f.due_date:
+            return False, False
+        try:
+            d = date.fromisoformat(f.due_date)
+            overdue = d < today
+            due_soon = not overdue and d <= today + timedelta(days=7)
+            return overdue, due_soon
+        except Exception:
+            return False, False
+
+    overdue_names = [f.name for f in active_focuses if _due_status(f)[0]]
+    commentaries = focus_service.get_commentary(active_focuses)
+    gooni_take = focus_service.get_daily_briefing(all_focuses, overdue_names)
+
+    def _serialize_focus(f):
+        overdue, due_soon = _due_status(f)
+        return {
+            "id": f.id,
+            "name": f.name,
+            "commitment": f.commitment,
+            "due_date": f.due_date,
+            "commentary": commentaries.get(f.id, ""),
+            "overdue": overdue,
+            "due_soon": due_soon,
+            "updated_at": (
+                f.updated_at.isoformat() if f.updated_at
+                else f.created_at.isoformat() if f.created_at
+                else None
+            ),
+        }
+
     return {
         "notes_this_week": notes_this_week,
         "recent_notes": [_serialize_note(n) for n in recent_notes],
         "streak": streak,
+        "gooni_take": gooni_take,
+        "focuses": [_serialize_focus(f) for f in all_focuses],
     }
+
+
+@app.post("/focuses")
+def create_focus(body: dict, db: Session = Depends(get_db)):
+    name = body.get("name", "").strip()
+    commitment = body.get("commitment", "committed")
+    due_date = body.get("due_date") or None
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    if commitment not in ("committed", "pending", "someday"):
+        raise HTTPException(status_code=400, detail="invalid commitment")
+    focus = Focus(name=name, commitment=commitment, due_date=due_date)
+    db.add(focus)
+    db.commit()
+    db.refresh(focus)
+    return {"id": focus.id, "name": focus.name, "commitment": focus.commitment, "due_date": focus.due_date}
 
 
 # ── MCP endpoints ─────────────────────────────────────────────────────────────

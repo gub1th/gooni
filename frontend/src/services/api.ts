@@ -118,15 +118,38 @@ export async function deleteNote(id: number): Promise<void> {
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 
+export interface FocusItem {
+  id: number;
+  name: string;
+  commitment: "committed" | "pending" | "someday";
+  due_date: string | null;
+  commentary: string;
+  overdue: boolean;
+  due_soon: boolean;
+  updated_at: string | null;
+}
+
 export interface DashboardStats {
   notes_this_week: number;
   recent_notes: ApiNote[];
   streak: number;
+  gooni_take: string;
+  focuses: FocusItem[];
 }
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
   const res = await apiFetch(`${BASE}/dashboard`);
   if (!res.ok) throw new Error("Failed to fetch dashboard stats");
+  return res.json();
+}
+
+export async function createFocus(name: string, commitment: FocusItem["commitment"], due_date: string | null): Promise<FocusItem> {
+  const res = await apiFetch(`${BASE}/focuses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, commitment, due_date: due_date || null }),
+  });
+  if (!res.ok) throw new Error("Failed to create focus");
   return res.json();
 }
 
