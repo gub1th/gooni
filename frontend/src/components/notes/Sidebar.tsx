@@ -75,8 +75,10 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
   }, []);
 
   function handleAllNotes() {
-    selectSpace("general");
-    loadNotes("general");
+    if (selectedSpaceId !== "general" && selectedSpaceId !== null) {
+      selectSpace("general");
+      loadNotes("general");
+    }
     onSpaceSelect();
   }
 
@@ -190,7 +192,7 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
               return (
                 <div
                   key={space.id}
-                  onClick={() => { selectSpace(spaceId); loadNotes(spaceId); onSpaceSelect(); }}
+                  onClick={() => { if (spaceId !== selectedSpaceId) { selectSpace(spaceId); loadNotes(spaceId); } onSpaceSelect(); }}
                   style={{
                     display: "flex", alignItems: "center", gap: 8,
                     padding: "0 10px", height: 30, borderRadius: 8,

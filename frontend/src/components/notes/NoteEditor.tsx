@@ -133,6 +133,13 @@ export function NoteEditor() {
   const hasChanges = useRef(false);
 
   useEffect(() => {
+    // Flush any unsaved changes (e.g. a dropped image) before leaving the previous note
+    const prevId = prevActiveNoteId.current;
+    if (hasChanges.current && prevId && prevId > 0 && prevId !== activeNoteId) {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      updateNote(prevId, titleRef.current, bodyRef.current).catch(() => {});
+    }
+
     setLocalTitle(activeNote?.title ?? "");
     bodyRef.current = activeNote?.content ?? "";
     titleRef.current = activeNote?.title ?? "";

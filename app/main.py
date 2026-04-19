@@ -1,4 +1,5 @@
 import os
+import time
 
 from dotenv import load_dotenv
 
@@ -26,6 +27,42 @@ from .services.focus_service import focus_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
+
+
+# ── Briefing cache ────────────────────────────────────────────────────────────
+# Keyed by a fingerprint of all focuses. Expires after 1 hour.
+# Prevents 2 LLM calls + N Mem0 searches on every dashboard open.
+_briefing_cache: dict = {"take": None, "commentaries": None, "sig": None, "ts": 0.0}
+_BRIEFING_TTL = 3600  # seconds
+
+
+def _focus_sig(focuses: list) -> str:
+    """Fingerprint of a focus list — changes if any focus is added/changed/deleted."""
+    return "|".join(
+        f"{f.id}:{f.name}:{f.commitment}:{f.due_date}"
+        for f in sorted(focuses, key=lambda f: f.id)
+    )
+
+
+def _get_briefing(all_focuses: list, active_focuses: list, overdue_names: list) -> tuple[str, dict]:
+    """Return (gooni_take, commentaries), using cache when valid."""
+    sig = _focus_sig(all_focuses)
+    now = time.time()
+    if (
+        _briefing_cache["sig"] == sig
+        and _briefing_cache["ts"]
+        and now - _briefing_cache["ts"] < _BRIEFING_TTL
+    ):
+        return _briefing_cache["take"], _briefing_cache["commentaries"]
+
+    take = focus_service.get_daily_briefing(all_focuses, overdue_names)
+    commentaries = focus_service.get_commentary(active_focuses)
+    _briefing_cache.update({"take": take, "commentaries": commentaries, "sig": sig, "ts": now})
+    return take, commentaries
+
+
+def _invalidate_briefing_cache():
+    _briefing_cache.update({"sig": None, "ts": 0.0})
 
 
 def _run_column_migrations(engine):
@@ -512,8 +549,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
             return False, False
 
     overdue_names = [f.name for f in active_focuses if _due_status(f)[0]]
-    commentaries = focus_service.get_commentary(active_focuses)
-    gooni_take = focus_service.get_daily_briefing(all_focuses, overdue_names)
+    gooni_take, commentaries = _get_briefing(all_focuses, active_focuses, overdue_names)
 
     def _serialize_focus(f):
         overdue, due_soon = _due_status(f)
@@ -554,6 +590,7 @@ def create_focus(body: dict, db: Session = Depends(get_db)):
     db.add(focus)
     db.commit()
     db.refresh(focus)
+    _invalidate_briefing_cache()
     return {"id": focus.id, "name": focus.name, "commitment": focus.commitment, "due_date": focus.due_date}
 
 
