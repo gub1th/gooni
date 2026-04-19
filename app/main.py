@@ -624,11 +624,27 @@ def get_public_note(note_id: int, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/notes/{note_id}")
+def get_note(note_id: int, db: Session = Depends(get_db)):
+    """Return a single note by ID."""
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return _serialize_note(note)
+
+
 @app.get("/public/profile")
 def get_public_profile(db: Session = Depends(get_db)):
-    """Return the public bio."""
+    """Return the public bio + stats."""
+    from sqlalchemy import func as sqlfunc
     profile = db.query(PublicProfile).first()
-    return {"bio": profile.bio if profile else None}
+    note_count = db.query(Note).count()
+    last_active = db.query(sqlfunc.max(Note.updated_at)).scalar()
+    return {
+        "bio": profile.bio if profile else None,
+        "note_count": note_count,
+        "last_active": last_active.isoformat() if last_active else None,
+    }
 
 
 @app.patch("/public/profile")

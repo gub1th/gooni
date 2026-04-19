@@ -7,6 +7,7 @@ import { TaskItem } from "@tiptap/extension-task-item";
 import { TaskList } from "@tiptap/extension-task-list";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { EditorContent, useEditor } from "@tiptap/react";
+import type { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
 import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
@@ -43,28 +44,42 @@ function useEditorStyles() {
       }
       .gooni-note-editor .ProseMirror ul[data-type="taskList"] {
         list-style: none;
-        padding-left: 4px;
+        padding-left: 0;
         margin: 0 0 6px;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li {
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] {
+        list-style: none !important;
         display: flex;
         align-items: flex-start;
         gap: 8px;
         margin-bottom: 4px;
+        padding: 0;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li input[type="checkbox"] {
-        margin-top: 3px;
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"]::marker { display: none; }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] label {
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+        padding-top: 2px;
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] label input[type="checkbox"] {
         flex-shrink: 0;
         width: 15px;
         height: 15px;
         cursor: pointer;
         accent-color: #1C1C1E;
+        margin: 0;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li > div { flex: 1; }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > div {
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"][data-checked="true"] > div {
         text-decoration: line-through;
         color: #AEAEB2;
       }
+      .gooni-toolbar-btn { transition: background 0.1s; }
+      .gooni-toolbar-btn:hover { background: rgba(0,0,0,0.05) !important; }
       .gooni-note-editor .ProseMirror table {
         border-collapse: collapse;
         width: 100%;
@@ -104,6 +119,53 @@ function formatNoteDate(iso: string | null): string {
 }
 
 type SaveStatus = "idle" | "saving" | "saved";
+
+const TOOLBAR_ITEMS = [
+  { label: "B",   title: "Bold",        cmd: (e: Editor | null) => e!.chain().focus().toggleBold().run(),              active: (e: Editor | null) => e!.isActive("bold"),             style: { fontWeight: 700 } },
+  { label: "I",   title: "Italic",      cmd: (e: Editor | null) => e!.chain().focus().toggleItalic().run(),            active: (e: Editor | null) => e!.isActive("italic"),           style: { fontStyle: "italic" as const } },
+  { label: "S",   title: "Strike",      cmd: (e: Editor | null) => e!.chain().focus().toggleStrike().run(),            active: (e: Editor | null) => e!.isActive("strike"),           style: { textDecoration: "line-through" as const } },
+  null,
+  { label: "H1",  title: "Heading 1",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 1 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 1 }), style: {} },
+  { label: "H2",  title: "Heading 2",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 2 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 2 }), style: {} },
+  null,
+  { label: "•",   title: "Bullet list", cmd: (e: Editor | null) => e!.chain().focus().toggleBulletList().run(),        active: (e: Editor | null) => e!.isActive("bulletList"),       style: {} },
+  { label: "☑",  title: "Task list",   cmd: (e: Editor | null) => e!.chain().focus().toggleTaskList().run(),          active: (e: Editor | null) => e!.isActive("taskList"),         style: {} },
+  null,
+  { label: "<>",  title: "Inline code", cmd: (e: Editor | null) => e!.chain().focus().toggleCode().run(),              active: (e: Editor | null) => e!.isActive("code"),             style: { fontFamily: "monospace", fontSize: "11px" } },
+  { label: "```", title: "Code block",  cmd: (e: Editor | null) => e!.chain().focus().toggleCodeBlock().run(),         active: (e: Editor | null) => e!.isActive("codeBlock"),        style: { fontFamily: "monospace", fontSize: "10px" } },
+  null,
+  { label: "⊞",  title: "Table",       cmd: (e: Editor | null) => e!.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: () => false, style: {} },
+] as const;
+
+function FormatToolbar({ editor }: { editor: Editor | null }) {
+  if (!editor) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 1, marginBottom: 14, paddingBottom: 10, borderBottom: "1px solid rgba(0,0,0,0.06)", flexWrap: "wrap" }}>
+      {TOOLBAR_ITEMS.map((item, i) =>
+        item === null ? (
+          <div key={i} style={{ width: 1, height: 13, background: "rgba(0,0,0,0.1)", margin: "0 3px" }} />
+        ) : (
+          <button
+            key={item.label}
+            title={item.title}
+            className="gooni-toolbar-btn"
+            onMouseDown={(e) => { e.preventDefault(); item.cmd(editor); }}
+            style={{
+              padding: "3px 7px", borderRadius: 5, border: "none",
+              background: item.active(editor) ? "rgba(0,0,0,0.09)" : "transparent",
+              color: item.active(editor) ? "#1C1C1E" : "#636366",
+              fontSize: 12, cursor: "pointer",
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              ...item.style,
+            }}
+          >
+            {item.label}
+          </button>
+        )
+      )}
+    </div>
+  );
+}
 
 export function NoteEditor() {
   useEditorStyles();
@@ -584,6 +646,9 @@ export function NoteEditor() {
               lineHeight: 1.3,
             }}
           />
+          {/* Format toolbar */}
+          <FormatToolbar editor={editor} />
+
           {/* Public toggle */}
           <div style={{ marginBottom: 16 }}>
             <button

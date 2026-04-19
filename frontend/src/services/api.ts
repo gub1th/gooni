@@ -18,6 +18,31 @@ export async function fetchSpaces(): Promise<ApiSpace[]> {
   return res.json();
 }
 
+export async function createSpace(name: string, emoji?: string): Promise<ApiSpace> {
+  const res = await apiFetch(`${BASE}/spaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, emoji: emoji || null }),
+  });
+  if (!res.ok) throw new Error("Failed to create space");
+  return res.json();
+}
+
+export async function updateSpace(id: number, patch: { name?: string; emoji?: string | null }): Promise<ApiSpace> {
+  const res = await apiFetch(`${BASE}/spaces/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update space");
+  return res.json();
+}
+
+export async function deleteSpace(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/spaces/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete space");
+}
+
 
 // ── Notes ──────────────────────────────────────────────────────────────────────
 
@@ -102,6 +127,12 @@ export async function embedNote(id: number): Promise<SpaceSuggestion> {
   }
 }
 
+export async function fetchNote(id: number): Promise<ApiNote> {
+  const res = await apiFetch(`${BASE}/notes/${id}`);
+  if (!res.ok) throw new Error("Note not found");
+  return res.json();
+}
+
 export async function fetchRelatedNotes(id: number): Promise<ApiNote[]> {
   try {
     const res = await apiFetch(`${BASE}/notes/${id}/related?limit=3`);
@@ -157,7 +188,7 @@ export async function fetchPublicNotes(): Promise<PublicNote[]> {
   return res.json();
 }
 
-export async function fetchPublicProfile(): Promise<{ bio: string | null }> {
+export async function fetchPublicProfile(): Promise<{ bio: string | null; note_count: number; last_active: string | null }> {
   const res = await apiFetch(`${BASE}/public/profile`);
   if (!res.ok) throw new Error("Failed to fetch public profile");
   return res.json();

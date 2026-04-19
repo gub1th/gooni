@@ -61,13 +61,24 @@ interface SidebarProps {
 }
 
 export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onConversationSelect }: SidebarProps) {
-  const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
+  const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId, removeSpace } = useNotesContentStore();
   const { conversations, activeId, selectConversation } = useConversationsStore();
-  const { spaces } = useSpacesStore();
+  const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
 
   const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
   const [spacesOpen, setSpacesOpen] = useState(true);
   const [sectionOrder, setSectionOrder] = useState<SectionId[]>(getSavedOrder);
+
+  // Space management state
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmoji, setEditEmoji] = useState("");
+  const [creatingSpace, setCreatingSpace] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newEmoji, setNewEmoji] = useState("");
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
+  const createInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState<SectionId | null>(null);
   const dragging = useRef<SectionId | null>(null);
 
@@ -125,6 +136,34 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
     setDragOver(null);
   }
 
+  function startEdit(id: number, name: string, emoji: string | null) {
+    setEditingId(id);
+    setEditName(name);
+    setEditEmoji(emoji ?? "");
+    setDeleteConfirmId(null);
+    setTimeout(() => editInputRef.current?.focus(), 0);
+  }
+
+  async function saveEdit() {
+    if (!editingId) return;
+    await updateSpace(editingId, { name: editName.trim() || "Untitled", emoji: editEmoji || null });
+    setEditingId(null);
+  }
+
+  function cancelEdit() { setEditingId(null); }
+
+  async function confirmDelete(id: number) {
+    await deleteSpace(id);
+    removeSpace(String(id));
+    setDeleteConfirmId(null);
+  }
+
+  async function submitCreate() {
+    if (!newName.trim()) return;
+    await createSpace(newName.trim(), newEmoji || undefined);
+    setNewName(""); setNewEmoji(""); setCreatingSpace(false);
+  }
+
   const isAllNotes = isNotes && (selectedSpaceId === "general" || selectedSpaceId === null);
 
   const notesSection = (
@@ -172,52 +211,98 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
         </div>
 
         {/* Spaces list */}
-        {spaces.length > 1 && (
-          <>
+        <>
+          <div style={{ display: "flex", alignItems: "center", padding: "6px 6px 2px" }}>
             <button
               onClick={() => setSpacesOpen((o) => !o)}
-              style={{
-                display: "flex", alignItems: "center", gap: 4,
-                padding: "6px 6px 2px", background: "none", border: "none",
-                cursor: "pointer", width: "100%", textAlign: "left",
-              }}
+              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
             >
-              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
-                SPACES
-              </span>
-              <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: "auto" }}>{spacesOpen ? "▾" : "▸"}</span>
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>SPACES</span>
+              <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{spacesOpen ? "▾" : "▸"}</span>
             </button>
-            {spacesOpen && spaces.filter(s => s.id !== "general").map((space) => {
-              const spaceId = String(space.id);
-              const isSelected = !isDashboard && selectedSpaceId === spaceId;
+            <button
+              onClick={() => { setCreatingSpace(true); setNewName(""); setNewEmoji(""); setTimeout(() => createInputRef.current?.focus(), 0); }}
+              title="New space"
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 16, lineHeight: 1, padding: "0 2px", display: "flex", alignItems: "center" }}
+            >+</button>
+          </div>
+          {spacesOpen && spaces.filter(s => s.id !== "general").map((space) => {
+            const spaceId = String(space.id);
+            const isSelected = isNotes && selectedSpaceId === spaceId;
+            const isEditing = editingId === space.id;
+            const isDelConfirm = deleteConfirmId === space.id;
+
+            if (isEditing) {
               return (
-                <div
-                  key={space.id}
-                  onClick={() => { if (spaceId !== selectedSpaceId) { selectSpace(spaceId); loadNotes(spaceId); } onSpaceSelect(); }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "0 10px", height: 30, borderRadius: 8,
-                    cursor: "pointer",
-                    background: isSelected ? "rgba(0,0,0,0.09)" : "transparent",
-                    transition: "background 0.12s", userSelect: "none",
-                  }}
-                  onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
-                  onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
-                >
-                  <span style={{ fontSize: 13, flexShrink: 0 }}>{space.emoji ?? "🗂️"}</span>
-                  <span style={{
-                    flex: 1, fontSize: 13,
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-                    fontWeight: isSelected ? 600 : 400, color: "#1C1C1E",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {space.name}
-                  </span>
+                <div key={space.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 6px", marginBottom: 2 }}>
+                  <input
+                    value={editEmoji}
+                    onChange={(e) => setEditEmoji(e.target.value)}
+                    placeholder="🗂️"
+                    style={{ width: 28, fontSize: 14, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
+                  />
+                  <input
+                    ref={editInputRef}
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") cancelEdit(); }}
+                    style={{ flex: 1, fontSize: 13, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, padding: "3px 6px", outline: "none", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}
+                  />
+                  <button onClick={saveEdit} style={{ background: "none", border: "none", cursor: "pointer", color: "#34C759", fontSize: 14, padding: "0 2px" }}>✓</button>
+                  <button onClick={cancelEdit} style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 14, padding: "0 2px" }}>✕</button>
                 </div>
               );
-            })}
-          </>
-        )}
+            }
+
+            return (
+              <div
+                key={space.id}
+                style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 4px 0 10px", height: 30, borderRadius: 8, cursor: "pointer", background: isSelected ? "rgba(0,0,0,0.09)" : "transparent", transition: "background 0.12s", userSelect: "none" }}
+                onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "1"); }}
+                onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "0"); setDeleteConfirmId(null); }}
+                onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; if (spaceId !== selectedSpaceId) { selectSpace(spaceId); loadNotes(spaceId); } onSpaceSelect(); }}
+              >
+                <span style={{ fontSize: 13, flexShrink: 0 }}>{space.emoji ?? "🗂️"}</span>
+                <span style={{ flex: 1, fontSize: 13, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {space.name}
+                </span>
+                {isDelConfirm ? (
+                  <button className="space-action" onClick={(e) => { e.stopPropagation(); confirmDelete(space.id as number); }}
+                    style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+                    sure?
+                  </button>
+                ) : (
+                  <>
+                    <button className="space-action" onClick={(e) => { e.stopPropagation(); startEdit(space.id as number, space.name, space.emoji); }}
+                      style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Rename">✎</button>
+                    <button className="space-action" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(space.id as number); }}
+                      style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Delete">×</button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {creatingSpace && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 6px", marginBottom: 2 }}>
+              <input
+                value={newEmoji}
+                onChange={(e) => setNewEmoji(e.target.value)}
+                placeholder="🗂️"
+                style={{ width: 28, fontSize: 14, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
+              />
+              <input
+                ref={createInputRef}
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") submitCreate(); if (e.key === "Escape") { setCreatingSpace(false); } }}
+                placeholder="Space name"
+                style={{ flex: 1, fontSize: 13, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, padding: "3px 6px", outline: "none", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}
+              />
+              <button onClick={submitCreate} style={{ background: "none", border: "none", cursor: "pointer", color: "#34C759", fontSize: 14, padding: "0 2px" }}>✓</button>
+              <button onClick={() => setCreatingSpace(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 14, padding: "0 2px" }}>✕</button>
+            </div>
+          )}
+        </>
 
         {/* Recent notes */}
         {recentNotes.length > 0 && (
