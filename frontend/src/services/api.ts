@@ -118,15 +118,38 @@ export async function deleteNote(id: number): Promise<void> {
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 
+export interface FocusItem {
+  id: number;
+  name: string;
+  commitment: "committed" | "pending" | "someday";
+  due_date: string | null;
+  commentary: string;
+  overdue: boolean;
+  due_soon: boolean;
+  updated_at: string | null;
+}
+
 export interface DashboardStats {
   notes_this_week: number;
   recent_notes: ApiNote[];
   streak: number;
+  gooni_take: string;
+  focuses: FocusItem[];
 }
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
   const res = await apiFetch(`${BASE}/dashboard`);
   if (!res.ok) throw new Error("Failed to fetch dashboard stats");
+  return res.json();
+}
+
+export async function createFocus(name: string, commitment: FocusItem["commitment"], due_date: string | null): Promise<FocusItem> {
+  const res = await apiFetch(`${BASE}/focuses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, commitment, due_date: due_date || null }),
+  });
+  if (!res.ok) throw new Error("Failed to create focus");
   return res.json();
 }
 
@@ -168,12 +191,13 @@ export async function createConversation(content?: string): Promise<ApiConversat
 export async function sendConversationMessage(
   convId: number,
   content: string,
-  noteContent?: string
+  noteContent?: string,
+  model?: string
 ): Promise<{ messages: ApiMessage[]; intention: string; tools_used: string[] }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
+    body: JSON.stringify({ role: "user", content, entry_content: noteContent, model }),
   });
   if (!res.ok) throw new Error("Failed to send message");
   return res.json();
@@ -204,15 +228,3 @@ export async function fetchIntention(
   }
 }
 
-export async function sendGooniMessage(
-  content: string,
-  noteContent?: string
-): Promise<{ content: string; intention: string }> {
-  const res = await apiFetch(`${BASE}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", content, entry_content: noteContent }),
-  });
-  if (!res.ok) throw new Error("Failed to send Gooni message");
-  return res.json();
-}

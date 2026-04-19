@@ -134,6 +134,9 @@ export function NoteEditor() {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       if (activeNoteId && activeNoteId > 0) {
         apiUpdateNote(activeNoteId, titleRef.current, bodyRef.current);
+        if (useNotesContentStore.getState().isDirty) {
+          apiMemorizeNote(activeNoteId);
+        }
       }
     }
     window.addEventListener("beforeunload", onBeforeUnload);

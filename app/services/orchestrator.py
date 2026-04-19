@@ -13,6 +13,7 @@ class Orchestrator:
         conversation_id: int = None,
         source: str = "telegram",
         entry_content: str = "",
+        model: str = None,
     ) -> tuple[str, dict | None]:
         """Unified chat handler for all sources.
 
@@ -67,7 +68,7 @@ class Orchestrator:
         else:
             response, usage = llm_client.generate_chat_response_with_memory(
                 message, full_context, recent_history,
-                is_first_time=is_first_time, db=db,
+                is_first_time=is_first_time, db=db, model=model,
             )
 
         conversation_service.add_message(conv.id, "assistant", response, db)

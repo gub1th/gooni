@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
 import { GooniPanel } from "../components/GooniPanel";
 import { NoteEditor } from "../components/notes/NoteEditor";
@@ -25,7 +26,7 @@ function NotesPage() {
   const windowWidth = useWindowWidth();
   const { fetchConversations, newChat } = useConversationsStore();
 
-  const [view, setView] = useState<"notes" | "dashboard">("dashboard");
+  const [view, setView] = useState<"notes" | "dashboard" | "chat">("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
 
   useEffect(() => {
@@ -38,7 +39,6 @@ function NotesPage() {
   }, []);
 
   useEffect(() => {
-    // Only select a space when we're in notes view, not dashboard
     if (view === "notes") {
       const spaceId = selectedSpaceId ?? "general";
       if (!selectedSpaceId) selectSpace("general");
@@ -46,25 +46,23 @@ function NotesPage() {
     }
   }, [view]);
 
-  // Clear selected space when switching to dashboard
   useEffect(() => {
-    if (view === "dashboard" && selectedSpaceId) {
+    if (view !== "notes" && selectedSpaceId) {
       selectSpace(null);
     }
   }, [view, selectedSpaceId]);
+
   const isSmall = windowWidth < 1100;
 
   function handleNewChat() {
     newChat();
-    setView("dashboard");
+    setView("chat");
   }
 
   function handleCompose() {
     const spaceId = selectedSpaceId ?? "general";
     setView("notes");
     selectSpace(spaceId);
-    // loadNotes is called by the view-change effect — don't double-call it.
-    // createNote adds an optimistic entry immediately; the store handles any race with loadNotes.
     createNote(spaceId);
   }
 
@@ -82,16 +80,18 @@ function NotesPage() {
         <Sidebar
           isDashboard={view === "dashboard"}
           showCompose={view !== "notes"}
-          onLogoClick={handleNewChat}
+          onLogoClick={() => setView("dashboard")}
           onSpaceSelect={() => setView("notes")}
           onCompose={handleCompose}
           onNewChat={handleNewChat}
-          onConversationSelect={() => setView("dashboard")}
+          onConversationSelect={() => setView("chat")}
         />
       )}
 
       {view === "dashboard" ? (
         <Dashboard />
+      ) : view === "chat" ? (
+        <ChatView />
       ) : (
         <>
           <NotesList />

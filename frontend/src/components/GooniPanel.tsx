@@ -1,13 +1,16 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { useGooniStore } from "../stores/useGooniStore";
+import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
+import { ModelSelector } from "./ModelSelector";
 
 interface GooniPanelProps {
   fullscreen?: boolean;
 }
 
 export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
-  const { messages, sending, toggle, send, width, setWidth } = useGooniStore();
+  const { toggle, width, setWidth } = useGooniStore();
+  const { messages, sending, send } = useConversationsStore();
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
   const [input, setInput] = useState("");
   const [expandedIntentions, setExpandedIntentions] = useState<Set<number>>(new Set());
@@ -314,6 +317,17 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
           </div>
         )}
 
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            background: "#F2F2F7",
+            borderRadius: 12,
+            padding: "8px 12px",
+            border: "1px solid rgba(0,0,0,0.08)",
+          }}
+        >
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           <textarea
             value={input}
@@ -324,13 +338,12 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
             style={{
               flex: 1,
               resize: "none",
-              border: "1px solid rgba(0,0,0,0.12)",
-              borderRadius: 12,
-              padding: "8px 12px",
+              border: "none",
+              padding: 0,
               fontSize: 13.5,
               fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
               outline: "none",
-              background: "#F2F2F7",
+              background: "transparent",
               color: "#1C1C1E",
               lineHeight: 1.4,
             }}
@@ -356,6 +369,8 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
           >
             →
           </button>
+        </div>
+        <ModelSelector />
         </div>
       </div>
     </div>
