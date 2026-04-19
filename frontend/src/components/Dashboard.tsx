@@ -18,7 +18,8 @@ function getDateStr(): string {
 
 function formatNoteDate(iso: string | null): string {
   if (!iso) return "—";
-  const diffDays = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  const diffDays = Math.floor((Date.now() - new Date(hasOffset ? iso : iso + "Z").getTime()) / 86400000);
   if (diffDays === 0) return "Today";
   if (diffDays === 1) return "Yesterday";
   if (diffDays < 7) return `${diffDays}d ago`;
