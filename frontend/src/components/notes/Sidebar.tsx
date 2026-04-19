@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useConversationsStore } from "../../stores/useConversationsStore";
+import { useSpacesStore } from "../../stores/useSpacesStore";
 import { fetchRecentNotes, type ApiNote } from "../../services/api";
 
 function relativeTime(iso: string): string {
@@ -61,8 +62,10 @@ interface SidebarProps {
 export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onConversationSelect }: SidebarProps) {
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
   const { conversations, activeId, selectConversation } = useConversationsStore();
+  const { spaces } = useSpacesStore();
 
   const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
+  const [spacesOpen, setSpacesOpen] = useState(true);
   const [sectionOrder, setSectionOrder] = useState<SectionId[]>(getSavedOrder);
   const [dragOver, setDragOver] = useState<SectionId | null>(null);
   const dragging = useRef<SectionId | null>(null);
@@ -165,6 +168,54 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
           }}>All Notes</span>
         </div>
 
+        {/* Spaces list */}
+        {spaces.length > 1 && (
+          <>
+            <button
+              onClick={() => setSpacesOpen((o) => !o)}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "6px 6px 2px", background: "none", border: "none",
+                cursor: "pointer", width: "100%", textAlign: "left",
+              }}
+            >
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+                SPACES
+              </span>
+              <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: "auto" }}>{spacesOpen ? "▾" : "▸"}</span>
+            </button>
+            {spacesOpen && spaces.filter(s => s.id !== "general").map((space) => {
+              const spaceId = String(space.id);
+              const isSelected = !isDashboard && selectedSpaceId === spaceId;
+              return (
+                <div
+                  key={space.id}
+                  onClick={() => { selectSpace(spaceId); loadNotes(spaceId); onSpaceSelect(); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "0 10px", height: 30, borderRadius: 8,
+                    cursor: "pointer",
+                    background: isSelected ? "rgba(0,0,0,0.09)" : "transparent",
+                    transition: "background 0.12s", userSelect: "none",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
+                  onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+                >
+                  <span style={{ fontSize: 13, flexShrink: 0 }}>{space.emoji ?? "🗂️"}</span>
+                  <span style={{
+                    flex: 1, fontSize: 13,
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                    fontWeight: isSelected ? 600 : 400, color: "#1C1C1E",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {space.name}
+                  </span>
+                </div>
+              );
+            })}
+          </>
+        )}
+
         {/* Recent notes */}
         {recentNotes.length > 0 && (
           <>
@@ -234,13 +285,13 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
           style={{
             display: "flex", alignItems: "center", gap: 6,
             margin: "0 0 4px", padding: "7px 10px", borderRadius: 8, border: "none",
-            background: "rgba(0,0,0,0.06)", color: "#1C1C1E", fontSize: 13,
+            background: "transparent", color: "#1C1C1E", fontSize: 13,
             fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
             fontWeight: 500, cursor: "pointer", width: "100%", textAlign: "left",
-            transition: "background 0.1s",
+            transition: "background 0.1s", outline: "none",
           }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.10)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
         >
           + New Chat
         </button>
@@ -300,7 +351,7 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
             border: "none", borderRadius: 6, padding: "3px 7px", cursor: "pointer",
             fontSize: 15, fontWeight: 700,
             fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
-            color: "#1C1C1E", transition: "background 0.1s",
+            color: "#1C1C1E", transition: "background 0.1s", outline: "none",
           }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.06)")}
           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.08)" : "transparent")}
@@ -311,9 +362,9 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
           <button
             onClick={onCompose}
             title="New note"
-            style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(0,0,0,0.06)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s" }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+            style={{ width: 30, height: 30, borderRadius: 8, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
           >
             <ComposeIcon />
           </button>
