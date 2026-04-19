@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -63,16 +64,14 @@ class Note(Base):
     updated_at = Column(DateTime, default=datetime.utcnow)
     last_opened_at = Column(DateTime, nullable=True)
     embedding = Column(Text, nullable=True)  # JSON-serialised float list
+    is_public = Column(Boolean, default=False, nullable=False)
 
 
-class Focus(Base):
-    __tablename__ = "focuses"
+class PublicProfile(Base):
+    __tablename__ = "public_profile"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(Text, nullable=False)
-    commitment = Column(String, nullable=False)  # 'committed' | 'pending' | 'someday'
-    due_date = Column(String, nullable=True)  # ISO date string e.g. "2026-04-15"
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    id = Column(Integer, primary_key=True)
+    bio = Column(Text, nullable=True)  # raw text/markdown, user-written
+
 
 

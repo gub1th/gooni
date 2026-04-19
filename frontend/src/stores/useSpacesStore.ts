@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { type ApiSpace, fetchSpaces } from "../services/api";
+import { type ApiSpace, fetchSpaces, createSpace as apiCreateSpace, updateSpace as apiUpdateSpace, deleteSpace as apiDeleteSpace } from "../services/api";
 
 export type SpaceId = number | "general";
 
@@ -19,6 +19,9 @@ interface SpacesStore {
   spaces: AppSpace[];
   loading: boolean;
   fetch: () => Promise<void>;
+  createSpace: (name: string, emoji?: string) => Promise<AppSpace>;
+  updateSpace: (id: number, patch: { name?: string; emoji?: string | null }) => Promise<void>;
+  deleteSpace: (id: number) => Promise<void>;
 }
 
 export const useSpacesStore = create<SpacesStore>((set) => ({
@@ -35,5 +38,26 @@ export const useSpacesStore = create<SpacesStore>((set) => ({
     } finally {
       set({ loading: false });
     }
+  },
+
+  createSpace: async (name, emoji) => {
+    const created = await apiCreateSpace(name, emoji);
+    const space: AppSpace = { id: created.id, name: created.name, emoji: created.emoji };
+    set((s) => ({ spaces: [...s.spaces, space] }));
+    return space;
+  },
+
+  updateSpace: async (id, patch) => {
+    const updated = await apiUpdateSpace(id, patch);
+    set((s) => ({
+      spaces: s.spaces.map((sp) =>
+        sp.id === id ? { ...sp, name: updated.name, emoji: updated.emoji } : sp
+      ),
+    }));
+  },
+
+  deleteSpace: async (id) => {
+    await apiDeleteSpace(id);
+    set((s) => ({ spaces: s.spaces.filter((sp) => sp.id !== id) }));
   },
 }));

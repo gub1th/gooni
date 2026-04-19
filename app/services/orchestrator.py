@@ -2,6 +2,7 @@ from ..db.models import Conversation as ConvModel
 from ..llm.client import llm_client
 from .conversation_service import conversation_service
 from .memory_service import memory_service
+from .list_service import list_service
 
 
 class Orchestrator:
@@ -59,7 +60,8 @@ class Orchestrator:
             f"Note the user wrote:\n\"\"\"{entry_content}\"\"\""
             if entry_content.strip() else ""
         )
-        full_context = "\n\n".join(filter(None, [memory_context, entry_context]))
+        list_context = list_service.get_list_context(db)
+        full_context = "\n\n".join(filter(None, [memory_context, entry_context, list_context]))
 
         if image_url:
             response, usage = llm_client.generate_response_with_image(

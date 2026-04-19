@@ -12,12 +12,20 @@ def _unwrap(raw) -> list[dict]:
     return raw or []
 
 
+def _is_memorable(text: str) -> bool:
+    """Skip only single-word/emoji acknowledgements. Everything else gets memory."""
+    return len(text.strip()) >= 8
+
+
 class MemoryService:
     def __init__(self):
         self.client = MemoryClient(api_key=os.getenv("MEM0_API_KEY"))
+        self._has_memories_cache: bool | None = None
 
     def add_exchange(self, user_message: str, assistant_reply: str) -> None:
-        """Called after every chat turn. Mem0 auto-extracts facts/preferences."""
+        """Called after chat turns. Skips Mem0 if message isn't memorable."""
+        if not _is_memorable(user_message):
+            return
         try:
             self.client.add([
                 {"role": "user", "content": user_message},
@@ -34,7 +42,11 @@ class MemoryService:
             print(f"Memory add_memory error: {e}")
 
     def build_memory_context(self, query: str) -> str:
-        """Search Mem0 and format results for system prompt injection."""
+        """Search Mem0 and format results for system prompt injection.
+        Skips the API call entirely if the query isn't memorable.
+        """
+        if not _is_memorable(query):
+            return ""
         try:
             results = _unwrap(self.client.search(query, filters={"user_id": USER_ID}, limit=8))
             if not results:
@@ -68,9 +80,13 @@ class MemoryService:
             print(f"Memory delete error: {e}")
 
     def has_memories(self) -> bool:
-        """Returns True if any memories exist (used for first-time Telegram detection)."""
+        """Returns True if any memories exist. Cached for process lifetime."""
+        if self._has_memories_cache is not None:
+            return self._has_memories_cache
         try:
-            return bool(_unwrap(self.client.get_all(filters={"user_id": USER_ID})))
+            result = bool(_unwrap(self.client.get_all(filters={"user_id": USER_ID})))
+            self._has_memories_cache = result
+            return result
         except Exception as e:
             print(f"Memory has_memories error: {e}")
             return False

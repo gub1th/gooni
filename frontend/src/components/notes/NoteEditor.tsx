@@ -1,7 +1,16 @@
+import Image from "@tiptap/extension-image";
+import { Table } from "@tiptap/extension-table";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { TableHeader } from "@tiptap/extension-table-header";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TaskItem } from "@tiptap/extension-task-item";
+import { TaskList } from "@tiptap/extension-task-list";
+import { BubbleMenu } from "@tiptap/react/menus";
 import { EditorContent, useEditor } from "@tiptap/react";
+import type { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
-import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, type ApiNote, type SpaceSuggestion } from "../../services/api";
+import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
@@ -23,6 +32,74 @@ function useEditorStyles() {
         float: left;
         height: 0;
       }
+      .gooni-note-editor .ProseMirror img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 6px;
+        display: block;
+        margin: 8px 0;
+      }
+      .gooni-note-editor .ProseMirror img.ProseMirror-selectednode {
+        outline: 2px solid #007AFF;
+      }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] {
+        list-style: none;
+        padding-left: 0;
+        margin: 0 0 6px;
+      }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] {
+        list-style: none !important;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin-bottom: 4px;
+        padding: 0;
+      }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"]::marker { display: none; }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] label {
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+        padding-top: 2px;
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] label input[type="checkbox"] {
+        flex-shrink: 0;
+        width: 15px;
+        height: 15px;
+        cursor: pointer;
+        accent-color: #1C1C1E;
+        margin: 0;
+      }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
+      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"][data-checked="true"] > div {
+        text-decoration: line-through;
+        color: #AEAEB2;
+      }
+      .gooni-toolbar-btn { transition: background 0.1s; }
+      .gooni-toolbar-btn:hover { background: rgba(0,0,0,0.05) !important; }
+      .gooni-note-editor .ProseMirror table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 8px 0;
+        font-size: 14px;
+      }
+      .gooni-note-editor .ProseMirror table td,
+      .gooni-note-editor .ProseMirror table th {
+        border: 1px solid rgba(0,0,0,0.12);
+        padding: 6px 10px;
+        min-width: 80px;
+        vertical-align: top;
+      }
+      .gooni-note-editor .ProseMirror table th {
+        background: rgba(0,0,0,0.04);
+        font-weight: 600;
+      }
+      .gooni-note-editor .ProseMirror table .selectedCell {
+        background: rgba(0,122,255,0.08);
+      }
     `;
     document.head.appendChild(style);
   }, []);
@@ -43,6 +120,53 @@ function formatNoteDate(iso: string | null): string {
 
 type SaveStatus = "idle" | "saving" | "saved";
 
+const TOOLBAR_ITEMS = [
+  { label: "B",   title: "Bold",        cmd: (e: Editor | null) => e!.chain().focus().toggleBold().run(),              active: (e: Editor | null) => e!.isActive("bold"),             style: { fontWeight: 700 } },
+  { label: "I",   title: "Italic",      cmd: (e: Editor | null) => e!.chain().focus().toggleItalic().run(),            active: (e: Editor | null) => e!.isActive("italic"),           style: { fontStyle: "italic" as const } },
+  { label: "S",   title: "Strike",      cmd: (e: Editor | null) => e!.chain().focus().toggleStrike().run(),            active: (e: Editor | null) => e!.isActive("strike"),           style: { textDecoration: "line-through" as const } },
+  null,
+  { label: "H1",  title: "Heading 1",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 1 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 1 }), style: {} },
+  { label: "H2",  title: "Heading 2",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 2 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 2 }), style: {} },
+  null,
+  { label: "•",   title: "Bullet list", cmd: (e: Editor | null) => e!.chain().focus().toggleBulletList().run(),        active: (e: Editor | null) => e!.isActive("bulletList"),       style: {} },
+  { label: "☑",  title: "Task list",   cmd: (e: Editor | null) => e!.chain().focus().toggleTaskList().run(),          active: (e: Editor | null) => e!.isActive("taskList"),         style: {} },
+  null,
+  { label: "<>",  title: "Inline code", cmd: (e: Editor | null) => e!.chain().focus().toggleCode().run(),              active: (e: Editor | null) => e!.isActive("code"),             style: { fontFamily: "monospace", fontSize: "11px" } },
+  { label: "```", title: "Code block",  cmd: (e: Editor | null) => e!.chain().focus().toggleCodeBlock().run(),         active: (e: Editor | null) => e!.isActive("codeBlock"),        style: { fontFamily: "monospace", fontSize: "10px" } },
+  null,
+  { label: "⊞",  title: "Table",       cmd: (e: Editor | null) => e!.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: () => false, style: {} },
+] as const;
+
+function FormatToolbar({ editor }: { editor: Editor | null }) {
+  if (!editor) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 1, marginBottom: 14, paddingBottom: 10, borderBottom: "1px solid rgba(0,0,0,0.06)", flexWrap: "wrap" }}>
+      {TOOLBAR_ITEMS.map((item, i) =>
+        item === null ? (
+          <div key={i} style={{ width: 1, height: 13, background: "rgba(0,0,0,0.1)", margin: "0 3px" }} />
+        ) : (
+          <button
+            key={item.label}
+            title={item.title}
+            className="gooni-toolbar-btn"
+            onMouseDown={(e) => { e.preventDefault(); item.cmd(editor); }}
+            style={{
+              padding: "3px 7px", borderRadius: 5, border: "none",
+              background: item.active(editor) ? "rgba(0,0,0,0.09)" : "transparent",
+              color: item.active(editor) ? "#1C1C1E" : "#636366",
+              fontSize: 12, cursor: "pointer",
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              ...item.style,
+            }}
+          >
+            {item.label}
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
 export function NoteEditor() {
   useEditorStyles();
 
@@ -59,6 +183,7 @@ export function NoteEditor() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [relatedNotes, setRelatedNotes] = useState<ApiNote[]>([]);
   const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
+  const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
   const movePickerRef = useRef<HTMLDivElement>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const bodyRef = useRef<string>(activeNote?.content ?? "");
@@ -67,8 +192,16 @@ export function NoteEditor() {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevActiveNoteId = useRef<number | null>(activeNoteId);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const hasChanges = useRef(false);
 
   useEffect(() => {
+    // Flush any unsaved changes (e.g. a dropped image) before leaving the previous note
+    const prevId = prevActiveNoteId.current;
+    if (hasChanges.current && prevId && prevId > 0 && prevId !== activeNoteId) {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+      updateNote(prevId, titleRef.current, bodyRef.current).catch(() => {});
+    }
+
     setLocalTitle(activeNote?.title ?? "");
     bodyRef.current = activeNote?.content ?? "";
     titleRef.current = activeNote?.title ?? "";
@@ -79,6 +212,8 @@ export function NoteEditor() {
     setSpaceSuggestion(null);
     setRelatedNotes([]);
     setDeleteConfirm(false);
+    setLocalIsPublic(activeNote?.is_public ?? false);
+    hasChanges.current = false;
   }, [activeNoteId]);
 
   // Load related notes after note settles (quiet, non-blocking)
@@ -132,7 +267,7 @@ export function NoteEditor() {
   useEffect(() => {
     function onBeforeUnload() {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      if (activeNoteId && activeNoteId > 0) {
+      if (activeNoteId && activeNoteId > 0 && hasChanges.current) {
         apiUpdateNote(activeNoteId, titleRef.current, bodyRef.current);
         if (useNotesContentStore.getState().isDirty) {
           apiMemorizeNote(activeNoteId);
@@ -145,7 +280,16 @@ export function NoteEditor() {
 
   const editor = useEditor(
     {
-      extensions: [StarterKit],
+      extensions: [
+        StarterKit,
+        Image.configure({ inline: false, allowBase64: true }),
+        TaskList,
+        TaskItem.configure({ nested: true }),
+        Table.configure({ resizable: true }),
+        TableRow,
+        TableHeader,
+        TableCell,
+      ],
       content: activeNote?.content ?? "",
       editorProps: {
         attributes: {
@@ -162,6 +306,7 @@ export function NoteEditor() {
       },
       onUpdate: ({ editor }) => {
         bodyRef.current = editor.getHTML();
+        hasChanges.current = true;
         scheduleSave();
       },
       onBlur: async () => {
@@ -189,9 +334,11 @@ export function NoteEditor() {
 
   async function save() {
     if (!activeNoteId || activeNoteId < 0) return;
+    if (!hasChanges.current) return;
     setSaveStatus("saving");
     try {
       await updateNote(activeNoteId, titleRef.current, bodyRef.current);
+      hasChanges.current = false;
       const time = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
       setLastSavedTime(time);
       setSaveStatus("saved");
@@ -218,6 +365,7 @@ export function NoteEditor() {
     const val = e.target.value;
     setLocalTitle(val);
     titleRef.current = val;
+    hasChanges.current = true;
     scheduleSave();
   }
 
@@ -498,7 +646,137 @@ export function NoteEditor() {
               lineHeight: 1.3,
             }}
           />
-          <EditorContent editor={editor} />
+          {/* Format toolbar */}
+          <FormatToolbar editor={editor} />
+
+          {/* Public toggle */}
+          <div style={{ marginBottom: 16 }}>
+            <button
+              onClick={() => {
+                if (!activeNoteId || activeNoteId < 0) return;
+                const next = !localIsPublic;
+                setLocalIsPublic(next);
+                apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
+              }}
+              style={{
+                padding: "3px 10px",
+                borderRadius: 20,
+                border: `1px solid ${localIsPublic ? "#34C759" : "rgba(0,0,0,0.15)"}`,
+                background: localIsPublic ? "#34C759" : "transparent",
+                color: localIsPublic ? "#fff" : "#636366",
+                fontSize: 12,
+                cursor: "pointer",
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                transition: "background 0.15s, color 0.15s",
+              }}
+            >
+              🌐 Public
+            </button>
+          </div>
+          {editor && (
+            <BubbleMenu
+              editor={editor}
+              style={{
+                display: "flex",
+                background: "#1C1C1E",
+                borderRadius: 8,
+                padding: "3px 4px",
+                gap: 1,
+                boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+              }}
+            >
+              {[
+                { label: "B", title: "Bold", action: () => editor.chain().focus().toggleBold().run(), active: editor.isActive("bold"), style: { fontWeight: 700 } },
+                { label: "I", title: "Italic", action: () => editor.chain().focus().toggleItalic().run(), active: editor.isActive("italic"), style: { fontStyle: "italic" } },
+                { label: "S", title: "Strikethrough", action: () => editor.chain().focus().toggleStrike().run(), active: editor.isActive("strike"), style: { textDecoration: "line-through" } },
+                { label: "H1", title: "Heading 1", action: () => editor.chain().focus().toggleHeading({ level: 1 }).run(), active: editor.isActive("heading", { level: 1 }), style: {} },
+                { label: "H2", title: "Heading 2", action: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), active: editor.isActive("heading", { level: 2 }), style: {} },
+                { label: "•", title: "Bullet list", action: () => editor.chain().focus().toggleBulletList().run(), active: editor.isActive("bulletList"), style: {} },
+                { label: "☑", title: "Task list", action: () => editor.chain().focus().toggleTaskList().run(), active: editor.isActive("taskList"), style: {} },
+                { label: "`", title: "Inline code", action: () => editor.chain().focus().toggleCode().run(), active: editor.isActive("code"), style: { fontFamily: "monospace" } },
+              ].map(({ label, title, action, active, style }) => (
+                <button
+                  key={label}
+                  title={title}
+                  onMouseDown={(e) => { e.preventDefault(); action(); }}
+                  style={{
+                    padding: "4px 7px",
+                    borderRadius: 5,
+                    border: "none",
+                    background: active ? "rgba(255,255,255,0.18)" : "transparent",
+                    color: active ? "#fff" : "rgba(255,255,255,0.7)",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                    ...style,
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+
+              {/* Divider */}
+              <div style={{ width: 1, background: "rgba(255,255,255,0.15)", margin: "4px 2px" }} />
+
+              {/* Insert table */}
+              <button
+                title="Insert table"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+                }}
+                style={{ padding: "4px 7px", borderRadius: 5, border: "none", background: "transparent", color: "rgba(255,255,255,0.7)", fontSize: 11, cursor: "pointer" }}
+              >
+                ⊞ table
+              </button>
+            </BubbleMenu>
+          )}
+
+          <div
+            onDrop={(e) => {
+              const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+                f.type.startsWith("image/")
+              );
+              if (!files.length || !editor) return;
+              e.preventDefault();
+              files.forEach((file) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  if (typeof reader.result === "string") {
+                    editor.chain().focus().setImage({ src: reader.result }).run();
+                    hasChanges.current = true;
+                    scheduleSave();
+                  }
+                };
+                reader.readAsDataURL(file);
+              });
+            }}
+            onDragOver={(e) => {
+              if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
+                e.preventDefault();
+              }
+            }}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+                f.type.startsWith("image/")
+              );
+              if (!files.length || !editor) return;
+              e.preventDefault();
+              files.forEach((file) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  if (typeof reader.result === "string") {
+                    editor.chain().focus().setImage({ src: reader.result }).run();
+                    hasChanges.current = true;
+                    scheduleSave();
+                  }
+                };
+                reader.readAsDataURL(file);
+              });
+            }}
+          >
+            <EditorContent editor={editor} />
+          </div>
 
           {/* Related notes */}
           {relatedNotes.length > 0 && (

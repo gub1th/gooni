@@ -18,6 +18,31 @@ export async function fetchSpaces(): Promise<ApiSpace[]> {
   return res.json();
 }
 
+export async function createSpace(name: string, emoji?: string): Promise<ApiSpace> {
+  const res = await apiFetch(`${BASE}/spaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, emoji: emoji || null }),
+  });
+  if (!res.ok) throw new Error("Failed to create space");
+  return res.json();
+}
+
+export async function updateSpace(id: number, patch: { name?: string; emoji?: string | null }): Promise<ApiSpace> {
+  const res = await apiFetch(`${BASE}/spaces/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update space");
+  return res.json();
+}
+
+export async function deleteSpace(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/spaces/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete space");
+}
+
 
 // ── Notes ──────────────────────────────────────────────────────────────────────
 
@@ -29,6 +54,7 @@ export interface ApiNote {
   created_at: string;
   updated_at: string;
   last_opened_at: string | null;
+  is_public: boolean;
 }
 
 export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiNote[]> {
@@ -101,6 +127,12 @@ export async function embedNote(id: number): Promise<SpaceSuggestion> {
   }
 }
 
+export async function fetchNote(id: number): Promise<ApiNote> {
+  const res = await apiFetch(`${BASE}/notes/${id}`);
+  if (!res.ok) throw new Error("Note not found");
+  return res.json();
+}
+
 export async function fetchRelatedNotes(id: number): Promise<ApiNote[]> {
   try {
     const res = await apiFetch(`${BASE}/notes/${id}/related?limit=3`);
@@ -111,45 +143,78 @@ export async function fetchRelatedNotes(id: number): Promise<ApiNote[]> {
   }
 }
 
+export async function patchNote(id: number, patch: { is_public?: boolean }): Promise<ApiNote> {
+  const res = await apiFetch(`${BASE}/notes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to patch note");
+  return res.json();
+}
+
 export async function deleteNote(id: number): Promise<void> {
   const res = await apiFetch(`${BASE}/notes/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete note");
 }
 
-// ── Dashboard ──────────────────────────────────────────────────────────────────
+// ── Public portfolio ────────────────────────────────────────────────────────────
 
-export interface FocusItem {
+export interface PublicNote {
   id: number;
-  name: string;
-  commitment: "committed" | "pending" | "someday";
-  due_date: string | null;
-  commentary: string;
-  overdue: boolean;
-  due_soon: boolean;
-  updated_at: string | null;
+  title: string | null;
+  space_name: string | null;
+  excerpt: string;
+  updated_at: string;
 }
+
+export interface PublicNoteDetail {
+  id: number;
+  title: string | null;
+  content: string | null;
+  space_name: string | null;
+  updated_at: string;
+}
+
+export async function fetchPublicNote(id: number): Promise<PublicNoteDetail> {
+  const res = await apiFetch(`${BASE}/public/notes/${id}`);
+  if (!res.ok) throw new Error("Not found");
+  return res.json();
+}
+
+export async function fetchPublicNotes(): Promise<PublicNote[]> {
+  const res = await apiFetch(`${BASE}/public/notes`);
+  if (!res.ok) throw new Error("Failed to fetch public notes");
+  return res.json();
+}
+
+export async function fetchPublicProfile(): Promise<{ bio: string | null; note_count: number; last_active: string | null }> {
+  const res = await apiFetch(`${BASE}/public/profile`);
+  if (!res.ok) throw new Error("Failed to fetch public profile");
+  return res.json();
+}
+
+export async function updatePublicProfile(bio: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/public/profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bio }),
+  });
+  if (!res.ok) throw new Error("Failed to update public profile");
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────────
 
 export interface DashboardStats {
   notes_this_week: number;
   recent_notes: ApiNote[];
   streak: number;
   gooni_take: string;
-  focuses: FocusItem[];
 }
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
   const res = await apiFetch(`${BASE}/dashboard`);
   if (!res.ok) throw new Error("Failed to fetch dashboard stats");
-  return res.json();
-}
-
-export async function createFocus(name: string, commitment: FocusItem["commitment"], due_date: string | null): Promise<FocusItem> {
-  const res = await apiFetch(`${BASE}/focuses`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, commitment, due_date: due_date || null }),
-  });
-  if (!res.ok) throw new Error("Failed to create focus");
   return res.json();
 }
 

@@ -34,6 +34,15 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
                 - If something's off, say it directly
                 - Bring up what you know naturally — don't announce it
 
+                Tools — use them proactively, don't wait to be asked:
+                - add_to_list: when Daniel mentions wanting to go somewhere, try a restaurant,
+                  buy something, read something, watch something — capture it. Infer a sensible
+                  list name ("Places to Eat", "Shopping List", "Books to Read", etc).
+                  Use the exact list name if one already exists (from context above).
+                - show_list: when Daniel asks what's on a list or wants to review options.
+                - fetch_url: when Daniel shares a URL and wants a summary or info from it.
+                - web_search: when Daniel asks about something current or factual you don't know.
+
             """
 
     if is_first_time:

@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
@@ -11,8 +11,13 @@ import { useGooniStore } from "../stores/useGooniStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
+import { fetchNote } from "../services/api";
 
 export const Route = createFileRoute("/")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    note: typeof search.note === "number" ? search.note : typeof search.note === "string" ? Number(search.note) : undefined,
+    conv: typeof search.conv === "number" ? search.conv : typeof search.conv === "string" ? Number(search.conv) : undefined,
+  }),
   component: NotesPage,
 });
 
@@ -21,10 +26,12 @@ const SIDEBAR_BREAKPOINT = 768;
 
 function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
-  const { selectedSpaceId, selectSpace, loadNotes, createNote } = useNotesContentStore();
+  const { selectedSpaceId, selectSpace, loadNotes, createNote, selectNote } = useNotesContentStore();
   const isGooniOpen = useGooniStore((s) => s.isOpen);
   const windowWidth = useWindowWidth();
-  const { fetchConversations, newChat } = useConversationsStore();
+  const { fetchConversations, newChat, selectConversation } = useConversationsStore();
+  const navigate = useNavigate({ from: "/" });
+  const search = Route.useSearch();
 
   const [view, setView] = useState<"notes" | "dashboard" | "chat">("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
@@ -33,9 +40,24 @@ function NotesPage() {
     setSidebarOpen(windowWidth >= SIDEBAR_BREAKPOINT);
   }, [windowWidth >= SIDEBAR_BREAKPOINT]);
 
+  // Initial load: restore from URL params
   useEffect(() => {
     fetchSpaces();
     fetchConversations();
+
+    if (search.note) {
+      fetchNote(search.note).then((note) => {
+        const spaceId = note.space_id == null ? "general" : String(note.space_id);
+        selectSpace(spaceId);
+        loadNotes(spaceId).then(() => selectNote(note.id));
+        setView("notes");
+      }).catch(() => {
+        setView("dashboard");
+      });
+    } else if (search.conv) {
+      selectConversation(search.conv);
+      setView("chat");
+    }
   }, []);
 
   useEffect(() => {
@@ -52,11 +74,34 @@ function NotesPage() {
     }
   }, [view, selectedSpaceId]);
 
+  // Cmd+N: new note
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "n") {
+        e.preventDefault();
+        handleCompose();
+      }
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selectedSpaceId, view]);
+
   const isSmall = windowWidth < 1100;
+
+  function setViewAndUrl(v: "notes" | "dashboard" | "chat", noteId?: number, convId?: number) {
+    setView(v);
+    if (v === "notes" && noteId) {
+      navigate({ search: { note: noteId, conv: undefined }, replace: true });
+    } else if (v === "chat" && convId) {
+      navigate({ search: { note: undefined, conv: convId }, replace: true });
+    } else {
+      navigate({ search: { note: undefined, conv: undefined }, replace: true });
+    }
+  }
 
   function handleNewChat() {
     newChat();
-    setView("chat");
+    setViewAndUrl("chat");
   }
 
   function handleCompose() {
@@ -64,23 +109,33 @@ function NotesPage() {
     setView("notes");
     selectSpace(spaceId);
     createNote(spaceId);
+    navigate({ search: { note: undefined, conv: undefined }, replace: true });
   }
 
+  // When active note changes while in notes view, update URL
+  const { activeNoteId } = useNotesContentStore();
+  useEffect(() => {
+    if (view === "notes" && activeNoteId && activeNoteId > 0) {
+      navigate({ search: { note: activeNoteId, conv: undefined }, replace: true });
+    }
+  }, [activeNoteId, view]);
+
+  // When active conversation changes while in chat view, update URL
+  const { activeId: activeConvId } = useConversationsStore();
+  useEffect(() => {
+    if (view === "chat" && activeConvId) {
+      navigate({ search: { note: undefined, conv: activeConvId }, replace: true });
+    }
+  }, [activeConvId, view]);
+
   return (
-    <div
-      style={{
-        display: "flex",
-        height: "100vh",
-        overflow: "hidden",
-        background: "#FFFFFF",
-        position: "relative",
-      }}
-    >
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#FFFFFF", position: "relative" }}>
       {sidebarOpen && (
         <Sidebar
           isDashboard={view === "dashboard"}
+          isNotes={view === "notes"}
           showCompose={view !== "notes"}
-          onLogoClick={() => setView("dashboard")}
+          onLogoClick={() => setViewAndUrl("dashboard")}
           onSpaceSelect={() => setView("notes")}
           onCompose={handleCompose}
           onNewChat={handleNewChat}
@@ -89,27 +144,16 @@ function NotesPage() {
       )}
 
       {view === "dashboard" ? (
-        <Dashboard />
+        <Dashboard onOpenNote={() => setView("notes")} />
       ) : view === "chat" ? (
         <ChatView />
       ) : (
         <>
           <NotesList />
-
           <NoteEditor />
-
           {isGooniOpen && (
             isSmall ? (
-              <div
-                style={{
-                  position: "absolute",
-                  right: 0,
-                  top: 0,
-                  height: "100%",
-                  zIndex: 50,
-                  boxShadow: "-4px 0 20px rgba(0,0,0,0.12)",
-                }}
-              >
+              <div style={{ position: "absolute", right: 0, top: 0, height: "100%", zIndex: 50, boxShadow: "-4px 0 20px rgba(0,0,0,0.12)" }}>
                 <GooniPanel />
               </div>
             ) : (

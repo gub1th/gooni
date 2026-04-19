@@ -18,6 +18,7 @@
 - [ ] Memory refactor — replace hardcoded meals/workouts tables with flexible Memory entities
 
 ## Done
+- [x] Lists via chat — `add_to_list` / `show_list` tool calls; lists are Notes in a "Lists" space (📋); list names injected into system prompt so LLM routes correctly; works from web chat + Telegram
 - [x] 3-panel Apple Notes layout (Sidebar + NotesList + NoteEditor)
 - [x] Gooni panel with note context
 - [x] Note CRUD (create, auto-save, delete)

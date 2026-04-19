@@ -13,15 +13,14 @@ from .db.database import engine, get_db
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
-    Focus,
     Message,
     Note,
+    PublicProfile,
     Space,
 )
 from .db.schemas import ChatRequest
 from .llm.client import llm_client
 from .services.conversation_service import conversation_service
-from .services.focus_service import focus_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
@@ -44,6 +43,7 @@ def _run_column_migrations(engine):
             ("notes", "last_opened_at", "INTEGER"),
             ("spaces", "emoji", "TEXT"),
             ("notes", "embedding", "TEXT"),
+            ("notes", "is_public", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -183,6 +183,7 @@ def _serialize_note(n: Note) -> dict:
         "created_at": n.created_at,
         "updated_at": n.updated_at,
         "last_opened_at": n.last_opened_at,
+        "is_public": bool(n.is_public),
     }
 
 
@@ -255,6 +256,8 @@ def update_note(
     if "space_id" in body:
         sid = body["space_id"]
         note.space_id = None if (sid is None or sid == "general") else int(sid)
+    if "is_public" in body:
+        note.is_public = bool(body["is_public"])
     db.commit()
     db.refresh(note)
     return _serialize_note(note)
@@ -452,6 +455,7 @@ async def health():
 @app.get("/dashboard")
 def get_dashboard_stats(db: Session = Depends(get_db)):
     from datetime import date, datetime, timedelta
+    import re
 
     from sqlalchemy import func as sqlfunc
 
@@ -463,13 +467,11 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     recent_notes = (
         db.query(Note)
         .order_by(sqlfunc.coalesce(Note.updated_at, Note.created_at).desc())
-        .limit(5)
+        .limit(8)
         .all()
     )
 
     # Streak: consecutive days with any activity (notes or conversations).
-    # Allows today OR yesterday as the starting point so the streak stays
-    # alive at the start of a new day before the user has done anything yet.
     try:
         date_rows = db.execute(
             text(
@@ -492,64 +494,69 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception:
         streak = 0
 
-    all_focuses = db.query(Focus).order_by(Focus.created_at).all()
-    active_focuses = [f for f in all_focuses if f.commitment in ("committed", "pending")]
+    # Gooni's Take — generated from recent notes + conversations, recency-weighted
+    gooni_take = ""
+    titled = [n for n in recent_notes if n.title and n.title.strip()]
+    if titled:
+        now = datetime.utcnow()
 
-    def _due_status(f):
-        if not f.due_date:
-            return False, False
+        def _age_label(dt):
+            if not dt:
+                return "a while ago"
+            delta = now - dt
+            if delta.days == 0:
+                return "today"
+            if delta.days == 1:
+                return "yesterday"
+            return f"{delta.days} days ago"
+
+        note_lines = []
+        for n in titled[:6]:
+            note_lines.append(f"- [{_age_label(n.updated_at or n.created_at)}] {n.title.strip()}")
+        note_list = "\n".join(note_lines)
+
+        # Pull recent conversation previews (last user message per convo)
+        recent_convos = (
+            db.query(Conversation)
+            .order_by(Conversation.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        convo_lines = []
+        for c in recent_convos:
+            last_msg = (
+                db.query(Message)
+                .filter(Message.conversation_id == c.id, Message.role == "user")
+                .order_by(Message.created_at.desc())
+                .first()
+            )
+            if last_msg and last_msg.content:
+                preview = last_msg.content[:80].replace("\n", " ")
+                convo_lines.append(f"- [{_age_label(c.created_at)}] \"{preview}\"")
+        convo_block = "\nRecent chats with Gooni:\n" + "\n".join(convo_lines) if convo_lines else ""
+
+        mem_ctx = memory_service.build_memory_context("recent activity focus projects")
+        mem_block = f"\n\nLong-term memory:\n{mem_ctx}" if mem_ctx else ""
+
+        prompt = (
+            f"You are Gooni — Daniel's personal AI notebook.\n"
+            f"Write 2-3 tight sentences giving your honest read on where Daniel's head is at right now. "
+            f"Prioritize the most recent signals. Find the thread — what's the underlying theme or tension? "
+            f"Don't just list what you see. Synthesize. Be specific but not exhaustive. "
+            f"Skip filler phrases like 'it seems' or 'it looks like'. No preamble, no sign-off.\n\n"
+            f"Recent notes (most recent first):\n{note_list}{convo_block}{mem_block}\n\nYour take:"
+        )
         try:
-            d = date.fromisoformat(f.due_date)
-            overdue = d < today
-            due_soon = not overdue and d <= today + timedelta(days=7)
-            return overdue, due_soon
+            gooni_take = llm_client.generate_simple_completion(prompt, max_tokens=150)
         except Exception:
-            return False, False
-
-    overdue_names = [f.name for f in active_focuses if _due_status(f)[0]]
-    commentaries = focus_service.get_commentary(active_focuses)
-    gooni_take = focus_service.get_daily_briefing(all_focuses, overdue_names)
-
-    def _serialize_focus(f):
-        overdue, due_soon = _due_status(f)
-        return {
-            "id": f.id,
-            "name": f.name,
-            "commitment": f.commitment,
-            "due_date": f.due_date,
-            "commentary": commentaries.get(f.id, ""),
-            "overdue": overdue,
-            "due_soon": due_soon,
-            "updated_at": (
-                f.updated_at.isoformat() if f.updated_at
-                else f.created_at.isoformat() if f.created_at
-                else None
-            ),
-        }
+            gooni_take = ""
 
     return {
         "notes_this_week": notes_this_week,
         "recent_notes": [_serialize_note(n) for n in recent_notes],
         "streak": streak,
         "gooni_take": gooni_take,
-        "focuses": [_serialize_focus(f) for f in all_focuses],
     }
-
-
-@app.post("/focuses")
-def create_focus(body: dict, db: Session = Depends(get_db)):
-    name = body.get("name", "").strip()
-    commitment = body.get("commitment", "committed")
-    due_date = body.get("due_date") or None
-    if not name:
-        raise HTTPException(status_code=400, detail="name is required")
-    if commitment not in ("committed", "pending", "someday"):
-        raise HTTPException(status_code=400, detail="invalid commitment")
-    focus = Focus(name=name, commitment=commitment, due_date=due_date)
-    db.add(focus)
-    db.commit()
-    db.refresh(focus)
-    return {"id": focus.id, "name": focus.name, "commitment": focus.commitment, "due_date": focus.due_date}
 
 
 # ── MCP endpoints ─────────────────────────────────────────────────────────────
@@ -606,5 +613,89 @@ def mcp_search_notes(q: str, limit: int = 5, db: Session = Depends(get_db)):
     """Search notes by semantic similarity to a query string."""
     related = note_service.search_by_query(q, limit, db)
     return [_serialize_note(n) for n in related]
+
+
+# ── Public portfolio ────────────────────────────────────────────────────────────
+
+
+def _strip_html(html: str) -> str:
+    import re
+    return re.sub(r"<[^>]+>", " ", html or "").strip()
+
+
+@app.get("/public/notes")
+def get_public_notes(db: Session = Depends(get_db)):
+    """Return all public notes with their space name, newest first. No auth."""
+    rows = (
+        db.query(Note, Space)
+        .outerjoin(Space, Note.space_id == Space.id)
+        .filter(Note.is_public == True)  # noqa: E712
+        .order_by(_notes_order())
+        .all()
+    )
+    result = []
+    for n, space in rows:
+        excerpt = _strip_html(n.content or "")[:150]
+        result.append({
+            "id": n.id,
+            "title": n.title,
+            "space_name": space.name if space else None,
+            "excerpt": excerpt,
+            "updated_at": n.updated_at,
+        })
+    return result
+
+
+@app.get("/public/notes/{note_id}")
+def get_public_note(note_id: int, db: Session = Depends(get_db)):
+    """Return a single public note's full content. 404 if not public."""
+    note = db.query(Note).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
+    if not note:
+        raise HTTPException(status_code=404, detail="Not found")
+    space = db.query(Space).filter(Space.id == note.space_id).first() if note.space_id else None
+    return {
+        "id": note.id,
+        "title": note.title,
+        "content": note.content,
+        "space_name": space.name if space else None,
+        "updated_at": note.updated_at,
+    }
+
+
+@app.get("/notes/{note_id}")
+def get_note(note_id: int, db: Session = Depends(get_db)):
+    """Return a single note by ID."""
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return _serialize_note(note)
+
+
+@app.get("/public/profile")
+def get_public_profile(db: Session = Depends(get_db)):
+    """Return the public bio + stats."""
+    from sqlalchemy import func as sqlfunc
+    profile = db.query(PublicProfile).first()
+    note_count = db.query(Note).count()
+    last_active = db.query(sqlfunc.max(Note.updated_at)).scalar()
+    return {
+        "bio": profile.bio if profile else None,
+        "note_count": note_count,
+        "last_active": last_active.isoformat() if last_active else None,
+    }
+
+
+@app.patch("/public/profile")
+def update_public_profile(body: dict, db: Session = Depends(get_db)):
+    """Save the public bio."""
+    bio = body.get("bio", "")
+    profile = db.query(PublicProfile).first()
+    if profile:
+        profile.bio = bio
+    else:
+        profile = PublicProfile(bio=bio)
+        db.add(profile)
+    db.commit()
+    return {"ok": True}
 
 
