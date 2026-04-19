@@ -74,14 +74,4 @@ class PublicProfile(Base):
     bio = Column(Text, nullable=True)  # raw text/markdown, user-written
 
 
-class Focus(Base):
-    __tablename__ = "focuses"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(Text, nullable=False)
-    commitment = Column(String, nullable=False)  # 'committed' | 'pending' | 'someday'
-    due_date = Column(String, nullable=True)  # ISO date string e.g. "2026-04-15"
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
-
 

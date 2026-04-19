@@ -1,5 +1,4 @@
 import os
-import time
 
 from dotenv import load_dotenv
 
@@ -14,7 +13,6 @@ from .db.database import engine, get_db
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
-    Focus,
     Message,
     Note,
     PublicProfile,
@@ -23,46 +21,9 @@ from .db.models import (  # noqa: F401 — triggers table creation
 from .db.schemas import ChatRequest
 from .llm.client import llm_client
 from .services.conversation_service import conversation_service
-from .services.focus_service import focus_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
-
-
-# ── Briefing cache ────────────────────────────────────────────────────────────
-# Keyed by a fingerprint of all focuses. Expires after 1 hour.
-# Prevents 2 LLM calls + N Mem0 searches on every dashboard open.
-_briefing_cache: dict = {"take": None, "commentaries": None, "sig": None, "ts": 0.0}
-_BRIEFING_TTL = 3600  # seconds
-
-
-def _focus_sig(focuses: list) -> str:
-    """Fingerprint of a focus list — changes if any focus is added/changed/deleted."""
-    return "|".join(
-        f"{f.id}:{f.name}:{f.commitment}:{f.due_date}"
-        for f in sorted(focuses, key=lambda f: f.id)
-    )
-
-
-def _get_briefing(all_focuses: list, active_focuses: list, overdue_names: list) -> tuple[str, dict]:
-    """Return (gooni_take, commentaries), using cache when valid."""
-    sig = _focus_sig(all_focuses)
-    now = time.time()
-    if (
-        _briefing_cache["sig"] == sig
-        and _briefing_cache["ts"]
-        and now - _briefing_cache["ts"] < _BRIEFING_TTL
-    ):
-        return _briefing_cache["take"], _briefing_cache["commentaries"]
-
-    take = focus_service.get_daily_briefing(all_focuses, overdue_names)
-    commentaries = focus_service.get_commentary(active_focuses)
-    _briefing_cache.update({"take": take, "commentaries": commentaries, "sig": sig, "ts": now})
-    return take, commentaries
-
-
-def _invalidate_briefing_cache():
-    _briefing_cache.update({"sig": None, "ts": 0.0})
 
 
 def _run_column_migrations(engine):
@@ -494,6 +455,7 @@ async def health():
 @app.get("/dashboard")
 def get_dashboard_stats(db: Session = Depends(get_db)):
     from datetime import date, datetime, timedelta
+    import re
 
     from sqlalchemy import func as sqlfunc
 
@@ -505,13 +467,11 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     recent_notes = (
         db.query(Note)
         .order_by(sqlfunc.coalesce(Note.updated_at, Note.created_at).desc())
-        .limit(5)
+        .limit(8)
         .all()
     )
 
     # Streak: consecutive days with any activity (notes or conversations).
-    # Allows today OR yesterday as the starting point so the streak stays
-    # alive at the start of a new day before the user has done anything yet.
     try:
         date_rows = db.execute(
             text(
@@ -534,64 +494,31 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception:
         streak = 0
 
-    all_focuses = db.query(Focus).order_by(Focus.created_at).all()
-    active_focuses = [f for f in all_focuses if f.commitment in ("committed", "pending")]
-
-    def _due_status(f):
-        if not f.due_date:
-            return False, False
+    # Gooni's Take — generated from recent note titles
+    gooni_take = ""
+    titled = [n for n in recent_notes if n.title and n.title.strip()]
+    if titled:
+        note_list = "\n".join(f"- {n.title.strip()}" for n in titled[:6])
+        mem_ctx = memory_service.build_memory_context("recent activity notes writing")
+        mem_block = f"\n\nMemory context:\n{mem_ctx}" if mem_ctx else ""
+        prompt = (
+            f"You are Gooni — Daniel's AI notebook assistant.\n"
+            f"Write a single short paragraph (2-3 sentences) observing what Daniel has been working on "
+            f"based on his recent notes. Be direct and specific — reference actual note titles. "
+            f"No preamble, no sign-off.\n\n"
+            f"Recent notes:\n{note_list}{mem_block}\n\nWrite the observation:"
+        )
         try:
-            d = date.fromisoformat(f.due_date)
-            overdue = d < today
-            due_soon = not overdue and d <= today + timedelta(days=7)
-            return overdue, due_soon
+            gooni_take = llm_client.generate_simple_completion(prompt, max_tokens=120)
         except Exception:
-            return False, False
-
-    overdue_names = [f.name for f in active_focuses if _due_status(f)[0]]
-    gooni_take, commentaries = _get_briefing(all_focuses, active_focuses, overdue_names)
-
-    def _serialize_focus(f):
-        overdue, due_soon = _due_status(f)
-        return {
-            "id": f.id,
-            "name": f.name,
-            "commitment": f.commitment,
-            "due_date": f.due_date,
-            "commentary": commentaries.get(f.id, ""),
-            "overdue": overdue,
-            "due_soon": due_soon,
-            "updated_at": (
-                f.updated_at.isoformat() if f.updated_at
-                else f.created_at.isoformat() if f.created_at
-                else None
-            ),
-        }
+            gooni_take = ""
 
     return {
         "notes_this_week": notes_this_week,
         "recent_notes": [_serialize_note(n) for n in recent_notes],
         "streak": streak,
         "gooni_take": gooni_take,
-        "focuses": [_serialize_focus(f) for f in all_focuses],
     }
-
-
-@app.post("/focuses")
-def create_focus(body: dict, db: Session = Depends(get_db)):
-    name = body.get("name", "").strip()
-    commitment = body.get("commitment", "committed")
-    due_date = body.get("due_date") or None
-    if not name:
-        raise HTTPException(status_code=400, detail="name is required")
-    if commitment not in ("committed", "pending", "someday"):
-        raise HTTPException(status_code=400, detail="invalid commitment")
-    focus = Focus(name=name, commitment=commitment, due_date=due_date)
-    db.add(focus)
-    db.commit()
-    db.refresh(focus)
-    _invalidate_briefing_cache()
-    return {"id": focus.id, "name": focus.name, "commitment": focus.commitment, "due_date": focus.due_date}
 
 
 # ── MCP endpoints ─────────────────────────────────────────────────────────────
