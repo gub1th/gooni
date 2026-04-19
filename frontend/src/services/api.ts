@@ -29,6 +29,7 @@ export interface ApiNote {
   created_at: string;
   updated_at: string;
   last_opened_at: string | null;
+  is_public: boolean;
 }
 
 export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiNote[]> {
@@ -111,9 +112,64 @@ export async function fetchRelatedNotes(id: number): Promise<ApiNote[]> {
   }
 }
 
+export async function patchNote(id: number, patch: { is_public?: boolean }): Promise<ApiNote> {
+  const res = await apiFetch(`${BASE}/notes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to patch note");
+  return res.json();
+}
+
 export async function deleteNote(id: number): Promise<void> {
   const res = await apiFetch(`${BASE}/notes/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete note");
+}
+
+// ── Public portfolio ────────────────────────────────────────────────────────────
+
+export interface PublicNote {
+  id: number;
+  title: string | null;
+  space_name: string | null;
+  excerpt: string;
+  updated_at: string;
+}
+
+export interface PublicNoteDetail {
+  id: number;
+  title: string | null;
+  content: string | null;
+  space_name: string | null;
+  updated_at: string;
+}
+
+export async function fetchPublicNote(id: number): Promise<PublicNoteDetail> {
+  const res = await apiFetch(`${BASE}/public/notes/${id}`);
+  if (!res.ok) throw new Error("Not found");
+  return res.json();
+}
+
+export async function fetchPublicNotes(): Promise<PublicNote[]> {
+  const res = await apiFetch(`${BASE}/public/notes`);
+  if (!res.ok) throw new Error("Failed to fetch public notes");
+  return res.json();
+}
+
+export async function fetchPublicProfile(): Promise<{ bio: string | null }> {
+  const res = await apiFetch(`${BASE}/public/profile`);
+  if (!res.ok) throw new Error("Failed to fetch public profile");
+  return res.json();
+}
+
+export async function updatePublicProfile(bio: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/public/profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bio }),
+  });
+  if (!res.ok) throw new Error("Failed to update public profile");
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────

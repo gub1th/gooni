@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { createFocus, fetchDashboardStats, type DashboardStats, type FocusItem } from "../services/api";
+import { createFocus, fetchDashboardStats, fetchPublicProfile, updatePublicProfile, type DashboardStats, type FocusItem } from "../services/api";
 
 const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
 const DISPLAY_FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
@@ -205,12 +205,29 @@ function AddFocusModal({ onClose, onAdd }: { onClose: () => void; onAdd: () => v
 export function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [bio, setBio] = useState("");
+  const [bioSaved, setBioSaved] = useState(false);
+  const [bioSaving, setBioSaving] = useState(false);
 
   function loadStats() {
     fetchDashboardStats().then(setStats).catch(console.error);
   }
 
   useEffect(() => { loadStats(); }, []);
+  useEffect(() => {
+    fetchPublicProfile().then((p) => setBio(p.bio ?? "")).catch(() => {});
+  }, []);
+
+  async function handleSaveBio() {
+    setBioSaving(true);
+    try {
+      await updatePublicProfile(bio);
+      setBioSaved(true);
+      setTimeout(() => setBioSaved(false), 2500);
+    } finally {
+      setBioSaving(false);
+    }
+  }
 
   const committed = stats?.focuses?.filter(f => f.commitment === "committed") ?? [];
   const pending = stats?.focuses?.filter(f => f.commitment === "pending") ?? [];
@@ -283,6 +300,57 @@ export function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* Public bio */}
+        <div style={{ marginTop: 52, paddingTop: 36, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#1C1C1E", marginBottom: 10, letterSpacing: "-0.1px" }}>
+            Public bio
+          </div>
+          <p style={{ fontSize: 12.5, color: "#8E8E93", margin: "0 0 12px" }}>
+            What founders see on your public portfolio page.
+          </p>
+          <textarea
+            value={bio}
+            onChange={(e) => { setBio(e.target.value); setBioSaved(false); }}
+            placeholder="Write a short bio — who you are, what you're building..."
+            rows={5}
+            style={{
+              width: "100%",
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.12)",
+              fontSize: 14,
+              fontFamily: FONT,
+              color: "#1C1C1E",
+              outline: "none",
+              resize: "vertical",
+              boxSizing: "border-box",
+              lineHeight: 1.65,
+            }}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+            <button
+              onClick={handleSaveBio}
+              disabled={bioSaving}
+              style={{
+                padding: "8px 18px",
+                borderRadius: 8,
+                border: "none",
+                background: "#1C1C1E",
+                color: "#fff",
+                fontSize: 13,
+                fontFamily: FONT,
+                cursor: "pointer",
+                fontWeight: 500,
+              }}
+            >
+              {bioSaving ? "Saving..." : "Save bio"}
+            </button>
+            {bioSaved && (
+              <span style={{ fontSize: 12.5, color: "#34C759", fontFamily: FONT }}>Saved ✓</span>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Floating add button */}

@@ -1,7 +1,8 @@
+import Image from "@tiptap/extension-image";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
-import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, type ApiNote, type SpaceSuggestion } from "../../services/api";
+import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
@@ -22,6 +23,16 @@ function useEditorStyles() {
         pointer-events: none;
         float: left;
         height: 0;
+      }
+      .gooni-note-editor .ProseMirror img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 6px;
+        display: block;
+        margin: 8px 0;
+      }
+      .gooni-note-editor .ProseMirror img.ProseMirror-selectednode {
+        outline: 2px solid #007AFF;
       }
     `;
     document.head.appendChild(style);
@@ -59,6 +70,7 @@ export function NoteEditor() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [relatedNotes, setRelatedNotes] = useState<ApiNote[]>([]);
   const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
+  const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
   const movePickerRef = useRef<HTMLDivElement>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const bodyRef = useRef<string>(activeNote?.content ?? "");
@@ -67,6 +79,7 @@ export function NoteEditor() {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevActiveNoteId = useRef<number | null>(activeNoteId);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const hasChanges = useRef(false);
 
   useEffect(() => {
     setLocalTitle(activeNote?.title ?? "");
@@ -79,6 +92,8 @@ export function NoteEditor() {
     setSpaceSuggestion(null);
     setRelatedNotes([]);
     setDeleteConfirm(false);
+    setLocalIsPublic(activeNote?.is_public ?? false);
+    hasChanges.current = false;
   }, [activeNoteId]);
 
   // Load related notes after note settles (quiet, non-blocking)
@@ -132,7 +147,7 @@ export function NoteEditor() {
   useEffect(() => {
     function onBeforeUnload() {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      if (activeNoteId && activeNoteId > 0) {
+      if (activeNoteId && activeNoteId > 0 && hasChanges.current) {
         apiUpdateNote(activeNoteId, titleRef.current, bodyRef.current);
         if (useNotesContentStore.getState().isDirty) {
           apiMemorizeNote(activeNoteId);
@@ -145,7 +160,7 @@ export function NoteEditor() {
 
   const editor = useEditor(
     {
-      extensions: [StarterKit],
+      extensions: [StarterKit, Image.configure({ inline: false, allowBase64: true })],
       content: activeNote?.content ?? "",
       editorProps: {
         attributes: {
@@ -162,6 +177,7 @@ export function NoteEditor() {
       },
       onUpdate: ({ editor }) => {
         bodyRef.current = editor.getHTML();
+        hasChanges.current = true;
         scheduleSave();
       },
       onBlur: async () => {
@@ -189,9 +205,11 @@ export function NoteEditor() {
 
   async function save() {
     if (!activeNoteId || activeNoteId < 0) return;
+    if (!hasChanges.current) return;
     setSaveStatus("saving");
     try {
       await updateNote(activeNoteId, titleRef.current, bodyRef.current);
+      hasChanges.current = false;
       const time = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
       setLastSavedTime(time);
       setSaveStatus("saved");
@@ -218,6 +236,7 @@ export function NoteEditor() {
     const val = e.target.value;
     setLocalTitle(val);
     titleRef.current = val;
+    hasChanges.current = true;
     scheduleSave();
   }
 
@@ -498,7 +517,75 @@ export function NoteEditor() {
               lineHeight: 1.3,
             }}
           />
-          <EditorContent editor={editor} />
+          {/* Public toggle */}
+          <div style={{ marginBottom: 16 }}>
+            <button
+              onClick={() => {
+                if (!activeNoteId || activeNoteId < 0) return;
+                const next = !localIsPublic;
+                setLocalIsPublic(next);
+                apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
+              }}
+              style={{
+                padding: "3px 10px",
+                borderRadius: 20,
+                border: `1px solid ${localIsPublic ? "#34C759" : "rgba(0,0,0,0.15)"}`,
+                background: localIsPublic ? "#34C759" : "transparent",
+                color: localIsPublic ? "#fff" : "#636366",
+                fontSize: 12,
+                cursor: "pointer",
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                transition: "background 0.15s, color 0.15s",
+              }}
+            >
+              🌐 Public
+            </button>
+          </div>
+          <div
+            onDrop={(e) => {
+              const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+                f.type.startsWith("image/")
+              );
+              if (!files.length || !editor) return;
+              e.preventDefault();
+              files.forEach((file) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  if (typeof reader.result === "string") {
+                    editor.chain().focus().setImage({ src: reader.result }).run();
+                    hasChanges.current = true;
+                    scheduleSave();
+                  }
+                };
+                reader.readAsDataURL(file);
+              });
+            }}
+            onDragOver={(e) => {
+              if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
+                e.preventDefault();
+              }
+            }}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+                f.type.startsWith("image/")
+              );
+              if (!files.length || !editor) return;
+              e.preventDefault();
+              files.forEach((file) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  if (typeof reader.result === "string") {
+                    editor.chain().focus().setImage({ src: reader.result }).run();
+                    hasChanges.current = true;
+                    scheduleSave();
+                  }
+                };
+                reader.readAsDataURL(file);
+              });
+            }}
+          >
+            <EditorContent editor={editor} />
+          </div>
 
           {/* Related notes */}
           {relatedNotes.length > 0 && (

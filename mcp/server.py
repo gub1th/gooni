@@ -134,5 +134,61 @@ def search_notes(query: str, limit: int = 5) -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
+def edit_note(note_id: int, title: str = None, content: str = None) -> str:
+    """Edit an existing note in Gooni. Use this to update progress notes or evolving docs.
+
+    Args:
+        note_id: the numeric ID of the note to edit
+        title: new title (optional — omit to keep current)
+        content: new body text (optional — omit to keep current)
+    """
+    patch: dict = {}
+    if title is not None:
+        patch["title"] = title
+    if content is not None:
+        patch["content"] = content
+    if not patch:
+        return "Nothing to update."
+    resp = httpx.patch(f"{BASE_URL}/notes/{note_id}", json=patch, timeout=10)
+    resp.raise_for_status()
+    n = resp.json()
+    return f"Updated note #{n['id']}: {n['title']}"
+
+
+@mcp.tool()
+def list_spaces() -> str:
+    """List all spaces in Gooni.
+
+    Use this to know where notes are organized before creating or searching.
+    """
+    resp = httpx.get(f"{BASE_URL}/spaces", timeout=10)
+    resp.raise_for_status()
+    spaces = resp.json()
+    if not spaces:
+        return "(no spaces yet)"
+    return "\n".join(f"#{s['id']} {s.get('emoji') or ''} {s['name']}".strip() for s in spaces)
+
+
+@mcp.tool()
+def list_notes(space_id: str = "general", limit: int = 20) -> str:
+    """List notes in a space. Use 'general' for all notes.
+
+    Args:
+        space_id: numeric space ID or 'general' for all notes
+        limit: max notes to return (default 20)
+    """
+    resp = httpx.get(f"{BASE_URL}/spaces/{space_id}/notes", timeout=10)
+    resp.raise_for_status()
+    notes = resp.json()[:limit]
+    if not notes:
+        return "(no notes)"
+    lines = []
+    for n in notes:
+        snippet = (n.get("content") or "")[:80].replace("\n", " ")
+        lines.append(f"#{n['id']} {n['title'] or '(untitled)'} — {snippet}")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

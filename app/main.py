@@ -16,6 +16,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Focus,
     Message,
     Note,
+    PublicProfile,
     Space,
 )
 from .db.schemas import ChatRequest
@@ -44,6 +45,7 @@ def _run_column_migrations(engine):
             ("notes", "last_opened_at", "INTEGER"),
             ("spaces", "emoji", "TEXT"),
             ("notes", "embedding", "TEXT"),
+            ("notes", "is_public", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -183,6 +185,7 @@ def _serialize_note(n: Note) -> dict:
         "created_at": n.created_at,
         "updated_at": n.updated_at,
         "last_opened_at": n.last_opened_at,
+        "is_public": bool(n.is_public),
     }
 
 
@@ -255,6 +258,8 @@ def update_note(
     if "space_id" in body:
         sid = body["space_id"]
         note.space_id = None if (sid is None or sid == "general") else int(sid)
+    if "is_public" in body:
+        note.is_public = bool(body["is_public"])
     db.commit()
     db.refresh(note)
     return _serialize_note(note)
@@ -606,5 +611,73 @@ def mcp_search_notes(q: str, limit: int = 5, db: Session = Depends(get_db)):
     """Search notes by semantic similarity to a query string."""
     related = note_service.search_by_query(q, limit, db)
     return [_serialize_note(n) for n in related]
+
+
+# ── Public portfolio ────────────────────────────────────────────────────────────
+
+
+def _strip_html(html: str) -> str:
+    import re
+    return re.sub(r"<[^>]+>", " ", html or "").strip()
+
+
+@app.get("/public/notes")
+def get_public_notes(db: Session = Depends(get_db)):
+    """Return all public notes with their space name, newest first. No auth."""
+    rows = (
+        db.query(Note, Space)
+        .outerjoin(Space, Note.space_id == Space.id)
+        .filter(Note.is_public == True)  # noqa: E712
+        .order_by(_notes_order())
+        .all()
+    )
+    result = []
+    for n, space in rows:
+        excerpt = _strip_html(n.content or "")[:150]
+        result.append({
+            "id": n.id,
+            "title": n.title,
+            "space_name": space.name if space else None,
+            "excerpt": excerpt,
+            "updated_at": n.updated_at,
+        })
+    return result
+
+
+@app.get("/public/notes/{note_id}")
+def get_public_note(note_id: int, db: Session = Depends(get_db)):
+    """Return a single public note's full content. 404 if not public."""
+    note = db.query(Note).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
+    if not note:
+        raise HTTPException(status_code=404, detail="Not found")
+    space = db.query(Space).filter(Space.id == note.space_id).first() if note.space_id else None
+    return {
+        "id": note.id,
+        "title": note.title,
+        "content": note.content,
+        "space_name": space.name if space else None,
+        "updated_at": note.updated_at,
+    }
+
+
+@app.get("/public/profile")
+def get_public_profile(db: Session = Depends(get_db)):
+    """Return the public bio."""
+    profile = db.query(PublicProfile).first()
+    return {"bio": profile.bio if profile else None}
+
+
+@app.patch("/public/profile")
+def update_public_profile(body: dict, db: Session = Depends(get_db)):
+    """Save the public bio."""
+    bio = body.get("bio", "")
+    profile = db.query(PublicProfile).first()
+    if profile:
+        profile.bio = bio
+    else:
+        profile = PublicProfile(bio=bio)
+        db.add(profile)
+    db.commit()
+    return {"ok": True}
 
 
