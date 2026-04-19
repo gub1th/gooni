@@ -90,7 +90,7 @@ function NotesPage() {
       )}
 
       {view === "dashboard" ? (
-        <Dashboard />
+        <Dashboard onOpenNote={() => setView("notes")} />
       ) : view === "chat" ? (
         <ChatView />
       ) : (

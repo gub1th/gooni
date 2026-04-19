@@ -28,7 +28,7 @@ function formatNoteDate(iso: string | null): string {
   return `${Math.floor(diffDays / 30)}mo ago`;
 }
 
-export function Dashboard() {
+export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [bio, setBio] = useState("");
   const [bioSaved, setBioSaved] = useState(false);
@@ -55,6 +55,7 @@ export function Dashboard() {
     const sid = spaceId == null ? "general" : String(spaceId);
     selectSpace(sid);
     loadNotes(sid).then(() => selectNote(noteId));
+    onOpenNote();
   }
 
   return (
