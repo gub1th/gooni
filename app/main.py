@@ -494,22 +494,60 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception:
         streak = 0
 
-    # Gooni's Take — generated from recent note titles
+    # Gooni's Take — generated from recent notes + conversations, recency-weighted
     gooni_take = ""
     titled = [n for n in recent_notes if n.title and n.title.strip()]
     if titled:
-        note_list = "\n".join(f"- {n.title.strip()}" for n in titled[:6])
-        mem_ctx = memory_service.build_memory_context("recent activity notes writing")
-        mem_block = f"\n\nMemory context:\n{mem_ctx}" if mem_ctx else ""
+        now = datetime.utcnow()
+
+        def _age_label(dt):
+            if not dt:
+                return "a while ago"
+            delta = now - dt
+            if delta.days == 0:
+                return "today"
+            if delta.days == 1:
+                return "yesterday"
+            return f"{delta.days} days ago"
+
+        note_lines = []
+        for n in titled[:6]:
+            note_lines.append(f"- [{_age_label(n.updated_at or n.created_at)}] {n.title.strip()}")
+        note_list = "\n".join(note_lines)
+
+        # Pull recent conversation previews (last user message per convo)
+        recent_convos = (
+            db.query(Conversation)
+            .order_by(Conversation.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        convo_lines = []
+        for c in recent_convos:
+            last_msg = (
+                db.query(Message)
+                .filter(Message.conversation_id == c.id, Message.role == "user")
+                .order_by(Message.created_at.desc())
+                .first()
+            )
+            if last_msg and last_msg.content:
+                preview = last_msg.content[:80].replace("\n", " ")
+                convo_lines.append(f"- [{_age_label(c.created_at)}] \"{preview}\"")
+        convo_block = "\nRecent chats with Gooni:\n" + "\n".join(convo_lines) if convo_lines else ""
+
+        mem_ctx = memory_service.build_memory_context("recent activity focus projects")
+        mem_block = f"\n\nLong-term memory:\n{mem_ctx}" if mem_ctx else ""
+
         prompt = (
-            f"You are Gooni — Daniel's AI notebook assistant.\n"
-            f"Write a single short paragraph (2-3 sentences) observing what Daniel has been working on "
-            f"based on his recent notes. Be direct and specific — reference actual note titles. "
-            f"No preamble, no sign-off.\n\n"
-            f"Recent notes:\n{note_list}{mem_block}\n\nWrite the observation:"
+            f"You are Gooni — Daniel's personal AI notebook.\n"
+            f"Write 2-3 tight sentences giving your honest read on where Daniel's head is at right now. "
+            f"Prioritize the most recent signals. Find the thread — what's the underlying theme or tension? "
+            f"Don't just list what you see. Synthesize. Be specific but not exhaustive. "
+            f"Skip filler phrases like 'it seems' or 'it looks like'. No preamble, no sign-off.\n\n"
+            f"Recent notes (most recent first):\n{note_list}{convo_block}{mem_block}\n\nYour take:"
         )
         try:
-            gooni_take = llm_client.generate_simple_completion(prompt, max_tokens=120)
+            gooni_take = llm_client.generate_simple_completion(prompt, max_tokens=150)
         except Exception:
             gooni_take = ""
 

@@ -8,6 +8,23 @@ export const Route = createFileRoute("/public/")(({
 
 const FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
+function PenIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}>
+      <path d="M9 2L11 4L4.5 10.5H2.5V8.5L9 2Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none"/>
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}>
+      <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.3"/>
+      <path d="M6.5 4V6.5L8 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
@@ -54,15 +71,30 @@ function PublicPage() {
 
         {/* Header */}
         <div style={{ marginBottom: 40 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.3px", marginBottom: 6 }}>
+          <div style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.4px", marginBottom: 12 }}>
             daniel gunawan
           </div>
-          <div style={{ fontSize: 13, color: "#999", display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {noteCount !== null && <span>{noteCount} notes</span>}
-            {lastActive && <span>· last active {timeAgo(lastActive)}</span>}
+          <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+            {noteCount !== null && (
+              <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#666" }}>
+                <PenIcon />
+                <span style={{ fontSize: 13 }}>
+                  {noteCount} notes written
+                  {notes.length > 0 && noteCount > notes.length && (
+                    <span style={{ color: "#bbb", marginLeft: 5 }}>· {notes.length} public</span>
+                  )}
+                </span>
+              </div>
+            )}
+            {lastActive && (
+              <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#bbb" }}>
+                <ClockIcon />
+                <span style={{ fontSize: 13 }}>active {timeAgo(lastActive)}</span>
+              </div>
+            )}
           </div>
           {bio && (
-            <p style={{ fontSize: 14.5, color: "#444", lineHeight: 1.7, margin: "16px 0 0", whiteSpace: "pre-wrap" }}>
+            <p style={{ fontSize: 14.5, color: "#444", lineHeight: 1.7, margin: "14px 0 0", whiteSpace: "pre-wrap" }}>
               {bio}
             </p>
           )}

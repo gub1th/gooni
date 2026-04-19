@@ -36,6 +36,133 @@ function DragHandle() {
   );
 }
 
+const COMMON_EMOJIS = [
+  "📁","📂","🗂️","📝","📋","📌","📎","🔖",
+  "🏷️","⭐","🌟","💫","🎯","🎨","🎭","💡",
+  "🔑","🔒","🔧","🔨","⚙️","🛠️","💼","🗃️",
+  "📊","📈","📅","🏠","🌐","💻","📱","🎮",
+  "📚","📖","✏️","🖊️","💰","🌱","🌿","🍀",
+  "🔥","❤️","🎵","🏋️","🧠","🚀","⚡","🎁",
+];
+
+interface SpacePopoverProps {
+  anchor: { top: number; left: number };
+  name: string;
+  emoji: string;
+  onNameChange: (v: string) => void;
+  onEmojiChange: (v: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}
+
+function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave, onCancel }: SpacePopoverProps) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { nameRef.current?.focus(); }, []);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={onCancel} />
+
+      {/* Popover */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "fixed", top: anchor.top, left: anchor.left,
+          zIndex: 100, background: "#fff", borderRadius: 10,
+          boxShadow: "0 4px 24px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.08)",
+          padding: "12px 12px 10px", width: 228,
+        }}
+      >
+        {/* Emoji button + name input */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: pickerOpen ? 8 : 10 }}>
+          <button
+            onClick={() => setPickerOpen((o) => !o)}
+            title="Pick emoji"
+            style={{
+              width: 32, height: 32, borderRadius: 6,
+              border: `1px solid ${pickerOpen ? "rgba(0,0,0,0.18)" : "rgba(0,0,0,0.1)"}`,
+              background: "#F2F2F7", cursor: "pointer", fontSize: 16,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              flexShrink: 0, outline: "none", transition: "border-color 0.1s",
+            }}
+          >
+            {emoji || "🗂️"}
+          </button>
+          <input
+            ref={nameRef}
+            value={name}
+            onChange={(e) => onNameChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); onSave(); }
+              if (e.key === "Escape") onCancel();
+            }}
+            placeholder="Space name"
+            style={{
+              flex: 1, fontSize: 13.5, outline: "none", border: "none",
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontWeight: 500, color: "#1C1C1E", background: "transparent",
+            }}
+          />
+        </div>
+
+        {/* Emoji grid */}
+        {pickerOpen && (
+          <div style={{
+            display: "grid", gridTemplateColumns: "repeat(8, 1fr)",
+            gap: 1, marginBottom: 10,
+            padding: "6px 0 2px",
+            borderTop: "1px solid rgba(0,0,0,0.07)",
+          }}>
+            {COMMON_EMOJIS.map((e) => (
+              <button
+                key={e}
+                onClick={() => { onEmojiChange(e); setPickerOpen(false); }}
+                style={{
+                  background: emoji === e ? "rgba(0,0,0,0.08)" : "transparent",
+                  border: "none", borderRadius: 4, cursor: "pointer",
+                  fontSize: 15, padding: "4px 2px",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Save / Cancel */}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+          <button
+            onClick={onCancel}
+            style={{
+              fontSize: 12, background: "none", border: "none",
+              cursor: "pointer", color: "#8E8E93",
+              padding: "4px 8px", borderRadius: 6,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSave}
+            style={{
+              fontSize: 12, background: "#1C1C1E", color: "#fff",
+              border: "none", borderRadius: 6, cursor: "pointer",
+              padding: "4px 12px", fontWeight: 500,
+            }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+type PopoverMode = { mode: "edit"; id: number } | { mode: "create" } | null;
+
 type SectionId = "notes" | "chat";
 
 function getSavedOrder(): SectionId[] {
@@ -69,16 +196,13 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
   const [spacesOpen, setSpacesOpen] = useState(true);
   const [sectionOrder, setSectionOrder] = useState<SectionId[]>(getSavedOrder);
 
-  // Space management state
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editEmoji, setEditEmoji] = useState("");
-  const [creatingSpace, setCreatingSpace] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newEmoji, setNewEmoji] = useState("");
+  // Space popover state
+  const [popover, setPopover] = useState<PopoverMode>(null);
+  const [popoverAnchor, setPopoverAnchor] = useState({ top: 0, left: 208 });
+  const [popoverName, setPopoverName] = useState("");
+  const [popoverEmoji, setPopoverEmoji] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
-  const editInputRef = useRef<HTMLInputElement>(null);
-  const createInputRef = useRef<HTMLInputElement>(null);
+
   const [dragOver, setDragOver] = useState<SectionId | null>(null);
   const dragging = useRef<SectionId | null>(null);
 
@@ -119,7 +243,6 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
       setDragOver(null);
       return;
     }
-    // preserve the original positions: put dragged item where target was
     const from = sectionOrder.indexOf(dragging.current);
     const to = sectionOrder.indexOf(target);
     const reordered = [...sectionOrder];
@@ -136,32 +259,39 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
     setDragOver(null);
   }
 
-  function startEdit(id: number, name: string, emoji: string | null) {
-    setEditingId(id);
-    setEditName(name);
-    setEditEmoji(emoji ?? "");
+  function openEditPopover(e: React.MouseEvent, id: number, name: string, emoji: string | null) {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPopoverAnchor({ top: Math.max(rect.top - 8, 8), left: 208 });
+    setPopoverName(name);
+    setPopoverEmoji(emoji ?? "");
     setDeleteConfirmId(null);
-    setTimeout(() => editInputRef.current?.focus(), 0);
+    setPopover({ mode: "edit", id });
   }
 
-  async function saveEdit() {
-    if (!editingId) return;
-    await updateSpace(editingId, { name: editName.trim() || "Untitled", emoji: editEmoji || null });
-    setEditingId(null);
+  function openCreatePopover(e: React.MouseEvent) {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPopoverAnchor({ top: Math.max(rect.top - 8, 8), left: 208 });
+    setPopoverName("");
+    setPopoverEmoji("");
+    setPopover({ mode: "create" });
   }
 
-  function cancelEdit() { setEditingId(null); }
+  async function handlePopoverSave() {
+    if (!popover) return;
+    if (popover.mode === "edit") {
+      await updateSpace(popover.id, { name: popoverName.trim() || "Untitled", emoji: popoverEmoji || null });
+    } else {
+      if (!popoverName.trim()) return;
+      await createSpace(popoverName.trim(), popoverEmoji || undefined);
+    }
+    setPopover(null);
+  }
 
   async function confirmDelete(id: number) {
     await deleteSpace(id);
     removeSpace(String(id));
     setDeleteConfirmId(null);
-  }
-
-  async function submitCreate() {
-    if (!newName.trim()) return;
-    await createSpace(newName.trim(), newEmoji || undefined);
-    setNewName(""); setNewEmoji(""); setCreatingSpace(false);
   }
 
   const isAllNotes = isNotes && (selectedSpaceId === "general" || selectedSpaceId === null);
@@ -221,38 +351,16 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
               <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{spacesOpen ? "▾" : "▸"}</span>
             </button>
             <button
-              onClick={() => { setCreatingSpace(true); setNewName(""); setNewEmoji(""); setTimeout(() => createInputRef.current?.focus(), 0); }}
+              onClick={openCreatePopover}
               title="New space"
               style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 16, lineHeight: 1, padding: "0 2px", display: "flex", alignItems: "center" }}
             >+</button>
           </div>
+
           {spacesOpen && spaces.filter(s => s.id !== "general").map((space) => {
             const spaceId = String(space.id);
             const isSelected = isNotes && selectedSpaceId === spaceId;
-            const isEditing = editingId === space.id;
             const isDelConfirm = deleteConfirmId === space.id;
-
-            if (isEditing) {
-              return (
-                <div key={space.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 6px", marginBottom: 2 }}>
-                  <input
-                    value={editEmoji}
-                    onChange={(e) => setEditEmoji(e.target.value)}
-                    placeholder="🗂️"
-                    style={{ width: 28, fontSize: 14, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
-                  />
-                  <input
-                    ref={editInputRef}
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") cancelEdit(); }}
-                    style={{ flex: 1, fontSize: 13, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, padding: "3px 6px", outline: "none", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}
-                  />
-                  <button onClick={saveEdit} style={{ background: "none", border: "none", cursor: "pointer", color: "#34C759", fontSize: 14, padding: "0 2px" }}>✓</button>
-                  <button onClick={cancelEdit} style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 14, padding: "0 2px" }}>✕</button>
-                </div>
-              );
-            }
 
             return (
               <div
@@ -273,7 +381,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
                   </button>
                 ) : (
                   <>
-                    <button className="space-action" onClick={(e) => { e.stopPropagation(); startEdit(space.id as number, space.name, space.emoji); }}
+                    <button className="space-action" onClick={(e) => openEditPopover(e, space.id as number, space.name, space.emoji)}
                       style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Rename">✎</button>
                     <button className="space-action" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(space.id as number); }}
                       style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Delete">×</button>
@@ -282,26 +390,6 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
               </div>
             );
           })}
-          {creatingSpace && (
-            <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 6px", marginBottom: 2 }}>
-              <input
-                value={newEmoji}
-                onChange={(e) => setNewEmoji(e.target.value)}
-                placeholder="🗂️"
-                style={{ width: 28, fontSize: 14, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, padding: "2px 3px", textAlign: "center", outline: "none" }}
-              />
-              <input
-                ref={createInputRef}
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") submitCreate(); if (e.key === "Escape") { setCreatingSpace(false); } }}
-                placeholder="Space name"
-                style={{ flex: 1, fontSize: 13, border: "1px solid rgba(0,0,0,0.15)", borderRadius: 4, padding: "3px 6px", outline: "none", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}
-              />
-              <button onClick={submitCreate} style={{ background: "none", border: "none", cursor: "pointer", color: "#34C759", fontSize: 14, padding: "0 2px" }}>✓</button>
-              <button onClick={() => setCreatingSpace(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 14, padding: "0 2px" }}>✕</button>
-            </div>
-          )}
         </>
 
         {/* Recent notes */}
@@ -418,58 +506,72 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
   const sections: Record<SectionId, React.ReactNode> = { notes: notesSection, chat: chatSection };
 
   return (
-    <div
-      style={{
-        width: 200, minWidth: 200, height: "100vh",
-        background: "#F2F2F7", display: "flex", flexDirection: "column",
-        borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box",
-      }}
-    >
-      {/* Header */}
-      <div style={{
-        height: 52, padding: "0 12px", display: "flex", alignItems: "center",
-        justifyContent: "space-between", flexShrink: 0,
-        borderBottom: "1px solid rgba(0,0,0,0.06)",
-      }}>
-        <button
-          onClick={onLogoClick}
-          title={isDashboard ? "Back to notes" : "Dashboard"}
-          style={{
-            background: isDashboard ? "rgba(0,0,0,0.08)" : "transparent",
-            border: "none", borderRadius: 6, padding: "3px 7px", cursor: "pointer",
-            fontSize: 15, fontWeight: 700,
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
-            color: "#1C1C1E", transition: "background 0.1s", outline: "none",
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.06)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.08)" : "transparent")}
-        >
-          Gooni
-        </button>
-        {showCompose && (
+    <>
+      <div
+        style={{
+          width: 200, minWidth: 200, height: "100vh",
+          background: "#F2F2F7", display: "flex", flexDirection: "column",
+          borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          height: 52, padding: "0 12px", display: "flex", alignItems: "center",
+          justifyContent: "space-between", flexShrink: 0,
+          borderBottom: "1px solid rgba(0,0,0,0.06)",
+        }}>
           <button
-            onClick={onCompose}
-            title="New note"
-            style={{ width: 30, height: 30, borderRadius: 8, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+            onClick={onLogoClick}
+            title={isDashboard ? "Back to notes" : "Dashboard"}
+            style={{
+              background: isDashboard ? "rgba(0,0,0,0.08)" : "transparent",
+              border: "none", borderRadius: 6, padding: "3px 7px", cursor: "pointer",
+              fontSize: 15, fontWeight: 700,
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
+              color: "#1C1C1E", transition: "background 0.1s", outline: "none",
+            }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.06)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.08)" : "transparent")}
           >
-            <ComposeIcon />
+            Gooni
           </button>
-        )}
+          {showCompose && (
+            <button
+              onClick={onCompose}
+              title="New note"
+              style={{ width: 30, height: 30, borderRadius: 8, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+            >
+              <ComposeIcon />
+            </button>
+          )}
+        </div>
+
+        {/* Scrollable content */}
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}>
+          {sectionOrder.map((id, i) => (
+            <div key={id}>
+              {sections[id]}
+              {i === 0 && (
+                <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 6px 2px" }} />
+              )}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Scrollable content */}
-      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}>
-        {sectionOrder.map((id, i) => (
-          <div key={id}>
-            {sections[id]}
-            {i === 0 && (
-              <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 6px 2px" }} />
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+      {popover && (
+        <SpacePopover
+          anchor={popoverAnchor}
+          name={popoverName}
+          emoji={popoverEmoji}
+          onNameChange={setPopoverName}
+          onEmojiChange={setPopoverEmoji}
+          onSave={handlePopoverSave}
+          onCancel={() => setPopover(null)}
+        />
+      )}
+    </>
   );
 }
