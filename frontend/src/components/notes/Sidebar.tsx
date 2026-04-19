@@ -51,6 +51,7 @@ function getSavedOrder(): SectionId[] {
 
 interface SidebarProps {
   isDashboard: boolean;
+  isNotes: boolean;
   showCompose: boolean;
   onLogoClick: () => void;
   onSpaceSelect: () => void;
@@ -59,7 +60,7 @@ interface SidebarProps {
   onConversationSelect: () => void;
 }
 
-export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onConversationSelect }: SidebarProps) {
+export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onConversationSelect }: SidebarProps) {
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
   const { conversations, activeId, selectConversation } = useConversationsStore();
   const { spaces } = useSpacesStore();
@@ -124,7 +125,7 @@ export function Sidebar({ isDashboard, showCompose, onLogoClick, onSpaceSelect, 
     setDragOver(null);
   }
 
-  const isAllNotes = !isDashboard && (selectedSpaceId === "general" || selectedSpaceId === null);
+  const isAllNotes = isNotes && (selectedSpaceId === "general" || selectedSpaceId === null);
 
   const notesSection = (
     <div

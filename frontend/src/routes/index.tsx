@@ -79,6 +79,7 @@ function NotesPage() {
       {sidebarOpen && (
         <Sidebar
           isDashboard={view === "dashboard"}
+          isNotes={view === "notes"}
           showCompose={view !== "notes"}
           onLogoClick={() => setView("dashboard")}
           onSpaceSelect={() => setView("notes")}
