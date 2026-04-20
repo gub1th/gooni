@@ -1,6 +1,33 @@
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
+export function getStoredToken(): string | null {
+  return localStorage.getItem("gooni_token");
+}
+
+export function setStoredToken(token: string) {
+  localStorage.setItem("gooni_token", token);
+}
+
+export function clearStoredToken() {
+  localStorage.removeItem("gooni_token");
+}
+
+export async function login(password: string): Promise<void> {
+  const res = await fetch(`${BASE}/auth`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) throw new Error("Wrong password");
+  const { token } = await res.json();
+  setStoredToken(token);
+}
+
 function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = getStoredToken();
+  if (token) {
+    init.headers = { ...(init.headers ?? {}), Authorization: `Bearer ${token}` };
+  }
   return fetch(url, init);
 }
 
