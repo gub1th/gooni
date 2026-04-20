@@ -6,6 +6,7 @@ import { GooniPanel } from "../components/GooniPanel";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { Sidebar } from "../components/notes/Sidebar";
+import { PasswordGate } from "../components/PasswordGate";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -129,6 +130,7 @@ function NotesPage() {
   }, [activeConvId, view]);
 
   return (
+    <PasswordGate>
     <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#FFFFFF", position: "relative" }}>
       {sidebarOpen && (
         <Sidebar
@@ -163,5 +165,6 @@ function NotesPage() {
         </>
       )}
     </div>
+    </PasswordGate>
   );
 }

@@ -1,10 +1,11 @@
+import hashlib
 import os
 
 from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -74,10 +75,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Auth ───────────────────────────────────────────────────────────────────────
 
-@app.get("/")
+_AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "").strip()
+
+
+def _expected_token() -> str:
+    """Derive a stateless token from the configured password."""
+    return hashlib.sha256(_AUTH_PASSWORD.encode()).hexdigest()
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    """Block non-public routes when AUTH_PASSWORD is set."""
+    if not _AUTH_PASSWORD:
+        return await call_next(request)
+
+    path = request.url.path
+    # Always allow: public routes, auth endpoint, static assets, CORS preflight
+    if (
+        path.startswith("/public")
+        or path == "/auth"
+        or path == "/healthz"
+        or path.startswith("/assets")
+        or path == "/"
+        or request.method == "OPTIONS"
+    ):
+        return await call_next(request)
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header == f"Bearer {_expected_token()}":
+        return await call_next(request)
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+
+@app.post("/auth")
+async def login(body: dict):
+    """Exchange password for a token. Returns 401 if wrong."""
+    if not _AUTH_PASSWORD:
+        # Auth disabled — return a dummy token so the frontend still works
+        return {"token": "dev"}
+    if body.get("password") != _AUTH_PASSWORD:
+        raise HTTPException(status_code=401, detail="Wrong password")
+    return {"token": _expected_token()}
+
+
+@app.get("/healthz")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "ok"}
 
 
 @app.post("/chat/intention")
@@ -697,5 +744,3 @@ def update_public_profile(body: dict, db: Session = Depends(get_db)):
         db.add(profile)
     db.commit()
     return {"ok": True}
-
-
