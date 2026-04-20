@@ -190,5 +190,26 @@ def list_notes(space_id: str = "general", limit: int = 20) -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
+def list_recent_notes(limit: int = 10) -> str:
+    """List the most recently updated notes across all spaces.
+
+    Use this to see what Daniel has been working on lately.
+
+    Args:
+        limit: max notes to return (default 10)
+    """
+    resp = httpx.get(f"{BASE_URL}/notes/recent", params={"limit": limit}, timeout=10)
+    resp.raise_for_status()
+    notes = resp.json()
+    if not notes:
+        return "(no notes)"
+    lines = []
+    for n in notes:
+        snippet = (n.get("content") or "")[:80].replace("\n", " ")
+        lines.append(f"#{n['id']} {n['title'] or '(untitled)'} — {snippet}")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
