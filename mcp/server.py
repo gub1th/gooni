@@ -2,6 +2,8 @@
 """Gooni MCP server — exposes Gooni's memory and notes to Claude Code via stdio."""
 
 import os
+import re
+from datetime import datetime, timezone
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -9,6 +11,42 @@ from mcp.server.fastmcp import FastMCP
 BASE_URL = os.getenv("GOONI_URL", "http://localhost:8000")
 
 mcp = FastMCP("gooni")
+
+# Trailing marker appended to a task item's text when an agent claims it.
+# Format:  "⏳ [agent-id | 2026-04-21T12:34Z]" at the end of the task text.
+# The timestamp group is optional to tolerate claims written by older versions.
+_CLAIM_RE = re.compile(r"\s*⏳\s*\[([^\]|]+?)(?:\s*\|\s*([^\]]+?))?\s*\]\s*$")
+
+
+def _default_agent_id() -> str:
+    """Agent label used to claim tasks. Override with GOONI_AGENT_ID env var."""
+    override = os.getenv("GOONI_AGENT_ID")
+    if override:
+        return override
+    return f"claude-{os.path.basename(os.getcwd()) or 'unknown'}"
+
+
+def _now_iso() -> str:
+    """UTC timestamp, minute precision: '2026-04-21T12:34Z'."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def _format_age(ts: str) -> str:
+    """Turn a claim timestamp into a relative age like '3h ago'. Falls back to the raw string on parse errors."""
+    if not ts:
+        return ""
+    try:
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%MZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return ts
+    secs = (datetime.now(timezone.utc) - dt).total_seconds()
+    if secs < 60:
+        return "just now"
+    if secs < 3600:
+        return f"{int(secs / 60)}m ago"
+    if secs < 86400:
+        return f"{int(secs / 3600)}h ago"
+    return f"{int(secs / 86400)}d ago"
 
 
 @mcp.tool()
@@ -134,6 +172,344 @@ def search_notes(query: str, limit: int = 5) -> str:
     return "\n".join(lines)
 
 
+def _html_to_text(html: str) -> str:
+    """Render TipTap HTML as Markdown-ish plain text.
+
+    Task-list items become `[ ] ...` or `[x] ...` so Claude can treat a
+    checklist note as a living plan.
+    """
+    from bs4 import BeautifulSoup, NavigableString, Tag
+
+    if not html or not html.strip():
+        return ""
+
+    def render(node, depth: int = 0) -> str:
+        if isinstance(node, NavigableString):
+            return str(node)
+        if not isinstance(node, Tag):
+            return ""
+
+        name = node.name
+        indent = "  " * depth
+
+        # Task-list checkbox item — render as [ ] / [x]
+        if name == "li" and node.get("data-type") == "taskItem":
+            checked = (node.get("data-checked") or "").lower() == "true"
+            mark = "[x]" if checked else "[ ]"
+            body_div = node.find("div")
+            text = body_div.get_text(" ", strip=True) if body_div else node.get_text(" ", strip=True)
+            nested = "".join(render(c, depth + 1) for c in node.find_all("ul", recursive=False))
+            return f"{indent}{mark} {text}\n{nested}"
+
+        # Bullet-list item
+        if name == "li":
+            # Render children, but skip nested <ul>/<ol> so we can handle them as siblings with extra depth
+            inline = "".join(
+                render(c, depth) for c in node.children
+                if not (isinstance(c, Tag) and c.name in ("ul", "ol"))
+            ).strip()
+            nested = "".join(
+                render(c, depth + 1) for c in node.children
+                if isinstance(c, Tag) and c.name in ("ul", "ol")
+            )
+            return f"{indent}- {inline}\n{nested}"
+
+        if name in ("ul", "ol"):
+            return "".join(render(c, depth) for c in node.children if isinstance(c, Tag))
+
+        if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            return f"\n{'#' * int(name[1])} {node.get_text(' ', strip=True)}\n\n"
+
+        if name == "p":
+            text = node.get_text(" ", strip=True)
+            return f"{text}\n\n" if text else ""
+
+        if name == "pre":
+            return f"```\n{node.get_text()}\n```\n\n"
+
+        if name == "code":
+            return f"`{node.get_text()}`"
+
+        if name == "img":
+            return "[image]"
+
+        if name == "br":
+            return "\n"
+
+        return "".join(render(c, depth) for c in node.children)
+
+    soup = BeautifulSoup(html, "html.parser")
+    return render(soup).strip()
+
+
+def _read_note_formatted(note_id: int) -> str:
+    resp = httpx.get(f"{BASE_URL}/notes/{note_id}", timeout=10)
+    if resp.status_code == 404:
+        return f"(note #{note_id} not found)"
+    resp.raise_for_status()
+    n = resp.json()
+    title = n.get("title") or "(untitled)"
+    body = _html_to_text(n.get("content") or "")
+    return f"# {title}\n\n{body}" if body else f"# {title}\n\n(empty)"
+
+
+def _find_space_by_name(name: str) -> dict | None:
+    """Case-insensitive exact-then-partial match. Returns the space dict or None."""
+    spaces = httpx.get(f"{BASE_URL}/spaces", timeout=10).json()
+    name_l = name.lower()
+    return (
+        next((s for s in spaces if (s.get("name") or "").lower() == name_l), None)
+        or next((s for s in spaces if name_l in (s.get("name") or "").lower()), None)
+    )
+
+
+def _find_command_center_note() -> dict | None:
+    """Convention: the note titled with 'todo' in the 'dev' space."""
+    dev = _find_space_by_name("dev")
+    if not dev:
+        return None
+    notes = httpx.get(f"{BASE_URL}/spaces/{dev['id']}/notes", timeout=10).json()
+    return next((n for n in notes if "todo" in (n.get("title") or "").lower()), None)
+
+
+@mcp.tool()
+def read_note(note_id: int) -> str:
+    """Read the full body of a note, with task-list checkmarks preserved.
+
+    Task items are rendered as `[ ]` (unchecked) or `[x]` (done), so a checklist
+    note in any space can serve as a persistent to-do / command-center for Claude
+    Code. Read current state → act on it → use edit_note() or check_task() to update.
+
+    Args:
+        note_id: numeric note ID (get this from list_notes, search_notes, or list_recent_notes)
+    """
+    return _read_note_formatted(note_id)
+
+
+@mcp.tool()
+def read_todos() -> str:
+    """Read Daniel's command-center todo note — the canonical entry point.
+
+    Convention: the note titled with 'todo' in the 'dev' space is the live
+    checklist. Use this whenever Daniel says 'pull my todos', 'what's on the
+    list', 'dev todos', etc. Returns items as `[ ]` / `[x]` so you can pick
+    one, work on it, then call check_task() to tick it off.
+    """
+    n = _find_command_center_note()
+    if not n:
+        return "(no command-center note found — expected a note with 'todo' in the title inside the 'dev' space)"
+    return f"[note #{n['id']}]\n" + _read_note_formatted(n["id"])
+
+
+def _find_task_li(soup, match: str):
+    """Find the first <li data-type=taskItem> whose text contains `match` (case-insensitive)."""
+    match_l = match.lower().strip()
+    return next(
+        (
+            li for li in soup.find_all("li", attrs={"data-type": "taskItem"})
+            if match_l in li.get_text(" ", strip=True).lower()
+        ),
+        None,
+    )
+
+
+def _strip_claim_from_li(li) -> tuple[str, str] | None:
+    """Remove trailing ⏳ [agent | timestamp?] marker from the task's paragraph.
+
+    Returns (agent, timestamp) or None. `timestamp` is "" if the existing claim
+    was written by an older version that didn't include one.
+    """
+    from bs4 import NavigableString
+    body = li.find("div")
+    if not body:
+        return None
+    p = body.find("p")
+    if not p:
+        return None
+
+    m = _CLAIM_RE.search(p.get_text())
+    if not m:
+        return None
+
+    agent = m.group(1).strip()
+    ts = (m.group(2) or "").strip()
+
+    remove_chars = len(m.group(0))
+    # Walk backwards through p's contents, trimming characters off the tail.
+    while remove_chars > 0 and p.contents:
+        last = p.contents[-1]
+        if isinstance(last, NavigableString):
+            text = str(last)
+            if len(text) <= remove_chars:
+                remove_chars -= len(text)
+                last.extract()
+            else:
+                last.replace_with(text[:-remove_chars])
+                remove_chars = 0
+        else:
+            # Non-text sibling at the tail — shouldn't happen for a claim marker, but stop safely.
+            break
+    return agent, ts
+
+
+def _append_claim_to_li(li, agent: str, timestamp: str | None = None) -> bool:
+    """Append ' ⏳ [agent | timestamp]' to the task's paragraph. Returns True if added.
+
+    Pass an explicit timestamp to preserve the original claim time when restoring;
+    otherwise a fresh UTC timestamp is stamped.
+    """
+    from bs4 import NavigableString
+    body = li.find("div")
+    if not body:
+        return False
+    p = body.find("p")
+    if not p:
+        return False
+    ts = timestamp or _now_iso()
+    p.append(NavigableString(f" ⏳ [{agent} | {ts}]"))
+    return True
+
+
+def _save_note_content(note_id: int, html: str):
+    r = httpx.patch(f"{BASE_URL}/notes/{note_id}", json={"content": html}, timeout=10)
+    r.raise_for_status()
+
+
+def _load_note_soup(note_id: int):
+    """Fetch note HTML and return (BeautifulSoup, None) or (None, error_string)."""
+    from bs4 import BeautifulSoup
+    resp = httpx.get(f"{BASE_URL}/notes/{note_id}", timeout=10)
+    if resp.status_code == 404:
+        return None, f"(note #{note_id} not found)"
+    resp.raise_for_status()
+    html = resp.json().get("content") or ""
+    return BeautifulSoup(html, "html.parser"), None
+
+
+def _resolve_note_id(note_id: int | None) -> tuple[int | None, str | None]:
+    """If note_id is None, fall back to the command-center note. Returns (id, error_or_None)."""
+    if note_id is not None:
+        return note_id, None
+    n = _find_command_center_note()
+    if not n:
+        return None, "(no command-center note found — pass note_id explicitly)"
+    return n["id"], None
+
+
+@mcp.tool()
+def check_task(match: str, checked: bool = True, note_id: int = None) -> str:
+    """Flip a task-list item's checkmark by text match. Auto-releases any claim on it.
+
+    Defaults to the command-center note (the 'todo' note in the 'dev' space)
+    so a bare `check_task("fix bug")` just works.
+
+    Args:
+        match: text contained in the task item (case-insensitive substring match; first hit wins)
+        checked: true to mark done [x], false to un-check [ ] — default true
+        note_id: optional — operate on a specific note instead of the command-center note
+    """
+    note_id, err = _resolve_note_id(note_id)
+    if err:
+        return err
+    soup, err = _load_note_soup(note_id)
+    if err:
+        return err
+
+    target = _find_task_li(soup, match)
+    if target is None:
+        return f"(no task matching '{match}' found in note #{note_id})"
+
+    # Strip any claim marker — checking the box implicitly releases the claim.
+    _strip_claim_from_li(target)
+
+    target["data-checked"] = "true" if checked else "false"
+    inp = target.find("input", attrs={"type": "checkbox"})
+    if inp is not None:
+        if checked:
+            inp["checked"] = "checked"
+        elif "checked" in inp.attrs:
+            del inp.attrs["checked"]
+
+    _save_note_content(note_id, str(soup))
+    text = target.get_text(" ", strip=True)
+    return f"{'[x]' if checked else '[ ]'} {text}"
+
+
+@mcp.tool()
+def claim_task(match: str, agent: str = None, note_id: int = None, force: bool = False) -> str:
+    """Mark a task as being worked on so other agents don't duplicate effort.
+
+    Appends ` ⏳ [agent | timestamp]` to the task text. Other agents (or a
+    human) see the claim and the age. Call release_task() or check_task()
+    when done.
+
+    If the task is already claimed by a DIFFERENT agent, this refuses and
+    reports the existing claim with its age. Pass `force=True` to take over
+    (useful when a prior agent crashed or a claim is clearly stale).
+
+    Args:
+        match: text contained in the task item to claim (case-insensitive substring)
+        agent: agent label to record. Defaults to $GOONI_AGENT_ID or `claude-<cwd>`.
+        note_id: optional — operate on a specific note instead of the command-center note
+        force: if True, overwrite an existing claim by a different agent
+    """
+    note_id, err = _resolve_note_id(note_id)
+    if err:
+        return err
+    soup, err = _load_note_soup(note_id)
+    if err:
+        return err
+
+    target = _find_task_li(soup, match)
+    if target is None:
+        return f"(no task matching '{match}' found in note #{note_id})"
+
+    agent = agent or _default_agent_id()
+    existing = _strip_claim_from_li(target)
+    if existing and existing[0] != agent and not force:
+        # Restore the existing claim verbatim and refuse — don't silently steal work.
+        _append_claim_to_li(target, existing[0], existing[1] or None)
+        age = f", {_format_age(existing[1])}" if existing[1] else ""
+        return f"(already claimed by '{existing[0]}'{age} — pass force=True to take over)"
+
+    _append_claim_to_li(target, agent)
+    _save_note_content(note_id, str(soup))
+    text = target.get_text(" ", strip=True)
+    took_over = existing and existing[0] != agent
+    prefix = f"took over from '{existing[0]}' — " if took_over else ""
+    return f"{prefix}claimed: {text}"
+
+
+@mcp.tool()
+def release_task(match: str, note_id: int = None) -> str:
+    """Remove the claim marker from a task without checking it off.
+
+    Args:
+        match: text contained in the task item to release (case-insensitive substring)
+        note_id: optional — operate on a specific note instead of the command-center note
+    """
+    note_id, err = _resolve_note_id(note_id)
+    if err:
+        return err
+    soup, err = _load_note_soup(note_id)
+    if err:
+        return err
+
+    target = _find_task_li(soup, match)
+    if target is None:
+        return f"(no task matching '{match}' found in note #{note_id})"
+
+    released = _strip_claim_from_li(target)
+    if not released:
+        return "(task was not claimed)"
+
+    _save_note_content(note_id, str(soup))
+    agent, ts = released
+    age = f", {_format_age(ts)}" if ts else ""
+    text = target.get_text(" ", strip=True)
+    return f"released (was '{agent}'{age}): {text}"
+
+
 @mcp.tool()
 def edit_note(note_id: int, title: str = None, content: str = None) -> str:
     """Edit an existing note in Gooni. Use this to update progress notes or evolving docs.
@@ -171,14 +547,23 @@ def list_spaces() -> str:
 
 
 @mcp.tool()
-def list_notes(space_id: str = "general", limit: int = 20) -> str:
-    """List notes in a space. Use 'general' for all notes.
+def list_notes(space: str = "general", limit: int = 20) -> str:
+    """List notes in a space. Accepts 'general', a numeric space ID, or a space name.
 
     Args:
-        space_id: numeric space ID or 'general' for all notes
+        space: 'general' for all notes, a numeric space ID, or a space name (e.g. 'dev')
         limit: max notes to return (default 20)
     """
-    resp = httpx.get(f"{BASE_URL}/spaces/{space_id}/notes", timeout=10)
+    # Resolve a name like "dev" → its numeric ID. Numeric strings and "general" pass through.
+    if space.lower() == "general" or space.isdigit():
+        space_key = space
+    else:
+        match = _find_space_by_name(space)
+        if not match:
+            return f"(no space matching '{space}')"
+        space_key = str(match["id"])
+
+    resp = httpx.get(f"{BASE_URL}/spaces/{space_key}/notes", timeout=10)
     resp.raise_for_status()
     notes = resp.json()[:limit]
     if not notes:
