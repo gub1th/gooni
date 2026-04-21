@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { fetchPublicNotes, fetchPublicProfile, type PublicNote } from "../services/api";
+import { fetchPublicNotes, fetchPublicProfile, updatePublicProfile, getStoredToken, type PublicNote } from "../services/api";
 
 export const Route = createFileRoute("/public/")(({
   component: PublicPage,
@@ -51,6 +51,11 @@ function PublicPage() {
   const [lastActive, setLastActive] = useState<string | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
 
+  const isOwner = getStoredToken() !== null;
+  const [editing, setEditing] = useState(false);
+  const [draftBio, setDraftBio] = useState("");
+  const [saving, setSaving] = useState(false);
+
   useEffect(() => {
     fetchPublicNotes().then(setNotes).catch(() => {});
     fetchPublicProfile().then((p) => {
@@ -59,6 +64,22 @@ function PublicPage() {
       setLastActive(p.last_active);
     }).catch(() => {});
   }, []);
+
+  async function handleSaveBio() {
+    setSaving(true);
+    try {
+      await updatePublicProfile(draftBio);
+      setBio(draftBio);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleStartEdit() {
+    setDraftBio(bio ?? "");
+    setEditing(true);
+  }
 
   const spaceNames = Array.from(
     new Set(notes.map((n) => n.space_name).filter((s): s is string => s !== null))
@@ -93,10 +114,70 @@ function PublicPage() {
               </div>
             )}
           </div>
-          {bio && (
-            <p style={{ fontSize: 14.5, color: "#444", lineHeight: 1.7, margin: "14px 0 0", whiteSpace: "pre-wrap" }}>
-              {bio}
-            </p>
+          {editing ? (
+            <div style={{ margin: "14px 0 0" }}>
+              <textarea
+                value={draftBio}
+                onChange={(e) => setDraftBio(e.target.value)}
+                placeholder="Write a short bio..."
+                rows={4}
+                style={{
+                  width: "100%", padding: "10px 14px", borderRadius: 10,
+                  border: "1px solid rgba(0,0,0,0.12)", fontSize: 14, fontFamily: FONT,
+                  color: "#111", outline: "none", resize: "vertical",
+                  boxSizing: "border-box", lineHeight: 1.65,
+                }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                <button
+                  onClick={handleSaveBio}
+                  disabled={saving}
+                  style={{
+                    padding: "6px 14px", borderRadius: 8, border: "none",
+                    background: "#111", color: "#fff", fontSize: 12.5,
+                    fontFamily: FONT, cursor: "pointer", fontWeight: 500,
+                  }}
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  onClick={() => setEditing(false)}
+                  style={{
+                    padding: "6px 14px", borderRadius: 8,
+                    border: "1px solid rgba(0,0,0,0.12)",
+                    background: "transparent", color: "#555", fontSize: 12.5,
+                    fontFamily: FONT, cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, margin: "14px 0 0" }}>
+              {bio ? (
+                <p style={{ fontSize: 14.5, color: "#444", lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap", flex: 1 }}>
+                  {bio}
+                </p>
+              ) : isOwner ? (
+                <p style={{ fontSize: 14, color: "#bbb", fontStyle: "italic", margin: 0, flex: 1 }}>
+                  No bio yet.
+                </p>
+              ) : null}
+              {isOwner && (
+                <button
+                  onClick={handleStartEdit}
+                  title="Edit bio"
+                  style={{
+                    flexShrink: 0, padding: "3px 10px", borderRadius: 12,
+                    border: "1px solid rgba(0,0,0,0.12)", background: "transparent",
+                    color: "#555", fontSize: 12, cursor: "pointer", fontFamily: FONT,
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+            </div>
           )}
         </div>
 

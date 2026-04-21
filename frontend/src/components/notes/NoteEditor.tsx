@@ -16,6 +16,8 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 
+type Variant = "full" | "embedded";
+
 function useEditorStyles() {
   useEffect(() => {
     let style = document.querySelector<HTMLStyleElement>("style[data-gooni-note-editor]");
@@ -29,12 +31,14 @@ function useEditorStyles() {
       .gooni-note-editor p { margin: 0 0 6px; }
       .gooni-note-editor ul,
       .gooni-note-editor ol { padding-left: 20px; margin: 0 0 6px; }
-      .gooni-note-editor > p:first-child:empty::before {
+      .gooni-note-editor.is-empty > p:first-child { position: relative; }
+      .gooni-note-editor.is-empty > p:first-child::before {
         content: "Start writing...";
         color: #AEAEB2;
         pointer-events: none;
-        float: left;
-        height: 0;
+        position: absolute;
+        top: 0;
+        left: 0;
       }
       .gooni-note-editor img {
         max-width: 100%;
@@ -173,10 +177,11 @@ function FormatToolbar({ editor }: { editor: Editor | null }) {
   );
 }
 
-export function NoteEditor() {
+export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
   useEditorStyles();
+  const embedded = variant === "embedded";
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote, createNote } = useNotesContentStore();
   const { isOpen: gooniOpen, toggle: toggleGooni } = useGooniStore();
   const { spaces } = useSpacesStore();
 
@@ -185,6 +190,7 @@ export function NoteEditor() {
 
   const [localTitle, setLocalTitle] = useState(activeNote?.title ?? "");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [editorEmpty, setEditorEmpty] = useState(true);
   const [movePicker, setMovePicker] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [relatedNotes, setRelatedNotes] = useState<ApiNote[]>([]);
@@ -297,22 +303,32 @@ export function NoteEditor() {
         TableCell,
       ],
       content: activeNote?.content ?? "",
+      autofocus: embedded ? "end" : false,
       editorProps: {
         attributes: {
           style: [
             "font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-            "font-size: 16px",
+            embedded ? "font-size: 14.5px" : "font-size: 16px",
             "line-height: 1.65",
             "color: #1C1C1E",
             "outline: none",
-            "min-height: 200px",
+            embedded ? "min-height: 80px" : "min-height: 200px",
           ].join("; "),
           class: "gooni-note-editor",
+        },
+        handleKeyDown: (_view, event) => {
+          if (embedded && event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            handleSubmit();
+            return true;
+          }
+          return false;
         },
       },
       onUpdate: ({ editor }) => {
         bodyRef.current = editor.getHTML();
         hasChanges.current = true;
+        setEditorEmpty(editor.isEmpty);
         scheduleSave();
       },
       onBlur: async () => {
@@ -322,6 +338,34 @@ export function NoteEditor() {
     },
     [activeNoteId]
   );
+
+  // Keep editorEmpty in sync when switching notes
+  useEffect(() => {
+    if (editor) setEditorEmpty(editor.isEmpty);
+  }, [editor, activeNoteId]);
+
+  // Toggle .is-empty on the editor DOM so the placeholder CSS tracks real emptiness
+  // (not CSS :empty, which breaks the moment ProseMirror inserts a trailing <br>)
+  useEffect(() => {
+    if (!editor) return;
+    const el = editor.view.dom as HTMLElement;
+    el.classList.toggle("is-empty", editorEmpty);
+  }, [editor, editorEmpty]);
+
+  async function handleSubmit() {
+    if (!editor || editor.isEmpty) return;
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (activeNoteId && activeNoteId > 0) {
+      try {
+        await updateNote(activeNoteId, titleRef.current, bodyRef.current);
+        hasChanges.current = false;
+      } catch {
+        // swallow; auto-save will retry
+      }
+    }
+    selectNote(null);
+    setEditorEmpty(true);
+  }
 
   useEffect(() => {
     if (editor && activeNote) {
@@ -388,19 +432,37 @@ export function NoteEditor() {
     .map((s) => ({ id: String(s.id), name: s.name, emoji: s.id === "general" ? "📥" : (s.emoji ?? "🗂️") }))
     .filter((s) => s.id !== currentSpaceId);
 
+  async function handleStartNewNote() {
+    const note = await createNote("general");
+    if (note) selectNote(note.id);
+  }
+
   return (
     <div
-      style={{
-        flex: 1,
-        height: "100vh",
-        background: "#FFFFFF",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        minWidth: 0,
-      }}
+      style={
+        embedded
+          ? {
+              background: "#FFFFFF",
+              border: "1px solid rgba(0,0,0,0.07)",
+              borderRadius: 14,
+              display: "flex",
+              flexDirection: "column",
+              minWidth: 0,
+              position: "relative",
+            }
+          : {
+              flex: 1,
+              height: "100vh",
+              background: "#FFFFFF",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              minWidth: 0,
+            }
+      }
     >
-      {/* Header bar — same height as Sidebar + NotesList headers */}
+      {/* Header bar — full variant only */}
+      {!embedded && (
       <div
         style={{
           height: 52,
@@ -597,39 +659,73 @@ export function NoteEditor() {
         </button>
         </div>
       </div>
+      )}
 
       {/* Editor content */}
       {!activeNote ? (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <span
+        embedded ? (
+          <button
+            onClick={handleStartNewNote}
             style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "flex-start",
+              width: "100%",
+              padding: "18px 22px",
+              minHeight: 80 + 18 * 2,
+              background: "transparent",
+              border: "none",
+              cursor: "text",
+              textAlign: "left",
               color: "#AEAEB2",
-              fontSize: 15,
+              fontSize: 14.5,
+              lineHeight: 1.65,
               fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             }}
           >
-            Select a note or press + to create one
-          </span>
-        </div>
+            Start writing...
+          </button>
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <span
+              style={{
+                color: "#AEAEB2",
+                fontSize: 15,
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              }}
+            >
+              Select a note or press + to create one
+            </span>
+          </div>
+        )
       ) : (
         <div
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: "32px 48px",
-            boxSizing: "border-box",
-            maxWidth: 740,
-            width: "100%",
-            margin: "0 auto",
-          }}
+          style={
+            embedded
+              ? {
+                  padding: "18px 22px",
+                  boxSizing: "border-box",
+                  width: "100%",
+                }
+              : {
+                  flex: 1,
+                  overflowY: "auto",
+                  padding: "32px 48px",
+                  boxSizing: "border-box",
+                  maxWidth: 740,
+                  width: "100%",
+                  margin: "0 auto",
+                }
+          }
         >
+          {!embedded && (
           <input
             ref={titleInputRef}
             value={localTitle}
@@ -652,10 +748,12 @@ export function NoteEditor() {
               lineHeight: 1.3,
             }}
           />
-          {/* Format toolbar */}
-          <FormatToolbar editor={editor} />
+          )}
+          {/* Format toolbar — full variant only */}
+          {!embedded && <FormatToolbar editor={editor} />}
 
-          {/* Public toggle */}
+          {/* Public toggle — full variant only */}
+          {!embedded && (
           <div style={{ marginBottom: 16 }}>
             <button
               onClick={() => {
@@ -679,6 +777,7 @@ export function NoteEditor() {
               🌐 Public
             </button>
           </div>
+          )}
           {editor && (
             <BubbleMenu
               editor={editor}
@@ -784,8 +883,37 @@ export function NoteEditor() {
             <EditorContent editor={editor} />
           </div>
 
-          {/* Related notes */}
-          {relatedNotes.length > 0 && (
+          {/* Subtle submit affordance — embedded variant only, visible when content exists */}
+          {embedded && !editorEmpty && (
+            <button
+              onClick={handleSubmit}
+              title="Submit (Enter)"
+              style={{
+                position: "absolute",
+                bottom: 8,
+                right: 10,
+                padding: "3px 10px",
+                borderRadius: 10,
+                border: "none",
+                background: "rgba(0,0,0,0.75)",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                letterSpacing: 0.2,
+                opacity: 0.85,
+                transition: "opacity 0.15s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "0.85")}
+            >
+              Submit ⏎
+            </button>
+          )}
+
+          {/* Related notes — full variant only */}
+          {!embedded && relatedNotes.length > 0 && (
             <div style={{ marginTop: 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
               <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>RELATED</p>
               {relatedNotes.map((n) => {
