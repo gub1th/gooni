@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { fetchDashboardStats, fetchPublicProfile, updatePublicProfile, type DashboardStats } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 
-const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
-const DISPLAY_FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
+const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const DISPLAY_FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 
 function getGreeting(): string {
   const h = new Date().getHours();

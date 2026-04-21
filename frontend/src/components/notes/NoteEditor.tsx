@@ -10,6 +10,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
+
 import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
@@ -17,91 +18,96 @@ import { useSpacesStore } from "../../stores/useSpacesStore";
 
 function useEditorStyles() {
   useEffect(() => {
-    if (document.querySelector("style[data-gooni-note-editor]")) return;
-    const style = document.createElement("style");
-    style.setAttribute("data-gooni-note-editor", "true");
+    let style = document.querySelector<HTMLStyleElement>("style[data-gooni-note-editor]");
+    if (!style) {
+      style = document.createElement("style");
+      style.setAttribute("data-gooni-note-editor", "true");
+      document.head.appendChild(style);
+    }
     style.textContent = `
-      .gooni-note-editor .ProseMirror { outline: none; }
-      .gooni-note-editor .ProseMirror p { margin: 0 0 6px; }
-      .gooni-note-editor .ProseMirror ul,
-      .gooni-note-editor .ProseMirror ol { padding-left: 20px; margin: 0 0 6px; }
-      .gooni-note-editor .ProseMirror > p:first-child:empty::before {
+      .gooni-note-editor { outline: none; }
+      .gooni-note-editor p { margin: 0 0 6px; }
+      .gooni-note-editor ul,
+      .gooni-note-editor ol { padding-left: 20px; margin: 0 0 6px; }
+      .gooni-note-editor > p:first-child:empty::before {
         content: "Start writing...";
         color: #AEAEB2;
         pointer-events: none;
         float: left;
         height: 0;
       }
-      .gooni-note-editor .ProseMirror img {
+      .gooni-note-editor img {
         max-width: 100%;
         height: auto;
         border-radius: 6px;
         display: block;
         margin: 8px 0;
       }
-      .gooni-note-editor .ProseMirror img.ProseMirror-selectednode {
+      .gooni-note-editor img.ProseMirror-selectednode {
         outline: 2px solid #007AFF;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] {
+      .gooni-note-editor ul[data-type="taskList"] {
         list-style: none;
-        padding-left: 0;
+        padding: 0;
         margin: 0 0 6px;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] {
-        list-style: none !important;
+      .gooni-note-editor ul[data-type="taskList"] li {
         display: flex;
         align-items: flex-start;
         gap: 8px;
-        margin-bottom: 4px;
-        padding: 0;
+        margin-bottom: 2px;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"]::marker { display: none; }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] label {
-        display: flex;
-        align-items: center;
-        flex-shrink: 0;
-        padding-top: 2px;
-        cursor: pointer;
+      .gooni-note-editor ul[data-type="taskList"] li > label {
+        flex: 0 0 auto;
+        margin: 0;
+        padding: 0;
         user-select: none;
         -webkit-user-select: none;
+        line-height: 1.65;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] label input[type="checkbox"] {
-        flex-shrink: 0;
+      .gooni-note-editor ul[data-type="taskList"] li > label input[type="checkbox"] {
         width: 15px;
         height: 15px;
         cursor: pointer;
         accent-color: #1C1C1E;
         margin: 0;
+        vertical-align: middle;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"][data-checked="true"] > div {
+      .gooni-note-editor ul[data-type="taskList"] li > div {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .gooni-note-editor ul[data-type="taskList"] li > div > p { margin: 0; }
+      .gooni-note-editor ul[data-type="taskList"] li[data-checked="true"] > div {
         text-decoration: line-through;
         color: #AEAEB2;
       }
+      .gooni-note-editor ul[data-type="taskList"] ul[data-type="taskList"] {
+        margin: 2px 0 0;
+      }
       .gooni-toolbar-btn { transition: background 0.1s; }
       .gooni-toolbar-btn:hover { background: rgba(0,0,0,0.05) !important; }
-      .gooni-note-editor .ProseMirror table {
+      .gooni-note-editor table {
         border-collapse: collapse;
         width: 100%;
         margin: 8px 0;
         font-size: 14px;
       }
-      .gooni-note-editor .ProseMirror table td,
-      .gooni-note-editor .ProseMirror table th {
+      .gooni-note-editor table td,
+      .gooni-note-editor table th {
         border: 1px solid rgba(0,0,0,0.12);
         padding: 6px 10px;
         min-width: 80px;
         vertical-align: top;
       }
-      .gooni-note-editor .ProseMirror table th {
+      .gooni-note-editor table th {
         background: rgba(0,0,0,0.04);
         font-weight: 600;
       }
-      .gooni-note-editor .ProseMirror table .selectedCell {
+      .gooni-note-editor table .selectedCell {
         background: rgba(0,122,255,0.08);
       }
     `;
-    document.head.appendChild(style);
   }, []);
 }
 
@@ -128,8 +134,8 @@ const TOOLBAR_ITEMS = [
   { label: "H1",  title: "Heading 1",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 1 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 1 }), style: {} },
   { label: "H2",  title: "Heading 2",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 2 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 2 }), style: {} },
   null,
-  { label: "•",   title: "Bullet list", cmd: (e: Editor | null) => e!.chain().focus().toggleBulletList().run(),        active: (e: Editor | null) => e!.isActive("bulletList"),       style: {} },
-  { label: "☑",  title: "Task list",   cmd: (e: Editor | null) => e!.chain().focus().toggleTaskList().run(),          active: (e: Editor | null) => e!.isActive("taskList"),         style: {} },
+  { label: "•",   title: "Bullet list", cmd: (e: Editor | null) => e!.chain().focus().toggleBulletList().run(), active: (e: Editor | null) => e!.isActive("bulletList"), style: {} },
+  { label: "☑",  title: "Task list",   cmd: (e: Editor | null) => e!.chain().focus().toggleTaskList().run(),   active: (e: Editor | null) => e!.isActive("taskList"),   style: {} },
   null,
   { label: "<>",  title: "Inline code", cmd: (e: Editor | null) => e!.chain().focus().toggleCode().run(),              active: (e: Editor | null) => e!.isActive("code"),             style: { fontFamily: "monospace", fontSize: "11px" } },
   { label: "```", title: "Code block",  cmd: (e: Editor | null) => e!.chain().focus().toggleCodeBlock().run(),         active: (e: Editor | null) => e!.isActive("codeBlock"),        style: { fontFamily: "monospace", fontSize: "10px" } },
@@ -155,7 +161,7 @@ function FormatToolbar({ editor }: { editor: Editor | null }) {
               background: item.active(editor) ? "rgba(0,0,0,0.09)" : "transparent",
               color: item.active(editor) ? "#1C1C1E" : "#636366",
               fontSize: 12, cursor: "pointer",
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               ...item.style,
             }}
           >
@@ -282,7 +288,7 @@ export function NoteEditor() {
     {
       extensions: [
         StarterKit,
-        Image.configure({ inline: false, allowBase64: true }),
+        Image.extend({ selectable: true }).configure({ inline: false, allowBase64: true }),
         TaskList,
         TaskItem.configure({ nested: true }),
         Table.configure({ resizable: true }),
@@ -294,7 +300,7 @@ export function NoteEditor() {
       editorProps: {
         attributes: {
           style: [
-            "font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            "font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             "font-size: 16px",
             "line-height: 1.65",
             "color: #1C1C1E",
@@ -410,7 +416,7 @@ export function NoteEditor() {
           style={{
             fontSize: 12,
             color: saveStatus === "saving" ? "#8E8E93" : saveStatus === "saved" ? "#34C759" : "#8E8E93",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             transition: "color 0.2s",
           }}
         >
@@ -426,7 +432,7 @@ export function NoteEditor() {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {/* Space suggestion */}
           {spaceSuggestion?.suggested_space_id && activeNote?.space_id === null && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 14, background: "rgba(0,122,255,0.08)", fontSize: 12, color: "#007AFF", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 14, background: "rgba(0,122,255,0.08)", fontSize: 12, color: "#007AFF", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
               <span>{spaceSuggestion.suggested_space_emoji ?? "🗂️"} {spaceSuggestion.suggested_space_name}?</span>
               <button
                 onClick={() => { if (activeNoteId) moveNote(activeNoteId, currentSpaceId, String(spaceSuggestion.suggested_space_id)); setSpaceSuggestion(null); }}
@@ -452,7 +458,7 @@ export function NoteEditor() {
                   cursor: "pointer",
                   fontSize: 12,
                   color: "#636366",
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                   display: "flex",
                   alignItems: "center",
                   gap: 4,
@@ -475,7 +481,7 @@ export function NoteEditor() {
                     padding: 6,
                     minWidth: 160,
                     zIndex: 100,
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                   }}
                 >
                   {moveTargets.map((space) => (
@@ -522,7 +528,7 @@ export function NoteEditor() {
                   background: deleteConfirm ? "rgba(255,59,48,0.10)" : "rgba(0,0,0,0.05)",
                   cursor: "pointer", fontSize: 12,
                   color: deleteConfirm ? "#FF3B30" : "#636366",
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                   display: "flex", alignItems: "center", gap: 4,
                   transition: "background 0.1s",
                 }}
@@ -537,7 +543,7 @@ export function NoteEditor() {
                   background: "#FFFFFF", borderRadius: 10,
                   boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
                   padding: 6, minWidth: 160, zIndex: 100,
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}>
                   <div style={{ padding: "6px 10px 8px", fontSize: 12.5, color: "#636366" }}>
                     Delete this note?
@@ -577,7 +583,7 @@ export function NoteEditor() {
             cursor: "pointer",
             fontSize: 13,
             color: gooniOpen ? "#1C1C1E" : "#636366",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             fontWeight: gooniOpen ? 600 : 400,
             display: "flex",
             alignItems: "center",
@@ -606,7 +612,7 @@ export function NoteEditor() {
             style={{
               color: "#AEAEB2",
               fontSize: 15,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             }}
           >
             Select a note or press + to create one
@@ -636,7 +642,7 @@ export function NoteEditor() {
               width: "100%",
               fontSize: 28,
               fontWeight: 700,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               color: "#1C1C1E",
               border: "none",
               outline: "none",
@@ -666,7 +672,7 @@ export function NoteEditor() {
                 color: localIsPublic ? "#fff" : "#636366",
                 fontSize: 12,
                 cursor: "pointer",
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                 transition: "background 0.15s, color 0.15s",
               }}
             >
@@ -707,7 +713,7 @@ export function NoteEditor() {
                     color: active ? "#fff" : "rgba(255,255,255,0.7)",
                     fontSize: 12,
                     cursor: "pointer",
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                     ...style,
                   }}
                 >
@@ -781,7 +787,7 @@ export function NoteEditor() {
           {/* Related notes */}
           {relatedNotes.length > 0 && (
             <div style={{ marginTop: 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-              <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>RELATED</p>
+              <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>RELATED</p>
               {relatedNotes.map((n) => {
                 const targetSpaceId = n.space_id ? String(n.space_id) : "general";
                 return (
@@ -792,10 +798,10 @@ export function NoteEditor() {
                     onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)")}
                     onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
                   >
-                    <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {n.title || "Untitled"}
                     </span>
-                    <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+                    <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
                       {formatNoteDate(n.updated_at)}
                     </span>
                   </button>

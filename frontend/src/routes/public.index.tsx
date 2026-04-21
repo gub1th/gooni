@@ -6,7 +6,7 @@ export const Route = createFileRoute("/public/")(({
   component: PublicPage,
 }));
 
-const FONT = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+const FONT = "'Manrope', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 
 function PenIcon() {
   return (

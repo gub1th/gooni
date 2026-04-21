@@ -1,4 +1,4 @@
-const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
+const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const NODES = [
   { x: 27, y:  7, d: 0.0 },
