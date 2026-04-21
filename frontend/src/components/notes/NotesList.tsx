@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
-import type { ApiNote } from "../../services/api";
+import { cleanupEmptyNotes, patchNote, type ApiNote } from "../../services/api";
 
 // Module-level drag state so Sidebar can read it without prop drilling
 export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
@@ -84,10 +84,11 @@ interface NoteRowProps {
   onDragStart: (id: number) => void;
   onDragEnd: () => void;
   onContextMenu: (e: React.MouseEvent, noteId: number) => void;
+  onTogglePin: (note: ApiNote) => void;
 }
 
-function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDragStart, onDragEnd, onContextMenu }: NoteRowProps) {
-  const preview = note.content ? stripHtml(note.content).slice(0, 60) : "";
+function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDragStart, onDragEnd, onContextMenu, onTogglePin }: NoteRowProps) {
+  const preview = note.content ? stripHtml(note.content).slice(0, 50) : "";
   const title = note.title?.trim() || "New Note";
 
   return (
@@ -106,8 +107,9 @@ function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDrag
       onClick={onSelect}
       onContextMenu={(e) => onContextMenu(e, note.id)}
       style={{
-        padding: "10px 14px",
-        borderBottom: "1px solid rgba(0,0,0,0.06)",
+        position: "relative",
+        padding: "8px 10px",
+        borderBottom: "1px solid rgba(0,0,0,0.05)",
         cursor: note.id > 0 ? "grab" : "pointer",
         background: active ? "rgba(0,0,0,0.07)" : "transparent",
         transition: "background 0.1s, opacity 0.15s",
@@ -116,39 +118,55 @@ function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDrag
       }}
       onMouseEnter={(e) => {
         if (!active) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.04)";
+        (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".row-action").forEach(b => b.style.opacity = "1");
       }}
       onMouseLeave={(e) => {
         if (!active) (e.currentTarget as HTMLDivElement).style.background = "transparent";
+        (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".row-action").forEach(b => b.style.opacity = note.is_pinned ? "1" : "0");
       }}
     >
-      <div
-        style={{
-          fontSize: 14,
-          fontWeight: 600,
-          color: "#1C1C1E",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-          marginBottom: 2,
-        }}
-      >
-        {title}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 1 }}>
+        <div
+          style={{
+            flex: 1,
+            fontSize: 13,
+            fontWeight: 600,
+            color: "#1C1C1E",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+          }}
+        >
+          {title}
+        </div>
+        <button
+          className="row-action"
+          onClick={(e) => { e.stopPropagation(); onTogglePin(note); }}
+          title={note.is_pinned ? "Unpin" : "Pin"}
+          style={{
+            opacity: note.is_pinned ? 1 : 0,
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 11, padding: "0 2px", flexShrink: 0, lineHeight: 1,
+            color: note.is_pinned ? "#FFB020" : "#8E8E93",
+            transition: "opacity 0.1s",
+          }}
+        >📌</button>
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
-        <span style={{ fontSize: 12, color: "#8E8E93", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", flexShrink: 0 }}>
+        <span style={{ fontSize: 11, color: "#8E8E93", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", flexShrink: 0 }}>
           {formatTime(note.updated_at)}
         </span>
         {preview && (
-          <span style={{ fontSize: 12, color: "#AEAEB2", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ fontSize: 11, color: "#AEAEB2", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {preview}
           </span>
         )}
       </div>
       {spaceBadge && (
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5, background: "rgba(0,0,0,0.07)", borderRadius: 5, padding: "2px 7px 2px 5px" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 3, marginTop: 4, background: "rgba(0,0,0,0.06)", borderRadius: 4, padding: "1px 5px 1px 4px" }}>
           <FolderIcon />
-          <span style={{ fontSize: 11.5, color: "#3C3C43", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: 500 }}>
+          <span style={{ fontSize: 10.5, color: "#3C3C43", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: 500 }}>
             {spaceBadge}
           </span>
         </div>
@@ -160,10 +178,12 @@ function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDrag
 function SectionHeader({ label }: { label: string }) {
   return (
     <div style={{
-      padding: "14px 14px 6px",
-      fontSize: 20,
-      fontWeight: 700,
-      color: "#1C1C1E",
+      padding: "10px 10px 4px",
+      fontSize: 10.5,
+      fontWeight: 600,
+      color: "#AEAEB2",
+      letterSpacing: 0.5,
+      textTransform: "uppercase",
       fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
     }}>
       {label}
@@ -172,10 +192,11 @@ function SectionHeader({ label }: { label: string }) {
 }
 
 export function NotesList() {
-  const { selectedSpaceId, notes, activeNoteId, createNote, selectNote, deleteNote } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId, createNote, selectNote, deleteNote, loadNotes } = useNotesContentStore();
   const spaces = useSpacesStore((s) => s.spaces);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [cleanConfirm, setCleanConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const spaceId = selectedSpaceId ?? "general";
@@ -223,25 +244,59 @@ export function NotesList() {
     await deleteNote(id, spaceId);
   }
 
+  async function handleTogglePin(note: ApiNote) {
+    const updated = await patchNote(note.id, { is_pinned: !note.is_pinned });
+    // Refresh current space so pin state updates in-list
+    loadNotes(spaceId);
+    return updated;
+  }
+
+  async function handleCleanInbox() {
+    if (!cleanConfirm) {
+      setCleanConfirm(true);
+      return;
+    }
+    setCleanConfirm(false);
+    const { deleted } = await cleanupEmptyNotes();
+    if (deleted > 0) loadNotes(spaceId);
+  }
+
   const groups = isAllNotes ? groupNotes(noteList) : null;
 
   return (
     <div
-      style={{ width: 260, minWidth: 260, height: "100vh", background: "#FAFAFA", display: "flex", flexDirection: "column", borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box" }}
+      style={{ width: 210, minWidth: 210, height: "100vh", background: "#FAFAFA", display: "flex", flexDirection: "column", borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box" }}
     >
       {/* Header */}
-      <div style={{ height: 52, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 8 }}>
-        <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+      <div style={{ height: 52, padding: "0 10px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 6 }}>
+        <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {headerLabel}
         </span>
+        {isAllNotes && (
+          <button
+            onClick={handleCleanInbox}
+            onMouseLeave={() => setCleanConfirm(false)}
+            title={cleanConfirm ? "Click again to confirm" : "Delete empty untitled notes"}
+            style={{
+              height: 26, padding: "0 8px", borderRadius: 6,
+              background: cleanConfirm ? "#FF3B30" : "transparent", border: "none",
+              cursor: "pointer", color: cleanConfirm ? "#fff" : "#8E8E93", fontSize: 11.5,
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+              fontWeight: 500, flexShrink: 0, transition: "background 0.1s, color 0.1s",
+            }}
+            onMouseEnter={(e) => { if (!cleanConfirm) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+          >
+            {cleanConfirm ? "sure?" : "🧹"}
+          </button>
+        )}
         <button
           onClick={() => createNote(spaceId)}
           title="New note"
-          style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(0,0,0,0.06)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s" }}
+          style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(0,0,0,0.06)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s" }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
         >
-          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg width="13" height="13" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M11 1.5L13.5 4L6.5 11H4V8.5L11 1.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none"/>
             <path d="M2 13.5H13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
           </svg>
@@ -272,6 +327,7 @@ export function NotesList() {
                     onDragStart={(id) => setDraggingId(id)}
                     onDragEnd={() => setDraggingId(null)}
                     onContextMenu={handleContextMenu}
+                    onTogglePin={handleTogglePin}
                   />
                 ))}
               </div>
@@ -287,6 +343,7 @@ export function NotesList() {
                 onDragStart={(id) => setDraggingId(id)}
                 onDragEnd={() => setDraggingId(null)}
                 onContextMenu={handleContextMenu}
+                onTogglePin={handleTogglePin}
               />
             ))}
       </div>

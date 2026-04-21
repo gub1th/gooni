@@ -64,6 +64,7 @@ export const useNotesContentStore = create<NotesContentState>()(
           updated_at: now,
           last_opened_at: null,
           is_public: false,
+          is_pinned: false,
         };
         // Go through selectNote so the prev note gets memorized if dirty
         get().selectNote(tempId);

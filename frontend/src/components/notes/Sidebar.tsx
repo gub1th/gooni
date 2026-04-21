@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useConversationsStore } from "../../stores/useConversationsStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
-import { fetchRecentNotes, type ApiNote } from "../../services/api";
+import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -192,7 +192,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
   const { conversations, activeId, selectConversation } = useConversationsStore();
   const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
 
-  const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
+  const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
   const [spacesOpen, setSpacesOpen] = useState(true);
   const [sectionOrder, setSectionOrder] = useState<SectionId[]>(getSavedOrder);
 
@@ -207,23 +207,26 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
   const dragging = useRef<SectionId | null>(null);
 
   useEffect(() => {
-    fetchRecentNotes(5).then(setRecentNotes).catch(() => {});
-  }, []);
+    fetchPinnedNotes().then(setPinnedNotes).catch(() => {});
+  }, [activeNoteId]);
+
+  async function handleUnpin(noteId: number) {
+    await patchNote(noteId, { is_pinned: false });
+    setPinnedNotes((prev) => prev.filter((n) => n.id !== noteId));
+  }
 
   function handleAllNotes() {
-    if (selectedSpaceId !== "general" && selectedSpaceId !== null) {
-      selectSpace("general");
-      loadNotes("general");
-    }
+    // Always deselect & reload so the click is perceivable even when we're already in All Notes.
+    selectSpace("general");
+    loadNotes("general");
     onSpaceSelect();
   }
 
   function handleSelectRecentNote(note: ApiNote) {
     const spaceId = note.space_id == null ? "general" : String(note.space_id);
     selectSpace(spaceId);
-    loadNotes(spaceId).then(() => {
-      selectNote(note.id);
-    });
+    selectNote(note.id); // set eagerly so the editor shows the right note immediately
+    loadNotes(spaceId);  // fire-and-forget refresh
     onSpaceSelect();
   }
 
@@ -368,7 +371,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
                 style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 4px 0 10px", height: 30, borderRadius: 8, cursor: "pointer", background: isSelected ? "rgba(0,0,0,0.09)" : "transparent", transition: "background 0.12s", userSelect: "none" }}
                 onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "1"); }}
                 onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "0"); setDeleteConfirmId(null); }}
-                onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; if (spaceId !== selectedSpaceId) { selectSpace(spaceId); loadNotes(spaceId); } onSpaceSelect(); }}
+                onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; selectSpace(spaceId); loadNotes(spaceId); onSpaceSelect(); }}
               >
                 <span style={{ fontSize: 13, flexShrink: 0 }}>{space.emoji ?? "🗂️"}</span>
                 <span style={{ flex: 1, fontSize: 13, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -392,43 +395,49 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
           })}
         </>
 
-        {/* Recent notes */}
-        {recentNotes.length > 0 && (
+        {/* Pinned notes */}
+        {pinnedNotes.length > 0 && (
           <>
-            <div style={{ padding: "6px 6px 2px" }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>RECENT</span>
+            <div style={{ padding: "10px 6px 2px" }}>
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
             </div>
-            {recentNotes.map((note) => {
+            {pinnedNotes.map((note) => {
               const selected = activeNoteId === note.id;
               return (
-                <button
+                <div
                   key={note.id}
-                  onClick={() => handleSelectRecentNote(note)}
                   style={{
-                    display: "flex", flexDirection: "column", alignItems: "flex-start",
-                    width: "100%", padding: "5px 10px", borderRadius: 8, border: "none",
-                    background: selected ? "rgba(0,0,0,0.08)" : "transparent",
-                    cursor: "pointer", textAlign: "left", transition: "background 0.1s",
+                    display: "flex", alignItems: "center", gap: 4,
+                    padding: "0 4px 0 10px", height: 30, borderRadius: 8,
+                    cursor: "pointer",
+                    background: selected ? "rgba(0,0,0,0.09)" : "transparent",
+                    transition: "background 0.12s",
                   }}
-                  onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
-                  onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                  onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "1"); }}
+                  onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "0"); }}
+                  onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; handleSelectRecentNote(note); }}
                 >
+                  <span style={{ fontSize: 11, flexShrink: 0, color: "#FFB020" }}>📌</span>
                   <span style={{
-                    fontSize: 13,
+                    flex: 1, fontSize: 13,
                     fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                     fontWeight: selected ? 600 : 400, color: "#1C1C1E",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}>
-                    {note.title || "Untitled"}
+                    {note.title?.trim() || "Untitled"}
                   </span>
-                  <span style={{ fontSize: 11, color: "#AEAEB2", marginTop: 1, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-                    {relativeTime(note.updated_at)}
-                  </span>
-                </button>
+                  <button
+                    className="pin-action"
+                    onClick={(e) => { e.stopPropagation(); handleUnpin(note.id); }}
+                    title="Unpin"
+                    style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
+                  >×</button>
+                </div>
               );
             })}
           </>
         )}
+
       </div>
     </div>
   );
@@ -450,28 +459,17 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
       {/* Section header */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px 4px", cursor: "grab" }}>
         <DragHandle />
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
+        <span style={{ flex: 1, fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
           CHAT
         </span>
+        <button
+          onClick={onNewChat}
+          title="New chat"
+          style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 16, lineHeight: 1, padding: "0 2px", display: "flex", alignItems: "center" }}
+        >+</button>
       </div>
 
       <div style={{ padding: "0 6px 4px" }}>
-        <button
-          onClick={onNewChat}
-          style={{
-            display: "flex", alignItems: "center", gap: 6,
-            margin: "0 0 4px", padding: "7px 10px", borderRadius: 8, border: "none",
-            background: "transparent", color: "#1C1C1E", fontSize: 13,
-            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-            fontWeight: 500, cursor: "pointer", width: "100%", textAlign: "left",
-            transition: "background 0.1s", outline: "none",
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-        >
-          + New Chat
-        </button>
-
         {conversations.slice(0, 5).map((conv) => (
           <button
             key={conv.id}

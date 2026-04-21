@@ -10,7 +10,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
-import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, fetchRecentNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
+import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
@@ -110,39 +110,6 @@ function useEditorStyles() {
       .gooni-note-editor table .selectedCell {
         background: rgba(0,122,255,0.08);
       }
-      .gooni-feed-item {
-        opacity: 0;
-        transform: translateY(24px);
-        transition: opacity 450ms ease-out, transform 450ms ease-out;
-        will-change: opacity, transform;
-      }
-      .gooni-feed-item.visible {
-        opacity: 1;
-        transform: translateY(0);
-      }
-      .gooni-feed-item .gooni-feed-body {
-        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
-        font-size: 16px;
-        line-height: 1.65;
-        color: #1C1C1E;
-      }
-      .gooni-feed-item .gooni-feed-body p { margin: 0 0 6px; }
-      .gooni-feed-item .gooni-feed-body ul,
-      .gooni-feed-item .gooni-feed-body ol { padding-left: 20px; margin: 0 0 6px; }
-      .gooni-feed-item .gooni-feed-body img {
-        max-width: 100%;
-        height: auto;
-        border-radius: 6px;
-        display: block;
-        margin: 8px 0;
-      }
-      .gooni-feed-item .gooni-feed-body h1 { font-size: 22px; margin: 10px 0 8px; }
-      .gooni-feed-item .gooni-feed-body h2 { font-size: 18px; margin: 8px 0 6px; }
-      .gooni-feed-item .gooni-feed-body ul[data-type="taskList"] { list-style: none; padding-left: 0; }
-      .gooni-feed-item .gooni-feed-body ul[data-type="taskList"] li { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 4px; }
-      .gooni-feed-item .gooni-feed-body table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 14px; }
-      .gooni-feed-item .gooni-feed-body table td,
-      .gooni-feed-item .gooni-feed-body table th { border: 1px solid rgba(0,0,0,0.12); padding: 6px 10px; }
     `;
   }, []);
 }
@@ -209,63 +176,6 @@ function FormatToolbar({ editor }: { editor: Editor | null }) {
   );
 }
 
-interface FeedItemProps {
-  note: ApiNote;
-  onSelect: () => void;
-}
-
-function FeedItem({ note, onSelect }: FeedItemProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true);
-          obs.disconnect();
-        }
-      },
-      { threshold: 0.08, rootMargin: "0px 0px -5% 0px" }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      className={`gooni-feed-item${visible ? " visible" : ""}`}
-      onClick={onSelect}
-      style={{
-        minHeight: "75vh",
-        padding: "48px 0 72px",
-        cursor: "pointer",
-        borderTop: "1px solid rgba(0,0,0,0.06)",
-      }}
-    >
-      <h2
-        style={{
-          fontSize: 26,
-          fontWeight: 700,
-          color: "#1C1C1E",
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
-          margin: "0 0 14px",
-          lineHeight: 1.3,
-        }}
-      >
-        {note.title?.trim() || "Untitled"}
-      </h2>
-      <div
-        className="gooni-feed-body"
-        dangerouslySetInnerHTML={{ __html: note.content ?? "" }}
-      />
-    </div>
-  );
-}
-
 export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
   useEditorStyles();
   const embedded = variant === "embedded";
@@ -287,7 +197,6 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
   const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
   const movePickerRef = useRef<HTMLDivElement>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
-  const [feedNotes, setFeedNotes] = useState<ApiNote[]>([]);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<string>(activeNote?.content ?? "");
   const titleRef = useRef<string>(activeNote?.title ?? "");
@@ -328,21 +237,6 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
     }, 1000);
     return () => clearTimeout(t);
   }, [activeNoteId]);
-
-  // Recent-notes feed (shown below the active note)
-  useEffect(() => {
-    fetchRecentNotes(8)
-      .then((list) => setFeedNotes(list.filter((n) => n.id !== activeNoteId)))
-      .catch(() => {});
-  }, [activeNoteId]);
-
-  async function handleSelectFromFeed(note: ApiNote) {
-    const targetSpaceId = note.space_id == null ? "general" : String(note.space_id);
-    selectSpace(targetSpaceId);
-    await loadNotes(targetSpaceId);
-    selectNote(note.id);
-    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }
 
   // Memorize previous note on leave; touch new note on enter — catches ALL navigation paths
   useEffect(() => {
@@ -437,7 +331,23 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
         setEditorEmpty(editor.isEmpty);
         scheduleSave();
       },
-      onBlur: async () => {
+      onBlur: async ({ editor }) => {
+        // If the embedded editor was focused but nothing was typed, delete the
+        // placeholder note instead of leaving behind an empty row.
+        if (
+          embedded &&
+          activeNoteId && activeNoteId > 0 &&
+          !hasChanges.current &&
+          editor.isEmpty &&
+          !(titleRef.current ?? "").trim()
+        ) {
+          try {
+            await deleteNote(activeNoteId, "general");
+          } catch {
+            // if delete fails, fall through to normal save path
+          }
+          return;
+        }
         await save();
         embedAndCheck(activeNoteId);
       },
@@ -874,6 +784,21 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
           style={{ flex: 1, overflowY: "auto", boxSizing: "border-box", width: "100%" }}
         >
           <div style={{ maxWidth: 740, width: "100%", margin: "0 auto", padding: "32px 48px", boxSizing: "border-box" }}>
+            {!activeNote && (
+              <div
+                style={{
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  minHeight: "70vh", textAlign: "center", color: "#AEAEB2",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                }}
+              >
+                <div style={{ fontSize: 28, marginBottom: 12 }}>📝</div>
+                <div style={{ fontSize: 15, color: "#8E8E93", marginBottom: 4 }}>No note selected</div>
+                <div style={{ fontSize: 13, color: "#C7C7CC" }}>
+                  Pick one from the list, or press <kbd style={{ padding: "1px 5px", borderRadius: 4, background: "rgba(0,0,0,0.06)", fontSize: 12, fontFamily: "inherit" }}>⌘N</kbd> to start a new one.
+                </div>
+              </div>
+            )}
             {activeNote && (
               <div style={{ minHeight: "75vh" }}>
                 <input
@@ -1054,10 +979,6 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
               </div>
             )}
 
-            {/* Recent notes feed */}
-            {feedNotes.map((note) => (
-              <FeedItem key={note.id} note={note} onSelect={() => handleSelectFromFeed(note)} />
-            ))}
           </div>
         </div>
       )}
