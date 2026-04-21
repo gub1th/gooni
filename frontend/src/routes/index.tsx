@@ -4,7 +4,6 @@ import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
 import { GooniPanel } from "../components/GooniPanel";
 import { NoteEditor } from "../components/notes/NoteEditor";
-import { NotesList } from "../components/notes/NotesList";
 import { Sidebar } from "../components/notes/Sidebar";
 import { PasswordGate } from "../components/PasswordGate";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -151,7 +150,6 @@ function NotesPage() {
         <ChatView />
       ) : (
         <>
-          <NotesList />
           <NoteEditor />
           {isGooniOpen && (
             isSmall ? (
