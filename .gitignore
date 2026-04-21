@@ -57,5 +57,6 @@ frontend/.tanstack/
 # app
 app/misc/
 
-# Local AI session memory
-.claude/
+# Local AI session memory — keep skills tracked, ignore everything else under .claude/
+.claude/*
+!.claude/skills/
