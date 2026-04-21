@@ -15,89 +15,99 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 
+type Variant = "full" | "embedded";
+
 function useEditorStyles() {
   useEffect(() => {
-    if (document.querySelector("style[data-gooni-note-editor]")) return;
-    const style = document.createElement("style");
-    style.setAttribute("data-gooni-note-editor", "true");
+    let style = document.querySelector<HTMLStyleElement>("style[data-gooni-note-editor]");
+    if (!style) {
+      style = document.createElement("style");
+      style.setAttribute("data-gooni-note-editor", "true");
+      document.head.appendChild(style);
+    }
     style.textContent = `
-      .gooni-note-editor .ProseMirror { outline: none; }
-      .gooni-note-editor .ProseMirror p { margin: 0 0 6px; }
-      .gooni-note-editor .ProseMirror ul,
-      .gooni-note-editor .ProseMirror ol { padding-left: 20px; margin: 0 0 6px; }
-      .gooni-note-editor .ProseMirror > p:first-child:empty::before {
+      .gooni-note-editor { outline: none; }
+      .gooni-note-editor p { margin: 0 0 6px; }
+      .gooni-note-editor ul,
+      .gooni-note-editor ol { padding-left: 20px; margin: 0 0 6px; }
+      .gooni-note-editor.is-empty > p:first-child { position: relative; }
+      .gooni-note-editor.is-empty > p:first-child::before {
         content: "Start writing...";
         color: #AEAEB2;
         pointer-events: none;
-        float: left;
-        height: 0;
+        position: absolute;
+        top: 0;
+        left: 0;
       }
-      .gooni-note-editor .ProseMirror img {
+      .gooni-note-editor img {
         max-width: 100%;
         height: auto;
         border-radius: 6px;
         display: block;
         margin: 8px 0;
       }
-      .gooni-note-editor .ProseMirror img.ProseMirror-selectednode {
+      .gooni-note-editor img.ProseMirror-selectednode {
         outline: 2px solid #007AFF;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] {
+      .gooni-note-editor ul[data-type="taskList"] {
         list-style: none;
-        padding-left: 0;
+        padding: 0;
         margin: 0 0 6px;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] {
-        list-style: none !important;
+      .gooni-note-editor ul[data-type="taskList"] li {
         display: flex;
         align-items: flex-start;
         gap: 8px;
-        margin-bottom: 4px;
-        padding: 0;
+        margin-bottom: 2px;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"]::marker { display: none; }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] label {
-        display: flex;
-        align-items: center;
-        flex-shrink: 0;
-        padding-top: 2px;
-        cursor: pointer;
+      .gooni-note-editor ul[data-type="taskList"] li > label {
+        flex: 0 0 auto;
+        margin: 0;
+        padding: 0;
         user-select: none;
         -webkit-user-select: none;
+        line-height: 1.65;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] label input[type="checkbox"] {
-        flex-shrink: 0;
+      .gooni-note-editor ul[data-type="taskList"] li > label input[type="checkbox"] {
         width: 15px;
         height: 15px;
         cursor: pointer;
         accent-color: #1C1C1E;
         margin: 0;
+        vertical-align: middle;
       }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
-      .gooni-note-editor .ProseMirror ul[data-type="taskList"] li[data-type="taskItem"][data-checked="true"] > div {
+      .gooni-note-editor ul[data-type="taskList"] li > div {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .gooni-note-editor ul[data-type="taskList"] li > div > p { margin: 0; }
+      .gooni-note-editor ul[data-type="taskList"] li[data-checked="true"] > div {
         text-decoration: line-through;
         color: #AEAEB2;
       }
+      .gooni-note-editor ul[data-type="taskList"] ul[data-type="taskList"] {
+        margin: 2px 0 0;
+      }
       .gooni-toolbar-btn { transition: background 0.1s; }
       .gooni-toolbar-btn:hover { background: rgba(0,0,0,0.05) !important; }
-      .gooni-note-editor .ProseMirror table {
+      .gooni-note-editor table {
         border-collapse: collapse;
         width: 100%;
         margin: 8px 0;
         font-size: 14px;
       }
-      .gooni-note-editor .ProseMirror table td,
-      .gooni-note-editor .ProseMirror table th {
+      .gooni-note-editor table td,
+      .gooni-note-editor table th {
         border: 1px solid rgba(0,0,0,0.12);
         padding: 6px 10px;
         min-width: 80px;
         vertical-align: top;
       }
-      .gooni-note-editor .ProseMirror table th {
+      .gooni-note-editor table th {
         background: rgba(0,0,0,0.04);
         font-weight: 600;
       }
-      .gooni-note-editor .ProseMirror table .selectedCell {
+      .gooni-note-editor table .selectedCell {
         background: rgba(0,122,255,0.08);
       }
       .gooni-feed-item {
@@ -134,7 +144,6 @@ function useEditorStyles() {
       .gooni-feed-item .gooni-feed-body table td,
       .gooni-feed-item .gooni-feed-body table th { border: 1px solid rgba(0,0,0,0.12); padding: 6px 10px; }
     `;
-    document.head.appendChild(style);
   }, []);
 }
 
@@ -161,8 +170,8 @@ const TOOLBAR_ITEMS = [
   { label: "H1",  title: "Heading 1",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 1 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 1 }), style: {} },
   { label: "H2",  title: "Heading 2",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 2 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 2 }), style: {} },
   null,
-  { label: "•",   title: "Bullet list", cmd: (e: Editor | null) => e!.chain().focus().toggleBulletList().run(),        active: (e: Editor | null) => e!.isActive("bulletList"),       style: {} },
-  { label: "☑",  title: "Task list",   cmd: (e: Editor | null) => e!.chain().focus().toggleTaskList().run(),          active: (e: Editor | null) => e!.isActive("taskList"),         style: {} },
+  { label: "•",   title: "Bullet list", cmd: (e: Editor | null) => e!.chain().focus().toggleBulletList().run(), active: (e: Editor | null) => e!.isActive("bulletList"), style: {} },
+  { label: "☑",  title: "Task list",   cmd: (e: Editor | null) => e!.chain().focus().toggleTaskList().run(),   active: (e: Editor | null) => e!.isActive("taskList"),   style: {} },
   null,
   { label: "<>",  title: "Inline code", cmd: (e: Editor | null) => e!.chain().focus().toggleCode().run(),              active: (e: Editor | null) => e!.isActive("code"),             style: { fontFamily: "monospace", fontSize: "11px" } },
   { label: "```", title: "Code block",  cmd: (e: Editor | null) => e!.chain().focus().toggleCodeBlock().run(),         active: (e: Editor | null) => e!.isActive("codeBlock"),        style: { fontFamily: "monospace", fontSize: "10px" } },
@@ -188,7 +197,7 @@ function FormatToolbar({ editor }: { editor: Editor | null }) {
               background: item.active(editor) ? "rgba(0,0,0,0.09)" : "transparent",
               color: item.active(editor) ? "#1C1C1E" : "#636366",
               fontSize: 12, cursor: "pointer",
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               ...item.style,
             }}
           >
@@ -257,10 +266,11 @@ function FeedItem({ note, onSelect }: FeedItemProps) {
   );
 }
 
-export function NoteEditor() {
+export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
   useEditorStyles();
+  const embedded = variant === "embedded";
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote, createNote } = useNotesContentStore();
   const { isOpen: gooniOpen, toggle: toggleGooni } = useGooniStore();
   const { spaces } = useSpacesStore();
 
@@ -269,6 +279,7 @@ export function NoteEditor() {
 
   const [localTitle, setLocalTitle] = useState(activeNote?.title ?? "");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [editorEmpty, setEditorEmpty] = useState(true);
   const [movePicker, setMovePicker] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [relatedNotes, setRelatedNotes] = useState<ApiNote[]>([]);
@@ -389,7 +400,7 @@ export function NoteEditor() {
     {
       extensions: [
         StarterKit,
-        Image.configure({ inline: false, allowBase64: true }),
+        Image.extend({ selectable: true }).configure({ inline: false, allowBase64: true }),
         TaskList,
         TaskItem.configure({ nested: true }),
         Table.configure({ resizable: true }),
@@ -398,22 +409,32 @@ export function NoteEditor() {
         TableCell,
       ],
       content: activeNote?.content ?? "",
+      autofocus: embedded ? "end" : false,
       editorProps: {
         attributes: {
           style: [
-            "font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-            "font-size: 16px",
+            "font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            embedded ? "font-size: 14.5px" : "font-size: 16px",
             "line-height: 1.65",
             "color: #1C1C1E",
             "outline: none",
-            "min-height: 200px",
+            embedded ? "min-height: 80px" : "min-height: 200px",
           ].join("; "),
           class: "gooni-note-editor",
+        },
+        handleKeyDown: (_view, event) => {
+          if (embedded && event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            handleSubmit();
+            return true;
+          }
+          return false;
         },
       },
       onUpdate: ({ editor }) => {
         bodyRef.current = editor.getHTML();
         hasChanges.current = true;
+        setEditorEmpty(editor.isEmpty);
         scheduleSave();
       },
       onBlur: async () => {
@@ -423,6 +444,34 @@ export function NoteEditor() {
     },
     [activeNoteId]
   );
+
+  // Keep editorEmpty in sync when switching notes
+  useEffect(() => {
+    if (editor) setEditorEmpty(editor.isEmpty);
+  }, [editor, activeNoteId]);
+
+  // Toggle .is-empty on the editor DOM so the placeholder CSS tracks real emptiness
+  // (not CSS :empty, which breaks the moment ProseMirror inserts a trailing <br>)
+  useEffect(() => {
+    if (!editor) return;
+    const el = editor.view.dom as HTMLElement;
+    el.classList.toggle("is-empty", editorEmpty);
+  }, [editor, editorEmpty]);
+
+  async function handleSubmit() {
+    if (!editor || editor.isEmpty) return;
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    if (activeNoteId && activeNoteId > 0) {
+      try {
+        await updateNote(activeNoteId, titleRef.current, bodyRef.current);
+        hasChanges.current = false;
+      } catch {
+        // swallow; auto-save will retry
+      }
+    }
+    selectNote(null);
+    setEditorEmpty(true);
+  }
 
   useEffect(() => {
     if (editor && activeNote) {
@@ -489,19 +538,37 @@ export function NoteEditor() {
     .map((s) => ({ id: String(s.id), name: s.name, emoji: s.id === "general" ? "📥" : (s.emoji ?? "🗂️") }))
     .filter((s) => s.id !== currentSpaceId);
 
+  async function handleStartNewNote() {
+    const note = await createNote("general");
+    if (note) selectNote(note.id);
+  }
+
   return (
     <div
-      style={{
-        flex: 1,
-        height: "100vh",
-        background: "#FFFFFF",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        minWidth: 0,
-      }}
+      style={
+        embedded
+          ? {
+              background: "#FFFFFF",
+              border: "1px solid rgba(0,0,0,0.07)",
+              borderRadius: 14,
+              display: "flex",
+              flexDirection: "column",
+              minWidth: 0,
+              position: "relative",
+            }
+          : {
+              flex: 1,
+              height: "100vh",
+              background: "#FFFFFF",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              minWidth: 0,
+            }
+      }
     >
-      {/* Header bar — same height as Sidebar + NotesList headers */}
+      {/* Header bar — full variant only */}
+      {!embedded && (
       <div
         style={{
           height: 52,
@@ -517,7 +584,7 @@ export function NoteEditor() {
           style={{
             fontSize: 12,
             color: saveStatus === "saving" ? "#8E8E93" : saveStatus === "saved" ? "#34C759" : "#8E8E93",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             transition: "color 0.2s",
           }}
         >
@@ -533,7 +600,7 @@ export function NoteEditor() {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {/* Space suggestion */}
           {spaceSuggestion?.suggested_space_id && activeNote?.space_id === null && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 14, background: "rgba(0,122,255,0.08)", fontSize: 12, color: "#007AFF", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 14, background: "rgba(0,122,255,0.08)", fontSize: 12, color: "#007AFF", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
               <span>{spaceSuggestion.suggested_space_emoji ?? "🗂️"} {spaceSuggestion.suggested_space_name}?</span>
               <button
                 onClick={() => { if (activeNoteId) moveNote(activeNoteId, currentSpaceId, String(spaceSuggestion.suggested_space_id)); setSpaceSuggestion(null); }}
@@ -559,7 +626,7 @@ export function NoteEditor() {
                   cursor: "pointer",
                   fontSize: 12,
                   color: "#636366",
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                   display: "flex",
                   alignItems: "center",
                   gap: 4,
@@ -582,7 +649,7 @@ export function NoteEditor() {
                     padding: 6,
                     minWidth: 160,
                     zIndex: 100,
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                   }}
                 >
                   {moveTargets.map((space) => (
@@ -629,7 +696,7 @@ export function NoteEditor() {
                   background: deleteConfirm ? "rgba(255,59,48,0.10)" : "rgba(0,0,0,0.05)",
                   cursor: "pointer", fontSize: 12,
                   color: deleteConfirm ? "#FF3B30" : "#636366",
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                   display: "flex", alignItems: "center", gap: 4,
                   transition: "background 0.1s",
                 }}
@@ -644,7 +711,7 @@ export function NoteEditor() {
                   background: "#FFFFFF", borderRadius: 10,
                   boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
                   padding: 6, minWidth: 160, zIndex: 100,
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}>
                   <div style={{ padding: "6px 10px 8px", fontSize: 12.5, color: "#636366" }}>
                     Delete this note?
@@ -684,7 +751,7 @@ export function NoteEditor() {
             cursor: "pointer",
             fontSize: 13,
             color: gooniOpen ? "#1C1C1E" : "#636366",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             fontWeight: gooniOpen ? 600 : 400,
             display: "flex",
             alignItems: "center",
@@ -698,203 +765,302 @@ export function NoteEditor() {
         </button>
         </div>
       </div>
+      )}
 
-      {/* Scrollable content: active note (75vh) + recent-notes feed */}
-      <div
-        ref={scrollContainerRef}
-        style={{ flex: 1, overflowY: "auto", boxSizing: "border-box", width: "100%" }}
-      >
-        <div style={{ maxWidth: 740, width: "100%", margin: "0 auto", padding: "32px 48px", boxSizing: "border-box" }}>
-          {activeNote && (
-            <div style={{ minHeight: "75vh" }}>
-          <input
-            ref={titleInputRef}
-            value={localTitle}
-            onChange={handleTitleChange}
-            onBlur={save}
-            onKeyDown={handleTitleKeyDown}
-            placeholder="Title"
+      {/* Editor content */}
+      {embedded ? (
+        !activeNote ? (
+          <button
+            onClick={handleStartNewNote}
             style={{
-              display: "block",
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "flex-start",
               width: "100%",
-              fontSize: 28,
-              fontWeight: 700,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
-              color: "#1C1C1E",
-              border: "none",
-              outline: "none",
+              padding: "18px 22px",
+              minHeight: 80 + 18 * 2,
               background: "transparent",
-              marginBottom: 16,
-              padding: 0,
-              lineHeight: 1.3,
-            }}
-          />
-          {/* Format toolbar */}
-          <FormatToolbar editor={editor} />
-
-          {/* Public toggle */}
-          <div style={{ marginBottom: 16 }}>
-            <button
-              onClick={() => {
-                if (!activeNoteId || activeNoteId < 0) return;
-                const next = !localIsPublic;
-                setLocalIsPublic(next);
-                apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
-              }}
-              style={{
-                padding: "3px 10px",
-                borderRadius: 20,
-                border: `1px solid ${localIsPublic ? "#34C759" : "rgba(0,0,0,0.15)"}`,
-                background: localIsPublic ? "#34C759" : "transparent",
-                color: localIsPublic ? "#fff" : "#636366",
-                fontSize: 12,
-                cursor: "pointer",
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-                transition: "background 0.15s, color 0.15s",
-              }}
-            >
-              🌐 Public
-            </button>
-          </div>
-          {editor && (
-            <BubbleMenu
-              editor={editor}
-              style={{
-                display: "flex",
-                background: "#1C1C1E",
-                borderRadius: 8,
-                padding: "3px 4px",
-                gap: 1,
-                boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
-              }}
-            >
-              {[
-                { label: "B", title: "Bold", action: () => editor.chain().focus().toggleBold().run(), active: editor.isActive("bold"), style: { fontWeight: 700 } },
-                { label: "I", title: "Italic", action: () => editor.chain().focus().toggleItalic().run(), active: editor.isActive("italic"), style: { fontStyle: "italic" } },
-                { label: "S", title: "Strikethrough", action: () => editor.chain().focus().toggleStrike().run(), active: editor.isActive("strike"), style: { textDecoration: "line-through" } },
-                { label: "H1", title: "Heading 1", action: () => editor.chain().focus().toggleHeading({ level: 1 }).run(), active: editor.isActive("heading", { level: 1 }), style: {} },
-                { label: "H2", title: "Heading 2", action: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), active: editor.isActive("heading", { level: 2 }), style: {} },
-                { label: "•", title: "Bullet list", action: () => editor.chain().focus().toggleBulletList().run(), active: editor.isActive("bulletList"), style: {} },
-                { label: "☑", title: "Task list", action: () => editor.chain().focus().toggleTaskList().run(), active: editor.isActive("taskList"), style: {} },
-                { label: "`", title: "Inline code", action: () => editor.chain().focus().toggleCode().run(), active: editor.isActive("code"), style: { fontFamily: "monospace" } },
-              ].map(({ label, title, action, active, style }) => (
-                <button
-                  key={label}
-                  title={title}
-                  onMouseDown={(e) => { e.preventDefault(); action(); }}
-                  style={{
-                    padding: "4px 7px",
-                    borderRadius: 5,
-                    border: "none",
-                    background: active ? "rgba(255,255,255,0.18)" : "transparent",
-                    color: active ? "#fff" : "rgba(255,255,255,0.7)",
-                    fontSize: 12,
-                    cursor: "pointer",
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-                    ...style,
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-
-              {/* Divider */}
-              <div style={{ width: 1, background: "rgba(255,255,255,0.15)", margin: "4px 2px" }} />
-
-              {/* Insert table */}
-              <button
-                title="Insert table"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-                }}
-                style={{ padding: "4px 7px", borderRadius: 5, border: "none", background: "transparent", color: "rgba(255,255,255,0.7)", fontSize: 11, cursor: "pointer" }}
-              >
-                ⊞ table
-              </button>
-            </BubbleMenu>
-          )}
-
-          <div
-            onDrop={(e) => {
-              const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
-                f.type.startsWith("image/")
-              );
-              if (!files.length || !editor) return;
-              e.preventDefault();
-              files.forEach((file) => {
-                const reader = new FileReader();
-                reader.onload = () => {
-                  if (typeof reader.result === "string") {
-                    editor.chain().focus().setImage({ src: reader.result }).run();
-                    hasChanges.current = true;
-                    scheduleSave();
-                  }
-                };
-                reader.readAsDataURL(file);
-              });
-            }}
-            onDragOver={(e) => {
-              if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
-                e.preventDefault();
-              }
-            }}
-            onPaste={(e) => {
-              const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
-                f.type.startsWith("image/")
-              );
-              if (!files.length || !editor) return;
-              e.preventDefault();
-              files.forEach((file) => {
-                const reader = new FileReader();
-                reader.onload = () => {
-                  if (typeof reader.result === "string") {
-                    editor.chain().focus().setImage({ src: reader.result }).run();
-                    hasChanges.current = true;
-                    scheduleSave();
-                  }
-                };
-                reader.readAsDataURL(file);
-              });
+              border: "none",
+              cursor: "text",
+              textAlign: "left",
+              color: "#AEAEB2",
+              fontSize: 14.5,
+              lineHeight: 1.65,
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             }}
           >
-            <EditorContent editor={editor} />
-          </div>
-
-          {/* Related notes */}
-          {relatedNotes.length > 0 && (
-            <div style={{ marginTop: 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-              <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>RELATED</p>
-              {relatedNotes.map((n) => {
-                const targetSpaceId = n.space_id ? String(n.space_id) : "general";
-                return (
-                  <button
-                    key={n.id}
-                    onClick={async () => { selectSpace(targetSpaceId); await loadNotes(targetSpaceId); selectNote(n.id); }}
-                    style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", width: "100%", padding: "7px 0", background: "none", border: "none", cursor: "pointer", gap: 12, borderRadius: 6 }}
-                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)")}
-                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
-                  >
-                    <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {n.title || "Untitled"}
-                    </span>
-                    <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
-                      {formatNoteDate(n.updated_at)}
-                    </span>
-                  </button>
+            Start writing...
+          </button>
+        ) : (
+          <div style={{ padding: "18px 22px", boxSizing: "border-box", width: "100%" }}>
+            <div
+              onDrop={(e) => {
+                const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+                  f.type.startsWith("image/")
                 );
-              })}
+                if (!files.length || !editor) return;
+                e.preventDefault();
+                files.forEach((file) => {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    if (typeof reader.result === "string") {
+                      editor.chain().focus().setImage({ src: reader.result }).run();
+                      hasChanges.current = true;
+                      scheduleSave();
+                    }
+                  };
+                  reader.readAsDataURL(file);
+                });
+              }}
+              onDragOver={(e) => {
+                if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
+                  e.preventDefault();
+                }
+              }}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+                  f.type.startsWith("image/")
+                );
+                if (!files.length || !editor) return;
+                e.preventDefault();
+                files.forEach((file) => {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    if (typeof reader.result === "string") {
+                      editor.chain().focus().setImage({ src: reader.result }).run();
+                      hasChanges.current = true;
+                      scheduleSave();
+                    }
+                  };
+                  reader.readAsDataURL(file);
+                });
+              }}
+            >
+              <EditorContent editor={editor} />
             </div>
-          )}
-            </div>
-          )}
 
-          {/* Recent notes feed */}
-          {feedNotes.map((note) => (
-            <FeedItem key={note.id} note={note} onSelect={() => handleSelectFromFeed(note)} />
-          ))}
+            {!editorEmpty && (
+              <button
+                onClick={handleSubmit}
+                title="Submit (Enter)"
+                style={{
+                  position: "absolute",
+                  bottom: 8,
+                  right: 10,
+                  padding: "3px 10px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "rgba(0,0,0,0.75)",
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                  letterSpacing: 0.2,
+                  opacity: 0.85,
+                  transition: "opacity 0.15s",
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "0.85")}
+              >
+                Submit ⏎
+              </button>
+            )}
+          </div>
+        )
+      ) : (
+        <div
+          ref={scrollContainerRef}
+          style={{ flex: 1, overflowY: "auto", boxSizing: "border-box", width: "100%" }}
+        >
+          <div style={{ maxWidth: 740, width: "100%", margin: "0 auto", padding: "32px 48px", boxSizing: "border-box" }}>
+            {activeNote && (
+              <div style={{ minHeight: "75vh" }}>
+                <input
+                  ref={titleInputRef}
+                  value={localTitle}
+                  onChange={handleTitleChange}
+                  onBlur={save}
+                  onKeyDown={handleTitleKeyDown}
+                  placeholder="Title"
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    fontSize: 28,
+                    fontWeight: 700,
+                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                    color: "#1C1C1E",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    marginBottom: 16,
+                    padding: 0,
+                    lineHeight: 1.3,
+                  }}
+                />
+                <FormatToolbar editor={editor} />
+
+                <div style={{ marginBottom: 16 }}>
+                  <button
+                    onClick={() => {
+                      if (!activeNoteId || activeNoteId < 0) return;
+                      const next = !localIsPublic;
+                      setLocalIsPublic(next);
+                      apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
+                    }}
+                    style={{
+                      padding: "3px 10px",
+                      borderRadius: 20,
+                      border: `1px solid ${localIsPublic ? "#34C759" : "rgba(0,0,0,0.15)"}`,
+                      background: localIsPublic ? "#34C759" : "transparent",
+                      color: localIsPublic ? "#fff" : "#636366",
+                      fontSize: 12,
+                      cursor: "pointer",
+                      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                      transition: "background 0.15s, color 0.15s",
+                    }}
+                  >
+                    🌐 Public
+                  </button>
+                </div>
+
+                {editor && (
+                  <BubbleMenu
+                    editor={editor}
+                    style={{
+                      display: "flex",
+                      background: "#1C1C1E",
+                      borderRadius: 8,
+                      padding: "3px 4px",
+                      gap: 1,
+                      boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+                    }}
+                  >
+                    {[
+                      { label: "B", title: "Bold", action: () => editor.chain().focus().toggleBold().run(), active: editor.isActive("bold"), style: { fontWeight: 700 } },
+                      { label: "I", title: "Italic", action: () => editor.chain().focus().toggleItalic().run(), active: editor.isActive("italic"), style: { fontStyle: "italic" } },
+                      { label: "S", title: "Strikethrough", action: () => editor.chain().focus().toggleStrike().run(), active: editor.isActive("strike"), style: { textDecoration: "line-through" } },
+                      { label: "H1", title: "Heading 1", action: () => editor.chain().focus().toggleHeading({ level: 1 }).run(), active: editor.isActive("heading", { level: 1 }), style: {} },
+                      { label: "H2", title: "Heading 2", action: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), active: editor.isActive("heading", { level: 2 }), style: {} },
+                      { label: "•", title: "Bullet list", action: () => editor.chain().focus().toggleBulletList().run(), active: editor.isActive("bulletList"), style: {} },
+                      { label: "☑", title: "Task list", action: () => editor.chain().focus().toggleTaskList().run(), active: editor.isActive("taskList"), style: {} },
+                      { label: "`", title: "Inline code", action: () => editor.chain().focus().toggleCode().run(), active: editor.isActive("code"), style: { fontFamily: "monospace" } },
+                    ].map(({ label, title, action, active, style }) => (
+                      <button
+                        key={label}
+                        title={title}
+                        onMouseDown={(e) => { e.preventDefault(); action(); }}
+                        style={{
+                          padding: "4px 7px",
+                          borderRadius: 5,
+                          border: "none",
+                          background: active ? "rgba(255,255,255,0.18)" : "transparent",
+                          color: active ? "#fff" : "rgba(255,255,255,0.7)",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                          ...style,
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+
+                    <div style={{ width: 1, background: "rgba(255,255,255,0.15)", margin: "4px 2px" }} />
+
+                    <button
+                      title="Insert table"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+                      }}
+                      style={{ padding: "4px 7px", borderRadius: 5, border: "none", background: "transparent", color: "rgba(255,255,255,0.7)", fontSize: 11, cursor: "pointer" }}
+                    >
+                      ⊞ table
+                    </button>
+                  </BubbleMenu>
+                )}
+
+                <div
+                  onDrop={(e) => {
+                    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
+                      f.type.startsWith("image/")
+                    );
+                    if (!files.length || !editor) return;
+                    e.preventDefault();
+                    files.forEach((file) => {
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        if (typeof reader.result === "string") {
+                          editor.chain().focus().setImage({ src: reader.result }).run();
+                          hasChanges.current = true;
+                          scheduleSave();
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                    });
+                  }}
+                  onDragOver={(e) => {
+                    if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
+                      e.preventDefault();
+                    }
+                  }}
+                  onPaste={(e) => {
+                    const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+                      f.type.startsWith("image/")
+                    );
+                    if (!files.length || !editor) return;
+                    e.preventDefault();
+                    files.forEach((file) => {
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        if (typeof reader.result === "string") {
+                          editor.chain().focus().setImage({ src: reader.result }).run();
+                          hasChanges.current = true;
+                          scheduleSave();
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                    });
+                  }}
+                >
+                  <EditorContent editor={editor} />
+                </div>
+
+                {relatedNotes.length > 0 && (
+                  <div style={{ marginTop: 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>RELATED</p>
+                    {relatedNotes.map((n) => {
+                      const targetSpaceId = n.space_id ? String(n.space_id) : "general";
+                      return (
+                        <button
+                          key={n.id}
+                          onClick={async () => { selectSpace(targetSpaceId); await loadNotes(targetSpaceId); selectNote(n.id); }}
+                          style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", width: "100%", padding: "7px 0", background: "none", border: "none", cursor: "pointer", gap: 12, borderRadius: 6 }}
+                          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)")}
+                          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
+                        >
+                          <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {n.title || "Untitled"}
+                          </span>
+                          <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+                            {formatNoteDate(n.updated_at)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Recent notes feed */}
+            {feedNotes.map((note) => (
+              <FeedItem key={note.id} note={note} onSelect={() => handleSelectFromFeed(note)} />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

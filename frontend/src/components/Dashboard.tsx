@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { fetchDashboardStats, fetchPublicProfile, updatePublicProfile, type DashboardStats } from "../services/api";
+import { fetchDashboardStats, type DashboardStats } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
+import { NoteEditor } from "./notes/NoteEditor";
 
-const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
-const DISPLAY_FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif";
+const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const DISPLAY_FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -14,6 +15,74 @@ function getGreeting(): string {
 
 function getDateStr(): string {
   return new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+}
+
+// GitHub contribution-graph palette (light mode)
+const CHART_COLORS = ["#EBEDF0", "#9BE9A8", "#40C463", "#30A14E", "#216E39"];
+
+function DayChart({ notes, activity, mode }: { notes: number[]; activity: number[]; mode: "bars" | "squares" }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  const max = Math.max(1, ...notes);
+  const now = new Date();
+  const series = mode === "squares" ? activity : notes;
+
+  const tooltipText = (i: number) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() - (6 - i));
+    const dayLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    if (mode === "squares") {
+      return `${dayLabel} — ${activity[i] ? "active" : "no activity"}`;
+    }
+    return `${dayLabel} — ${notes[i]} note${notes[i] === 1 ? "" : "s"}`;
+  };
+
+  return (
+    <div style={{ position: "relative", display: "flex", alignItems: mode === "bars" ? "flex-end" : "center", gap: 3, height: 36 }}>
+      {series.map((val, i) => {
+        let color: string;
+        let width: number;
+        let height: number;
+        if (mode === "squares") {
+          color = val > 0 ? CHART_COLORS[2] : CHART_COLORS[0];
+          width = 10;
+          height = 10;
+        } else {
+          const level = val === 0 ? 0 : val <= 2 ? 1 : val <= 5 ? 2 : val <= 9 ? 3 : 4;
+          color = CHART_COLORS[level];
+          width = 6;
+          height = Math.max(4, (val / max) * 36);
+        }
+        return (
+          <div
+            key={i}
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
+            style={{ width, height, background: color, borderRadius: 2, cursor: "default" }}
+          />
+        );
+      })}
+      {hovered !== null && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 6px)",
+            right: 0,
+            background: "#1C1C1E",
+            color: "#fff",
+            fontSize: 11.5,
+            padding: "4px 8px",
+            borderRadius: 6,
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            zIndex: 10,
+          }}
+        >
+          {tooltipText(hovered)}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function formatNoteDate(iso: string | null): string {
@@ -30,26 +99,11 @@ function formatNoteDate(iso: string | null): string {
 
 export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [bio, setBio] = useState("");
-  const [bioSaved, setBioSaved] = useState(false);
-  const [bioSaving, setBioSaving] = useState(false);
   const { selectSpace, loadNotes, selectNote } = useNotesContentStore();
 
   useEffect(() => {
     fetchDashboardStats().then(setStats).catch(console.error);
-    fetchPublicProfile().then((p) => setBio(p.bio ?? "")).catch(() => {});
   }, []);
-
-  async function handleSaveBio() {
-    setBioSaving(true);
-    try {
-      await updatePublicProfile(bio);
-      setBioSaved(true);
-      setTimeout(() => setBioSaved(false), 2500);
-    } finally {
-      setBioSaving(false);
-    }
-  }
 
   function openNote(spaceId: number | null, noteId: number) {
     const sid = spaceId == null ? "general" : String(spaceId);
@@ -73,19 +127,32 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
         </div>
 
         {/* Stats row */}
-        <div style={{ display: "flex", gap: 12, marginBottom: 28 }}>
+        <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
           {[
-            { label: "notes this week", value: stats?.notes_this_week ?? "—" },
-            { label: "day streak", value: stats?.streak ?? "—" },
-          ].map(({ label, value }) => (
+            { label: "notes this week", value: stats?.notes_this_week ?? "—", mode: "bars" as const },
+            { label: "day streak", value: stats?.streak ?? "—", mode: "squares" as const },
+          ].map(({ label, value, mode }) => (
             <div key={label} style={{
               flex: 1, background: "#fff", border: "1px solid rgba(0,0,0,0.07)",
               borderRadius: 12, padding: "16px 20px",
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14,
             }}>
-              <div style={{ fontSize: 26, fontWeight: 700, color: "#1C1C1E", fontFamily: DISPLAY_FONT }}>{value}</div>
-              <div style={{ fontSize: 12, color: "#8E8E93", marginTop: 2 }}>{label}</div>
+              <div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: "#1C1C1E", fontFamily: DISPLAY_FONT }}>{value}</div>
+                <div style={{ fontSize: 12, color: "#8E8E93", marginTop: 2 }}>{label}</div>
+              </div>
+              <DayChart
+                notes={stats?.notes_per_day ?? [0, 0, 0, 0, 0, 0, 0]}
+                activity={stats?.activity_per_day ?? [0, 0, 0, 0, 0, 0, 0]}
+                mode={mode}
+              />
             </div>
           ))}
+        </div>
+
+        {/* Quick note */}
+        <div style={{ marginBottom: 24 }}>
+          <NoteEditor variant="embedded" />
         </div>
 
         {/* Gooni's Take */}
@@ -142,40 +209,6 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           ) : (
             <p style={{ fontSize: 13.5, color: "#C7C7CC" }}>Loading…</p>
           )}
-        </div>
-
-        {/* Public bio */}
-        <div style={{ paddingTop: 32, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, marginBottom: 10 }}>PUBLIC BIO</div>
-          <p style={{ fontSize: 12.5, color: "#8E8E93", margin: "0 0 12px" }}>
-            What visitors see on your public portfolio page.
-          </p>
-          <textarea
-            value={bio}
-            onChange={(e) => { setBio(e.target.value); setBioSaved(false); }}
-            placeholder="Write a short bio — who you are, what you're building..."
-            rows={4}
-            style={{
-              width: "100%", padding: "10px 14px", borderRadius: 10,
-              border: "1px solid rgba(0,0,0,0.12)", fontSize: 14, fontFamily: FONT,
-              color: "#1C1C1E", outline: "none", resize: "vertical",
-              boxSizing: "border-box", lineHeight: 1.65,
-            }}
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
-            <button
-              onClick={handleSaveBio}
-              disabled={bioSaving}
-              style={{
-                padding: "8px 18px", borderRadius: 8, border: "none",
-                background: "#1C1C1E", color: "#fff", fontSize: 13,
-                fontFamily: FONT, cursor: "pointer", fontWeight: 500,
-              }}
-            >
-              {bioSaving ? "Saving..." : "Save bio"}
-            </button>
-            {bioSaved && <span style={{ fontSize: 12.5, color: "#34C759", fontFamily: FONT }}>Saved ✓</span>}
-          </div>
         </div>
 
       </div>

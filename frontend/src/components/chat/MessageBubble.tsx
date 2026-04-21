@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
+const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const TOOL_LABELS: Record<string, string> = {
   web_search: "🔍 Searched the web",

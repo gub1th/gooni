@@ -126,7 +126,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
             fontSize: 15,
             fontWeight: 600,
             color: "#1C1C1E",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
           }}
         >
           Gooni
@@ -174,7 +174,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
             style={{
               color: "#AEAEB2",
               fontSize: 13,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               textAlign: "center",
               marginTop: fullscreen ? 80 : 32,
             }}
@@ -211,7 +211,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
                     padding: "2px 0",
                     color: "#AEAEB2",
                     fontSize: 12,
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                   }}
                 >
                   <span>Assessed your intention</span>
@@ -225,7 +225,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
                       borderRadius: 8,
                       background: "rgba(0,0,0,0.03)",
                       border: "1px solid rgba(0,0,0,0.07)",
-                      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
@@ -251,7 +251,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
                 color: m.role === "user" ? "#FFFFFF" : "#1C1C1E",
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               }}
             >
               {m.content}
@@ -263,7 +263,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
             style={{
               color: "#AEAEB2",
               fontSize: 13,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               fontStyle: "italic",
             }}
           >
@@ -306,7 +306,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
               style={{
                 fontSize: 12,
                 color: "#636366",
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
@@ -341,7 +341,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
               border: "none",
               padding: 0,
               fontSize: 13.5,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               outline: "none",
               background: "transparent",
               color: "#1C1C1E",

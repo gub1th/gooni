@@ -1,3 +1,5 @@
+import { cacheInvalidate, cachedFetch } from "./cache";
+
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export function getStoredToken(): string | null {
@@ -237,12 +239,31 @@ export interface DashboardStats {
   recent_notes: ApiNote[];
   streak: number;
   gooni_take: string;
+  notes_per_day: number[];
+  activity_per_day: number[];
 }
 
-export async function fetchDashboardStats(): Promise<DashboardStats> {
-  const res = await apiFetch(`${BASE}/dashboard`);
-  if (!res.ok) throw new Error("Failed to fetch dashboard stats");
-  return res.json();
+// Cache the whole dashboard payload — the gooni_take field is an LLM call,
+// so every uncached fetch costs tokens. 30 min keeps the briefing feeling
+// alive without paying on every view switch or page refresh.
+const DASHBOARD_CACHE_KEY = "dashboard-stats";
+const DASHBOARD_TTL_MS = 30 * 60 * 1000;
+
+export async function fetchDashboardStats(opts: { force?: boolean } = {}): Promise<DashboardStats> {
+  return cachedFetch(
+    DASHBOARD_CACHE_KEY,
+    DASHBOARD_TTL_MS,
+    async () => {
+      const res = await apiFetch(`${BASE}/dashboard`);
+      if (!res.ok) throw new Error("Failed to fetch dashboard stats");
+      return res.json() as Promise<DashboardStats>;
+    },
+    opts,
+  );
+}
+
+export function invalidateDashboardCache(): void {
+  cacheInvalidate(DASHBOARD_CACHE_KEY);
 }
 
 

@@ -102,7 +102,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
             placeholder="Space name"
             style={{
               flex: 1, fontSize: 13.5, outline: "none", border: "none",
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               fontWeight: 500, color: "#1C1C1E", background: "transparent",
             }}
           />
@@ -313,7 +313,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
       {/* Section header */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px 4px", cursor: "grab" }}>
         <DragHandle />
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", userSelect: "none" }}>
+        <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
           NOTES
         </span>
       </div>
@@ -335,7 +335,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
           <span style={{ fontSize: 14, flexShrink: 0 }}>📋</span>
           <span style={{
             flex: 1, fontSize: 13.5,
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             fontWeight: isAllNotes ? 600 : 400, color: "#1C1C1E",
           }}>All Notes</span>
         </div>
@@ -347,7 +347,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
               onClick={() => setSpacesOpen((o) => !o)}
               style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
             >
-              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>SPACES</span>
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>SPACES</span>
               <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{spacesOpen ? "▾" : "▸"}</span>
             </button>
             <button
@@ -371,12 +371,12 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
                 onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; if (spaceId !== selectedSpaceId) { selectSpace(spaceId); loadNotes(spaceId); } onSpaceSelect(); }}
               >
                 <span style={{ fontSize: 13, flexShrink: 0 }}>{space.emoji ?? "🗂️"}</span>
-                <span style={{ flex: 1, fontSize: 13, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span style={{ flex: 1, fontSize: 13, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {space.name}
                 </span>
                 {isDelConfirm ? (
                   <button className="space-action" onClick={(e) => { e.stopPropagation(); confirmDelete(space.id as number); }}
-                    style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+                    style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
                     sure?
                   </button>
                 ) : (
@@ -396,7 +396,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
         {recentNotes.length > 0 && (
           <>
             <div style={{ padding: "6px 6px 2px" }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>RECENT</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>RECENT</span>
             </div>
             {recentNotes.map((note) => {
               const selected = activeNoteId === note.id;
@@ -415,13 +415,13 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
                 >
                   <span style={{
                     fontSize: 13,
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
                     fontWeight: selected ? 600 : 400, color: "#1C1C1E",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%",
                   }}>
                     {note.title || "Untitled"}
                   </span>
-                  <span style={{ fontSize: 11, color: "#AEAEB2", marginTop: 1, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+                  <span style={{ fontSize: 11, color: "#AEAEB2", marginTop: 1, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
                     {relativeTime(note.updated_at)}
                   </span>
                 </button>
@@ -450,7 +450,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
       {/* Section header */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px 4px", cursor: "grab" }}>
         <DragHandle />
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", userSelect: "none" }}>
+        <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
           CHAT
         </span>
       </div>
@@ -462,7 +462,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
             display: "flex", alignItems: "center", gap: 6,
             margin: "0 0 4px", padding: "7px 10px", borderRadius: 8, border: "none",
             background: "transparent", color: "#1C1C1E", fontSize: 13,
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             fontWeight: 500, cursor: "pointer", width: "100%", textAlign: "left",
             transition: "background 0.1s", outline: "none",
           }}
@@ -487,14 +487,14 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
           >
             <div style={{
               fontSize: 13,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               fontWeight: activeId === conv.id ? 600 : 400,
               color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis",
               whiteSpace: "nowrap", width: "100%",
             }}>
               {conv.title || "New conversation"}
             </div>
-            <div style={{ fontSize: 11, color: "#AEAEB2", marginTop: 1, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+            <div style={{ fontSize: 11, color: "#AEAEB2", marginTop: 1, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
               {relativeTime(conv.last_message_at ?? conv.created_at)}
             </div>
           </button>
@@ -527,7 +527,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
               background: isDashboard ? "rgba(0,0,0,0.08)" : "transparent",
               border: "none", borderRadius: 6, padding: "3px 7px", cursor: "pointer",
               fontSize: 15, fontWeight: 700,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               color: "#1C1C1E", transition: "background 0.1s", outline: "none",
             }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.06)")}

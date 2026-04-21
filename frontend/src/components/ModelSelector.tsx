@@ -1,6 +1,6 @@
 import { MODELS, useModelStore, type ModelId } from "../stores/useModelStore";
 
-const FONT = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif";
+const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export function ModelSelector() {
   const { model, setModel } = useModelStore();

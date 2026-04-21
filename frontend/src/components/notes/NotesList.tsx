@@ -129,18 +129,18 @@ function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDrag
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
           marginBottom: 2,
         }}
       >
         {title}
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
-        <span style={{ fontSize: 12, color: "#8E8E93", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", flexShrink: 0 }}>
+        <span style={{ fontSize: 12, color: "#8E8E93", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", flexShrink: 0 }}>
           {formatTime(note.updated_at)}
         </span>
         {preview && (
-          <span style={{ fontSize: 12, color: "#AEAEB2", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ fontSize: 12, color: "#AEAEB2", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {preview}
           </span>
         )}
@@ -148,7 +148,7 @@ function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDrag
       {spaceBadge && (
         <div style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5, background: "rgba(0,0,0,0.07)", borderRadius: 5, padding: "2px 7px 2px 5px" }}>
           <FolderIcon />
-          <span style={{ fontSize: 11.5, color: "#3C3C43", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif", fontWeight: 500 }}>
+          <span style={{ fontSize: 11.5, color: "#3C3C43", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: 500 }}>
             {spaceBadge}
           </span>
         </div>
@@ -164,7 +164,7 @@ function SectionHeader({ label }: { label: string }) {
       fontSize: 20,
       fontWeight: 700,
       color: "#1C1C1E",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
+      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
     }}>
       {label}
     </div>
@@ -231,7 +231,7 @@ export function NotesList() {
     >
       {/* Header */}
       <div style={{ height: 52, padding: "0 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 8 }}>
-        <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: "#1C1C1E", fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif" }}>
+        <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
           {headerLabel}
         </span>
         <button
@@ -251,7 +251,7 @@ export function NotesList() {
       {/* Note list */}
       <div style={{ flex: 1, overflowY: "auto" }}>
         {noteList.length === 0 && (
-          <div style={{ padding: "32px 14px", textAlign: "center", color: "#AEAEB2", fontSize: 13, fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif" }}>
+          <div style={{ padding: "32px 14px", textAlign: "center", color: "#AEAEB2", fontSize: 13, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
             No notes yet. Press + to create one.
           </div>
         )}
@@ -305,7 +305,7 @@ export function NotesList() {
             boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
             padding: 6,
             minWidth: 160,
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
           }}
         >
           {!contextMenu.confirming ? (
