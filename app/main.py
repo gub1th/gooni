@@ -92,9 +92,10 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
 
     path = request.url.path
-    # Always allow: public routes, auth endpoint, static assets, CORS preflight
+    # Always allow: public read-only routes, auth endpoint, static assets, CORS preflight
+    # Mutations on /public/* (e.g. PATCH /public/profile) still require the Bearer token.
     if (
-        path.startswith("/public")
+        (path.startswith("/public") and request.method == "GET")
         or path == "/auth"
         or path == "/healthz"
         or path.startswith("/assets")
@@ -511,6 +512,45 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
 
+    # Per-day note creation counts for the last 7 days (oldest first, index 6 = today)
+    seven_days_ago = today - timedelta(days=6)
+    try:
+        day_rows = db.execute(
+            text(
+                "SELECT date(created_at) as d, COUNT(*) as c FROM notes "
+                "WHERE created_at IS NOT NULL AND date(created_at) >= :start "
+                "GROUP BY date(created_at)"
+            ),
+            {"start": seven_days_ago.isoformat()},
+        ).fetchall()
+        day_counts = {r[0]: r[1] for r in day_rows}
+        notes_per_day = [
+            day_counts.get((seven_days_ago + timedelta(days=i)).isoformat(), 0)
+            for i in range(7)
+        ]
+    except Exception:
+        notes_per_day = [0] * 7
+
+    # Per-day activity (notes touched OR user messages sent) — matches streak semantics
+    try:
+        activity_rows = db.execute(
+            text(
+                "SELECT DISTINCT d FROM ("
+                "  SELECT date(updated_at) as d FROM notes WHERE updated_at IS NOT NULL AND date(updated_at) >= :start"
+                "  UNION"
+                "  SELECT date(created_at) as d FROM messages WHERE role = 'user' AND created_at IS NOT NULL AND date(created_at) >= :start"
+                ")"
+            ),
+            {"start": seven_days_ago.isoformat()},
+        ).fetchall()
+        active_days = {r[0] for r in activity_rows}
+        activity_per_day = [
+            1 if (seven_days_ago + timedelta(days=i)).isoformat() in active_days else 0
+            for i in range(7)
+        ]
+    except Exception:
+        activity_per_day = [0] * 7
+
     recent_notes = (
         db.query(Note)
         .order_by(sqlfunc.coalesce(Note.updated_at, Note.created_at).desc())
@@ -603,6 +643,8 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         "recent_notes": [_serialize_note(n) for n in recent_notes],
         "streak": streak,
         "gooni_take": gooni_take,
+        "notes_per_day": notes_per_day,
+        "activity_per_day": activity_per_day,
     }
 
 

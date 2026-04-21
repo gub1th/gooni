@@ -239,6 +239,8 @@ export interface DashboardStats {
   recent_notes: ApiNote[];
   streak: number;
   gooni_take: string;
+  notes_per_day: number[];
+  activity_per_day: number[];
 }
 
 // Cache the whole dashboard payload — the gooni_take field is an LLM call,
