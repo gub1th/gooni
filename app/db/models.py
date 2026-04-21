@@ -65,6 +65,7 @@ class Note(Base):
     last_opened_at = Column(DateTime, nullable=True)
     embedding = Column(Text, nullable=True)  # JSON-serialised float list
     is_public = Column(Boolean, default=False, nullable=False)
+    is_pinned = Column(Boolean, default=False, nullable=False)
 
 
 class PublicProfile(Base):

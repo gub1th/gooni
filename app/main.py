@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 
 from dotenv import load_dotenv
 
@@ -45,6 +46,7 @@ def _run_column_migrations(engine):
             ("spaces", "emoji", "TEXT"),
             ("notes", "embedding", "TEXT"),
             ("notes", "is_public", "INTEGER"),
+            ("notes", "is_pinned", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -54,6 +56,14 @@ def _run_column_migrations(engine):
             if col not in existing_cols:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
                 print(f"Migration: added {table}.{col}")
+                # Backfill NULLs to 0 for boolean-like columns so filters
+                # on `column == False` still match existing rows.
+                if table == "notes" and col in ("is_public", "is_pinned"):
+                    conn.execute(text(f"UPDATE {table} SET {col} = 0 WHERE {col} IS NULL"))
+        # Even if the column already existed, catch any stragglers with NULL state
+        # from a previous migration that ran before the backfill step existed.
+        conn.execute(text("UPDATE notes SET is_pinned = 0 WHERE is_pinned IS NULL"))
+        conn.execute(text("UPDATE notes SET is_public = 0 WHERE is_public IS NULL"))
         conn.commit()
 
 
@@ -232,6 +242,7 @@ def _serialize_note(n: Note) -> dict:
         "updated_at": n.updated_at,
         "last_opened_at": n.last_opened_at,
         "is_public": bool(n.is_public),
+        "is_pinned": bool(n.is_pinned),
     }
 
 
@@ -306,9 +317,54 @@ def update_note(
         note.space_id = None if (sid is None or sid == "general") else int(sid)
     if "is_public" in body:
         note.is_public = bool(body["is_public"])
+    if "is_pinned" in body:
+        note.is_pinned = bool(body["is_pinned"])
     db.commit()
     db.refresh(note)
     return _serialize_note(note)
+
+
+@app.get("/notes/pinned")
+def get_pinned_notes(db: Session = Depends(get_db)):
+    notes = (
+        db.query(Note)
+        .filter(Note.is_pinned == True)  # noqa: E712
+        .order_by(_notes_order())
+        .all()
+    )
+    return [_serialize_note(n) for n in notes]
+
+
+@app.post("/notes/cleanup")
+def cleanup_empty_notes(db: Session = Depends(get_db)):
+    """Delete notes whose plaintext content is < 6 chars and title is empty.
+    Used by the 'Clean Inbox' button — these are typically accidental creates.
+    Pinned notes are always preserved.
+    """
+    import re
+
+    def _plaintext_len(html: str | None) -> int:
+        if not html:
+            return 0
+        # strip tags, collapse whitespace
+        text_only = re.sub(r"<[^>]+>", " ", html)
+        text_only = re.sub(r"\s+", " ", text_only).strip()
+        return len(text_only)
+
+    # Treat NULL is_pinned as not-pinned (happens on freshly-migrated rows).
+    candidates = (
+        db.query(Note)
+        .filter((Note.is_pinned == False) | (Note.is_pinned.is_(None)))  # noqa: E712
+        .all()
+    )
+    deleted_ids = []
+    for n in candidates:
+        title_empty = not (n.title or "").strip()
+        if title_empty and _plaintext_len(n.content) < 6:
+            deleted_ids.append(n.id)
+            db.delete(n)
+    db.commit()
+    return {"deleted": len(deleted_ids), "ids": deleted_ids}
 
 
 @app.post("/notes/{note_id}/embed")
@@ -581,71 +637,57 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception:
         streak = 0
 
-    # Gooni's Take — generated from recent notes + conversations, recency-weighted
-    gooni_take = ""
-    titled = [n for n in recent_notes if n.title and n.title.strip()]
-    if titled:
-        now = datetime.utcnow()
-
-        def _age_label(dt):
-            if not dt:
-                return "a while ago"
-            delta = now - dt
-            if delta.days == 0:
-                return "today"
-            if delta.days == 1:
-                return "yesterday"
-            return f"{delta.days} days ago"
-
-        note_lines = []
-        for n in titled[:6]:
-            note_lines.append(f"- [{_age_label(n.updated_at or n.created_at)}] {n.title.strip()}")
-        note_list = "\n".join(note_lines)
-
-        # Pull recent conversation previews (last user message per convo)
-        recent_convos = (
-            db.query(Conversation)
-            .order_by(Conversation.created_at.desc())
-            .limit(5)
-            .all()
-        )
-        convo_lines = []
-        for c in recent_convos:
-            last_msg = (
-                db.query(Message)
-                .filter(Message.conversation_id == c.id, Message.role == "user")
-                .order_by(Message.created_at.desc())
-                .first()
-            )
-            if last_msg and last_msg.content:
-                preview = last_msg.content[:80].replace("\n", " ")
-                convo_lines.append(f"- [{_age_label(c.created_at)}] \"{preview}\"")
-        convo_block = "\nRecent chats with Gooni:\n" + "\n".join(convo_lines) if convo_lines else ""
-
-        mem_ctx = memory_service.build_memory_context("recent activity focus projects")
-        mem_block = f"\n\nLong-term memory:\n{mem_ctx}" if mem_ctx else ""
-
-        prompt = (
-            f"You are Gooni — Daniel's personal AI notebook.\n"
-            f"Write 2-3 tight sentences giving your honest read on where Daniel's head is at right now. "
-            f"Prioritize the most recent signals. Find the thread — what's the underlying theme or tension? "
-            f"Don't just list what you see. Synthesize. Be specific but not exhaustive. "
-            f"Skip filler phrases like 'it seems' or 'it looks like'. No preamble, no sign-off.\n\n"
-            f"Recent notes (most recent first):\n{note_list}{convo_block}{mem_block}\n\nYour take:"
-        )
-        try:
-            gooni_take = llm_client.generate_simple_completion(prompt, max_tokens=150)
-        except Exception:
-            gooni_take = ""
-
     return {
         "notes_this_week": notes_this_week,
         "recent_notes": [_serialize_note(n) for n in recent_notes],
         "streak": streak,
-        "gooni_take": gooni_take,
         "notes_per_day": notes_per_day,
         "activity_per_day": activity_per_day,
     }
+
+
+@app.get("/dashboard/take")
+def get_gooni_take(db: Session = Depends(get_db)):
+    """Gooni's Take — one gpt-4o-mini call summarizing the 3 most recent notes.
+    Cached client-side; refresh button forces a fresh call.
+    """
+    from sqlalchemy import func as sqlfunc
+
+    recent_notes = (
+        db.query(Note)
+        .order_by(sqlfunc.coalesce(Note.updated_at, Note.created_at).desc())
+        .limit(8)
+        .all()
+    )
+    top_notes = [n for n in recent_notes if (n.title and n.title.strip()) or (n.content and n.content.strip())][:3]
+    if not top_notes:
+        return {"take": ""}
+
+    def _plain(html: str | None) -> str:
+        if not html:
+            return ""
+        t = re.sub(r"<[^>]+>", " ", html)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    lines = []
+    for n in top_notes:
+        title = (n.title or "").strip() or "Untitled"
+        body = _plain(n.content)[:300]
+        lines.append(f"- {title}: {body}" if body else f"- {title}")
+    note_block = "\n".join(lines)
+
+    prompt = (
+        "You are Gooni — Daniel's personal AI notebook.\n"
+        "Write 1-2 tight sentences on what Daniel is thinking about right now, based on his most recent notes. "
+        "Find the thread. Be specific. No filler phrases, no preamble, no sign-off.\n\n"
+        f"Recent notes:\n{note_block}\n\nYour take:"
+    )
+    try:
+        take = llm_client.generate_simple_completion(prompt, max_tokens=100)
+    except Exception:
+        take = ""
+    return {"take": take}
 
 
 # ── MCP endpoints ─────────────────────────────────────────────────────────────

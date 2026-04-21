@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { fetchDashboardStats, type DashboardStats } from "../services/api";
+import { fetchDashboardStats, fetchGooniTake, type DashboardStats } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { NoteEditor } from "./notes/NoteEditor";
 
@@ -99,16 +99,33 @@ function formatNoteDate(iso: string | null): string {
 
 export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [take, setTake] = useState<string>("");
+  const [takeRefreshing, setTakeRefreshing] = useState(false);
   const { selectSpace, loadNotes, selectNote } = useNotesContentStore();
 
   useEffect(() => {
     fetchDashboardStats().then(setStats).catch(console.error);
+    fetchGooniTake().then((r) => setTake(r.take)).catch(console.error);
   }, []);
+
+  async function refreshTake() {
+    if (takeRefreshing) return;
+    setTakeRefreshing(true);
+    try {
+      const r = await fetchGooniTake({ force: true });
+      setTake(r.take);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTakeRefreshing(false);
+    }
+  }
 
   function openNote(spaceId: number | null, noteId: number) {
     const sid = spaceId == null ? "general" : String(spaceId);
     selectSpace(sid);
-    loadNotes(sid).then(() => selectNote(noteId));
+    selectNote(noteId); // set eagerly; avoids flashing the most-recent note before the target loads
+    loadNotes(sid);     // fire-and-forget refresh
     onOpenNote();
   }
 
@@ -150,60 +167,113 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           ))}
         </div>
 
+        {/* Gooni's Take — minimal: 1-2 sentences on the most recent notes. */}
+        {take && (
+          <div style={{
+            display: "flex", gap: 10, alignItems: "flex-start",
+            padding: "14px 16px", marginBottom: 24,
+            border: "1px solid rgba(0,0,0,0.07)", borderRadius: 12, background: "#FAFAFA",
+            position: "relative",
+          }}>
+            <div style={{
+              width: 20, height: 20, borderRadius: "50%", background: "#1C1C1E",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#fff", fontSize: 10, fontWeight: 700, flexShrink: 0, marginTop: 1,
+            }}>G</div>
+            <p style={{ flex: 1, fontSize: 13.5, color: "#3C3C43", lineHeight: 1.55, margin: 0, fontFamily: FONT, paddingRight: 22 }}>
+              {take}
+            </p>
+            <button
+              onClick={refreshTake}
+              disabled={takeRefreshing}
+              title="Regenerate"
+              style={{
+                position: "absolute", top: 8, right: 8,
+                width: 22, height: 22, borderRadius: 6, border: "none",
+                background: "transparent", color: "#8E8E93", cursor: takeRefreshing ? "default" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background 0.1s, color 0.1s",
+              }}
+              onMouseEnter={(e) => { if (!takeRefreshing) { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLButtonElement).style.color = "#3C3C43"; } }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "#8E8E93"; }}
+            >
+              <svg
+                width="12" height="12" viewBox="0 0 16 16" fill="none"
+                style={{
+                  animation: takeRefreshing ? "gooni-spin 0.8s linear infinite" : undefined,
+                  opacity: takeRefreshing ? 0.6 : 1,
+                }}
+              >
+                <path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9L13 3v3.5H9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                <path d="M13.5 8a5.5 5.5 0 0 1-9.4 3.9L3 13v-3.5h3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+              </svg>
+              <style>{`@keyframes gooni-spin { to { transform: rotate(360deg); } }`}</style>
+            </button>
+          </div>
+        )}
+
         {/* Quick note */}
         <div style={{ marginBottom: 24 }}>
           <NoteEditor variant="embedded" />
         </div>
 
-        {/* Gooni's Take */}
-        {stats?.gooni_take && (
-          <div style={{ border: "2px solid #1C1C1E", borderRadius: 14, padding: "18px 22px", marginBottom: 36, background: "#fff" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <div style={{
-                width: 24, height: 24, borderRadius: "50%", background: "#1C1C1E",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: "#fff", fontSize: 11, fontWeight: 700, flexShrink: 0,
-              }}>G</div>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "#1C1C1E" }}>Gooni's Take</span>
-            </div>
-            <p style={{ fontSize: 14.5, color: "#1C1C1E", lineHeight: 1.7, margin: 0 }}>
-              {stats.gooni_take}
-            </p>
-          </div>
-        )}
-
-        {/* Recent notes */}
+        {/* Recent notes — two preview cards */}
         <div style={{ marginBottom: 44 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, marginBottom: 10 }}>RECENT NOTES</div>
           {stats ? (
             stats.recent_notes.length === 0 ? (
               <p style={{ fontSize: 13.5, color: "#C7C7CC" }}>No notes yet.</p>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {stats.recent_notes.map((note) => (
-                  <button
-                    key={note.id}
-                    onClick={() => openNote(note.space_id, note.id)}
-                    style={{
-                      display: "flex", alignItems: "baseline", justifyContent: "space-between",
-                      gap: 12, padding: "10px 12px", borderRadius: 8,
-                      border: "none", background: "transparent", cursor: "pointer",
-                      textAlign: "left", width: "100%",
-                    }}
-                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)")}
-                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-                  >
-                    <span style={{
-                      fontSize: 14, color: "#1C1C1E", fontFamily: FONT,
-                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
-                    }}>
-                      {note.title || "Untitled"}
-                    </span>
-                    <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0 }}>
-                      {formatNoteDate(note.updated_at)}
-                    </span>
-                  </button>
-                ))}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {stats.recent_notes.slice(0, 2).map((note) => {
+                  const excerpt = (note.content ?? "")
+                    .replace(/<[^>]+>/g, " ")
+                    .replace(/&nbsp;/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim();
+                  return (
+                    <div
+                      key={note.id}
+                      onClick={() => openNote(note.space_id, note.id)}
+                      style={{
+                        display: "flex", flexDirection: "column", alignItems: "stretch",
+                        gap: 6, padding: "14px 16px", borderRadius: 12,
+                        border: "1px solid rgba(0,0,0,0.07)", background: "#fff", cursor: "pointer",
+                        textAlign: "left", width: "100%", height: 160, boxSizing: "border-box",
+                        transition: "background 0.12s, border-color 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        const el = e.currentTarget;
+                        el.style.borderColor = "rgba(0,0,0,0.15)";
+                        el.style.background = "#FDFDFD";
+                      }}
+                      onMouseLeave={(e) => {
+                        const el = e.currentTarget;
+                        el.style.borderColor = "rgba(0,0,0,0.07)";
+                        el.style.background = "#fff";
+                      }}
+                    >
+                      <div style={{
+                        fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: FONT,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        flexShrink: 0,
+                      }}>
+                        {note.title?.trim() || "Untitled"}
+                      </div>
+                      <div
+                        style={{
+                          flex: 1, fontSize: 12.5, color: "#6C6C70", lineHeight: 1.5, fontFamily: FONT,
+                          overflowY: "auto", overscrollBehavior: "contain",
+                        }}
+                      >
+                        {excerpt || <span style={{ color: "#C7C7CC", fontStyle: "italic" }}>empty note</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#AEAEB2", fontFamily: FONT, flexShrink: 0 }}>
+                        {formatNoteDate(note.updated_at)}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )
           ) : (

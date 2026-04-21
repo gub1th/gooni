@@ -1,4 +1,4 @@
-import { cacheInvalidate, cachedFetch } from "./cache";
+import { cachedFetch } from "./cache";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -84,6 +84,7 @@ export interface ApiNote {
   updated_at: string;
   last_opened_at: string | null;
   is_public: boolean;
+  is_pinned: boolean;
 }
 
 export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiNote[]> {
@@ -172,7 +173,19 @@ export async function fetchRelatedNotes(id: number): Promise<ApiNote[]> {
   }
 }
 
-export async function patchNote(id: number, patch: { is_public?: boolean }): Promise<ApiNote> {
+export async function fetchPinnedNotes(): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/notes/pinned`);
+  if (!res.ok) throw new Error("Failed to fetch pinned notes");
+  return res.json();
+}
+
+export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: number[] }> {
+  const res = await apiFetch(`${BASE}/notes/cleanup`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to clean up notes");
+  return res.json();
+}
+
+export async function patchNote(id: number, patch: { is_public?: boolean; is_pinned?: boolean }): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -238,34 +251,34 @@ export interface DashboardStats {
   notes_this_week: number;
   recent_notes: ApiNote[];
   streak: number;
-  gooni_take: string;
   notes_per_day: number[];
   activity_per_day: number[];
 }
 
-// Cache the whole dashboard payload — the gooni_take field is an LLM call,
-// so every uncached fetch costs tokens. 30 min keeps the briefing feeling
-// alive without paying on every view switch or page refresh.
-const DASHBOARD_CACHE_KEY = "dashboard-stats";
-const DASHBOARD_TTL_MS = 30 * 60 * 1000;
+// Stats are cheap SQL — fetched fresh every time so recent-notes previews stay current.
+export async function fetchDashboardStats(): Promise<DashboardStats> {
+  const res = await apiFetch(`${BASE}/dashboard`);
+  if (!res.ok) throw new Error("Failed to fetch dashboard stats");
+  return res.json() as Promise<DashboardStats>;
+}
 
-export async function fetchDashboardStats(opts: { force?: boolean } = {}): Promise<DashboardStats> {
+// Gooni's Take — LLM call, cached separately so we don't pay tokens per tab switch.
+// User can force-refresh via the refresh button next to the take.
+const TAKE_CACHE_KEY = "gooni-take";
+const TAKE_TTL_MS = 30 * 60 * 1000;
+
+export async function fetchGooniTake(opts: { force?: boolean } = {}): Promise<{ take: string }> {
   return cachedFetch(
-    DASHBOARD_CACHE_KEY,
-    DASHBOARD_TTL_MS,
+    TAKE_CACHE_KEY,
+    TAKE_TTL_MS,
     async () => {
-      const res = await apiFetch(`${BASE}/dashboard`);
-      if (!res.ok) throw new Error("Failed to fetch dashboard stats");
-      return res.json() as Promise<DashboardStats>;
+      const res = await apiFetch(`${BASE}/dashboard/take`);
+      if (!res.ok) throw new Error("Failed to fetch Gooni's Take");
+      return res.json() as Promise<{ take: string }>;
     },
     opts,
   );
 }
-
-export function invalidateDashboardCache(): void {
-  cacheInvalidate(DASHBOARD_CACHE_KEY);
-}
-
 
 // ── Conversations ──────────────────────────────────────────────────────────────
 

@@ -4,6 +4,7 @@ import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
 import { GooniPanel } from "../components/GooniPanel";
 import { NoteEditor } from "../components/notes/NoteEditor";
+import { NotesList } from "../components/notes/NotesList";
 import { Sidebar } from "../components/notes/Sidebar";
 import { PasswordGate } from "../components/PasswordGate";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -33,7 +34,10 @@ function NotesPage() {
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
 
-  const [view, setView] = useState<"notes" | "dashboard" | "chat">("dashboard");
+  // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
+  const [view, setView] = useState<"notes" | "dashboard" | "chat">(() =>
+    search.note ? "notes" : search.conv ? "chat" : "dashboard"
+  );
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
 
   useEffect(() => {
@@ -49,14 +53,13 @@ function NotesPage() {
       fetchNote(search.note).then((note) => {
         const spaceId = note.space_id == null ? "general" : String(note.space_id);
         selectSpace(spaceId);
-        loadNotes(spaceId).then(() => selectNote(note.id));
-        setView("notes");
+        selectNote(note.id); // set eagerly so editor doesn't show a different note while notes load
+        loadNotes(spaceId);
       }).catch(() => {
         setView("dashboard");
       });
     } else if (search.conv) {
       selectConversation(search.conv);
-      setView("chat");
     }
   }, []);
 
@@ -67,6 +70,10 @@ function NotesPage() {
       loadNotes(spaceId);
     }
   }, [view]);
+
+  // (Auto-select on space entry was removed — it caused confusing behavior when the
+  //  most-recent note lived in both a specific space and All Notes. The editor now
+  //  shows an empty state, and the user picks a note from the rail.)
 
   useEffect(() => {
     if (view !== "notes" && selectedSpaceId) {
@@ -150,6 +157,7 @@ function NotesPage() {
         <ChatView />
       ) : (
         <>
+          <NotesList />
           <NoteEditor />
           {isGooniOpen && (
             isSmall ? (
