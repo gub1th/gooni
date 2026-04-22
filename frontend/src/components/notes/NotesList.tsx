@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { cleanupEmptyNotes, patchNote, type ApiNote } from "../../services/api";
+import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 
 // Module-level drag state so Sidebar can read it without prop drilling
 export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
@@ -250,7 +251,7 @@ export function NotesList() {
 
   async function handleTogglePin(note: ApiNote) {
     const updated = await patchNote(note.id, { is_pinned: !note.is_pinned });
-    // Refresh current space so pin state updates in-list
+    usePinnedVersionStore.getState().bump();
     loadNotes(spaceId);
     return updated;
   }

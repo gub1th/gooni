@@ -681,8 +681,14 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     today = datetime.utcnow().date()
     week_ago = datetime.utcnow() - timedelta(days=7)
+    two_weeks_ago = datetime.utcnow() - timedelta(days=14)
 
     notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
+    notes_last_week = (
+        db.query(Note)
+        .filter(Note.updated_at >= two_weeks_ago, Note.updated_at < week_ago)
+        .count()
+    )
 
     # Per-day note creation counts for the last 7 days (oldest first, index 6 = today)
     seven_days_ago = today - timedelta(days=6)
@@ -726,7 +732,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     recent_notes = (
         db.query(Note)
         .order_by(sqlfunc.coalesce(Note.updated_at, Note.created_at).desc())
-        .limit(8)
+        .limit(20)
         .all()
     )
 
@@ -755,6 +761,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     return {
         "notes_this_week": notes_this_week,
+        "notes_last_week": notes_last_week,
         "recent_notes": [_serialize_note(n) for n in recent_notes],
         "streak": streak,
         "notes_per_day": notes_per_day,

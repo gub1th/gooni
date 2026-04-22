@@ -258,6 +258,7 @@ export async function updatePublicProfile(bio: string): Promise<void> {
 
 export interface DashboardStats {
   notes_this_week: number;
+  notes_last_week: number;
   recent_notes: ApiNote[];
   streak: number;
   notes_per_day: number[];

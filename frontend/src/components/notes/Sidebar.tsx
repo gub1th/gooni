@@ -1,38 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
-import { useConversationsStore } from "../../stores/useConversationsStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
+import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { GooniLogo } from "../GooniLogo";
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
 function ComposeIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M11 1.5L13.5 4L6.5 11H4V8.5L11 1.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none"/>
       <path d="M2 13.5H13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-    </svg>
-  );
-}
-
-function DragHandle() {
-  return (
-    <svg width="10" height="14" viewBox="0 0 10 14" fill="none" style={{ flexShrink: 0 }}>
-      {[0, 4, 8].map((y) => (
-        <g key={y}>
-          <circle cx="2.5" cy={y + 3} r="1.2" fill="#C7C7CC" />
-          <circle cx="7.5" cy={y + 3} r="1.2" fill="#C7C7CC" />
-        </g>
-      ))}
     </svg>
   );
 }
@@ -64,10 +41,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
 
   return (
     <>
-      {/* Backdrop */}
       <div style={{ position: "fixed", inset: 0, zIndex: 99 }} onClick={onCancel} />
-
-      {/* Popover */}
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
@@ -77,7 +51,6 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
           padding: "12px 12px 10px", width: 228,
         }}
       >
-        {/* Emoji button + name input */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: pickerOpen ? 8 : 10 }}>
           <button
             onClick={() => setPickerOpen((o) => !o)}
@@ -109,7 +82,6 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
           />
         </div>
 
-        {/* Emoji grid */}
         {pickerOpen && (
           <div style={{
             display: "grid", gridTemplateColumns: "repeat(8, 1fr)",
@@ -134,7 +106,6 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
           </div>
         )}
 
-        {/* Save / Cancel */}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
           <button
             onClick={onCancel}
@@ -164,103 +135,53 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
 
 type PopoverMode = { mode: "edit"; id: number } | { mode: "create" } | null;
 
-type SectionId = "notes" | "chat";
-
-function getSavedOrder(): SectionId[] {
-  try {
-    const saved = localStorage.getItem("gooni-sidebar-order");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length === 2) return parsed;
-    }
-  } catch {}
-  return ["notes", "chat"];
-}
-
 interface SidebarProps {
   isDashboard: boolean;
   isNotes: boolean;
+  isChat: boolean;
   showCompose: boolean;
   onLogoClick: () => void;
   onSpaceSelect: () => void;
   onCompose: () => void;
   onNewChat: () => void;
-  onConversationSelect: () => void;
 }
 
-export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onConversationSelect }: SidebarProps) {
+export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat }: SidebarProps) {
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId, removeSpace } = useNotesContentStore();
-  const { conversations, activeId, selectConversation } = useConversationsStore();
   const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
 
   const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
   const [spacesOpen, setSpacesOpen] = useState(true);
-  const [sectionOrder, setSectionOrder] = useState<SectionId[]>(getSavedOrder);
 
-  // Space popover state
   const [popover, setPopover] = useState<PopoverMode>(null);
   const [popoverAnchor, setPopoverAnchor] = useState({ top: 0, left: 208 });
   const [popoverName, setPopoverName] = useState("");
   const [popoverEmoji, setPopoverEmoji] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
-  const [dragOver, setDragOver] = useState<SectionId | null>(null);
-  const dragging = useRef<SectionId | null>(null);
-
+  const pinnedVersion = usePinnedVersionStore((s) => s.version);
   useEffect(() => {
     fetchPinnedNotes().then(setPinnedNotes).catch(() => {});
-  }, [activeNoteId]);
+  }, [activeNoteId, pinnedVersion]);
 
   async function handleUnpin(noteId: number) {
+    setPinnedNotes((prev) => prev.filter((n) => n.id !== noteId)); // optimistic
     await patchNote(noteId, { is_pinned: false });
-    setPinnedNotes((prev) => prev.filter((n) => n.id !== noteId));
+    usePinnedVersionStore.getState().bump();
   }
 
   function handleAllNotes() {
-    // Always deselect & reload so the click is perceivable even when we're already in All Notes.
     selectSpace("general");
     loadNotes("general");
     onSpaceSelect();
   }
 
-  function handleSelectRecentNote(note: ApiNote) {
+  function handleSelectNote(note: ApiNote) {
     const spaceId = note.space_id == null ? "general" : String(note.space_id);
     selectSpace(spaceId);
-    selectNote(note.id); // set eagerly so the editor shows the right note immediately
-    loadNotes(spaceId);  // fire-and-forget refresh
+    selectNote(note.id);
+    loadNotes(spaceId);
     onSpaceSelect();
-  }
-
-  function handleDragStart(section: SectionId) {
-    dragging.current = section;
-  }
-
-  function handleDragOver(e: React.DragEvent, section: SectionId) {
-    e.preventDefault();
-    if (dragging.current && dragging.current !== section) {
-      setDragOver(section);
-    }
-  }
-
-  function handleDrop(target: SectionId) {
-    if (!dragging.current || dragging.current === target) {
-      setDragOver(null);
-      return;
-    }
-    const from = sectionOrder.indexOf(dragging.current);
-    const to = sectionOrder.indexOf(target);
-    const reordered = [...sectionOrder];
-    reordered.splice(from, 1);
-    reordered.splice(to, 0, dragging.current);
-    setSectionOrder(reordered);
-    localStorage.setItem("gooni-sidebar-order", JSON.stringify(reordered));
-    dragging.current = null;
-    setDragOver(null);
-  }
-
-  function handleDragEnd() {
-    dragging.current = null;
-    setDragOver(null);
   }
 
   function openEditPopover(e: React.MouseEvent, id: number, name: string, emoji: string | null) {
@@ -300,210 +221,6 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
 
   const isAllNotes = isNotes && (selectedSpaceId === "general" || selectedSpaceId === null);
 
-  const notesSection = (
-    <div
-      key="notes"
-      draggable
-      onDragStart={() => handleDragStart("notes")}
-      onDragOver={(e) => handleDragOver(e, "notes")}
-      onDrop={() => handleDrop("notes")}
-      onDragEnd={handleDragEnd}
-      style={{
-        outline: dragOver === "notes" ? "2px solid rgba(0,122,255,0.4)" : "none",
-        borderRadius: 8,
-        transition: "outline 0.1s",
-      }}
-    >
-      {/* Section header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px 4px", cursor: "grab" }}>
-        <DragHandle />
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
-          NOTES
-        </span>
-      </div>
-
-      <div style={{ padding: "0 6px 4px" }}>
-        {/* All Notes */}
-        <div
-          onClick={handleAllNotes}
-          style={{
-            display: "flex", alignItems: "center", gap: 8,
-            padding: "0 10px", height: 32, borderRadius: 8,
-            cursor: "pointer",
-            background: isAllNotes ? "rgba(0,0,0,0.09)" : "transparent",
-            transition: "background 0.12s", userSelect: "none", marginBottom: 2,
-          }}
-          onMouseEnter={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
-          onMouseLeave={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
-        >
-          <span style={{ fontSize: 14, flexShrink: 0 }}>📋</span>
-          <span style={{
-            flex: 1, fontSize: 13.5,
-            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-            fontWeight: isAllNotes ? 600 : 400, color: "#1C1C1E",
-          }}>All Notes</span>
-        </div>
-
-        {/* Spaces list */}
-        <>
-          <div style={{ display: "flex", alignItems: "center", padding: "6px 6px 2px" }}>
-            <button
-              onClick={() => setSpacesOpen((o) => !o)}
-              style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
-            >
-              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>SPACES</span>
-              <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{spacesOpen ? "▾" : "▸"}</span>
-            </button>
-            <button
-              onClick={openCreatePopover}
-              title="New space"
-              style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 16, lineHeight: 1, padding: "0 2px", display: "flex", alignItems: "center" }}
-            >+</button>
-          </div>
-
-          {spacesOpen && spaces.filter(s => s.id !== "general").map((space) => {
-            const spaceId = String(space.id);
-            const isSelected = isNotes && selectedSpaceId === spaceId;
-            const isDelConfirm = deleteConfirmId === space.id;
-
-            return (
-              <div
-                key={space.id}
-                style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 4px 0 10px", height: 30, borderRadius: 8, cursor: "pointer", background: isSelected ? "rgba(0,0,0,0.09)" : "transparent", transition: "background 0.12s", userSelect: "none" }}
-                onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "1"); }}
-                onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "0"); setDeleteConfirmId(null); }}
-                onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; selectSpace(spaceId); loadNotes(spaceId); onSpaceSelect(); }}
-              >
-                <span style={{ fontSize: 13, flexShrink: 0 }}>{space.emoji ?? "🗂️"}</span>
-                <span style={{ flex: 1, fontSize: 13, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {space.name}
-                </span>
-                {isDelConfirm ? (
-                  <button className="space-action" onClick={(e) => { e.stopPropagation(); confirmDelete(space.id as number); }}
-                    style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-                    sure?
-                  </button>
-                ) : (
-                  <>
-                    <button className="space-action" onClick={(e) => openEditPopover(e, space.id as number, space.name, space.emoji)}
-                      style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Rename">✎</button>
-                    <button className="space-action" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(space.id as number); }}
-                      style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Delete">×</button>
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </>
-
-        {/* Pinned notes */}
-        {pinnedNotes.length > 0 && (
-          <>
-            <div style={{ padding: "10px 6px 2px" }}>
-              <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
-            </div>
-            {pinnedNotes.map((note) => {
-              const selected = activeNoteId === note.id;
-              return (
-                <div
-                  key={note.id}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 4,
-                    padding: "0 4px 0 10px", height: 30, borderRadius: 8,
-                    cursor: "pointer",
-                    background: selected ? "rgba(0,0,0,0.09)" : "transparent",
-                    transition: "background 0.12s",
-                  }}
-                  onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "1"); }}
-                  onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "0"); }}
-                  onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; handleSelectRecentNote(note); }}
-                >
-                  <span style={{ fontSize: 11, flexShrink: 0, color: "#FFB020" }}>📌</span>
-                  <span style={{
-                    flex: 1, fontSize: 13,
-                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                    fontWeight: selected ? 600 : 400, color: "#1C1C1E",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {note.title?.trim() || "Untitled"}
-                  </span>
-                  <button
-                    className="pin-action"
-                    onClick={(e) => { e.stopPropagation(); handleUnpin(note.id); }}
-                    title="Unpin"
-                    style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
-                  >×</button>
-                </div>
-              );
-            })}
-          </>
-        )}
-
-      </div>
-    </div>
-  );
-
-  const chatSection = (
-    <div
-      key="chat"
-      draggable
-      onDragStart={() => handleDragStart("chat")}
-      onDragOver={(e) => handleDragOver(e, "chat")}
-      onDrop={() => handleDrop("chat")}
-      onDragEnd={handleDragEnd}
-      style={{
-        outline: dragOver === "chat" ? "2px solid rgba(0,122,255,0.4)" : "none",
-        borderRadius: 8,
-        transition: "outline 0.1s",
-      }}
-    >
-      {/* Section header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px 4px", cursor: "grab" }}>
-        <DragHandle />
-        <span style={{ flex: 1, fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
-          CHAT
-        </span>
-        <button
-          onClick={onNewChat}
-          title="New chat"
-          style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 16, lineHeight: 1, padding: "0 2px", display: "flex", alignItems: "center" }}
-        >+</button>
-      </div>
-
-      <div style={{ padding: "0 6px 4px" }}>
-        {conversations.slice(0, 5).map((conv) => (
-          <button
-            key={conv.id}
-            onClick={() => { selectConversation(conv.id); onConversationSelect(); }}
-            style={{
-              display: "flex", flexDirection: "column", alignItems: "flex-start",
-              width: "100%", padding: "6px 10px", borderRadius: 8, border: "none",
-              background: activeId === conv.id ? "rgba(0,0,0,0.08)" : "transparent",
-              cursor: "pointer", textAlign: "left", transition: "background 0.1s",
-            }}
-            onMouseEnter={(e) => { if (activeId !== conv.id) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
-            onMouseLeave={(e) => { if (activeId !== conv.id) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-          >
-            <div style={{
-              fontSize: 13,
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-              fontWeight: activeId === conv.id ? 600 : 400,
-              color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis",
-              whiteSpace: "nowrap", width: "100%",
-            }}>
-              {conv.title || "New conversation"}
-            </div>
-            <div style={{ fontSize: 11, color: "#AEAEB2", marginTop: 1, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-              {relativeTime(conv.last_message_at ?? conv.created_at)}
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-
-  const sections: Record<SectionId, React.ReactNode> = { notes: notesSection, chat: chatSection };
-
   return (
     <>
       <div
@@ -513,7 +230,7 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
           borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box",
         }}
       >
-        {/* Header */}
+        {/* Header — logo + compose */}
         <div style={{
           height: 52, padding: "0 12px", display: "flex", alignItems: "center",
           justifyContent: "space-between", flexShrink: 0,
@@ -551,14 +268,164 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
 
         {/* Scrollable content */}
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}>
-          {sectionOrder.map((id, i) => (
-            <div key={id}>
-              {sections[id]}
-              {i === 0 && (
-                <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 6px 2px" }} />
-              )}
+          {/* Section: NOTES */}
+          <div style={{ padding: "8px 12px 4px" }}>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
+              NOTES
+            </span>
+          </div>
+
+          <div style={{ padding: "0 6px 4px" }}>
+            {/* All Notes */}
+            <div
+              onClick={handleAllNotes}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "0 10px", height: 32, borderRadius: 8,
+                cursor: "pointer",
+                background: isAllNotes ? "rgba(0,0,0,0.09)" : "transparent",
+                transition: "background 0.12s", userSelect: "none", marginBottom: 2,
+              }}
+              onMouseEnter={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
+              onMouseLeave={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+            >
+              <span style={{ fontSize: 14, flexShrink: 0 }}>📋</span>
+              <span style={{
+                flex: 1, fontSize: 13.5,
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontWeight: isAllNotes ? 600 : 400, color: "#1C1C1E",
+              }}>All Notes</span>
             </div>
-          ))}
+          </div>
+
+          {/* Divider */}
+          <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 10px" }} />
+
+          {/* Section: SPACES */}
+          <div style={{ padding: "0 6px 4px" }}>
+            <div style={{ display: "flex", alignItems: "center", padding: "6px 6px 2px" }}>
+              <button
+                onClick={() => setSpacesOpen((o) => !o)}
+                style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
+              >
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>SPACES</span>
+                <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{spacesOpen ? "▾" : "▸"}</span>
+              </button>
+              <button
+                onClick={openCreatePopover}
+                title="New space"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 16, lineHeight: 1, padding: "0 2px", display: "flex", alignItems: "center" }}
+              >+</button>
+            </div>
+
+            {spacesOpen && spaces.filter(s => s.id !== "general").map((space) => {
+              const spaceId = String(space.id);
+              const isSelected = isNotes && selectedSpaceId === spaceId;
+              const isDelConfirm = deleteConfirmId === space.id;
+
+              return (
+                <div
+                  key={space.id}
+                  style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 4px 0 10px", height: 30, borderRadius: 8, cursor: "pointer", background: isSelected ? "rgba(0,0,0,0.09)" : "transparent", transition: "background 0.12s", userSelect: "none" }}
+                  onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "1"); }}
+                  onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "0"); setDeleteConfirmId(null); }}
+                  onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; selectSpace(spaceId); loadNotes(spaceId); onSpaceSelect(); }}
+                >
+                  <span style={{ fontSize: 13, flexShrink: 0 }}>{space.emoji ?? "🗂️"}</span>
+                  <span style={{ flex: 1, fontSize: 13, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {space.name}
+                  </span>
+                  {isDelConfirm ? (
+                    <button className="space-action" onClick={(e) => { e.stopPropagation(); confirmDelete(space.id as number); }}
+                      style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+                      sure?
+                    </button>
+                  ) : (
+                    <>
+                      <button className="space-action" onClick={(e) => openEditPopover(e, space.id as number, space.name, space.emoji)}
+                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Rename">✎</button>
+                      <button className="space-action" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(space.id as number); }}
+                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Delete">×</button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Section: PINNED */}
+          {pinnedNotes.length > 0 && (
+            <>
+              <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 10px" }} />
+              <div style={{ padding: "0 6px 4px" }}>
+                <div style={{ padding: "6px 6px 2px" }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
+                </div>
+                {pinnedNotes.map((note) => {
+                  const selected = activeNoteId === note.id;
+                  return (
+                    <div
+                      key={note.id}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        padding: "0 4px 0 10px", height: 30, borderRadius: 8,
+                        cursor: "pointer",
+                        background: selected ? "rgba(0,0,0,0.09)" : "transparent",
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "1"); }}
+                      onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "0"); }}
+                      onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; handleSelectNote(note); }}
+                    >
+                      <span style={{ fontSize: 11, flexShrink: 0, color: "#FFB020" }}>📌</span>
+                      <span style={{
+                        flex: 1, fontSize: 13,
+                        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                        fontWeight: selected ? 600 : 400, color: "#1C1C1E",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {note.title?.trim() || "Untitled"}
+                      </span>
+                      <button
+                        className="pin-action"
+                        onClick={(e) => { e.stopPropagation(); handleUnpin(note.id); }}
+                        title="Unpin"
+                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
+                      >×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* Spacer pushes New chat button to the bottom */}
+          <div style={{ flex: 1, minHeight: 20 }} />
+
+          {/* New chat — full-page chat entry point */}
+          <div style={{ padding: "0 6px 10px" }}>
+            <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 4px 8px" }} />
+            <button
+              onClick={onNewChat}
+              title="Start a new chat with Gooni"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                cursor: "pointer", background: isChat ? "rgba(0,0,0,0.09)" : "transparent",
+                border: "none", textAlign: "left",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontWeight: isChat ? 600 : 400, fontSize: 13.5, color: "#1C1C1E",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+              onMouseLeave={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+                <path d="M2 3.5C2 2.67 2.67 2 3.5 2h7A1.5 1.5 0 0 1 12 3.5v5A1.5 1.5 0 0 1 10.5 10H6l-2.5 2.5V10H3.5A1.5 1.5 0 0 1 2 8.5v-5Z" stroke="#3C3C43" strokeWidth="1.3" fill="none" strokeLinejoin="round"/>
+              </svg>
+              New chat
+            </button>
+          </div>
         </div>
       </div>
 

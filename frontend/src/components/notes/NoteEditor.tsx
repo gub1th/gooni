@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
+import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { GooniLogo } from "../GooniLogo";
 
@@ -417,15 +418,24 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
   // Keep handleSubmitRef current so the editor's once-captured handleKeyDown always calls fresh state.
   handleSubmitRef.current = handleSubmit;
 
+  // Sync editor + local refs from activeNote. Deps include activeNote.content/title so we
+  // catch the common case where a note is selected BEFORE its space has loaded — activeNote
+  // starts null, then arrives async via loadNotes. The hasChanges guard prevents clobbering
+  // the user's in-progress typing when a save round-trip updates the store.
   useEffect(() => {
-    if (editor && activeNote) {
-      const current = editor.getHTML();
-      const desired = activeNote.content ?? "";
-      if (current !== desired) {
-        editor.commands.setContent(desired);
-      }
+    if (!editor || !activeNote || hasChanges.current) return;
+    const desired = activeNote.content ?? "";
+    if (editor.getHTML() !== desired) {
+      editor.commands.setContent(desired);
+      bodyRef.current = desired;
     }
-  }, [activeNoteId, editor]);
+    const title = activeNote.title ?? "";
+    if (titleRef.current !== title) {
+      setLocalTitle(title);
+      titleRef.current = title;
+    }
+    setLocalIsPublic(activeNote.is_public ?? false);
+  }, [activeNoteId, editor, activeNote?.content, activeNote?.title, activeNote?.is_public]);
 
   function scheduleSave() {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -490,6 +500,25 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
     }
     const note = await createNote("general");
     if (note) selectNote(note.id);
+  }
+
+  async function handleTogglePin() {
+    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
+    const newPinned = !activeNote.is_pinned;
+    try {
+      await apiPatchNote(activeNoteId, { is_pinned: newPinned });
+      // Optimistically update the note in every cached space list so activeNote.is_pinned flips immediately
+      useNotesContentStore.setState((s) => {
+        const updated: Record<string, ApiNote[]> = {};
+        for (const [k, list] of Object.entries(s.notes)) {
+          updated[k] = list.map((n) => (n.id === activeNoteId ? { ...n, is_pinned: newPinned } : n));
+        }
+        return { notes: updated };
+      });
+      usePinnedVersionStore.getState().bump();
+    } catch (e) {
+      console.error("pin toggle failed", e);
+    }
   }
 
   // Focus the editor after it appears in authoring mode.
@@ -696,6 +725,31 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
             </div>
           )}
 
+        {/* Pin toggle — surfaces the current note in the sidebar's Pinned section */}
+        {activeNote && activeNoteId && activeNoteId > 0 && (
+          <button
+            onClick={handleTogglePin}
+            title={activeNote.is_pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              border: "none",
+              background: activeNote.is_pinned ? "rgba(255,176,32,0.14)" : "transparent",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: 0, flexShrink: 0,
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+            onMouseLeave={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+          >
+            <span style={{
+              fontSize: 13, lineHeight: 1,
+              filter: activeNote.is_pinned ? "none" : "grayscale(1) opacity(0.5)",
+              transition: "filter 0.15s",
+            }}>📌</span>
+          </button>
+        )}
+
         <button
           onClick={toggleGooni}
           title={gooniOpen ? "Close Gooni" : "Open Gooni"}
@@ -730,9 +784,10 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
           <button
             onClick={handleStartNewNote}
             style={{
+              position: "relative",
               display: "flex",
               alignItems: "flex-start",
-              justifyContent: "flex-start",
+              gap: 12,
               width: "100%",
               padding: "18px 22px",
               minHeight: 80 + 18 * 2,
@@ -740,13 +795,26 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
               border: "none",
               cursor: "text",
               textAlign: "left",
-              color: "#AEAEB2",
-              fontSize: 14.5,
-              lineHeight: 1.65,
               fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
             }}
           >
-            Start writing...
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ opacity: 0.3, flexShrink: 0, marginTop: 2 }}>
+              <path d="M2 12.5V14h1.5l7-7-1.5-1.5-7 7zM13.7 3.3a1 1 0 0 0 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0L9.3 1.7l3 3 1.4-1.4z" fill="#1C1C1E"/>
+            </svg>
+            <span style={{ flex: 1, fontSize: 14, color: "#8E8E93", lineHeight: 1.4 }}>start a new note...</span>
+            {/* ↵ hint sits at bottom-right — same corner where the submit button appears in the active state, so transitioning doesn't cause a visual jump */}
+            <span style={{
+              position: "absolute",
+              bottom: 14,
+              right: 14,
+              fontSize: 11, color: "#8E8E93",
+              background: "#F2F2F7",
+              border: "0.5px solid rgba(0,0,0,0.08)",
+              borderRadius: 4,
+              padding: "2px 6px",
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+              pointerEvents: "none",
+            }}>↵ to create</span>
           </button>
         ) : (
           <div style={{ padding: "18px 22px", boxSizing: "border-box", width: "100%" }}>

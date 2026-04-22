@@ -94,14 +94,14 @@ function PublicPage() {
 
         {/* Header */}
         <div style={{ marginBottom: 40 }}>
-          <div style={{ fontSize: 21, fontWeight: 700, letterSpacing: "-0.4px", marginBottom: 12 }}>
+          <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.5px", marginBottom: 14 }}>
             daniel gunawan
           </div>
           <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
             {noteCount !== null && (
               <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#666" }}>
                 <PenIcon />
-                <span style={{ fontSize: 13 }}>
+                <span style={{ fontSize: 14 }}>
                   {noteCount} notes written
                   {notes.length > 0 && noteCount > notes.length && (
                     <span style={{ color: "#bbb", marginLeft: 5 }}>· {notes.length} public</span>
@@ -112,11 +112,11 @@ function PublicPage() {
             {lastActive && (
               <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#bbb" }}>
                 <ClockIcon />
-                <span style={{ fontSize: 13 }}>active {timeAgo(lastActive)}</span>
+                <span style={{ fontSize: 14 }}>active {timeAgo(lastActive)}</span>
               </div>
             )}
             {visitors !== null && visitors > 0 && (
-              <span style={{ fontSize: 12, color: "#cfcfcf", fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ fontSize: 13, color: "#cfcfcf", fontVariantNumeric: "tabular-nums" }}>
                 {visitors.toLocaleString()} unique {visitors === 1 ? "visitor" : "visitors"}
               </span>
             )}
@@ -163,11 +163,11 @@ function PublicPage() {
           ) : (
             <div style={{ display: "flex", alignItems: "flex-start", gap: 10, margin: "14px 0 0" }}>
               {bio ? (
-                <p style={{ fontSize: 14.5, color: "#444", lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap", flex: 1 }}>
+                <p style={{ fontSize: 15.5, color: "#444", lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap", flex: 1 }}>
                   {bio}
                 </p>
               ) : isOwner ? (
-                <p style={{ fontSize: 14, color: "#bbb", fontStyle: "italic", margin: 0, flex: 1 }}>
+                <p style={{ fontSize: 15, color: "#bbb", fontStyle: "italic", margin: 0, flex: 1 }}>
                   No bio yet.
                 </p>
               ) : null}
@@ -226,18 +226,18 @@ function PublicPage() {
                   <Link
                     to="/public/$noteId"
                     params={{ noteId: String(note.id) }}
-                    style={{ fontSize: 15, fontWeight: 500, color: "#111", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "none" }}
+                    style={{ fontSize: 17, fontWeight: 500, color: "#111", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "none" }}
                     onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "underline")}
                     onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "none")}
                   >
                     {note.title || "Untitled"}
                   </Link>
-                  <span style={{ fontSize: 12.5, color: "#999", marginTop: 2, display: "block" }}>
+                  <span style={{ fontSize: 13.5, color: "#999", marginTop: 3, display: "block" }}>
                     {formatDate(note.updated_at)}
                   </span>
                 </div>
                 {note.space_name && (
-                  <span style={{ flexShrink: 0, fontSize: 11.5, color: "#666", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12, padding: "2px 8px" }}>
+                  <span style={{ flexShrink: 0, fontSize: 12, color: "#666", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12, padding: "3px 9px" }}>
                     {note.space_name}
                   </span>
                 )}
