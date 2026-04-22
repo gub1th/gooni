@@ -1,0 +1,33 @@
+interface GooniLogoProps {
+  size?: number;
+  style?: React.CSSProperties;
+}
+
+export function GooniLogo({ size = 24, style }: GooniLogoProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ display: "block", flexShrink: 0, ...style }}
+      aria-label="Gooni"
+    >
+      <rect width="48" height="48" rx="12" fill="#0F0F0F" />
+      <circle cx="24" cy="22" r="11" fill="white" opacity="0.95" />
+      <circle cx="20" cy="21" r="2" fill="#0F0F0F" />
+      <circle cx="28" cy="21" r="2" fill="#0F0F0F" />
+      <circle cx="21" cy="20.5" r="0.7" fill="white" />
+      <circle cx="29" cy="20.5" r="0.7" fill="white" />
+      <path
+        d="M19 26 Q24 30 29 26"
+        stroke="#0F0F0F"
+        strokeWidth="1.5"
+        fill="none"
+        strokeLinecap="round"
+      />
+      <rect x="18" y="34" width="12" height="4" rx="2" fill="#4ADE80" />
+    </svg>
+  );
+}

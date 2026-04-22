@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getStoredToken, login } from "../services/api";
+import { GooniLogo } from "./GooniLogo";
 
 interface Props {
   children: React.ReactNode;
@@ -47,8 +48,11 @@ export function PasswordGate({ children }: Props) {
           width: 280,
         }}
       >
-        <div style={{ fontSize: 22, fontWeight: 600, color: "#f0f0f0", marginBottom: 4 }}>
-          gooni
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, marginBottom: 10 }}>
+          <GooniLogo size={64} />
+          <div style={{ fontSize: 20, fontWeight: 600, color: "#f0f0f0", letterSpacing: "-0.01em" }}>
+            gooni
+          </div>
         </div>
         <input
           type="password"

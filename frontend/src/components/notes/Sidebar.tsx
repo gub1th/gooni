@@ -3,6 +3,7 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useConversationsStore } from "../../stores/useConversationsStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
+import { GooniLogo } from "../GooniLogo";
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -522,15 +523,17 @@ export function Sidebar({ isDashboard, isNotes, showCompose, onLogoClick, onSpac
             onClick={onLogoClick}
             title={isDashboard ? "Back to notes" : "Dashboard"}
             style={{
-              background: isDashboard ? "rgba(0,0,0,0.08)" : "transparent",
-              border: "none", borderRadius: 6, padding: "3px 7px", cursor: "pointer",
+              background: "transparent",
+              border: "none", borderRadius: 8, padding: "3px 7px", cursor: "pointer",
               fontSize: 15, fontWeight: 700,
               fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               color: "#1C1C1E", transition: "background 0.1s", outline: "none",
+              display: "flex", alignItems: "center", gap: 7,
             }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.06)")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = isDashboard ? "rgba(0,0,0,0.08)" : "transparent")}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
           >
+            <GooniLogo size={20} />
             Gooni
           </button>
           {showCompose && (

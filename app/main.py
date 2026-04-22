@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db.database import engine, get_db
+from .db.database import SessionLocal
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
@@ -19,6 +20,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Note,
     PublicProfile,
     Space,
+    Visit,
 )
 from .db.schemas import ChatRequest
 from .llm.client import llm_client
@@ -120,6 +122,120 @@ async def auth_middleware(request: Request, call_next):
 
     from fastapi.responses import JSONResponse
     return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+
+# ── Visit logging ──────────────────────────────────────────────────────────────
+# Logs every GET /public/* hit for unique-visitor counts. IPs are salted + hashed
+# so we never store raw PII. Set VISIT_HASH_SALT in env to a long random string.
+
+_VISIT_SALT = os.getenv("VISIT_HASH_SALT", "gooni-default-salt-please-change").encode()
+
+_BOT_UA_RE = re.compile(
+    r"bot|crawl|spider|scrape|slurp|ahrefs|semrush|dataprovider|"
+    r"pingdom|uptime|monitor|curl|wget|python-requests|httpclient|"
+    r"facebookexternalhit|slackbot|twitterbot|linkedinbot|discordbot|telegrambot|"
+    r"headless|phantomjs|playwright|puppeteer",
+    re.IGNORECASE,
+)
+
+
+def _client_ip(request: Request) -> str:
+    """Extract the visitor's IP, respecting common reverse-proxy headers."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    cf = request.headers.get("cf-connecting-ip")
+    if cf:
+        return cf.strip()
+    return request.client.host if request.client else ""
+
+
+def _hash_ip(ip: str) -> str:
+    return hashlib.sha256(_VISIT_SALT + ip.encode()).hexdigest()[:16]
+
+
+@app.middleware("http")
+async def visit_logger(request: Request, call_next):
+    """Record hits on /public/* for unique-visitor analytics.
+    Runs AFTER the route (so we only log successful responses) and skips obvious bots.
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if (
+        request.method == "GET"
+        and path.startswith("/public")
+        and response.status_code < 400
+    ):
+        ua = request.headers.get("user-agent", "")
+        if not _BOT_UA_RE.search(ua):
+            ip = _client_ip(request)
+            if ip:
+                db = SessionLocal()
+                try:
+                    db.add(Visit(
+                        ip_hash=_hash_ip(ip),
+                        user_agent=ua[:500] or None,
+                        path=path[:500],
+                    ))
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                finally:
+                    db.close()
+    return response
+
+
+@app.get("/public/visits/count")
+def get_public_visit_count(db: Session = Depends(get_db)):
+    """Unique visitor count for the public site. Safe to expose — no PII, just a number."""
+    from sqlalchemy import func as sqlfunc
+    count = db.query(sqlfunc.count(sqlfunc.distinct(Visit.ip_hash))).scalar() or 0
+    return {"unique_visitors": int(count)}
+
+
+@app.get("/visits/summary")
+def get_visits_summary(db: Session = Depends(get_db)):
+    """Unique-visitor stats for /public/*. Auth-gated (not a /public route)."""
+    from datetime import datetime, timedelta
+    from sqlalchemy import func as sqlfunc
+
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    total_visits = db.query(Visit).count()
+    unique_visitors = db.query(sqlfunc.count(sqlfunc.distinct(Visit.ip_hash))).scalar() or 0
+    weekly_unique = (
+        db.query(sqlfunc.count(sqlfunc.distinct(Visit.ip_hash)))
+        .filter(Visit.created_at >= week_ago)
+        .scalar()
+        or 0
+    )
+    top_paths = (
+        db.query(Visit.path, sqlfunc.count(Visit.id).label("c"))
+        .group_by(Visit.path)
+        .order_by(sqlfunc.count(Visit.id).desc())
+        .limit(5)
+        .all()
+    )
+    recent = (
+        db.query(Visit)
+        .order_by(Visit.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    return {
+        "total_visits": total_visits,
+        "unique_visitors": unique_visitors,
+        "weekly_unique_visitors": weekly_unique,
+        "top_paths": [{"path": p, "count": c} for (p, c) in top_paths],
+        "recent": [
+            {
+                "ip_hash": v.ip_hash,
+                "path": v.path,
+                "user_agent": (v.user_agent or "")[:80],
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+            }
+            for v in recent
+        ],
+    }
 
 
 @app.post("/auth")
