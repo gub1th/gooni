@@ -3,7 +3,9 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
+import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { GooniLogo } from "../GooniLogo";
+import { SettingsModal } from "../SettingsModal";
 
 function ComposeIcon() {
   return (
@@ -152,6 +154,9 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
 
   const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
   const [spacesOpen, setSpacesOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const theme = useGooniThemeStore((s) => s.theme);
+  const palette = THEME_PALETTES[theme];
 
   const [popover, setPopover] = useState<PopoverMode>(null);
   const [popoverAnchor, setPopoverAnchor] = useState({ top: 0, left: 208 });
@@ -226,8 +231,9 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
       <div
         style={{
           width: 200, minWidth: 200, height: "100vh",
-          background: "#F2F2F7", display: "flex", flexDirection: "column",
+          background: palette.sidebar, display: "flex", flexDirection: "column",
           borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box",
+          position: "relative",
         }}
       >
         {/* Header — logo + compose */}
@@ -399,12 +405,11 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
             </>
           )}
 
-          {/* Spacer pushes New chat button to the bottom */}
+          {/* Spacer — push New chat + Settings to the bottom */}
           <div style={{ flex: 1, minHeight: 20 }} />
 
-          {/* New chat — full-page chat entry point */}
-          <div style={{ padding: "0 6px 10px" }}>
-            <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 4px 8px" }} />
+          {/* New chat — directly above Settings */}
+          <div style={{ padding: "0 6px 4px" }}>
             <button
               onClick={onNewChat}
               title="Start a new chat with Gooni"
@@ -426,8 +431,35 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               New chat
             </button>
           </div>
+
+          {/* Settings — stays at the bottom as a full row (icon + label) */}
+          <div style={{ padding: "0 6px 10px" }}>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              title="Settings"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                border: "none", background: "transparent", cursor: "pointer",
+                textAlign: "left",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontSize: 13.5, color: "#3C3C43",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
+                <path d="M8 1.5v2 M8 12.5v2 M14.5 8h-2 M3.5 8h-2 M12.6 3.4l-1.4 1.4 M4.8 11.2l-1.4 1.4 M12.6 12.6l-1.4-1.4 M4.8 4.8l-1.4-1.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              </svg>
+              Settings
+            </button>
+          </div>
         </div>
       </div>
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {popover && (
         <SpacePopover

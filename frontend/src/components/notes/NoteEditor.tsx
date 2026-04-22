@@ -112,6 +112,50 @@ function useEditorStyles() {
       .gooni-note-editor table .selectedCell {
         background: rgba(0,122,255,0.08);
       }
+      /* Warm-yellow pointer-tracking glow on the embedded quick-note placeholder.
+         Uses @property so CSS can smoothly transition the custom properties —
+         the glow eases toward the pointer instead of snapping 1:1, which makes the
+         light feel like it has some inertia rather than being mechanical. */
+      @property --glow-x {
+        syntax: "<length>";
+        inherits: true;
+        initial-value: 200px;
+      }
+      @property --glow-y {
+        syntax: "<length>";
+        inherits: true;
+        initial-value: 60px;
+      }
+      .gooni-note-glow {
+        transition: --glow-x 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+                    --glow-y 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      .gooni-note-glow::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: radial-gradient(170px circle at var(--glow-x) var(--glow-y),
+                      rgba(255, 196, 82, 0.30),
+                      rgba(255, 196, 82, 0.10) 42%,
+                      transparent 75%);
+        opacity: 0;
+        transition: opacity 0.25s ease-out;
+        pointer-events: none;
+        z-index: 0;
+      }
+      /* Slow, subtle breathing on hover — soft oscillation of opacity so the light
+         feels alive even when the pointer is still. */
+      @keyframes gooni-glow-breathe {
+        0%, 100% { opacity: 0.88; }
+        50%      { opacity: 1; }
+      }
+      .gooni-note-glow:hover::before {
+        opacity: 1;
+        animation: gooni-glow-breathe 2.6s ease-in-out infinite;
+      }
+      /* While the user is actually typing, keep the surface quiet. */
+      .gooni-note-glow:focus-within::before { opacity: 0; animation: none; }
     `;
   }, []);
 }
@@ -187,7 +231,7 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
   useEditorStyles();
   const embedded = variant === "embedded";
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote, createNote } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote } = useNotesContentStore();
   const { isOpen: gooniOpen, toggle: toggleGooni } = useGooniStore();
   const { spaces } = useSpacesStore();
 
@@ -213,10 +257,7 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
   const titleInputRef = useRef<HTMLInputElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
   const hasChanges = useRef(false);
-  // Embedded mode is ephemeral: we don't create a server note until the user submits.
-  // `embeddedAuthoring` flips true on first click of the "Start writing..." placeholder
-  // and stays true across submits so the editor doesn't collapse mid-session.
-  const [embeddedAuthoring, setEmbeddedAuthoring] = useState(false);
+  // Embedded mode is ephemeral: no server note is created until the user submits.
   // Ref so handleKeyDown (captured once inside useEditor) always calls the latest handleSubmit.
   const handleSubmitRef = useRef<() => Promise<void>>(async () => {});
 
@@ -346,13 +387,9 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
         // Embedded quick-note is ephemeral — no debounced save. Everything persists on submit.
         if (!embedded) scheduleSave();
       },
-      onBlur: async ({ editor }) => {
-        if (embedded) {
-          // Collapse back to the "Start writing..." placeholder if the user blurred without typing.
-          if (editor.isEmpty) setEmbeddedAuthoring(false);
-          // No save, no embed — embedded is ephemeral until submit.
-          return;
-        }
+      onBlur: async () => {
+        // Embedded: ephemeral, no save on blur — content persists only on submit.
+        if (embedded) return;
         await save();
         embedAndCheck(activeNoteId);
       },
@@ -492,16 +529,6 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
     .map((s) => ({ id: String(s.id), name: s.name, emoji: s.id === "general" ? "📥" : (s.emoji ?? "🗂️") }))
     .filter((s) => s.id !== currentSpaceId);
 
-  async function handleStartNewNote() {
-    if (embedded) {
-      // Ephemeral: just reveal the editor. No server note is created until submit.
-      setEmbeddedAuthoring(true);
-      return;
-    }
-    const note = await createNote("general");
-    if (note) selectNote(note.id);
-  }
-
   async function handleTogglePin() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
     const newPinned = !activeNote.is_pinned;
@@ -520,13 +547,6 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
       console.error("pin toggle failed", e);
     }
   }
-
-  // Focus the editor after it appears in authoring mode.
-  useEffect(() => {
-    if (embedded && embeddedAuthoring && editor) {
-      editor.commands.focus("end");
-    }
-  }, [embeddedAuthoring, editor, embedded]);
 
   return (
     <div
@@ -780,45 +800,26 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
 
       {/* Editor content */}
       {embedded ? (
-        !embeddedAuthoring ? (
-          <button
-            onClick={handleStartNewNote}
-            style={{
-              position: "relative",
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 12,
-              width: "100%",
-              padding: "18px 22px",
-              minHeight: 80 + 18 * 2,
-              background: "transparent",
-              border: "none",
-              cursor: "text",
-              textAlign: "left",
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ opacity: 0.3, flexShrink: 0, marginTop: 2 }}>
-              <path d="M2 12.5V14h1.5l7-7-1.5-1.5-7 7zM13.7 3.3a1 1 0 0 0 0-1.4l-1.6-1.6a1 1 0 0 0-1.4 0L9.3 1.7l3 3 1.4-1.4z" fill="#1C1C1E"/>
-            </svg>
-            <span style={{ flex: 1, fontSize: 14, color: "#8E8E93", lineHeight: 1.4 }}>start a new note...</span>
-            {/* ↵ hint sits at bottom-right — same corner where the submit button appears in the active state, so transitioning doesn't cause a visual jump */}
-            <span style={{
-              position: "absolute",
-              bottom: 14,
-              right: 14,
-              fontSize: 11, color: "#8E8E93",
-              background: "#F2F2F7",
-              border: "0.5px solid rgba(0,0,0,0.08)",
-              borderRadius: 4,
-              padding: "2px 6px",
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-              pointerEvents: "none",
-            }}>↵ to create</span>
-          </button>
-        ) : (
-          <div style={{ padding: "18px 22px", boxSizing: "border-box", width: "100%" }}>
+        <div
+          className="gooni-note-glow"
+          onMouseMove={(e) => {
+            const el = e.currentTarget;
+            const rect = el.getBoundingClientRect();
+            el.style.setProperty("--glow-x", `${e.clientX - rect.left}px`);
+            el.style.setProperty("--glow-y", `${e.clientY - rect.top}px`);
+          }}
+          style={{
+            position: "relative",
+            padding: "18px 22px",
+            boxSizing: "border-box",
+            width: "100%",
+            minHeight: 80 + 18 * 2,
+            overflow: "hidden",
+            borderRadius: 14,
+          }}
+        >
             <div
+              style={{ position: "relative", zIndex: 1 }}
               onDrop={(e) => {
                 const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
                   f.type.startsWith("image/")
@@ -904,8 +905,7 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
                 <path d="M6.5 10.5 L6.5 3 M3 6.5 L6.5 3 L10 6.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
-          </div>
-        )
+        </div>
       ) : (
         <div
           ref={scrollContainerRef}

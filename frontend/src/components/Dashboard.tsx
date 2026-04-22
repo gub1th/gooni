@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { fetchDashboardStats, fetchGooniTake, fetchPinnedNotes, updateNote, type ApiNote, type DashboardStats } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { usePinnedVersionStore } from "../stores/usePinnedVersionStore";
+import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
+import { GooniMascot } from "./GooniMascot";
 import { NoteEditor } from "./notes/NoteEditor";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -403,12 +405,6 @@ function TodoCard({ todoNote, onAfterMutate }: TodoCardProps) {
       {/* Add input — always at bottom, Enter to commit. Pointer-tracking glow on hover. */}
       <div
         className="gooni-todo-add"
-        onMouseMove={(e) => {
-          const el = e.currentTarget;
-          const rect = el.getBoundingClientRect();
-          el.style.setProperty("--glow-x", `${e.clientX - rect.left}px`);
-          el.style.setProperty("--glow-y", `${e.clientY - rect.top}px`);
-        }}
         style={{
           position: "relative",
           display: "flex", alignItems: "center", gap: 8,
@@ -454,6 +450,7 @@ function TodoCard({ todoNote, onAfterMutate }: TodoCardProps) {
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────
+// The dashboard itself:
 
 export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -466,7 +463,16 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const typingRaf = useRef<number | null>(null);
   const { selectSpace, loadNotes, selectNote } = useNotesContentStore();
   const pinnedVersion = usePinnedVersionStore((s) => s.version);
+  const theme = useGooniThemeStore((s) => s.theme);
+  const palette = THEME_PALETTES[theme];
   const firstRowRef = useRef<HTMLDivElement>(null);
+  const dashRef = useRef<HTMLDivElement>(null);
+
+  // Keep body/html background in sync with theme so any gap around the app fills correctly.
+  useEffect(() => {
+    document.body.style.background = palette.main;
+    document.documentElement.style.background = palette.main;
+  }, [palette.main]);
 
   useEffect(() => () => {
     if (typingRaf.current != null) cancelAnimationFrame(typingRaf.current);
@@ -571,7 +577,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const activityPerDay = stats?.activity_per_day ?? [0, 0, 0, 0, 0, 0, 0];
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", background: "#FAFAFA", fontFamily: FONT, position: "relative" }}>
+    <div ref={dashRef} style={{ flex: 1, overflowY: "auto", background: palette.main, fontFamily: FONT, position: "relative" }}>
       <style>{`
         @keyframes gooni-row-pulse {
           0%   { background: transparent; }
@@ -590,27 +596,10 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           margin-left: 1px;
           font-weight: 400;
         }
-        /* Pointer-tracking warm-yellow glow on the 'add a todo' row.
-           Tighter 90px radius + taller row padding so vertical mouse movement is perceivable. */
-        .gooni-todo-add::before {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background: radial-gradient(90px circle at var(--glow-x, 50%) var(--glow-y, 50%),
-                        rgba(255, 196, 82, 0.38),
-                        rgba(255, 196, 82, 0.14) 45%,
-                        transparent 80%);
-          opacity: 0;
-          transition: opacity 0.18s ease-out;
-          pointer-events: none;
-          z-index: 0;
-        }
-        .gooni-todo-add:hover::before {
-          opacity: 1;
-        }
-        .gooni-todo-add:focus-within::before {
-          opacity: 1;
-        }
+        /* Quiet hover on the 'add a todo' row — matches the per-row hover treatment above it. */
+        .gooni-todo-add { transition: background 0.12s; }
+        .gooni-todo-add:hover,
+        .gooni-todo-add:focus-within { background: rgba(0,0,0,0.035); }
         /* Subtle scrollbar for recent notes — invisible until interaction */
         .gooni-recent-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
         .gooni-recent-scroll:hover { scrollbar-color: rgba(0,0,0,0.15) transparent; }
@@ -882,6 +871,9 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
         </div>
 
       </div>
+
+      {/* Interactive mascot — peeks from sidebar seam, drag-to-toss, walks with perspective */}
+      <GooniMascot dashboardRef={dashRef} />
     </div>
   );
 }
