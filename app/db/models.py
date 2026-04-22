@@ -75,4 +75,18 @@ class PublicProfile(Base):
     bio = Column(Text, nullable=True)  # raw text/markdown, user-written
 
 
+class Visit(Base):
+    """Append-only log of hits on /public/* — for unique-visitor counts.
+    IP is stored as a salted SHA-256 hash (first 16 hex chars) so we can't reverse it.
+    """
+
+    __tablename__ = "visits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ip_hash = Column(String, nullable=False, index=True)
+    user_agent = Column(Text, nullable=True)
+    path = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 

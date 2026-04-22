@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { fetchPublicNotes, fetchPublicProfile, updatePublicProfile, getStoredToken, type PublicNote } from "../services/api";
+import { fetchPublicNotes, fetchPublicProfile, fetchPublicVisitCount, updatePublicProfile, getStoredToken, type PublicNote } from "../services/api";
 
 export const Route = createFileRoute("/public/")(({
   component: PublicPage,
@@ -49,6 +49,7 @@ function PublicPage() {
   const [bio, setBio] = useState<string | null>(null);
   const [noteCount, setNoteCount] = useState<number | null>(null);
   const [lastActive, setLastActive] = useState<string | null>(null);
+  const [visitors, setVisitors] = useState<number | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
 
   const isOwner = getStoredToken() !== null;
@@ -63,6 +64,7 @@ function PublicPage() {
       setNoteCount(p.note_count);
       setLastActive(p.last_active);
     }).catch(() => {});
+    fetchPublicVisitCount().then((v) => setVisitors(v.unique_visitors)).catch(() => {});
   }, []);
 
   async function handleSaveBio() {
@@ -112,6 +114,11 @@ function PublicPage() {
                 <ClockIcon />
                 <span style={{ fontSize: 13 }}>active {timeAgo(lastActive)}</span>
               </div>
+            )}
+            {visitors !== null && visitors > 0 && (
+              <span style={{ fontSize: 12, color: "#cfcfcf", fontVariantNumeric: "tabular-nums" }}>
+                {visitors.toLocaleString()} unique {visitors === 1 ? "visitor" : "visitors"}
+              </span>
             )}
           </div>
           {editing ? (

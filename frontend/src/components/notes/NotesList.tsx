@@ -59,14 +59,6 @@ function groupNotes(notes: ApiNote[]): { label: string; notes: ApiNote[] }[] {
     .map(([label, notes]) => ({ label, notes }));
 }
 
-function FolderIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M1 3.5C1 2.948 1.448 2.5 2 2.5H4.5L5.5 3.5H10C10.552 3.5 11 3.948 11 4.5V9C11 9.552 10.552 10 10 10H2C1.448 10 1 9.552 1 9V3.5Z" stroke="#636366" strokeWidth="1.2" fill="none"/>
-    </svg>
-  );
-}
-
 interface ContextMenu {
   x: number;
   y: number;
@@ -79,7 +71,6 @@ interface NoteRowProps {
   active: boolean;
   spaceId: string;
   dragging: boolean;
-  spaceBadge?: string | null; // "emoji name" or just "name" — shown when in all-notes view
   onSelect: () => void;
   onDragStart: (id: number) => void;
   onDragEnd: () => void;
@@ -87,9 +78,26 @@ interface NoteRowProps {
   onTogglePin: (note: ApiNote) => void;
 }
 
-function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDragStart, onDragEnd, onContextMenu, onTogglePin }: NoteRowProps) {
-  const preview = note.content ? stripHtml(note.content).slice(0, 50) : "";
-  const title = note.title?.trim() || "New Note";
+function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDragEnd, onContextMenu, onTogglePin }: NoteRowProps) {
+  // Derive title from content when the note has no real title — so the list
+  // never shows a row of repeated "New Note" placeholders.
+  const plain = note.content ? stripHtml(note.content) : "";
+  const trimmedTitle = note.title?.trim() ?? "";
+  let title: string;
+  let preview: string;
+  if (trimmedTitle) {
+    title = trimmedTitle;
+    preview = plain.slice(0, 60);
+  } else if (plain) {
+    // First line (or first ~50 chars) becomes the display title.
+    const firstLineBreak = plain.search(/[\n\r]/);
+    title = plain.slice(0, firstLineBreak > 0 ? firstLineBreak : 50).trim() || "Untitled";
+    const rest = plain.slice(title.length).trim();
+    preview = rest.slice(0, 60);
+  } else {
+    title = "Untitled";
+    preview = "";
+  }
 
   return (
     <div
@@ -108,7 +116,7 @@ function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDrag
       onContextMenu={(e) => onContextMenu(e, note.id)}
       style={{
         position: "relative",
-        padding: "8px 10px",
+        padding: "9px 10px",
         borderBottom: "1px solid rgba(0,0,0,0.05)",
         cursor: note.id > 0 ? "grab" : "pointer",
         background: active ? "rgba(0,0,0,0.07)" : "transparent",
@@ -122,10 +130,11 @@ function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDrag
       }}
       onMouseLeave={(e) => {
         if (!active) (e.currentTarget as HTMLDivElement).style.background = "transparent";
-        (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".row-action").forEach(b => b.style.opacity = note.is_pinned ? "1" : "0");
+        (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".row-action").forEach(b => b.style.opacity = "0");
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 1 }}>
+      {/* Title row: title left, timestamp right, pin button absolute on hover */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
         <div
           style={{
             flex: 1,
@@ -140,37 +149,40 @@ function NoteRow({ note, active, spaceId, dragging, spaceBadge, onSelect, onDrag
         >
           {title}
         </div>
-        <button
-          className="row-action"
-          onClick={(e) => { e.stopPropagation(); onTogglePin(note); }}
-          title={note.is_pinned ? "Unpin" : "Pin"}
-          style={{
-            opacity: note.is_pinned ? 1 : 0,
-            background: "none", border: "none", cursor: "pointer",
-            fontSize: 11, padding: "0 2px", flexShrink: 0, lineHeight: 1,
-            color: note.is_pinned ? "#FFB020" : "#8E8E93",
-            transition: "opacity 0.1s",
-          }}
-        >📌</button>
-      </div>
-      <div style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
-        <span style={{ fontSize: 11, color: "#8E8E93", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", flexShrink: 0 }}>
+        <span style={{
+          fontSize: 10.5, color: "#C7C7CC", flexShrink: 0,
+          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+          fontVariantNumeric: "tabular-nums",
+        }}>
           {formatTime(note.updated_at)}
         </span>
-        {preview && (
-          <span style={{ fontSize: 11, color: "#AEAEB2", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {preview}
-          </span>
-        )}
       </div>
-      {spaceBadge && (
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 3, marginTop: 4, background: "rgba(0,0,0,0.06)", borderRadius: 4, padding: "1px 5px 1px 4px" }}>
-          <FolderIcon />
-          <span style={{ fontSize: 10.5, color: "#3C3C43", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: 500 }}>
-            {spaceBadge}
-          </span>
+      {/* Preview — single line, muted */}
+      {preview && (
+        <div style={{
+          fontSize: 11.5, color: "#8E8E93", marginTop: 2,
+          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>
+          {preview}
         </div>
       )}
+      {/* Pin button — hover-only. The Pinned section in the sidebar is the source of truth. */}
+      <button
+        className="row-action"
+        onClick={(e) => { e.stopPropagation(); onTogglePin(note); }}
+        title={note.is_pinned ? "Unpin" : "Pin"}
+        style={{
+          position: "absolute", top: 6, right: 5,
+          opacity: 0,
+          background: "rgba(255,255,255,0.85)",
+          border: "none", cursor: "pointer",
+          fontSize: 10, padding: "2px 5px", lineHeight: 1,
+          transition: "opacity 0.1s",
+          borderRadius: 5,
+          filter: note.is_pinned ? "none" : "grayscale(1) opacity(0.6)",
+        }}
+      >📌</button>
     </div>
   );
 }
@@ -202,14 +214,6 @@ export function NotesList() {
   const spaceId = selectedSpaceId ?? "general";
   const isAllNotes = spaceId === "general";
   const noteList = notes[spaceId] ?? [];
-
-  // Build a lookup from numeric space_id → display label
-  const spaceLabel = (numericId: number | null): string | null => {
-    if (!numericId) return null;
-    const sp = spaces.find((s) => s.id === numericId);
-    if (!sp) return null;
-    return sp.emoji ? `${sp.emoji} ${sp.name}` : sp.name;
-  };
 
   const currentSpace = isAllNotes ? null : spaces.find((s) => String(s.id) === spaceId);
   const headerLabel = isAllNotes
@@ -322,7 +326,6 @@ export function NotesList() {
                     active={activeNoteId === note.id}
                     spaceId={spaceId}
                     dragging={draggingId === note.id}
-                    spaceBadge={spaceLabel(note.space_id)}
                     onSelect={() => selectNote(note.id)}
                     onDragStart={(id) => setDraggingId(id)}
                     onDragEnd={() => setDraggingId(null)}

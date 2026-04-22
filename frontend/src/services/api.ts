@@ -99,11 +99,14 @@ export async function fetchRecentNotes(limit = 5): Promise<ApiNote[]> {
   return res.json();
 }
 
-export async function createNote(spaceId: number | "general"): Promise<ApiNote> {
+export async function createNote(
+  spaceId: number | "general",
+  init: { title?: string; content?: string } = {},
+): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/spaces/${spaceId}/notes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify(init),
   });
   if (!res.ok) throw new Error("Failed to create note");
   return res.json();
@@ -233,6 +236,12 @@ export async function fetchPublicNotes(): Promise<PublicNote[]> {
 export async function fetchPublicProfile(): Promise<{ bio: string | null; note_count: number; last_active: string | null }> {
   const res = await apiFetch(`${BASE}/public/profile`);
   if (!res.ok) throw new Error("Failed to fetch public profile");
+  return res.json();
+}
+
+export async function fetchPublicVisitCount(): Promise<{ unique_visitors: number }> {
+  const res = await apiFetch(`${BASE}/public/visits/count`);
+  if (!res.ok) throw new Error("Failed to fetch visit count");
   return res.json();
 }
 

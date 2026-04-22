@@ -10,10 +10,11 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useRef, useState } from "react";
-import { updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
+import { GooniLogo } from "../GooniLogo";
 
 type Variant = "full" | "embedded";
 
@@ -176,7 +177,12 @@ function FormatToolbar({ editor }: { editor: Editor | null }) {
   );
 }
 
-export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
+interface NoteEditorProps {
+  variant?: Variant;
+  onSubmitted?: (note: ApiNote | null, buttonRect: DOMRect | null) => void;
+}
+
+export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = {}) {
   useEditorStyles();
   const embedded = variant === "embedded";
 
@@ -204,7 +210,14 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevActiveNoteId = useRef<number | null>(activeNoteId);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
   const hasChanges = useRef(false);
+  // Embedded mode is ephemeral: we don't create a server note until the user submits.
+  // `embeddedAuthoring` flips true on first click of the "Start writing..." placeholder
+  // and stays true across submits so the editor doesn't collapse mid-session.
+  const [embeddedAuthoring, setEmbeddedAuthoring] = useState(false);
+  // Ref so handleKeyDown (captured once inside useEditor) always calls the latest handleSubmit.
+  const handleSubmitRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     // Flush any unsaved changes (e.g. a dropped image) before leaving the previous note
@@ -319,7 +332,7 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
         handleKeyDown: (_view, event) => {
           if (embedded && event.key === "Enter" && !event.shiftKey && !event.isComposing) {
             event.preventDefault();
-            handleSubmit();
+            void handleSubmitRef.current();
             return true;
           }
           return false;
@@ -329,23 +342,14 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
         bodyRef.current = editor.getHTML();
         hasChanges.current = true;
         setEditorEmpty(editor.isEmpty);
-        scheduleSave();
+        // Embedded quick-note is ephemeral — no debounced save. Everything persists on submit.
+        if (!embedded) scheduleSave();
       },
       onBlur: async ({ editor }) => {
-        // If the embedded editor was focused but nothing was typed, delete the
-        // placeholder note instead of leaving behind an empty row.
-        if (
-          embedded &&
-          activeNoteId && activeNoteId > 0 &&
-          !hasChanges.current &&
-          editor.isEmpty &&
-          !(titleRef.current ?? "").trim()
-        ) {
-          try {
-            await deleteNote(activeNoteId, "general");
-          } catch {
-            // if delete fails, fall through to normal save path
-          }
+        if (embedded) {
+          // Collapse back to the "Start writing..." placeholder if the user blurred without typing.
+          if (editor.isEmpty) setEmbeddedAuthoring(false);
+          // No save, no embed — embedded is ephemeral until submit.
           return;
         }
         await save();
@@ -371,17 +375,47 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
   async function handleSubmit() {
     if (!editor || editor.isEmpty) return;
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    if (activeNoteId && activeNoteId > 0) {
+
+    // Capture the rect BEFORE any state mutation so the ink animation has the right origin.
+    const buttonRect = submitButtonRef.current?.getBoundingClientRect() ?? null;
+    const contentToSave = bodyRef.current;
+    let savedNote: ApiNote | null = null;
+
+    if (embedded && !activeNoteId) {
+      // Ephemeral quick-note path: create the note server-side NOW with the final content.
       try {
-        await updateNote(activeNoteId, titleRef.current, bodyRef.current);
-        hasChanges.current = false;
+        savedNote = await apiCreateNote("general", { content: contentToSave });
       } catch {
-        // swallow; auto-save will retry
+        // silent — animation/refresh will no-op
       }
+      // Reset editor for the next quick note; keep authoring mode so it stays open + focused.
+      editor.commands.clearContent();
+      bodyRef.current = "";
+      hasChanges.current = false;
+      setEditorEmpty(true);
+      editor.commands.focus("end");
+    } else if (activeNoteId && activeNoteId > 0) {
+      // Existing full-variant / already-created path.
+      try {
+        await updateNote(activeNoteId, titleRef.current, contentToSave);
+        hasChanges.current = false;
+        for (const list of Object.values(useNotesContentStore.getState().notes)) {
+          const n = list.find((x) => x.id === activeNoteId);
+          if (n) { savedNote = n; break; }
+        }
+      } catch {
+        // swallow
+      }
+      selectNote(null);
+      setEditorEmpty(true);
+      editor.commands.clearContent();
     }
-    selectNote(null);
-    setEditorEmpty(true);
+
+    onSubmitted?.(savedNote, buttonRect);
   }
+
+  // Keep handleSubmitRef current so the editor's once-captured handleKeyDown always calls fresh state.
+  handleSubmitRef.current = handleSubmit;
 
   useEffect(() => {
     if (editor && activeNote) {
@@ -449,9 +483,21 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
     .filter((s) => s.id !== currentSpaceId);
 
   async function handleStartNewNote() {
+    if (embedded) {
+      // Ephemeral: just reveal the editor. No server note is created until submit.
+      setEmbeddedAuthoring(true);
+      return;
+    }
     const note = await createNote("general");
     if (note) selectNote(note.id);
   }
+
+  // Focus the editor after it appears in authoring mode.
+  useEffect(() => {
+    if (embedded && embeddedAuthoring && editor) {
+      editor.commands.focus("end");
+    }
+  }, [embeddedAuthoring, editor, embedded]);
 
   return (
     <div
@@ -671,7 +717,8 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.10)")}
           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = gooniOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)")}
         >
-          💬 Gooni
+          <GooniLogo size={14} />
+          Chat with Gooni
         </button>
         </div>
       </div>
@@ -679,7 +726,7 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
 
       {/* Editor content */}
       {embedded ? (
-        !activeNote ? (
+        !embeddedAuthoring ? (
           <button
             onClick={handleStartNewNote}
             style={{
@@ -749,33 +796,46 @@ export function NoteEditor({ variant = "full" }: { variant?: Variant } = {}) {
               <EditorContent editor={editor} />
             </div>
 
-            {!editorEmpty && (
-              <button
-                onClick={handleSubmit}
-                title="Submit (Enter)"
-                style={{
-                  position: "absolute",
-                  bottom: 8,
-                  right: 10,
-                  padding: "3px 10px",
-                  borderRadius: 10,
-                  border: "none",
-                  background: "rgba(0,0,0,0.75)",
-                  color: "#fff",
-                  fontSize: 11,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-                  letterSpacing: 0.2,
-                  opacity: 0.85,
-                  transition: "opacity 0.15s",
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "0.85")}
-              >
-                Submit ⏎
-              </button>
-            )}
+            <button
+              ref={submitButtonRef}
+              onClick={handleSubmit}
+              disabled={editorEmpty}
+              title="Submit (Enter)"
+              style={{
+                position: "absolute",
+                bottom: 10,
+                right: 10,
+                width: 30, height: 30, borderRadius: "50%",
+                border: "none",
+                background: editorEmpty ? "rgba(0,0,0,0.06)" : "#1C1C1E",
+                color: editorEmpty ? "#C7C7CC" : "#fff",
+                cursor: editorEmpty ? "default" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 0,
+                transition: "background 0.25s ease, color 0.25s ease, transform 0.2s ease, box-shadow 0.25s ease",
+                transform: editorEmpty ? "scale(0.92)" : "scale(1)",
+                // Active state borrows the goon's green accent for a subtle glow.
+                boxShadow: editorEmpty
+                  ? "none"
+                  : "0 2px 8px rgba(28,28,30,0.28), 0 0 0 1px rgba(74,222,128,0.35)",
+              }}
+              onMouseEnter={(e) => {
+                if (editorEmpty) return;
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.transform = "scale(1.08)";
+                el.style.boxShadow = "0 3px 14px rgba(74,222,128,0.35), 0 0 0 1px rgba(74,222,128,0.55)";
+              }}
+              onMouseLeave={(e) => {
+                if (editorEmpty) return;
+                const el = e.currentTarget as HTMLButtonElement;
+                el.style.transform = "scale(1)";
+                el.style.boxShadow = "0 2px 8px rgba(28,28,30,0.28), 0 0 0 1px rgba(74,222,128,0.35)";
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <path d="M6.5 10.5 L6.5 3 M3 6.5 L6.5 3 L10 6.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
           </div>
         )
       ) : (
