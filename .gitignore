@@ -61,3 +61,13 @@ app/misc/
 # live under .claude/skills/ and are tracked so they travel with the repo.
 .claude/*
 !.claude/skills/
+
+# MCP server config — has hardcoded local paths + GOONI_AUTH_PASSWORD secret.
+# Per-machine; never share. Use .mcp.json.example as the template.
+.mcp.json
+
+# Personal planning / memory dumps — not meant for the public repo.
+# DEPLOY_DEBUG.md stays tracked as a useful runbook.
+docs/TODO.md
+docs/VISION.md
+docs/memory_export.json

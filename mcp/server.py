@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Gooni MCP server — exposes Gooni's memory and notes to Claude Code via stdio."""
 
+import hashlib
 import os
 import re
 from datetime import datetime, timezone
@@ -9,6 +10,19 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 BASE_URL = os.getenv("GOONI_URL", "http://localhost:8000")
+
+# Prod has password-gated auth (see app/main.py auth_middleware). Compute the
+# stable bearer token from the password locally — no need to hit /auth — and
+# attach it to every outgoing request via a default-header httpx.Client.
+# If GOONI_AUTH_PASSWORD is unset (e.g. running against unauthenticated dev),
+# the header is omitted and the backend lets requests through.
+_AUTH_PASSWORD = os.getenv("GOONI_AUTH_PASSWORD", "").strip()
+_session_headers: dict[str, str] = {}
+if _AUTH_PASSWORD:
+    _token = hashlib.sha256(_AUTH_PASSWORD.encode()).hexdigest()
+    _session_headers["Authorization"] = f"Bearer {_token}"
+
+_session = httpx.Client(headers=_session_headers, timeout=10)
 
 mcp = FastMCP("gooni")
 
@@ -60,7 +74,7 @@ def get_context(query: str = "") -> str:
     Args:
         query: optional topic to search relevant memories for
     """
-    resp = httpx.get(f"{BASE_URL}/mcp/context", params={"q": query}, timeout=10)
+    resp = _session.get(f"{BASE_URL}/mcp/context", params={"q": query}, timeout=10)
     resp.raise_for_status()
     return resp.json()["context"] or "(no memories yet)"
 
@@ -72,7 +86,7 @@ def add_memory(content: str) -> str:
     Args:
         content: the full memory sentence (e.g. "Currently building an MCP server in Python")
     """
-    resp = httpx.post(
+    resp = _session.post(
         f"{BASE_URL}/mcp/memories",
         json={"content": content},
         timeout=10,
@@ -89,7 +103,7 @@ def search_memories(query: str, limit: int = 8) -> str:
         query: natural language description of what to look for
         limit: max results to return (default 8)
     """
-    resp = httpx.get(
+    resp = _session.get(
         f"{BASE_URL}/mcp/memories/search",
         params={"q": query, "limit": limit},
         timeout=10,
@@ -109,7 +123,7 @@ def edit_memory(memory_id: str, content: str) -> str:
         memory_id: the memory UUID to update
         content: the new content to replace the old value
     """
-    resp = httpx.patch(
+    resp = _session.patch(
         f"{BASE_URL}/mcp/memories/{memory_id}",
         json={"content": content},
         timeout=10,
@@ -125,7 +139,7 @@ def forget_memory(memory_id: str) -> str:
     Args:
         memory_id: the memory UUID to delete
     """
-    resp = httpx.delete(f"{BASE_URL}/mcp/memories/{memory_id}", timeout=10)
+    resp = _session.delete(f"{BASE_URL}/mcp/memories/{memory_id}", timeout=10)
     resp.raise_for_status()
     return f"Forgotten: {memory_id}"
 
@@ -138,7 +152,7 @@ def add_note(title: str, content: str) -> str:
         title: short note title
         content: note body (plain text)
     """
-    resp = httpx.post(
+    resp = _session.post(
         f"{BASE_URL}/spaces/general/notes",
         json={"title": title, "content": content},
         timeout=10,
@@ -156,7 +170,7 @@ def search_notes(query: str, limit: int = 5) -> str:
         query: what to look for in notes
         limit: max results (default 5)
     """
-    resp = httpx.get(
+    resp = _session.get(
         f"{BASE_URL}/mcp/notes/search",
         params={"q": query, "limit": limit},
         timeout=10,
@@ -243,7 +257,7 @@ def _html_to_text(html: str) -> str:
 
 
 def _read_note_formatted(note_id: int) -> str:
-    resp = httpx.get(f"{BASE_URL}/notes/{note_id}", timeout=10)
+    resp = _session.get(f"{BASE_URL}/notes/{note_id}", timeout=10)
     if resp.status_code == 404:
         return f"(note #{note_id} not found)"
     resp.raise_for_status()
@@ -255,7 +269,7 @@ def _read_note_formatted(note_id: int) -> str:
 
 def _find_space_by_name(name: str) -> dict | None:
     """Case-insensitive exact-then-partial match. Returns the space dict or None."""
-    spaces = httpx.get(f"{BASE_URL}/spaces", timeout=10).json()
+    spaces = _session.get(f"{BASE_URL}/spaces", timeout=10).json()
     name_l = name.lower()
     return (
         next((s for s in spaces if (s.get("name") or "").lower() == name_l), None)
@@ -268,7 +282,7 @@ def _find_command_center_note() -> dict | None:
     dev = _find_space_by_name("dev")
     if not dev:
         return None
-    notes = httpx.get(f"{BASE_URL}/spaces/{dev['id']}/notes", timeout=10).json()
+    notes = _session.get(f"{BASE_URL}/spaces/{dev['id']}/notes", timeout=10).json()
     return next((n for n in notes if "todo" in (n.get("title") or "").lower()), None)
 
 
@@ -371,14 +385,14 @@ def _append_claim_to_li(li, agent: str, timestamp: str | None = None) -> bool:
 
 
 def _save_note_content(note_id: int, html: str):
-    r = httpx.patch(f"{BASE_URL}/notes/{note_id}", json={"content": html}, timeout=10)
+    r = _session.patch(f"{BASE_URL}/notes/{note_id}", json={"content": html}, timeout=10)
     r.raise_for_status()
 
 
 def _load_note_soup(note_id: int):
     """Fetch note HTML and return (BeautifulSoup, None) or (None, error_string)."""
     from bs4 import BeautifulSoup
-    resp = httpx.get(f"{BASE_URL}/notes/{note_id}", timeout=10)
+    resp = _session.get(f"{BASE_URL}/notes/{note_id}", timeout=10)
     if resp.status_code == 404:
         return None, f"(note #{note_id} not found)"
     resp.raise_for_status()
@@ -526,7 +540,7 @@ def edit_note(note_id: int, title: str = None, content: str = None) -> str:
         patch["content"] = content
     if not patch:
         return "Nothing to update."
-    resp = httpx.patch(f"{BASE_URL}/notes/{note_id}", json=patch, timeout=10)
+    resp = _session.patch(f"{BASE_URL}/notes/{note_id}", json=patch, timeout=10)
     resp.raise_for_status()
     n = resp.json()
     return f"Updated note #{n['id']}: {n['title']}"
@@ -538,7 +552,7 @@ def list_spaces() -> str:
 
     Use this to know where notes are organized before creating or searching.
     """
-    resp = httpx.get(f"{BASE_URL}/spaces", timeout=10)
+    resp = _session.get(f"{BASE_URL}/spaces", timeout=10)
     resp.raise_for_status()
     spaces = resp.json()
     if not spaces:
@@ -563,7 +577,7 @@ def list_notes(space: str = "general", limit: int = 20) -> str:
             return f"(no space matching '{space}')"
         space_key = str(match["id"])
 
-    resp = httpx.get(f"{BASE_URL}/spaces/{space_key}/notes", timeout=10)
+    resp = _session.get(f"{BASE_URL}/spaces/{space_key}/notes", timeout=10)
     resp.raise_for_status()
     notes = resp.json()[:limit]
     if not notes:
@@ -576,7 +590,7 @@ def list_notes(space: str = "general", limit: int = 20) -> str:
 
 
 def _fetch_todos() -> list[dict]:
-    resp = httpx.get(f"{BASE_URL}/todos", timeout=10)
+    resp = _session.get(f"{BASE_URL}/todos", timeout=10)
     resp.raise_for_status()
     return resp.json()
 
@@ -610,7 +624,7 @@ def add_todo(text: str) -> str:
     text = (text or "").strip()
     if not text:
         return "(text required)"
-    resp = httpx.post(f"{BASE_URL}/todos", json={"text": text}, timeout=10)
+    resp = _session.post(f"{BASE_URL}/todos", json={"text": text}, timeout=10)
     resp.raise_for_status()
     t = resp.json()
     return f"added #{t['id']}: {t['text']}"
@@ -665,7 +679,7 @@ def complete_todo(match: str) -> str:
     t, err = _find_todo(match, only_open=True)
     if err:
         return err
-    resp = httpx.patch(f"{BASE_URL}/todos/{t['id']}", json={"done": True}, timeout=10)
+    resp = _session.patch(f"{BASE_URL}/todos/{t['id']}", json={"done": True}, timeout=10)
     resp.raise_for_status()
     return f"[x] {t['text']}"
 
@@ -680,7 +694,7 @@ def uncheck_todo(match: str) -> str:
     t, err = _find_todo(match)
     if err:
         return err
-    resp = httpx.patch(f"{BASE_URL}/todos/{t['id']}", json={"done": False}, timeout=10)
+    resp = _session.patch(f"{BASE_URL}/todos/{t['id']}", json={"done": False}, timeout=10)
     resp.raise_for_status()
     return f"[ ] {t['text']}"
 
@@ -695,7 +709,7 @@ def delete_todo(match: str) -> str:
     t, err = _find_todo(match)
     if err:
         return err
-    resp = httpx.delete(f"{BASE_URL}/todos/{t['id']}", timeout=10)
+    resp = _session.delete(f"{BASE_URL}/todos/{t['id']}", timeout=10)
     resp.raise_for_status()
     return f"deleted: {t['text']}"
 
@@ -709,7 +723,7 @@ def list_recent_notes(limit: int = 10) -> str:
     Args:
         limit: max notes to return (default 10)
     """
-    resp = httpx.get(f"{BASE_URL}/notes/recent", params={"limit": limit}, timeout=10)
+    resp = _session.get(f"{BASE_URL}/notes/recent", params={"limit": limit}, timeout=10)
     resp.raise_for_status()
     notes = resp.json()
     if not notes:

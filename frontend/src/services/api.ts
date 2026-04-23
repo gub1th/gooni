@@ -219,6 +219,7 @@ export interface PublicNoteDetail {
   title: string | null;
   content: string | null;
   space_name: string | null;
+  created_at: string;
   updated_at: string;
 }
 
