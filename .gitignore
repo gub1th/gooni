@@ -57,5 +57,7 @@ frontend/.tanstack/
 # app
 app/misc/
 
-# Local AI session memory
-.claude/
+# Local AI session state — per-user config, caches, etc. Shared skills
+# live under .claude/skills/ and are tracked so they travel with the repo.
+.claude/*
+!.claude/skills/
