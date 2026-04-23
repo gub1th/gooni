@@ -378,13 +378,13 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const [takeRefreshing, setTakeRefreshing] = useState(false);
   const [todos, setTodos] = useState<ApiTodo[]>([]);
   const [ink, setInk] = useState<InkState | null>(null);
-  const [rowPulsing, setRowPulsing] = useState(false);
+  const [cardPulsing, setRowPulsing] = useState(false);
   const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
   const typingRaf = useRef<number | null>(null);
   const { selectSpace, loadNotes, selectNote } = useNotesContentStore();
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
-  const firstRowRef = useRef<HTMLDivElement>(null);
+  const firstCardRef = useRef<HTMLDivElement>(null);
   const dashRef = useRef<HTMLDivElement>(null);
 
   // Keep body/html background in sync with theme so any gap around the app fills correctly.
@@ -425,7 +425,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   }
 
   async function handleSubmitted(_note: ApiNote | null, buttonRect: DOMRect | null) {
-    const target = firstRowRef.current?.getBoundingClientRect() ?? null;
+    const target = firstCardRef.current?.getBoundingClientRect() ?? null;
     const refresh = fetchDashboardStats();
 
     if (buttonRect && target) {
@@ -491,10 +491,11 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   return (
     <div ref={dashRef} style={{ flex: 1, overflowY: "auto", background: palette.main, fontFamily: FONT, position: "relative" }}>
       <style>{`
-        @keyframes gooni-row-pulse {
-          0%   { background: transparent; }
-          30%  { background: rgba(74,222,128,0.08); }
-          100% { background: transparent; }
+        @keyframes gooni-card-pulse {
+          0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(28,28,30,0.0); border-color: rgba(0,0,0,0.07); }
+          22%  { transform: scale(1.035); box-shadow: 0 0 0 6px rgba(28,28,30,0.06); border-color: rgba(28,28,30,0.28); }
+          60%  { transform: scale(1);    box-shadow: 0 0 0 2px rgba(28,28,30,0.03); border-color: rgba(28,28,30,0.18); }
+          100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(28,28,30,0.0); border-color: rgba(0,0,0,0.07); }
         }
         @keyframes gooni-caret-blink {
           0%, 49% { opacity: 1; }
@@ -512,18 +513,6 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
         .gooni-todo-add { transition: background 0.12s; }
         .gooni-todo-add:hover,
         .gooni-todo-add:focus-within { background: rgba(0,0,0,0.035); }
-        /* Subtle scrollbar for recent notes — invisible until interaction */
-        .gooni-recent-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
-        .gooni-recent-scroll:hover { scrollbar-color: rgba(0,0,0,0.15) transparent; }
-        .gooni-recent-scroll::-webkit-scrollbar { width: 6px; }
-        .gooni-recent-scroll::-webkit-scrollbar-track { background: transparent; }
-        .gooni-recent-scroll::-webkit-scrollbar-thumb {
-          background: transparent;
-          border-radius: 3px;
-          transition: background 0.2s;
-        }
-        .gooni-recent-scroll:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
-        .gooni-recent-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.3); }
       `}</style>
 
       {ink && (
@@ -713,95 +702,79 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
         {/* Todo card — backed by dedicated TodoItem model with timestamps + sort order */}
         <TodoCard todos={todos} onMutate={setTodos} />
 
-        {/* Recent notes — simple rows with dividers, no cards. Scrollable after ~5 rows. */}
-        <div>
+        {/* Recent notes — two preview cards */}
+        <div style={{ marginBottom: 44 }}>
           <div style={{
             fontSize: 12, color: "#8E8E93", letterSpacing: 0.6,
-            textTransform: "uppercase", marginBottom: 8,
+            textTransform: "uppercase", marginBottom: 10,
           }}>recent notes</div>
-          {stats ? (() => {
-            const visibleRecent = stats.recent_notes;
-            return visibleRecent.length === 0 ? (
-              <p style={{ fontSize: 13, color: "#C7C7CC" }}>No notes yet.</p>
+          {stats ? (
+            stats.recent_notes.length === 0 ? (
+              <p style={{ fontSize: 13.5, color: "#C7C7CC" }}>No notes yet.</p>
             ) : (
-              <div
-                className="gooni-recent-scroll"
-                style={{
-                  maxHeight: 5 * 56,
-                  overflowY: "auto",
-                  // pad the right so scrollbar doesn't overlap content when it appears
-                  paddingRight: 6,
-                  marginRight: -6,
-                }}
-              >
-                {visibleRecent.map((note, idx) => {
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                {stats.recent_notes.slice(0, 2).map((note, idx) => {
+                  const fullTitle = note.title?.trim() || "Untitled";
+                  const fullExcerpt = stripHtml(note.content ?? "");
                   const isFirst = idx === 0;
-                  const plain = stripHtml(note.content ?? "");
-                  const trimmedTitle = note.title?.trim() ?? "";
-                  let title: string;
-                  let preview: string;
-                  if (trimmedTitle) {
-                    title = trimmedTitle;
-                    preview = plain.slice(0, 80);
-                  } else if (plain) {
-                    const br = plain.search(/[\n\r]/);
-                    title = plain.slice(0, br > 0 ? br : 60).trim() || "Untitled";
-                    preview = plain.slice(title.length).trim().slice(0, 80);
-                  } else {
-                    title = "Untitled";
-                    preview = "";
-                  }
                   const isTyping = typing !== null && typing.noteId === note.id;
                   const revealed = isTyping ? typing!.revealed : Infinity;
-                  const shownTitle = isTyping ? title.slice(0, Math.min(revealed, title.length)) : title;
-                  const excerptBudget = isTyping ? Math.max(0, revealed - title.length) : Infinity;
-                  const shownPreview = isTyping ? preview.slice(0, excerptBudget) : preview;
-                  const caretInTitle = isTyping && revealed <= title.length;
-                  const caretInPreview = isTyping && revealed > title.length;
+                  const shownTitle = isTyping ? fullTitle.slice(0, Math.min(revealed, fullTitle.length)) : fullTitle;
+                  const excerptBudget = isTyping ? Math.max(0, revealed - fullTitle.length) : Infinity;
+                  const shownExcerpt = isTyping ? fullExcerpt.slice(0, excerptBudget) : fullExcerpt;
+                  const caretInTitle = isTyping && revealed <= fullTitle.length;
+                  const caretInExcerpt = isTyping && revealed > fullTitle.length;
                   return (
                     <div
                       key={note.id}
-                      ref={isFirst ? firstRowRef : undefined}
+                      ref={isFirst ? firstCardRef : undefined}
                       onClick={() => openNote(note.space_id, note.id)}
                       style={{
-                        display: "flex",
-                        alignItems: "baseline",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        padding: "10px 0",
-                        borderBottom: "0.5px solid rgba(0,0,0,0.07)",
-                        cursor: "pointer",
-                        animation: isFirst && rowPulsing ? "gooni-row-pulse 0.7s ease-out" : undefined,
+                        display: "flex", flexDirection: "column", alignItems: "stretch",
+                        gap: 6, padding: "14px 16px", borderRadius: 12,
+                        border: "1px solid rgba(0,0,0,0.07)", background: "#fff", cursor: "pointer",
+                        textAlign: "left", width: "100%", height: 160, boxSizing: "border-box",
+                        transition: "background 0.12s, border-color 0.12s",
+                        animation: isFirst && cardPulsing ? `gooni-card-pulse 0.6s cubic-bezier(0.22,1,0.36,1)` : undefined,
+                      }}
+                      onMouseEnter={(e) => {
+                        const el = e.currentTarget;
+                        el.style.borderColor = "rgba(0,0,0,0.15)";
+                        el.style.background = "#FDFDFD";
+                      }}
+                      onMouseLeave={(e) => {
+                        const el = e.currentTarget;
+                        el.style.borderColor = "rgba(0,0,0,0.07)";
+                        el.style.background = "#fff";
                       }}
                     >
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{
-                          fontSize: 13, color: "#1C1C1E",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}>
-                          {shownTitle || " "}
-                          {caretInTitle && <span className="gooni-caret">▍</span>}
-                        </div>
-                        {(preview || isTyping) && (
-                          <div style={{
-                            fontSize: 12, color: "#8E8E93", marginTop: 1,
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}>
-                            {shownPreview}
-                            {caretInPreview && <span className="gooni-caret">▍</span>}
-                          </div>
-                        )}
+                      <div style={{
+                        fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: FONT,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        flexShrink: 0,
+                      }}>
+                        {shownTitle || (isFirst && isTyping ? " " : "Untitled")}
+                        {caretInTitle && <span className="gooni-caret">▍</span>}
                       </div>
-                      <span style={{ fontSize: 11, color: "#AEAEB2", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+                      <div
+                        style={{
+                          flex: 1, fontSize: 12.5, color: "#6C6C70", lineHeight: 1.5, fontFamily: FONT,
+                          overflowY: "auto", overscrollBehavior: "contain",
+                        }}
+                      >
+                        {shownExcerpt || (isTyping ? "" : <span style={{ color: "#C7C7CC", fontStyle: "italic" }}>empty note</span>)}
+                        {caretInExcerpt && <span className="gooni-caret">▍</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#AEAEB2", fontFamily: FONT, flexShrink: 0 }}>
                         {formatNoteDate(note.updated_at)}
-                      </span>
+                      </div>
                     </div>
                   );
                 })}
               </div>
-            );
-          })() : (
-            <p style={{ fontSize: 13, color: "#C7C7CC" }}>Loading…</p>
+            )
+          ) : (
+            <p style={{ fontSize: 13.5, color: "#C7C7CC" }}>Loading…</p>
           )}
         </div>
 

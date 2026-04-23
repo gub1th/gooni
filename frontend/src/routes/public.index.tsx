@@ -233,7 +233,7 @@ function PublicPage() {
                     {note.title || "Untitled"}
                   </Link>
                   <span style={{ fontSize: 13.5, color: "#999", marginTop: 3, display: "block" }}>
-                    {formatDate(note.updated_at)}
+                    {formatDate(note.updated_at)} · {note.read_time_minutes} min read
                   </span>
                 </div>
                 {note.space_name && (

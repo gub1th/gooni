@@ -13,6 +13,12 @@ function formatPublicDate(iso: string | null): string {
   return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 
+function readingTimeMin(html: string | null): number {
+  if (!html) return 1;
+  const text = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  return Math.max(1, Math.ceil(text.length / 1000));
+}
+
 function PublicNotePage() {
   const { noteId } = Route.useParams();
   const [note, setNote] = useState<PublicNoteDetail | null>(null);
@@ -59,7 +65,7 @@ function PublicNotePage() {
               {note.title || "Untitled"}
             </h1>
             <p style={{ fontSize: 13, color: "#999", margin: "0 0 40px" }}>
-              {formatPublicDate(note.updated_at)}
+              {readingTimeMin(note.content)} min read · Last updated {formatPublicDate(note.updated_at)}
             </p>
             <div
               style={{ fontSize: 16, lineHeight: 1.75, color: "#222" }}
