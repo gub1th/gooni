@@ -245,6 +245,60 @@ export async function fetchPublicVisitCount(): Promise<{ unique_visitors: number
   return res.json();
 }
 
+// ── Todos ────────────────────────────────────────────────────────────────────
+
+export interface ApiTodo {
+  id: number;
+  text: string;
+  done: boolean;
+  created_at: string;
+  completed_at: string | null;
+  sort_order: number;
+}
+
+export async function fetchTodos(): Promise<ApiTodo[]> {
+  const res = await apiFetch(`${BASE}/todos`);
+  if (!res.ok) throw new Error("Failed to fetch todos");
+  return res.json();
+}
+
+export async function createTodo(text: string): Promise<ApiTodo> {
+  const res = await apiFetch(`${BASE}/todos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error("Failed to create todo");
+  return res.json();
+}
+
+export async function updateTodo(
+  id: number,
+  patch: { text?: string; done?: boolean; sort_order?: number },
+): Promise<ApiTodo> {
+  const res = await apiFetch(`${BASE}/todos/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update todo");
+  return res.json();
+}
+
+export async function deleteTodo(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/todos/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete todo");
+}
+
+export async function reorderTodos(items: { id: number; sort_order: number }[]): Promise<void> {
+  const res = await apiFetch(`${BASE}/todos/reorder`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!res.ok) throw new Error("Failed to reorder todos");
+}
+
 export async function updatePublicProfile(bio: string): Promise<void> {
   const res = await apiFetch(`${BASE}/public/profile`, {
     method: "PATCH",
@@ -258,6 +312,7 @@ export async function updatePublicProfile(bio: string): Promise<void> {
 
 export interface DashboardStats {
   notes_this_week: number;
+  notes_last_week: number;
   recent_notes: ApiNote[];
   streak: number;
   notes_per_day: number[];

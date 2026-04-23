@@ -89,4 +89,21 @@ class Visit(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+class TodoItem(Base):
+    """A single todo. Lives in its own table so we can track per-item timestamps,
+    sort order, and completion independently of any containing note.
+    `sort_order` is a plain int — the item placed at the end of the list gets
+    max(sort_order)+1. Drag-reorder issues a batch update. Gaps on delete are fine.
+    """
+
+    __tablename__ = "todo_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    text = Column(Text, nullable=False)
+    done = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+
+
 

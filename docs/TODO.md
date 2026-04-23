@@ -8,16 +8,17 @@
 - [ ] Set up Alembic for versioned DB migrations (currently using manual `_run_column_migrations()` in `main.py` — no version tracking, no rollback). On prod, data migrations must be run manually over SSH before restarting the service. Note: SQLAlchemy stores enum values by member **name** (e.g. `FACT`, `EPISODE`) not by `.value` — use uppercase in raw SQL migrations.
 
 ## Backlog
-- [ ] Note search — filter NotesList by title/content as you type
 - [ ] Gooni memory context — include top-3 relevant memories in Gooni prompt (not just active note)
 - [ ] Telegram → note sync: messages captured via Telegram appear as notes in relevant space
-- [ ] Keyboard shortcut: ⌘N creates a new note in the current space
 - [ ] Mobile: Gooni panel as a bottom sheet on narrow screens
 - [ ] Dark mode
 - [ ] GoalView redesign — living document feel, inline note creation, blockers as one-liner
 - [ ] Memory refactor — replace hardcoded meals/workouts tables with flexible Memory entities
 
 ## Done
+- [x] Note search in NotesList — filter by title + content as you type, ⌘F to focus, Esc to clear. Search box hides date-group headers and shows a flat filtered list.
+- [x] Keyboard shortcut: ⌘N creates a new note in the current space (`routes/index.tsx`)
+- [x] Drag-to-reorder spaces and pinned notes (localStorage-backed, per-device)
 - [x] Lists via chat — `add_to_list` / `show_list` tool calls; lists are Notes in a "Lists" space (📋); list names injected into system prompt so LLM routes correctly; works from web chat + Telegram
 - [x] 3-panel Apple Notes layout (Sidebar + NotesList + NoteEditor)
 - [x] Gooni panel with note context

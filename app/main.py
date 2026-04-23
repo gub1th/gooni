@@ -20,6 +20,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Note,
     PublicProfile,
     Space,
+    TodoItem,
     Visit,
 )
 from .db.schemas import ChatRequest
@@ -193,6 +194,81 @@ def get_public_visit_count(db: Session = Depends(get_db)):
     return {"unique_visitors": int(count)}
 
 
+@app.get("/public/mcp")
+def get_public_mcp_config():
+    """Sanitized snapshot of the project's MCP setup — servers (from .mcp.json) + tools
+    (parsed from mcp/server.py via AST). Dynamic: edit the config or add a @mcp.tool() and
+    this endpoint reflects the change on next request. No secrets returned — absolute paths
+    are reduced to basenames, env values stripped (keys only)."""
+    import ast
+    import json as _json
+    from pathlib import Path as _Path
+
+    repo_root = _Path(__file__).resolve().parent.parent
+
+    # 1) Parse .mcp.json — redact paths and env values
+    servers: list[dict] = []
+    mcp_json = repo_root / ".mcp.json"
+    if mcp_json.exists():
+        try:
+            raw = _json.loads(mcp_json.read_text())
+            for name, scfg in (raw.get("mcpServers") or {}).items():
+                command = scfg.get("command", "")
+                args = scfg.get("args") or []
+                env = scfg.get("env") or {}
+                servers.append({
+                    "name": name,
+                    "command": _Path(command).name if command else "",
+                    "script": _Path(args[0]).name if args else None,
+                    "env_keys": list(env.keys()),
+                })
+        except Exception:
+            pass
+
+    # 2) AST-walk mcp/server.py for @mcp.tool() decorated functions
+    def _dec_name(dec) -> str:
+        if isinstance(dec, ast.Name):
+            return dec.id
+        if isinstance(dec, ast.Attribute):
+            base = _dec_name(dec.value)
+            return f"{base}.{dec.attr}" if base else dec.attr
+        if isinstance(dec, ast.Call):
+            return _dec_name(dec.func)
+        return ""
+
+    tools: list[dict] = []
+    server_py = repo_root / "mcp" / "server.py"
+    if server_py.exists():
+        try:
+            tree = ast.parse(server_py.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    is_tool = any(_dec_name(d) == "mcp.tool" for d in node.decorator_list)
+                    if not is_tool:
+                        continue
+                    params = []
+                    defaults = node.args.defaults or []
+                    default_start = len(node.args.args) - len(defaults)
+                    for i, arg in enumerate(node.args.args):
+                        has_default = i >= default_start
+                        params.append({
+                            "name": arg.arg,
+                            "required": not has_default,
+                        })
+                    doc = ast.get_docstring(node) or ""
+                    # Keep only the first paragraph — keeps the surface tidy
+                    short = doc.split("\n\n", 1)[0].strip().replace("\n", " ")
+                    tools.append({
+                        "name": node.name,
+                        "params": params,
+                        "description": short,
+                    })
+        except Exception:
+            pass
+
+    return {"servers": servers, "tools": tools}
+
+
 @app.get("/visits/summary")
 def get_visits_summary(db: Session = Depends(get_db)):
     """Unique-visitor stats for /public/*. Auth-gated (not a /public route)."""
@@ -236,6 +312,88 @@ def get_visits_summary(db: Session = Depends(get_db)):
             for v in recent
         ],
     }
+
+
+# ── Todos ────────────────────────────────────────────────────────────────────
+
+
+def _serialize_todo(t: TodoItem) -> dict:
+    return {
+        "id": t.id,
+        "text": t.text,
+        "done": bool(t.done),
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+        "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+        "sort_order": t.sort_order,
+    }
+
+
+@app.get("/todos")
+def list_todos(db: Session = Depends(get_db)):
+    """All todos, ordered by sort_order ascending. Client filters the day-boundary view."""
+    items = db.query(TodoItem).order_by(TodoItem.sort_order, TodoItem.id).all()
+    return [_serialize_todo(t) for t in items]
+
+
+@app.post("/todos")
+def create_todo(body: dict, db: Session = Depends(get_db)):
+    from sqlalchemy import func as sqlfunc
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    max_order = db.query(sqlfunc.max(TodoItem.sort_order)).scalar() or 0
+    item = TodoItem(text=text, sort_order=max_order + 1)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _serialize_todo(item)
+
+
+@app.patch("/todos/{todo_id}")
+def update_todo(todo_id: int, body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="todo not found")
+    if "text" in body:
+        item.text = (body["text"] or "").strip() or item.text
+    if "done" in body:
+        new_done = bool(body["done"])
+        if new_done and not item.done:
+            item.completed_at = datetime.utcnow()
+        elif not new_done and item.done:
+            item.completed_at = None
+        item.done = new_done
+    if "sort_order" in body:
+        item.sort_order = int(body["sort_order"])
+    db.commit()
+    db.refresh(item)
+    return _serialize_todo(item)
+
+
+@app.delete("/todos/{todo_id}")
+def delete_todo(todo_id: int, db: Session = Depends(get_db)):
+    item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="todo not found")
+    db.delete(item)
+    db.commit()
+    return {"ok": True}
+
+
+@app.post("/todos/reorder")
+def reorder_todos(body: dict, db: Session = Depends(get_db)):
+    """Batch sort_order update. Body: {items: [{id, sort_order}, ...]}"""
+    items = body.get("items") or []
+    for entry in items:
+        tid = entry.get("id")
+        so = entry.get("sort_order")
+        if tid is None or so is None:
+            continue
+        db.query(TodoItem).filter(TodoItem.id == int(tid)).update({"sort_order": int(so)})
+    db.commit()
+    return {"ok": True}
+
 
 
 @app.post("/auth")
@@ -681,8 +839,14 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     today = datetime.utcnow().date()
     week_ago = datetime.utcnow() - timedelta(days=7)
+    two_weeks_ago = datetime.utcnow() - timedelta(days=14)
 
     notes_this_week = db.query(Note).filter(Note.updated_at >= week_ago).count()
+    notes_last_week = (
+        db.query(Note)
+        .filter(Note.updated_at >= two_weeks_ago, Note.updated_at < week_ago)
+        .count()
+    )
 
     # Per-day note creation counts for the last 7 days (oldest first, index 6 = today)
     seven_days_ago = today - timedelta(days=6)
@@ -726,7 +890,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     recent_notes = (
         db.query(Note)
         .order_by(sqlfunc.coalesce(Note.updated_at, Note.created_at).desc())
-        .limit(8)
+        .limit(20)
         .all()
     )
 
@@ -755,6 +919,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
     return {
         "notes_this_week": notes_this_week,
+        "notes_last_week": notes_last_week,
         "recent_notes": [_serialize_note(n) for n in recent_notes],
         "streak": streak,
         "notes_per_day": notes_per_day,

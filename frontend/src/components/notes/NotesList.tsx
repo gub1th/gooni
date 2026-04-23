@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { cleanupEmptyNotes, patchNote, type ApiNote } from "../../services/api";
+import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 
 // Module-level drag state so Sidebar can read it without prop drilling
 export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
@@ -209,16 +210,44 @@ export function NotesList() {
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [cleanConfirm, setCleanConfirm] = useState(false);
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const spaceId = selectedSpaceId ?? "general";
   const isAllNotes = spaceId === "general";
-  const noteList = notes[spaceId] ?? [];
+  const allNotes = notes[spaceId] ?? [];
+
+  // Clear search whenever the user switches spaces — a query only makes sense
+  // in the space it was typed in.
+  useEffect(() => { setSearch(""); }, [spaceId]);
+
+  // Client-side title+content search. Case-insensitive substring match.
+  const searchTrimmed = search.trim().toLowerCase();
+  const noteList = !searchTrimmed ? allNotes : allNotes.filter((n) => {
+    const title = (n.title ?? "").toLowerCase();
+    if (title.includes(searchTrimmed)) return true;
+    const plain = n.content ? stripHtml(n.content).toLowerCase() : "";
+    return plain.includes(searchTrimmed);
+  });
 
   const currentSpace = isAllNotes ? null : spaces.find((s) => String(s.id) === spaceId);
   const headerLabel = isAllNotes
     ? "All Notes"
     : (currentSpace?.emoji ? `${currentSpace.emoji} ${currentSpace.name}` : currentSpace?.name ?? "Notes");
+
+  // ⌘F / Ctrl-F focuses the search input when the notes pane is visible.
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Dismiss context menu on outside click
   useEffect(() => {
@@ -250,7 +279,7 @@ export function NotesList() {
 
   async function handleTogglePin(note: ApiNote) {
     const updated = await patchNote(note.id, { is_pinned: !note.is_pinned });
-    // Refresh current space so pin state updates in-list
+    usePinnedVersionStore.getState().bump();
     loadNotes(spaceId);
     return updated;
   }
@@ -265,7 +294,8 @@ export function NotesList() {
     if (deleted > 0) loadNotes(spaceId);
   }
 
-  const groups = isAllNotes ? groupNotes(noteList) : null;
+  // Skip date grouping while searching — a flat, recency-ordered list reads better.
+  const groups = isAllNotes && !searchTrimmed ? groupNotes(noteList) : null;
 
   return (
     <div
@@ -307,11 +337,52 @@ export function NotesList() {
         </button>
       </div>
 
+      {/* Search row — compact, always visible */}
+      <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
+        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+          <svg
+            width="12" height="12" viewBox="0 0 14 14" fill="none"
+            style={{ position: "absolute", left: 8, pointerEvents: "none", color: "#AEAEB2" }}
+          >
+            <circle cx="6" cy="6" r="4" stroke="currentColor" strokeWidth="1.3"/>
+            <path d="M9 9L12 12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+          </svg>
+          <input
+            ref={searchRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") { setSearch(""); (e.target as HTMLInputElement).blur(); } }}
+            placeholder="Search notes"
+            style={{
+              flex: 1, height: 28, padding: "0 26px 0 26px",
+              borderRadius: 7, border: "1px solid rgba(0,0,0,0.08)",
+              background: "#fff", outline: "none", fontSize: 12.5,
+              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+              color: "#1C1C1E",
+            }}
+          />
+          {search && (
+            <button
+              onClick={() => { setSearch(""); searchRef.current?.focus(); }}
+              title="Clear"
+              style={{
+                position: "absolute", right: 4, width: 20, height: 20,
+                borderRadius: 4, border: "none", background: "transparent",
+                cursor: "pointer", color: "#8E8E93", fontSize: 14,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 0,
+              }}
+            >×</button>
+          )}
+        </div>
+      </div>
+
       {/* Note list */}
       <div style={{ flex: 1, overflowY: "auto" }}>
         {noteList.length === 0 && (
           <div style={{ padding: "32px 14px", textAlign: "center", color: "#AEAEB2", fontSize: 13, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-            No notes yet. Press + to create one.
+            {searchTrimmed ? `No notes match “${search.trim()}”` : "No notes yet. Press + to create one."}
           </div>
         )}
 

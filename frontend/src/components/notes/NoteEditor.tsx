@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
+import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { GooniLogo } from "../GooniLogo";
 
@@ -111,6 +112,50 @@ function useEditorStyles() {
       .gooni-note-editor table .selectedCell {
         background: rgba(0,122,255,0.08);
       }
+      /* Warm-yellow pointer-tracking glow on the embedded quick-note placeholder.
+         Uses @property so CSS can smoothly transition the custom properties —
+         the glow eases toward the pointer instead of snapping 1:1, which makes the
+         light feel like it has some inertia rather than being mechanical. */
+      @property --glow-x {
+        syntax: "<length>";
+        inherits: true;
+        initial-value: 200px;
+      }
+      @property --glow-y {
+        syntax: "<length>";
+        inherits: true;
+        initial-value: 60px;
+      }
+      .gooni-note-glow {
+        transition: --glow-x 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+                    --glow-y 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      .gooni-note-glow::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: radial-gradient(170px circle at var(--glow-x) var(--glow-y),
+                      rgba(255, 196, 82, 0.30),
+                      rgba(255, 196, 82, 0.10) 42%,
+                      transparent 75%);
+        opacity: 0;
+        transition: opacity 0.25s ease-out;
+        pointer-events: none;
+        z-index: 0;
+      }
+      /* Slow, subtle breathing on hover — soft oscillation of opacity so the light
+         feels alive even when the pointer is still. */
+      @keyframes gooni-glow-breathe {
+        0%, 100% { opacity: 0.88; }
+        50%      { opacity: 1; }
+      }
+      .gooni-note-glow:hover::before {
+        opacity: 1;
+        animation: gooni-glow-breathe 2.6s ease-in-out infinite;
+      }
+      /* While the user is actually typing, keep the surface quiet. */
+      .gooni-note-glow:focus-within::before { opacity: 0; animation: none; }
     `;
   }, []);
 }
@@ -186,7 +231,7 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
   useEditorStyles();
   const embedded = variant === "embedded";
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote, createNote } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote } = useNotesContentStore();
   const { isOpen: gooniOpen, toggle: toggleGooni } = useGooniStore();
   const { spaces } = useSpacesStore();
 
@@ -212,10 +257,7 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
   const titleInputRef = useRef<HTMLInputElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
   const hasChanges = useRef(false);
-  // Embedded mode is ephemeral: we don't create a server note until the user submits.
-  // `embeddedAuthoring` flips true on first click of the "Start writing..." placeholder
-  // and stays true across submits so the editor doesn't collapse mid-session.
-  const [embeddedAuthoring, setEmbeddedAuthoring] = useState(false);
+  // Embedded mode is ephemeral: no server note is created until the user submits.
   // Ref so handleKeyDown (captured once inside useEditor) always calls the latest handleSubmit.
   const handleSubmitRef = useRef<() => Promise<void>>(async () => {});
 
@@ -345,13 +387,9 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
         // Embedded quick-note is ephemeral — no debounced save. Everything persists on submit.
         if (!embedded) scheduleSave();
       },
-      onBlur: async ({ editor }) => {
-        if (embedded) {
-          // Collapse back to the "Start writing..." placeholder if the user blurred without typing.
-          if (editor.isEmpty) setEmbeddedAuthoring(false);
-          // No save, no embed — embedded is ephemeral until submit.
-          return;
-        }
+      onBlur: async () => {
+        // Embedded: ephemeral, no save on blur — content persists only on submit.
+        if (embedded) return;
         await save();
         embedAndCheck(activeNoteId);
       },
@@ -417,15 +455,24 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
   // Keep handleSubmitRef current so the editor's once-captured handleKeyDown always calls fresh state.
   handleSubmitRef.current = handleSubmit;
 
+  // Sync editor + local refs from activeNote. Deps include activeNote.content/title so we
+  // catch the common case where a note is selected BEFORE its space has loaded — activeNote
+  // starts null, then arrives async via loadNotes. The hasChanges guard prevents clobbering
+  // the user's in-progress typing when a save round-trip updates the store.
   useEffect(() => {
-    if (editor && activeNote) {
-      const current = editor.getHTML();
-      const desired = activeNote.content ?? "";
-      if (current !== desired) {
-        editor.commands.setContent(desired);
-      }
+    if (!editor || !activeNote || hasChanges.current) return;
+    const desired = activeNote.content ?? "";
+    if (editor.getHTML() !== desired) {
+      editor.commands.setContent(desired);
+      bodyRef.current = desired;
     }
-  }, [activeNoteId, editor]);
+    const title = activeNote.title ?? "";
+    if (titleRef.current !== title) {
+      setLocalTitle(title);
+      titleRef.current = title;
+    }
+    setLocalIsPublic(activeNote.is_public ?? false);
+  }, [activeNoteId, editor, activeNote?.content, activeNote?.title, activeNote?.is_public]);
 
   function scheduleSave() {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -482,22 +529,24 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
     .map((s) => ({ id: String(s.id), name: s.name, emoji: s.id === "general" ? "📥" : (s.emoji ?? "🗂️") }))
     .filter((s) => s.id !== currentSpaceId);
 
-  async function handleStartNewNote() {
-    if (embedded) {
-      // Ephemeral: just reveal the editor. No server note is created until submit.
-      setEmbeddedAuthoring(true);
-      return;
+  async function handleTogglePin() {
+    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
+    const newPinned = !activeNote.is_pinned;
+    try {
+      await apiPatchNote(activeNoteId, { is_pinned: newPinned });
+      // Optimistically update the note in every cached space list so activeNote.is_pinned flips immediately
+      useNotesContentStore.setState((s) => {
+        const updated: Record<string, ApiNote[]> = {};
+        for (const [k, list] of Object.entries(s.notes)) {
+          updated[k] = list.map((n) => (n.id === activeNoteId ? { ...n, is_pinned: newPinned } : n));
+        }
+        return { notes: updated };
+      });
+      usePinnedVersionStore.getState().bump();
+    } catch (e) {
+      console.error("pin toggle failed", e);
     }
-    const note = await createNote("general");
-    if (note) selectNote(note.id);
   }
-
-  // Focus the editor after it appears in authoring mode.
-  useEffect(() => {
-    if (embedded && embeddedAuthoring && editor) {
-      editor.commands.focus("end");
-    }
-  }, [embeddedAuthoring, editor, embedded]);
 
   return (
     <div
@@ -696,6 +745,31 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
             </div>
           )}
 
+        {/* Pin toggle — surfaces the current note in the sidebar's Pinned section */}
+        {activeNote && activeNoteId && activeNoteId > 0 && (
+          <button
+            onClick={handleTogglePin}
+            title={activeNote.is_pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              border: "none",
+              background: activeNote.is_pinned ? "rgba(255,176,32,0.14)" : "transparent",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: 0, flexShrink: 0,
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+            onMouseLeave={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+          >
+            <span style={{
+              fontSize: 13, lineHeight: 1,
+              filter: activeNote.is_pinned ? "none" : "grayscale(1) opacity(0.5)",
+              transition: "filter 0.15s",
+            }}>📌</span>
+          </button>
+        )}
+
         <button
           onClick={toggleGooni}
           title={gooniOpen ? "Close Gooni" : "Open Gooni"}
@@ -726,31 +800,26 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
 
       {/* Editor content */}
       {embedded ? (
-        !embeddedAuthoring ? (
-          <button
-            onClick={handleStartNewNote}
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              justifyContent: "flex-start",
-              width: "100%",
-              padding: "18px 22px",
-              minHeight: 80 + 18 * 2,
-              background: "transparent",
-              border: "none",
-              cursor: "text",
-              textAlign: "left",
-              color: "#AEAEB2",
-              fontSize: 14.5,
-              lineHeight: 1.65,
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-            }}
-          >
-            Start writing...
-          </button>
-        ) : (
-          <div style={{ padding: "18px 22px", boxSizing: "border-box", width: "100%" }}>
+        <div
+          className="gooni-note-glow"
+          onMouseMove={(e) => {
+            const el = e.currentTarget;
+            const rect = el.getBoundingClientRect();
+            el.style.setProperty("--glow-x", `${e.clientX - rect.left}px`);
+            el.style.setProperty("--glow-y", `${e.clientY - rect.top}px`);
+          }}
+          style={{
+            position: "relative",
+            padding: "18px 22px",
+            boxSizing: "border-box",
+            width: "100%",
+            minHeight: 80 + 18 * 2,
+            overflow: "hidden",
+            borderRadius: 14,
+          }}
+        >
             <div
+              style={{ position: "relative", zIndex: 1 }}
               onDrop={(e) => {
                 const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
                   f.type.startsWith("image/")
@@ -836,8 +905,7 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
                 <path d="M6.5 10.5 L6.5 3 M3 6.5 L6.5 3 L10 6.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </button>
-          </div>
-        )
+        </div>
       ) : (
         <div
           ref={scrollContainerRef}

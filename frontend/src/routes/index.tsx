@@ -142,12 +142,12 @@ function NotesPage() {
         <Sidebar
           isDashboard={view === "dashboard"}
           isNotes={view === "notes"}
+          isChat={view === "chat"}
           showCompose={view !== "notes"}
           onLogoClick={() => setViewAndUrl("dashboard")}
           onSpaceSelect={() => setView("notes")}
           onCompose={handleCompose}
           onNewChat={handleNewChat}
-          onConversationSelect={() => setView("chat")}
         />
       )}
 

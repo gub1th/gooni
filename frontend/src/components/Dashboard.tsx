@@ -1,11 +1,16 @@
 import { useState, useEffect, useRef } from "react";
-import { fetchDashboardStats, fetchGooniTake, type ApiNote, type DashboardStats } from "../services/api";
+import {
+  fetchDashboardStats, fetchGooniTake,
+  fetchTodos, createTodo, updateTodo, deleteTodo, reorderTodos,
+  type ApiNote, type ApiTodo, type DashboardStats,
+} from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
-import { GooniLogo } from "./GooniLogo";
+import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
+import { GooniMascot } from "./GooniMascot";
 import { NoteEditor } from "./notes/NoteEditor";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
-const DISPLAY_FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const GREEN = "#4ADE80";
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -18,118 +23,394 @@ function getDateStr(): string {
   return new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
 
-// GitHub contribution-graph palette (light mode)
-const CHART_COLORS = ["#EBEDF0", "#9BE9A8", "#40C463", "#30A14E", "#216E39"];
-
-function DayChart({ notes, activity, mode }: { notes: number[]; activity: number[]; mode: "bars" | "squares" }) {
-  const [hovered, setHovered] = useState<number | null>(null);
-  const max = Math.max(1, ...notes);
-  const now = new Date();
-  const series = mode === "squares" ? activity : notes;
-
-  const tooltipText = (i: number) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - (6 - i));
-    const dayLabel = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-    if (mode === "squares") {
-      return `${dayLabel} — ${activity[i] ? "active" : "no activity"}`;
-    }
-    return `${dayLabel} — ${notes[i]} note${notes[i] === 1 ? "" : "s"}`;
-  };
-
-  return (
-    <div style={{ position: "relative", display: "flex", alignItems: mode === "bars" ? "flex-end" : "center", gap: 3, height: 36 }}>
-      {series.map((val, i) => {
-        let color: string;
-        let width: number;
-        let height: number;
-        if (mode === "squares") {
-          color = val > 0 ? CHART_COLORS[2] : CHART_COLORS[0];
-          width = 10;
-          height = 10;
-        } else {
-          const level = val === 0 ? 0 : val <= 2 ? 1 : val <= 5 ? 2 : val <= 9 ? 3 : 4;
-          color = CHART_COLORS[level];
-          width = 6;
-          height = Math.max(4, (val / max) * 36);
-        }
-        return (
-          <div
-            key={i}
-            onMouseEnter={() => setHovered(i)}
-            onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
-            style={{ width, height, background: color, borderRadius: 2, cursor: "default" }}
-          />
-        );
-      })}
-      {hovered !== null && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "calc(100% + 6px)",
-            right: 0,
-            background: "#1C1C1E",
-            color: "#fff",
-            fontSize: 11.5,
-            padding: "4px 8px",
-            borderRadius: 6,
-            whiteSpace: "nowrap",
-            pointerEvents: "none",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif",
-            zIndex: 10,
-          }}
-        >
-          {tooltipText(hovered)}
-        </div>
-      )}
-    </div>
-  );
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function formatNoteDate(iso: string | null): string {
   if (!iso) return "—";
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const diffDays = Math.floor((Date.now() - new Date(hasOffset ? iso : iso + "Z").getTime()) / 86400000);
-  if (diffDays === 0) return "Today";
+  const d = new Date(hasOffset ? iso : iso + "Z");
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  }
   if (diffDays === 1) return "Yesterday";
-  if (diffDays < 7) return `${diffDays}d ago`;
-  if (diffDays < 14) return "1w ago";
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  return `${Math.floor(diffDays / 30)}mo ago`;
+  if (diffDays < 7) return d.toLocaleDateString("en-US", { weekday: "short" });
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 type InkState = {
-  id: number;                 // unique key so CSS transition re-triggers per submit
+  id: number;
   fromX: number; fromY: number;
   toX: number;   toY: number;
-  angle: number;              // degrees — rotation of the stretched droplet
+  angle: number;
   phase: "init" | "travel" | "absorb";
 };
+
+// ── Todo card ──────────────────────────────────────────────────────────────────
+
+// Day-boundary filter: visible = not-done OR completed-today. Archived (completed-before-today)
+// still lives in the DB for stats but drops off the dashboard widget at midnight-local.
+function filterVisibleTodos(todos: ApiTodo[]): ApiTodo[] {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  return todos.filter((t) => !t.done || (t.completed_at && new Date(t.completed_at) >= startOfToday));
+}
+
+// Relative age in m/h/d since created_at. Returns null for under-a-minute.
+// Tier drives color escalation: newer todos stay muted; stale ones warm up.
+type AgeTier = "fresh" | "stale" | "warm" | "bold";
+function formatAge(createdAt: string): { text: string; tier: AgeTier } | null {
+  const sec = Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000);
+  if (sec < 60) return null;
+  if (sec < 3600) return { text: `${Math.floor(sec / 60)}m`, tier: "fresh" };
+  const hours = Math.floor(sec / 3600);
+  if (hours < 24) return { text: `${hours}h`, tier: "fresh" };
+  const days = Math.floor(hours / 24);
+  const tier: AgeTier = days >= 7 ? "bold" : days >= 4 ? "warm" : "stale";
+  return { text: `${days}d`, tier };
+}
+
+function ageTierStyle(tier: AgeTier): { color: string; weight: number } {
+  if (tier === "bold") return { color: "#B7791F", weight: 600 };  // bold amber — 7+d
+  if (tier === "warm") return { color: "#D69E2E", weight: 500 };  // warm amber — 4-6d
+  if (tier === "stale") return { color: "#8E8E93", weight: 500 }; // neutral gray — 1-3d
+  return { color: "#AEAEB2", weight: 400 };                        // lighter gray — minutes/hours
+}
+
+// ── TodoCard ─────────────────────────────────────────────────────────────────
+
+interface TodoCardProps {
+  todos: ApiTodo[];
+  onMutate: (nextTodos: ApiTodo[]) => void;
+}
+
+function TodoCard({ todos, onMutate }: TodoCardProps) {
+  const [newText, setNewText] = useState("");
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const [rowHoverId, setRowHoverId] = useState<number | null>(null);
+  // Re-render every minute so the age pill rolls over from e.g. 2m → 3m
+  // without needing a user interaction to trigger it.
+  const [, setAgeTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setAgeTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const visible = filterVisibleTodos(todos);
+  const showEmpty = visible.length === 0;
+
+  async function toggle(id: number, done: boolean) {
+    const optimistic = todos.map((t) =>
+      t.id === id ? { ...t, done, completed_at: done ? new Date().toISOString() : null } : t,
+    );
+    onMutate(optimistic);
+    try {
+      const updated = await updateTodo(id, { done });
+      onMutate(optimistic.map((t) => (t.id === id ? updated : t)));
+    } catch (e) {
+      console.error(e);
+      onMutate(todos);
+    }
+  }
+
+  async function del(id: number) {
+    const optimistic = todos.filter((t) => t.id !== id);
+    onMutate(optimistic);
+    try { await deleteTodo(id); } catch (e) { console.error(e); onMutate(todos); }
+  }
+
+  async function reorder(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx) return;
+    const reordered = [...visible];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    const renumbered = reordered.map((t, i) => ({ ...t, sort_order: i + 1 }));
+    const renumberedMap = new Map(renumbered.map((t) => [t.id, t]));
+    const folded = todos.map((t) => renumberedMap.get(t.id) ?? t);
+    onMutate(folded);
+    try {
+      await reorderTodos(renumbered.map((t) => ({ id: t.id, sort_order: t.sort_order })));
+    } catch (e) { console.error(e); onMutate(todos); }
+  }
+
+  async function handleAdd() {
+    const text = newText.trim();
+    if (!text) return;
+    setNewText("");
+    const tempId = -Date.now();
+    const optimistic: ApiTodo = {
+      id: tempId, text, done: false,
+      created_at: new Date().toISOString(), completed_at: null,
+      sort_order: todos.reduce((m, t) => Math.max(m, t.sort_order), 0) + 1,
+    };
+    onMutate([...todos, optimistic]);
+    try {
+      const created = await createTodo(text);
+      onMutate([...todos.filter((t) => t.id !== tempId), created]);
+    } catch (e) {
+      console.error(e);
+      onMutate(todos);
+    }
+  }
+
+  function startEdit(t: ApiTodo) {
+    setEditingId(t.id);
+    setEditingText(t.text);
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditingText("");
+  }
+  async function commitEdit() {
+    const id = editingId;
+    if (id === null) return;
+    const next = editingText.trim();
+    const cur = todos.find((t) => t.id === id);
+    setEditingId(null);
+    setEditingText("");
+    if (!cur) return;
+    if (!next) { await del(id); return; }
+    if (next === cur.text) return;
+    const optimistic = todos.map((t) => (t.id === id ? { ...t, text: next } : t));
+    onMutate(optimistic);
+    try {
+      const updated = await updateTodo(id, { text: next });
+      onMutate(optimistic.map((t) => (t.id === id ? updated : t)));
+    } catch (e) { console.error(e); onMutate(todos); }
+  }
+
+  return (
+    <div style={{
+      background: "#fff",
+      border: "0.5px solid rgba(0,0,0,0.08)",
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 22,
+      fontFamily: FONT,
+    }}>
+      <div style={{
+        fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+        textTransform: "uppercase", marginBottom: 12,
+      }}>today</div>
+
+      {showEmpty && (
+        <div style={{ fontSize: 13, color: "#C7C7CC", padding: "4px 0 2px" }}>
+          Nothing here yet — add your first todo below.
+        </div>
+      )}
+
+      {visible.map((t, i) => {
+        const isDragging = dragIdx === i;
+        const isHoverDrop = hoverIdx === i && dragIdx !== null && dragIdx !== i;
+        const isEditing = editingId === t.id;
+        const age = t.done ? null : formatAge(t.created_at);
+        const ageStyle = age ? ageTierStyle(age.tier) : null;
+
+        return (
+          <div
+            key={t.id}
+            draggable={!isEditing}
+            onDragStart={(e) => {
+              if (isEditing) { e.preventDefault(); return; }
+              setDragIdx(i);
+              e.dataTransfer.effectAllowed = "move";
+              try { e.dataTransfer.setData("text/plain", t.text); } catch {}
+            }}
+            onDragEnd={() => { setDragIdx(null); setHoverIdx(null); }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (dragIdx !== null && dragIdx !== i) setHoverIdx(i);
+            }}
+            onDragLeave={() => { if (hoverIdx === i) setHoverIdx(null); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragIdx !== null && dragIdx !== i) reorder(dragIdx, i);
+              setDragIdx(null);
+              setHoverIdx(null);
+            }}
+            style={{
+              position: "relative",
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 8px",
+              marginLeft: -8, marginRight: -8,
+              borderRadius: 6,
+              borderBottom: i === visible.length - 1 ? "none" : "0.5px solid rgba(0,0,0,0.07)",
+              opacity: isDragging ? 0.35 : 1,
+              background: isHoverDrop
+                ? "rgba(255,196,82,0.15)"
+                : rowHoverId === t.id
+                ? "rgba(0,0,0,0.035)"
+                : "transparent",
+              transition: "background 0.12s",
+              cursor: "default",
+            }}
+            onMouseEnter={(e) => {
+              setRowHoverId(t.id);
+              (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLElement>(".todo-hover").forEach((el) => (el.style.opacity = "1"));
+            }}
+            onMouseLeave={(e) => {
+              setRowHoverId((cur) => (cur === t.id ? null : cur));
+              (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLElement>(".todo-hover").forEach((el) => (el.style.opacity = "0"));
+            }}
+          >
+            <button
+              onClick={() => toggle(t.id, !t.done)}
+              aria-label={t.done ? "Uncheck" : "Check"}
+              style={{
+                width: 16, height: 16, borderRadius: "50%",
+                border: t.done ? `1.5px solid ${GREEN}` : "1.5px solid rgba(0,0,0,0.18)",
+                background: t.done ? GREEN : "transparent",
+                cursor: "pointer", padding: 0, flexShrink: 0,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background 0.15s, border-color 0.15s",
+              }}
+            >
+              {t.done && (
+                <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
+                  <path d="M1.5 4.5 L3.5 6.5 L7.5 2" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              )}
+            </button>
+
+            {isEditing ? (
+              <input
+                autoFocus
+                value={editingText}
+                onChange={(e) => setEditingText(e.target.value)}
+                onBlur={commitEdit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); commitEdit(); }
+                  else if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+                }}
+                style={{
+                  flex: 1, fontSize: 13, fontFamily: FONT, color: "#1C1C1E",
+                  background: "transparent", border: "none", outline: "none",
+                  padding: 0, lineHeight: 1.5, minWidth: 0,
+                }}
+              />
+            ) : (
+              <span
+                onClick={() => startEdit(t)}
+                style={{
+                  flex: 1, fontSize: 13,
+                  color: t.done ? "#AEAEB2" : "#1C1C1E",
+                  textDecoration: t.done ? "line-through" : "none",
+                  lineHeight: 1.5, cursor: "text", userSelect: "text",
+                }}
+              >{t.text}</span>
+            )}
+
+            {age && ageStyle && (
+              <span style={{
+                fontSize: 10, fontWeight: ageStyle.weight, color: ageStyle.color,
+                fontVariantNumeric: "tabular-nums", flexShrink: 0, letterSpacing: 0.2,
+              }}>
+                {age.text}
+              </span>
+            )}
+
+            <button
+              className="todo-hover"
+              onClick={(e) => { e.stopPropagation(); del(t.id); }}
+              title="Delete"
+              style={{
+                opacity: 0,
+                background: "none", border: "none", cursor: "pointer",
+                color: "#C7C7CC", fontSize: 14, padding: "0 4px", lineHeight: 1,
+                transition: "opacity 0.12s, color 0.12s", flexShrink: 0,
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#FF3B30")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#C7C7CC")}
+            >×</button>
+          </div>
+        );
+      })}
+
+      <div
+        className="gooni-todo-add"
+        style={{
+          position: "relative",
+          display: "flex", alignItems: "center", gap: 8,
+          marginTop: visible.length > 0 ? 8 : 0,
+          paddingTop: visible.length > 0 ? 16 : 12,
+          paddingBottom: 14,
+          paddingLeft: 8, paddingRight: 8,
+          marginLeft: -8, marginRight: -8,
+          borderTop: visible.length > 0 ? "0.5px solid rgba(0,0,0,0.07)" : "none",
+          borderRadius: 8,
+          overflow: "hidden",
+        }}
+      >
+        <span style={{
+          width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center",
+          color: "#C7C7CC", fontSize: 14, flexShrink: 0,
+          position: "relative", zIndex: 1,
+        }}>+</span>
+        <input
+          value={newText}
+          onChange={(e) => setNewText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } }}
+          placeholder="add a todo"
+          style={{
+            flex: 1, fontSize: 13, fontFamily: FONT,
+            border: "none", outline: "none", background: "transparent",
+            color: "#1C1C1E", padding: "4px 0",
+            position: "relative", zIndex: 1,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────────
+// The dashboard itself:
 
 export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [take, setTake] = useState<string>("");
   const [takeRefreshing, setTakeRefreshing] = useState(false);
+  const [todos, setTodos] = useState<ApiTodo[]>([]);
   const [ink, setInk] = useState<InkState | null>(null);
-  const [cardPulsing, setCardPulsing] = useState(false);
+  const [rowPulsing, setRowPulsing] = useState(false);
   const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
   const typingRaf = useRef<number | null>(null);
   const { selectSpace, loadNotes, selectNote } = useNotesContentStore();
-  const firstCardRef = useRef<HTMLDivElement>(null);
+  const theme = useGooniThemeStore((s) => s.theme);
+  const palette = THEME_PALETTES[theme];
+  const firstRowRef = useRef<HTMLDivElement>(null);
+  const dashRef = useRef<HTMLDivElement>(null);
+
+  // Keep body/html background in sync with theme so any gap around the app fills correctly.
+  useEffect(() => {
+    document.body.style.background = palette.main;
+    document.documentElement.style.background = palette.main;
+  }, [palette.main]);
 
   useEffect(() => () => {
     if (typingRaf.current != null) cancelAnimationFrame(typingRaf.current);
+  }, []);
+
+  useEffect(() => {
+    fetchDashboardStats().then(setStats).catch(console.error);
+    fetchGooniTake().then((r) => setTake(r.take)).catch(console.error);
+    fetchTodos().then(setTodos).catch(console.error);
   }, []);
 
   function startTyping(noteId: number, total: number) {
     if (typingRaf.current != null) cancelAnimationFrame(typingRaf.current);
     if (total <= 0) return;
     setTyping({ noteId, revealed: 0, total });
-    const duration = Math.min(1400, 350 + total * 6); // scale with length, capped
+    const duration = Math.min(1400, 350 + total * 6);
     const start = performance.now();
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / duration);
-      // ease-out-cubic for a "settling" feel at the end of the typing
       const eased = 1 - Math.pow(1 - t, 3);
       const revealed = Math.floor(eased * total);
       setTyping((s) => (s && s.noteId === noteId ? { ...s, revealed } : s));
@@ -143,55 +424,41 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
     typingRaf.current = requestAnimationFrame(tick);
   }
 
-  useEffect(() => {
-    fetchDashboardStats().then(setStats).catch(console.error);
-    fetchGooniTake().then((r) => setTake(r.take)).catch(console.error);
-  }, []);
-
   async function handleSubmitted(_note: ApiNote | null, buttonRect: DOMRect | null) {
-    const target = firstCardRef.current?.getBoundingClientRect() ?? null;
+    const target = firstRowRef.current?.getBoundingClientRect() ?? null;
     const refresh = fetchDashboardStats();
 
     if (buttonRect && target) {
       const fromX = buttonRect.left + buttonRect.width / 2;
       const fromY = buttonRect.top + buttonRect.height / 2;
       const toX = target.left + target.width / 2;
-      const toY = target.top + 24; // aim for top of the card
+      const toY = target.top + target.height / 2;
       const angle = (Math.atan2(toY - fromY, toX - fromX) * 180) / Math.PI;
       const inkId = Date.now();
-      // Phase 1 — render at origin, stretched and small. No transition yet.
       setInk({ id: inkId, fromX, fromY, toX, toY, angle, phase: "init" });
-      // Phase 2 — flip to "travel" on the next frame so CSS transition animates.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           setInk((s) => (s && s.id === inkId ? { ...s, phase: "travel" } : s));
         });
       });
-      // Phase 3 — landed: absorb into card, pulse the card, swap the data,
-      // and start the "typing" reveal animation on the new first-card text.
       setTimeout(() => {
         setInk((s) => (s && s.id === inkId ? { ...s, phase: "absorb" } : s));
-        setCardPulsing(true);
+        setRowPulsing(true);
         refresh
           .then((s) => {
             setStats(s);
             const first = s.recent_notes[0];
             if (first) {
               const t = (first.title ?? "").trim() || "Untitled";
-              const ex = (first.content ?? "")
-                .replace(/<[^>]+>/g, " ")
-                .replace(/&nbsp;/g, " ")
-                .replace(/\s+/g, " ")
-                .trim();
+              const ex = stripHtml(first.content ?? "");
               startTyping(first.id, t.length + ex.length);
             }
           })
           .catch(console.error);
       }, 640);
-      // Phase 4 — clean up the ink element + pulse flag.
       setTimeout(() => {
         setInk((s) => (s && s.id === inkId ? null : s));
-        setCardPulsing(false);
+        setRowPulsing(false);
       }, 1280);
     } else {
       refresh.then(setStats).catch(console.error);
@@ -214,25 +481,26 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   function openNote(spaceId: number | null, noteId: number) {
     const sid = spaceId == null ? "general" : String(spaceId);
     selectSpace(sid);
-    selectNote(noteId); // set eagerly; avoids flashing the most-recent note before the target loads
-    loadNotes(sid);     // fire-and-forget refresh
+    selectNote(noteId);
+    loadNotes(sid);
     onOpenNote();
   }
 
+  const activityPerDay = stats?.activity_per_day ?? [0, 0, 0, 0, 0, 0, 0];
+
   return (
-    <div style={{ flex: 1, overflowY: "auto", background: "#FAFAFA", fontFamily: FONT, position: "relative" }}>
-      {/* Keyframes for the submit → recent-note ink flourish */}
+    <div ref={dashRef} style={{ flex: 1, overflowY: "auto", background: palette.main, fontFamily: FONT, position: "relative" }}>
       <style>{`
-        @keyframes gooni-card-pulse {
-          0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(28,28,30,0.0); border-color: rgba(0,0,0,0.07); }
-          22%  { transform: scale(1.035); box-shadow: 0 0 0 6px rgba(28,28,30,0.06); border-color: rgba(28,28,30,0.28); }
-          60%  { transform: scale(1);    box-shadow: 0 0 0 2px rgba(28,28,30,0.03); border-color: rgba(28,28,30,0.18); }
-          100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(28,28,30,0.0); border-color: rgba(0,0,0,0.07); }
+        @keyframes gooni-row-pulse {
+          0%   { background: transparent; }
+          30%  { background: rgba(74,222,128,0.08); }
+          100% { background: transparent; }
         }
         @keyframes gooni-caret-blink {
           0%, 49% { opacity: 1; }
           50%, 100% { opacity: 0; }
         }
+        @keyframes gooni-spin { to { transform: rotate(360deg); } }
         .gooni-caret {
           display: inline-block;
           color: #1C1C1E;
@@ -240,6 +508,22 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           margin-left: 1px;
           font-weight: 400;
         }
+        /* Quiet hover on the 'add a todo' row — matches the per-row hover treatment above it. */
+        .gooni-todo-add { transition: background 0.12s; }
+        .gooni-todo-add:hover,
+        .gooni-todo-add:focus-within { background: rgba(0,0,0,0.035); }
+        /* Subtle scrollbar for recent notes — invisible until interaction */
+        .gooni-recent-scroll { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+        .gooni-recent-scroll:hover { scrollbar-color: rgba(0,0,0,0.15) transparent; }
+        .gooni-recent-scroll::-webkit-scrollbar { width: 6px; }
+        .gooni-recent-scroll::-webkit-scrollbar-track { background: transparent; }
+        .gooni-recent-scroll::-webkit-scrollbar-thumb {
+          background: transparent;
+          border-radius: 3px;
+          transition: background 0.2s;
+        }
+        .gooni-recent-scroll:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); }
+        .gooni-recent-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.3); }
       `}</style>
 
       {ink && (
@@ -266,8 +550,6 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
                 ? `translate(${ink.toX - ink.fromX}px, ${ink.toY - ink.fromY}px) rotate(${ink.angle}deg) scale(1.55, 0.6)`
                 : `translate(${ink.toX - ink.fromX}px, ${ink.toY - ink.fromY}px) rotate(0deg) scale(2.1, 2.1)`,
             opacity: ink.phase === "init" ? 0.55 : ink.phase === "absorb" ? 0 : 0.92,
-            // Keep transform transition consistent from init → travel so CSS reliably animates
-            // between them (swapping transition-property mid-render can suppress the animation).
             transition:
               ink.phase === "absorb"
                 ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s ease-out"
@@ -278,50 +560,129 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
 
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "48px 40px 120px" }}>
 
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 32 }}>
-          <div style={{ fontSize: 34, fontWeight: 700, fontFamily: DISPLAY_FONT, color: "#1C1C1E", letterSpacing: "-0.5px", lineHeight: 1.15 }}>
-            {getGreeting()}, Daniel.
-          </div>
-          <div style={{ fontSize: 12.5, color: "#8E8E93", display: "flex", alignItems: "center", gap: 4, paddingTop: 10 }}>
-            <span>◷</span><span>{getDateStr()}</span>
-          </div>
-        </div>
-
-        {/* Stats row */}
-        <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
-          {[
-            { label: "notes this week", value: stats?.notes_this_week ?? "—", mode: "bars" as const },
-            { label: "day streak", value: stats?.streak ?? "—", mode: "squares" as const },
-          ].map(({ label, value, mode }) => (
-            <div key={label} style={{
-              flex: 1, background: "#fff", border: "1px solid rgba(0,0,0,0.07)",
-              borderRadius: 12, padding: "16px 20px",
-              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14,
-            }}>
-              <div>
-                <div style={{ fontSize: 26, fontWeight: 700, color: "#1C1C1E", fontFamily: DISPLAY_FONT }}>{value}</div>
-                <div style={{ fontSize: 12, color: "#8E8E93", marginTop: 2 }}>{label}</div>
-              </div>
-              <DayChart
-                notes={stats?.notes_per_day ?? [0, 0, 0, 0, 0, 0, 0]}
-                activity={stats?.activity_per_day ?? [0, 0, 0, 0, 0, 0, 0]}
-                mode={mode}
-              />
+        {/* Greeting + stats on the same row — greeting left, compact stat cards floated right */}
+        <div style={{
+          display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+          gap: 16, marginBottom: 26,
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 28, fontWeight: 700, color: "#1C1C1E", letterSpacing: "-0.5px", lineHeight: 1.2 }}>
+              {getGreeting()}, Daniel.
             </div>
-          ))}
+            <div style={{ fontSize: 13, color: "#8E8E93", marginTop: 4 }}>
+              {getDateStr()}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+            {/* notes this week */}
+            <div style={{
+              background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
+              borderRadius: 10, padding: "10px 14px",
+              display: "flex", flexDirection: "column", alignItems: "flex-start",
+              minWidth: 110,
+            }}>
+              <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>notes this week</div>
+              <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
+                {stats?.notes_this_week ?? "—"}
+              </div>
+              {stats && (() => {
+                const delta = stats.notes_this_week - stats.notes_last_week;
+                if (delta === 0 && stats.notes_last_week === 0) return null;
+                const isUp = delta > 0;
+                const isFlat = delta === 0;
+                return (
+                  <div style={{
+                    fontSize: 10.5, color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
+                    marginTop: 2, fontVariantNumeric: "tabular-nums",
+                  }}>
+                    {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* day streak */}
+            <div style={{
+              background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
+              borderRadius: 10, padding: "10px 14px",
+              display: "flex", flexDirection: "column", alignItems: "flex-start",
+              minWidth: 110,
+            }}>
+              <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>day streak</div>
+              <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
+                {stats?.streak ?? "—"}
+              </div>
+              <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
+                {activityPerDay.map((v, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      width: 6, height: 6, borderRadius: "50%",
+                      background: v > 0 ? GREEN : "rgba(0,0,0,0.08)",
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* todos — open count + done-today momentum */}
+            {(() => {
+              const startOfToday = new Date();
+              startOfToday.setHours(0, 0, 0, 0);
+              const openCount = todos.filter((t) => !t.done).length;
+              const doneToday = todos.filter(
+                (t) => t.done && t.completed_at && new Date(t.completed_at) >= startOfToday,
+              ).length;
+              return (
+                <div style={{
+                  background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
+                  borderRadius: 10, padding: "10px 14px",
+                  display: "flex", flexDirection: "column", alignItems: "flex-start",
+                  minWidth: 110,
+                }}>
+                  <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>todos open</div>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
+                    {openCount}
+                  </div>
+                  <div style={{
+                    fontSize: 10.5,
+                    color: doneToday > 0 ? "#2B8C4D" : "#AEAEB2",
+                    marginTop: 2, fontVariantNumeric: "tabular-nums",
+                  }}>
+                    {doneToday > 0 ? `✓ ${doneToday} done today` : "nothing done yet today"}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         </div>
 
-        {/* Gooni's Take — minimal: 1-2 sentences on the most recent notes. */}
+        {/* Note input — NoteEditor's embedded variant owns the bordered shell + ink animation */}
+        <div style={{ marginBottom: 22 }}>
+          <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
+        </div>
+
+        {/* Gooni's Take — green dot + uppercase label */}
         {take && (
           <div style={{
-            display: "flex", gap: 10, alignItems: "flex-start",
-            padding: "14px 16px", marginBottom: 24,
-            border: "1px solid rgba(0,0,0,0.07)", borderRadius: 12, background: "#FAFAFA",
+            background: "#fff",
+            border: "0.5px solid rgba(0,0,0,0.08)",
+            borderRadius: 12,
+            padding: 16,
+            marginBottom: 22,
             position: "relative",
           }}>
-            <GooniLogo size={22} />
-            <p style={{ flex: 1, fontSize: 13.5, color: "#3C3C43", lineHeight: 1.55, margin: 0, fontFamily: FONT, paddingRight: 22 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <div style={{ width: 7, height: 7, borderRadius: "50%", background: GREEN, flexShrink: 0 }} />
+              <span style={{
+                fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+                textTransform: "uppercase",
+              }}>
+                Gooni's Take
+              </span>
+            </div>
+            <p style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.6, margin: 0, paddingRight: 24 }}>
               {take}
             </p>
             <button
@@ -329,7 +690,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
               disabled={takeRefreshing}
               title="Regenerate"
               style={{
-                position: "absolute", top: 8, right: 8,
+                position: "absolute", top: 10, right: 10,
                 width: 22, height: 22, borderRadius: 6, border: "none",
                 background: "transparent", color: "#8E8E93", cursor: takeRefreshing ? "default" : "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -340,102 +701,114 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             >
               <svg
                 width="12" height="12" viewBox="0 0 16 16" fill="none"
-                style={{
-                  animation: takeRefreshing ? "gooni-spin 0.8s linear infinite" : undefined,
-                  opacity: takeRefreshing ? 0.6 : 1,
-                }}
+                style={{ animation: takeRefreshing ? "gooni-spin 0.8s linear infinite" : undefined, opacity: takeRefreshing ? 0.6 : 1 }}
               >
                 <path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9L13 3v3.5H9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
                 <path d="M13.5 8a5.5 5.5 0 0 1-9.4 3.9L3 13v-3.5h3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
               </svg>
-              <style>{`@keyframes gooni-spin { to { transform: rotate(360deg); } }`}</style>
             </button>
           </div>
         )}
 
-        {/* Quick note */}
-        <div style={{ marginBottom: 24 }}>
-          <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
-        </div>
+        {/* Todo card — backed by dedicated TodoItem model with timestamps + sort order */}
+        <TodoCard todos={todos} onMutate={setTodos} />
 
-        {/* Recent notes — two preview cards */}
-        <div style={{ marginBottom: 44 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "#8E8E93", letterSpacing: 0.5, marginBottom: 10 }}>RECENT NOTES</div>
-          {stats ? (
-            stats.recent_notes.length === 0 ? (
-              <p style={{ fontSize: 13.5, color: "#C7C7CC" }}>No notes yet.</p>
+        {/* Recent notes — simple rows with dividers, no cards. Scrollable after ~5 rows. */}
+        <div>
+          <div style={{
+            fontSize: 12, color: "#8E8E93", letterSpacing: 0.6,
+            textTransform: "uppercase", marginBottom: 8,
+          }}>recent notes</div>
+          {stats ? (() => {
+            const visibleRecent = stats.recent_notes;
+            return visibleRecent.length === 0 ? (
+              <p style={{ fontSize: 13, color: "#C7C7CC" }}>No notes yet.</p>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {stats.recent_notes.slice(0, 2).map((note, idx) => {
-                  const fullTitle = note.title?.trim() || "Untitled";
-                  const fullExcerpt = (note.content ?? "")
-                    .replace(/<[^>]+>/g, " ")
-                    .replace(/&nbsp;/g, " ")
-                    .replace(/\s+/g, " ")
-                    .trim();
+              <div
+                className="gooni-recent-scroll"
+                style={{
+                  maxHeight: 5 * 56,
+                  overflowY: "auto",
+                  // pad the right so scrollbar doesn't overlap content when it appears
+                  paddingRight: 6,
+                  marginRight: -6,
+                }}
+              >
+                {visibleRecent.map((note, idx) => {
                   const isFirst = idx === 0;
+                  const plain = stripHtml(note.content ?? "");
+                  const trimmedTitle = note.title?.trim() ?? "";
+                  let title: string;
+                  let preview: string;
+                  if (trimmedTitle) {
+                    title = trimmedTitle;
+                    preview = plain.slice(0, 80);
+                  } else if (plain) {
+                    const br = plain.search(/[\n\r]/);
+                    title = plain.slice(0, br > 0 ? br : 60).trim() || "Untitled";
+                    preview = plain.slice(title.length).trim().slice(0, 80);
+                  } else {
+                    title = "Untitled";
+                    preview = "";
+                  }
                   const isTyping = typing !== null && typing.noteId === note.id;
                   const revealed = isTyping ? typing!.revealed : Infinity;
-                  const shownTitle = isTyping ? fullTitle.slice(0, Math.min(revealed, fullTitle.length)) : fullTitle;
-                  const excerptBudget = isTyping ? Math.max(0, revealed - fullTitle.length) : Infinity;
-                  const shownExcerpt = isTyping ? fullExcerpt.slice(0, excerptBudget) : fullExcerpt;
-                  const caretInTitle = isTyping && revealed <= fullTitle.length;
-                  const caretInExcerpt = isTyping && revealed > fullTitle.length;
+                  const shownTitle = isTyping ? title.slice(0, Math.min(revealed, title.length)) : title;
+                  const excerptBudget = isTyping ? Math.max(0, revealed - title.length) : Infinity;
+                  const shownPreview = isTyping ? preview.slice(0, excerptBudget) : preview;
+                  const caretInTitle = isTyping && revealed <= title.length;
+                  const caretInPreview = isTyping && revealed > title.length;
                   return (
                     <div
                       key={note.id}
-                      ref={isFirst ? firstCardRef : undefined}
+                      ref={isFirst ? firstRowRef : undefined}
                       onClick={() => openNote(note.space_id, note.id)}
                       style={{
-                        display: "flex", flexDirection: "column", alignItems: "stretch",
-                        gap: 6, padding: "14px 16px", borderRadius: 12,
-                        border: "1px solid rgba(0,0,0,0.07)", background: "#fff", cursor: "pointer",
-                        textAlign: "left", width: "100%", height: 160, boxSizing: "border-box",
-                        transition: "background 0.12s, border-color 0.12s",
-                        animation: isFirst && cardPulsing ? `gooni-card-pulse 0.6s cubic-bezier(0.22,1,0.36,1)` : undefined,
-                      }}
-                      onMouseEnter={(e) => {
-                        const el = e.currentTarget;
-                        el.style.borderColor = "rgba(0,0,0,0.15)";
-                        el.style.background = "#FDFDFD";
-                      }}
-                      onMouseLeave={(e) => {
-                        const el = e.currentTarget;
-                        el.style.borderColor = "rgba(0,0,0,0.07)";
-                        el.style.background = "#fff";
+                        display: "flex",
+                        alignItems: "baseline",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        padding: "10px 0",
+                        borderBottom: "0.5px solid rgba(0,0,0,0.07)",
+                        cursor: "pointer",
+                        animation: isFirst && rowPulsing ? "gooni-row-pulse 0.7s ease-out" : undefined,
                       }}
                     >
-                      <div style={{
-                        fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: FONT,
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        flexShrink: 0,
-                      }}>
-                        {shownTitle || (isFirst && isTyping ? " " : "Untitled")}
-                        {caretInTitle && <span className="gooni-caret">▍</span>}
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{
+                          fontSize: 13, color: "#1C1C1E",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {shownTitle || " "}
+                          {caretInTitle && <span className="gooni-caret">▍</span>}
+                        </div>
+                        {(preview || isTyping) && (
+                          <div style={{
+                            fontSize: 12, color: "#8E8E93", marginTop: 1,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}>
+                            {shownPreview}
+                            {caretInPreview && <span className="gooni-caret">▍</span>}
+                          </div>
+                        )}
                       </div>
-                      <div
-                        style={{
-                          flex: 1, fontSize: 12.5, color: "#6C6C70", lineHeight: 1.5, fontFamily: FONT,
-                          overflowY: "auto", overscrollBehavior: "contain",
-                        }}
-                      >
-                        {shownExcerpt || (isTyping ? "" : <span style={{ color: "#C7C7CC", fontStyle: "italic" }}>empty note</span>)}
-                        {caretInExcerpt && <span className="gooni-caret">▍</span>}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#AEAEB2", fontFamily: FONT, flexShrink: 0 }}>
+                      <span style={{ fontSize: 11, color: "#AEAEB2", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
                         {formatNoteDate(note.updated_at)}
-                      </div>
+                      </span>
                     </div>
                   );
                 })}
               </div>
-            )
-          ) : (
-            <p style={{ fontSize: 13.5, color: "#C7C7CC" }}>Loading…</p>
+            );
+          })() : (
+            <p style={{ fontSize: 13, color: "#C7C7CC" }}>Loading…</p>
           )}
         </div>
 
       </div>
+
+      {/* Interactive mascot — peeks from sidebar seam, drag-to-toss, walks with perspective */}
+      <GooniMascot dashboardRef={dashRef} />
     </div>
   );
 }

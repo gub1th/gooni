@@ -15,6 +15,22 @@
       href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <style>
+      /* Global reset — kills the default 8px body margin that was letting the desktop
+         show through around the edges when the app is installed as a PWA (or any time
+         the viewport background wasn't explicitly set). */
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+      }
+      /* Actual background is set dynamically by the theme store (default = cool). */
+      html, body { background: #FAFAFA; }
+      body {
+        overscroll-behavior: none;
+        -webkit-font-smoothing: antialiased;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

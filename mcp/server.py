@@ -575,6 +575,131 @@ def list_notes(space: str = "general", limit: int = 20) -> str:
     return "\n".join(lines)
 
 
+def _fetch_todos() -> list[dict]:
+    resp = httpx.get(f"{BASE_URL}/todos", timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _find_todo(match: str, only_open: bool = False) -> tuple[dict | None, str | None]:
+    """Case-insensitive substring match on todo text. Returns (todo, error_or_None)."""
+    match_l = match.lower().strip()
+    if not match_l:
+        return None, "(empty match string)"
+    todos = _fetch_todos()
+    candidates = [t for t in todos if match_l in (t["text"] or "").lower()]
+    if only_open:
+        candidates = [t for t in candidates if not t["done"]]
+    if not candidates:
+        return None, f"(no todo matching '{match}')"
+    # Prefer shortest text (most specific match)
+    candidates.sort(key=lambda t: len(t["text"]))
+    return candidates[0], None
+
+
+@mcp.tool()
+def add_todo(text: str) -> str:
+    """Add a new todo to Daniel's dashboard todo list.
+
+    The todo appears in the dashboard's Todo card, goes to the bottom of the
+    list, and tracks its own created_at so the UI can show an age pill.
+
+    Args:
+        text: the todo text (e.g. "review PR #42", "fix the mascot walk cycle")
+    """
+    text = (text or "").strip()
+    if not text:
+        return "(text required)"
+    resp = httpx.post(f"{BASE_URL}/todos", json={"text": text}, timeout=10)
+    resp.raise_for_status()
+    t = resp.json()
+    return f"added #{t['id']}: {t['text']}"
+
+
+@mcp.tool()
+def list_todos(include_done: bool = False, limit: int = 50) -> str:
+    """List Daniel's dashboard todos.
+
+    Args:
+        include_done: include completed items (default False — open items only)
+        limit: max items to return (default 50)
+    """
+    todos = _fetch_todos()
+    if not include_done:
+        todos = [t for t in todos if not t["done"]]
+    todos = todos[:limit]
+    if not todos:
+        return "(no todos)"
+    lines = []
+    for t in todos:
+        mark = "[x]" if t["done"] else "[ ]"
+        age = ""
+        if t.get("created_at"):
+            try:
+                dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                secs = (datetime.now(timezone.utc) - dt).total_seconds()
+                if secs < 60:
+                    age = "just now"
+                elif secs < 3600:
+                    age = f"{int(secs / 60)}m"
+                elif secs < 86400:
+                    age = f"{int(secs / 3600)}h"
+                else:
+                    age = f"{int(secs / 86400)}d"
+            except (ValueError, AttributeError):
+                age = ""
+        suffix = f" ({age})" if age else ""
+        lines.append(f"#{t['id']} {mark} {t['text']}{suffix}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def complete_todo(match: str) -> str:
+    """Mark a todo as done by text match.
+
+    Args:
+        match: text contained in the todo (case-insensitive substring; shortest match wins)
+    """
+    t, err = _find_todo(match, only_open=True)
+    if err:
+        return err
+    resp = httpx.patch(f"{BASE_URL}/todos/{t['id']}", json={"done": True}, timeout=10)
+    resp.raise_for_status()
+    return f"[x] {t['text']}"
+
+
+@mcp.tool()
+def uncheck_todo(match: str) -> str:
+    """Un-check a completed todo by text match.
+
+    Args:
+        match: text contained in the todo (case-insensitive substring; shortest match wins)
+    """
+    t, err = _find_todo(match)
+    if err:
+        return err
+    resp = httpx.patch(f"{BASE_URL}/todos/{t['id']}", json={"done": False}, timeout=10)
+    resp.raise_for_status()
+    return f"[ ] {t['text']}"
+
+
+@mcp.tool()
+def delete_todo(match: str) -> str:
+    """Delete a todo by text match.
+
+    Args:
+        match: text contained in the todo (case-insensitive substring; shortest match wins)
+    """
+    t, err = _find_todo(match)
+    if err:
+        return err
+    resp = httpx.delete(f"{BASE_URL}/todos/{t['id']}", timeout=10)
+    resp.raise_for_status()
+    return f"deleted: {t['text']}"
+
+
 @mcp.tool()
 def list_recent_notes(limit: int = 10) -> str:
     """List the most recently updated notes across all spaces.
