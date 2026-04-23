@@ -173,6 +173,17 @@ function formatNoteDate(iso: string | null): string {
     " at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
+function formatShortDate(iso: string | null): string {
+  if (!iso) return "";
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  const d = new Date(hasOffset ? iso : iso + "Z");
+  const now = new Date();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString("en-US", sameYear
+    ? { month: "short", day: "numeric" }
+    : { month: "short", day: "numeric", year: "numeric" });
+}
+
 type SaveStatus = "idle" | "saving" | "saved";
 
 const TOOLBAR_ITEMS = [
@@ -598,7 +609,7 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
             : saveStatus === "saved"
             ? `Saved ${lastSavedTime}`
             : activeNote
-            ? formatNoteDate(activeNote.updated_at)
+            ? `Created ${formatShortDate(activeNote.created_at)} · Updated ${formatNoteDate(activeNote.updated_at)}`
             : ""}
         </span>
 
@@ -624,23 +635,20 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
                 onClick={() => setMovePicker((p) => !p)}
                 title="Move note to another space"
                 style={{
-                  padding: "4px 10px",
-                  borderRadius: 14,
+                  width: 30, height: 30, borderRadius: 8,
                   border: "none",
-                  background: movePicker ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)",
+                  background: movePicker ? "rgba(0,0,0,0.08)" : "transparent",
                   cursor: "pointer",
-                  fontSize: 12,
+                  fontSize: 13,
                   color: "#636366",
-                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  transition: "background 0.1s",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  padding: 0, flexShrink: 0,
+                  transition: "background 0.12s",
                 }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.10)")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = movePicker ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)")}
+                onMouseEnter={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+                onMouseLeave={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
               >
-                Move to ↗
+                ↗
               </button>
               {movePicker && (
                 <div
@@ -697,18 +705,18 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
                 onClick={() => setDeleteConfirm((p) => !p)}
                 title="Delete note"
                 style={{
-                  padding: "4px 10px", borderRadius: 14, border: "none",
-                  background: deleteConfirm ? "rgba(255,59,48,0.10)" : "rgba(0,0,0,0.05)",
-                  cursor: "pointer", fontSize: 12,
+                  width: 30, height: 30, borderRadius: 8, border: "none",
+                  background: deleteConfirm ? "rgba(255,59,48,0.10)" : "transparent",
+                  cursor: "pointer", fontSize: 13,
                   color: deleteConfirm ? "#FF3B30" : "#636366",
-                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                  display: "flex", alignItems: "center", gap: 4,
-                  transition: "background 0.1s",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  padding: 0, flexShrink: 0,
+                  transition: "background 0.12s",
                 }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.10)")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = deleteConfirm ? "rgba(255,59,48,0.10)" : "rgba(0,0,0,0.05)")}
+                onMouseEnter={(e) => { if (!deleteConfirm) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.08)"; }}
+                onMouseLeave={(e) => { if (!deleteConfirm) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
               >
-                🗑 Delete
+                🗑
               </button>
               {deleteConfirm && (
                 <div style={{
@@ -767,6 +775,36 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
               filter: activeNote.is_pinned ? "none" : "grayscale(1) opacity(0.5)",
               transition: "filter 0.15s",
             }}>📌</span>
+          </button>
+        )}
+
+        {/* Public toggle — same visual family as Pin: icon-only with colored background when active */}
+        {activeNote && activeNoteId && activeNoteId > 0 && (
+          <button
+            onClick={() => {
+              if (!activeNoteId || activeNoteId < 0) return;
+              const next = !localIsPublic;
+              setLocalIsPublic(next);
+              apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
+            }}
+            title={localIsPublic ? "Unpublish from public portfolio" : "Publish to public portfolio"}
+            style={{
+              width: 30, height: 30, borderRadius: 8,
+              border: "none",
+              background: localIsPublic ? "rgba(52,199,89,0.16)" : "transparent",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: 0, flexShrink: 0,
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+            onMouseLeave={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+          >
+            <span style={{
+              fontSize: 13, lineHeight: 1,
+              filter: localIsPublic ? "none" : "grayscale(1) opacity(0.5)",
+              transition: "filter 0.15s",
+            }}>🌐</span>
           </button>
         )}
 
@@ -952,30 +990,6 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
                   }}
                 />
                 <FormatToolbar editor={editor} />
-
-                <div style={{ marginBottom: 16 }}>
-                  <button
-                    onClick={() => {
-                      if (!activeNoteId || activeNoteId < 0) return;
-                      const next = !localIsPublic;
-                      setLocalIsPublic(next);
-                      apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
-                    }}
-                    style={{
-                      padding: "3px 10px",
-                      borderRadius: 20,
-                      border: `1px solid ${localIsPublic ? "#34C759" : "rgba(0,0,0,0.15)"}`,
-                      background: localIsPublic ? "#34C759" : "transparent",
-                      color: localIsPublic ? "#fff" : "#636366",
-                      fontSize: 12,
-                      cursor: "pointer",
-                      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                      transition: "background 0.15s, color 0.15s",
-                    }}
-                  >
-                    🌐 Public
-                  </button>
-                </div>
 
                 {editor && (
                   <BubbleMenu

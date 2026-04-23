@@ -211,6 +211,7 @@ export interface PublicNote {
   space_name: string | null;
   excerpt: string;
   updated_at: string;
+  read_time_minutes: number;
 }
 
 export interface PublicNoteDetail {

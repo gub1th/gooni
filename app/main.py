@@ -1035,6 +1035,12 @@ def _strip_html(html: str) -> str:
     return re.sub(r"<[^>]+>", " ", html or "").strip()
 
 
+def _read_time_min(html: str) -> int:
+    import re
+    text = re.sub(r"\s+", " ", _strip_html(html)).strip()
+    return max(1, -(-len(text) // 1000))
+
+
 @app.get("/public/notes")
 def get_public_notes(db: Session = Depends(get_db)):
     """Return all public notes with their space name, newest first. No auth."""
@@ -1054,6 +1060,7 @@ def get_public_notes(db: Session = Depends(get_db)):
             "space_name": space.name if space else None,
             "excerpt": excerpt,
             "updated_at": n.updated_at,
+            "read_time_minutes": _read_time_min(n.content or ""),
         })
     return result
 
