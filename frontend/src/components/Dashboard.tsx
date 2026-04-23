@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from "react";
-import { fetchDashboardStats, fetchGooniTake, fetchPinnedNotes, updateNote, type ApiNote, type DashboardStats } from "../services/api";
+import {
+  fetchDashboardStats, fetchGooniTake,
+  fetchTodos, createTodo, updateTodo, deleteTodo, reorderTodos,
+  type ApiNote, type ApiTodo, type DashboardStats,
+} from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
-import { usePinnedVersionStore } from "../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
 import { GooniMascot } from "./GooniMascot";
 import { NoteEditor } from "./notes/NoteEditor";
@@ -48,189 +51,139 @@ type InkState = {
 
 // ── Todo card ──────────────────────────────────────────────────────────────────
 
-interface TodoItem { text: string; checked: boolean }
-
-function parseTodos(html: string): TodoItem[] {
-  try {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const items = Array.from(doc.querySelectorAll('li[data-type="taskItem"]'));
-    return items.map((el) => {
-      const p = el.querySelector("p");
-      const text = (p?.textContent ?? el.textContent ?? "").trim();
-      const checked = el.getAttribute("data-checked") === "true";
-      return { text, checked };
-    });
-  } catch {
-    return [];
-  }
+// Day-boundary filter: visible = not-done OR completed-today. Archived (completed-before-today)
+// still lives in the DB for stats but drops off the dashboard widget at midnight-local.
+function filterVisibleTodos(todos: ApiTodo[]): ApiTodo[] {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  return todos.filter((t) => !t.done || (t.completed_at && new Date(t.completed_at) >= startOfToday));
 }
 
-function ensureTaskListDoc(html: string): { doc: Document; list: Element } {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  let list = doc.querySelector('ul[data-type="taskList"]');
-  if (!list) {
-    list = doc.createElement("ul");
-    list.setAttribute("data-type", "taskList");
-    doc.body.appendChild(list);
-  }
-  return { doc, list };
+// Relative age in m/h/d since created_at. Returns null for under-a-minute.
+// Tier drives color escalation: newer todos stay muted; stale ones warm up.
+type AgeTier = "fresh" | "stale" | "warm" | "bold";
+function formatAge(createdAt: string): { text: string; tier: AgeTier } | null {
+  const sec = Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000);
+  if (sec < 60) return null;
+  if (sec < 3600) return { text: `${Math.floor(sec / 60)}m`, tier: "fresh" };
+  const hours = Math.floor(sec / 3600);
+  if (hours < 24) return { text: `${hours}h`, tier: "fresh" };
+  const days = Math.floor(hours / 24);
+  const tier: AgeTier = days >= 7 ? "bold" : days >= 4 ? "warm" : "stale";
+  return { text: `${days}d`, tier };
 }
 
-function toggleTodoHtml(html: string, idx: number): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const items = doc.querySelectorAll('li[data-type="taskItem"]');
-  const el = items[idx];
-  if (!el) return html;
-  const cur = el.getAttribute("data-checked") === "true";
-  el.setAttribute("data-checked", cur ? "false" : "true");
-  const input = el.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
-  if (input) input.checked = !cur;
-  return doc.body.innerHTML;
+function ageTierStyle(tier: AgeTier): { color: string; weight: number } {
+  if (tier === "bold") return { color: "#B7791F", weight: 600 };  // bold amber — 7+d
+  if (tier === "warm") return { color: "#D69E2E", weight: 500 };  // warm amber — 4-6d
+  if (tier === "stale") return { color: "#8E8E93", weight: 500 }; // neutral gray — 1-3d
+  return { color: "#AEAEB2", weight: 400 };                        // lighter gray — minutes/hours
 }
 
-function addTodoHtml(html: string, text: string): string {
-  const { doc, list } = ensureTaskListDoc(html);
-  const li = doc.createElement("li");
-  li.setAttribute("data-type", "taskItem");
-  li.setAttribute("data-checked", "false");
-
-  // TipTap task-item DOM: label>input+span, then div>p
-  const label = doc.createElement("label");
-  const input = doc.createElement("input");
-  input.setAttribute("type", "checkbox");
-  const labelSpan = doc.createElement("span");
-  label.appendChild(input);
-  label.appendChild(labelSpan);
-
-  const contentDiv = doc.createElement("div");
-  const p = doc.createElement("p");
-  p.textContent = text;
-  contentDiv.appendChild(p);
-
-  li.appendChild(label);
-  li.appendChild(contentDiv);
-  list.appendChild(li);
-  return doc.body.innerHTML;
-}
-
-function deleteTodoHtml(html: string, idx: number): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const items = doc.querySelectorAll('li[data-type="taskItem"]');
-  items[idx]?.remove();
-  return doc.body.innerHTML;
-}
-
-function reorderTodoHtml(html: string, fromIdx: number, toIdx: number): string {
-  if (fromIdx === toIdx) return html;
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const items = Array.from(doc.querySelectorAll('li[data-type="taskItem"]'));
-  const from = items[fromIdx];
-  const to = items[toIdx];
-  if (!from || !to) return html;
-  if (fromIdx < toIdx) {
-    to.parentNode?.insertBefore(from, to.nextSibling);
-  } else {
-    to.parentNode?.insertBefore(from, to);
-  }
-  return doc.body.innerHTML;
-}
-
-function editTodoHtml(html: string, idx: number, newText: string): string {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const items = doc.querySelectorAll('li[data-type="taskItem"]');
-  const el = items[idx];
-  if (!el) return html;
-  const p = el.querySelector("p");
-  if (p) {
-    p.textContent = newText;
-  } else {
-    // Fallback: stuff text into a fresh <p> inside a wrapper div
-    const div = doc.createElement("div");
-    const newP = doc.createElement("p");
-    newP.textContent = newText;
-    div.appendChild(newP);
-    // Preserve label element; replace anything after it with the new div
-    const label = el.querySelector("label");
-    el.innerHTML = "";
-    if (label) el.appendChild(label);
-    el.appendChild(div);
-  }
-  return doc.body.innerHTML;
-}
+// ── TodoCard ─────────────────────────────────────────────────────────────────
 
 interface TodoCardProps {
-  todoNote: ApiNote | null;
-  onAfterMutate: (updated: ApiNote) => void;
+  todos: ApiTodo[];
+  onMutate: (nextTodos: ApiTodo[]) => void;
 }
 
-function TodoCard({ todoNote, onAfterMutate }: TodoCardProps) {
-  // Local HTML is the source of truth for rendering — allows optimistic updates
-  // (click feels instant; server save runs in background).
-  const [localHtml, setLocalHtml] = useState<string>(todoNote?.content ?? "");
+function TodoCard({ todos, onMutate }: TodoCardProps) {
   const [newText, setNewText] = useState("");
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
-  const [rowHoverIdx, setRowHoverIdx] = useState<number | null>(null);
-
-  // Re-sync when the source note changes externally (e.g., edited in the full editor).
+  const [rowHoverId, setRowHoverId] = useState<number | null>(null);
+  // Re-render every minute so the age pill rolls over from e.g. 2m → 3m
+  // without needing a user interaction to trigger it.
+  const [, setAgeTick] = useState(0);
   useEffect(() => {
-    setLocalHtml(todoNote?.content ?? "");
-  }, [todoNote?.content]);
+    const id = setInterval(() => setAgeTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
-  if (!todoNote) return null;
-  const items = parseTodos(localHtml);
+  const visible = filterVisibleTodos(todos);
+  const showEmpty = visible.length === 0;
 
-  async function persist(newHtml: string) {
-    const prev = localHtml;
-    setLocalHtml(newHtml);
+  async function toggle(id: number, done: boolean) {
+    const optimistic = todos.map((t) =>
+      t.id === id ? { ...t, done, completed_at: done ? new Date().toISOString() : null } : t,
+    );
+    onMutate(optimistic);
     try {
-      await updateNote(todoNote!.id, todoNote!.title ?? "", newHtml);
-      onAfterMutate({ ...todoNote!, content: newHtml });
+      const updated = await updateTodo(id, { done });
+      onMutate(optimistic.map((t) => (t.id === id ? updated : t)));
     } catch (e) {
-      console.error("todo persist failed — rolling back", e);
-      setLocalHtml(prev);
+      console.error(e);
+      onMutate(todos);
     }
   }
 
-  const toggle = (i: number) => persist(toggleTodoHtml(localHtml, i));
-  const del = (i: number) => persist(deleteTodoHtml(localHtml, i));
-  const reorder = (from: number, to: number) => persist(reorderTodoHtml(localHtml, from, to));
-
-  function startEdit(i: number, text: string) {
-    setEditingIdx(i);
-    setEditingText(text);
+  async function del(id: number) {
+    const optimistic = todos.filter((t) => t.id !== id);
+    onMutate(optimistic);
+    try { await deleteTodo(id); } catch (e) { console.error(e); onMutate(todos); }
   }
 
-  function cancelEdit() {
-    setEditingIdx(null);
-    setEditingText("");
+  async function reorder(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx) return;
+    const reordered = [...visible];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    const renumbered = reordered.map((t, i) => ({ ...t, sort_order: i + 1 }));
+    const renumberedMap = new Map(renumbered.map((t) => [t.id, t]));
+    const folded = todos.map((t) => renumberedMap.get(t.id) ?? t);
+    onMutate(folded);
+    try {
+      await reorderTodos(renumbered.map((t) => ({ id: t.id, sort_order: t.sort_order })));
+    } catch (e) { console.error(e); onMutate(todos); }
   }
 
-  function commitEdit() {
-    const i = editingIdx;
-    if (i === null) return;
-    const next = editingText.trim();
-    const prev = items[i]?.text ?? "";
-    setEditingIdx(null);
-    setEditingText("");
-    if (!next) {
-      // Emptying an item on commit deletes it — matches Apple Reminders behavior
-      persist(deleteTodoHtml(localHtml, i));
-    } else if (next !== prev) {
-      persist(editTodoHtml(localHtml, i, next));
-    }
-  }
-
-  function handleAdd() {
-    const t = newText.trim();
-    if (!t) return;
-    persist(addTodoHtml(localHtml, t));
+  async function handleAdd() {
+    const text = newText.trim();
+    if (!text) return;
     setNewText("");
+    const tempId = -Date.now();
+    const optimistic: ApiTodo = {
+      id: tempId, text, done: false,
+      created_at: new Date().toISOString(), completed_at: null,
+      sort_order: todos.reduce((m, t) => Math.max(m, t.sort_order), 0) + 1,
+    };
+    onMutate([...todos, optimistic]);
+    try {
+      const created = await createTodo(text);
+      onMutate([...todos.filter((t) => t.id !== tempId), created]);
+    } catch (e) {
+      console.error(e);
+      onMutate(todos);
+    }
   }
 
-  const showEmpty = items.length === 0;
+  function startEdit(t: ApiTodo) {
+    setEditingId(t.id);
+    setEditingText(t.text);
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditingText("");
+  }
+  async function commitEdit() {
+    const id = editingId;
+    if (id === null) return;
+    const next = editingText.trim();
+    const cur = todos.find((t) => t.id === id);
+    setEditingId(null);
+    setEditingText("");
+    if (!cur) return;
+    if (!next) { await del(id); return; }
+    if (next === cur.text) return;
+    const optimistic = todos.map((t) => (t.id === id ? { ...t, text: next } : t));
+    onMutate(optimistic);
+    try {
+      const updated = await updateTodo(id, { text: next });
+      onMutate(optimistic.map((t) => (t.id === id ? updated : t)));
+    } catch (e) { console.error(e); onMutate(todos); }
+  }
 
   return (
     <div style={{
@@ -242,11 +195,8 @@ function TodoCard({ todoNote, onAfterMutate }: TodoCardProps) {
       fontFamily: FONT,
     }}>
       <div style={{
-        fontSize: 11,
-        color: "#8E8E93",
-        letterSpacing: 0.6,
-        textTransform: "uppercase",
-        marginBottom: 12,
+        fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+        textTransform: "uppercase", marginBottom: 12,
       }}>today</div>
 
       {showEmpty && (
@@ -255,19 +205,22 @@ function TodoCard({ todoNote, onAfterMutate }: TodoCardProps) {
         </div>
       )}
 
-      {items.map((it, i) => {
+      {visible.map((t, i) => {
         const isDragging = dragIdx === i;
-        const isHover = hoverIdx === i && dragIdx !== null && dragIdx !== i;
-        const isEditing = editingIdx === i;
+        const isHoverDrop = hoverIdx === i && dragIdx !== null && dragIdx !== i;
+        const isEditing = editingId === t.id;
+        const age = t.done ? null : formatAge(t.created_at);
+        const ageStyle = age ? ageTierStyle(age.tier) : null;
+
         return (
           <div
-            key={i}
+            key={t.id}
             draggable={!isEditing}
             onDragStart={(e) => {
               if (isEditing) { e.preventDefault(); return; }
               setDragIdx(i);
               e.dataTransfer.effectAllowed = "move";
-              try { e.dataTransfer.setData("text/plain", it.text); } catch {}
+              try { e.dataTransfer.setData("text/plain", t.text); } catch {}
             }}
             onDragEnd={() => { setDragIdx(null); setHoverIdx(null); }}
             onDragOver={(e) => {
@@ -283,62 +236,42 @@ function TodoCard({ todoNote, onAfterMutate }: TodoCardProps) {
             }}
             style={{
               position: "relative",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
+              display: "flex", alignItems: "center", gap: 8,
               padding: "8px 8px",
               marginLeft: -8, marginRight: -8,
               borderRadius: 6,
-              borderBottom: i === items.length - 1 ? "none" : "0.5px solid rgba(0,0,0,0.07)",
+              borderBottom: i === visible.length - 1 ? "none" : "0.5px solid rgba(0,0,0,0.07)",
               opacity: isDragging ? 0.35 : 1,
-              background: isHover
+              background: isHoverDrop
                 ? "rgba(255,196,82,0.15)"
-                : rowHoverIdx === i
+                : rowHoverId === t.id
                 ? "rgba(0,0,0,0.035)"
                 : "transparent",
               transition: "background 0.12s",
               cursor: "default",
             }}
             onMouseEnter={(e) => {
-              setRowHoverIdx(i);
-              (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLElement>(".todo-hover").forEach(el => el.style.opacity = "1");
+              setRowHoverId(t.id);
+              (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLElement>(".todo-hover").forEach((el) => (el.style.opacity = "1"));
             }}
             onMouseLeave={(e) => {
-              setRowHoverIdx((cur) => (cur === i ? null : cur));
-              (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLElement>(".todo-hover").forEach(el => el.style.opacity = "0");
+              setRowHoverId((cur) => (cur === t.id ? null : cur));
+              (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLElement>(".todo-hover").forEach((el) => (el.style.opacity = "0"));
             }}
           >
-            {/* Drag handle — visible on hover */}
-            <span
-              className="todo-hover"
-              title="Drag to reorder"
-              style={{
-                opacity: 0,
-                cursor: "grab",
-                color: "#C7C7CC",
-                fontSize: 14,
-                lineHeight: 1,
-                padding: "0 2px",
-                transition: "opacity 0.12s",
-                userSelect: "none",
-                flexShrink: 0,
-              }}
-            >⋮⋮</span>
-
             <button
-              onClick={() => toggle(i)}
-              aria-label={it.checked ? "Uncheck" : "Check"}
+              onClick={() => toggle(t.id, !t.done)}
+              aria-label={t.done ? "Uncheck" : "Check"}
               style={{
                 width: 16, height: 16, borderRadius: "50%",
-                border: it.checked ? `1.5px solid ${GREEN}` : "1.5px solid rgba(0,0,0,0.18)",
-                background: it.checked ? GREEN : "transparent",
-                cursor: "pointer",
-                padding: 0, flexShrink: 0,
+                border: t.done ? `1.5px solid ${GREEN}` : "1.5px solid rgba(0,0,0,0.18)",
+                background: t.done ? GREEN : "transparent",
+                cursor: "pointer", padding: 0, flexShrink: 0,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 transition: "background 0.15s, border-color 0.15s",
               }}
             >
-              {it.checked && (
+              {t.done && (
                 <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
                   <path d="M1.5 4.5 L3.5 6.5 L7.5 2" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
@@ -356,38 +289,35 @@ function TodoCard({ todoNote, onAfterMutate }: TodoCardProps) {
                   else if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
                 }}
                 style={{
-                  flex: 1,
-                  fontSize: 13,
-                  fontFamily: FONT,
-                  color: "#1C1C1E",
-                  background: "transparent",
-                  border: "none",
-                  outline: "none",
-                  padding: 0,
-                  lineHeight: 1.5,
-                  minWidth: 0,
+                  flex: 1, fontSize: 13, fontFamily: FONT, color: "#1C1C1E",
+                  background: "transparent", border: "none", outline: "none",
+                  padding: 0, lineHeight: 1.5, minWidth: 0,
                 }}
               />
             ) : (
               <span
-                onClick={() => startEdit(i, it.text)}
+                onClick={() => startEdit(t)}
                 style={{
-                  flex: 1,
-                  fontSize: 13,
-                  color: it.checked ? "#AEAEB2" : "#1C1C1E",
-                  textDecoration: it.checked ? "line-through" : "none",
-                  lineHeight: 1.5,
-                  cursor: "text",
-                  // Kill the default "drag ghost" feel on a text span when its row is draggable
-                  userSelect: "text",
+                  flex: 1, fontSize: 13,
+                  color: t.done ? "#AEAEB2" : "#1C1C1E",
+                  textDecoration: t.done ? "line-through" : "none",
+                  lineHeight: 1.5, cursor: "text", userSelect: "text",
                 }}
-              >{it.text}</span>
+              >{t.text}</span>
             )}
 
-            {/* Delete — visible on hover */}
+            {age && ageStyle && (
+              <span style={{
+                fontSize: 10, fontWeight: ageStyle.weight, color: ageStyle.color,
+                fontVariantNumeric: "tabular-nums", flexShrink: 0, letterSpacing: 0.2,
+              }}>
+                {age.text}
+              </span>
+            )}
+
             <button
               className="todo-hover"
-              onClick={(e) => { e.stopPropagation(); del(i); }}
+              onClick={(e) => { e.stopPropagation(); del(t.id); }}
               title="Delete"
               style={{
                 opacity: 0,
@@ -402,20 +332,17 @@ function TodoCard({ todoNote, onAfterMutate }: TodoCardProps) {
         );
       })}
 
-      {/* Add input — always at bottom, Enter to commit. Pointer-tracking glow on hover. */}
       <div
         className="gooni-todo-add"
         style={{
           position: "relative",
           display: "flex", alignItems: "center", gap: 8,
-          marginTop: items.length > 0 ? 8 : 0,
-          // Taller padding so vertical pointer travel is perceptible — the glow follows Y, and
-          // a too-short row made the movement feel stuck horizontally.
-          paddingTop: items.length > 0 ? 16 : 12,
+          marginTop: visible.length > 0 ? 8 : 0,
+          paddingTop: visible.length > 0 ? 16 : 12,
           paddingBottom: 14,
           paddingLeft: 8, paddingRight: 8,
           marginLeft: -8, marginRight: -8,
-          borderTop: items.length > 0 ? "0.5px solid rgba(0,0,0,0.07)" : "none",
+          borderTop: visible.length > 0 ? "0.5px solid rgba(0,0,0,0.07)" : "none",
           borderRadius: 8,
           overflow: "hidden",
         }}
@@ -428,19 +355,12 @@ function TodoCard({ todoNote, onAfterMutate }: TodoCardProps) {
         <input
           value={newText}
           onChange={(e) => setNewText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); handleAdd(); }
-          }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } }}
           placeholder="add a todo"
           style={{
-            flex: 1,
-            fontSize: 13,
-            fontFamily: FONT,
-            border: "none",
-            outline: "none",
-            background: "transparent",
-            color: "#1C1C1E",
-            padding: "4px 0",
+            flex: 1, fontSize: 13, fontFamily: FONT,
+            border: "none", outline: "none", background: "transparent",
+            color: "#1C1C1E", padding: "4px 0",
             position: "relative", zIndex: 1,
           }}
         />
@@ -456,13 +376,12 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [take, setTake] = useState<string>("");
   const [takeRefreshing, setTakeRefreshing] = useState(false);
-  const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
+  const [todos, setTodos] = useState<ApiTodo[]>([]);
   const [ink, setInk] = useState<InkState | null>(null);
   const [rowPulsing, setRowPulsing] = useState(false);
   const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
   const typingRaf = useRef<number | null>(null);
   const { selectSpace, loadNotes, selectNote } = useNotesContentStore();
-  const pinnedVersion = usePinnedVersionStore((s) => s.version);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
   const firstRowRef = useRef<HTMLDivElement>(null);
@@ -481,15 +400,8 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   useEffect(() => {
     fetchDashboardStats().then(setStats).catch(console.error);
     fetchGooniTake().then((r) => setTake(r.take)).catch(console.error);
+    fetchTodos().then(setTodos).catch(console.error);
   }, []);
-
-  // Pinned list refetches on every pin/unpin (across the app)
-  useEffect(() => {
-    fetchPinnedNotes().then(setPinnedNotes).catch(() => {});
-  }, [pinnedVersion]);
-
-  // Find the first pinned note that contains a TipTap task list — that becomes the dashboard todo widget.
-  const todoNote = pinnedNotes.find((n) => (n.content ?? "").includes('data-type="taskList"')) ?? null;
 
   function startTyping(noteId: number, total: number) {
     if (typingRaf.current != null) cancelAnimationFrame(typingRaf.current);
@@ -713,6 +625,36 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
                 ))}
               </div>
             </div>
+
+            {/* todos — open count + done-today momentum */}
+            {(() => {
+              const startOfToday = new Date();
+              startOfToday.setHours(0, 0, 0, 0);
+              const openCount = todos.filter((t) => !t.done).length;
+              const doneToday = todos.filter(
+                (t) => t.done && t.completed_at && new Date(t.completed_at) >= startOfToday,
+              ).length;
+              return (
+                <div style={{
+                  background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
+                  borderRadius: 10, padding: "10px 14px",
+                  display: "flex", flexDirection: "column", alignItems: "flex-start",
+                  minWidth: 110,
+                }}>
+                  <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>todos open</div>
+                  <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
+                    {openCount}
+                  </div>
+                  <div style={{
+                    fontSize: 10.5,
+                    color: doneToday > 0 ? "#2B8C4D" : "#AEAEB2",
+                    marginTop: 2, fontVariantNumeric: "tabular-nums",
+                  }}>
+                    {doneToday > 0 ? `✓ ${doneToday} done today` : "nothing done yet today"}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -768,13 +710,8 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           </div>
         )}
 
-        {/* Todo card — wired to the first pinned task-list note */}
-        <TodoCard
-          todoNote={todoNote}
-          onAfterMutate={(updated) => {
-            setPinnedNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
-          }}
-        />
+        {/* Todo card — backed by dedicated TodoItem model with timestamps + sort order */}
+        <TodoCard todos={todos} onMutate={setTodos} />
 
         {/* Recent notes — simple rows with dividers, no cards. Scrollable after ~5 rows. */}
         <div>
@@ -783,9 +720,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             textTransform: "uppercase", marginBottom: 8,
           }}>recent notes</div>
           {stats ? (() => {
-            // Hide the todo-widget note from Recent — it gets edited daily, so it'd otherwise squat at the top
-            // and push out actually-recent work.
-            const visibleRecent = stats.recent_notes.filter((n) => n.id !== todoNote?.id);
+            const visibleRecent = stats.recent_notes;
             return visibleRecent.length === 0 ? (
               <p style={{ fontSize: 13, color: "#C7C7CC" }}>No notes yet.</p>
             ) : (

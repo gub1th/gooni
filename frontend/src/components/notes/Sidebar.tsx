@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
+import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
+import { DevToolsModal } from "../DevToolsModal";
 
 function ComposeIcon() {
   return (
@@ -155,6 +157,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
   const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
   const [spacesOpen, setSpacesOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
 
@@ -168,6 +171,53 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
   useEffect(() => {
     fetchPinnedNotes().then(setPinnedNotes).catch(() => {});
   }, [activeNoteId, pinnedVersion]);
+
+  // ── Drag-to-reorder (localStorage-backed) ─────────────────────────────
+  const spaceOrder = useOrderingStore((s) => s.spaceOrder);
+  const pinnedOrder = useOrderingStore((s) => s.pinnedOrder);
+  const setSpaceOrder = useOrderingStore((s) => s.setSpaceOrder);
+  const setPinnedOrder = useOrderingStore((s) => s.setPinnedOrder);
+
+  // drag state: { kind: "space"|"pinned", fromId: number, overId: number | null }
+  const [drag, setDrag] = useState<{ kind: "space" | "pinned"; fromId: number; overId: number | null } | null>(null);
+
+  const orderedSpaces = useMemo(() => {
+    const nonGeneral = spaces.filter((s) => s.id !== "general") as { id: number; name: string; emoji: string | null }[];
+    return applyOrder(nonGeneral, spaceOrder);
+  }, [spaces, spaceOrder]);
+
+  const orderedPinnedNotes = useMemo(
+    () => applyOrder(pinnedNotes, pinnedOrder),
+    [pinnedNotes, pinnedOrder],
+  );
+
+  function moveId(list: number[], fromId: number, toId: number): number[] {
+    // If the current list doesn't contain every id we need, seed it from the
+    // currently-rendered order so the reorder operation has a stable basis.
+    const fromIdx = list.indexOf(fromId);
+    const toIdx = list.indexOf(toId);
+    if (fromIdx === -1 || toIdx === -1) return list;
+    const next = list.slice();
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, fromId);
+    return next;
+  }
+
+  function dropSpace(overId: number) {
+    if (!drag || drag.kind !== "space") return;
+    const ids = orderedSpaces.map((s) => s.id as number);
+    // seed the stored order with the full current list so every id is present
+    const seeded = ids;
+    setSpaceOrder(moveId(seeded, drag.fromId, overId));
+    setDrag(null);
+  }
+
+  function dropPinned(overId: number) {
+    if (!drag || drag.kind !== "pinned") return;
+    const ids = orderedPinnedNotes.map((n) => n.id);
+    setPinnedOrder(moveId(ids, drag.fromId, overId));
+    setDrag(null);
+  }
 
   async function handleUnpin(noteId: number) {
     setPinnedNotes((prev) => prev.filter((n) => n.id !== noteId)); // optimistic
@@ -324,17 +374,45 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               >+</button>
             </div>
 
-            {spacesOpen && spaces.filter(s => s.id !== "general").map((space) => {
+            {spacesOpen && orderedSpaces.map((space) => {
               const spaceId = String(space.id);
               const isSelected = isNotes && selectedSpaceId === spaceId;
               const isDelConfirm = deleteConfirmId === space.id;
+              const isDragging = drag?.kind === "space" && drag.fromId === space.id;
+              const isDropTarget = drag?.kind === "space" && drag.overId === space.id && drag.fromId !== space.id;
 
               return (
                 <div
                   key={space.id}
-                  style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 4px 0 10px", height: 30, borderRadius: 8, cursor: "pointer", background: isSelected ? "rgba(0,0,0,0.09)" : "transparent", transition: "background 0.12s", userSelect: "none" }}
-                  onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "1"); }}
-                  onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "0"); setDeleteConfirmId(null); }}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", String(space.id));
+                    setDrag({ kind: "space", fromId: space.id as number, overId: null });
+                  }}
+                  onDragOver={(e) => {
+                    if (drag?.kind !== "space") return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (drag.overId !== space.id) setDrag({ ...drag, overId: space.id as number });
+                  }}
+                  onDragLeave={() => {
+                    if (drag?.kind === "space" && drag.overId === space.id) setDrag({ ...drag, overId: null });
+                  }}
+                  onDrop={(e) => { e.preventDefault(); dropSpace(space.id as number); }}
+                  onDragEnd={() => setDrag(null)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 4,
+                    padding: "0 4px 0 10px", height: 30, borderRadius: 8,
+                    cursor: "pointer",
+                    background: isSelected ? "rgba(0,0,0,0.09)" : (isDropTarget ? "rgba(0,120,255,0.10)" : "transparent"),
+                    opacity: isDragging ? 0.4 : 1,
+                    transition: "background 0.12s, opacity 0.12s",
+                    userSelect: "none",
+                    boxShadow: isDropTarget ? "inset 0 2px 0 rgba(0,120,255,0.45)" : "none",
+                  }}
+                  onMouseEnter={(e) => { if (!isSelected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "1"); }}
+                  onMouseLeave={(e) => { if (!isSelected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "0"); setDeleteConfirmId(null); }}
                   onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; selectSpace(spaceId); loadNotes(spaceId); onSpaceSelect(); }}
                 >
                   <span style={{ fontSize: 13, flexShrink: 0 }}>{space.emoji ?? "🗂️"}</span>
@@ -367,20 +445,41 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
                 <div style={{ padding: "6px 6px 2px" }}>
                   <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
                 </div>
-                {pinnedNotes.map((note) => {
+                {orderedPinnedNotes.map((note) => {
                   const selected = activeNoteId === note.id;
+                  const isDragging = drag?.kind === "pinned" && drag.fromId === note.id;
+                  const isDropTarget = drag?.kind === "pinned" && drag.overId === note.id && drag.fromId !== note.id;
                   return (
                     <div
                       key={note.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", String(note.id));
+                        setDrag({ kind: "pinned", fromId: note.id, overId: null });
+                      }}
+                      onDragOver={(e) => {
+                        if (drag?.kind !== "pinned") return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        if (drag.overId !== note.id) setDrag({ ...drag, overId: note.id });
+                      }}
+                      onDragLeave={() => {
+                        if (drag?.kind === "pinned" && drag.overId === note.id) setDrag({ ...drag, overId: null });
+                      }}
+                      onDrop={(e) => { e.preventDefault(); dropPinned(note.id); }}
+                      onDragEnd={() => setDrag(null)}
                       style={{
                         display: "flex", alignItems: "center", gap: 4,
                         padding: "0 4px 0 10px", height: 30, borderRadius: 8,
                         cursor: "pointer",
-                        background: selected ? "rgba(0,0,0,0.09)" : "transparent",
-                        transition: "background 0.12s",
+                        background: selected ? "rgba(0,0,0,0.09)" : (isDropTarget ? "rgba(0,120,255,0.10)" : "transparent"),
+                        opacity: isDragging ? 0.4 : 1,
+                        transition: "background 0.12s, opacity 0.12s",
+                        boxShadow: isDropTarget ? "inset 0 2px 0 rgba(0,120,255,0.45)" : "none",
                       }}
-                      onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "1"); }}
-                      onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "0"); }}
+                      onMouseEnter={(e) => { if (!selected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "1"); }}
+                      onMouseLeave={(e) => { if (!selected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "0"); }}
                       onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; handleSelectNote(note); }}
                     >
                       <span style={{ fontSize: 11, flexShrink: 0, color: "#FFB020" }}>📌</span>
@@ -432,6 +531,34 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
             </button>
           </div>
 
+          {/* Dev tools — sits directly above Settings */}
+          <div style={{ padding: "0 6px 2px" }}>
+            <button
+              onClick={() => setDevToolsOpen(true)}
+              title="Dev tools"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                border: "none", background: "transparent", cursor: "pointer",
+                textAlign: "left",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontSize: 13.5, color: "#3C3C43",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+            >
+              {/* Bug icon */}
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                <ellipse cx="8" cy="9" rx="3.5" ry="4.2" stroke="currentColor" strokeWidth="1.3" fill="none" />
+                <path d="M8 4.8V3.5M6 3l-1-1M10 3l1-1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                <path d="M4.5 7.5H3M4.5 9.2H2.5M4.5 11H3.2M11.5 7.5H13M11.5 9.2H13.5M11.5 11H12.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                <path d="M7 8.2V10M9 8.2V10" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+              </svg>
+              Dev tools
+            </button>
+          </div>
+
           {/* Settings — stays at the bottom as a full row (icon + label) */}
           <div style={{ padding: "0 6px 10px" }}>
             <button
@@ -460,6 +587,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
       </div>
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <DevToolsModal open={devToolsOpen} onClose={() => setDevToolsOpen(false)} />
 
       {popover && (
         <SpacePopover

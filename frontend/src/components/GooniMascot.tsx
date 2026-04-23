@@ -1,27 +1,62 @@
 import { useEffect, useRef, useState } from "react";
 import { useGooniFaceStore, type GooniFace } from "../stores/useGooniFaceStore";
 
-// Interactive mascot: peeks from sidebar, drag-to-toss, wanders with perspective.
-// Supports 4 cardinal facing directions (N/S/E/W) with a proper turn-in-place state —
-// the character stops, rotates to the new facing, then resumes walking.
-// Walk cycle uses contralateral limb swing (opposite arm + leg move together).
+// Interactive Gooni mascot — single RAF loop owns every phase (peek/drag/walk/idle/
+// turning/landing). All per-frame visuals are direct DOM updates via refs; no React
+// re-renders per frame, no CSS keyframe animations for the walk cycle.
+// Static CSS transitions are used only for facing-change visibility (opacity/scale on
+// face/arm/head when the direction enum flips) — these are rare and not per-frame.
 
-type MascotState = "peek" | "drag" | "walk" | "idle" | "landing" | "turning";
-type Facing = "N" | "S" | "E" | "W";
+type MascotPhase = "peek" | "drag" | "walk" | "idle" | "turning" | "landing";
+type FacingDir = "N" | "S" | "E" | "W";
+type IdleActionKind = "none" | "lookLR" | "scratch";
 
-interface GooniMascotProps {
-  dashboardRef: React.RefObject<HTMLDivElement | null>;
+interface MascotState {
+  phase: MascotPhase;
+  x: number; y: number;          // world-space, relative to dashboard top-left
+  targetX: number; targetY: number;
+  angle: number;                 // radians, direction of travel
+  walkFrame: number;             // accumulating float; cycle = Math.sin(walkFrame)
+  facingDir: FacingDir;
+
+  // Timers (absolute ms from performance.now)
+  pauseUntilMs: number;
+  turningUntilMs: number;
+  landingUntilMs: number;
+
+  // Idle action
+  idleActionKind: IdleActionKind;
+  idleActionStartMs: number;
+  idleActionDir: 1 | -1;          // sign for look-left vs look-right
+  nextIdleActionMs: number;
+
+  // Blink
+  blinkStartMs: number;           // 0 when not blinking
+  nextBlinkMs: number;
+
+  // Drag
+  dragOffsetDx: number;
+  dragOffsetDy: number;
 }
 
-// Half of the v4 natural size (90×130 → 45×65)
 const WRAPPER_W = 48;
 const WRAPPER_H = 68;
 const SIDEBAR_SNAP_PX = 40;
-const TURN_MS = 220;
+const LANDING_MS = 220;
+const TURN_MS = 200;
+
+// Arm/leg rest angles (degrees). The v4 SVG has baked-in ±12° on arms; we apply those
+// via JS each frame since we're driving all transforms from the RAF loop.
+const ARM_REST_L = 12;
+const ARM_REST_R = -12;
+const LEG_REST = 0;
 
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)); }
-function facingFor(dx: number, dy: number): Facing {
+function easeInOut(t: number): number { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+function facingFor(dx: number, dy: number): FacingDir {
+  // 4 cardinals only — pick the dominant axis. Ties favor horizontal.
   if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "E" : "W";
   return dy >= 0 ? "S" : "N";
 }
@@ -92,7 +127,28 @@ function FaceCryingLaughing() {
   );
 }
 
-export function Face({ face }: { face: GooniFace }) {
+// Internal drag-only face — shocked/yelling. Wide eyes, raised brows, open mouth (red fill).
+function FaceShocked() {
+  return (
+    <g>
+      {/* Wide eyes with shine */}
+      <circle cx="38" cy="31" r="4.5" fill="#1a1a1a" />
+      <circle cx="39.5" cy="29" r="1.3" fill="white" />
+      <circle cx="52" cy="31" r="4.5" fill="#1a1a1a" />
+      <circle cx="53.5" cy="29" r="1.3" fill="white" />
+      {/* Raised brows */}
+      <path d="M33 22 Q38 18 43 22" stroke="#1a1a1a" strokeWidth="2" fill="none" strokeLinecap="round" />
+      <path d="M47 22 Q52 18 57 22" stroke="#1a1a1a" strokeWidth="2" fill="none" strokeLinecap="round" />
+      {/* Open mouth — oval with red fill, dark stroke */}
+      <ellipse cx="45" cy="44" rx="4.5" ry="4" fill="#DC2626" stroke="#1a1a1a" strokeWidth="1.5" />
+    </g>
+  );
+}
+
+// Internal union: selectable face variants plus the drag-only "shocked".
+type DisplayFace = GooniFace | "shocked";
+
+export function Face({ face }: { face: DisplayFace }) {
   switch (face) {
     case "smirk": return <FaceSmirk />;
     case "side-eye": return <FaceSideEye />;
@@ -100,6 +156,7 @@ export function Face({ face }: { face: GooniFace }) {
     case "dead-inside": return <FaceDeadInside />;
     case "sus": return <FaceSus />;
     case "crying-laughing": return <FaceCryingLaughing />;
+    case "shocked": return <FaceShocked />;
   }
 }
 
@@ -121,171 +178,513 @@ export function GooniFacePreview({ face, size = 36 }: { face: GooniFace; size?: 
 
 // ── Mascot ────────────────────────────────────────────────────────────────────
 
+interface GooniMascotProps {
+  dashboardRef: React.RefObject<HTMLDivElement | null>;
+}
+
+// Avoidance behavior — Gooni flees the mouse when it gets close during walk/idle.
+const FLEE_RADIUS = 140;          // px — cursor within this range triggers flee
+const FLEE_DISTANCE = 120;        // px — how far to flee per retarget
+const FLEE_SPEED_BOOST = 1.25;    // slightly faster than normal walk (still catchable)
+
 export function GooniMascot({ dashboardRef }: GooniMascotProps) {
   const selectedFace = useGooniFaceStore((s) => s.face);
 
-  const [state, setState] = useState<MascotState>("peek");
-  const stateRef = useRef<MascotState>("peek");
-  stateRef.current = state;
+  // React state ONLY for things that determine which face component renders.
+  // Peek forces "sus" (sneaky corner look), drag forces "shocked" (wide eyes, open red mouth),
+  // everything else uses the user's selected face.
+  const [displayFace, setDisplayFace] = useState<DisplayFace>("sus");
 
-  const [facing, setFacing] = useState<Facing>("S");
-  const facingRef = useRef<Facing>("S");
-  facingRef.current = facing;
+  // Drop-zone visibility mirrors the drag phase. React state so we can animate
+  // it in/out with CSS transitions cleanly (this is a rare state change, not per-frame).
+  const [dropZoneVisible, setDropZoneVisible] = useState(false);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+  // Latest mouse position in viewport coords
+  const mouseRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Everything else lives in a mutable ref and is written via setAttribute/setProperty
+  // directly from the RAF loop. No re-renders per frame.
+  const stateRef = useRef<MascotState>({
+    phase: "peek",
+    x: 0, y: 0,
+    targetX: 0, targetY: 0,
+    angle: 0,
+    walkFrame: 0,
+    facingDir: "S",
+    pauseUntilMs: 0,
+    turningUntilMs: 0,
+    landingUntilMs: 0,
+    idleActionKind: "none",
+    idleActionStartMs: 0,
+    idleActionDir: 1,
+    nextIdleActionMs: 0,
+    blinkStartMs: 0,
+    nextBlinkMs: 0,
+    dragOffsetDx: 0, dragOffsetDy: 0,
+  });
+
+  // DOM refs for direct transform writes
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const pos = useRef({ x: 0, y: 0 });
-  const target = useRef({ x: 0, y: 0 });
-  const pauseUntil = useRef<number>(0);
-  const grabOffset = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
-  const rafId = useRef<number>(0);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const headRef = useRef<SVGGElement>(null);
+  const faceGroupRef = useRef<SVGGElement>(null);
+  const bodyRef = useRef<SVGGElement>(null);
+  const armLRef = useRef<SVGGElement>(null);
+  const armRRef = useRef<SVGGElement>(null);
+  const legLRef = useRef<SVGGElement>(null);
+  const legRRef = useRef<SVGGElement>(null);
+  const shadowRef = useRef<SVGEllipseElement>(null);
+  const gripRef = useRef<SVGGElement>(null);
 
-  const activeFace: GooniFace = state === "peek" ? "sus" : selectedFace;
+  // Last-applied facing so we only update CSS classes when it changes
+  const lastFacingRef = useRef<FacingDir>("S");
+  const lastPhaseCssRef = useRef<MascotPhase>("peek");
+  const rafIdRef = useRef<number>(0);
 
-  function pickWaypoint(bounds: DOMRect) {
-    const insetX = 40;
-    const insetTop = 30;
-    const insetBottom = 60;
-    const tx = insetX + Math.random() * Math.max(1, bounds.width - WRAPPER_W - insetX * 2);
-    const ty = insetTop + Math.random() * Math.max(1, bounds.height - WRAPPER_H - insetTop - insetBottom);
-    target.current = { x: tx, y: ty };
+  // ── Helpers that the RAF loop uses ────────────────────────────────────────
+
+  function setPhase(next: MascotPhase) {
+    stateRef.current.phase = next;
+    // Face override: peek = sus, drag = shocked, else user's pick.
+    const wantFace: DisplayFace =
+      next === "peek" ? "sus" :
+      next === "drag" ? "shocked" :
+      selectedFace;
+    setDisplayFace((cur) => (cur === wantFace ? cur : wantFace));
+    // Drop-zone only shows while dragging.
+    setDropZoneVisible(next === "drag");
   }
 
-  // Transition helper: if target facing differs from current, enter turn state
-  function setFacingWithTurn(newFacing: Facing, afterTurn: () => void) {
-    if (newFacing === facingRef.current) { afterTurn(); return; }
-    setFacing(newFacing);
-    setState("turning");
-    setTimeout(() => {
-      if (stateRef.current === "turning") afterTurn();
-    }, TURN_MS);
+  function pickTarget(bounds: DOMRect) {
+    const s = stateRef.current;
+    const padding = 60;
+    const minY = 40;
+    const maxY = Math.max(minY + 10, bounds.height - 60);
+    const tx = padding + Math.random() * Math.max(1, bounds.width - padding * 2 - WRAPPER_W);
+    // Bias toward Y-variance from current position so consecutive waypoints noticeably
+    // change depth (avoid two targets both near the current Y, which would look "stuck" at one scale).
+    const yRange = maxY - minY;
+    let ty: number;
+    const attempts = 3;
+    let best = minY + Math.random() * yRange;
+    let bestDist = -1;
+    for (let i = 0; i < attempts; i++) {
+      const candidate = minY + Math.random() * yRange;
+      const d = Math.abs(candidate - s.y);
+      if (d > bestDist) { best = candidate; bestDist = d; }
+    }
+    ty = best;
+    s.targetX = tx;
+    s.targetY = ty;
   }
 
-  // rAF loop
+  function scheduleNextIdleAction(now: number) {
+    const s = stateRef.current;
+    s.idleActionKind = "none";
+    s.nextIdleActionMs = now + 800 + Math.random() * 1400;
+  }
+
+  function scheduleNextBlink(now: number) {
+    stateRef.current.nextBlinkMs = now + 3000 + Math.random() * 2000;
+  }
+
+  // ── Global mouse tracking for avoidance ──────────────────────────────────
+
   useEffect(() => {
+    function onMove(e: MouseEvent) {
+      mouseRef.current = { x: e.clientX, y: e.clientY };
+    }
+    function onLeave() {
+      mouseRef.current = null;
+    }
+    window.addEventListener("mousemove", onMove, { passive: true });
+    window.addEventListener("mouseleave", onLeave);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseleave", onLeave);
+    };
+  }, []);
+
+  // ── Main RAF loop ─────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    // Initial facing/face sync
+    setDisplayFace("sus");
+
     function tick(now: number) {
+      const s = stateRef.current;
       const bounds = dashboardRef.current?.getBoundingClientRect();
       const wrapper = wrapperRef.current;
       if (!bounds || !wrapper) {
-        rafId.current = requestAnimationFrame(tick);
+        rafIdRef.current = requestAnimationFrame(tick);
         return;
       }
-      const s = stateRef.current;
 
-      if (s === "walk") {
-        const depth = clamp(pos.current.y / Math.max(1, bounds.height), 0, 1);
-        const speed = 1.2 * lerp(0.9, 1.5, depth);
-        const dx = target.current.x - pos.current.x;
-        const dy = target.current.y - pos.current.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist < 2) {
-          setState("idle");
-          pauseUntil.current = now + 1500 + Math.random() * 1500;
-        } else {
-          pos.current.x += (dx / dist) * speed;
-          pos.current.y += (dy / dist) * speed;
+      const MIN_Y = 40;
+      const MAX_Y = Math.max(MIN_Y + 10, bounds.height - 60);
+
+      // ── Avoidance: if the cursor is close, retarget AWAY from it.
+      //    Only kicks in during walk/idle so peek/drag/turning/landing stay deterministic.
+      //    Keeps speed close to normal so he's catchable.
+      let fleeing = false;
+      if (
+        mouseRef.current &&
+        (s.phase === "walk" || s.phase === "idle")
+      ) {
+        const mx = mouseRef.current.x - bounds.left;
+        const my = mouseRef.current.y - bounds.top;
+        // Mascot's on-screen center (approximate, wrapper has scale applied; close enough)
+        const cx = s.x + WRAPPER_W / 2;
+        const cy = s.y + WRAPPER_H / 2;
+        const mdx = cx - mx;
+        const mdy = cy - my;
+        const mdist = Math.hypot(mdx, mdy);
+        if (mdist < FLEE_RADIUS) {
+          fleeing = true;
+          // Escape vector: away from cursor. Handle degenerate case (cursor on top).
+          const ux = mdist > 0.5 ? mdx / mdist : Math.random() - 0.5;
+          const uy = mdist > 0.5 ? mdy / mdist : Math.random() - 0.5;
+          const rawTx = s.x + ux * FLEE_DISTANCE;
+          const rawTy = s.y + uy * FLEE_DISTANCE;
+          s.targetX = clamp(rawTx, 40, Math.max(40, bounds.width - WRAPPER_W - 40));
+          s.targetY = clamp(rawTy, MIN_Y, MAX_Y);
+          s.angle = Math.atan2(s.targetY - s.y, s.targetX - s.x);
+          const newDir = facingFor(s.targetX - s.x, s.targetY - s.y);
+          if (newDir !== s.facingDir) s.facingDir = newDir;
+          if (s.phase === "idle") {
+            // Break out of idle immediately — fleeing takes priority over scratching
+            s.idleActionKind = "none";
+            setPhase("walk");
+          }
         }
-      } else if (s === "idle") {
-        if (now >= pauseUntil.current) {
-          pickWaypoint(bounds);
-          const dx = target.current.x - pos.current.x;
-          const dy = target.current.y - pos.current.y;
-          const nextFacing = facingFor(dx, dy);
-          setFacingWithTurn(nextFacing, () => setState("walk"));
-        }
-      } else if (s === "peek") {
-        pos.current.x = -18;
-        pos.current.y = bounds.height / 2 - WRAPPER_H / 2;
       }
 
-      const depth = clamp(pos.current.y / Math.max(1, bounds.height), 0, 1);
-      const scaleBase = s === "peek" ? 0.85 : s === "drag" ? 1.1 : 0.7 + depth * 0.5;
-      // Flip horizontally only when facing west (character's left profile mirrored from east)
-      const flipX = facingRef.current === "W" ? -1 : 1;
+      // ── Phase logic ───────────────────────────────────────────────────────
+      switch (s.phase) {
+        case "peek": {
+          s.x = -20;
+          s.y = bounds.height / 2 - WRAPPER_H / 2;
+          break;
+        }
 
-      wrapper.style.left = `${bounds.left + pos.current.x}px`;
-      wrapper.style.top = `${bounds.top + pos.current.y}px`;
-      wrapper.style.transform = `scale(${scaleBase * flipX}, ${scaleBase})`;
+        case "drag": {
+          // Flail frame increments fast; position driven by pointer handlers.
+          s.walkFrame += 0.35;
+          break;
+        }
+
+        case "walk": {
+          const dx = s.targetX - s.x;
+          const dy = s.targetY - s.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 4) {
+            setPhase("idle");
+            s.pauseUntilMs = now + 1500 + Math.random() * 1500;
+            s.walkFrame = 0;
+            s.nextIdleActionMs = now + 800 + Math.random() * 1200;
+            break;
+          }
+          const depthT = clamp((s.y - MIN_Y) / Math.max(1, MAX_Y - MIN_Y), 0, 1);
+          const baseSpeed = 0.8 + depthT * 1.2;
+          const walkSpeed = fleeing ? baseSpeed * FLEE_SPEED_BOOST : baseSpeed;
+          s.angle = Math.atan2(dy, dx);
+          s.x += (dx / dist) * walkSpeed;
+          s.y += (dy / dist) * walkSpeed;
+          s.walkFrame += 0.08 * walkSpeed;
+          break;
+        }
+
+        case "turning": {
+          if (now >= s.turningUntilMs) {
+            setPhase("walk");
+          }
+          break;
+        }
+
+        case "idle": {
+          if (now >= s.pauseUntilMs) {
+            pickTarget(bounds);
+            const dx = s.targetX - s.x;
+            const dy = s.targetY - s.y;
+            s.angle = Math.atan2(dy, dx);
+            const newDir = facingFor(dx, dy);
+            if (newDir !== s.facingDir) {
+              s.facingDir = newDir;
+              s.turningUntilMs = now + TURN_MS;
+              s.idleActionKind = "none";
+              setPhase("turning");
+            } else {
+              setPhase("walk");
+            }
+            break;
+          }
+          // Idle actions — schedule + run
+          if (s.idleActionKind === "none" && now >= s.nextIdleActionMs) {
+            const pick = Math.random();
+            if (pick < 0.55) {
+              s.idleActionKind = "lookLR";
+              s.idleActionDir = Math.random() < 0.5 ? -1 : 1;
+            } else {
+              s.idleActionKind = "scratch";
+            }
+            s.idleActionStartMs = now;
+          }
+          // If an action is running, check expiry
+          if (s.idleActionKind === "lookLR") {
+            // 300ms ramp out, 800ms hold, 300ms ramp back = 1400ms total
+            if (now - s.idleActionStartMs > 1400) scheduleNextIdleAction(now);
+          } else if (s.idleActionKind === "scratch") {
+            // 400 ramp + 400 oscillate + 400 ramp = 1200ms total
+            if (now - s.idleActionStartMs > 1200) scheduleNextIdleAction(now);
+          }
+          break;
+        }
+
+        case "landing": {
+          if (now >= s.landingUntilMs) {
+            pickTarget(bounds);
+            const dx = s.targetX - s.x;
+            const dy = s.targetY - s.y;
+            s.angle = Math.atan2(dy, dx);
+            const newDir = facingFor(dx, dy);
+            if (newDir !== s.facingDir) {
+              s.facingDir = newDir;
+              s.turningUntilMs = now + TURN_MS;
+              setPhase("turning");
+            } else {
+              setPhase("walk");
+            }
+          }
+          break;
+        }
+      }
+
+      // ── Render: wrapper position + scale + flip ──────────────────────────
+      const depthT = clamp((s.y - MIN_Y) / Math.max(1, MAX_Y - MIN_Y), 0, 1);
+      // Mii-Plaza depth — dramatic scale variance so the character reads as "near/far"
+      const scale =
+        s.phase === "peek" ? 0.85 :
+        s.phase === "drag" ? 1.2 :
+        0.5 + depthT * 1.0;  // 0.5 (far/top) → 1.5 (near/bottom) — 3x variance
+      const flipX = s.facingDir === "W" ? -1 : 1;
+
+      // Bob the whole character during peek (slow) or walk (sync'd to walkFrame)
+      let wrapperBob = 0;
+      if (s.phase === "peek") {
+        wrapperBob = Math.sin(now / 420) * 2.5;
+      } else if (s.phase === "walk") {
+        wrapperBob = -Math.abs(Math.sin(s.walkFrame)) * 2.5; // lift at midpoints
+      }
+
+      wrapper.style.left = `${bounds.left + s.x}px`;
+      wrapper.style.top = `${bounds.top + s.y}px`;
+      wrapper.style.transform = `translateY(${wrapperBob}px) scale(${scale * flipX}, ${scale})`;
       wrapper.style.transformOrigin = "50% 100%";
 
-      rafId.current = requestAnimationFrame(tick);
+      // Drop zone position — anchored just inside the left edge of the dashboard,
+      // vertically centered near the peek Y so dropping there visibly "snaps to base".
+      if (dropZoneRef.current) {
+        const dzW = 56, dzH = 120;
+        dropZoneRef.current.style.left = `${bounds.left + 8}px`;
+        dropZoneRef.current.style.top = `${bounds.top + bounds.height / 2 - dzH / 2}px`;
+        void dzW;
+      }
+
+      // Phase CSS class — swaps visibility of shadow/body/limbs/grip in bulk
+      if (lastPhaseCssRef.current !== s.phase) {
+        wrapper.className = `gooni-mascot-wrapper gm-${s.phase} gf-${s.facingDir}`;
+        lastPhaseCssRef.current = s.phase;
+        lastFacingRef.current = s.facingDir;
+      } else if (lastFacingRef.current !== s.facingDir) {
+        wrapper.className = `gooni-mascot-wrapper gm-${s.phase} gf-${s.facingDir}`;
+        lastFacingRef.current = s.facingDir;
+      }
+
+      // ── Limb transforms per phase ────────────────────────────────────────
+      applyLimbTransforms(s, now);
+
+      rafIdRef.current = requestAnimationFrame(tick);
     }
-    rafId.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId.current);
+
+    function applyLimbTransforms(s: MascotState, now: number) {
+      const armL = armLRef.current;
+      const armR = armRRef.current;
+      const legL = legLRef.current;
+      const legR = legRRef.current;
+      const body = bodyRef.current;
+      const head = headRef.current;
+      if (!armL || !armR || !legL || !legR || !body || !head) return;
+
+      if (s.phase === "walk") {
+        const cycle = Math.sin(s.walkFrame);            // -1..1 per stride
+        const armSwing = cycle * 28;                    // degrees
+        const legSwing = cycle * 22;
+        // Contralateral: R-arm and L-leg same phase; L-arm and R-leg same phase.
+        // Arms rotate OPPOSITE directions so the character doesn't flap.
+        armR.setAttribute("transform", `rotate(${ARM_REST_R + armSwing}, 61, 59)`);
+        armL.setAttribute("transform", `rotate(${ARM_REST_L - armSwing}, 29, 59)`);
+        legR.setAttribute("transform", `rotate(${LEG_REST - legSwing}, 56, 88)`);
+        legL.setAttribute("transform", `rotate(${LEG_REST + legSwing}, 34, 88)`);
+        body.setAttribute("transform", `rotate(3, 45, 92)`);
+        head.setAttribute("transform", "");
+      } else if (s.phase === "drag") {
+        // Rapid chaotic oscillations, offset phases so limbs don't sync
+        const t = s.walkFrame;
+        armR.setAttribute("transform", `rotate(${ARM_REST_R + Math.sin(t) * 70}, 61, 59)`);
+        armL.setAttribute("transform", `rotate(${ARM_REST_L + Math.sin(t + 1.2) * 70}, 29, 59)`);
+        legR.setAttribute("transform", `rotate(${Math.sin(t + 2.1) * 35}, 56, 88)`);
+        legL.setAttribute("transform", `rotate(${Math.sin(t + 3.0) * 35}, 34, 88)`);
+        body.setAttribute("transform", "");
+        head.setAttribute("transform", "");
+      } else if (s.phase === "idle") {
+        // Breathing scale on body, head actions on the head group
+        const breathe = 1 + Math.sin(now / 900) * 0.015;
+        body.setAttribute("transform", `scale(${breathe}) translate(0, ${(1 - breathe) * 92})`);
+
+        // Head-tilt look-left-right
+        if (s.idleActionKind === "lookLR") {
+          const t = now - s.idleActionStartMs;
+          let rot = 0;
+          if (t < 300) rot = s.idleActionDir * 15 * easeInOut(t / 300);
+          else if (t < 1100) rot = s.idleActionDir * 15;
+          else if (t < 1400) rot = s.idleActionDir * 15 * (1 - easeInOut((t - 1100) / 300));
+          head.setAttribute("transform", `rotate(${rot}, 45, 58)`);
+        } else {
+          head.setAttribute("transform", "");
+        }
+
+        // Scratch head — overrides the right arm only; left arm stays at rest
+        if (s.idleActionKind === "scratch") {
+          const t = now - s.idleActionStartMs;
+          let armRotR = ARM_REST_R;
+          if (t < 400) {
+            armRotR = lerp(ARM_REST_R, -105, easeInOut(t / 400));
+          } else if (t < 800) {
+            armRotR = -105 + Math.sin((t - 400) / 60) * 8;
+          } else if (t < 1200) {
+            armRotR = lerp(-105, ARM_REST_R, easeInOut((t - 800) / 400));
+          }
+          armR.setAttribute("transform", `rotate(${armRotR}, 61, 59)`);
+          armL.setAttribute("transform", `rotate(${ARM_REST_L}, 29, 59)`);
+        } else {
+          armR.setAttribute("transform", `rotate(${ARM_REST_R}, 61, 59)`);
+          armL.setAttribute("transform", `rotate(${ARM_REST_L}, 29, 59)`);
+        }
+        legR.setAttribute("transform", `rotate(${LEG_REST}, 56, 88)`);
+        legL.setAttribute("transform", `rotate(${LEG_REST}, 34, 88)`);
+      } else if (s.phase === "turning") {
+        // Static rest pose, no animation
+        armR.setAttribute("transform", `rotate(${ARM_REST_R}, 61, 59)`);
+        armL.setAttribute("transform", `rotate(${ARM_REST_L}, 29, 59)`);
+        legR.setAttribute("transform", `rotate(${LEG_REST}, 56, 88)`);
+        legL.setAttribute("transform", `rotate(${LEG_REST}, 34, 88)`);
+        body.setAttribute("transform", "");
+        head.setAttribute("transform", "");
+      } else if (s.phase === "landing") {
+        // Squash — interpolate body scale over landingUntilMs - LANDING_MS → now
+        const startAt = s.landingUntilMs - LANDING_MS;
+        const t = clamp((now - startAt) / LANDING_MS, 0, 1);
+        // 0 → 0.6: crush (scale 1.2, 0.75). 0.6 → 1: snap back to 1,1.
+        let sx = 1, sy = 1;
+        if (t < 0.6) {
+          sx = lerp(1.2, 0.95, t / 0.6);
+          sy = lerp(0.75, 1.05, t / 0.6);
+        } else {
+          sx = lerp(0.95, 1, (t - 0.6) / 0.4);
+          sy = lerp(1.05, 1, (t - 0.6) / 0.4);
+        }
+        body.setAttribute("transform", `matrix(${sx}, 0, 0, ${sy}, ${45 * (1 - sx)}, ${92 * (1 - sy)})`);
+        head.setAttribute("transform", `matrix(${sx}, 0, 0, ${sy}, ${45 * (1 - sx)}, ${92 * (1 - sy)})`);
+        armR.setAttribute("transform", `rotate(${ARM_REST_R}, 61, 59)`);
+        armL.setAttribute("transform", `rotate(${ARM_REST_L}, 29, 59)`);
+        legR.setAttribute("transform", `rotate(${LEG_REST}, 56, 88)`);
+        legL.setAttribute("transform", `rotate(${LEG_REST}, 34, 88)`);
+      } else if (s.phase === "peek") {
+        // Rest pose (everything visible is static; wrapper handles the bob)
+        armR.setAttribute("transform", `rotate(${ARM_REST_R}, 61, 59)`);
+        armL.setAttribute("transform", `rotate(${ARM_REST_L}, 29, 59)`);
+        legR.setAttribute("transform", `rotate(${LEG_REST}, 56, 88)`);
+        legL.setAttribute("transform", `rotate(${LEG_REST}, 34, 88)`);
+        body.setAttribute("transform", "");
+        head.setAttribute("transform", `rotate(-8, 45, 34)`);
+      }
+    }
+
+    scheduleNextBlink(performance.now());
+    rafIdRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafIdRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardRef]);
 
-  // ResizeObserver — snap back to peek if out of bounds
+  // When user changes selected face while not peeking, update the displayed face.
+  useEffect(() => {
+    if (stateRef.current.phase !== "peek") {
+      setDisplayFace(selectedFace);
+    }
+  }, [selectedFace]);
+
+  // Resize — if out of bounds, snap back to peek
   useEffect(() => {
     if (!dashboardRef.current) return;
     const obs = new ResizeObserver(() => {
+      const s = stateRef.current;
       const bounds = dashboardRef.current?.getBoundingClientRect();
       if (!bounds) return;
-      if (
-        pos.current.x > bounds.width - WRAPPER_W ||
-        pos.current.y > bounds.height - WRAPPER_H ||
-        pos.current.x < -WRAPPER_W
-      ) {
-        setState("peek");
+      if (s.x > bounds.width - WRAPPER_W || s.y > bounds.height - WRAPPER_H || s.x < -WRAPPER_W) {
+        setPhase("peek");
+        s.facingDir = "S";
       } else {
-        pos.current.x = clamp(pos.current.x, -WRAPPER_W / 2, bounds.width - WRAPPER_W);
-        pos.current.y = clamp(pos.current.y, 0, bounds.height - WRAPPER_H);
+        s.x = clamp(s.x, -WRAPPER_W / 2, bounds.width - WRAPPER_W);
+        s.y = clamp(s.y, 0, bounds.height - WRAPPER_H);
       }
     });
     obs.observe(dashboardRef.current);
     return () => obs.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardRef]);
+
+  // ── Pointer handlers ─────────────────────────────────────────────────────
 
   function onPointerDown(e: React.PointerEvent) {
     const s = stateRef.current;
-    if (s !== "peek" && s !== "walk" && s !== "idle" && s !== "turning") return;
+    if (s.phase !== "peek" && s.phase !== "walk" && s.phase !== "idle" && s.phase !== "turning") return;
     const bounds = dashboardRef.current?.getBoundingClientRect();
     if (!bounds) return;
     try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch {}
-    grabOffset.current = {
-      dx: e.clientX - (bounds.left + pos.current.x),
-      dy: e.clientY - (bounds.top + pos.current.y),
-    };
-    setState("drag");
+    s.dragOffsetDx = e.clientX - (bounds.left + s.x);
+    s.dragOffsetDy = e.clientY - (bounds.top + s.y);
+    setPhase("drag");
   }
 
   function onPointerMove(e: React.PointerEvent) {
-    if (stateRef.current !== "drag") return;
+    const s = stateRef.current;
+    if (s.phase !== "drag") return;
     const bounds = dashboardRef.current?.getBoundingClientRect();
     if (!bounds) return;
-    pos.current.x = clamp(
-      e.clientX - bounds.left - grabOffset.current.dx,
+    s.x = clamp(
+      e.clientX - bounds.left - s.dragOffsetDx,
       -WRAPPER_W / 2,
       Math.max(0, bounds.width - WRAPPER_W)
     );
-    pos.current.y = clamp(
-      e.clientY - bounds.top - grabOffset.current.dy,
+    s.y = clamp(
+      e.clientY - bounds.top - s.dragOffsetDy,
       0,
       Math.max(0, bounds.height - WRAPPER_H)
     );
   }
 
   function onPointerUp(e: React.PointerEvent) {
-    if (stateRef.current !== "drag") return;
+    const s = stateRef.current;
+    if (s.phase !== "drag") return;
     try { (e.currentTarget as Element).releasePointerCapture(e.pointerId); } catch {}
-    if (pos.current.x < SIDEBAR_SNAP_PX) {
-      setFacing("S");
-      setState("peek");
+    if (s.x < SIDEBAR_SNAP_PX) {
+      s.facingDir = "S";
+      setPhase("peek");
     } else {
-      setState("landing");
-      setTimeout(() => {
-        if (stateRef.current !== "landing") return;
-        const bounds = dashboardRef.current?.getBoundingClientRect();
-        if (!bounds) return;
-        pickWaypoint(bounds);
-        const dx = target.current.x - pos.current.x;
-        const dy = target.current.y - pos.current.y;
-        const nextFacing = facingFor(dx, dy);
-        setFacingWithTurn(nextFacing, () => setState("walk"));
-      }, 220);
+      s.landingUntilMs = performance.now() + LANDING_MS;
+      setPhase("landing");
     }
   }
-
-  const stateClass = `gm-${state}`;
-  const facingClass = `gf-${facing}`;
 
   return (
     <>
@@ -296,46 +695,23 @@ export function GooniMascot({ dashboardRef }: GooniMascotProps) {
           height: ${WRAPPER_H}px;
           z-index: 50;
           pointer-events: none;
-          transition: left 0.28s cubic-bezier(0.22,1,0.36,1), top 0.28s cubic-bezier(0.22,1,0.36,1);
         }
-        .gooni-mascot-wrapper.gm-peek .gooni-mascot-svg,
-        .gooni-mascot-wrapper.gm-walk .gooni-mascot-svg,
-        .gooni-mascot-wrapper.gm-idle .gooni-mascot-svg,
-        .gooni-mascot-wrapper.gm-turning .gooni-mascot-svg,
-        .gooni-mascot-wrapper.gm-drag .gooni-mascot-svg { pointer-events: auto; }
+        /* Interactive in every phase — shape hit-testing via visiblePainted keeps
+           notes underneath clickable at transparent corners. */
+        .gooni-mascot-wrapper .gooni-mascot-svg { pointer-events: auto; cursor: grab; }
         .gooni-mascot-wrapper.gm-drag .gooni-mascot-svg { cursor: grabbing; }
-        .gooni-mascot-wrapper.gm-peek .gooni-mascot-svg,
-        .gooni-mascot-wrapper.gm-walk .gooni-mascot-svg,
-        .gooni-mascot-wrapper.gm-idle .gooni-mascot-svg,
-        .gooni-mascot-wrapper.gm-turning .gooni-mascot-svg { cursor: grab; }
-        .gooni-mascot-wrapper.gm-walk,
-        .gooni-mascot-wrapper.gm-idle,
-        .gooni-mascot-wrapper.gm-landing,
-        .gooni-mascot-wrapper.gm-turning,
-        .gooni-mascot-wrapper.gm-drag { transition: none; }
         .gooni-mascot-svg { width: 100%; height: 100%; display: block; pointer-events: none; }
         .gooni-mascot-svg [data-hit] { pointer-events: visiblePainted; }
+        /* Peek hitbox — off by default so it doesn't steal clicks from notes.
+           Enabled only during peek where there's no content underneath anyway. */
+        .gooni-peek-hitbox { pointer-events: none; cursor: grab; }
+        .gooni-mascot-wrapper.gm-peek .gooni-peek-hitbox { pointer-events: all; }
 
-        /* Arm rest poses, baked in via CSS so keyframes can override */
-        .gooni-arm-l { transform: rotate(12deg); transform-origin: 29px 59px; transition: opacity 0.2s; }
-        .gooni-arm-r { transform: rotate(-12deg); transform-origin: 61px 59px; transition: opacity 0.2s; }
-        .gooni-head-face { transition: opacity 0.2s; }
-        .gooni-head { transition: transform 0.25s; }
+        /* All parts stay visible regardless of facing — flipping horizontally for W is
+           the only directional signal. Back-of-head and one-arm side profiles made the
+           character read as broken at small scale. */
 
-        /* ── FACING modifiers ── */
-        /* Facing E (right) — side profile. Hide the far arm (the left arm). */
-        .gooni-mascot-wrapper.gf-E .gooni-arm-l { opacity: 0; }
-        /* Facing W (left) — same sprite but horizontally flipped by wrapper's scaleX(-1).
-           After flip, the SVG's left arm renders on the right visually but is still the
-           "behind the body" arm — hide it to keep the profile clean. */
-        .gooni-mascot-wrapper.gf-W .gooni-arm-l { opacity: 0; }
-        /* Facing N (back to camera) — hide the face; head slightly smaller */
-        .gooni-mascot-wrapper.gf-N .gooni-head-face { opacity: 0; }
-        .gooni-mascot-wrapper.gf-N .gooni-head { transform: scale(0.88); transform-origin: 45px 58px; }
-
-        /* ── PEEK ── */
-        @keyframes gm-peek-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-        .gooni-mascot-wrapper.gm-peek .gooni-mascot-svg { animation: gm-peek-bob 2.2s ease-in-out infinite; }
+        /* Peek-only visibility swaps */
         .gooni-mascot-wrapper.gm-peek .gooni-body,
         .gooni-mascot-wrapper.gm-peek .gooni-leg-l,
         .gooni-mascot-wrapper.gm-peek .gooni-leg-r,
@@ -343,79 +719,54 @@ export function GooniMascot({ dashboardRef }: GooniMascotProps) {
         .gooni-mascot-wrapper.gm-peek .gooni-arm-r,
         .gooni-mascot-wrapper.gm-peek .gooni-shadow { opacity: 0; }
         .gooni-mascot-wrapper.gm-peek .gooni-grip-hand { opacity: 1; }
-        .gooni-mascot-wrapper.gm-peek .gooni-head { transform: rotate(-8deg); transform-origin: 45px 34px; }
-
-        /* ── DRAG ── */
-        @keyframes gm-flail-arm-l { 0%,100% { transform: rotate(-30deg); } 50% { transform: rotate(60deg); } }
-        @keyframes gm-flail-arm-r { 0%,100% { transform: rotate(30deg); } 50% { transform: rotate(-60deg); } }
-        @keyframes gm-flail-leg-l { 0%,100% { transform: rotate(-25deg); } 50% { transform: rotate(25deg); } }
-        @keyframes gm-flail-leg-r { 0%,100% { transform: rotate(25deg); } 50% { transform: rotate(-25deg); } }
-        .gooni-mascot-wrapper.gm-drag .gooni-arm-l { animation: gm-flail-arm-l 0.15s linear infinite; }
-        .gooni-mascot-wrapper.gm-drag .gooni-arm-r { animation: gm-flail-arm-r 0.15s linear infinite; }
-        .gooni-mascot-wrapper.gm-drag .gooni-leg-l { animation: gm-flail-leg-l 0.17s linear infinite; }
-        .gooni-mascot-wrapper.gm-drag .gooni-leg-r { animation: gm-flail-leg-r 0.16s linear infinite; }
-
-        /* ── WALK ── Proper contralateral stride.
-           L-arm and R-leg swing together (same phase). R-arm and L-leg swing together.
-           Arms rotate OPPOSITE directions (one CW while other CCW) so character
-           doesn't "flap". Leg pivots at hip, arm pivots at shoulder. */
-        @keyframes gm-walk-arm-l {
-          0%, 100% { transform: rotate(35deg); }   /* L-arm BACK (down) */
-          50%      { transform: rotate(-10deg); }  /* L-arm FWD (up) */
-        }
-        @keyframes gm-walk-arm-r {
-          0%, 100% { transform: rotate(-35deg); }  /* R-arm FWD (up) */
-          50%      { transform: rotate(10deg); }   /* R-arm BACK (down) */
-        }
-        @keyframes gm-walk-leg-l {
-          0%, 100% { transform: rotate(-20deg); }  /* L-leg FWD */
-          50%      { transform: rotate(20deg); }   /* L-leg BACK */
-        }
-        @keyframes gm-walk-leg-r {
-          0%, 100% { transform: rotate(20deg); }   /* R-leg BACK */
-          50%      { transform: rotate(-20deg); }  /* R-leg FWD */
-        }
-        /* Head bobs once per full stride — up at midpoint, neutral at extremes */
-        @keyframes gm-walk-head-bob {
-          0%, 100% { transform: translateY(0); }
-          50%      { transform: translateY(-2px); }
-        }
-        .gooni-mascot-wrapper.gm-walk .gooni-arm-l { animation: gm-walk-arm-l 0.5s ease-in-out infinite; }
-        .gooni-mascot-wrapper.gm-walk .gooni-arm-r { animation: gm-walk-arm-r 0.5s ease-in-out infinite; }
-        .gooni-mascot-wrapper.gm-walk .gooni-leg-l { animation: gm-walk-leg-l 0.5s ease-in-out infinite; }
-        .gooni-mascot-wrapper.gm-walk .gooni-leg-r { animation: gm-walk-leg-r 0.5s ease-in-out infinite; }
-        .gooni-mascot-wrapper.gm-walk .gooni-head  { animation: gm-walk-head-bob 0.5s ease-in-out infinite; transform-origin: 45px 58px; }
-        /* Forward body lean (auto-flips with wrapper scaleX when facing W) */
-        .gooni-mascot-wrapper.gm-walk .gooni-body { transform: rotate(3deg); transform-origin: 45px 92px; }
-
-        /* ── TURNING — static pose during the flip. No walk animation, no position change. ── */
-        .gooni-mascot-wrapper.gm-turning .gooni-arm-l,
-        .gooni-mascot-wrapper.gm-turning .gooni-arm-r,
-        .gooni-mascot-wrapper.gm-turning .gooni-leg-l,
-        .gooni-mascot-wrapper.gm-turning .gooni-leg-r { animation: none; }
-
-        /* ── IDLE ── */
-        @keyframes gm-breathe { 0%,100% { transform: scale(1,1); } 50% { transform: scale(1.02, 0.98); } }
-        @keyframes gm-head-tilt { 0%,100% { transform: rotate(0deg); } 40% { transform: rotate(-4deg); } 80% { transform: rotate(3deg); } }
-        .gooni-mascot-wrapper.gm-idle .gooni-body { animation: gm-breathe 2.6s ease-in-out infinite; transform-origin: 45px 92px; }
-        .gooni-mascot-wrapper.gm-idle .gooni-head { animation: gm-head-tilt 3.2s ease-in-out infinite; transform-origin: 45px 58px; }
-
-        /* ── LANDING ── */
-        @keyframes gm-land { 0% { transform: scale(1.2, 0.75); } 55% { transform: scale(0.95, 1.05); } 100% { transform: scale(1, 1); } }
-        @keyframes gm-shadow-land { 0% { transform: scale(1.6, 1); opacity: 0.35; } 100% { transform: scale(1, 1); opacity: 0.15; } }
-        .gooni-mascot-wrapper.gm-landing .gooni-body,
-        .gooni-mascot-wrapper.gm-landing .gooni-head { animation: gm-land 0.22s ease-out forwards; transform-origin: 50% 100%; }
-        .gooni-mascot-wrapper.gm-landing .gooni-shadow { animation: gm-shadow-land 0.22s ease-out forwards; transform-origin: 50% 100%; }
-
         .gooni-grip-hand { opacity: 0; }
+
+        /* ─ Drop zone ─ visible while dragging, anchored at sidebar edge */
+        .gooni-drop-zone {
+          position: fixed;
+          width: 56px;
+          height: 120px;
+          z-index: 49;
+          pointer-events: none;
+          border-radius: 12px;
+          border: 2px dashed #1C1C1E;
+          background:
+            repeating-linear-gradient(
+              45deg,
+              rgba(74,222,128,0.18),
+              rgba(74,222,128,0.18) 6px,
+              rgba(28,28,30,0.06) 6px,
+              rgba(28,28,30,0.06) 10px
+            ),
+            rgba(74,222,128,0.08);
+          opacity: 0;
+          transform: scale(0.9);
+          transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .gooni-drop-zone.gdz-visible {
+          opacity: 1;
+          transform: scale(1);
+          animation: gooni-drop-zone-pulse 1.8s ease-in-out infinite;
+        }
+        @keyframes gooni-drop-zone-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.0); }
+          50%      { box-shadow: 0 0 0 8px rgba(74,222,128,0.18); }
+        }
       `}</style>
 
       <div
+        ref={dropZoneRef}
+        className={`gooni-drop-zone ${dropZoneVisible ? "gdz-visible" : ""}`}
+        aria-hidden="true"
+      />
+
+      <div
         ref={wrapperRef}
-        className={`gooni-mascot-wrapper ${stateClass} ${facingClass}`}
+        className="gooni-mascot-wrapper gm-peek gf-S"
         aria-hidden="true"
       >
         <svg
+          ref={svgRef}
           className="gooni-mascot-svg"
           viewBox="0 0 90 130"
           xmlns="http://www.w3.org/2000/svg"
@@ -424,38 +775,45 @@ export function GooniMascot({ dashboardRef }: GooniMascotProps) {
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          <ellipse className="gooni-shadow" cx="45" cy="126" rx="18" ry="4" fill="#00000018" />
+          {/* Invisible peek hitbox — covers the full SVG bounding box so the cursor
+              flips to grab over the entire peek area, not just the tiny head. Only
+              enabled during peek; other phases rely on shape-level hit-testing. */}
+          <rect
+            className="gooni-peek-hitbox"
+            x="0" y="0" width="90" height="130"
+            fill="transparent"
+          />
+          <ellipse ref={shadowRef} className="gooni-shadow" cx="45" cy="126" rx="18" ry="4" fill="#00000018" />
 
-          <g className="gooni-leg gooni-leg-l" style={{ transformOrigin: "34px 88px" }}>
+          <g ref={legLRef} className="gooni-leg gooni-leg-l">
             <rect x="30" y="88" width="8" height="32" rx="4" fill="#1a1a1a" data-hit="1" />
             <rect x="24" y="116" width="18" height="8" rx="4" fill="#1a1a1a" data-hit="1" />
           </g>
-          <g className="gooni-leg gooni-leg-r" style={{ transformOrigin: "56px 88px" }}>
+          <g ref={legRRef} className="gooni-leg gooni-leg-r">
             <rect x="52" y="88" width="8" height="32" rx="4" fill="#1a1a1a" data-hit="1" />
             <rect x="48" y="116" width="18" height="8" rx="4" fill="#1a1a1a" data-hit="1" />
           </g>
 
-          <g className="gooni-body">
+          <g ref={bodyRef} className="gooni-body">
             <rect x="27" y="52" width="36" height="40" rx="6" fill="#4ADE80" data-hit="1" />
           </g>
 
-          <g className="gooni-arm gooni-arm-l">
+          <g ref={armLRef} className="gooni-arm gooni-arm-l">
             <rect x="2" y="55" width="27" height="8" rx="4" fill="#1a1a1a" data-hit="1" />
           </g>
-          <g className="gooni-arm gooni-arm-r">
+          <g ref={armRRef} className="gooni-arm gooni-arm-r">
             <rect x="61" y="55" width="27" height="8" rx="4" fill="#1a1a1a" data-hit="1" />
           </g>
 
-          <g className="gooni-grip-hand">
+          <g ref={gripRef} className="gooni-grip-hand">
             <rect x="20" y="48" width="16" height="10" rx="5" fill="#1a1a1a" data-hit="1" />
           </g>
 
-          <g className="gooni-head">
+          <g ref={headRef} className="gooni-head">
             <circle cx="45" cy="34" r="24" fill="#1a1a1a" data-hit="1" />
-            {/* face layer — hidden when facing N */}
-            <g className="gooni-head-face">
+            <g ref={faceGroupRef} className="gooni-head-face">
               <circle cx="45" cy="34" r="19" fill="#f2f2f2" data-hit="1" />
-              <Face face={activeFace} />
+              <Face face={displayFace} />
             </g>
           </g>
         </svg>
