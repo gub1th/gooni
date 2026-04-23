@@ -56,14 +56,27 @@ type InkState = {
 function filterVisibleTodos(todos: ApiTodo[]): ApiTodo[] {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  return todos.filter((t) => !t.done || (t.completed_at && new Date(t.completed_at) >= startOfToday));
+  const visible = todos.filter(
+    (t) => !t.done || (t.completed_at && new Date(t.completed_at) >= startOfToday),
+  );
+  // Show open items first (preserving their manual sort_order), then done-today
+  // at the bottom — crossed-off items shouldn't clutter the top of the list.
+  return visible.sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    return a.sort_order - b.sort_order;
+  });
 }
 
 // Relative age in m/h/d since created_at. Returns null for under-a-minute.
 // Tier drives color escalation: newer todos stay muted; stale ones warm up.
 type AgeTier = "fresh" | "stale" | "warm" | "bold";
 function formatAge(createdAt: string): { text: string; tier: AgeTier } | null {
-  const sec = Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000);
+  // Backend returns naive UTC ISO strings (no Z, no offset). JS `new Date(...)`
+  // treats those as local, making "now - createdAt" go negative by the TZ offset.
+  // Force-interpret as UTC by appending Z when no offset is present.
+  const hasOffset = createdAt.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(createdAt);
+  const ms = new Date(hasOffset ? createdAt : createdAt + "Z").getTime();
+  const sec = Math.floor((Date.now() - ms) / 1000);
   if (sec < 60) return null;
   if (sec < 3600) return { text: `${Math.floor(sec / 60)}m`, tier: "fresh" };
   const hours = Math.floor(sec / 3600);
@@ -337,9 +350,9 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
         style={{
           position: "relative",
           display: "flex", alignItems: "center", gap: 8,
-          marginTop: visible.length > 0 ? 8 : 0,
-          paddingTop: visible.length > 0 ? 16 : 12,
-          paddingBottom: 14,
+          marginTop: visible.length > 0 ? 4 : 0,
+          paddingTop: visible.length > 0 ? 8 : 6,
+          paddingBottom: 6,
           paddingLeft: 8, paddingRight: 8,
           marginLeft: -8, marginRight: -8,
           borderTop: visible.length > 0 ? "0.5px solid rgba(0,0,0,0.07)" : "none",
@@ -560,6 +573,27 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             </div>
             <div style={{ fontSize: 13, color: "#8E8E93", marginTop: 4 }}>
               {getDateStr()}
+              {(() => {
+                const startOfToday = new Date();
+                startOfToday.setHours(0, 0, 0, 0);
+                const openCount = todos.filter((t) => !t.done).length;
+                const doneToday = todos.filter(
+                  (t) => t.done && t.completed_at && new Date(t.completed_at) >= startOfToday,
+                ).length;
+                if (openCount === 0 && doneToday === 0) return null;
+                return (
+                  <>
+                    <span style={{ margin: "0 8px", color: "#D1D1D6" }}>·</span>
+                    <span>{openCount} {openCount === 1 ? "todo" : "todos"} open</span>
+                    {doneToday > 0 && (
+                      <>
+                        <span style={{ margin: "0 6px", color: "#D1D1D6" }}>·</span>
+                        <span style={{ color: "#2B8C4D" }}>✓ {doneToday} done today</span>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -615,35 +649,6 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
               </div>
             </div>
 
-            {/* todos — open count + done-today momentum */}
-            {(() => {
-              const startOfToday = new Date();
-              startOfToday.setHours(0, 0, 0, 0);
-              const openCount = todos.filter((t) => !t.done).length;
-              const doneToday = todos.filter(
-                (t) => t.done && t.completed_at && new Date(t.completed_at) >= startOfToday,
-              ).length;
-              return (
-                <div style={{
-                  background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
-                  borderRadius: 10, padding: "10px 14px",
-                  display: "flex", flexDirection: "column", alignItems: "flex-start",
-                  minWidth: 110,
-                }}>
-                  <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>todos open</div>
-                  <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
-                    {openCount}
-                  </div>
-                  <div style={{
-                    fontSize: 10.5,
-                    color: doneToday > 0 ? "#2B8C4D" : "#AEAEB2",
-                    marginTop: 2, fontVariantNumeric: "tabular-nums",
-                  }}>
-                    {doneToday > 0 ? `✓ ${doneToday} done today` : "nothing done yet today"}
-                  </div>
-                </div>
-              );
-            })()}
           </div>
         </div>
 

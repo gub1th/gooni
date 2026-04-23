@@ -705,7 +705,12 @@ export function GooniMascot({ dashboardRef }: GooniMascotProps) {
         /* Peek hitbox — off by default so it doesn't steal clicks from notes.
            Enabled only during peek where there's no content underneath anyway. */
         .gooni-peek-hitbox { pointer-events: none; cursor: grab; }
-        .gooni-mascot-wrapper.gm-peek .gooni-peek-hitbox { pointer-events: all; }
+        .gooni-mascot-wrapper.gm-peek .gooni-peek-hitbox { pointer-events: all; cursor: grab; }
+        /* Explicit grab cursor on every paintable part during peek so the cursor
+           flips even on sub-pixel hover-over-the-head cases where browsers route
+           hit-testing to the painted child before the sibling hitbox. */
+        .gooni-mascot-wrapper.gm-peek .gooni-mascot-svg [data-hit] { cursor: grab; }
+        .gooni-mascot-wrapper.gm-drag .gooni-mascot-svg [data-hit] { cursor: grabbing; }
 
         /* All parts stay visible regardless of facing — flipping horizontally for W is
            the only directional signal. Back-of-head and one-arm side profiles made the
@@ -775,14 +780,6 @@ export function GooniMascot({ dashboardRef }: GooniMascotProps) {
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          {/* Invisible peek hitbox — covers the full SVG bounding box so the cursor
-              flips to grab over the entire peek area, not just the tiny head. Only
-              enabled during peek; other phases rely on shape-level hit-testing. */}
-          <rect
-            className="gooni-peek-hitbox"
-            x="0" y="0" width="90" height="130"
-            fill="transparent"
-          />
           <ellipse ref={shadowRef} className="gooni-shadow" cx="45" cy="126" rx="18" ry="4" fill="#00000018" />
 
           <g ref={legLRef} className="gooni-leg gooni-leg-l">
@@ -816,6 +813,16 @@ export function GooniMascot({ dashboardRef }: GooniMascotProps) {
               <Face face={displayFace} />
             </g>
           </g>
+
+          {/* Peek hitbox — LAST child so it's topmost in SVG hit-testing. Transparent
+              fill + pointer-events: all (during peek only) means the cursor flips to
+              grab over the full 90×130 bounding box, even where no painted shape
+              exists. Off in other phases so notes beneath stay clickable. */}
+          <rect
+            className="gooni-peek-hitbox"
+            x="0" y="0" width="90" height="130"
+            fill="transparent"
+          />
         </svg>
       </div>
     </>

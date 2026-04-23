@@ -1,6 +1,8 @@
 import hashlib
 import os
 import re
+import time
+from collections import defaultdict, deque
 
 from dotenv import load_dotenv
 
@@ -123,6 +125,62 @@ async def auth_middleware(request: Request, call_next):
 
     from fastapi.responses import JSONResponse
     return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+
+# ── Rate limiting ──────────────────────────────────────────────────────────────
+# In-memory per-(IP, bucket) token limiter. Single-process only — fine for the
+# current 1-machine Fly deploy but would need Redis if we scale horizontally.
+# Rules:
+#   - /auth           → 10/min per IP  (cap offline brute-force against the password)
+#   - /chat, /embed   → 30/min per IP  (cap OpenAI cost-abuse)
+#   - everything else → 300/min per IP (generic DoS backstop)
+
+_RATE_BUCKETS: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+_RATE_RULES: list[tuple[re.Pattern[str], str, int, int]] = [
+    # (path regex, bucket name, max_requests, window_seconds)
+    (re.compile(r"^/auth$"), "auth", 10, 60),
+    (re.compile(r"^/chat(/|$)"), "chat", 30, 60),
+    (re.compile(r"^/notes/\d+/(embed|memorize)$"), "embed", 30, 60),
+    (re.compile(r"^/dashboard/take$"), "take", 30, 60),
+]
+_DEFAULT_BUCKET = ("default", 300, 60)
+
+
+def _pick_bucket(path: str) -> tuple[str, int, int]:
+    for pattern, name, limit, window in _RATE_RULES:
+        if pattern.match(path):
+            return (name, limit, window)
+    return _DEFAULT_BUCKET
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # CORS preflight must never rate-limit — browsers retry immediately on 429
+    # and can't attach Bearer tokens to OPTIONS. Healthz stays open for Fly probes.
+    if request.method == "OPTIONS" or request.url.path == "/healthz":
+        return await call_next(request)
+
+    bucket_name, limit, window = _pick_bucket(request.url.path)
+    ip = _client_ip(request) or "unknown"
+    key = (ip, bucket_name)
+    now = time.monotonic()
+    cutoff = now - window
+
+    q = _RATE_BUCKETS[key]
+    while q and q[0] < cutoff:
+        q.popleft()
+
+    if len(q) >= limit:
+        retry_after = max(1, int(q[0] + window - now))
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            {"detail": "Too many requests"},
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    q.append(now)
+    return await call_next(request)
 
 
 # ── Visit logging ──────────────────────────────────────────────────────────────
@@ -438,12 +496,6 @@ async def chat(body: ChatRequest, db: Session = Depends(get_db)):
         model=body.model,
     )
     return {"content": content, "usage": usage, "intention": usage.get("intention") or ""}
-
-
-@app.get("/debug/memories")
-async def debug_memories():
-    memories = memory_service.get_all()
-    return [{"id": m.get("id"), "memory": m.get("memory")} for m in memories]
 
 
 # ── Spaces ────────────────────────────────────────────────────────────────────
@@ -1077,6 +1129,7 @@ def get_public_note(note_id: int, db: Session = Depends(get_db)):
         "title": note.title,
         "content": note.content,
         "space_name": space.name if space else None,
+        "created_at": note.created_at,
         "updated_at": note.updated_at,
     }
 

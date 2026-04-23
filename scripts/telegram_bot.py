@@ -94,21 +94,58 @@ async def cmd_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _respond(update, f"/goal {name}")
 
 
+def _parse_chat_ids(raw: str | None) -> list[int]:
+    """Parse TELEGRAM_CHAT_ID env var. Accepts a single id or comma-separated list."""
+    if not raw:
+        return []
+    ids: list[int] = []
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            ids.append(int(chunk))
+        except ValueError:
+            raise ValueError(f"TELEGRAM_CHAT_ID contains non-integer value: {chunk!r}")
+    return ids
+
+
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN is not set. Add it to your .env file.")
 
+    # Refuse to start without an allowlist — the bot costs OpenAI tokens per
+    # message, and without a chat-ID filter anyone who finds the bot can run
+    # up the bill + pollute the conversation DB. Opt-in override for local
+    # testing: set ALLOW_UNFILTERED_TELEGRAM=1 (never use in prod).
+    allowed_chat_ids = _parse_chat_ids(os.getenv("TELEGRAM_CHAT_ID"))
+    if not allowed_chat_ids and os.getenv("ALLOW_UNFILTERED_TELEGRAM") != "1":
+        raise ValueError(
+            "TELEGRAM_CHAT_ID is not set. Set it to your personal Telegram chat ID "
+            "(message @userinfobot to find yours; comma-separate multiple). "
+            "To deliberately run without a filter in local dev, set "
+            "ALLOW_UNFILTERED_TELEGRAM=1 — never do this in prod."
+        )
+
+    chat_filter = filters.Chat(chat_id=allowed_chat_ids) if allowed_chat_ids else filters.ALL
+
     app = ApplicationBuilder().token(token).build()
 
-    app.add_handler(CommandHandler("memory", cmd_memory))
-    app.add_handler(CommandHandler("goals", cmd_goals))
-    app.add_handler(CommandHandler("goal", cmd_goal))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    # Every handler is gated on chat_filter so messages from non-allowlisted
+    # chats are dropped silently. CommandHandler takes the filter via kwarg;
+    # MessageHandler via `&` composition with its content filter.
+    app.add_handler(CommandHandler("memory", cmd_memory, filters=chat_filter))
+    app.add_handler(CommandHandler("goals", cmd_goals, filters=chat_filter))
+    app.add_handler(CommandHandler("goal", cmd_goal, filters=chat_filter))
+    app.add_handler(MessageHandler(filters.PHOTO & chat_filter, handle_photo))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & chat_filter, handle_message))
+    app.add_handler(MessageHandler(filters.VOICE & chat_filter, handle_voice))
 
-    print("Gooni Telegram Bot started. Press Ctrl+C to stop.")
+    if allowed_chat_ids:
+        print(f"Gooni Telegram Bot started. Allowlisted chat IDs: {allowed_chat_ids}")
+    else:
+        print("Gooni Telegram Bot started in UNFILTERED mode (DEV ONLY).")
     app.run_polling()
 
 
