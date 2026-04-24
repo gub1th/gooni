@@ -51,20 +51,58 @@ type InkState = {
 
 // ── Todo card ──────────────────────────────────────────────────────────────────
 
-// Day-boundary filter: visible = not-done OR completed-today. Archived (completed-before-today)
-// still lives in the DB for stats but drops off the dashboard widget at midnight-local.
-function filterVisibleTodos(todos: ApiTodo[]): ApiTodo[] {
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const visible = todos.filter(
-    (t) => !t.done || (t.completed_at && new Date(t.completed_at) >= startOfToday),
-  );
-  // Show open items first (preserving their manual sort_order), then done-today
-  // at the bottom — crossed-off items shouldn't clutter the top of the list.
-  return visible.sort((a, b) => {
-    if (a.done !== b.done) return a.done ? 1 : -1;
-    return a.sort_order - b.sort_order;
+// Backend returns naive UTC ISO strings (no Z, no offset). JS new Date() treats
+// those as local, which flips the day boundary on completed_at filters. Always
+// parse through this helper so "completed today" actually matches UTC-to-local.
+function parseBackendDate(iso: string): Date {
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  return new Date(hasOffset ? iso : iso + "Z");
+}
+
+// Bounds for the local calendar day at (today + dayOffset). dayOffset 0 = today,
+// -1 = yesterday, etc. Returns [start-of-day, start-of-next-day].
+function dayBounds(dayOffset: number): [Date, Date] {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() + dayOffset);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return [start, end];
+}
+
+// Day-scoped filter.
+//  - dayOffset === 0 (today): open items + done-today, open first by sort_order.
+//  - dayOffset  <  0 (past):  ONLY items completed that day, most recent first.
+function filterVisibleTodos(todos: ApiTodo[], dayOffset: number): ApiTodo[] {
+  const [start, end] = dayBounds(dayOffset);
+
+  if (dayOffset === 0) {
+    const visible = todos.filter(
+      (t) => !t.done || (t.completed_at && parseBackendDate(t.completed_at) >= start),
+    );
+    return visible.sort((a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      return a.sort_order - b.sort_order;
+    });
+  }
+
+  const visible = todos.filter((t) => {
+    if (!t.done || !t.completed_at) return false;
+    const c = parseBackendDate(t.completed_at);
+    return c >= start && c < end;
   });
+  return visible.sort((a, b) => {
+    const ac = parseBackendDate(a.completed_at!).getTime();
+    const bc = parseBackendDate(b.completed_at!).getTime();
+    return bc - ac;
+  });
+}
+
+function formatDayLabel(dayOffset: number): string {
+  if (dayOffset === 0) return "today";
+  if (dayOffset === -1) return "yesterday";
+  const [start] = dayBounds(dayOffset);
+  return start.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 // Relative age in m/h/d since created_at. Returns null for under-a-minute.
@@ -115,7 +153,18 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
     return () => clearInterval(id);
   }, []);
 
-  const visible = filterVisibleTodos(todos);
+  // Day-machine state: 0 = today, -1 = yesterday, etc. Navigating back shows
+  // only todos completed on that day; past views are read-only.
+  const [dayOffset, setDayOffset] = useState(0);
+  const isPast = dayOffset < 0;
+  const visible = filterVisibleTodos(todos, dayOffset);
+
+  // Can we go further back? Only if at least one done todo exists with a
+  // completed_at that falls BEFORE the start of the currently-viewed day.
+  const [currentDayStart] = dayBounds(dayOffset);
+  const canGoBack = todos.some(
+    (t) => t.done && t.completed_at && parseBackendDate(t.completed_at) < currentDayStart,
+  );
   const showEmpty = visible.length === 0;
 
   async function toggle(id: number, done: boolean) {
@@ -207,14 +256,62 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
       marginBottom: 22,
       fontFamily: FONT,
     }}>
+      {/* Day-navigator header. Left chevron steps back a day (shows that day's
+          completed todos, read-only). Right chevron returns to today. */}
       <div style={{
-        fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
-        textTransform: "uppercase", marginBottom: 12,
-      }}>today</div>
+        display: "flex", alignItems: "center", gap: 4,
+        marginBottom: 12, userSelect: "none",
+      }}>
+        <button
+          onClick={() => canGoBack && setDayOffset((d) => d - 1)}
+          disabled={!canGoBack}
+          title={canGoBack ? "See a previous day's completed todos" : "No older completed todos"}
+          style={{
+            background: "none", border: "none", padding: 0,
+            color: "#8E8E93",
+            opacity: canGoBack ? 0.55 : 0.18,
+            cursor: canGoBack ? "pointer" : "default",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: 16, height: 16,
+            transition: "opacity 0.12s",
+          }}
+          onMouseEnter={(e) => { if (canGoBack) (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
+          onMouseLeave={(e) => { if (canGoBack) (e.currentTarget as HTMLButtonElement).style.opacity = "0.55"; }}
+        >
+          <svg width="8" height="10" viewBox="0 0 8 10" fill="none" aria-hidden="true">
+            <path d="M6 1L2 5L6 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <div style={{
+          fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+          textTransform: "uppercase",
+        }}>{formatDayLabel(dayOffset)}</div>
+        {isPast && (
+          <button
+            onClick={() => setDayOffset((d) => Math.min(0, d + 1))}
+            title="Back to today"
+            style={{
+              background: "none", border: "none", padding: 0,
+              color: "#8E8E93", opacity: 0.55, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 16, height: 16, marginLeft: 2,
+              transition: "opacity 0.12s",
+            }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "0.55")}
+          >
+            <svg width="8" height="10" viewBox="0 0 8 10" fill="none" aria-hidden="true">
+              <path d="M2 1L6 5L2 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
+      </div>
 
       {showEmpty && (
         <div style={{ fontSize: 13, color: "#C7C7CC", padding: "4px 0 2px" }}>
-          Nothing here yet — add your first todo below.
+          {isPast
+            ? `Nothing was completed ${formatDayLabel(dayOffset)}.`
+            : "Nothing here yet — add your first todo below."}
         </div>
       )}
 
@@ -228,20 +325,22 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
         return (
           <div
             key={t.id}
-            draggable={!isEditing}
+            draggable={!isEditing && !isPast}
             onDragStart={(e) => {
-              if (isEditing) { e.preventDefault(); return; }
+              if (isEditing || isPast) { e.preventDefault(); return; }
               setDragIdx(i);
               e.dataTransfer.effectAllowed = "move";
               try { e.dataTransfer.setData("text/plain", t.text); } catch {}
             }}
             onDragEnd={() => { setDragIdx(null); setHoverIdx(null); }}
             onDragOver={(e) => {
+              if (isPast) return;
               e.preventDefault();
               if (dragIdx !== null && dragIdx !== i) setHoverIdx(i);
             }}
             onDragLeave={() => { if (hoverIdx === i) setHoverIdx(null); }}
             onDrop={(e) => {
+              if (isPast) return;
               e.preventDefault();
               if (dragIdx !== null && dragIdx !== i) reorder(dragIdx, i);
               setDragIdx(null);
@@ -273,15 +372,17 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
             }}
           >
             <button
-              onClick={() => toggle(t.id, !t.done)}
+              onClick={() => { if (!isPast) toggle(t.id, !t.done); }}
               aria-label={t.done ? "Uncheck" : "Check"}
+              disabled={isPast}
               style={{
                 width: 16, height: 16, borderRadius: "50%",
                 border: t.done ? `1.5px solid ${GREEN}` : "1.5px solid rgba(0,0,0,0.18)",
                 background: t.done ? GREEN : "transparent",
-                cursor: "pointer", padding: 0, flexShrink: 0,
+                cursor: isPast ? "default" : "pointer", padding: 0, flexShrink: 0,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 transition: "background 0.15s, border-color 0.15s",
+                opacity: isPast ? 0.85 : 1,
               }}
             >
               {t.done && (
@@ -309,12 +410,14 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
               />
             ) : (
               <span
-                onClick={() => startEdit(t)}
+                onClick={() => { if (!isPast) startEdit(t); }}
                 style={{
                   flex: 1, fontSize: 13,
                   color: t.done ? "#AEAEB2" : "#1C1C1E",
                   textDecoration: t.done ? "line-through" : "none",
-                  lineHeight: 1.5, cursor: "text", userSelect: "text",
+                  lineHeight: 1.5,
+                  cursor: isPast ? "default" : "text",
+                  userSelect: "text",
                 }}
               >{t.text}</span>
             )}
@@ -328,24 +431,26 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
               </span>
             )}
 
-            <button
-              className="todo-hover"
-              onClick={(e) => { e.stopPropagation(); del(t.id); }}
-              title="Delete"
-              style={{
-                opacity: 0,
-                background: "none", border: "none", cursor: "pointer",
-                color: "#C7C7CC", fontSize: 14, padding: "0 4px", lineHeight: 1,
-                transition: "opacity 0.12s, color 0.12s", flexShrink: 0,
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#FF3B30")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#C7C7CC")}
-            >×</button>
+            {!isPast && (
+              <button
+                className="todo-hover"
+                onClick={(e) => { e.stopPropagation(); del(t.id); }}
+                title="Delete"
+                style={{
+                  opacity: 0,
+                  background: "none", border: "none", cursor: "pointer",
+                  color: "#C7C7CC", fontSize: 14, padding: "0 4px", lineHeight: 1,
+                  transition: "opacity 0.12s, color 0.12s", flexShrink: 0,
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#FF3B30")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#C7C7CC")}
+              >×</button>
+            )}
           </div>
         );
       })}
 
-      <div
+      {!isPast && <div
         className="gooni-todo-add"
         style={{
           position: "relative",
@@ -377,7 +482,7 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
             position: "relative", zIndex: 1,
           }}
         />
-      </div>
+      </div>}
     </div>
   );
 }
