@@ -182,13 +182,33 @@ export async function fetchPinnedNotes(): Promise<ApiNote[]> {
   return res.json();
 }
 
+export interface GraphNode {
+  id: number;
+  title: string;
+  size: number;
+  space_id: number | null;
+}
+export interface GraphEdge {
+  from: number;
+  to: number;
+  weight: number;
+}
+export async function fetchNotesGraph(): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  const res = await apiFetch(`${BASE}/notes/graph`);
+  if (!res.ok) throw new Error("Failed to fetch notes graph");
+  return res.json();
+}
+
 export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: number[] }> {
   const res = await apiFetch(`${BASE}/notes/cleanup`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to clean up notes");
   return res.json();
 }
 
-export async function patchNote(id: number, patch: { is_public?: boolean; is_pinned?: boolean }): Promise<ApiNote> {
+export async function patchNote(
+  id: number,
+  patch: { is_public?: boolean; is_pinned?: boolean; title?: string; content?: string },
+): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -299,6 +319,14 @@ export async function reorderTodos(items: { id: number; sort_order: number }[]):
     body: JSON.stringify({ items }),
   });
   if (!res.ok) throw new Error("Failed to reorder todos");
+}
+
+// Spawn a "Plan for <todo text>" note in General, linked to the todo via
+// todo_notes. Returns the new note so the frontend can animate its title in.
+export async function createTodoPlan(todoId: number): Promise<ApiNote> {
+  const res = await apiFetch(`${BASE}/todos/${todoId}/plan`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to create plan from todo");
+  return res.json();
 }
 
 export async function updatePublicProfile(bio: string): Promise<void> {

@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 import {
   fetchDashboardStats, fetchGooniTake,
-  fetchTodos, createTodo, updateTodo, deleteTodo, reorderTodos,
+  fetchTodos, createTodo, updateTodo, deleteTodo, reorderTodos, createTodoPlan,
   type ApiNote, type ApiTodo, type DashboardStats,
 } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
+import { useGooniActivatedStore } from "../stores/useGooniActivatedStore";
 import { GooniMascot } from "./GooniMascot";
 import { NoteEditor } from "./notes/NoteEditor";
+import { BrainOrb } from "./BrainOrb";
+import { ExploreModal } from "./ExploreModal";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#4ADE80";
@@ -136,9 +139,10 @@ function ageTierStyle(tier: AgeTier): { color: string; weight: number } {
 interface TodoCardProps {
   todos: ApiTodo[];
   onMutate: (nextTodos: ApiTodo[]) => void;
+  onPlan?: (todo: ApiTodo) => void;
 }
 
-function TodoCard({ todos, onMutate }: TodoCardProps) {
+function TodoCard({ todos, onMutate, onPlan }: TodoCardProps) {
   const [newText, setNewText] = useState("");
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -431,6 +435,31 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
               </span>
             )}
 
+            {!isPast && !t.done && onPlan && (
+              <button
+                className="todo-hover"
+                onClick={(e) => { e.stopPropagation(); onPlan(t); }}
+                title="Plan for this todo"
+                style={{
+                  opacity: 0,
+                  background: "none", border: "none", cursor: "pointer",
+                  color: "#8E8E93", fontSize: 11, padding: "2px 6px", lineHeight: 1.2,
+                  borderRadius: 5,
+                  transition: "opacity 0.12s, color 0.12s, background 0.12s",
+                  flexShrink: 0, fontWeight: 500, letterSpacing: 0.2,
+                  fontFamily: FONT,
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.color = "#1C1C1E";
+                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.color = "#8E8E93";
+                  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                }}
+              >plan</button>
+            )}
+
             {!isPast && (
               <button
                 className="todo-hover"
@@ -487,6 +516,152 @@ function TodoCard({ todos, onMutate }: TodoCardProps) {
   );
 }
 
+// ── PlanAnimation ─────────────────────────────────────────────────────────────
+// Drop-in replacement for the embedded NoteEditor while a plan is being spun up.
+// Expands the container, types the title character-by-character, then drops a
+// blinking cursor on the next line and offers Continue / Cancel. The note is
+// already created on the backend; this is just the front-end flourish + a
+// handoff into the full editor.
+
+function PlanWrapper({
+  title,
+  noteId,
+  onSubmitted,
+  onContinue,
+  onCancel,
+}: {
+  title: string;
+  noteId: number;
+  onSubmitted: () => void;
+  onContinue: () => void;
+  onCancel: () => void;
+}) {
+  const [typed, setTyped] = useState(0);
+  const done = typed >= title.length;
+  // Latches once the user types anything into the embedded NoteEditor —
+  // hides the meta-buttons (Open in editor / Cancel) so the typing flow
+  // isn't cluttered. Latched, so clearing back to empty doesn't un-hide.
+  const [hasTyped, setHasTyped] = useState(false);
+
+  useEffect(() => {
+    if (typed >= title.length) return;
+    const h = setTimeout(() => setTyped(typed + 1), 35);
+    return () => clearTimeout(h);
+  }, [typed, title]);
+
+  // Esc cancels at any time — user needs a reliable escape hatch even
+  // after they've started typing a body (content stays in the note as a
+  // draft; they can delete from the notes list if unwanted).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  // "Open in editor" only makes sense before they've started typing —
+  // after that the NoteEditor's own submit button carries the flow. The
+  // close (×) button below is the persistent escape hatch.
+  const showContinue = done && !hasTyped;
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        animation: "gooni-plan-expand 320ms cubic-bezier(0.22,1,0.36,1) both",
+      }}
+    >
+      <style>{`
+        @keyframes gooni-plan-expand {
+          0%   { opacity: 0.4; transform: translateY(-4px) scale(0.985); }
+          100% { opacity: 1;   transform: translateY(0)    scale(1); }
+        }
+        @keyframes gooni-plan-caret {
+          0%, 50%   { opacity: 1; }
+          51%, 100% { opacity: 0; }
+        }
+        .gooni-plan-caret {
+          display: inline-block;
+          width: 2px;
+          margin-left: 1px;
+          background: #1C1C1E;
+          animation: gooni-plan-caret 1s step-end infinite;
+          vertical-align: text-bottom;
+        }
+      `}</style>
+
+      {/* Title row: animated bold title typed character-by-character, with
+          a persistent × close button on the right so user can always bail
+          out. Esc also cancels. */}
+      <div style={{
+        display: "flex", alignItems: "flex-start", gap: 8,
+        marginBottom: 12, minHeight: 30,
+      }}>
+        <div style={{
+          flex: 1, minWidth: 0,
+          fontSize: 22, fontWeight: 700, color: "#1C1C1E",
+          letterSpacing: "-0.3px", lineHeight: 1.25,
+        }}>
+          {title.slice(0, typed)}
+          {!done && <span className="gooni-plan-caret" style={{ height: 24 }} />}
+        </div>
+        <button
+          onClick={onCancel}
+          title="Close (Esc)"
+          aria-label="Close plan"
+          style={{
+            flexShrink: 0,
+            background: "transparent", border: "none", cursor: "pointer",
+            width: 24, height: 24, borderRadius: 6,
+            color: "#8E8E93", fontSize: 18, lineHeight: 1,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 0, transition: "background 0.12s, color 0.12s",
+            marginTop: -2,
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)";
+            (e.currentTarget as HTMLButtonElement).style.color = "#1C1C1E";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+            (e.currentTarget as HTMLButtonElement).style.color = "#8E8E93";
+          }}
+        >×</button>
+      </div>
+
+      {/* Real NoteEditor handles body input, submit (Enter / button),
+          image paste, autosave — all of it. submitToNoteId makes the
+          submit path PATCH the existing plan note instead of creating
+          a new one. */}
+      {done && (
+        <NoteEditor
+          variant="embedded"
+          submitToNoteId={noteId}
+          onEmptyChange={(empty) => { if (!empty) setHasTyped(true); }}
+          onSubmitted={onSubmitted}
+        />
+      )}
+
+      {showContinue && (
+        <div style={{ marginTop: 10 }}>
+          <button
+            onClick={onContinue}
+            style={{
+              background: "transparent", color: "#3C3C43",
+              border: "1px solid rgba(0,0,0,0.12)",
+              borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 500,
+              cursor: "pointer", fontFamily: FONT, letterSpacing: 0.1,
+            }}
+          >
+            Open in editor →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 // The dashboard itself:
 
@@ -499,8 +674,15 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const [cardPulsing, setRowPulsing] = useState(false);
   const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
   const typingRaf = useRef<number | null>(null);
+  // Plan-from-todo state. When non-null, the note input is replaced by a
+  // typing-animation block showing "Plan for <todo text>". The note already
+  // exists on the backend (linked via todo_notes); user clicks "continue"
+  // to navigate to it in the full editor.
+  const [planning, setPlanning] = useState<{ todo: ApiTodo; note: ApiNote } | null>(null);
+  const [exploreOpen, setExploreOpen] = useState(false);
   const { selectSpace, loadNotes, selectNote } = useNotesContentStore();
   const theme = useGooniThemeStore((s) => s.theme);
+  const gooniActivated = useGooniActivatedStore((s) => s.activated);
   const palette = THEME_PALETTES[theme];
   const firstCardRef = useRef<HTMLDivElement>(null);
   const dashRef = useRef<HTMLDivElement>(null);
@@ -540,6 +722,31 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
       }
     };
     typingRaf.current = requestAnimationFrame(tick);
+  }
+
+  async function handlePlanFromTodo(todo: ApiTodo) {
+    // Guard: one plan animation at a time.
+    if (planning) return;
+    try {
+      const note = await createTodoPlan(todo.id);
+      setPlanning({ todo, note });
+    } catch (e) {
+      console.error("plan failed:", e);
+    }
+  }
+
+  function handlePlanContinue() {
+    if (!planning) return;
+    const id = planning.note.id;
+    setPlanning(null);
+    selectSpace("general");
+    selectNote(id);
+    onOpenNote();
+  }
+
+  function handlePlanCancel() {
+    // Note stays in the DB (linked) — user can delete from notes list if unwanted.
+    setPlanning(null);
   }
 
   async function handleSubmitted(_note: ApiNote | null, buttonRect: DOMRect | null) {
@@ -702,7 +909,11 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "stretch" }}>
+            {/* 3D brain — opens the notes visualization. Left of the stat cards
+                so it reads as a peer affordance, not buried in a toolbar. */}
+            <BrainOrb size={60} onClick={() => setExploreOpen(true)} />
+
             {/* notes this week */}
             <div style={{
               background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
@@ -757,9 +968,25 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           </div>
         </div>
 
-        {/* Note input — NoteEditor's embedded variant owns the bordered shell + ink animation */}
+        {/* Note input — swaps into a PlanAnimation when user clicks "plan"
+            on a todo. Otherwise the normal embedded NoteEditor quick-input. */}
         <div style={{ marginBottom: 22 }}>
-          <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
+          {planning ? (
+            <PlanWrapper
+              title={planning.note.title ?? ""}
+              noteId={planning.note.id}
+              onSubmitted={() => {
+                // After submit, clear planning state and refresh notes in
+                // General so the new plan shows up in recent-notes lists.
+                setPlanning(null);
+                loadNotes("general");
+              }}
+              onContinue={handlePlanContinue}
+              onCancel={handlePlanCancel}
+            />
+          ) : (
+            <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
+          )}
         </div>
 
         {/* Gooni's Take — green dot + uppercase label */}
@@ -810,7 +1037,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
         )}
 
         {/* Todo card — backed by dedicated TodoItem model with timestamps + sort order */}
-        <TodoCard todos={todos} onMutate={setTodos} />
+        <TodoCard todos={todos} onMutate={setTodos} onPlan={handlePlanFromTodo} />
 
         {/* Recent notes — two preview cards */}
         <div style={{ marginBottom: 44 }}>
@@ -840,10 +1067,13 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
                       ref={isFirst ? firstCardRef : undefined}
                       onClick={() => openNote(note.space_id, note.id)}
                       style={{
+                        // Use minHeight instead of fixed height so the card grows
+                        // with its content up to the line-clamp ceiling. The grid
+                        // row naturally stretches so both cards still match heights.
                         display: "flex", flexDirection: "column", alignItems: "stretch",
                         gap: 6, padding: "14px 16px", borderRadius: 12,
                         border: "1px solid rgba(0,0,0,0.07)", background: "#fff", cursor: "pointer",
-                        textAlign: "left", width: "100%", height: 160, boxSizing: "border-box",
+                        textAlign: "left", width: "100%", minHeight: 160, boxSizing: "border-box",
                         transition: "background 0.12s, border-color 0.12s",
                         animation: isFirst && cardPulsing ? `gooni-card-pulse 0.6s cubic-bezier(0.22,1,0.36,1)` : undefined,
                       }}
@@ -868,14 +1098,26 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
                       </div>
                       <div
                         style={{
-                          flex: 1, fontSize: 12.5, color: "#6C6C70", lineHeight: 1.5, fontFamily: FONT,
-                          overflowY: "auto", overscrollBehavior: "contain",
+                          // NO `flex: 1` — that makes the div fill the remaining
+                          // card height and breaks -webkit-line-clamp (you get
+                          // mid-line clipping instead of a clean "…"). Without
+                          // flex:1 the div is its intrinsic ~4-line height.
+                          fontSize: 12.5, color: "#6C6C70", lineHeight: 1.5, fontFamily: FONT,
+                          display: "-webkit-box",
+                          WebkitLineClamp: 4,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          wordBreak: "break-word",
                         }}
                       >
                         {shownExcerpt || (isTyping ? "" : <span style={{ color: "#C7C7CC", fontStyle: "italic" }}>empty note</span>)}
                         {caretInExcerpt && <span className="gooni-caret">▍</span>}
                       </div>
-                      <div style={{ fontSize: 11, color: "#AEAEB2", fontFamily: FONT, flexShrink: 0 }}>
+                      {/* marginTop:auto pins the date to the bottom regardless of
+                          how tall the excerpt ended up, so short-content cards
+                          still show the timestamp at the card bottom. */}
+                      <div style={{ fontSize: 11, color: "#AEAEB2", fontFamily: FONT, flexShrink: 0, marginTop: "auto" }}>
                         {formatNoteDate(note.updated_at)}
                       </div>
                     </div>
@@ -891,7 +1133,10 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
       </div>
 
       {/* Interactive mascot — peeks from sidebar seam, drag-to-toss, walks with perspective */}
-      <GooniMascot dashboardRef={dashRef} />
+      {gooniActivated && <GooniMascot dashboardRef={dashRef} />}
+
+      {/* Semantic graph of all notes — opens as a full-screen modal */}
+      <ExploreModal open={exploreOpen} onClose={() => setExploreOpen(false)} />
     </div>
   );
 }

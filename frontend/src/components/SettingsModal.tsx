@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { GOONI_FACES, GOONI_FACE_LABELS, useGooniFaceStore, type GooniFace } from "../stores/useGooniFaceStore";
 import { GOONI_THEMES, GOONI_THEME_LABELS, THEME_PALETTES, useGooniThemeStore, type GooniTheme } from "../stores/useGooniThemeStore";
+import { GOONI_MASCOT_TYPES, GOONI_MASCOT_LABELS, useGooniMascotTypeStore, type GooniMascotType } from "../stores/useGooniMascotTypeStore";
 import { GooniFacePreview } from "./GooniMascot";
 
 interface SettingsModalProps {
@@ -13,6 +14,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const setFace = useGooniFaceStore((s) => s.setFace);
   const selectedTheme = useGooniThemeStore((s) => s.theme);
   const setTheme = useGooniThemeStore((s) => s.setTheme);
+  const selectedMascotType = useGooniMascotTypeStore((s) => s.type);
+  const setMascotType = useGooniMascotTypeStore((s) => s.setType);
 
   useEffect(() => {
     if (!open) return;
@@ -137,6 +140,37 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   }}>
                     {GOONI_THEME_LABELS[t]}
                   </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section style={{ marginBottom: 22 }}>
+          <div style={{
+            fontSize: 11, fontWeight: 600, color: "#8E8E93",
+            letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12,
+          }}>
+            mascot style
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {GOONI_MASCOT_TYPES.map((t: GooniMascotType) => {
+              const selected = selectedMascotType === t;
+              return (
+                <button
+                  key={t}
+                  onClick={() => setMascotType(t)}
+                  style={{
+                    flex: 1, padding: "8px 12px", borderRadius: 8,
+                    border: `1.5px solid ${selected ? "#1C1C1E" : "rgba(0,0,0,0.1)"}`,
+                    background: selected ? "rgba(0,0,0,0.04)" : "transparent",
+                    cursor: "pointer", fontSize: 13, fontWeight: selected ? 600 : 500,
+                    color: "#1C1C1E", textAlign: "center",
+                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                    transition: "border-color 0.12s, background 0.12s",
+                  }}
+                >
+                  {GOONI_MASCOT_LABELS[t]}
                 </button>
               );
             })}

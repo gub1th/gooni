@@ -106,4 +106,20 @@ class TodoItem(Base):
     sort_order = Column(Integer, default=0, nullable=False)
 
 
+class TodoNote(Base):
+    """Link between a TodoItem and a Note. Kept narrow (not a general
+    entity-links system) so queries stay typed: `relation_type` is a small
+    enum of concrete relationships. Today only "plan" is used — the note
+    spawned when the user clicks the Plan button on a todo.
+    """
+
+    __tablename__ = "todo_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    todo_id = Column(Integer, ForeignKey("todo_items.id"), nullable=False, index=True)
+    note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
+    relation_type = Column(String, nullable=False, default="plan")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 

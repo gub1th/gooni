@@ -112,50 +112,9 @@ function useEditorStyles() {
       .gooni-note-editor table .selectedCell {
         background: rgba(0,122,255,0.08);
       }
-      /* Warm-yellow pointer-tracking glow on the embedded quick-note placeholder.
-         Uses @property so CSS can smoothly transition the custom properties —
-         the glow eases toward the pointer instead of snapping 1:1, which makes the
-         light feel like it has some inertia rather than being mechanical. */
-      @property --glow-x {
-        syntax: "<length>";
-        inherits: true;
-        initial-value: 200px;
-      }
-      @property --glow-y {
-        syntax: "<length>";
-        inherits: true;
-        initial-value: 60px;
-      }
-      .gooni-note-glow {
-        transition: --glow-x 0.28s cubic-bezier(0.22, 1, 0.36, 1),
-                    --glow-y 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-      }
-      .gooni-note-glow::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        border-radius: inherit;
-        background: radial-gradient(170px circle at var(--glow-x) var(--glow-y),
-                      rgba(255, 196, 82, 0.30),
-                      rgba(255, 196, 82, 0.10) 42%,
-                      transparent 75%);
-        opacity: 0;
-        transition: opacity 0.25s ease-out;
-        pointer-events: none;
-        z-index: 0;
-      }
-      /* Slow, subtle breathing on hover — soft oscillation of opacity so the light
-         feels alive even when the pointer is still. */
-      @keyframes gooni-glow-breathe {
-        0%, 100% { opacity: 0.88; }
-        50%      { opacity: 1; }
-      }
-      .gooni-note-glow:hover::before {
-        opacity: 1;
-        animation: gooni-glow-breathe 2.6s ease-in-out infinite;
-      }
-      /* While the user is actually typing, keep the surface quiet. */
-      .gooni-note-glow:focus-within::before { opacity: 0; animation: none; }
+      /* (Hover glow removed — the warm-yellow pointer-tracking light on the
+         embedded quick-note input was too busy. Class stays on the element
+         for layout-ordering purposes but has no visual effect now.) */
     `;
   }, []);
 }
@@ -236,9 +195,16 @@ function FormatToolbar({ editor }: { editor: Editor | null }) {
 interface NoteEditorProps {
   variant?: Variant;
   onSubmitted?: (note: ApiNote | null, buttonRect: DOMRect | null) => void;
+  // When set in embedded mode, the submit path patches THIS note's content
+  // instead of creating a new one. Used by the Plan-from-todo flow where
+  // the plan note already exists on the backend.
+  submitToNoteId?: number;
+  // Fires when the editor's empty state changes — lets parents react to
+  // "user started typing" without reading editor internals.
+  onEmptyChange?: (empty: boolean) => void;
 }
 
-export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = {}) {
+export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEmptyChange }: NoteEditorProps = {}) {
   useEditorStyles();
   const embedded = variant === "embedded";
 
@@ -395,6 +361,7 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
         bodyRef.current = editor.getHTML();
         hasChanges.current = true;
         setEditorEmpty(editor.isEmpty);
+        onEmptyChange?.(editor.isEmpty);
         // Embedded quick-note is ephemeral — no debounced save. Everything persists on submit.
         if (!embedded) scheduleSave();
       },
@@ -430,7 +397,20 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
     const contentToSave = bodyRef.current;
     let savedNote: ApiNote | null = null;
 
-    if (embedded && !activeNoteId) {
+    if (embedded && submitToNoteId) {
+      // Plan-from-todo path: the note already exists (title was set by
+      // POST /todos/{id}/plan). We only need to PATCH in the body content.
+      try {
+        savedNote = await apiPatchNote(submitToNoteId, { content: contentToSave });
+      } catch {
+        // silent
+      }
+      editor.commands.clearContent();
+      bodyRef.current = "";
+      hasChanges.current = false;
+      setEditorEmpty(true);
+      onEmptyChange?.(true);
+    } else if (embedded && !activeNoteId) {
       // Ephemeral quick-note path: create the note server-side NOW with the final content.
       try {
         savedNote = await apiCreateNote("general", { content: contentToSave });
@@ -442,6 +422,7 @@ export function NoteEditor({ variant = "full", onSubmitted }: NoteEditorProps = 
       bodyRef.current = "";
       hasChanges.current = false;
       setEditorEmpty(true);
+      onEmptyChange?.(true);
       editor.commands.focus("end");
     } else if (activeNoteId && activeNoteId > 0) {
       // Existing full-variant / already-created path.
