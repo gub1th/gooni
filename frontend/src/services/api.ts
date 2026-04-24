@@ -199,6 +199,54 @@ export async function fetchNotesGraph(): Promise<{ nodes: GraphNode[]; edges: Gr
   return res.json();
 }
 
+// ── Google Calendar integration ─────────────────────────────────────────────────
+
+export interface GoogleCalendarStatus {
+  configured: boolean;     // env vars set on backend
+  connected: boolean;      // user has active token row
+  account_email: string | null;
+}
+export async function fetchCalendarStatus(): Promise<GoogleCalendarStatus> {
+  const res = await apiFetch(`${BASE}/auth/google/status`);
+  if (!res.ok) throw new Error("Failed to fetch calendar status");
+  return res.json();
+}
+export async function startCalendarOAuth(): Promise<{ authorize_url: string }> {
+  const res = await apiFetch(`${BASE}/auth/google/start`);
+  if (!res.ok) throw new Error("Calendar OAuth not configured on backend");
+  return res.json();
+}
+export async function disconnectCalendar(): Promise<void> {
+  const res = await apiFetch(`${BASE}/auth/google`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to disconnect calendar");
+}
+
+export interface CalendarEvent {
+  id: string;
+  html_link: string;
+  summary: string;
+  start: { dateTime?: string; date?: string };
+  end: { dateTime?: string; date?: string };
+}
+export async function createCalendarEvent(body: {
+  summary: string;
+  start_iso: string;
+  end_iso: string;
+  description?: string;
+  time_zone?: string;
+}): Promise<CalendarEvent> {
+  const res = await apiFetch(`${BASE}/calendar/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Failed to create event: ${msg || res.status}`);
+  }
+  return res.json();
+}
+
 export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: number[] }> {
   const res = await apiFetch(`${BASE}/notes/cleanup`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to clean up notes");

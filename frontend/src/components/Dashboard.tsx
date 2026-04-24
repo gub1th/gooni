@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   fetchDashboardStats, fetchGooniTake,
   fetchTodos, createTodo, updateTodo, deleteTodo, reorderTodos, createTodoPlan,
+  fetchCalendarStatus, createCalendarEvent,
   type ApiNote, type ApiTodo, type DashboardStats,
 } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -644,7 +645,7 @@ function PlanWrapper({
       )}
 
       {showContinue && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={onContinue}
             style={{
@@ -656,8 +657,188 @@ function PlanWrapper({
           >
             Open in editor →
           </button>
+          <SchedulePlanButton title={title} noteId={noteId} />
         </div>
       )}
+    </div>
+  );
+}
+
+// ── SchedulePlanButton ────────────────────────────────────────────────────────
+// A small "📅 Schedule" affordance attached to a plan note. Clicking expands
+// inline into a date + start-time + duration form; Enter or Create hits the
+// /calendar/events endpoint. If the user hasn't connected Google Calendar yet,
+// we show a nudge that points them at DevToolsModal.
+
+function roundToNextHalfHour(d: Date): Date {
+  const copy = new Date(d);
+  copy.setMinutes(copy.getMinutes() < 30 ? 30 : 60, 0, 0);
+  return copy;
+}
+
+function toLocalDateInputValue(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function toLocalTimeInputValue(d: Date): string {
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+// Combine a YYYY-MM-DD + HH:MM input pair with the current local TZ offset
+// into an RFC3339 string that Google's Calendar API accepts.
+function localInputsToRFC3339(dateStr: string, timeStr: string): string {
+  const [y, m, d] = dateStr.split("-").map((x) => parseInt(x, 10));
+  const [hh, mm] = timeStr.split(":").map((x) => parseInt(x, 10));
+  const local = new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
+  const tzOffsetMin = -local.getTimezoneOffset(); // positive for east of UTC
+  const sign = tzOffsetMin >= 0 ? "+" : "-";
+  const absMin = Math.abs(tzOffsetMin);
+  const offH = String(Math.floor(absMin / 60)).padStart(2, "0");
+  const offM = String(absMin % 60).padStart(2, "0");
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}T${pad(local.getHours())}:${pad(local.getMinutes())}:00${sign}${offH}:${offM}`;
+}
+
+function SchedulePlanButton({ title, noteId }: { title: string; noteId: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const [status, setStatus] = useState<{ connected: boolean; configured: boolean } | null>(null);
+  const initial = roundToNextHalfHour(new Date(Date.now() + 60 * 60 * 1000)); // 1h from now, rounded
+  const [date, setDate] = useState(toLocalDateInputValue(initial));
+  const [time, setTime] = useState(toLocalTimeInputValue(initial));
+  const [durationMin, setDurationMin] = useState(60);
+  const [creating, setCreating] = useState(false);
+  const [result, setResult] = useState<{ html_link: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!expanded || status) return;
+    fetchCalendarStatus()
+      .then((s) => setStatus({ connected: s.connected, configured: s.configured }))
+      .catch(() => setStatus({ connected: false, configured: false }));
+  }, [expanded, status]);
+
+  async function submit() {
+    setCreating(true);
+    setErr(null);
+    try {
+      const startISO = localInputsToRFC3339(date, time);
+      const startMs = Date.parse(startISO);
+      const endMs = startMs + durationMin * 60 * 1000;
+      const endISO = localInputsToRFC3339(
+        toLocalDateInputValue(new Date(endMs)),
+        toLocalTimeInputValue(new Date(endMs)),
+      );
+      const event = await createCalendarEvent({
+        summary: title,
+        start_iso: startISO,
+        end_iso: endISO,
+        description: `Plan note #${noteId} in Gooni.`,
+        time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+      setResult({ html_link: event.html_link });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  if (!expanded) {
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        style={{
+          background: "transparent", color: "#3C3C43",
+          border: "1px solid rgba(0,0,0,0.12)",
+          borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 500,
+          cursor: "pointer", fontFamily: FONT, letterSpacing: 0.1,
+          display: "flex", alignItems: "center", gap: 5,
+        }}
+      >
+        <span style={{ fontSize: 13 }}>📅</span> Schedule
+      </button>
+    );
+  }
+
+  if (result) {
+    return (
+      <div style={{ fontSize: 12, color: "#2B8C4D", display: "flex", alignItems: "center", gap: 6 }}>
+        ✓ Scheduled —{" "}
+        <a href={result.html_link} target="_blank" rel="noreferrer" style={{ color: "#2B8C4D", textDecoration: "underline" }}>
+          open in Google Calendar
+        </a>
+      </div>
+    );
+  }
+
+  if (status && !status.configured) {
+    return (
+      <div style={{ fontSize: 12, color: "#8E8E93", padding: "6px 0" }}>
+        Calendar not configured. Set env vars on the backend first.
+        <button onClick={() => setExpanded(false)} style={{ marginLeft: 6, background: "transparent", border: "none", color: "#6B6B70", textDecoration: "underline", cursor: "pointer", fontSize: 12 }}>dismiss</button>
+      </div>
+    );
+  }
+
+  if (status && !status.connected) {
+    return (
+      <div style={{ fontSize: 12, color: "#8E8E93", padding: "6px 0" }}>
+        Connect Calendar from <strong>Dev tools</strong> in the sidebar first.
+        <button onClick={() => setExpanded(false)} style={{ marginLeft: 6, background: "transparent", border: "none", color: "#6B6B70", textDecoration: "underline", cursor: "pointer", fontSize: 12 }}>dismiss</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+      padding: "6px 8px", borderRadius: 8, background: "rgba(0,0,0,0.03)",
+      border: "1px solid rgba(0,0,0,0.08)",
+    }}>
+      <input
+        type="date" value={date} onChange={(e) => setDate(e.target.value)}
+        style={{ fontSize: 12.5, border: "none", background: "transparent", fontFamily: FONT, outline: "none" }}
+      />
+      <input
+        type="time" value={time} onChange={(e) => setTime(e.target.value)}
+        style={{ fontSize: 12.5, border: "none", background: "transparent", fontFamily: FONT, outline: "none" }}
+      />
+      <select
+        value={durationMin}
+        onChange={(e) => setDurationMin(parseInt(e.target.value, 10))}
+        style={{ fontSize: 12.5, border: "1px solid rgba(0,0,0,0.1)", borderRadius: 6, padding: "2px 6px", background: "#fff", fontFamily: FONT }}
+      >
+        <option value={30}>30 min</option>
+        <option value={60}>1 hr</option>
+        <option value={90}>1.5 hr</option>
+        <option value={120}>2 hr</option>
+        <option value={180}>3 hr</option>
+      </select>
+      <button
+        onClick={submit}
+        disabled={creating}
+        style={{
+          background: "#1C1C1E", color: "#fff", border: "none",
+          borderRadius: 6, padding: "5px 10px", fontSize: 12, fontWeight: 600,
+          cursor: creating ? "default" : "pointer", fontFamily: FONT,
+          opacity: creating ? 0.6 : 1,
+        }}
+      >
+        {creating ? "adding…" : "create"}
+      </button>
+      <button
+        onClick={() => setExpanded(false)}
+        style={{
+          background: "transparent", color: "#8E8E93", border: "none",
+          padding: "5px 6px", fontSize: 12, cursor: "pointer", fontFamily: FONT,
+        }}
+      >cancel</button>
+      {err && <span style={{ fontSize: 11, color: "#C44", width: "100%" }}>{err}</span>}
     </div>
   );
 }

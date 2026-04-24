@@ -113,6 +113,9 @@ async def auth_middleware(request: Request, call_next):
     if (
         (path.startswith("/public") and request.method == "GET")
         or path == "/auth"
+        # OAuth callback is hit by Google's redirect with no bearer; must be open.
+        # The code value itself is the auth proof. `state` can carry a CSRF token.
+        or path == "/auth/google/callback"
         or path == "/healthz"
         or path.startswith("/assets")
         or path == "/"
@@ -1290,3 +1293,103 @@ def update_public_profile(body: dict, db: Session = Depends(get_db)):
         db.add(profile)
     db.commit()
     return {"ok": True}
+
+
+# ── Google Calendar OAuth + Events ─────────────────────────────────────────────
+# Single-tenant OAuth. See app/services/google_calendar.py for the setup
+# requirements (Cloud Console project, client creds, redirect URIs).
+
+from .services import google_calendar as gcal  # noqa: E402
+
+
+@app.get("/auth/google/start")
+def auth_google_start():
+    """Kick off the OAuth flow. Returns the URL the frontend should
+    window.open() — we return JSON instead of 302 so the frontend keeps
+    control (shows a spinner, knows if env vars are missing, etc.).
+    """
+    if not gcal.is_configured():
+        raise HTTPException(status_code=503, detail="Google OAuth env vars not set")
+    return {"authorize_url": gcal.build_authorize_url()}
+
+
+@app.get("/auth/google/callback")
+def auth_google_callback(code: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
+    """Google redirects the user here with ?code=... — we exchange it for
+    tokens, stash them, and redirect the browser back to the app. The
+    frontend polls /auth/google/status to know connection state.
+    """
+    from fastapi.responses import HTMLResponse
+    if error:
+        return HTMLResponse(f"<p>Google OAuth returned: {error}. You can close this tab.</p>", status_code=400)
+    if not code:
+        return HTMLResponse("<p>Missing code parameter.</p>", status_code=400)
+    try:
+        tokens = gcal.exchange_code_for_tokens(code)
+        info = {}
+        try:
+            info = gcal.fetch_userinfo(tokens.get("access_token", ""))
+        except Exception:
+            pass
+        gcal.save_tokens_from_exchange(db, tokens, account_email=info.get("email"))
+    except Exception as e:
+        return HTMLResponse(f"<p>Token exchange failed: {e}. You can close this tab.</p>", status_code=500)
+    # Auto-close the popup / redirect tab. Include a small inline script so
+    # both flows (popup and full-page redirect) work.
+    return HTMLResponse(
+        """
+        <!doctype html>
+        <meta charset="utf-8">
+        <title>Calendar connected</title>
+        <style>body{font-family:system-ui;padding:40px;color:#1C1C1E;}</style>
+        <p>Google Calendar connected. You can close this tab.</p>
+        <script>
+          try { window.opener && window.opener.postMessage({type:"gooni-oauth-done"}, "*"); } catch(e){}
+          setTimeout(() => { window.close(); }, 600);
+        </script>
+        """,
+        status_code=200,
+    )
+
+
+@app.get("/auth/google/status")
+def auth_google_status(db: Session = Depends(get_db)):
+    return gcal.connection_status(db)
+
+
+@app.delete("/auth/google")
+def auth_google_disconnect(db: Session = Depends(get_db)):
+    disconnected = gcal.disconnect(db)
+    return {"disconnected": disconnected}
+
+
+@app.post("/calendar/events")
+def calendar_create_event(body: dict, db: Session = Depends(get_db)):
+    """Create a Google Calendar event on the user's primary calendar.
+    Body: { summary, start_iso, end_iso, description?, time_zone? }
+    """
+    summary = (body.get("summary") or "").strip()
+    start_iso = body.get("start_iso")
+    end_iso = body.get("end_iso")
+    if not summary or not start_iso or not end_iso:
+        raise HTTPException(status_code=400, detail="summary, start_iso, end_iso are required")
+    try:
+        event = gcal.create_event(
+            db,
+            summary=summary,
+            start_iso=start_iso,
+            end_iso=end_iso,
+            description=body.get("description"),
+            time_zone=body.get("time_zone"),
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Calendar API error: {e}")
+    return {
+        "id": event.get("id"),
+        "html_link": event.get("htmlLink"),
+        "summary": event.get("summary"),
+        "start": event.get("start"),
+        "end": event.get("end"),
+    }
