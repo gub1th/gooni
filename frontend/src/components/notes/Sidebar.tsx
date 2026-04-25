@@ -12,6 +12,7 @@ import {
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
 import { DevToolsModal } from "../DevToolsModal";
+import { SpaceIcon, SPACE_ICON_OPTIONS, lucideIconValue } from "./SpaceIcon";
 
 // Per-item color tints — Tolaria-style subtle hues.
 const ICON_TINT = {
@@ -22,15 +23,6 @@ const ICON_TINT = {
   devTools: "#F43F5E",   // rose
   settings: "#64748B",   // slate
 } as const;
-
-const COMMON_EMOJIS = [
-  "📁","📂","🗂️","📝","📋","📌","📎","🔖",
-  "🏷️","⭐","🌟","💫","🎯","🎨","🎭","💡",
-  "🔑","🔒","🔧","🔨","⚙️","🛠️","💼","🗃️",
-  "📊","📈","📅","🏠","🌐","💻","📱","🎮",
-  "📚","📖","✏️","🖊️","💰","🌱","🌿","🍀",
-  "🔥","❤️","🎵","🏋️","🧠","🚀","⚡","🎁",
-];
 
 interface SpacePopoverProps {
   anchor: { top: number; left: number };
@@ -63,16 +55,16 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: pickerOpen ? 8 : 10 }}>
           <button
             onClick={() => setPickerOpen((o) => !o)}
-            title="Pick emoji"
+            title="Pick icon"
             style={{
               width: 32, height: 32, borderRadius: 6,
               border: `1px solid ${pickerOpen ? "rgba(0,0,0,0.18)" : "rgba(0,0,0,0.1)"}`,
-              background: "#F2F2F7", cursor: "pointer", fontSize: 16,
+              background: "#F2F2F7", cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center",
               flexShrink: 0, outline: "none", transition: "border-color 0.1s",
             }}
           >
-            {emoji || "🗂️"}
+            <SpaceIcon emoji={emoji || null} size={16} color="#475569" />
           </button>
           <input
             ref={nameRef}
@@ -93,25 +85,34 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
 
         {pickerOpen && (
           <div style={{
-            display: "grid", gridTemplateColumns: "repeat(8, 1fr)",
-            gap: 1, marginBottom: 10,
-            padding: "6px 0 2px",
+            display: "grid", gridTemplateColumns: "repeat(6, 1fr)",
+            gap: 2, marginBottom: 10,
+            padding: "8px 0 2px",
             borderTop: "1px solid rgba(0,0,0,0.07)",
           }}>
-            {COMMON_EMOJIS.map((e) => (
-              <button
-                key={e}
-                onClick={() => { onEmojiChange(e); setPickerOpen(false); }}
-                style={{
-                  background: emoji === e ? "rgba(0,0,0,0.08)" : "transparent",
-                  border: "none", borderRadius: 4, cursor: "pointer",
-                  fontSize: 15, padding: "4px 2px",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}
-              >
-                {e}
-              </button>
-            ))}
+            {SPACE_ICON_OPTIONS.map(({ name, Icon }) => {
+              const value = lucideIconValue(name);
+              const selected = emoji === value;
+              return (
+                <button
+                  key={name}
+                  onClick={() => { onEmojiChange(value); setPickerOpen(false); }}
+                  title={name}
+                  style={{
+                    background: selected ? "rgba(15,23,42,0.08)" : "transparent",
+                    border: "none", borderRadius: 6, cursor: "pointer",
+                    height: 28, padding: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    color: selected ? "#0F172A" : "#475569",
+                    transition: "background 0.1s, color 0.1s",
+                  }}
+                  onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.04)"; }}
+                  onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                >
+                  <Icon size={15} strokeWidth={1.8} />
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -496,7 +497,9 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
                   onMouseLeave={(e) => { if (!isSelected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "0"); setDeleteConfirmId(null); }}
                   onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; selectSpace(spaceId); loadNotes(spaceId); onSpaceSelect(); }}
                 >
-                  <span style={{ fontSize: 13, flexShrink: 0 }}>{space.emoji ?? "🗂️"}</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, flexShrink: 0 }}>
+                    <SpaceIcon emoji={space.emoji} size={14} />
+                  </span>
                   <span style={{ flex: 1, fontSize: 13, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {space.name}
                   </span>

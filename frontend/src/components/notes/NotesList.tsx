@@ -3,6 +3,7 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { cleanupEmptyNotes, patchNote, type ApiNote } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
+import { SpaceIcon } from "./SpaceIcon";
 
 // Module-level drag state so Sidebar can read it without prop drilling
 export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
@@ -232,9 +233,7 @@ export function NotesList() {
   });
 
   const currentSpace = isAllNotes ? null : spaces.find((s) => String(s.id) === spaceId);
-  const headerLabel = isAllNotes
-    ? "All Notes"
-    : (currentSpace?.emoji ? `${currentSpace.emoji} ${currentSpace.name}` : currentSpace?.name ?? "Notes");
+  const headerName = isAllNotes ? "All Notes" : (currentSpace?.name ?? "Notes");
 
   // ⌘F / Ctrl-F focuses the search input when the notes pane is visible.
   useEffect(() => {
@@ -303,8 +302,11 @@ export function NotesList() {
     >
       {/* Header */}
       <div style={{ height: 52, padding: "0 10px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 6 }}>
-        <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {headerLabel}
+        <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", whiteSpace: "nowrap" }}>
+          {!isAllNotes && currentSpace && (
+            <SpaceIcon emoji={currentSpace.emoji} size={14} />
+          )}
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{headerName}</span>
         </span>
         {isAllNotes && (
           <button
@@ -355,7 +357,8 @@ export function NotesList() {
             onKeyDown={(e) => { if (e.key === "Escape") { setSearch(""); (e.target as HTMLInputElement).blur(); } }}
             placeholder="Search notes"
             style={{
-              flex: 1, height: 28, padding: "0 26px 0 26px",
+              flex: 1, minWidth: 0, height: 28, padding: "0 26px",
+              boxSizing: "border-box",
               borderRadius: 7, border: "1px solid rgba(0,0,0,0.08)",
               background: "#fff", outline: "none", fontSize: 12.5,
               fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
