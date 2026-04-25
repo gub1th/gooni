@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import re
 import time
@@ -18,10 +19,13 @@ from .db.database import SessionLocal
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
+    Focus,
+    FocusActivity,
     Message,
     Note,
     PublicProfile,
     Space,
+    Suggestion,
     TodoItem,
     TodoNote,
     Visit,
@@ -29,9 +33,99 @@ from .db.models import (  # noqa: F401 — triggers table creation
 from .db.schemas import ChatRequest
 from .llm.client import llm_client
 from .services.conversation_service import conversation_service
+from .services.focus_service import focus_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
+from .services.suggestions_service import suggestions_service
+
+
+def _migrate_focuses_legacy_schema(engine):
+    """Reshape an older `focuses` table (commitment, updated_at) to the new
+    schema (endgoal, status, last_activity_at, embedding). Preserves rows
+    via a backup table — `focuses_legacy_backup` is left in place so the
+    migration is reversible. Idempotent: skips work when schema is already
+    current.
+    """
+    with engine.connect() as conn:
+        existing_tables = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
+        if "focuses" not in existing_tables:
+            return
+        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(focuses)"))]
+        if "endgoal" in cols:
+            return  # already on new schema
+        if "commitment" not in cols:
+            return  # unknown legacy shape; bail rather than guess
+
+        rows = list(
+            conn.execute(
+                text(
+                    "SELECT id, name, commitment, due_date, created_at "
+                    "FROM focuses"
+                )
+            )
+        )
+        # Backup the legacy table verbatim before dropping. Idempotent guard:
+        # only create the backup if it doesn't already exist.
+        if "focuses_legacy_backup" not in existing_tables:
+            conn.execute(
+                text(
+                    "CREATE TABLE focuses_legacy_backup AS SELECT * FROM focuses"
+                )
+            )
+            print(f"Migration: backed up {len(rows)} rows to focuses_legacy_backup")
+        conn.execute(text("DROP TABLE focuses"))
+        conn.commit()
+
+        # New table is created by create_all later in the boot sequence.
+        # Re-insertion happens after that step in _backfill_focuses.
+        # Stash rows on the engine for the next phase to read.
+        engine._pending_focus_backfill = [
+            {
+                "id": r[0],
+                "name": r[1],
+                "commitment": r[2],
+                "due_date": r[3],
+                "created_at": r[4],
+            }
+            for r in rows
+        ]
+
+
+def _backfill_focuses(engine):
+    """Re-insert legacy focus rows after the new table has been created.
+    Maps commitment → status, uses the focus name as a placeholder endgoal
+    (Daniel can edit later).
+    """
+    rows = getattr(engine, "_pending_focus_backfill", None)
+    if not rows:
+        return
+    with engine.connect() as conn:
+        for r in rows:
+            conn.execute(
+                text(
+                    "INSERT INTO focuses (id, name, endgoal, status, due_date, "
+                    "last_activity_at, embedding, created_at) VALUES "
+                    "(:id, :name, :endgoal, :status, :due_date, NULL, NULL, :created_at)"
+                ),
+                {
+                    "id": r["id"],
+                    "name": r["name"],
+                    # Placeholder — name doubles as endgoal until Daniel fills it in
+                    "endgoal": r["name"],
+                    "status": r["commitment"] or "committed",
+                    "due_date": r["due_date"] or None,
+                    "created_at": r["created_at"],
+                },
+            )
+        conn.commit()
+        print(f"Migration: backfilled {len(rows)} focuses onto new schema")
+    engine._pending_focus_backfill = None
 
 
 def _run_column_migrations(engine):
@@ -53,6 +147,9 @@ def _run_column_migrations(engine):
             ("notes", "embedding", "TEXT"),
             ("notes", "is_public", "INTEGER"),
             ("notes", "is_pinned", "INTEGER"),
+            ("notes", "suggested_questions", "TEXT"),
+            ("conversations", "topic_graph", "TEXT"),
+            ("todo_items", "due_date", "DATETIME"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -77,8 +174,14 @@ def _run_column_migrations(engine):
 Base.metadata.create_all(bind=engine, tables=[Space.__table__])
 # 2. Add space_id to any existing tables that predate this change
 _run_column_migrations(engine)
-# 3. Create remaining tables (they already have space_id in their model definition)
+# 3. Reshape the legacy focuses table if it predates the endgoal/status/embedding
+#    schema. Drops the old table after stashing rows; create_all then makes
+#    the new one, and _backfill_focuses re-inserts on top.
+_migrate_focuses_legacy_schema(engine)
+# 4. Create remaining tables (they already have space_id in their model definition)
 Base.metadata.create_all(bind=engine)
+# 5. Restore legacy focus rows onto the new schema (no-op if no migration ran)
+_backfill_focuses(engine)
 
 app = FastAPI()
 
@@ -387,6 +490,7 @@ def _serialize_todo(t: TodoItem) -> dict:
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "completed_at": t.completed_at.isoformat() if t.completed_at else None,
         "sort_order": t.sort_order,
+        "due_date": t.due_date.isoformat() if t.due_date else None,
     }
 
 
@@ -400,11 +504,20 @@ def list_todos(db: Session = Depends(get_db)):
 @app.post("/todos")
 def create_todo(body: dict, db: Session = Depends(get_db)):
     from sqlalchemy import func as sqlfunc
+    from datetime import datetime
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
+    due = body.get("due_date")
+    parsed_due = None
+    if due:
+        try:
+            cleaned = due[:-1] if isinstance(due, str) and due.endswith("Z") else due
+            parsed_due = datetime.fromisoformat(cleaned)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="invalid due_date")
     max_order = db.query(sqlfunc.max(TodoItem.sort_order)).scalar() or 0
-    item = TodoItem(text=text, sort_order=max_order + 1)
+    item = TodoItem(text=text, sort_order=max_order + 1, due_date=parsed_due)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -428,6 +541,20 @@ def update_todo(todo_id: int, body: dict, db: Session = Depends(get_db)):
         item.done = new_done
     if "sort_order" in body:
         item.sort_order = int(body["sort_order"])
+    if "due_date" in body:
+        # Accepts an ISO string (YYYY-MM-DD or full datetime) or null to clear.
+        # Stored as naive UTC midnight to match the date-only semantics of the UI.
+        raw = body["due_date"]
+        if raw is None or raw == "":
+            item.due_date = None
+        else:
+            try:
+                # Strip any trailing Z so fromisoformat is happy on Python <3.11.
+                cleaned = raw[:-1] if isinstance(raw, str) and raw.endswith("Z") else raw
+                parsed = datetime.fromisoformat(cleaned)
+                item.due_date = parsed
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="invalid due_date")
     db.commit()
     db.refresh(item)
     return _serialize_todo(item)
@@ -497,6 +624,205 @@ def list_todo_notes(todo_id: int, db: Session = Depends(get_db)):
             "note": _serialize_note(note),
         })
     return out
+
+
+# ── Focuses ──────────────────────────────────────────────────────────────────
+
+
+def _serialize_focus(f: Focus) -> dict:
+    from datetime import datetime
+    days_since = None
+    if f.last_activity_at:
+        days_since = (datetime.utcnow() - f.last_activity_at).days
+    return {
+        "id": f.id,
+        "name": f.name,
+        "endgoal": f.endgoal,
+        "status": f.status,
+        "due_date": f.due_date.isoformat() if f.due_date else None,
+        "last_activity_at": (
+            f.last_activity_at.isoformat() if f.last_activity_at else None
+        ),
+        "days_since_activity": days_since,
+        "created_at": f.created_at.isoformat() if f.created_at else None,
+    }
+
+
+def _parse_due_date(raw):
+    from datetime import datetime
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail="invalid due_date")
+    cleaned = raw[:-1] if raw.endswith("Z") else raw
+    try:
+        return datetime.fromisoformat(cleaned)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid due_date")
+
+
+@app.get("/focuses")
+def list_focuses(
+    include_done: bool = False,
+    include_someday: bool = True,
+    db: Session = Depends(get_db),
+):
+    statuses = ["committed", "pending"]
+    if include_someday:
+        statuses.append("someday")
+    if include_done:
+        statuses.append("done")
+    return [_serialize_focus(f) for f in focus_service.list_focuses(db, statuses)]
+
+
+@app.get("/focuses/stale")
+def list_stale_focuses(days: int = 5, db: Session = Depends(get_db)):
+    return [_serialize_focus(f) for f in focus_service.stale_focuses(db, days=days)]
+
+
+@app.post("/focuses")
+def create_focus(body: dict, db: Session = Depends(get_db)):
+    name = (body.get("name") or "").strip()
+    endgoal = (body.get("endgoal") or "").strip()
+    if not name or not endgoal:
+        raise HTTPException(status_code=400, detail="name and endgoal required")
+    status = (body.get("status") or "committed").strip()
+    if status not in ("committed", "pending", "someday", "done"):
+        raise HTTPException(status_code=400, detail="invalid status")
+    due_date = _parse_due_date(body.get("due_date"))
+    focus = focus_service.create_focus(
+        db, name=name, endgoal=endgoal, due_date=due_date, status=status
+    )
+    # Mirror to Mem0 so focus is discoverable through normal memory search.
+    try:
+        memory_service.add_memory(f"Daniel's focus: {focus.name} — {focus.endgoal}")
+    except Exception as e:
+        print(f"Mem0 mirror (create) failed: {e}")
+    return _serialize_focus(focus)
+
+
+@app.patch("/focuses/{focus_id}")
+def update_focus(focus_id: int, body: dict, db: Session = Depends(get_db)):
+    patch = {}
+    if "name" in body:
+        name = (body["name"] or "").strip()
+        if name:
+            patch["name"] = name
+    if "endgoal" in body:
+        endgoal = (body["endgoal"] or "").strip()
+        if endgoal:
+            patch["endgoal"] = endgoal
+    if "status" in body:
+        status = (body["status"] or "").strip()
+        if status not in ("committed", "pending", "someday", "done"):
+            raise HTTPException(status_code=400, detail="invalid status")
+        patch["status"] = status
+    if "due_date" in body:
+        patch["due_date"] = _parse_due_date(body["due_date"])
+
+    prior = focus_service.get_focus(db, focus_id)
+    if not prior:
+        raise HTTPException(status_code=404, detail="focus not found")
+    prior_status = prior.status
+
+    focus = focus_service.update_focus(db, focus_id, **patch)
+    if not focus:
+        raise HTTPException(status_code=404, detail="focus not found")
+
+    try:
+        if patch.get("status") == "done" and prior_status != "done":
+            memory_service.add_memory(
+                f"Daniel completed his focus: {focus.name}"
+            )
+        elif "name" in patch or "endgoal" in patch:
+            memory_service.add_memory(
+                f"Daniel's focus: {focus.name} — {focus.endgoal}"
+            )
+    except Exception as e:
+        print(f"Mem0 mirror (update) failed: {e}")
+
+    return _serialize_focus(focus)
+
+
+@app.delete("/focuses/{focus_id}")
+def delete_focus(focus_id: int, db: Session = Depends(get_db)):
+    if not focus_service.delete_focus(db, focus_id):
+        raise HTTPException(status_code=404, detail="focus not found")
+    return {"ok": True}
+
+
+@app.post("/focuses/{focus_id}/heartbeat")
+def heartbeat_focus(focus_id: int, db: Session = Depends(get_db)):
+    activity = focus_service.mark_activity(
+        db, focus_id, source_type="manual_heartbeat"
+    )
+    if not activity:
+        raise HTTPException(status_code=404, detail="focus not found")
+    focus = focus_service.get_focus(db, focus_id)
+    return _serialize_focus(focus)
+
+
+@app.get("/focuses/{focus_id}/activity")
+def list_focus_activity(
+    focus_id: int, days: int = 30, db: Session = Depends(get_db)
+):
+    from datetime import datetime, timedelta
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    rows = (
+        db.query(FocusActivity)
+        .filter(
+            FocusActivity.focus_id == focus_id,
+            FocusActivity.created_at >= cutoff,
+        )
+        .order_by(FocusActivity.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "source_type": r.source_type,
+            "source_id": r.source_id,
+            "similarity": r.similarity,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
+# ── Suggestions ──────────────────────────────────────────────────────────────
+
+
+def _serialize_suggestion(s: Suggestion) -> dict:
+    return {
+        "id": s.id,
+        "category": s.category,
+        "title": s.title,
+        "body": s.body,
+        "source_url": s.source_url,
+        "generated_at": s.generated_at.isoformat() if s.generated_at else None,
+    }
+
+
+@app.get("/suggestions/today")
+def get_suggestions_today(db: Session = Depends(get_db)):
+    grouped = suggestions_service.today(db)
+    return {
+        "discovery": [_serialize_suggestion(s) for s in grouped.get("discovery", [])],
+        "whimsy": [_serialize_suggestion(s) for s in grouped.get("whimsy", [])],
+    }
+
+
+@app.post("/suggestions/{suggestion_id}/dismiss")
+def dismiss_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
+    if not suggestions_service.dismiss(db, suggestion_id):
+        raise HTTPException(status_code=404, detail="suggestion not found")
+    return {"ok": True}
+
+
+@app.post("/suggestions/refresh")
+def refresh_suggestions(db: Session = Depends(get_db)):
+    created = suggestions_service.regenerate(db)
+    return {"created": len(created)}
 
 
 @app.post("/auth")
@@ -821,6 +1147,8 @@ def cleanup_empty_notes(db: Session = Depends(get_db)):
 def embed_note(note_id: int, db: Session = Depends(get_db)):
     """Generate embedding for a note and check for space suggestion.
     Called on blur (not on every save) to avoid wasteful API calls.
+    Also runs the focus-activity matcher so focuses get heartbeats from
+    note writing without an explicit FK linkage.
     """
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
@@ -828,7 +1156,74 @@ def embed_note(note_id: int, db: Session = Depends(get_db)):
     note_service.update_embedding(note_id)  # opens/closes its own session
     db.expire_all()  # invalidate cache so suggest_space sees fresh embedding
     suggestion = note_service.suggest_space(note_id, db)
+
+    # Implicit focus linkage: cosine-compare the note's fresh embedding
+    # against active focus embeddings. Above-threshold matches log a
+    # FocusActivity row + bump last_activity_at. Failures are non-fatal
+    # since this is a side-effect, not the endpoint's contract.
+    fresh = db.query(Note).filter(Note.id == note_id).first()
+    if fresh and fresh.embedding:
+        try:
+            vec = json.loads(fresh.embedding)
+            for fid, sim in focus_service.match_vec_to_focuses(db, vec):
+                focus_service.mark_activity(
+                    db, fid, source_type="note", source_id=note_id, similarity=sim,
+                )
+        except Exception as e:
+            print(f"focus-activity match (embed_note) failed: {e}")
+
     return {"ok": True, **suggestion}
+
+
+@app.post("/notes/{note_id}/suggest-questions")
+def suggest_note_questions(note_id: int, db: Session = Depends(get_db)):
+    """Generate 3-5 probing questions Gooni would ask about this note. Cached
+    on the note row keyed by content hash — so re-opening the editor doesn't
+    re-fire the LLM call. Bails empty for short or empty notes.
+    """
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    plaintext = note_service._strip_html(note.content or "")
+    title = (note.title or "").strip()
+    raw = (title + "\n" + plaintext).strip()
+    # Below ~200 chars there isn't enough surface for sharp questions.
+    if len(plaintext) < 200:
+        return {"questions": []}
+
+    content_hash = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    if note.suggested_questions:
+        try:
+            cached = json.loads(note.suggested_questions)
+            if cached.get("hash") == content_hash:
+                return {"questions": cached.get("questions") or []}
+        except json.JSONDecodeError:
+            pass  # corrupt cache → regenerate
+
+    prompt = (
+        "Daniel just wrote this note. Generate 3-5 probing questions a sharp "
+        "friend would ask to push his thinking — questions that surface "
+        "assumptions, force tradeoffs, or reveal what's missing. One per "
+        "line. No numbering, no preamble, no quotes around questions.\n\n"
+        f"Title: {title}\n\nContent: {plaintext[:3000]}"
+    )
+    try:
+        raw_out = llm_client.generate_simple_completion(prompt, max_tokens=300)
+    except Exception as e:
+        print(f"suggest-questions LLM error: {e}")
+        return {"questions": []}
+
+    questions = [
+        line.strip().lstrip("-•0123456789. ").strip()
+        for line in (raw_out or "").splitlines()
+        if line.strip()
+    ]
+    questions = [q for q in questions if len(q) > 10][:5]
+
+    note.suggested_questions = json.dumps({"hash": content_hash, "questions": questions})
+    db.commit()
+    return {"questions": questions}
 
 
 @app.post("/notes/{note_id}/touch")
@@ -995,6 +1390,13 @@ def send_conversation_message(
         "intention": usage.get("intention") or "",
         "tools_used": usage.get("tools_used") or [],
     }
+
+
+@app.get("/conversations/{conversation_id}/graph")
+def get_conversation_graph(conversation_id: int, db: Session = Depends(get_db)):
+    """Topic graph for the chat-flow visualization in GooniPanel. Cached on
+    the conversation row by message count — a new turn invalidates."""
+    return conversation_service.build_topic_graph(conversation_id, db)
 
 
 @app.get("/health")

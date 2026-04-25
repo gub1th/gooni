@@ -714,6 +714,161 @@ def delete_todo(match: str) -> str:
     return f"deleted: {t['text']}"
 
 
+def _fetch_focuses(include_done: bool = False, include_someday: bool = True) -> list[dict]:
+    params = {}
+    if include_done:
+        params["include_done"] = "true"
+    if not include_someday:
+        params["include_someday"] = "false"
+    resp = _session.get(f"{BASE_URL}/focuses", params=params, timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _find_focus(match: str) -> tuple[dict | None, str | None]:
+    """Case-insensitive substring match on focus name. Returns (focus, error_or_None)."""
+    match_l = match.lower().strip()
+    if not match_l:
+        return None, "(empty match string)"
+    focuses = _fetch_focuses(include_done=True)
+    candidates = [f for f in focuses if match_l in (f["name"] or "").lower()]
+    if not candidates:
+        return None, f"(no focus matching '{match}')"
+    # Prefer shortest name (most specific match)
+    candidates.sort(key=lambda f: len(f["name"]))
+    return candidates[0], None
+
+
+@mcp.tool()
+def list_focuses(include_done: bool = False, include_someday: bool = True, limit: int = 20) -> str:
+    """List Daniel's focuses — long-running things he's committed to or considering.
+
+    Args:
+        include_done: include completed focuses (default False)
+        include_someday: include 'someday/maybe' focuses (default True)
+        limit: max to return (default 20)
+    """
+    focuses = _fetch_focuses(include_done=include_done, include_someday=include_someday)
+    focuses = focuses[:limit]
+    if not focuses:
+        return "(no focuses)"
+    lines = []
+    for f in focuses:
+        days = f.get("days_since_activity")
+        if days is None:
+            heat = "no activity yet"
+        elif days == 0:
+            heat = "touched today"
+        else:
+            heat = f"{days}d ago"
+        due = f" (due {f['due_date'][:10]})" if f.get("due_date") else ""
+        lines.append(
+            f"#{f['id']} [{f['status']}] {f['name']}{due} — {heat}\n    → {f['endgoal']}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_focus(
+    name: str,
+    endgoal: str,
+    due_date: str = None,
+    status: str = "committed",
+) -> str:
+    """Create a new focus on Daniel's dashboard.
+
+    Args:
+        name: short label (e.g. "Ship Gooni v2")
+        endgoal: what 'done' looks like — long enough that Gooni knows when Daniel's there
+        due_date: optional ISO date (YYYY-MM-DD) or full datetime
+        status: 'committed' | 'pending' | 'someday' (default 'committed')
+    """
+    name = (name or "").strip()
+    endgoal = (endgoal or "").strip()
+    if not name or not endgoal:
+        return "(name and endgoal required)"
+    if status not in ("committed", "pending", "someday", "done"):
+        return f"(invalid status '{status}'; use committed/pending/someday/done)"
+    body = {"name": name, "endgoal": endgoal, "status": status}
+    if due_date:
+        body["due_date"] = due_date
+    resp = _session.post(f"{BASE_URL}/focuses", json=body, timeout=10)
+    resp.raise_for_status()
+    f = resp.json()
+    return f"added focus #{f['id']}: {f['name']} ({f['status']})"
+
+
+@mcp.tool()
+def update_focus_status(match: str, status: str) -> str:
+    """Change a focus's status (committed/pending/someday/done) by name match.
+
+    Args:
+        match: text contained in the focus name (case-insensitive substring)
+        status: 'committed' | 'pending' | 'someday' | 'done'
+    """
+    if status not in ("committed", "pending", "someday", "done"):
+        return f"(invalid status '{status}')"
+    f, err = _find_focus(match)
+    if err:
+        return err
+    resp = _session.patch(
+        f"{BASE_URL}/focuses/{f['id']}", json={"status": status}, timeout=10
+    )
+    resp.raise_for_status()
+    return f"[{status}] {f['name']}"
+
+
+@mcp.tool()
+def mark_focus_activity(match: str) -> str:
+    """Record a manual heartbeat on a focus — bumps last_activity_at to now.
+    Use when Daniel mentions making progress on something but no note/message
+    captured it (e.g. real-world action).
+
+    Args:
+        match: text contained in the focus name
+    """
+    f, err = _find_focus(match)
+    if err:
+        return err
+    resp = _session.post(f"{BASE_URL}/focuses/{f['id']}/heartbeat", timeout=10)
+    resp.raise_for_status()
+    updated = resp.json()
+    return f"♥ {updated['name']} — touched today"
+
+
+@mcp.tool()
+def read_focus(match: str) -> str:
+    """Read a focus's full details + recent activity log.
+
+    Args:
+        match: text contained in the focus name
+    """
+    f, err = _find_focus(match)
+    if err:
+        return err
+    resp = _session.get(f"{BASE_URL}/focuses/{f['id']}/activity", timeout=10)
+    resp.raise_for_status()
+    activity = resp.json()
+    lines = [
+        f"#{f['id']} {f['name']} ({f['status']})",
+        f"  Endgoal: {f['endgoal']}",
+    ]
+    if f.get("due_date"):
+        lines.append(f"  Due: {f['due_date'][:10]}")
+    days = f.get("days_since_activity")
+    if days is None:
+        lines.append("  Activity: no heartbeats yet")
+    else:
+        lines.append(f"  Last touched: {days}d ago")
+    if activity:
+        lines.append(f"  Recent activity ({len(activity)} events):")
+        for a in activity[:10]:
+            ts = a.get("created_at", "")[:16].replace("T", " ")
+            sim = f" sim={a['similarity']:.2f}" if a.get("similarity") else ""
+            lines.append(f"    - {ts} via {a['source_type']}{sim}")
+    return "\n".join(lines)
+
+
 @mcp.tool()
 def list_recent_notes(limit: int = 10) -> str:
     """List the most recently updated notes across all spaces.

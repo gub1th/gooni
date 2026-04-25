@@ -2,7 +2,9 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
+import { useFocusesStore } from "../stores/useFocusesStore";
 import { ModelSelector } from "./ModelSelector";
+import { ChatGraphView } from "./chat/ChatGraphView";
 
 interface GooniPanelProps {
   fullscreen?: boolean;
@@ -10,9 +12,17 @@ interface GooniPanelProps {
 
 export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
   const { toggle, width, setWidth } = useGooniStore();
-  const { messages, sending, send } = useConversationsStore();
+  const { messages, sending, send, activeId } = useConversationsStore();
+  const [viewMode, setViewMode] = useState<"chat" | "graph">("chat");
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
+  const { staleFocuses, fetchStale } = useFocusesStore();
   const [input, setInput] = useState("");
+
+  // Pull stale focuses lazily so the empty-state can offer a check-in starter.
+  // Cheap fetch — 6-row table at most. Only runs when the panel is mounted.
+  useEffect(() => {
+    fetchStale();
+  }, [fetchStale]);
   const [expandedIntentions, setExpandedIntentions] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
@@ -131,6 +141,35 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
         >
           Gooni
         </span>
+
+        {/* View toggle — only relevant once a conversation has enough turns
+            to show topic shifts. Hidden in fullscreen mode (different
+            ergonomics) and when no active conversation exists. */}
+        {!fullscreen && activeId !== null && messages.length > 6 && (
+          <div style={{
+            display: "flex", gap: 0,
+            border: "1px solid rgba(0,0,0,0.08)", borderRadius: 6,
+            overflow: "hidden", marginRight: 8,
+          }}>
+            {(["chat", "graph"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setViewMode(m)}
+                style={{
+                  fontSize: 11, padding: "3px 9px",
+                  background: viewMode === m ? "#1C1C1E" : "#fff",
+                  color: viewMode === m ? "#fff" : "#6E6E73",
+                  border: "none", cursor: "pointer",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                  fontWeight: 500,
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
+
         {!fullscreen && (
           <button
             onClick={toggle}
@@ -158,7 +197,15 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
         )}
       </div>
 
+      {/* Graph view — renders in place of messages when toggled on. */}
+      {viewMode === "graph" && activeId !== null && (
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          <ChatGraphView conversationId={activeId} />
+        </div>
+      )}
+
       {/* Messages */}
+      {viewMode === "chat" && (
       <div
         style={{
           flex: 1,
@@ -169,21 +216,59 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
           gap: 8,
         }}
       >
-        {messages.length === 0 && (
-          <div
-            style={{
-              color: "#AEAEB2",
-              fontSize: 13,
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-              textAlign: "center",
-              marginTop: fullscreen ? 80 : 32,
-            }}
-          >
-            {fullscreen
-              ? "Ask Gooni anything, or open a note to get feedback on it."
-              : "Ask Gooni anything. Your active note is shared as context."}
-          </div>
-        )}
+        {messages.length === 0 && (() => {
+          // Stale-focus check-in only fires when there's no active note —
+          // a note in view should keep priority over a focus nudge.
+          const checkin = !activeNote && staleFocuses.length > 0 ? staleFocuses[0] : null;
+          if (checkin) {
+            const days = checkin.days_since_activity;
+            const heat =
+              days === null ? "you haven't started yet"
+              : days === 1 ? "1 day"
+              : `${days} days`;
+            return (
+              <div style={{
+                marginTop: fullscreen ? 80 : 32,
+                padding: "0 4px",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                textAlign: "center",
+              }}>
+                <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.55 }}>
+                  Hey — it's been <strong>{heat}</strong> since we touched <strong>{checkin.name}</strong>.
+                </div>
+                <button
+                  onClick={() => {
+                    const seed = `Let's talk about "${checkin.name}". What's the latest?`;
+                    send(seed).catch(console.error);
+                  }}
+                  style={{
+                    marginTop: 14,
+                    background: "#1C1C1E", color: "#fff",
+                    border: "none", borderRadius: 999, padding: "7px 14px",
+                    fontFamily: "inherit", fontSize: 12, fontWeight: 500, cursor: "pointer",
+                  }}
+                >
+                  Talk about it
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div
+              style={{
+                color: "#AEAEB2",
+                fontSize: 13,
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                textAlign: "center",
+                marginTop: fullscreen ? 80 : 32,
+              }}
+            >
+              {fullscreen
+                ? "Ask Gooni anything, or open a note to get feedback on it."
+                : "Ask Gooni anything. Your active note is shared as context."}
+            </div>
+          );
+        })()}
         {messages.map((m) => (
           <div
             key={m.id}
@@ -272,6 +357,7 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
         )}
         <div ref={messagesEndRef} />
       </div>
+      )}
 
       {/* Input area */}
       <div

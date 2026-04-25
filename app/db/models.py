@@ -4,6 +4,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -39,6 +40,10 @@ class Conversation(Base):
         DateTime(timezone=True), nullable=True
     )  # for session lookup
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Cached topic-graph payload for the visualization toggle in GooniPanel.
+    # JSON: {"message_count": int, "nodes": [...], "edges": [...]}.
+    # Invalidated when message_count drifts from the cached value.
+    topic_graph = Column(Text, nullable=True)
 
 
 class Message(Base):
@@ -66,6 +71,11 @@ class Note(Base):
     embedding = Column(Text, nullable=True)  # JSON-serialised float list
     is_public = Column(Boolean, default=False, nullable=False)
     is_pinned = Column(Boolean, default=False, nullable=False)
+    # JSON-encoded list of probing questions Gooni would ask, plus the hash
+    # of the content they were generated from. Schema:
+    #   {"hash": "<sha1>", "questions": ["...", "..."]}
+    # Cached so opening the note doesn't re-fire the LLM call.
+    suggested_questions = Column(Text, nullable=True)
 
 
 class PublicProfile(Base):
@@ -104,6 +114,7 @@ class TodoItem(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
+    due_date = Column(DateTime, nullable=True)
 
 
 class TodoNote(Base):
@@ -120,6 +131,68 @@ class TodoNote(Base):
     note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
     relation_type = Column(String, nullable=False, default="plan")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Focus(Base):
+    """A long-running thing Daniel is working on. Has an endgoal description
+    so Gooni knows what 'done' means. `last_activity_at` is rolled forward
+    by the implicit matcher (notes/messages that mention the focus) and by
+    explicit heartbeats. Status is a small string enum, consistent with
+    other models in this codebase.
+    """
+
+    __tablename__ = "focuses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(Text, nullable=False)
+    endgoal = Column(Text, nullable=False)
+    # 'committed' | 'pending' | 'someday' | 'done'
+    status = Column(String, nullable=False, default="committed")
+    due_date = Column(DateTime, nullable=True)
+    last_activity_at = Column(DateTime, nullable=True)
+    # Cached embedding of name + endgoal so the matcher doesn't recompute
+    # on every note save. Refreshed on create/update.
+    embedding = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class FocusActivity(Base):
+    """Append-only log of moments where a note or message touched a focus —
+    either matched by the implicit similarity matcher or via an explicit
+    heartbeat. Powers the 'haven't touched X in 5 days' check-in.
+    """
+
+    __tablename__ = "focus_activities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=False, index=True)
+    # 'note' | 'message' | 'manual_heartbeat'
+    source_type = Column(String, nullable=False)
+    source_id = Column(Integer, nullable=True)
+    similarity = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class Suggestion(Base):
+    """A daily-refreshed item Gooni surfaces to nudge Daniel out of his ruts.
+    Two categories so far:
+      'discovery' — intellectual: startups, books, articles, ideas to explore
+      'whimsy'    — experiential: try a new restaurant, talk to a stranger,
+                    do something out of comfort zone
+    Generated in batches of 6 (3+3); refreshed at most once per 24h. The
+    `dismissed` flag lets Daniel hide an item without losing the row, so
+    we know not to regenerate it next cycle.
+    """
+
+    __tablename__ = "suggestions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String, nullable=False, index=True)  # 'discovery'|'whimsy'
+    title = Column(Text, nullable=False)
+    body = Column(Text, nullable=False)
+    source_url = Column(Text, nullable=True)
+    generated_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    dismissed = Column(Boolean, default=False, nullable=False)
 
 
 class GoogleOAuthToken(Base):

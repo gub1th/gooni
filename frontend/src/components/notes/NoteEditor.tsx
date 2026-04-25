@@ -7,12 +7,17 @@ import { TaskItem } from "@tiptap/extension-task-item";
 import { TaskList } from "@tiptap/extension-task-list";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { EditorContent, useEditor } from "@tiptap/react";
-import type { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import {
+  Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, type ApiNote, type SpaceSuggestion } from "../../services/api";
+
+import { SlashCommand } from "./slash-command";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, suggestNoteQuestions, type ApiNote, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
+import { useConversationsStore } from "../../stores/useConversationsStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { GooniLogo } from "../GooniLogo";
@@ -29,18 +34,42 @@ function useEditorStyles() {
     }
     style.textContent = `
       .gooni-note-editor { outline: none; }
-      .gooni-note-editor p { margin: 0 0 6px; }
+      .gooni-note-editor p { margin: 0 0 12px; }
+      .gooni-note-editor h1 { font-size: 1.7em; font-weight: 700; line-height: 1.25; margin: 1.4em 0 0.5em; letter-spacing: -0.01em; }
+      .gooni-note-editor h2 { font-size: 1.35em; font-weight: 700; line-height: 1.3; margin: 1.2em 0 0.4em; letter-spacing: -0.005em; }
+      .gooni-note-editor h3 { font-size: 1.15em; font-weight: 600; line-height: 1.35; margin: 1em 0 0.4em; }
+      .gooni-note-editor h1:first-child,
+      .gooni-note-editor h2:first-child,
+      .gooni-note-editor h3:first-child { margin-top: 0; }
+      .gooni-note-editor blockquote { border-left: 3px solid rgba(0,0,0,0.10); padding-left: 14px; color: #475569; margin: 12px 0; }
+      .gooni-note-editor code { background: rgba(15,23,42,0.06); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+      .gooni-note-editor pre { background: #0F172A; color: #F1F5F9; padding: 14px 16px; border-radius: 8px; margin: 12px 0; overflow-x: auto; }
+      .gooni-note-editor pre code { background: transparent; padding: 0; color: inherit; font-size: 0.92em; }
       .gooni-note-editor ul,
-      .gooni-note-editor ol { padding-left: 20px; margin: 0 0 6px; }
+      .gooni-note-editor ol { padding-left: 22px; margin: 0 0 12px; }
+      .gooni-note-editor li > p { margin: 0 0 4px; }
       .gooni-note-editor.is-empty > p:first-child { position: relative; }
       .gooni-note-editor.is-empty > p:first-child::before {
-        content: "Start writing...";
+        content: "Start writing — press '/' for blocks";
         color: #AEAEB2;
         pointer-events: none;
         position: absolute;
         top: 0;
         left: 0;
       }
+      ${import.meta.env.DEV ? `
+      .gooni-note-editor.is-empty > p:first-child::after {
+        content: "[THIS IS DEV]";
+        color: #FF3B30;
+        font-weight: 600;
+        font-size: 0.75em;
+        letter-spacing: 0.5px;
+        pointer-events: none;
+        position: absolute;
+        top: 0.25em;
+        right: 0;
+      }
+      ` : ""}
       .gooni-note-editor img {
         max-width: 100%;
         height: auto;
@@ -145,53 +174,6 @@ function formatShortDate(iso: string | null): string {
 
 type SaveStatus = "idle" | "saving" | "saved";
 
-const TOOLBAR_ITEMS = [
-  { label: "B",   title: "Bold",        cmd: (e: Editor | null) => e!.chain().focus().toggleBold().run(),              active: (e: Editor | null) => e!.isActive("bold"),             style: { fontWeight: 700 } },
-  { label: "I",   title: "Italic",      cmd: (e: Editor | null) => e!.chain().focus().toggleItalic().run(),            active: (e: Editor | null) => e!.isActive("italic"),           style: { fontStyle: "italic" as const } },
-  { label: "S",   title: "Strike",      cmd: (e: Editor | null) => e!.chain().focus().toggleStrike().run(),            active: (e: Editor | null) => e!.isActive("strike"),           style: { textDecoration: "line-through" as const } },
-  null,
-  { label: "H1",  title: "Heading 1",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 1 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 1 }), style: {} },
-  { label: "H2",  title: "Heading 2",   cmd: (e: Editor | null) => e!.chain().focus().toggleHeading({ level: 2 }).run(), active: (e: Editor | null) => e!.isActive("heading", { level: 2 }), style: {} },
-  null,
-  { label: "•",   title: "Bullet list", cmd: (e: Editor | null) => e!.chain().focus().toggleBulletList().run(), active: (e: Editor | null) => e!.isActive("bulletList"), style: {} },
-  { label: "☑",  title: "Task list",   cmd: (e: Editor | null) => e!.chain().focus().toggleTaskList().run(),   active: (e: Editor | null) => e!.isActive("taskList"),   style: {} },
-  null,
-  { label: "<>",  title: "Inline code", cmd: (e: Editor | null) => e!.chain().focus().toggleCode().run(),              active: (e: Editor | null) => e!.isActive("code"),             style: { fontFamily: "monospace", fontSize: "11px" } },
-  { label: "```", title: "Code block",  cmd: (e: Editor | null) => e!.chain().focus().toggleCodeBlock().run(),         active: (e: Editor | null) => e!.isActive("codeBlock"),        style: { fontFamily: "monospace", fontSize: "10px" } },
-  null,
-  { label: "⊞",  title: "Table",       cmd: (e: Editor | null) => e!.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(), active: () => false, style: {} },
-] as const;
-
-function FormatToolbar({ editor }: { editor: Editor | null }) {
-  if (!editor) return null;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 1, marginBottom: 14, paddingBottom: 10, borderBottom: "1px solid rgba(0,0,0,0.06)", flexWrap: "wrap" }}>
-      {TOOLBAR_ITEMS.map((item, i) =>
-        item === null ? (
-          <div key={i} style={{ width: 1, height: 13, background: "rgba(0,0,0,0.1)", margin: "0 3px" }} />
-        ) : (
-          <button
-            key={item.label}
-            title={item.title}
-            className="gooni-toolbar-btn"
-            onMouseDown={(e) => { e.preventDefault(); item.cmd(editor); }}
-            style={{
-              padding: "3px 7px", borderRadius: 5, border: "none",
-              background: item.active(editor) ? "rgba(0,0,0,0.09)" : "transparent",
-              color: item.active(editor) ? "#1C1C1E" : "#636366",
-              fontSize: 12, cursor: "pointer",
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-              ...item.style,
-            }}
-          >
-            {item.label}
-          </button>
-        )
-      )}
-    </div>
-  );
-}
-
 interface NoteEditorProps {
   variant?: Variant;
   onSubmitted?: (note: ApiNote | null, buttonRect: DOMRect | null) => void;
@@ -221,6 +203,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
   const [movePicker, setMovePicker] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [relatedNotes, setRelatedNotes] = useState<ApiNote[]>([]);
+  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
   const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
   const movePickerRef = useRef<HTMLDivElement>(null);
@@ -257,6 +240,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
     setRelatedNotes([]);
     setDeleteConfirm(false);
     setLocalIsPublic(activeNote?.is_public ?? false);
+    setSuggestedQuestions([]);
     hasChanges.current = false;
   }, [activeNoteId]);
 
@@ -333,6 +317,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
         TableRow,
         TableHeader,
         TableCell,
+        SlashCommand,
       ],
       content: activeNote?.content ?? "",
       autofocus: embedded ? "end" : false,
@@ -340,8 +325,8 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
         attributes: {
           style: [
             "font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-            embedded ? "font-size: 14.5px" : "font-size: 16px",
-            "line-height: 1.65",
+            embedded ? "font-size: 14.5px" : "font-size: 17px",
+            embedded ? "line-height: 1.65" : "line-height: 1.75",
             "color: #1C1C1E",
             "outline: none",
             embedded ? "min-height: 80px" : "min-height: 200px",
@@ -498,6 +483,27 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
     } catch {
       // note may have been deleted — ignore
     }
+    // Generate probing questions in parallel — only fires LLM call when the
+    // note is substantive enough (server-side gate at ~200 chars plaintext).
+    try {
+      const plain = bodyRef.current.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      if (plain.length >= 200) {
+        const qs = await suggestNoteQuestions(noteId);
+        setSuggestedQuestions(qs);
+      } else {
+        setSuggestedQuestions([]);
+      }
+    } catch {
+      // non-fatal — questions are a nice-to-have, never block the note flow
+    }
+  }
+
+  function askGooni(question: string) {
+    const { newChat, send } = useConversationsStore.getState();
+    newChat();
+    if (!gooniOpen) toggleGooni();
+    // Pass the active note's body as context so Gooni's reply stays grounded.
+    send(question, bodyRef.current).catch(console.error);
   }
 
   function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -970,62 +976,46 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                     lineHeight: 1.3,
                   }}
                 />
-                <FormatToolbar editor={editor} />
-
                 {editor && (
                   <BubbleMenu
                     editor={editor}
                     style={{
                       display: "flex",
+                      alignItems: "center",
                       background: "#1C1C1E",
                       borderRadius: 8,
                       padding: "3px 4px",
                       gap: 1,
-                      boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+                      boxShadow: "0 6px 22px rgba(0,0,0,0.22)",
                     }}
                   >
-                    {[
-                      { label: "B", title: "Bold", action: () => editor.chain().focus().toggleBold().run(), active: editor.isActive("bold"), style: { fontWeight: 700 } },
-                      { label: "I", title: "Italic", action: () => editor.chain().focus().toggleItalic().run(), active: editor.isActive("italic"), style: { fontStyle: "italic" } },
-                      { label: "S", title: "Strikethrough", action: () => editor.chain().focus().toggleStrike().run(), active: editor.isActive("strike"), style: { textDecoration: "line-through" } },
-                      { label: "H1", title: "Heading 1", action: () => editor.chain().focus().toggleHeading({ level: 1 }).run(), active: editor.isActive("heading", { level: 1 }), style: {} },
-                      { label: "H2", title: "Heading 2", action: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), active: editor.isActive("heading", { level: 2 }), style: {} },
-                      { label: "•", title: "Bullet list", action: () => editor.chain().focus().toggleBulletList().run(), active: editor.isActive("bulletList"), style: {} },
-                      { label: "☑", title: "Task list", action: () => editor.chain().focus().toggleTaskList().run(), active: editor.isActive("taskList"), style: {} },
-                      { label: "`", title: "Inline code", action: () => editor.chain().focus().toggleCode().run(), active: editor.isActive("code"), style: { fontFamily: "monospace" } },
-                    ].map(({ label, title, action, active, style }) => (
+                    {/* Inline marks only — block-level conversions (H1/H2/lists/quote/code/table)
+                        live in the slash menu now, which is the cleaner Confluence-style split. */}
+                    {([
+                      { Icon: BoldIcon,      title: "Bold",        action: () => editor.chain().focus().toggleBold().run(),    active: editor.isActive("bold") },
+                      { Icon: ItalicIcon,    title: "Italic",      action: () => editor.chain().focus().toggleItalic().run(),  active: editor.isActive("italic") },
+                      { Icon: Strikethrough, title: "Strike",      action: () => editor.chain().focus().toggleStrike().run(),  active: editor.isActive("strike") },
+                      { Icon: CodeIcon,      title: "Inline code", action: () => editor.chain().focus().toggleCode().run(),    active: editor.isActive("code") },
+                    ] as const).map((item) => (
                       <button
-                        key={label}
-                        title={title}
-                        onMouseDown={(e) => { e.preventDefault(); action(); }}
+                        key={item.title}
+                        title={item.title}
+                        onMouseDown={(e) => { e.preventDefault(); item.action(); }}
                         style={{
-                          padding: "4px 7px",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          width: 26, height: 26,
+                          padding: 0,
                           borderRadius: 5,
                           border: "none",
-                          background: active ? "rgba(255,255,255,0.18)" : "transparent",
-                          color: active ? "#fff" : "rgba(255,255,255,0.7)",
-                          fontSize: 12,
+                          background: item.active ? "rgba(255,255,255,0.18)" : "transparent",
+                          color: item.active ? "#fff" : "rgba(255,255,255,0.78)",
                           cursor: "pointer",
-                          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                          ...style,
+                          transition: "background 0.1s, color 0.1s",
                         }}
                       >
-                        {label}
+                        <item.Icon size={14} strokeWidth={1.9} />
                       </button>
                     ))}
-
-                    <div style={{ width: 1, background: "rgba(255,255,255,0.15)", margin: "4px 2px" }} />
-
-                    <button
-                      title="Insert table"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-                      }}
-                      style={{ padding: "4px 7px", borderRadius: 5, border: "none", background: "transparent", color: "rgba(255,255,255,0.7)", fontSize: 11, cursor: "pointer" }}
-                    >
-                      ⊞ table
-                    </button>
                   </BubbleMenu>
                 )}
 
@@ -1097,6 +1087,25 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                         </button>
                       );
                     })}
+                  </div>
+                )}
+
+                {suggestedQuestions.length > 0 && (
+                  <div style={{ marginTop: relatedNotes.length > 0 ? 28 : 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+                      QUESTIONS GOONI WOULD ASK
+                    </p>
+                    {suggestedQuestions.map((q, i) => (
+                      <button
+                        key={i}
+                        onClick={() => askGooni(q)}
+                        style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", marginBottom: 6, background: "rgba(0,0,0,0.025)", border: "1px solid rgba(0,0,0,0.05)", borderRadius: 8, cursor: "pointer", fontSize: 13.5, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", lineHeight: 1.5 }}
+                        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
+                        onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.025)")}
+                      >
+                        {q}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>

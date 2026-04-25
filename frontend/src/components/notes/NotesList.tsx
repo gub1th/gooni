@@ -117,8 +117,8 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
       onContextMenu={(e) => onContextMenu(e, note.id)}
       style={{
         position: "relative",
-        padding: "9px 10px",
-        borderBottom: "1px solid rgba(0,0,0,0.05)",
+        padding: "15px 14px",
+        borderBottom: "1px solid rgba(0,0,0,0.06)",
         cursor: note.id > 0 ? "grab" : "pointer",
         background: active ? "rgba(0,0,0,0.07)" : "transparent",
         transition: "background 0.1s, opacity 0.15s",
@@ -139,7 +139,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
         <div
           style={{
             flex: 1,
-            fontSize: 13,
+            fontSize: 13.5,
             fontWeight: 600,
             color: "#1C1C1E",
             overflow: "hidden",
@@ -161,7 +161,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
       {/* Preview — single line, muted */}
       {preview && (
         <div style={{
-          fontSize: 11.5, color: "#8E8E93", marginTop: 2,
+          fontSize: 11.5, color: "#8E8E93", marginTop: 6,
           fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         }}>
@@ -191,7 +191,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
 function SectionHeader({ label }: { label: string }) {
   return (
     <div style={{
-      padding: "10px 10px 4px",
+      padding: "16px 14px 6px",
       fontSize: 10.5,
       fontWeight: 600,
       color: "#AEAEB2",

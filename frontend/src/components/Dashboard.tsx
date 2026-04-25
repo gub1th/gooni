@@ -12,6 +12,9 @@ import { GooniMascot } from "./GooniMascot";
 import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
+import { FocusCard } from "./FocusCard";
+import { FocusCheckinCard } from "./FocusCheckinCard";
+import { SuggestionsCard } from "./SuggestionsCard";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#4ADE80";
@@ -86,6 +89,10 @@ function filterVisibleTodos(todos: ApiTodo[], dayOffset: number): ApiTodo[] {
     );
     return visible.sort((a, b) => {
       if (a.done !== b.done) return a.done ? 1 : -1;
+      // Float overdue + due-today to the top; preserve manual order otherwise.
+      const aR = a.done ? 99 : urgencyRank(a.due_date);
+      const bR = b.done ? 99 : urgencyRank(b.due_date);
+      if (aR !== bR) return aR - bR;
       return a.sort_order - b.sort_order;
     });
   }
@@ -133,6 +140,214 @@ function ageTierStyle(tier: AgeTier): { color: string; weight: number } {
   if (tier === "warm") return { color: "#D69E2E", weight: 500 };  // warm amber — 4-6d
   if (tier === "stale") return { color: "#8E8E93", weight: 500 }; // neutral gray — 1-3d
   return { color: "#AEAEB2", weight: 400 };                        // lighter gray — minutes/hours
+}
+
+// ── Due-date urgency ────────────────────────────────────────────────────────
+// Backend serializes due_date as naive `YYYY-MM-DDT00:00:00` (no Z). Parse as
+// local-day so "today" semantics stay aligned with the user's calendar — we
+// don't append Z here, unlike created_at/completed_at which are real timestamps.
+function parseDueDate(iso: string): Date {
+  const d = new Date(iso);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+type DueTier = "overdue" | "today" | "tomorrow" | "soon" | "later" | "far";
+
+function dueDaysFromToday(iso: string): number {
+  const due = parseDueDate(iso);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((due.getTime() - today.getTime()) / 86400000);
+}
+
+function dueUrgencyTier(iso: string): DueTier {
+  const days = dueDaysFromToday(iso);
+  if (days < 0) return "overdue";
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days <= 7) return "soon";
+  if (days <= 30) return "later";
+  return "far";
+}
+
+// Saturation-driven palette: one accent (amber) intensifies as the date nears.
+// Red is reserved exclusively for overdue — the only "you broke a promise" signal.
+function dueTierStyle(tier: DueTier): { bg: string; fg: string; weight: number; border: string } {
+  switch (tier) {
+    case "overdue":  return { bg: "#FF3B30", fg: "#fff",    weight: 600, border: "transparent" };
+    case "today":    return { bg: "#F59E0B", fg: "#fff",    weight: 600, border: "transparent" };
+    case "tomorrow": return { bg: "#FCD34D", fg: "#7C2D12", weight: 600, border: "transparent" };
+    case "soon":     return { bg: "#FEF3C7", fg: "#92400E", weight: 500, border: "transparent" };
+    case "later":    return { bg: "#F1F5F9", fg: "#475569", weight: 500, border: "transparent" };
+    case "far":      return { bg: "transparent", fg: "#94A3B8", weight: 400, border: "rgba(0,0,0,0.10)" };
+  }
+}
+
+function formatDueLabel(iso: string): string {
+  const days = dueDaysFromToday(iso);
+  if (days === 0) return "Today";
+  if (days === 1) return "Tom";
+  if (days === -1) return "1d ago";
+  if (days < 0) return `${Math.abs(days)}d ago`;
+  if (days <= 6) return parseDueDate(iso).toLocaleDateString("en-US", { weekday: "short" });
+  return parseDueDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+// Sort key: overdue floats highest, then today, everything else neutral.
+// Tomorrow/soon don't auto-float — only the inescapable cases do, so the
+// rest of the list keeps the manual order the user set.
+function urgencyRank(iso: string | null): number {
+  if (!iso) return 99;
+  const tier = dueUrgencyTier(iso);
+  if (tier === "overdue") return 0;
+  if (tier === "today") return 1;
+  return 99;
+}
+
+// Parse a trailing `/today`, `/tom`, `/<weekday>`, `/Nd` shortcut from the
+// new-todo input. Returns the cleaned text (shortcut stripped) and an ISO
+// `YYYY-MM-DD` due date, or null if no shortcut matched.
+function parseTodoShortcut(input: string): { text: string; dueIso: string | null } {
+  const m = input.match(/\s*\/(today|tom(?:orrow)?|mon|tue|wed|thu|fri|sat|sun|\d+d)\s*$/i);
+  if (!m) return { text: input.trim(), dueIso: null };
+  const token = m[1].toLowerCase();
+  const cleaned = input.slice(0, m.index).trim();
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let due: Date | null = null;
+  if (token === "today") due = today;
+  else if (token.startsWith("tom")) { due = new Date(today); due.setDate(today.getDate() + 1); }
+  else if (/^\d+d$/.test(token)) {
+    due = new Date(today); due.setDate(today.getDate() + parseInt(token, 10));
+  } else {
+    const map: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+    const target = map[token];
+    if (target !== undefined) {
+      const cur = today.getDay();
+      let diff = (target - cur + 7) % 7;
+      if (diff === 0) diff = 7; // /<weekday> always points to the *next* one
+      due = new Date(today); due.setDate(today.getDate() + diff);
+    }
+  }
+  if (!due) return { text: input.trim(), dueIso: null };
+  // YYYY-MM-DD in local time (not UTC) — backend parses with fromisoformat.
+  const yyyy = due.getFullYear();
+  const mm = String(due.getMonth() + 1).padStart(2, "0");
+  const dd = String(due.getDate()).padStart(2, "0");
+  return { text: cleaned, dueIso: `${yyyy}-${mm}-${dd}` };
+}
+
+// ── DueChip ──────────────────────────────────────────────────────────────────
+// Two states:
+//   - no due_date: hover-only ghost "+ date" button (invisible at rest)
+//   - has due_date: saturation-tinted pill, with an × that appears on hover
+// In both states a transparent <input type="date"> overlays the chip so
+// clicking anywhere opens the native picker without us shipping a custom one.
+function DueChip({
+  due,
+  hidden,
+  onChange,
+}: {
+  due: string | null;
+  hidden: boolean;
+  onChange: (iso: string | null) => void;
+}) {
+  const [hover, setHover] = useState(false);
+  if (hidden) return null;
+
+  if (due) {
+    const tier = dueUrgencyTier(due);
+    const style = dueTierStyle(tier);
+    const label = formatDueLabel(due);
+    const value = due.slice(0, 10); // YYYY-MM-DD for the native input
+    return (
+      <span
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          position: "relative",
+          display: "inline-flex", alignItems: "center", gap: 4,
+          padding: "1px 7px", borderRadius: 10,
+          fontSize: 10.5, fontWeight: style.weight, letterSpacing: 0.2,
+          background: style.bg, color: style.fg,
+          border: `0.5px solid ${style.border}`,
+          flexShrink: 0,
+          cursor: "pointer",
+          transition: "background 0.15s",
+        }}
+      >
+        <input
+          type="date"
+          value={value}
+          onChange={(e) => onChange(e.target.value || null)}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute", inset: 0,
+            opacity: 0, cursor: "pointer",
+            border: "none", background: "transparent",
+            padding: 0, margin: 0, width: "100%", height: "100%",
+            // Keep the picker behind the × button so the × can be clicked.
+            zIndex: 1,
+          }}
+        />
+        <span style={{ position: "relative", zIndex: 0 }}>{label}</span>
+        {hover && (
+          <button
+            onClick={(e) => { e.stopPropagation(); e.preventDefault(); onChange(null); }}
+            title="Clear due date"
+            style={{
+              position: "relative", zIndex: 2,
+              background: "transparent", border: "none", cursor: "pointer",
+              padding: 0, marginLeft: 1, lineHeight: 1,
+              color: style.fg === "#fff" ? "rgba(255,255,255,0.85)" : "rgba(0,0,0,0.45)",
+              fontSize: 11,
+            }}
+          >×</button>
+        )}
+      </span>
+    );
+  }
+
+  // Empty state: ghost "+ date" — invisible until the row is hovered (parent
+  // toggles opacity on .todo-hover).
+  return (
+    <span
+      className="todo-hover"
+      style={{
+        position: "relative",
+        display: "inline-flex", alignItems: "center",
+        opacity: 0,
+        padding: "1px 7px", borderRadius: 10,
+        fontSize: 10.5, fontWeight: 500, letterSpacing: 0.2,
+        background: "transparent", color: "#94A3B8",
+        border: "0.5px dashed rgba(0,0,0,0.18)",
+        flexShrink: 0,
+        cursor: "pointer",
+        transition: "opacity 0.12s, background 0.12s, color 0.12s",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLElement).style.color = "#475569";
+        (e.currentTarget as HTMLElement).style.background = "rgba(0,0,0,0.03)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLElement).style.color = "#94A3B8";
+        (e.currentTarget as HTMLElement).style.background = "transparent";
+      }}
+    >
+      <input
+        type="date"
+        value=""
+        onChange={(e) => onChange(e.target.value || null)}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "absolute", inset: 0,
+          opacity: 0, cursor: "pointer",
+          border: "none", background: "transparent",
+          padding: 0, margin: 0, width: "100%", height: "100%",
+        }}
+      />
+      <span style={{ position: "relative" }}>+ date</span>
+    </span>
+  );
 }
 
 // ── TodoCard ─────────────────────────────────────────────────────────────────
@@ -207,7 +422,9 @@ function TodoCard({ todos, onMutate, onPlan }: TodoCardProps) {
   }
 
   async function handleAdd() {
-    const text = newText.trim();
+    const raw = newText.trim();
+    if (!raw) return;
+    const { text, dueIso } = parseTodoShortcut(raw);
     if (!text) return;
     setNewText("");
     const tempId = -Date.now();
@@ -215,11 +432,24 @@ function TodoCard({ todos, onMutate, onPlan }: TodoCardProps) {
       id: tempId, text, done: false,
       created_at: new Date().toISOString(), completed_at: null,
       sort_order: todos.reduce((m, t) => Math.max(m, t.sort_order), 0) + 1,
+      due_date: dueIso,
     };
     onMutate([...todos, optimistic]);
     try {
-      const created = await createTodo(text);
+      const created = await createTodo(text, dueIso);
       onMutate([...todos.filter((t) => t.id !== tempId), created]);
+    } catch (e) {
+      console.error(e);
+      onMutate(todos);
+    }
+  }
+
+  async function setDue(id: number, isoOrNull: string | null) {
+    const optimistic = todos.map((t) => (t.id === id ? { ...t, due_date: isoOrNull } : t));
+    onMutate(optimistic);
+    try {
+      const updated = await updateTodo(id, { due_date: isoOrNull });
+      onMutate(optimistic.map((t) => (t.id === id ? updated : t)));
     } catch (e) {
       console.error(e);
       onMutate(todos);
@@ -427,13 +657,26 @@ function TodoCard({ todos, onMutate, onPlan }: TodoCardProps) {
               >{t.text}</span>
             )}
 
-            {age && ageStyle && (
+            {/* Age pill — only shows when no due date is set, since the due
+                pill conveys urgency more directly once a date exists. */}
+            {age && ageStyle && !t.due_date && (
               <span style={{
                 fontSize: 10, fontWeight: ageStyle.weight, color: ageStyle.color,
                 fontVariantNumeric: "tabular-nums", flexShrink: 0, letterSpacing: 0.2,
               }}>
                 {age.text}
               </span>
+            )}
+
+            {/* Due-date chip — colored pill when set, hover-only ghost button when not.
+                Click anywhere on the chip opens the native date picker via an overlaid
+                transparent <input type="date">. */}
+            {!t.done && (
+              <DueChip
+                due={t.due_date}
+                hidden={isPast}
+                onChange={(iso) => setDue(t.id, iso)}
+              />
             )}
 
             {!isPast && !t.done && onPlan && (
@@ -1149,6 +1392,11 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           </div>
         </div>
 
+        {/* Stale-focus check-in. Renders nothing if no focus is stale or
+            today's nudge has been dismissed. Sits between greeting + note input
+            so it lands in the eyeline without crowding the writing surface. */}
+        <FocusCheckinCard />
+
         {/* Note input — swaps into a PlanAnimation when user clicks "plan"
             on a todo. Otherwise the normal embedded NoteEditor quick-input. */}
         <div style={{ marginBottom: 22 }}>
@@ -1216,6 +1464,14 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             </button>
           </div>
         )}
+
+        {/* Focus card — long-running commitments. Above todos to frame the day. */}
+        <FocusCard />
+
+        {/* Suggestions — discovery + whimsy. Below focuses so it reads as a
+            companion feed: 'here's what you're committed to, here's what
+            else might catch your eye.' Hidden until ≥1 focus exists. */}
+        <SuggestionsCard />
 
         {/* Todo card — backed by dedicated TodoItem model with timestamps + sort order */}
         <TodoCard todos={todos} onMutate={setTodos} onPlan={handlePlanFromTodo} />
