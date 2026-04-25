@@ -7,8 +7,6 @@ import {
 } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
-import { useGooniActivatedStore } from "../stores/useGooniActivatedStore";
-import { GooniMascot } from "./GooniMascot";
 import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
@@ -1106,7 +1104,6 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
   const [exploreOpen, setExploreOpen] = useState(false);
   const { selectSpace, loadNotes, selectNote } = useNotesContentStore();
   const theme = useGooniThemeStore((s) => s.theme);
-  const gooniActivated = useGooniActivatedStore((s) => s.activated);
   const palette = THEME_PALETTES[theme];
   const firstCardRef = useRef<HTMLDivElement>(null);
   const dashRef = useRef<HTMLDivElement>(null);
@@ -1569,8 +1566,8 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
 
       </div>
 
-      {/* Interactive mascot — peeks from sidebar seam, drag-to-toss, walks with perspective */}
-      {gooniActivated && <GooniMascot dashboardRef={dashRef} />}
+      {/* Mascot mounts at the route root now (see routes/index.tsx) so it
+          appears on every view, not just the dashboard. */}
 
       {/* Semantic graph of all notes — opens as a full-screen modal */}
       <ExploreModal open={exploreOpen} onClose={() => setExploreOpen(false)} />

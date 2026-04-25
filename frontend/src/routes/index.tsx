@@ -1,13 +1,16 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatView } from "../components/ChatView";
+import { ChatLauncher } from "../components/ChatLauncher";
 import { Dashboard } from "../components/Dashboard";
+import { GooniMascot } from "../components/GooniMascot";
 import { GooniPanel } from "../components/GooniPanel";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { Sidebar } from "../components/notes/Sidebar";
 import { PasswordGate } from "../components/PasswordGate";
 import { useWindowWidth } from "../hooks/useWindowWidth";
+import { useGooniActivatedStore } from "../stores/useGooniActivatedStore";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
@@ -29,10 +32,15 @@ function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
   const { selectedSpaceId, selectSpace, loadNotes, createNote, selectNote } = useNotesContentStore();
   const isGooniOpen = useGooniStore((s) => s.isOpen);
+  const gooniActivated = useGooniActivatedStore((s) => s.activated);
   const windowWidth = useWindowWidth();
   const { fetchConversations, newChat, selectConversation } = useConversationsStore();
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
+  // Bounds the mascot walks within. Refs the right-side content area so the
+  // mascot doesn't wander over the sidebar — applies to every view (notes,
+  // dashboard, chat). Mascot was previously dashboard-only.
+  const pageRef = useRef<HTMLDivElement>(null);
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
   const [view, setView] = useState<"notes" | "dashboard" | "chat">(() =>
@@ -151,25 +159,40 @@ function NotesPage() {
         />
       )}
 
-      {view === "dashboard" ? (
-        <Dashboard onOpenNote={() => setView("notes")} />
-      ) : view === "chat" ? (
-        <ChatView />
-      ) : (
-        <>
-          <NotesList />
-          <NoteEditor />
-          {isGooniOpen && (
-            isSmall ? (
-              <div style={{ position: "absolute", right: 0, top: 0, height: "100%", zIndex: 50, boxShadow: "-4px 0 20px rgba(0,0,0,0.12)" }}>
+      {/* Right-side content area, ref'd so the mascot can walk within it on
+          every view — not just the dashboard. Excludes the sidebar so the
+          mascot stays out of the nav rail. */}
+      <div ref={pageRef} style={{ flex: 1, display: "flex", minWidth: 0, position: "relative", overflow: "hidden" }}>
+        {view === "dashboard" ? (
+          <Dashboard onOpenNote={() => setView("notes")} />
+        ) : view === "chat" ? (
+          <ChatView />
+        ) : (
+          <>
+            <NotesList />
+            <NoteEditor />
+            {isGooniOpen && (
+              isSmall ? (
+                <div style={{ position: "absolute", right: 0, top: 0, height: "100%", zIndex: 50, boxShadow: "-4px 0 20px rgba(0,0,0,0.12)" }}>
+                  <GooniPanel />
+                </div>
+              ) : (
                 <GooniPanel />
-              </div>
-            ) : (
-              <GooniPanel />
-            )
-          )}
-        </>
-      )}
+              )
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Mascot mounts globally now (was dashboard-only). Bounds tracked via
+          pageRef so it walks across notes / dashboard / chat without overlap
+          into the sidebar. The dashboard's own mount has been removed. */}
+      {gooniActivated && <GooniMascot dashboardRef={pageRef} />}
+
+      {/* Floating chat launcher — bottom-right FAB. Click toggles GooniPanel.
+          Replaces the old in-panel header + close button. Mascot's drop zone
+          and docked idle position anchor to this launcher. */}
+      <ChatLauncher />
     </div>
     </PasswordGate>
   );
