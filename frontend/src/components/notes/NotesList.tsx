@@ -357,7 +357,8 @@ export function NotesList() {
             onKeyDown={(e) => { if (e.key === "Escape") { setSearch(""); (e.target as HTMLInputElement).blur(); } }}
             placeholder="Search notes"
             style={{
-              flex: 1, height: 28, padding: "0 26px 0 26px",
+              flex: 1, minWidth: 0, height: 28, padding: "0 26px",
+              boxSizing: "border-box",
               borderRadius: 7, border: "1px solid rgba(0,0,0,0.08)",
               background: "#fff", outline: "none", fontSize: 12.5,
               fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",

@@ -21,6 +21,7 @@ import { useConversationsStore } from "../../stores/useConversationsStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { GooniLogo } from "../GooniLogo";
+import { Tooltip } from "../Tooltip";
 import { SpaceIcon } from "./SpaceIcon";
 
 type Variant = "full" | "embedded";
@@ -326,8 +327,8 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
         attributes: {
           style: [
             "font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-            embedded ? "font-size: 14.5px" : "font-size: 17px",
-            embedded ? "line-height: 1.65" : "line-height: 1.75",
+            embedded ? "font-size: 14.5px" : "font-size: 15.5px",
+            "line-height: 1.65",
             "color: #1C1C1E",
             "outline: none",
             embedded ? "min-height: 80px" : "min-height: 200px",
@@ -625,25 +626,26 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
           {/* Move to... button */}
           {activeNote && moveTargets.length > 0 && (
             <div ref={movePickerRef} style={{ position: "relative" }}>
-              <button
-                onClick={() => setMovePicker((p) => !p)}
-                title="Move note to another space"
-                style={{
-                  width: 30, height: 30, borderRadius: 8,
-                  border: "none",
-                  background: movePicker ? "rgba(0,0,0,0.08)" : "transparent",
-                  cursor: "pointer",
-                  fontSize: 13,
-                  color: "#636366",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  padding: 0, flexShrink: 0,
-                  transition: "background 0.12s",
-                }}
-                onMouseEnter={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
-                onMouseLeave={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-              >
-                ↗
-              </button>
+              <Tooltip label="Move to space">
+                <button
+                  onClick={() => setMovePicker((p) => !p)}
+                  style={{
+                    width: 30, height: 30, borderRadius: 8,
+                    border: "none",
+                    background: movePicker ? "rgba(0,0,0,0.08)" : "transparent",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    color: "#636366",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    padding: 0, flexShrink: 0,
+                    transition: "background 0.12s",
+                  }}
+                  onMouseEnter={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+                  onMouseLeave={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                >
+                  ↗
+                </button>
+              </Tooltip>
               {movePicker && (
                 <div
                   style={{
@@ -695,23 +697,24 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
           {/* Delete button */}
           {activeNote && activeNote.id > 0 && (
             <div style={{ position: "relative" }}>
-              <button
-                onClick={() => setDeleteConfirm((p) => !p)}
-                title="Delete note"
-                style={{
-                  width: 30, height: 30, borderRadius: 8, border: "none",
-                  background: deleteConfirm ? "rgba(255,59,48,0.10)" : "transparent",
-                  cursor: "pointer", fontSize: 13,
-                  color: deleteConfirm ? "#FF3B30" : "#636366",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  padding: 0, flexShrink: 0,
-                  transition: "background 0.12s",
-                }}
-                onMouseEnter={(e) => { if (!deleteConfirm) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.08)"; }}
-                onMouseLeave={(e) => { if (!deleteConfirm) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-              >
-                🗑
-              </button>
+              <Tooltip label="Delete note">
+                <button
+                  onClick={() => setDeleteConfirm((p) => !p)}
+                  style={{
+                    width: 30, height: 30, borderRadius: 8, border: "none",
+                    background: deleteConfirm ? "rgba(255,59,48,0.10)" : "transparent",
+                    cursor: "pointer", fontSize: 13,
+                    color: deleteConfirm ? "#FF3B30" : "#636366",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    padding: 0, flexShrink: 0,
+                    transition: "background 0.12s",
+                  }}
+                  onMouseEnter={(e) => { if (!deleteConfirm) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.08)"; }}
+                  onMouseLeave={(e) => { if (!deleteConfirm) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                >
+                  🗑
+                </button>
+              </Tooltip>
               {deleteConfirm && (
                 <div style={{
                   position: "absolute", top: "calc(100% + 6px)", right: 0,
@@ -749,57 +752,59 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
 
         {/* Pin toggle — surfaces the current note in the sidebar's Pinned section */}
         {activeNote && activeNoteId && activeNoteId > 0 && (
-          <button
-            onClick={handleTogglePin}
-            title={activeNote.is_pinned ? "Unpin from sidebar" : "Pin to sidebar"}
-            style={{
-              width: 30, height: 30, borderRadius: 8,
-              border: "none",
-              background: activeNote.is_pinned ? "rgba(255,176,32,0.14)" : "transparent",
-              cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: 0, flexShrink: 0,
-              transition: "background 0.12s",
-            }}
-            onMouseEnter={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
-            onMouseLeave={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-          >
-            <span style={{
-              fontSize: 13, lineHeight: 1,
-              filter: activeNote.is_pinned ? "none" : "grayscale(1) opacity(0.5)",
-              transition: "filter 0.15s",
-            }}>📌</span>
-          </button>
+          <Tooltip label={activeNote.is_pinned ? "Unpin from sidebar" : "Pin to sidebar"}>
+            <button
+              onClick={handleTogglePin}
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                border: "none",
+                background: activeNote.is_pinned ? "rgba(255,176,32,0.14)" : "transparent",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 0, flexShrink: 0,
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+              onMouseLeave={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              <span style={{
+                fontSize: 13, lineHeight: 1,
+                filter: activeNote.is_pinned ? "none" : "grayscale(1) opacity(0.5)",
+                transition: "filter 0.15s",
+              }}>📌</span>
+            </button>
+          </Tooltip>
         )}
 
         {/* Public toggle — same visual family as Pin: icon-only with colored background when active */}
         {activeNote && activeNoteId && activeNoteId > 0 && (
-          <button
-            onClick={() => {
-              if (!activeNoteId || activeNoteId < 0) return;
-              const next = !localIsPublic;
-              setLocalIsPublic(next);
-              apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
-            }}
-            title={localIsPublic ? "Unpublish from public portfolio" : "Publish to public portfolio"}
-            style={{
-              width: 30, height: 30, borderRadius: 8,
-              border: "none",
-              background: localIsPublic ? "rgba(52,199,89,0.16)" : "transparent",
-              cursor: "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: 0, flexShrink: 0,
-              transition: "background 0.12s",
-            }}
-            onMouseEnter={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
-            onMouseLeave={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-          >
-            <span style={{
-              fontSize: 13, lineHeight: 1,
-              filter: localIsPublic ? "none" : "grayscale(1) opacity(0.5)",
-              transition: "filter 0.15s",
-            }}>🌐</span>
-          </button>
+          <Tooltip label={localIsPublic ? "Unpublish from portfolio" : "Publish to portfolio"}>
+            <button
+              onClick={() => {
+                if (!activeNoteId || activeNoteId < 0) return;
+                const next = !localIsPublic;
+                setLocalIsPublic(next);
+                apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
+              }}
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                border: "none",
+                background: localIsPublic ? "rgba(52,199,89,0.16)" : "transparent",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 0, flexShrink: 0,
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+              onMouseLeave={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              <span style={{
+                fontSize: 13, lineHeight: 1,
+                filter: localIsPublic ? "none" : "grayscale(1) opacity(0.5)",
+                transition: "filter 0.15s",
+              }}>🌐</span>
+            </button>
+          </Tooltip>
         )}
 
         <button
