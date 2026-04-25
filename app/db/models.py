@@ -4,7 +4,6 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Integer,
     String,
@@ -150,27 +149,7 @@ class Focus(Base):
     status = Column(String, nullable=False, default="committed")
     due_date = Column(DateTime, nullable=True)
     last_activity_at = Column(DateTime, nullable=True)
-    # Cached embedding of name + endgoal so the matcher doesn't recompute
-    # on every note save. Refreshed on create/update.
-    embedding = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
-class FocusActivity(Base):
-    """Append-only log of moments where a note or message touched a focus —
-    either matched by the implicit similarity matcher or via an explicit
-    heartbeat. Powers the 'haven't touched X in 5 days' check-in.
-    """
-
-    __tablename__ = "focus_activities"
-
-    id = Column(Integer, primary_key=True, index=True)
-    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=False, index=True)
-    # 'note' | 'message' | 'manual_heartbeat'
-    source_type = Column(String, nullable=False)
-    source_id = Column(Integer, nullable=True)
-    similarity = Column(Float, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
 class Suggestion(Base):

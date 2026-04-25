@@ -838,7 +838,7 @@ def mark_focus_activity(match: str) -> str:
 
 @mcp.tool()
 def read_focus(match: str) -> str:
-    """Read a focus's full details + recent activity log.
+    """Read a focus's full details — name, endgoal, status, last activity.
 
     Args:
         match: text contained in the focus name
@@ -846,9 +846,6 @@ def read_focus(match: str) -> str:
     f, err = _find_focus(match)
     if err:
         return err
-    resp = _session.get(f"{BASE_URL}/focuses/{f['id']}/activity", timeout=10)
-    resp.raise_for_status()
-    activity = resp.json()
     lines = [
         f"#{f['id']} {f['name']} ({f['status']})",
         f"  Endgoal: {f['endgoal']}",
@@ -860,12 +857,6 @@ def read_focus(match: str) -> str:
         lines.append("  Activity: no heartbeats yet")
     else:
         lines.append(f"  Last touched: {days}d ago")
-    if activity:
-        lines.append(f"  Recent activity ({len(activity)} events):")
-        for a in activity[:10]:
-            ts = a.get("created_at", "")[:16].replace("T", " ")
-            sim = f" sim={a['similarity']:.2f}" if a.get("similarity") else ""
-            lines.append(f"    - {ts} via {a['source_type']}{sim}")
     return "\n".join(lines)
 
 

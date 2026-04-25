@@ -47,9 +47,7 @@ class Orchestrator:
             saved_message = f"[Photo: {message}]" if message.strip() else "[Photo]"
         else:
             saved_message = message
-        user_msg = conversation_service.add_message(conv.id, "user", saved_message, db)
-        # Fire-and-forget focus-activity match. Side-effect, must not block chat.
-        focus_service.match_message_async(saved_message, user_msg.id)
+        conversation_service.add_message(conv.id, "user", saved_message, db)
 
         # Build recent history from this conversation
         recent_messages = conversation_service.get_recent_messages(conv.id, limit=10, db=db)
