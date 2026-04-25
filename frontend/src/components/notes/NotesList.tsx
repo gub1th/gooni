@@ -4,6 +4,7 @@ import { useSpacesStore } from "../../stores/useSpacesStore";
 import { cleanupEmptyNotes, patchNote, type ApiNote } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { SpaceIcon } from "./SpaceIcon";
+import { extractFirstImage } from "../../utils/notePreview";
 
 // Module-level drag state so Sidebar can read it without prop drilling
 export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
@@ -85,6 +86,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
   // never shows a row of repeated "New Note" placeholders.
   const plain = note.content ? stripHtml(note.content) : "";
   const trimmedTitle = note.title?.trim() ?? "";
+  const thumbSrc = note.content ? extractFirstImage(note.content) : null;
   let title: string;
   let preview: string;
   if (trimmedTitle) {
@@ -96,6 +98,9 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
     title = plain.slice(0, firstLineBreak > 0 ? firstLineBreak : 50).trim() || "Untitled";
     const rest = plain.slice(title.length).trim();
     preview = rest.slice(0, 60);
+  } else if (thumbSrc) {
+    title = "Image";
+    preview = "";
   } else {
     title = "Untitled";
     preview = "";
@@ -159,14 +164,32 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
           {formatTime(note.updated_at)}
         </span>
       </div>
-      {/* Preview — single line, muted */}
-      {preview && (
-        <div style={{
-          fontSize: 11.5, color: "#8E8E93", marginTop: 6,
-          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}>
-          {preview}
+      {/* Preview row — text on the left, optional image thumb on the right.
+          Thumb is shown even when there's no text (e.g. image-only notes). */}
+      {(preview || thumbSrc) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+          <div style={{
+            flex: 1,
+            fontSize: 11.5, color: "#8E8E93",
+            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            minWidth: 0,
+          }}>
+            {preview || (thumbSrc ? <span style={{ fontStyle: "italic", color: "#C7C7CC" }}>image</span> : null)}
+          </div>
+          {thumbSrc && (
+            <div style={{
+              width: 28, height: 28, borderRadius: 4,
+              overflow: "hidden", flexShrink: 0,
+              background: "rgba(0,0,0,0.04)",
+            }}>
+              <img
+                src={thumbSrc}
+                alt=""
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              />
+            </div>
+          )}
         </div>
       )}
       {/* Pin button — hover-only. The Pinned section in the sidebar is the source of truth. */}

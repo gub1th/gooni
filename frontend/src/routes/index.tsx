@@ -171,15 +171,6 @@ function NotesPage() {
           <>
             <NotesList />
             <NoteEditor />
-            {isGooniOpen && (
-              isSmall ? (
-                <div style={{ position: "absolute", right: 0, top: 0, height: "100%", zIndex: 50, boxShadow: "-4px 0 20px rgba(0,0,0,0.12)" }}>
-                  <GooniPanel />
-                </div>
-              ) : (
-                <GooniPanel />
-              )
-            )}
           </>
         )}
       </div>
@@ -188,6 +179,32 @@ function NotesPage() {
           pageRef so it walks across notes / dashboard / chat without overlap
           into the sidebar. The dashboard's own mount has been removed. */}
       {gooniActivated && <GooniMascot dashboardRef={pageRef} />}
+
+      {/* Floating Gooni panel — anchored above the FAB, visible on every view.
+          Was previously embedded only in the notes view (and collided with the
+          FAB). Now position-fixed bottom-right so it never fights the FAB. */}
+      {isGooniOpen && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 110,            // FAB margin (24) + FAB size (72) + gap (14)
+            right: 24,
+            width: isSmall ? "calc(100vw - 48px)" : 380,
+            maxWidth: 420,
+            height: isSmall ? "calc(100vh - 130px)" : 560,
+            maxHeight: "calc(100vh - 130px)",
+            background: "#FFFFFF",
+            borderRadius: 18,
+            boxShadow:
+              "0 24px 60px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)",
+            overflow: "hidden",
+            zIndex: 999,
+            display: "flex",
+          }}
+        >
+          <GooniPanel floating />
+        </div>
+      )}
 
       {/* Floating chat launcher — bottom-right FAB. Click toggles GooniPanel.
           Replaces the old in-panel header + close button. Mascot's drop zone

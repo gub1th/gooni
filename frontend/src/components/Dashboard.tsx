@@ -7,10 +7,11 @@ import {
 } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
+import { extractFirstImage, stripHtmlForExcerpt } from "../utils/notePreview";
 import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
-import { FocusCard } from "./FocusCard";
+import { FocusBubbles } from "./FocusBubbles";
 import { FocusCheckinCard } from "./FocusCheckinCard";
 import { SuggestionsCard } from "./SuggestionsCard";
 
@@ -1415,28 +1416,37 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           )}
         </div>
 
-        {/* Gooni's Take — green dot + uppercase label */}
-        {take && (
-          <div style={{
-            background: "#fff",
-            border: "0.5px solid rgba(0,0,0,0.08)",
-            borderRadius: 12,
-            padding: 16,
-            marginBottom: 22,
-            position: "relative",
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              <div style={{ width: 7, height: 7, borderRadius: "50%", background: GREEN, flexShrink: 0 }} />
-              <span style={{
-                fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
-                textTransform: "uppercase",
-              }}>
-                Gooni's Take
-              </span>
-            </div>
+        {/* Gooni's Take — green dot + uppercase label. Renders even when there's
+            no take yet so focuses still have a home. */}
+        <div style={{
+          background: "#fff",
+          border: "0.5px solid rgba(0,0,0,0.08)",
+          borderRadius: 12,
+          padding: 16,
+          marginBottom: 22,
+          position: "relative",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: GREEN, flexShrink: 0 }} />
+            <span style={{
+              fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+              textTransform: "uppercase",
+            }}>
+              Gooni's Take
+            </span>
+          </div>
+          {take ? (
             <p style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.6, margin: 0, paddingRight: 24 }}>
               {take}
             </p>
+          ) : (
+            <p style={{ fontSize: 13, color: "#C7C7CC", lineHeight: 1.6, margin: 0 }}>
+              No take yet — write a note and Gooni will weigh in.
+            </p>
+          )}
+          {/* Focuses live INSIDE Gooni's Take now — they read as part of the
+              same daily framing instead of a separate stacked section. */}
+          <FocusBubbles />
             <button
               onClick={refreshTake}
               disabled={takeRefreshing}
@@ -1459,11 +1469,9 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
                 <path d="M13.5 8a5.5 5.5 0 0 1-9.4 3.9L3 13v-3.5h3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
               </svg>
             </button>
-          </div>
-        )}
+        </div>
 
-        {/* Focus card — long-running commitments. Above todos to frame the day. */}
-        <FocusCard />
+        {/* Focus card lifted into Gooni's Take above as floating bubbles. */}
 
         {/* Suggestions — discovery + whimsy. Below focuses so it reads as a
             companion feed: 'here's what you're committed to, here's what
@@ -1486,7 +1494,8 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 {stats.recent_notes.slice(0, 2).map((note, idx) => {
                   const fullTitle = note.title?.trim() || "Untitled";
-                  const fullExcerpt = stripHtml(note.content ?? "");
+                  const fullExcerpt = stripHtmlForExcerpt(note.content ?? "");
+                  const thumbSrc = extractFirstImage(note.content ?? "");
                   const isFirst = idx === 0;
                   const isTyping = typing !== null && typing.noteId === note.id;
                   const revealed = isTyping ? typing!.revealed : Infinity;
@@ -1530,6 +1539,27 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
                         {shownTitle || (isFirst && isTyping ? " " : "Untitled")}
                         {caretInTitle && <span className="gooni-caret">▍</span>}
                       </div>
+                      {/* Image preview — first <img> in TipTap content. Tight
+                          16:7 strip so the card doesn't grow much vertically. */}
+                      {thumbSrc && (
+                        <div style={{
+                          width: "100%",
+                          height: 80,
+                          borderRadius: 8,
+                          overflow: "hidden",
+                          flexShrink: 0,
+                          background: "rgba(0,0,0,0.04)",
+                        }}>
+                          <img
+                            src={thumbSrc}
+                            alt=""
+                            style={{
+                              width: "100%", height: "100%",
+                              objectFit: "cover", display: "block",
+                            }}
+                          />
+                        </div>
+                      )}
                       <div
                         style={{
                           // NO `flex: 1` — that makes the div fill the remaining

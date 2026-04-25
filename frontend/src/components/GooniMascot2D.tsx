@@ -897,16 +897,16 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
               <Face face={displayFace} />
             </g>
           </g>
-
-          {/* Peek hitbox — LAST child so it's topmost in SVG hit-testing. Transparent
-              fill + pointer-events: all (during peek only) means the cursor flips to
-              grab over the full 90×130 bounding box, even where no painted shape
-              exists. Off in other phases so notes beneath stay clickable. */}
+          {/* Peek-only enlarged hit target — covers JUST the head area so it's
+              easier to grab the mascot when only the head is visible above the
+              FAB. Stays narrow horizontally and short vertically so it does
+              NOT extend down into the FAB and steal FAB clicks. */}
           <rect
             className="gooni-peek-hitbox"
-            x="0" y="0" width="90" height="130"
+            x="15" y="0" width="60" height="64"
             fill="transparent"
           />
+
         </svg>
       </div>
     </>
