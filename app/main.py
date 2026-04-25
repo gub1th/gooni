@@ -20,6 +20,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
     Focus,
+    Memory,
     Message,
     Note,
     PublicProfile,
@@ -146,6 +147,101 @@ def _backfill_focuses(engine):
     engine._pending_focus_backfill = None
 
 
+def _migrate_memories_legacy_schema(engine):
+    """Reshape an older `memories` table (memory_type enum, goal_id FK,
+    no context/updated_at) to the new shape. Preserves the 255-ish rows
+    of pre-Mem0 episodic + typed memories via memories_legacy_backup.
+    Idempotent: skips when schema is already current.
+    """
+    with engine.connect() as conn:
+        existing_tables = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
+        if "memories" not in existing_tables:
+            return
+        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(memories)"))]
+        if "type" in cols and "context" in cols:
+            return  # already on new schema
+        if "memory_type" not in cols:
+            return  # unknown legacy shape; bail rather than guess
+
+        rows = list(
+            conn.execute(
+                text(
+                    "SELECT id, memory_type, key, content, goal_id, embedding, "
+                    "confidence, is_active, superseded_by, created_at "
+                    "FROM memories"
+                )
+            )
+        )
+        if "memories_legacy_backup" not in existing_tables:
+            conn.execute(
+                text(
+                    "CREATE TABLE memories_legacy_backup AS SELECT * FROM memories"
+                )
+            )
+            print(f"Migration: backed up {len(rows)} memories to memories_legacy_backup")
+        conn.execute(text("DROP TABLE memories"))
+        conn.commit()
+
+        engine._pending_memory_backfill = [
+            {
+                "id": r[0],
+                "memory_type": r[1],
+                "key": r[2],
+                "content": r[3],
+                "goal_id": r[4],
+                "embedding": r[5],
+                "confidence": r[6],
+                "is_active": r[7],
+                "superseded_by": r[8],
+                "created_at": r[9],
+            }
+            for r in rows
+        ]
+
+
+def _backfill_memories(engine):
+    """Re-insert legacy memory rows after the new table has been created.
+    Maps memory_type → type (lowercased), goal_id → focus_id, and fills
+    updated_at = created_at since the legacy schema didn't track it.
+    """
+    rows = getattr(engine, "_pending_memory_backfill", None)
+    if not rows:
+        return
+    with engine.connect() as conn:
+        for r in rows:
+            mtype = (r["memory_type"] or "episode").lower()
+            # Old enum values came in upper-case ("EPISODE", "FACT", etc.)
+            conn.execute(
+                text(
+                    "INSERT INTO memories (id, type, key, content, context, "
+                    "confidence, embedding, focus_id, is_active, superseded_by, "
+                    "created_at, updated_at) VALUES "
+                    "(:id, :type, :key, :content, NULL, :confidence, :embedding, "
+                    ":focus_id, :is_active, :superseded_by, :created_at, :created_at)"
+                ),
+                {
+                    "id": r["id"],
+                    "type": mtype,
+                    "key": r["key"],
+                    "content": r["content"],
+                    "confidence": r["confidence"] if r["confidence"] is not None else 0.8,
+                    "embedding": r["embedding"],
+                    "focus_id": r["goal_id"],  # old goal_id is now focus_id
+                    "is_active": r["is_active"] if r["is_active"] is not None else 1,
+                    "superseded_by": r["superseded_by"],
+                    "created_at": r["created_at"],
+                },
+            )
+        conn.commit()
+        print(f"Migration: backfilled {len(rows)} memories onto new schema")
+    engine._pending_memory_backfill = None
+
+
 def _run_column_migrations(engine):
     """Add space_id to existing tables. Only runs ALTER if table exists but column is missing."""
     with engine.connect() as conn:
@@ -167,6 +263,7 @@ def _run_column_migrations(engine):
             ("notes", "is_pinned", "INTEGER"),
             ("notes", "suggested_questions", "TEXT"),
             ("conversations", "topic_graph", "TEXT"),
+            ("conversations", "summary", "TEXT"),
             ("todo_items", "due_date", "DATETIME"),
         ]:
             if table not in existing_tables:
@@ -196,11 +293,16 @@ _run_column_migrations(engine)
 #    schema. Drops the old table after stashing rows; create_all then makes
 #    the new one, and _backfill_focuses re-inserts on top.
 _migrate_focuses_legacy_schema(engine)
-# 4. Create remaining tables (they already have space_id in their model definition)
+# 4. Same dance for the legacy memories table — drop + stash old rows so
+#    create_all can make the new schema.
+_migrate_memories_legacy_schema(engine)
+# 5. Create remaining tables (they already have space_id in their model definition)
 Base.metadata.create_all(bind=engine)
-# 5. Restore legacy focus rows onto the new schema (no-op if no migration ran)
+# 6. Restore legacy focus rows onto the new schema (no-op if no migration ran)
 _backfill_focuses(engine)
-# 6. Drop the deprecated focus_activities table — its data isn't surfaced
+# 7. Restore legacy memory rows onto the new schema (no-op if no migration ran)
+_backfill_memories(engine)
+# 8. Drop the deprecated focus_activities table — its data isn't surfaced
 #    anywhere and the LLM-tool-based activity flow makes it redundant.
 _drop_legacy_focus_activities(engine)
 
@@ -714,11 +816,16 @@ def create_focus(body: dict, db: Session = Depends(get_db)):
     focus = focus_service.create_focus(
         db, name=name, endgoal=endgoal, due_date=due_date, status=status
     )
-    # Mirror to Mem0 so focus is discoverable through normal memory search.
+    # Mirror into the local memory store as a 'goal' fact so semantic search
+    # surfaces the focus alongside other memories.
     try:
-        memory_service.add_memory(f"Daniel's focus: {focus.name} — {focus.endgoal}")
+        memory_service.add_memory(
+            f"Daniel's focus: {focus.name} — {focus.endgoal}",
+            type="goal",
+            db=db,
+        )
     except Exception as e:
-        print(f"Mem0 mirror (create) failed: {e}")
+        print(f"memory mirror (focus create) failed: {e}")
     return _serialize_focus(focus)
 
 
@@ -753,14 +860,18 @@ def update_focus(focus_id: int, body: dict, db: Session = Depends(get_db)):
     try:
         if patch.get("status") == "done" and prior_status != "done":
             memory_service.add_memory(
-                f"Daniel completed his focus: {focus.name}"
+                f"Daniel completed his focus: {focus.name}",
+                type="episode",
+                db=db,
             )
         elif "name" in patch or "endgoal" in patch:
             memory_service.add_memory(
-                f"Daniel's focus: {focus.name} — {focus.endgoal}"
+                f"Daniel's focus: {focus.name} — {focus.endgoal}",
+                type="goal",
+                db=db,
             )
     except Exception as e:
-        print(f"Mem0 mirror (update) failed: {e}")
+        print(f"memory mirror (focus update) failed: {e}")
 
     return _serialize_focus(focus)
 
@@ -1242,7 +1353,7 @@ def memorize_note(note_id: int, db: Session = Depends(get_db)):
     if len(raw) <= 10:
         return {"ok": True, "facts_saved": 0}
     try:
-        memory_service.add_memory(raw)
+        memory_service.add_memory(raw, type="episode", db=db)
     except Exception:
         pass
     return {"ok": True, "facts_saved": 1}
@@ -1545,44 +1656,43 @@ def mcp_get_context(q: str = "", db: Session = Depends(get_db)):
     """Return memory context for a query."""
     if not q.strip():
         return {"context": ""}
-    context = memory_service.build_memory_context(q)
+    context = memory_service.build_memory_context(q, db=db)
     return {"context": context}
 
 
 @app.post("/mcp/memories")
-def mcp_add_memory(body: dict):
-    """Add a memory."""
+def mcp_add_memory(body: dict, db: Session = Depends(get_db)):
+    """Add a memory directly (bypasses extraction). Used by MCP."""
     content = body.get("content", "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    memory_service.add_memory(content)
+    memory_service.add_memory(content, db=db)
     return {"ok": True}
 
 
 @app.get("/mcp/memories/search")
-def mcp_search_memories(q: str, limit: int = 10):
+def mcp_search_memories(q: str, limit: int = 10, db: Session = Depends(get_db)):
     """Search memories by semantic similarity."""
-    memories = memory_service.search(q, limit=limit)
+    memories = memory_service.search(q, limit=limit, db=db)
     return [{"id": m.get("id"), "memory": m.get("memory")} for m in memories]
 
 
 @app.patch("/mcp/memories/{memory_id}")
-def mcp_edit_memory(memory_id: str, body: dict):
-    """Update a memory by ID."""
+def mcp_edit_memory(memory_id: str, body: dict, db: Session = Depends(get_db)):
+    """Update a memory by ID via supersede chain."""
     content = body.get("content", "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    try:
-        memory_service.client.update(memory_id, data=content)
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    if not memory_service.update_memory(memory_id, content, db=db):
+        raise HTTPException(status_code=404, detail="memory not found")
     return {"ok": True, "id": memory_id}
 
 
 @app.delete("/mcp/memories/{memory_id}")
-def mcp_forget_memory(memory_id: str):
-    """Delete a memory by ID."""
-    memory_service.delete(memory_id)
+def mcp_forget_memory(memory_id: str, db: Session = Depends(get_db)):
+    """Soft-delete a memory (is_active=False)."""
+    if not memory_service.delete(memory_id, db=db):
+        raise HTTPException(status_code=404, detail="memory not found")
     return {"ok": True, "id": memory_id}
 
 

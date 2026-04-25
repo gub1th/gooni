@@ -42,6 +42,9 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
                 - show_list: when Daniel asks what's on a list or wants to review options.
                 - fetch_url: when Daniel shares a URL and wants a summary or info from it.
                 - web_search: when Daniel asks about something current or factual you don't know.
+                - search_notes: when Daniel references something he wrote, asks "what did I say
+                  about X", or you need context from his notes that isn't in this thread. His
+                  notes are where he thinks — don't pretend you don't know what's there.
 
                 Focuses — Daniel's active focuses are listed in the context above.
                 Reference them by name when relevant. When he talks about progress on

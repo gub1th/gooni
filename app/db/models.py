@@ -4,6 +4,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -39,6 +40,10 @@ class Conversation(Base):
         DateTime(timezone=True), nullable=True
     )  # for session lookup
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Rolling 200-word rollup of the conversation, refreshed every 15 messages.
+    # Prepended to the recent-history window so long sessions don't lose
+    # early context to the 10-message truncation.
+    summary = Column(Text, nullable=True)
     # Cached topic-graph payload for the visualization toggle in GooniPanel.
     # JSON: {"message_count": int, "nodes": [...], "edges": [...]}.
     # Invalidated when message_count drifts from the cached value.
@@ -172,6 +177,47 @@ class Suggestion(Base):
     source_url = Column(Text, nullable=True)
     generated_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     dismissed = Column(Boolean, default=False, nullable=False)
+
+
+class Memory(Base):
+    """Daniel's persistent knowledge of himself. Replaces the Mem0 hosted
+    service with a local SQL store + LLM extraction + LLM reconciliation.
+
+    Types:
+      'preference' — stable likes/dislikes (always injected into prompt)
+      'goal'       — long-running aspirations (linked to focus_id when relevant)
+      'fact'       — declarative facts about Daniel
+      'routine'    — habits + recurring patterns
+      'constraint' — hard limits (allergies, schedule blockers, dealbreakers)
+      'episode'    — free-form chat extract; no key, just embedded content
+
+    Updates use a supersede chain: when a fact contradicts an old one, the
+    old row gets is_active=False and superseded_by=<new id>. Audit trail
+    survives. The reconcile LLM step decides per candidate whether to ADD,
+    UPDATE (supersede), DELETE (mark inactive), or NONE (boost confidence).
+    """
+
+    __tablename__ = "memories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # 'preference' | 'goal' | 'fact' | 'routine' | 'constraint' | 'episode'
+    type = Column(String, nullable=False, index=True)
+    # snake_case slug for typed memories so we can lookup by key. NULL for episodes.
+    key = Column(String, nullable=True, index=True)
+    content = Column(Text, nullable=False)
+    # JSON: {"time": str?, "location": str?, "scope": "global"|"contextual"}
+    context = Column(Text, nullable=True)
+    confidence = Column(Float, nullable=False, default=0.8)
+    # JSON-serialized embedding vector for cosine search.
+    embedding = Column(Text, nullable=True)
+    # Optional link to a Focus when the memory is goal/aspiration-shaped.
+    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    superseded_by = Column(Integer, ForeignKey("memories.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
 
 class GoogleOAuthToken(Base):

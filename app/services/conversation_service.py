@@ -62,6 +62,39 @@ def _build_topic_graph_via_llm(messages: list[Message]) -> dict | None:
 
 SESSION_GAP_MINUTES = 10  # new session if last message was > 10 minutes ago
 
+# How many messages between auto-summarization passes. The summary is
+# regenerated each time the count crosses a multiple, so the most recent
+# rollup always reflects (N // SUMMARIZE_EVERY_N) * SUMMARIZE_EVERY_N msgs.
+SUMMARIZE_EVERY_N = 15
+
+
+_SUMMARY_PROMPT = """Summarize this conversation between Daniel and Gooni in
+under 200 words. Focus on what Daniel was trying to do, what was decided,
+unresolved threads, and any commitments made. Skip pleasantries.
+
+Write as a tight third-person rollup — no bullet points unless they aid clarity.
+
+Conversation:
+{thread}
+
+Summary:"""
+
+
+def _build_summary_via_llm(messages: list[Message]) -> str | None:
+    if not messages:
+        return None
+    thread_lines = []
+    for m in messages:
+        text = (m.content or "").strip().replace("\n", " ")[:500]
+        thread_lines.append(f"[{m.role}] {text}")
+    prompt = _SUMMARY_PROMPT.format(thread="\n".join(thread_lines))
+    try:
+        raw = llm_client.generate_simple_completion(prompt, max_tokens=350)
+    except Exception as e:
+        print(f"conversation summary LLM error: {e}")
+        return None
+    return (raw or "").strip() or None
+
 
 class ConversationService:
 
@@ -167,6 +200,27 @@ class ConversationService:
         conv.topic_graph = json.dumps(payload)
         db.commit()
         return {"nodes": graph["nodes"], "edges": graph["edges"]}
+
+    def maybe_summarize(self, conversation_id: int, db: Session) -> str | None:
+        """Regenerate the rolling summary on every SUMMARIZE_EVERY_N messages.
+        No-op otherwise. Runs after the assistant reply, so latency is hidden
+        from the user. Returns the new summary if generated, else None.
+        """
+        msgs = self.get_messages(conversation_id, db)
+        n = len(msgs)
+        if n == 0 or n % SUMMARIZE_EVERY_N != 0:
+            return None
+        summary = _build_summary_via_llm(msgs)
+        if not summary:
+            return None
+        conv = (
+            db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        )
+        if not conv:
+            return None
+        conv.summary = summary
+        db.commit()
+        return summary
 
     def get_recent_messages(
         self, conversation_id: int, limit: int, db: Session
