@@ -21,6 +21,7 @@ import { useConversationsStore } from "../../stores/useConversationsStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { GooniLogo } from "../GooniLogo";
+import { SpaceIcon } from "./SpaceIcon";
 
 type Variant = "full" | "embedded";
 
@@ -521,10 +522,15 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
     }
   }
 
-  // Spaces the note can be moved to (all except the current one)
+  // Spaces the note can be moved to (all except the current one).
+  // `emoji` is the raw stored value (may be `lucide:Folder`, a legacy emoji, or null).
+  // `isInbox` flags the General space so the row can render an Inbox icon instead.
   const currentSpaceId = selectedSpaceId ?? "general";
   const moveTargets = spaces
-    .map((s) => ({ id: String(s.id), name: s.name, emoji: s.id === "general" ? "📥" : (s.emoji ?? "🗂️") }))
+    .map((s) => ({
+      id: String(s.id), name: s.name,
+      emoji: s.id === "general" ? "lucide:Inbox" : s.emoji,
+    }))
     .filter((s) => s.id !== currentSpaceId);
 
   async function handleTogglePin() {
@@ -604,7 +610,8 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
           {/* Space suggestion */}
           {spaceSuggestion?.suggested_space_id && activeNote?.space_id === null && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 14, background: "rgba(0,122,255,0.08)", fontSize: 12, color: "#007AFF", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-              <span>{spaceSuggestion.suggested_space_emoji ?? "🗂️"} {spaceSuggestion.suggested_space_name}?</span>
+              <SpaceIcon emoji={spaceSuggestion.suggested_space_emoji} size={13} color="#007AFF" />
+              <span>{spaceSuggestion.suggested_space_name}?</span>
               <button
                 onClick={() => { if (activeNoteId) moveNote(activeNoteId, currentSpaceId, String(spaceSuggestion.suggested_space_id)); setSpaceSuggestion(null); }}
                 style={{ background: "none", border: "none", cursor: "pointer", color: "#007AFF", fontWeight: 600, fontSize: 12, padding: 0 }}
@@ -676,7 +683,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                       onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
                       onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
                     >
-                      <span style={{ fontSize: 14 }}>{space.emoji}</span>
+                      <SpaceIcon emoji={space.emoji} size={14} />
                       {space.name}
                     </button>
                   ))}
