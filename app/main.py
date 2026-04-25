@@ -20,7 +20,6 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
     Focus,
-    FocusActivity,
     Message,
     Note,
     PublicProfile,
@@ -38,6 +37,25 @@ from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
 from .services.suggestions_service import suggestions_service
+
+
+def _drop_legacy_focus_activities(engine):
+    """Remove the experimental focus_activities table. We collapsed the
+    activity log into Focus.last_activity_at — provenance and history
+    weren't surfaced anywhere, so the row inserts were pure cost.
+    Idempotent: only drops when the table actually exists.
+    """
+    with engine.connect() as conn:
+        existing_tables = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
+        if "focus_activities" in existing_tables:
+            conn.execute(text("DROP TABLE focus_activities"))
+            conn.commit()
+            print("Migration: dropped focus_activities table")
 
 
 def _migrate_focuses_legacy_schema(engine):
@@ -182,6 +200,9 @@ _migrate_focuses_legacy_schema(engine)
 Base.metadata.create_all(bind=engine)
 # 5. Restore legacy focus rows onto the new schema (no-op if no migration ran)
 _backfill_focuses(engine)
+# 6. Drop the deprecated focus_activities table — its data isn't surfaced
+#    anywhere and the LLM-tool-based activity flow makes it redundant.
+_drop_legacy_focus_activities(engine)
 
 app = FastAPI()
 
@@ -753,40 +774,10 @@ def delete_focus(focus_id: int, db: Session = Depends(get_db)):
 
 @app.post("/focuses/{focus_id}/heartbeat")
 def heartbeat_focus(focus_id: int, db: Session = Depends(get_db)):
-    activity = focus_service.mark_activity(
-        db, focus_id, source_type="manual_heartbeat"
-    )
-    if not activity:
+    focus = focus_service.mark_activity(db, focus_id)
+    if not focus:
         raise HTTPException(status_code=404, detail="focus not found")
-    focus = focus_service.get_focus(db, focus_id)
     return _serialize_focus(focus)
-
-
-@app.get("/focuses/{focus_id}/activity")
-def list_focus_activity(
-    focus_id: int, days: int = 30, db: Session = Depends(get_db)
-):
-    from datetime import datetime, timedelta
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    rows = (
-        db.query(FocusActivity)
-        .filter(
-            FocusActivity.focus_id == focus_id,
-            FocusActivity.created_at >= cutoff,
-        )
-        .order_by(FocusActivity.created_at.desc())
-        .all()
-    )
-    return [
-        {
-            "id": r.id,
-            "source_type": r.source_type,
-            "source_id": r.source_id,
-            "similarity": r.similarity,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in rows
-    ]
 
 
 # ── Suggestions ──────────────────────────────────────────────────────────────
@@ -1157,20 +1148,17 @@ def embed_note(note_id: int, db: Session = Depends(get_db)):
     db.expire_all()  # invalidate cache so suggest_space sees fresh embedding
     suggestion = note_service.suggest_space(note_id, db)
 
-    # Implicit focus linkage: cosine-compare the note's fresh embedding
-    # against active focus embeddings. Above-threshold matches log a
-    # FocusActivity row + bump last_activity_at. Failures are non-fatal
-    # since this is a side-effect, not the endpoint's contract.
+    # Single cheap LLM call to classify which focuses this note touches.
+    # One call per save (not one per focus) — replaces the old per-focus
+    # cosine matcher. Failures non-fatal.
     fresh = db.query(Note).filter(Note.id == note_id).first()
-    if fresh and fresh.embedding:
+    if fresh:
+        plaintext = note_service._strip_html(fresh.content or "")
         try:
-            vec = json.loads(fresh.embedding)
-            for fid, sim in focus_service.match_vec_to_focuses(db, vec):
-                focus_service.mark_activity(
-                    db, fid, source_type="note", source_id=note_id, similarity=sim,
-                )
+            for fid in focus_service.classify_focuses(db, plaintext):
+                focus_service.mark_activity(db, fid)
         except Exception as e:
-            print(f"focus-activity match (embed_note) failed: {e}")
+            print(f"focus classify (embed_note) failed: {e}")
 
     return {"ok": True, **suggestion}
 
