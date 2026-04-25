@@ -324,6 +324,7 @@ export interface ApiTodo {
   created_at: string;
   completed_at: string | null;
   sort_order: number;
+  due_date: string | null;
 }
 
 export async function fetchTodos(): Promise<ApiTodo[]> {
@@ -332,11 +333,11 @@ export async function fetchTodos(): Promise<ApiTodo[]> {
   return res.json();
 }
 
-export async function createTodo(text: string): Promise<ApiTodo> {
+export async function createTodo(text: string, due_date?: string | null): Promise<ApiTodo> {
   const res = await apiFetch(`${BASE}/todos`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(due_date ? { text, due_date } : { text }),
   });
   if (!res.ok) throw new Error("Failed to create todo");
   return res.json();
@@ -344,7 +345,7 @@ export async function createTodo(text: string): Promise<ApiTodo> {
 
 export async function updateTodo(
   id: number,
-  patch: { text?: string; done?: boolean; sort_order?: number },
+  patch: { text?: string; done?: boolean; sort_order?: number; due_date?: string | null },
 ): Promise<ApiTodo> {
   const res = await apiFetch(`${BASE}/todos/${id}`, {
     method: "PATCH",
@@ -374,6 +375,135 @@ export async function reorderTodos(items: { id: number; sort_order: number }[]):
 export async function createTodoPlan(todoId: number): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/todos/${todoId}/plan`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to create plan from todo");
+  return res.json();
+}
+
+// ── Suggestions ──────────────────────────────────────────────────────────────
+
+export type SuggestionCategory = "discovery" | "whimsy";
+
+export interface ApiSuggestion {
+  id: number;
+  category: SuggestionCategory;
+  title: string;
+  body: string;
+  source_url: string | null;
+  generated_at: string | null;
+}
+
+export async function fetchSuggestionsToday(): Promise<{ discovery: ApiSuggestion[]; whimsy: ApiSuggestion[] }> {
+  const res = await apiFetch(`${BASE}/suggestions/today`);
+  if (!res.ok) throw new Error("Failed to fetch suggestions");
+  return res.json();
+}
+
+export async function dismissSuggestion(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/suggestions/${id}/dismiss`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to dismiss suggestion");
+}
+
+export async function refreshSuggestions(): Promise<{ created: number }> {
+  const res = await apiFetch(`${BASE}/suggestions/refresh`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to refresh suggestions");
+  return res.json();
+}
+
+export interface ChatGraphNode {
+  id: number;
+  label: string;
+  role: "user" | "assistant";
+}
+
+export interface ChatGraphEdge {
+  from: number;
+  to: number;
+}
+
+export async function fetchConversationGraph(
+  id: number,
+): Promise<{ nodes: ChatGraphNode[]; edges: ChatGraphEdge[] }> {
+  const res = await apiFetch(`${BASE}/conversations/${id}/graph`);
+  if (!res.ok) throw new Error("Failed to fetch conversation graph");
+  return res.json();
+}
+
+export async function suggestNoteQuestions(id: number): Promise<string[]> {
+  const res = await apiFetch(`${BASE}/notes/${id}/suggest-questions`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to suggest questions");
+  const json = await res.json();
+  return json.questions ?? [];
+}
+
+// ── Focuses ──────────────────────────────────────────────────────────────────
+
+export type FocusStatus = "committed" | "pending" | "someday" | "done";
+
+export interface ApiFocus {
+  id: number;
+  name: string;
+  endgoal: string;
+  status: FocusStatus;
+  due_date: string | null;
+  last_activity_at: string | null;
+  days_since_activity: number | null;
+  created_at: string | null;
+}
+
+export async function fetchFocuses(opts?: {
+  include_done?: boolean;
+  include_someday?: boolean;
+}): Promise<ApiFocus[]> {
+  const params = new URLSearchParams();
+  if (opts?.include_done) params.set("include_done", "true");
+  if (opts?.include_someday === false) params.set("include_someday", "false");
+  const qs = params.toString();
+  const res = await apiFetch(`${BASE}/focuses${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch focuses");
+  return res.json();
+}
+
+export async function fetchStaleFocuses(days = 5): Promise<ApiFocus[]> {
+  const res = await apiFetch(`${BASE}/focuses/stale?days=${days}`);
+  if (!res.ok) throw new Error("Failed to fetch stale focuses");
+  return res.json();
+}
+
+export async function createFocus(body: {
+  name: string;
+  endgoal: string;
+  status?: FocusStatus;
+  due_date?: string | null;
+}): Promise<ApiFocus> {
+  const res = await apiFetch(`${BASE}/focuses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to create focus");
+  return res.json();
+}
+
+export async function updateFocus(
+  id: number,
+  patch: { name?: string; endgoal?: string; status?: FocusStatus; due_date?: string | null },
+): Promise<ApiFocus> {
+  const res = await apiFetch(`${BASE}/focuses/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update focus");
+  return res.json();
+}
+
+export async function deleteFocus(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/focuses/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete focus");
+}
+
+export async function heartbeatFocus(id: number): Promise<ApiFocus> {
+  const res = await apiFetch(`${BASE}/focuses/${id}/heartbeat`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to heartbeat focus");
   return res.json();
 }
 

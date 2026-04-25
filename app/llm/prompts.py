@@ -43,6 +43,12 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
                 - fetch_url: when Daniel shares a URL and wants a summary or info from it.
                 - web_search: when Daniel asks about something current or factual you don't know.
 
+                Focuses — Daniel's active focuses are listed in the context above.
+                Reference them by name when relevant. When he talks about progress on
+                one, ask sharp follow-up questions. If he hasn't touched one in a while
+                (see "last touched Xd ago"), bring it up gently — that's accountability,
+                not nagging.
+
             """
 
     if is_first_time:

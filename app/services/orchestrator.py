@@ -1,6 +1,7 @@
 from ..db.models import Conversation as ConvModel
 from ..llm.client import llm_client
 from .conversation_service import conversation_service
+from .focus_service import focus_service
 from .memory_service import memory_service
 from .list_service import list_service
 
@@ -46,7 +47,9 @@ class Orchestrator:
             saved_message = f"[Photo: {message}]" if message.strip() else "[Photo]"
         else:
             saved_message = message
-        conversation_service.add_message(conv.id, "user", saved_message, db)
+        user_msg = conversation_service.add_message(conv.id, "user", saved_message, db)
+        # Fire-and-forget focus-activity match. Side-effect, must not block chat.
+        focus_service.match_message_async(saved_message, user_msg.id)
 
         # Build recent history from this conversation
         recent_messages = conversation_service.get_recent_messages(conv.id, limit=10, db=db)
@@ -61,7 +64,8 @@ class Orchestrator:
             if entry_content.strip() else ""
         )
         list_context = list_service.get_list_context(db)
-        full_context = "\n\n".join(filter(None, [memory_context, entry_context, list_context]))
+        focus_context = focus_service.get_focus_context(db)
+        full_context = "\n\n".join(filter(None, [memory_context, entry_context, list_context, focus_context]))
 
         if image_url:
             response, usage = llm_client.generate_response_with_image(

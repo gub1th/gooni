@@ -1,8 +1,63 @@
+import json
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
 
 from ..db.models import Conversation, Message
+from ..llm.client import llm_client
+
+
+_GRAPH_PROMPT = """Extract the topic flow from this conversation as a JSON graph.
+
+Each user/assistant turn is a "moment". Pull 1-3 concrete topic keywords per
+moment (nouns or verb phrases — NOT generic words like "question", "follow-up",
+"explanation"). If a turn has no distinct topic shift, skip it.
+
+An edge connects parent_message_id → message_id when one turn builds on, or
+branches off, an earlier topic. The first turn has no parent.
+
+Output JSON only — no preamble, no markdown fences:
+{{"nodes": [{{"id": <message_id>, "label": "<short topic>", "role": "user"|"assistant"}}, ...],
+ "edges": [{{"from": <id>, "to": <id>}}, ...]}}
+
+Conversation:
+{thread}
+"""
+
+
+def _build_topic_graph_via_llm(messages: list[Message]) -> dict | None:
+    """Single-shot LLM extraction. Returns None on parse failure — the caller
+    falls back to an empty graph rather than blowing up the UI.
+    """
+    if not messages:
+        return {"nodes": [], "edges": []}
+    thread_lines = []
+    for m in messages:
+        text = (m.content or "").strip().replace("\n", " ")[:600]
+        thread_lines.append(f"#{m.id} [{m.role}] {text}")
+    prompt = _GRAPH_PROMPT.format(thread="\n".join(thread_lines))
+    try:
+        raw = llm_client.generate_simple_completion(prompt, max_tokens=600)
+    except Exception as e:
+        print(f"topic_graph LLM error: {e}")
+        return None
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```", 2)[1]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.rsplit("```", 1)[0].strip()
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        print(f"topic_graph JSON parse error: {e} | raw: {cleaned[:200]}")
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return {
+        "nodes": parsed.get("nodes") or [],
+        "edges": parsed.get("edges") or [],
+    }
 
 
 SESSION_GAP_MINUTES = 10  # new session if last message was > 10 minutes ago
@@ -77,6 +132,41 @@ class ConversationService:
             .order_by(Message.created_at.asc())
             .all()
         )
+
+    def build_topic_graph(self, conversation_id: int, db: Session) -> dict:
+        """Return a topic graph for the conversation, building + caching
+        on cache miss. Cache is keyed by message count: a new turn arrives,
+        cache invalidates, next read regenerates. Empty/malformed cache
+        treated as miss.
+        """
+        conv = (
+            db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        )
+        if not conv:
+            return {"nodes": [], "edges": []}
+        msgs = self.get_messages(conversation_id, db)
+        current_count = len(msgs)
+
+        if conv.topic_graph:
+            try:
+                cached = json.loads(conv.topic_graph)
+                if cached.get("message_count") == current_count:
+                    return {
+                        "nodes": cached.get("nodes") or [],
+                        "edges": cached.get("edges") or [],
+                    }
+            except json.JSONDecodeError:
+                pass  # fall through and regenerate
+
+        graph = _build_topic_graph_via_llm(msgs) or {"nodes": [], "edges": []}
+        payload = {
+            "message_count": current_count,
+            "nodes": graph["nodes"],
+            "edges": graph["edges"],
+        }
+        conv.topic_graph = json.dumps(payload)
+        db.commit()
+        return {"nodes": graph["nodes"], "edges": graph["edges"]}
 
     def get_recent_messages(
         self, conversation_id: int, limit: int, db: Session

@@ -6,18 +6,22 @@ import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import { useGooniActivatedStore } from "../../stores/useGooniActivatedStore";
+import {
+  PenLine, FileText, Pin, MessageSquare, Sparkles, Moon, Bug, Settings as SettingsIcon,
+} from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
 import { DevToolsModal } from "../DevToolsModal";
 
-function ComposeIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M11 1.5L13.5 4L6.5 11H4V8.5L11 1.5Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="none"/>
-      <path d="M2 13.5H13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-    </svg>
-  );
-}
+// Per-item color tints — Tolaria-style subtle hues.
+const ICON_TINT = {
+  allNotes: "#6366F1",   // indigo
+  pinned:   "#F59E0B",   // amber
+  newChat:  "#10B981",   // emerald
+  gooni:    "#A855F7",   // violet
+  devTools: "#F43F5E",   // rose
+  settings: "#64748B",   // slate
+} as const;
 
 const COMMON_EMOJIS = [
   "📁","📂","🗂️","📝","📋","📌","📎","🔖",
@@ -157,6 +161,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
 
   const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
   const [spacesOpen, setSpacesOpen] = useState(true);
+  const [pinnedOpen, setPinnedOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const gooniActivated = useGooniActivatedStore((s) => s.activated);
@@ -320,7 +325,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
               onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
             >
-              <ComposeIcon />
+              <PenLine size={15} strokeWidth={1.6} />
             </button>
           )}
         </div>
@@ -348,7 +353,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               onMouseEnter={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
               onMouseLeave={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
             >
-              <span style={{ fontSize: 14, flexShrink: 0 }}>📋</span>
+              <FileText size={15} strokeWidth={1.7} color={ICON_TINT.allNotes} style={{ flexShrink: 0 }} />
               <span style={{
                 flex: 1, fontSize: 13.5,
                 fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -359,6 +364,79 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
 
           {/* Divider */}
           <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 10px" }} />
+
+          {/* Section: PINNED — sits above Spaces */}
+          {pinnedNotes.length > 0 && (
+            <>
+              <div style={{ padding: "0 6px 4px" }}>
+                <div style={{ display: "flex", alignItems: "center", padding: "6px 6px 2px" }}>
+                  <button
+                    onClick={() => setPinnedOpen((o) => !o)}
+                    style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
+                  >
+                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
+                    <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{pinnedOpen ? "▾" : "▸"}</span>
+                  </button>
+                </div>
+                {pinnedOpen && orderedPinnedNotes.map((note) => {
+                  const selected = activeNoteId === note.id;
+                  const isDragging = drag?.kind === "pinned" && drag.fromId === note.id;
+                  const isDropTarget = drag?.kind === "pinned" && drag.overId === note.id && drag.fromId !== note.id;
+                  return (
+                    <div
+                      key={note.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", String(note.id));
+                        setDrag({ kind: "pinned", fromId: note.id, overId: null });
+                      }}
+                      onDragOver={(e) => {
+                        if (drag?.kind !== "pinned") return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        if (drag.overId !== note.id) setDrag({ ...drag, overId: note.id });
+                      }}
+                      onDragLeave={() => {
+                        if (drag?.kind === "pinned" && drag.overId === note.id) setDrag({ ...drag, overId: null });
+                      }}
+                      onDrop={(e) => { e.preventDefault(); dropPinned(note.id); }}
+                      onDragEnd={() => setDrag(null)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        padding: "0 4px 0 10px", height: 30, borderRadius: 8,
+                        cursor: "pointer",
+                        background: selected ? "rgba(0,0,0,0.09)" : (isDropTarget ? "rgba(0,120,255,0.10)" : "transparent"),
+                        opacity: isDragging ? 0.4 : 1,
+                        transition: "background 0.12s, opacity 0.12s",
+                        boxShadow: isDropTarget ? "inset 0 2px 0 rgba(0,120,255,0.45)" : "none",
+                      }}
+                      onMouseEnter={(e) => { if (!selected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "1"); }}
+                      onMouseLeave={(e) => { if (!selected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "0"); }}
+                      onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; handleSelectNote(note); }}
+                    >
+                      <Pin size={13} strokeWidth={1.8} color={ICON_TINT.pinned} fill={ICON_TINT.pinned} style={{ flexShrink: 0 }} />
+                      <span style={{
+                        flex: 1, fontSize: 13,
+                        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                        fontWeight: selected ? 600 : 400, color: "#1C1C1E",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {note.title?.trim() || "Untitled"}
+                      </span>
+                      <button
+                        className="pin-action"
+                        onClick={(e) => { e.stopPropagation(); handleUnpin(note.id); }}
+                        title="Unpin"
+                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
+                      >×</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 10px" }} />
+            </>
+          )}
 
           {/* Section: SPACES */}
           <div style={{ padding: "0 6px 4px" }}>
@@ -440,73 +518,6 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
             })}
           </div>
 
-          {/* Section: PINNED */}
-          {pinnedNotes.length > 0 && (
-            <>
-              <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 10px" }} />
-              <div style={{ padding: "0 6px 4px" }}>
-                <div style={{ padding: "6px 6px 2px" }}>
-                  <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
-                </div>
-                {orderedPinnedNotes.map((note) => {
-                  const selected = activeNoteId === note.id;
-                  const isDragging = drag?.kind === "pinned" && drag.fromId === note.id;
-                  const isDropTarget = drag?.kind === "pinned" && drag.overId === note.id && drag.fromId !== note.id;
-                  return (
-                    <div
-                      key={note.id}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.effectAllowed = "move";
-                        e.dataTransfer.setData("text/plain", String(note.id));
-                        setDrag({ kind: "pinned", fromId: note.id, overId: null });
-                      }}
-                      onDragOver={(e) => {
-                        if (drag?.kind !== "pinned") return;
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = "move";
-                        if (drag.overId !== note.id) setDrag({ ...drag, overId: note.id });
-                      }}
-                      onDragLeave={() => {
-                        if (drag?.kind === "pinned" && drag.overId === note.id) setDrag({ ...drag, overId: null });
-                      }}
-                      onDrop={(e) => { e.preventDefault(); dropPinned(note.id); }}
-                      onDragEnd={() => setDrag(null)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 4,
-                        padding: "0 4px 0 10px", height: 30, borderRadius: 8,
-                        cursor: "pointer",
-                        background: selected ? "rgba(0,0,0,0.09)" : (isDropTarget ? "rgba(0,120,255,0.10)" : "transparent"),
-                        opacity: isDragging ? 0.4 : 1,
-                        transition: "background 0.12s, opacity 0.12s",
-                        boxShadow: isDropTarget ? "inset 0 2px 0 rgba(0,120,255,0.45)" : "none",
-                      }}
-                      onMouseEnter={(e) => { if (!selected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "1"); }}
-                      onMouseLeave={(e) => { if (!selected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "0"); }}
-                      onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; handleSelectNote(note); }}
-                    >
-                      <span style={{ fontSize: 11, flexShrink: 0, color: "#FFB020" }}>📌</span>
-                      <span style={{
-                        flex: 1, fontSize: 13,
-                        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                        fontWeight: selected ? 600 : 400, color: "#1C1C1E",
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                      }}>
-                        {note.title?.trim() || "Untitled"}
-                      </span>
-                      <button
-                        className="pin-action"
-                        onClick={(e) => { e.stopPropagation(); handleUnpin(note.id); }}
-                        title="Unpin"
-                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
-                      >×</button>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
           {/* Spacer — push New chat + Settings to the bottom */}
           <div style={{ flex: 1, minHeight: 20 }} />
 
@@ -527,9 +538,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               onMouseEnter={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
               onMouseLeave={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
-                <path d="M2 3.5C2 2.67 2.67 2 3.5 2h7A1.5 1.5 0 0 1 12 3.5v5A1.5 1.5 0 0 1 10.5 10H6l-2.5 2.5V10H3.5A1.5 1.5 0 0 1 2 8.5v-5Z" stroke="#3C3C43" strokeWidth="1.3" fill="none" strokeLinejoin="round"/>
-              </svg>
+              <MessageSquare size={14} strokeWidth={1.7} color={ICON_TINT.newChat} style={{ flexShrink: 0 }} />
               New chat
             </button>
           </div>
@@ -552,16 +561,10 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
               onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
             >
-              {/* Sparkle/wand icon for activate, moon for hide */}
               {gooniActivated ? (
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-                  <path d="M13.5 10.3A5.5 5.5 0 1 1 5.7 2.5a5.5 5.5 0 0 0 7.8 7.8Z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" />
-                </svg>
+                <Moon size={14} strokeWidth={1.7} color={ICON_TINT.gooni} style={{ flexShrink: 0 }} />
               ) : (
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-                  <path d="M8 2v3M8 11v3M2 8h3M11 8h3M3.8 3.8l2.1 2.1M10.1 10.1l2.1 2.1M3.8 12.2l2.1-2.1M10.1 5.9l2.1-2.1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                  <circle cx="8" cy="8" r="1.6" fill="currentColor" />
-                </svg>
+                <Sparkles size={14} strokeWidth={1.7} color={ICON_TINT.gooni} style={{ flexShrink: 0 }} />
               )}
               {gooniActivated ? "Hide Gooni" : "Activate Gooni"}
             </button>
@@ -584,13 +587,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
               onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
             >
-              {/* Bug icon */}
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-                <ellipse cx="8" cy="9" rx="3.5" ry="4.2" stroke="currentColor" strokeWidth="1.3" fill="none" />
-                <path d="M8 4.8V3.5M6 3l-1-1M10 3l1-1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                <path d="M4.5 7.5H3M4.5 9.2H2.5M4.5 11H3.2M11.5 7.5H13M11.5 9.2H13.5M11.5 11H12.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-                <path d="M7 8.2V10M9 8.2V10" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
-              </svg>
+              <Bug size={14} strokeWidth={1.7} color={ICON_TINT.devTools} style={{ flexShrink: 0 }} />
               Dev tools
             </button>
           </div>
@@ -612,10 +609,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
               onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
-                <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
-                <path d="M8 1.5v2 M8 12.5v2 M14.5 8h-2 M3.5 8h-2 M12.6 3.4l-1.4 1.4 M4.8 11.2l-1.4 1.4 M12.6 12.6l-1.4-1.4 M4.8 4.8l-1.4-1.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-              </svg>
+              <SettingsIcon size={14} strokeWidth={1.7} color={ICON_TINT.settings} style={{ flexShrink: 0 }} />
               Settings
             </button>
           </div>
