@@ -23,6 +23,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     PublicProfile,
     Space,
     TodoItem,
+    TodoNote,
     Visit,
 )
 from .db.schemas import ChatRequest
@@ -112,6 +113,9 @@ async def auth_middleware(request: Request, call_next):
     if (
         (path.startswith("/public") and request.method == "GET")
         or path == "/auth"
+        # OAuth callback is hit by Google's redirect with no bearer; must be open.
+        # The code value itself is the auth proof. `state` can carry a CSRF token.
+        or path == "/auth/google/callback"
         or path == "/healthz"
         or path.startswith("/assets")
         or path == "/"
@@ -453,6 +457,47 @@ def reorder_todos(body: dict, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@app.post("/todos/{todo_id}/plan")
+def create_todo_plan(todo_id: int, db: Session = Depends(get_db)):
+    """Spawn a "Plan for <todo text>" note in General, linked to the todo
+    via the todo_notes table. The frontend uses this to open a quick
+    typing-animation flow that lands the user in a ready-to-write plan.
+    """
+    todo = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not todo:
+        raise HTTPException(status_code=404, detail="todo not found")
+    title = f"Plan for {todo.text}"
+    note = Note(title=title, content="", space_id=None)
+    db.add(note)
+    db.flush()  # populate note.id before creating the link
+    link = TodoNote(todo_id=todo.id, note_id=note.id, relation_type="plan")
+    db.add(link)
+    db.commit()
+    db.refresh(note)
+    return _serialize_note(note)
+
+
+@app.get("/todos/{todo_id}/notes")
+def list_todo_notes(todo_id: int, db: Session = Depends(get_db)):
+    """Notes linked to a todo (e.g. plans). Returns newest link first."""
+    links = (
+        db.query(TodoNote)
+        .filter(TodoNote.todo_id == todo_id)
+        .order_by(TodoNote.created_at.desc())
+        .all()
+    )
+    out = []
+    for link in links:
+        note = db.query(Note).filter(Note.id == link.note_id).first()
+        if not note:
+            continue
+        out.append({
+            "relation_type": link.relation_type,
+            "linked_at": link.created_at,
+            "note": _serialize_note(note),
+        })
+    return out
+
 
 @app.post("/auth")
 async def login(body: dict):
@@ -659,6 +704,85 @@ def get_pinned_notes(db: Session = Depends(get_db)):
         .all()
     )
     return [_serialize_note(n) for n in notes]
+
+
+@app.get("/notes/graph")
+def notes_graph(db: Session = Depends(get_db)):
+    """Semantic graph of all embedded notes.
+
+    Nodes = notes with embeddings, sized by log(word_count+1).
+    Edges = pairs with cosine similarity above a threshold — these are the
+    "you've written related things" connections that drive the physics-based
+    clustering on the frontend.
+
+    Clustering labels are intentionally NOT computed here — let the frontend's
+    force-directed layout surface clumps visually first; labels can be a
+    follow-up that queries this endpoint + hits the LLM for cluster names.
+    """
+    import json
+    import math
+    import re as _re
+
+    notes = (
+        db.query(Note)
+        .filter(Note.embedding.isnot(None))
+        .all()
+    )
+
+    # Parse embeddings + build node metadata.
+    vectors: list[list[float]] = []
+    nodes: list[dict] = []
+    for n in notes:
+        try:
+            v = json.loads(n.embedding)
+            if not isinstance(v, list) or not v:
+                continue
+        except (ValueError, TypeError):
+            continue
+        # Word count for node size — strip HTML first.
+        raw = (n.title or "") + " " + (n.content or "")
+        raw = _re.sub(r"<[^>]+>", " ", raw)
+        words = [w for w in raw.split() if w.strip()]
+        word_count = len(words)
+        vectors.append(v)
+        nodes.append({
+            "id": n.id,
+            "title": (n.title or "").strip() or "(untitled)",
+            "size": round(math.log2(word_count + 2), 3),
+            "space_id": n.space_id,
+        })
+
+    if len(vectors) < 2:
+        return {"nodes": nodes, "edges": []}
+
+    # Pre-compute norms so the pairwise loop doesn't repeat work.
+    norms = [math.sqrt(sum(x * x for x in v)) or 1.0 for v in vectors]
+
+    # Cosine-similarity edges. Threshold is deliberately moderate (0.62) so
+    # we get visible clusters without the hairball-of-edges problem.
+    SIM_THRESHOLD = 0.62
+    edges: list[dict] = []
+    n_count = len(vectors)
+    for i in range(n_count):
+        vi = vectors[i]
+        ni = norms[i]
+        for j in range(i + 1, n_count):
+            vj = vectors[j]
+            nj = norms[j]
+            # Inner loop hot path — dimension is uniform, zip is fast enough
+            # for ~200 notes; switch to numpy if this ever feels slow.
+            dot = 0.0
+            for a, b in zip(vi, vj):
+                dot += a * b
+            sim = dot / (ni * nj)
+            if sim >= SIM_THRESHOLD:
+                edges.append({
+                    "from": nodes[i]["id"],
+                    "to": nodes[j]["id"],
+                    "weight": round(sim, 3),
+                })
+
+    return {"nodes": nodes, "edges": edges}
 
 
 @app.post("/notes/cleanup")
@@ -1169,3 +1293,103 @@ def update_public_profile(body: dict, db: Session = Depends(get_db)):
         db.add(profile)
     db.commit()
     return {"ok": True}
+
+
+# ── Google Calendar OAuth + Events ─────────────────────────────────────────────
+# Single-tenant OAuth. See app/services/google_calendar.py for the setup
+# requirements (Cloud Console project, client creds, redirect URIs).
+
+from .services import google_calendar as gcal  # noqa: E402
+
+
+@app.get("/auth/google/start")
+def auth_google_start():
+    """Kick off the OAuth flow. Returns the URL the frontend should
+    window.open() — we return JSON instead of 302 so the frontend keeps
+    control (shows a spinner, knows if env vars are missing, etc.).
+    """
+    if not gcal.is_configured():
+        raise HTTPException(status_code=503, detail="Google OAuth env vars not set")
+    return {"authorize_url": gcal.build_authorize_url()}
+
+
+@app.get("/auth/google/callback")
+def auth_google_callback(code: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
+    """Google redirects the user here with ?code=... — we exchange it for
+    tokens, stash them, and redirect the browser back to the app. The
+    frontend polls /auth/google/status to know connection state.
+    """
+    from fastapi.responses import HTMLResponse
+    if error:
+        return HTMLResponse(f"<p>Google OAuth returned: {error}. You can close this tab.</p>", status_code=400)
+    if not code:
+        return HTMLResponse("<p>Missing code parameter.</p>", status_code=400)
+    try:
+        tokens = gcal.exchange_code_for_tokens(code)
+        info = {}
+        try:
+            info = gcal.fetch_userinfo(tokens.get("access_token", ""))
+        except Exception:
+            pass
+        gcal.save_tokens_from_exchange(db, tokens, account_email=info.get("email"))
+    except Exception as e:
+        return HTMLResponse(f"<p>Token exchange failed: {e}. You can close this tab.</p>", status_code=500)
+    # Auto-close the popup / redirect tab. Include a small inline script so
+    # both flows (popup and full-page redirect) work.
+    return HTMLResponse(
+        """
+        <!doctype html>
+        <meta charset="utf-8">
+        <title>Calendar connected</title>
+        <style>body{font-family:system-ui;padding:40px;color:#1C1C1E;}</style>
+        <p>Google Calendar connected. You can close this tab.</p>
+        <script>
+          try { window.opener && window.opener.postMessage({type:"gooni-oauth-done"}, "*"); } catch(e){}
+          setTimeout(() => { window.close(); }, 600);
+        </script>
+        """,
+        status_code=200,
+    )
+
+
+@app.get("/auth/google/status")
+def auth_google_status(db: Session = Depends(get_db)):
+    return gcal.connection_status(db)
+
+
+@app.delete("/auth/google")
+def auth_google_disconnect(db: Session = Depends(get_db)):
+    disconnected = gcal.disconnect(db)
+    return {"disconnected": disconnected}
+
+
+@app.post("/calendar/events")
+def calendar_create_event(body: dict, db: Session = Depends(get_db)):
+    """Create a Google Calendar event on the user's primary calendar.
+    Body: { summary, start_iso, end_iso, description?, time_zone? }
+    """
+    summary = (body.get("summary") or "").strip()
+    start_iso = body.get("start_iso")
+    end_iso = body.get("end_iso")
+    if not summary or not start_iso or not end_iso:
+        raise HTTPException(status_code=400, detail="summary, start_iso, end_iso are required")
+    try:
+        event = gcal.create_event(
+            db,
+            summary=summary,
+            start_iso=start_iso,
+            end_iso=end_iso,
+            description=body.get("description"),
+            time_zone=body.get("time_zone"),
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Calendar API error: {e}")
+    return {
+        "id": event.get("id"),
+        "html_link": event.get("htmlLink"),
+        "summary": event.get("summary"),
+        "start": event.get("start"),
+        "end": event.get("end"),
+    }

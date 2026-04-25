@@ -106,4 +106,40 @@ class TodoItem(Base):
     sort_order = Column(Integer, default=0, nullable=False)
 
 
+class TodoNote(Base):
+    """Link between a TodoItem and a Note. Kept narrow (not a general
+    entity-links system) so queries stay typed: `relation_type` is a small
+    enum of concrete relationships. Today only "plan" is used — the note
+    spawned when the user clicks the Plan button on a todo.
+    """
+
+    __tablename__ = "todo_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    todo_id = Column(Integer, ForeignKey("todo_items.id"), nullable=False, index=True)
+    note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
+    relation_type = Column(String, nullable=False, default="plan")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class GoogleOAuthToken(Base):
+    """Stored OAuth credentials for the single Gooni user. One row max —
+    the app is single-tenant. Refresh-token rotation replaces the values
+    in place rather than appending. `provider` left as a column so we can
+    support e.g. gmail later without a second table.
+    """
+
+    __tablename__ = "google_oauth_tokens"
+
+    id = Column(Integer, primary_key=True)
+    provider = Column(String, nullable=False, default="google_calendar", unique=True)
+    access_token = Column(Text, nullable=False)
+    refresh_token = Column(Text, nullable=False)
+    # Unix seconds since epoch — easier to compare than tz-aware datetimes.
+    expires_at = Column(Integer, nullable=False)
+    scope = Column(Text, nullable=True)
+    account_email = Column(Text, nullable=True)  # user's Google email for display
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 

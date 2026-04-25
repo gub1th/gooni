@@ -182,13 +182,81 @@ export async function fetchPinnedNotes(): Promise<ApiNote[]> {
   return res.json();
 }
 
+export interface GraphNode {
+  id: number;
+  title: string;
+  size: number;
+  space_id: number | null;
+}
+export interface GraphEdge {
+  from: number;
+  to: number;
+  weight: number;
+}
+export async function fetchNotesGraph(): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  const res = await apiFetch(`${BASE}/notes/graph`);
+  if (!res.ok) throw new Error("Failed to fetch notes graph");
+  return res.json();
+}
+
+// ── Google Calendar integration ─────────────────────────────────────────────────
+
+export interface GoogleCalendarStatus {
+  configured: boolean;     // env vars set on backend
+  connected: boolean;      // user has active token row
+  account_email: string | null;
+}
+export async function fetchCalendarStatus(): Promise<GoogleCalendarStatus> {
+  const res = await apiFetch(`${BASE}/auth/google/status`);
+  if (!res.ok) throw new Error("Failed to fetch calendar status");
+  return res.json();
+}
+export async function startCalendarOAuth(): Promise<{ authorize_url: string }> {
+  const res = await apiFetch(`${BASE}/auth/google/start`);
+  if (!res.ok) throw new Error("Calendar OAuth not configured on backend");
+  return res.json();
+}
+export async function disconnectCalendar(): Promise<void> {
+  const res = await apiFetch(`${BASE}/auth/google`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to disconnect calendar");
+}
+
+export interface CalendarEvent {
+  id: string;
+  html_link: string;
+  summary: string;
+  start: { dateTime?: string; date?: string };
+  end: { dateTime?: string; date?: string };
+}
+export async function createCalendarEvent(body: {
+  summary: string;
+  start_iso: string;
+  end_iso: string;
+  description?: string;
+  time_zone?: string;
+}): Promise<CalendarEvent> {
+  const res = await apiFetch(`${BASE}/calendar/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Failed to create event: ${msg || res.status}`);
+  }
+  return res.json();
+}
+
 export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: number[] }> {
   const res = await apiFetch(`${BASE}/notes/cleanup`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to clean up notes");
   return res.json();
 }
 
-export async function patchNote(id: number, patch: { is_public?: boolean; is_pinned?: boolean }): Promise<ApiNote> {
+export async function patchNote(
+  id: number,
+  patch: { is_public?: boolean; is_pinned?: boolean; title?: string; content?: string },
+): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -299,6 +367,14 @@ export async function reorderTodos(items: { id: number; sort_order: number }[]):
     body: JSON.stringify({ items }),
   });
   if (!res.ok) throw new Error("Failed to reorder todos");
+}
+
+// Spawn a "Plan for <todo text>" note in General, linked to the todo via
+// todo_notes. Returns the new note so the frontend can animate its title in.
+export async function createTodoPlan(todoId: number): Promise<ApiNote> {
+  const res = await apiFetch(`${BASE}/todos/${todoId}/plan`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to create plan from todo");
+  return res.json();
 }
 
 export async function updatePublicProfile(bio: string): Promise<void> {

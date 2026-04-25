@@ -5,6 +5,7 @@ import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
+import { useGooniActivatedStore } from "../../stores/useGooniActivatedStore";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
 import { DevToolsModal } from "../DevToolsModal";
@@ -158,6 +159,8 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
   const [spacesOpen, setSpacesOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const gooniActivated = useGooniActivatedStore((s) => s.activated);
+  const gooniToggle = useGooniActivatedStore((s) => s.toggle);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
 
@@ -528,6 +531,39 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
                 <path d="M2 3.5C2 2.67 2.67 2 3.5 2h7A1.5 1.5 0 0 1 12 3.5v5A1.5 1.5 0 0 1 10.5 10H6l-2.5 2.5V10H3.5A1.5 1.5 0 0 1 2 8.5v-5Z" stroke="#3C3C43" strokeWidth="1.3" fill="none" strokeLinejoin="round"/>
               </svg>
               New chat
+            </button>
+          </div>
+
+          {/* Activate / Hide Gooni — mounts or unmounts the mascot character.
+              Hidden by default until the user opts in from here. */}
+          <div style={{ padding: "0 6px 2px" }}>
+            <button
+              onClick={gooniToggle}
+              title={gooniActivated ? "Hide Gooni" : "Drop Gooni in the center"}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                border: "none", background: "transparent", cursor: "pointer",
+                textAlign: "left",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontSize: 13.5, color: "#3C3C43",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+            >
+              {/* Sparkle/wand icon for activate, moon for hide */}
+              {gooniActivated ? (
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                  <path d="M13.5 10.3A5.5 5.5 0 1 1 5.7 2.5a5.5 5.5 0 0 0 7.8 7.8Z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                  <path d="M8 2v3M8 11v3M2 8h3M11 8h3M3.8 3.8l2.1 2.1M10.1 10.1l2.1 2.1M3.8 12.2l2.1-2.1M10.1 5.9l2.1-2.1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+                  <circle cx="8" cy="8" r="1.6" fill="currentColor" />
+                </svg>
+              )}
+              {gooniActivated ? "Hide Gooni" : "Activate Gooni"}
             </button>
           </div>
 
