@@ -11,7 +11,7 @@ interface GooniPanelProps {
 }
 
 export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
-  const { toggle, width, setWidth } = useGooniStore();
+  const { width, setWidth } = useGooniStore();
   const { messages, sending, send, activeId } = useConversationsStore();
   const [viewMode, setViewMode] = useState<"chat" | "graph">("chat");
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
@@ -119,83 +119,40 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
         />
       )}
 
-      {/* Header */}
-      <div
-        style={{
-          height: 52,
-          padding: "0 16px",
-          borderBottom: "1px solid rgba(0,0,0,0.08)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexShrink: 0,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 15,
-            fontWeight: 600,
-            color: "#1C1C1E",
-            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-          }}
-        >
-          Gooni
-        </span>
-
-        {/* View toggle — only relevant once a conversation has enough turns
-            to show topic shifts. Hidden in fullscreen mode (different
-            ergonomics) and when no active conversation exists. */}
-        {!fullscreen && activeId !== null && messages.length > 6 && (
-          <div style={{
-            display: "flex", gap: 0,
-            border: "1px solid rgba(0,0,0,0.08)", borderRadius: 6,
-            overflow: "hidden", marginRight: 8,
-          }}>
-            {(["chat", "graph"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setViewMode(m)}
-                style={{
-                  fontSize: 11, padding: "3px 9px",
-                  background: viewMode === m ? "#1C1C1E" : "#fff",
-                  color: viewMode === m ? "#fff" : "#6E6E73",
-                  border: "none", cursor: "pointer",
-                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                  fontWeight: 500,
-                }}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {!fullscreen && (
-          <button
-            onClick={toggle}
-            title="Close Gooni"
-            style={{
-              width: 24,
-              height: 24,
-              borderRadius: "50%",
-              background: "rgba(0,0,0,0.06)",
-              border: "none",
-              cursor: "pointer",
-              fontSize: 13,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#636366",
-              padding: 0,
-              transition: "background 0.1s",
-            }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
-          >
-            ×
-          </button>
-        )}
-      </div>
+      {/* View toggle — small floating chip top-right. Replaces the old header
+          bar. Only shown when the conversation has enough turns to graph,
+          and only in sidebar mode (fullscreen has its own ergonomics).
+          Close behavior moved to the floating ChatLauncher (FAB). */}
+      {!fullscreen && activeId !== null && messages.length > 6 && (
+        <div style={{
+          position: "absolute",
+          top: 12,
+          right: 12,
+          zIndex: 5,
+          display: "flex", gap: 0,
+          border: "1px solid rgba(0,0,0,0.10)", borderRadius: 6,
+          overflow: "hidden",
+          background: "#fff",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+        }}>
+          {(["chat", "graph"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setViewMode(m)}
+              style={{
+                fontSize: 11, padding: "3px 9px",
+                background: viewMode === m ? "#1C1C1E" : "#fff",
+                color: viewMode === m ? "#fff" : "#6E6E73",
+                border: "none", cursor: "pointer",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontWeight: 500,
+              }}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Graph view — renders in place of messages when toggled on. */}
       {viewMode === "graph" && activeId !== null && (
