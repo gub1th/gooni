@@ -5,6 +5,7 @@ from .list_tools import AddToListTool, ShowListTool
 from .focus_tools import MarkFocusActivityTool
 from .note_tools import SearchNotesTool
 from .feature_request_tool import RequestFeatureTool
+from .calendar_tools import CreateCalendarEventTool, CheckCalendarFreeBusyTool
 
 registry = [
     SaveMemoryTool(),
@@ -15,5 +16,7 @@ registry = [
     MarkFocusActivityTool(),
     SearchNotesTool(),
     RequestFeatureTool(),
+    CreateCalendarEventTool(),
+    CheckCalendarFreeBusyTool(),
 ]
 tool_map = {t.name: t for t in registry}
