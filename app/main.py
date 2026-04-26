@@ -26,6 +26,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     PublicProfile,
     Space,
     Suggestion,
+    SuggestionPrompt,
     TodoItem,
     TodoNote,
     Visit,
@@ -265,6 +266,7 @@ def _run_column_migrations(engine):
             ("conversations", "topic_graph", "TEXT"),
             ("conversations", "summary", "TEXT"),
             ("todo_items", "due_date", "DATETIME"),
+            ("suggestions", "note_id", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -901,6 +903,7 @@ def _serialize_suggestion(s: Suggestion) -> dict:
         "title": s.title,
         "body": s.body,
         "source_url": s.source_url,
+        "note_id": getattr(s, "note_id", None),
         "generated_at": s.generated_at.isoformat() if s.generated_at else None,
     }
 
@@ -909,8 +912,9 @@ def _serialize_suggestion(s: Suggestion) -> dict:
 def get_suggestions_today(db: Session = Depends(get_db)):
     grouped = suggestions_service.today(db)
     return {
-        "discovery": [_serialize_suggestion(s) for s in grouped.get("discovery", [])],
-        "whimsy": [_serialize_suggestion(s) for s in grouped.get("whimsy", [])],
+        "read":    [_serialize_suggestion(s) for s in grouped.get("read", [])],
+        "do":      [_serialize_suggestion(s) for s in grouped.get("do", [])],
+        "revisit": [_serialize_suggestion(s) for s in grouped.get("revisit", [])],
     }
 
 
@@ -925,6 +929,28 @@ def dismiss_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
 def refresh_suggestions(db: Session = Depends(get_db)):
     created = suggestions_service.regenerate(db)
     return {"created": len(created)}
+
+
+@app.get("/suggestions/prompts")
+def get_suggestion_prompts(db: Session = Depends(get_db)):
+    """Per-category user prompts. Empty string when not set."""
+    prompts = suggestions_service.get_user_prompts(db)
+    return {
+        "read": prompts.get("read", ""),
+        "do": prompts.get("do", ""),
+        "revisit": prompts.get("revisit", ""),
+    }
+
+
+@app.patch("/suggestions/prompts/{category}")
+def patch_suggestion_prompt(category: str, body: dict, db: Session = Depends(get_db)):
+    """Set the user prompt for a single category. Empty string clears it."""
+    prompt = (body.get("prompt") or "").strip()
+    try:
+        row = suggestions_service.set_user_prompt(db, category, prompt)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"category": row.category, "user_prompt": row.user_prompt}
 
 
 @app.post("/auth")

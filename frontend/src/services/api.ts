@@ -380,7 +380,7 @@ export async function createTodoPlan(todoId: number): Promise<ApiNote> {
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
 
-export type SuggestionCategory = "discovery" | "whimsy";
+export type SuggestionCategory = "read" | "do" | "revisit";
 
 export interface ApiSuggestion {
   id: number;
@@ -388,13 +388,29 @@ export interface ApiSuggestion {
   title: string;
   body: string;
   source_url: string | null;
+  note_id: number | null;
   generated_at: string | null;
 }
 
-export async function fetchSuggestionsToday(): Promise<{ discovery: ApiSuggestion[]; whimsy: ApiSuggestion[] }> {
+export async function fetchSuggestionsToday(): Promise<{ read: ApiSuggestion[]; do: ApiSuggestion[]; revisit: ApiSuggestion[] }> {
   const res = await apiFetch(`${BASE}/suggestions/today`);
   if (!res.ok) throw new Error("Failed to fetch suggestions");
   return res.json();
+}
+
+export async function fetchSuggestionPrompts(): Promise<{ read: string; do: string; revisit: string }> {
+  const res = await apiFetch(`${BASE}/suggestions/prompts`);
+  if (!res.ok) throw new Error("Failed to fetch suggestion prompts");
+  return res.json();
+}
+
+export async function patchSuggestionPrompt(category: SuggestionCategory, prompt: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/suggestions/prompts/${category}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) throw new Error("Failed to update suggestion prompt");
 }
 
 export async function dismissSuggestion(id: number): Promise<void> {
