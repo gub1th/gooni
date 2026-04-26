@@ -842,6 +842,10 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
         .gooni-mascot-wrapper.gm-idle,
         .gooni-mascot-wrapper.gm-turning,
         .gooni-mascot-wrapper.gm-landing { z-index: 1001; }
+        /* Peek = mascot is "inside the FAB". The FAB's embedded character is
+           the visible Gooni; the live mascot must be invisible OR we get
+           a duplicate floating head above the launcher. */
+        .gooni-mascot-wrapper.gm-peek { opacity: 0; pointer-events: none; }
         /* Interactive in every phase — shape hit-testing via visiblePainted keeps
            notes underneath clickable at transparent corners. */
         .gooni-mascot-wrapper .gooni-mascot-svg { pointer-events: auto; cursor: grab; }
