@@ -277,8 +277,9 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
       next === "drag" ? "shocked" :
       selectedFace;
     setDisplayFace((cur) => (cur === wantFace ? cur : wantFace));
-    // Drop-zone only shows while dragging.
-    setDropZoneVisible(next === "drag");
+    // Drop zone visible whenever mascot is OUT of the FAB (drag/walk/idle/...)
+    // so the user always sees where to put him back, not just mid-drag.
+    setDropZoneVisible(next !== "peek");
     // Publish out-of-FAB signal so ChatLauncher hides its embedded character
     // whenever the mascot is anywhere except docked.
     useMascotOutStore.getState().setIsOut(next !== "peek");
