@@ -79,8 +79,8 @@ function facingFor(dx: number, dy: number): FacingDir {
 function FaceSmirk() {
   return (
     <g>
-      <circle cx="38" cy="32" r="3.5" fill="#1a1a1a" />
-      <circle cx="52" cy="32" r="3.5" fill="#1a1a1a" />
+      <g className="gooni-pupil-l"><circle cx="38" cy="32" r="3.5" fill="#1a1a1a" /></g>
+      <g className="gooni-pupil-r"><circle cx="52" cy="32" r="3.5" fill="#1a1a1a" /></g>
       <path d="M38 42 Q45 48 52 43" stroke="#1a1a1a" strokeWidth="2.5" fill="none" strokeLinecap="round" />
     </g>
   );
@@ -88,10 +88,14 @@ function FaceSmirk() {
 function FaceSideEye() {
   return (
     <g>
-      <circle cx="38" cy="32" r="3.5" fill="#1a1a1a" />
-      <circle cx="40" cy="32" r="1.5" fill="#f2f2f2" />
-      <circle cx="52" cy="32" r="3.5" fill="#1a1a1a" />
-      <circle cx="54" cy="32" r="1.5" fill="#f2f2f2" />
+      <g className="gooni-pupil-l">
+        <circle cx="38" cy="32" r="3.5" fill="#1a1a1a" />
+        <circle cx="40" cy="32" r="1.5" fill="#f2f2f2" />
+      </g>
+      <g className="gooni-pupil-r">
+        <circle cx="52" cy="32" r="3.5" fill="#1a1a1a" />
+        <circle cx="54" cy="32" r="1.5" fill="#f2f2f2" />
+      </g>
       <path d="M34 23 Q38 20 43 22" stroke="#1a1a1a" strokeWidth="2.2" fill="none" strokeLinecap="round" />
       <line x1="38" y1="43" x2="52" y2="43" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" />
     </g>
@@ -100,8 +104,8 @@ function FaceSideEye() {
 function FaceHyped() {
   return (
     <g>
-      <circle cx="38" cy="30" r="3.5" fill="#1a1a1a" />
-      <circle cx="52" cy="30" r="3.5" fill="#1a1a1a" />
+      <g className="gooni-pupil-l"><circle cx="38" cy="30" r="3.5" fill="#1a1a1a" /></g>
+      <g className="gooni-pupil-r"><circle cx="52" cy="30" r="3.5" fill="#1a1a1a" /></g>
       <path d="M34 22 Q38 19 42 21" stroke="#1a1a1a" strokeWidth="2" fill="none" strokeLinecap="round" />
       <path d="M48 21 Q52 18 56 20" stroke="#1a1a1a" strokeWidth="2" fill="none" strokeLinecap="round" />
       <path d="M34 40 Q45 52 56 40" stroke="#1a1a1a" strokeWidth="2.5" fill="#1a1a1a" strokeLinecap="round" />
@@ -111,8 +115,8 @@ function FaceHyped() {
 function FaceDeadInside() {
   return (
     <g>
-      <circle cx="38" cy="34" r="3" fill="#1a1a1a" />
-      <circle cx="52" cy="34" r="3" fill="#1a1a1a" />
+      <g className="gooni-pupil-l"><circle cx="38" cy="34" r="3" fill="#1a1a1a" /></g>
+      <g className="gooni-pupil-r"><circle cx="52" cy="34" r="3" fill="#1a1a1a" /></g>
       <line x1="38" y1="44" x2="52" y2="44" stroke="#1a1a1a" strokeWidth="2.5" strokeLinecap="round" />
     </g>
   );
@@ -145,10 +149,14 @@ function FaceShocked() {
   return (
     <g>
       {/* Wide eyes with shine */}
-      <circle cx="38" cy="31" r="4.5" fill="#1a1a1a" />
-      <circle cx="39.5" cy="29" r="1.3" fill="white" />
-      <circle cx="52" cy="31" r="4.5" fill="#1a1a1a" />
-      <circle cx="53.5" cy="29" r="1.3" fill="white" />
+      <g className="gooni-pupil-l">
+        <circle cx="38" cy="31" r="4.5" fill="#1a1a1a" />
+        <circle cx="39.5" cy="29" r="1.3" fill="white" />
+      </g>
+      <g className="gooni-pupil-r">
+        <circle cx="52" cy="31" r="4.5" fill="#1a1a1a" />
+        <circle cx="53.5" cy="29" r="1.3" fill="white" />
+      </g>
       {/* Raised brows */}
       <path d="M33 22 Q38 18 43 22" stroke="#1a1a1a" strokeWidth="2" fill="none" strokeLinecap="round" />
       <path d="M47 22 Q52 18 57 22" stroke="#1a1a1a" strokeWidth="2" fill="none" strokeLinecap="round" />
@@ -333,6 +341,40 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseleave", onLeave);
     };
+  }, []);
+
+  // ── Eye tracking — pupils follow the cursor regardless of phase ──────────
+  // Mirrors the FAB-embedded character's behavior in ChatLauncher.tsx so the
+  // mascot stays "alive" while walking/idling around the dashboard. Faces
+  // without circular pupils (sus, crying-laughing) get nothing — their
+  // pupil group simply isn't tagged with the class.
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      const wrapper = wrapperRef.current;
+      const faceGroup = faceGroupRef.current;
+      if (!wrapper || !faceGroup) return;
+      const r = wrapper.getBoundingClientRect();
+      // Approximate head center on screen. Wrapper is 48x68 covering a 90x130
+      // viewBox where the head sits around y=34 / x=45. So the head center is
+      // ~50% across and ~26% down within the wrapper rect.
+      const cx = r.left + r.width * 0.5;
+      const cy = r.top + r.height * 0.27;
+      const dx = e.clientX - cx;
+      const dy = e.clientY - cy;
+      const dist = Math.hypot(dx, dy) || 1;
+      // viewBox units. ~2.2 keeps the pupil inside the white eye-plate at
+      // every face variant. Soft falloff with screen distance so eyes only
+      // lock on when the cursor is nearby.
+      const MAX = 2.2;
+      const t = Math.min(1, dist / 240);
+      const tx = (dx / dist) * MAX * t;
+      const ty = (dy / dist) * MAX * t;
+      const transform = `translate(${tx.toFixed(2)} ${ty.toFixed(2)})`;
+      const pupils = faceGroup.querySelectorAll<SVGGElement>(".gooni-pupil-l, .gooni-pupil-r");
+      pupils.forEach((p) => p.setAttribute("transform", transform));
+    }
+    window.addEventListener("mousemove", onMove, { passive: true });
+    return () => window.removeEventListener("mousemove", onMove);
   }, []);
 
   // ── FAB → mascot drag handoff ────────────────────────────────────────────

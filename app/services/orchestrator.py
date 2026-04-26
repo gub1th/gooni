@@ -90,6 +90,7 @@ class Orchestrator:
         # the orchestrator stamps the message + writes a tone preference into
         # memory. Skipped for image turns since those carry no critique signal.
         feedback_ack: str | None = None
+        feedback_tools: list[str] = []
         skip_normal_reply = False
         if not image_url and saved_message.strip():
             # Explicit undo command — runs before the detector so it always wins.
@@ -111,10 +112,11 @@ class Orchestrator:
                     fb = feedback_detector.classify(
                         prev_assistant.content, saved_message
                     )
-                    if fb["is_feedback"] and fb["rule"]:
+                    if fb["kind"] == "tone" and fb["rule"]:
                         user_msg.feedback_for_message_id = prev_assistant.id
                         user_msg.is_feedback = True
                         db.commit()
+                        feedback_tools.append("feedback_detector:tone")
                         # Memory write is best-effort + off-thread to avoid
                         # blocking the reply.
                         threading.Thread(
@@ -133,12 +135,37 @@ class Orchestrator:
                         # If the user *also* asked something new, fall through
                         # and run the normal reply pipeline. Else short-circuit.
                         skip_normal_reply = not fb["also_new_question"]
+                    elif fb["kind"] == "capability_gap" and fb["feature_title"]:
+                        # Daniel is calling out a hallucination / missing
+                        # capability. Log the feature inline (synchronous so
+                        # the ack reflects success) instead of routing through
+                        # the LLM tool path — the user's message itself IS
+                        # the request, no extra inference needed.
+                        from ..tools.feature_request_tool import feature_request_tool
+                        try:
+                            feature_request_tool.execute(
+                                db=db,
+                                title=fb["feature_title"],
+                                why=fb["feature_why"] or saved_message[:300],
+                            )
+                            feedback_tools.append("request_feature")
+                        except Exception as e:
+                            print(f"feature_request via detector error: {e}")
+                        feedback_tools.append("feedback_detector:capability_gap")
+                        user_msg.feedback_for_message_id = prev_assistant.id
+                        user_msg.is_feedback = True
+                        db.commit()
+                        feedback_ack = (
+                            f"You're right — I can't. Logged it as a feature "
+                            f"request: \"{fb['feature_title']}\"."
+                        )
+                        skip_normal_reply = not fb["also_new_question"]
 
         if skip_normal_reply and feedback_ack is not None:
             conversation_service.add_message(conv.id, "assistant", feedback_ack, db)
             return feedback_ack, {
                 "intention": "feedback acknowledgment",
-                "tools_used": ["feedback_detector"],
+                "tools_used": feedback_tools or ["feedback_detector"],
             }
 
         # Build recent history. If a rolling summary exists, prepend it as a
