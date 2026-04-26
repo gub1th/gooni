@@ -688,6 +688,29 @@ export interface ChatAuditFeedback {
   created_at: string | null;
 }
 
+export interface ChatAuditDebugMemory {
+  id: number;
+  type: string;
+  content: string;
+  similarity: number | null;
+  always_inject: boolean;
+}
+
+export interface ChatAuditDebug {
+  intention: string;
+  tools_used: string[];
+  model: string;
+  latency_ms: number;
+  prompt_chars: number;
+  history_msgs: number;
+  has_entry_context: boolean;
+  has_list_context: boolean;
+  has_focus_context: boolean;
+  has_conv_summary: boolean;
+  memories: ChatAuditDebugMemory[];
+  feedback_ack: string | null;
+}
+
 export interface ChatAuditEntry {
   id: number;
   conversation_id: number;
@@ -696,6 +719,7 @@ export interface ChatAuditEntry {
   content: string;
   created_at: string | null;
   feedback: ChatAuditFeedback | null;
+  debug: ChatAuditDebug | null;
 }
 
 export interface ChatAuditActiveRule {

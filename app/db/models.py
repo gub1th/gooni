@@ -67,6 +67,12 @@ class Message(Base):
         Integer, ForeignKey("messages.id"), nullable=True
     )
     is_feedback = Column(Boolean, nullable=False, default=False)
+    # JSON snapshot of the inputs that produced this assistant reply so the
+    # /chat-audit visualizer can show what informed Gooni: retrieved
+    # memories with similarity scores, tools used, intention, latency,
+    # context flags. Populated only on assistant rows; user rows leave it
+    # null. Read-mostly — never join on this.
+    debug_payload = Column(Text, nullable=True)
 
 
 class Note(Base):

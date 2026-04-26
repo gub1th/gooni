@@ -269,6 +269,7 @@ def _run_column_migrations(engine):
             ("suggestions", "note_id", "INTEGER"),
             ("messages", "feedback_for_message_id", "INTEGER"),
             ("messages", "is_feedback", "INTEGER"),
+            ("messages", "debug_payload", "TEXT"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -1880,6 +1881,12 @@ def list_chat_audit(
                 "content": fb_m.content,
                 "created_at": fb_m.created_at.isoformat() if fb_m.created_at else None,
             }
+        debug = None
+        if asst_m.debug_payload:
+            try:
+                debug = json.loads(asst_m.debug_payload)
+            except json.JSONDecodeError:
+                debug = None
         entries.append({
             "id": asst_m.id,
             "conversation_id": asst_m.conversation_id,
@@ -1888,6 +1895,7 @@ def list_chat_audit(
             "content": asst_m.content,
             "created_at": asst_m.created_at.isoformat() if asst_m.created_at else None,
             "feedback": feedback,
+            "debug": debug,
         })
     return {
         "total": total,

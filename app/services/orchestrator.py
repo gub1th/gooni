@@ -1,8 +1,10 @@
+import json
 import re
 import threading
+import time
 
 from ..db.database import SessionLocal
-from ..db.models import Conversation as ConvModel
+from ..db.models import Conversation as ConvModel, Message
 from ..llm.client import llm_client
 from .conversation_service import conversation_service
 from .feedback_detector import feedback_detector
@@ -155,7 +157,9 @@ class Orchestrator:
         query = message if message.strip() else "image"
 
         intention_context = llm_client.generate_intention_context(query, recent_history[-6:])
-        memory_context = memory_service.build_memory_context(query, db=db)
+        memory_context, retrieved_memories = memory_service.build_memory_context_with_debug(
+            query, db=db
+        )
         # If the active note is large, summarize it before injection to keep
         # the prompt focused. Below threshold, dump it raw as before.
         if entry_content.strip():
@@ -185,6 +189,7 @@ class Orchestrator:
             focus_context,
         ]))
 
+        llm_started_at = time.monotonic()
         if image_url:
             response, usage = llm_client.generate_response_with_image(
                 message, image_url, full_context, recent_history, db=db
@@ -194,13 +199,42 @@ class Orchestrator:
                 message, full_context, recent_history,
                 is_first_time=is_first_time, db=db, model=model,
             )
+        llm_latency_ms = int((time.monotonic() - llm_started_at) * 1000)
 
         # Mixed turn (feedback + new question): prepend the ack so Daniel
         # sees that the correction was logged before the actual answer.
         if feedback_ack is not None:
             response = f"{feedback_ack}\n\n{response}"
 
-        conversation_service.add_message(conv.id, "assistant", response, db)
+        assistant_msg = conversation_service.add_message(conv.id, "assistant", response, db)
+
+        # Snapshot of every input that produced this reply. Saved on the
+        # assistant Message so /chat-audit can render a "behind the scenes"
+        # disclosure: which memories were pulled, similarity scores, tools
+        # called, intention, latency, context flags. Truncated content
+        # keeps row size bounded.
+        debug_snapshot = {
+            "intention": intention_context or "",
+            "tools_used": list(usage.get("tools_used") or []),
+            "model": usage.get("model") or model or "",
+            "latency_ms": llm_latency_ms,
+            "prompt_chars": len(full_context),
+            "history_msgs": len(recent_history),
+            "has_entry_context": bool(entry_context),
+            "has_list_context": bool(list_context),
+            "has_focus_context": bool(focus_context),
+            "has_conv_summary": bool(conv.summary),
+            "memories": [
+                {**m, "content": (m.get("content") or "")[:240]}
+                for m in retrieved_memories
+            ],
+            "feedback_ack": feedback_ack,
+        }
+        try:
+            assistant_msg.debug_payload = json.dumps(debug_snapshot)
+            db.commit()
+        except Exception as e:
+            print(f"debug_payload write error: {e}")
 
         # Local memory pipeline (extract → reconcile → apply). Fire-and-forget
         # in a daemon thread so the response isn't blocked by 1-2 LLM calls.
