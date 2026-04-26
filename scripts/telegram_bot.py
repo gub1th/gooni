@@ -23,6 +23,43 @@ from app.services.todo_nudge import build_nudge_message, seconds_until_next
 
 load_dotenv()
 
+
+def _markdown_to_telegram_html(text: str) -> str:
+    """Convert the LLM's markdown to Telegram HTML so **bold** / `code` /
+    [text](url) actually render. parse_mode='HTML' is more lenient than
+    Telegram's MarkdownV2 (no need to escape every `.`/`-`/etc).
+
+    Order matters: escape HTML chars first, THEN substitute markdown so the
+    pattern characters aren't blown away by escaping.
+    """
+    if not text:
+        return ""
+    # Escape HTML chars so user content can't accidentally break parsing.
+    out = (
+        text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+    )
+    # Bold: **text**
+    out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out, flags=re.DOTALL)
+    # Inline code: `text`
+    out = re.sub(r"`([^`\n]+?)`", r"<code>\1</code>", out)
+    # Links: [text](url)
+    out = re.sub(
+        r"\[([^\]]+)\]\((https?://[^\s)]+)\)",
+        r'<a href="\2">\1</a>',
+        out,
+    )
+    # Italic: *text* (must run AFTER bold). Skip when a digit is on either
+    # side (avoids 2*3 etc) — Telegram has no italic-via-asterisk in HTML
+    # anyway, so fall back to <i>.
+    out = re.sub(
+        r"(?<![\*\w])\*([^\*\n]+?)\*(?!\w)",
+        r"<i>\1</i>",
+        out,
+    )
+    return out
+
 Base.metadata.create_all(bind=engine)
 
 
@@ -35,7 +72,15 @@ async def _respond(update: Update, message: str, image_url: str | None = None) -
             db.close()
 
     response, usage = await asyncio.to_thread(chat_fn)
-    await update.message.reply_text(response)
+    rendered = _markdown_to_telegram_html(response)
+    try:
+        await update.message.reply_text(rendered, parse_mode="HTML")
+    except Exception as e:
+        # If Telegram rejects the HTML (rare — we escape, but a stray tag
+        # could slip through), retry as plain text rather than dropping
+        # the response on the floor.
+        print(f"telegram HTML send error: {e}; falling back to plain text")
+        await update.message.reply_text(response)
 
     if usage:
         tools_used = usage.get("tools_used", [])

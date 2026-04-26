@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { renderMarkdown } from "../../utils/markdown";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -103,7 +104,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           wordBreak: "break-word",
         }}
       >
-        {message.content}
+        {renderMarkdown(message.content)}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from "react";
+import { renderMarkdown } from "../utils/markdown";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -310,7 +311,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                 fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
               }}
             >
-              {m.content}
+              {renderMarkdown(m.content)}
             </div>
           </div>
         ))}
