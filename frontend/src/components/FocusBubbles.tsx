@@ -198,9 +198,9 @@ export function FocusBubbles() {
             <div style={{ flex: 1 }} />
             <button
               onClick={() => { if (editingId !== null) heartbeat(editingId); setEditingId(null); }}
-              title="Touched today"
+              title="Mark as worked on today"
               style={btnGhost()}
-            >♥ touched</button>
+            >♥ worked on it</button>
             <button
               onClick={() => {
                 if (editingId === null) return;

@@ -15,7 +15,7 @@ const STATUS_ORDER: FocusStatus[] = ["committed", "pending", "someday", "done"];
 
 function formatDaysSince(days: number | null): string {
   if (days === null) return "no activity yet";
-  if (days === 0) return "touched today";
+  if (days === 0) return "worked on today";
   if (days === 1) return "1d ago";
   return `${days}d ago`;
 }
@@ -169,7 +169,7 @@ export function FocusCard() {
                     {isHover && (
                       <div style={{ display: "flex", gap: 4 }}>
                         <button
-                          title="Mark as touched today"
+                          title="Mark as worked on today"
                           onClick={() => heartbeat(f.id)}
                           style={iconBtnStyle()}
                         >♥</button>

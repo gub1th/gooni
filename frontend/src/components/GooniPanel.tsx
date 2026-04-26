@@ -205,7 +205,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                 textAlign: "center",
               }}>
                 <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.55 }}>
-                  Hey — it's been <strong>{heat}</strong> since we touched <strong>{checkin.name}</strong>.
+                  Hey — it's been <strong>{heat}</strong> since you worked on <strong>{checkin.name}</strong>.
                 </div>
                 <button
                   onClick={() => {

@@ -4,7 +4,7 @@ from .base import BaseTool
 class MarkFocusActivityTool(BaseTool):
     name = "mark_focus_activity"
     description = (
-        "Mark a focus as touched today — bumps its last_activity_at to now. "
+        "Mark a focus as worked on today — bumps its last_activity_at to now. "
         "Use whenever Daniel mentions making progress on something, or his "
         "message clearly relates to one of his active focuses (listed in the "
         "system context). The focus list lives under 'Daniel's active focuses' "
@@ -33,4 +33,4 @@ class MarkFocusActivityTool(BaseTool):
         if not focus:
             return f"(no focus matching '{focus_name}')"
         focus_service.mark_activity(db, focus.id)
-        return f"♥ marked '{focus.name}' as touched today"
+        return f"♥ marked '{focus.name}' as worked on today"
