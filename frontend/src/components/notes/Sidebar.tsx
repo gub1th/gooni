@@ -6,9 +6,8 @@ import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
-import { useGooniActivatedStore } from "../../stores/useGooniActivatedStore";
 import {
-  PenLine, FileText, Pin, MessageSquare, Sparkles, Moon, Bug, Brain, Settings as SettingsIcon,
+  PenLine, FileText, Pin, MessageSquare, Bug, Brain, Settings as SettingsIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -168,8 +167,6 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
-  const gooniActivated = useGooniActivatedStore((s) => s.activated);
-  const gooniToggle = useGooniActivatedStore((s) => s.toggle);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
 
@@ -546,33 +543,6 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
             >
               <MessageSquare size={14} strokeWidth={1.7} color={ICON_TINT.newChat} style={{ flexShrink: 0 }} />
               New chat
-            </button>
-          </div>
-
-          {/* Activate / Hide Gooni — mounts or unmounts the mascot character.
-              Hidden by default until the user opts in from here. */}
-          <div style={{ padding: "0 6px 2px" }}>
-            <button
-              onClick={gooniToggle}
-              title={gooniActivated ? "Hide Gooni" : "Drop Gooni in the center"}
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
-                border: "none", background: "transparent", cursor: "pointer",
-                textAlign: "left",
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontSize: 13.5, color: "#3C3C43",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-            >
-              {gooniActivated ? (
-                <Moon size={14} strokeWidth={1.7} color={ICON_TINT.gooni} style={{ flexShrink: 0 }} />
-              ) : (
-                <Sparkles size={14} strokeWidth={1.7} color={ICON_TINT.gooni} style={{ flexShrink: 0 }} />
-              )}
-              {gooniActivated ? "Hide Gooni" : "Activate Gooni"}
             </button>
           </div>
 

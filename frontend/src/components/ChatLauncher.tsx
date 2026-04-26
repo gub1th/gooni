@@ -1,20 +1,32 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useChatLauncherRectStore } from "../stores/useChatLauncherRectStore";
 
-// Floating chat-launcher (FAB) — bottom-right, fixed. Replaces the in-panel
-// header bar + close button. Click toggles the floating GooniPanel. Mascot's
-// peek/drop-zone anchor here via useChatLauncherRectStore so the head appears
-// to perch on top of this launcher when idle.
+// Floating chat-launcher (FAB) — bottom-right, fixed. Visible on every authed
+// route via GooniLayer. Click toggles the floating GooniPanel.
+//
+// Visual: 64px black circle, brand-green border, green pulse dot indicator
+// top-right, simplified Gooni character embedded inside (head + green body,
+// legs cropped by the circular border). Hover: scale 1.08, lighter rim.
+//
+// Click vs drag: pointerup within 200ms + delta < 5px counts as click.
+// Anything longer or further is ignored — leaves room for a drag-out mascot
+// handoff in a follow-up without re-architecting.
 
 const SIZE = 64;
 const MARGIN = 24;
+const CLICK_MAX_MS = 200;
+const CLICK_MAX_PX = 5;
 
 export function ChatLauncher() {
   const isOpen = useGooniStore((s) => s.isOpen);
   const toggle = useGooniStore((s) => s.toggle);
   const setRect = useChatLauncherRectStore((s) => s.setRect);
   const ref = useRef<HTMLButtonElement>(null);
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  // Track pointer-down to distinguish click from drag.
+  const pointerStateRef = useRef<{ x: number; y: number; t: number } | null>(null);
 
   useEffect(() => {
     function publish() {
@@ -33,67 +45,54 @@ export function ChatLauncher() {
     };
   }, [setRect]);
 
+  function handlePointerDown(e: React.PointerEvent) {
+    pointerStateRef.current = { x: e.clientX, y: e.clientY, t: performance.now() };
+    setPressed(true);
+  }
+  function handlePointerUp(e: React.PointerEvent) {
+    setPressed(false);
+    const start = pointerStateRef.current;
+    pointerStateRef.current = null;
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    const dt = performance.now() - start.t;
+    if (dt < CLICK_MAX_MS && Math.hypot(dx, dy) < CLICK_MAX_PX) {
+      toggle();
+    }
+  }
+  function handlePointerLeave() {
+    setHovered(false);
+    setPressed(false);
+    pointerStateRef.current = null;
+  }
+
+  // Border lightens on hover; a touch greener on press. Scale animates in CSS.
+  const borderColor = hovered ? "#6EE7A0" : "#4ADE80";
+  const scale = pressed ? 0.94 : hovered ? 1.08 : 1;
+
   return (
     <>
-      {/* Inline keyframes so we don't have to plumb a global stylesheet. */}
       <style>{`
-        @keyframes gooni-fab-breathe {
-          0%, 100% {
-            box-shadow:
-              0 12px 28px rgba(0,0,0,0.28),
-              0 4px 8px rgba(0,0,0,0.18),
-              0 0 0 0 rgba(74,222,128,0.0);
-          }
-          50% {
-            box-shadow:
-              0 12px 28px rgba(0,0,0,0.28),
-              0 4px 8px rgba(0,0,0,0.18),
-              0 0 0 8px rgba(74,222,128,0.18);
-          }
+        @keyframes gooni-fab-pulse-dot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.45; transform: scale(0.7); }
         }
-        @keyframes gooni-fab-orbit {
-          0%   { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        .gooni-fab-halo {
-          position: absolute;
-          inset: -10px;
-          border-radius: 50%;
-          background: conic-gradient(
-            from 0deg,
-            rgba(74,222,128,0.0) 0deg,
-            rgba(74,222,128,0.45) 90deg,
-            rgba(74,222,128,0.0) 180deg,
-            rgba(74,222,128,0.25) 270deg,
-            rgba(74,222,128,0.0) 360deg
-          );
-          filter: blur(8px);
-          opacity: 0.8;
-          animation: gooni-fab-orbit 6s linear infinite;
-          pointer-events: none;
-        }
-        .gooni-fab-x {
-          position: absolute; inset: 0;
-          display: flex; align-items: center; justify-content: center;
-          opacity: 0;
-          transition: opacity 0.18s ease, transform 0.18s ease;
-          transform: rotate(-45deg) scale(0.8);
-        }
-        .gooni-fab.is-open .gooni-fab-x {
-          opacity: 1;
-          transform: rotate(0deg) scale(1);
-        }
-        .gooni-fab.is-open {
-          background: linear-gradient(145deg, #16A34A 0%, #1C1C1E 70%, #0A0A0B 100%) !important;
+        @keyframes gooni-fab-aura {
+          0%, 100% { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 0 rgba(74,222,128,0.0); }
+          50%      { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 6px rgba(74,222,128,0.18); }
         }
       `}</style>
 
       <button
         ref={ref}
-        onClick={toggle}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerLeave}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={handlePointerLeave}
         title={isOpen ? "Close chat" : "Open chat"}
         aria-label={isOpen ? "Close Gooni chat" : "Open Gooni chat"}
-        className={`gooni-fab ${isOpen ? "is-open" : ""}`}
         style={{
           position: "fixed",
           bottom: MARGIN,
@@ -101,76 +100,95 @@ export function ChatLauncher() {
           width: SIZE,
           height: SIZE,
           borderRadius: "50%",
-          // Layered depth: outer dark gradient + inner brand-green rim. Looks
-          // closer to a physical button than the flat dark ball it was.
-          background:
-            "linear-gradient(145deg, #2C2C2E 0%, #1C1C1E 55%, #0A0A0B 100%)",
-          border: "1px solid rgba(74,222,128,0.18)",
-          // Subtle constant breathing pulse — pulls the eye without screaming.
-          animation: "gooni-fab-breathe 3.6s ease-in-out infinite",
-          cursor: "pointer",
+          background: "#1A1A1A",
+          border: `2px solid ${borderColor}`,
+          overflow: "hidden",
+          cursor: pressed ? "grabbing" : "pointer",
           zIndex: 1000,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
           padding: 0,
-          transition: "transform 0.15s ease, background 0.25s ease",
           outline: "none",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.06)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
-        }}
-        onMouseDown={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.94)";
-        }}
-        onMouseUp={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.06)";
+          transform: `scale(${scale})`,
+          transition: "transform 0.15s ease, border-color 0.18s ease",
+          // Idle aura pulse — stops when open since the X already says "active".
+          animation: isOpen ? "none" : "gooni-fab-aura 3.6s ease-in-out infinite",
         }}
       >
-        {/* Conic-gradient halo orbits behind the button — wisp of green that
-            reads as "alive" without the constant pulsing being too loud. */}
-        <span className="gooni-fab-halo" aria-hidden />
+        {/* Embedded Gooni character — head + body, legs cropped by circle.
+            Uses the same palette as the live mascot so the FAB reads as
+            Gooni's "self portrait." Sized so head sits high in the circle. */}
+        <svg
+          width={SIZE + 16}
+          height={SIZE + 16}
+          viewBox="0 0 90 100"
+          style={{
+            position: "absolute",
+            bottom: -8,
+            left: -8,
+            pointerEvents: "none",
+            transition: "opacity 0.2s ease, transform 0.2s ease",
+            // Hide the character when open — the X icon takes its place so the
+            // button reads cleanly as a close affordance.
+            opacity: isOpen ? 0 : 1,
+            transform: isOpen ? "translateY(8px)" : "translateY(0)",
+          }}
+        >
+          {/* Body — green rounded square, partially cropped at the bottom by
+              the FAB's overflow:hidden. */}
+          <rect x="29" y="50" width="32" height="38" rx="6" fill="#4ADE80" />
+          {/* Arms — short stubs at body sides */}
+          <rect x="6" y="54" width="24" height="7" rx="3.5" fill="#1A1A1A" />
+          <rect x="60" y="54" width="24" height="7" rx="3.5" fill="#1A1A1A" />
+          {/* Head — dark circle with f2 face plate */}
+          <circle cx="45" cy="32" r="22" fill="#1A1A1A" />
+          <circle cx="45" cy="32" r="17" fill="#F2F2F2" />
+          {/* Smirk face — eyes + curve mouth */}
+          <circle cx="38" cy="30" r="3" fill="#1A1A1A" />
+          <circle cx="52" cy="30" r="3" fill="#1A1A1A" />
+          <path d="M38 39 Q45 45 52 40" stroke="#1A1A1A" strokeWidth="2.2" fill="none" strokeLinecap="round" />
+        </svg>
 
-        {/* Inner glow ring: warmer center, tunnels eye toward the mascot or X. */}
+        {/* Soft top-half radial highlight — sells the spherical depth. */}
         <span
           aria-hidden
           style={{
-            position: "absolute",
-            inset: 5,
-            borderRadius: "50%",
-            background:
-              "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.10), rgba(255,255,255,0) 65%)",
+            position: "absolute", inset: 0, borderRadius: "50%",
+            background: "radial-gradient(ellipse at 50% 18%, rgba(255,255,255,0.10), rgba(255,255,255,0) 55%)",
             pointerEvents: "none",
           }}
         />
 
-        {/* Brand green dot — sits at top-left like an indicator LED. Hidden
-            when open since the X takes that visual job. */}
-        {!isOpen && (
+        {/* Status pulse dot — top-right, brand green, gently animated. */}
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            top: 5,
+            right: 5,
+            width: 9,
+            height: 9,
+            borderRadius: "50%",
+            background: "#4ADE80",
+            boxShadow: "0 0 6px rgba(74,222,128,0.85)",
+            animation: "gooni-fab-pulse-dot 2.2s ease-in-out infinite",
+            pointerEvents: "none",
+          }}
+        />
+
+        {/* X icon — fades in when panel is open. */}
+        {isOpen && (
           <span
             aria-hidden
             style={{
-              position: "absolute",
-              top: 9,
-              left: 9,
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              background: "#4ADE80",
-              boxShadow: "0 0 8px rgba(74,222,128,0.7)",
+              position: "absolute", inset: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              pointerEvents: "none",
             }}
-          />
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M6 6 L18 18 M18 6 L6 18" stroke="#FFFFFF" strokeWidth="2.4" strokeLinecap="round" />
+            </svg>
+          </span>
         )}
-
-        {/* X icon — fades in when panel is open. White stroke on dark surface. */}
-        <span className="gooni-fab-x" aria-hidden>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <path d="M6 6 L18 18 M18 6 L6 18" stroke="#ffffff" strokeWidth="2.4" strokeLinecap="round" />
-          </svg>
-        </span>
       </button>
     </>
   );

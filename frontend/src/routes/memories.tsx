@@ -6,6 +6,7 @@ import {
 } from "../services/api";
 import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
+import { GooniLayer } from "../components/GooniLayer";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 
 export const Route = createFileRoute("/memories")({
@@ -396,6 +397,8 @@ function MemoriesPage() {
             </div>
           </div>
         </div>
+
+        <GooniLayer />
       </div>
     </PasswordGate>
   );
