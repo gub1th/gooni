@@ -876,36 +876,30 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
         .gooni-mascot-wrapper.gm-peek .gooni-grip-hand { opacity: 1; }
         .gooni-grip-hand { opacity: 0; }
 
-        /* ─ Drop zone ─ visible while dragging, anchored at sidebar edge */
+        /* ─ Drop zone ─ shaped like the FAB, hosts a Gooni-silhouette SVG.
+           Position + size are written from JS to overlay the FAB rect. The
+           visual is the SVG inside; the wrapper itself is just a transparent
+           positioned container so the silhouette can sit exactly over the
+           launcher's circular shape. */
         .gooni-drop-zone {
           position: fixed;
-          width: 56px;
-          height: 120px;
           z-index: 49;
           pointer-events: none;
-          border-radius: 12px;
-          border: 2px dashed #1C1C1E;
-          background:
-            repeating-linear-gradient(
-              45deg,
-              rgba(74,222,128,0.18),
-              rgba(74,222,128,0.18) 6px,
-              rgba(28,28,30,0.06) 6px,
-              rgba(28,28,30,0.06) 10px
-            ),
-            rgba(74,222,128,0.08);
+          background: transparent;
+          border: none;
           opacity: 0;
           transform: scale(0.9);
           transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
         }
+        .gooni-drop-zone svg { width: 100%; height: 100%; display: block; overflow: visible; }
         .gooni-drop-zone.gdz-visible {
           opacity: 1;
           transform: scale(1);
           animation: gooni-drop-zone-pulse 1.8s ease-in-out infinite;
         }
         @keyframes gooni-drop-zone-pulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.0); }
-          50%      { box-shadow: 0 0 0 8px rgba(74,222,128,0.18); }
+          0%, 100% { filter: drop-shadow(0 0 0 rgba(74,222,128,0.0)); }
+          50%      { filter: drop-shadow(0 0 6px rgba(74,222,128,0.6)); }
         }
       `}</style>
 
@@ -913,7 +907,62 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
         ref={dropZoneRef}
         className={`gooni-drop-zone ${dropZoneVisible ? "gdz-visible" : ""}`}
         aria-hidden="true"
-      />
+      >
+        {/* Drop zone visual: dashed silhouette of Gooni inside the FAB
+            outline, filled with diagonal green stripes. ViewBox matches
+            the FAB embedded character so head/body sit in the same place. */}
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern
+              id="gooni-dropzone-stripes"
+              width="10"
+              height="10"
+              patternUnits="userSpaceOnUse"
+              patternTransform="rotate(45)"
+            >
+              <rect width="10" height="10" fill="rgba(74,222,128,0.10)" />
+              <rect width="5" height="10" fill="rgba(74,222,128,0.30)" />
+            </pattern>
+          </defs>
+          {/* Outer FAB outline — circular dashed boundary, lightly filled. */}
+          <circle
+            cx="32"
+            cy="32"
+            r="30"
+            fill="url(#gooni-dropzone-stripes)"
+            stroke="#1C1C1E"
+            strokeWidth="1.6"
+            strokeDasharray="4 3"
+            opacity="0.85"
+          />
+          {/* Body silhouette — rounded rect, dashed outline. Sits low so
+              part is "cropped" by the circle, matching the embedded FAB
+              character's posture. */}
+          <rect
+            x="22"
+            y="34"
+            width="20"
+            height="26"
+            rx="4"
+            fill="none"
+            stroke="#1C1C1E"
+            strokeWidth="1.4"
+            strokeDasharray="3 2.5"
+            opacity="0.9"
+          />
+          {/* Head silhouette — circle, dashed. */}
+          <circle
+            cx="32"
+            cy="22"
+            r="11"
+            fill="none"
+            stroke="#1C1C1E"
+            strokeWidth="1.4"
+            strokeDasharray="3 2.5"
+            opacity="0.9"
+          />
+        </svg>
+      </div>
 
       <div
         ref={wrapperRef}
