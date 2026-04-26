@@ -897,6 +897,15 @@ def heartbeat_focus(focus_id: int, db: Session = Depends(get_db)):
     return _serialize_focus(focus)
 
 
+@app.post("/focuses/suggest")
+def suggest_focuses(db: Session = Depends(get_db)):
+    """Return up to 4 focus suggestions based on recurring themes in
+    Daniel's last 30 days of notes. Skips themes that match existing
+    focuses. Empty list if nothing strong enough.
+    """
+    return {"suggestions": focus_service.suggest_from_notes(db)}
+
+
 # ── Suggestions ──────────────────────────────────────────────────────────────
 
 
@@ -1636,8 +1645,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
 @app.get("/dashboard/take")
 def get_gooni_take(db: Session = Depends(get_db)):
-    """Gooni's Take — one gpt-4o-mini call summarizing the 3 most recent notes.
-    Cached client-side; refresh button forces a fresh call.
+    """Gooni's Take — ONE tight sentence on Daniel's current focus thread.
+    Recency-weighted: most-recent note marked, active focuses pulled in for
+    long-arc context. Cached client-side; refresh button forces a fresh call.
     """
     from sqlalchemy import func as sqlfunc
 
@@ -1647,9 +1657,7 @@ def get_gooni_take(db: Session = Depends(get_db)):
         .limit(8)
         .all()
     )
-    top_notes = [n for n in recent_notes if (n.title and n.title.strip()) or (n.content and n.content.strip())][:3]
-    if not top_notes:
-        return {"take": ""}
+    top_notes = [n for n in recent_notes if (n.title and n.title.strip()) or (n.content and n.content.strip())][:5]
 
     def _plain(html: str | None) -> str:
         if not html:
@@ -1658,21 +1666,36 @@ def get_gooni_take(db: Session = Depends(get_db)):
         t = re.sub(r"\s+", " ", t).strip()
         return t
 
-    lines = []
-    for n in top_notes:
+    note_lines = []
+    for i, n in enumerate(top_notes):
         title = (n.title or "").strip() or "Untitled"
-        body = _plain(n.content)[:300]
-        lines.append(f"- {title}: {body}" if body else f"- {title}")
-    note_block = "\n".join(lines)
+        body = _plain(n.content)[:240]
+        marker = "(MOST RECENT)" if i == 0 else ""
+        note_lines.append(f"- {title} {marker}: {body}" if body else f"- {title} {marker}")
+    note_block = "\n".join(note_lines) if note_lines else "(no notes yet)"
+
+    focus_block = focus_service.get_focus_context(db) or "(no active focuses)"
+
+    if not top_notes and focus_block.startswith("("):
+        return {"take": ""}
 
     prompt = (
-        "You are Gooni — Daniel's personal AI notebook.\n"
-        "Write 1-2 tight sentences on what Daniel is thinking about right now, based on his most recent notes. "
-        "Find the thread. Be specific. No filler phrases, no preamble, no sign-off.\n\n"
-        f"Recent notes:\n{note_block}\n\nYour take:"
+        "You are Gooni — Daniel's AI notebook companion.\n\n"
+        "Write ONE sentence (max 25 words) describing what Daniel is focused on RIGHT NOW. "
+        "Recent notes carry more weight than older ones. Find the dominant thread.\n\n"
+        "Format options (pick what fits):\n"
+        '  "Focus is on X."\n'
+        '  "Split between X and Y."\n'
+        '  "Mostly X, with some Y on the side."\n'
+        '  "Heads-down on X this week."\n\n'
+        "No preamble, no sign-off, no filler. Just the sentence.\n\n"
+        f"Active focuses:\n{focus_block}\n\n"
+        f"Recent notes (newest first):\n{note_block}\n\n"
+        "Your one-sentence take:"
     )
     try:
-        take = llm_client.generate_simple_completion(prompt, max_tokens=100)
+        take = llm_client.generate_simple_completion(prompt, max_tokens=80)
+        take = take.strip().strip('"').strip("'")
     except Exception:
         take = ""
     return {"take": take}

@@ -523,6 +523,18 @@ export async function heartbeatFocus(id: number): Promise<ApiFocus> {
   return res.json();
 }
 
+export interface ApiFocusSuggestion {
+  name: string;
+  reason: string;
+}
+
+export async function suggestFocuses(): Promise<ApiFocusSuggestion[]> {
+  const res = await apiFetch(`${BASE}/focuses/suggest`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to suggest focuses");
+  const json = await res.json();
+  return json.suggestions ?? [];
+}
+
 export async function updatePublicProfile(bio: string): Promise<void> {
   const res = await apiFetch(`${BASE}/public/profile`, {
     method: "PATCH",
