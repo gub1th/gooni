@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGooniFaceStore, type GooniFace } from "../stores/useGooniFaceStore";
 import { useChatLauncherRectStore } from "../stores/useChatLauncherRectStore";
+import { useMascotOutStore } from "../stores/useMascotOutStore";
 
 // Interactive Gooni mascot — single RAF loop owns every phase (peek/drag/walk/idle/
 // turning/landing). All per-frame visuals are direct DOM updates via refs; no React
@@ -45,10 +46,12 @@ const WRAPPER_W = 48;
 const WRAPPER_H = 68;
 // Drop the dragged mascot within this many pixels of the FAB center to
 // snap back to peek. Larger than the FAB radius so it forgives near-misses.
-const FAB_SNAP_RADIUS = 80;
-// Fallback for when the FAB rect isn't published yet — old sidebar-edge
-// behavior so the mascot has somewhere to dock during first paint.
+// Drop the dragged mascot within this many pixels of the left edge to snap
+// back to peek (sidebar-seam fallback when no FAB rect is published).
 const SIDEBAR_SNAP_PX = 40;
+// Snap radius around the FAB center — drop the mascot inside this circle and
+// he returns to docked peek inside the FAB.
+const FAB_SNAP_RADIUS = 80;
 const LANDING_MS = 220;
 const TURN_MS = 200;
 // Smooth scale ramp when picking the mascot up out of the FAB.
@@ -215,9 +218,9 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
   // Latest mouse position in viewport coords
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
 
-  // FAB (chat launcher) bounding rect — the mascot's "home" when docked and
-  // the drop target on drag-end. Read via ref so the RAF loop sees the
-  // latest value without recreating itself on every store change.
+  // FAB rect — read into a ref so the RAF loop sees the latest value without
+  // recreating itself on every store change. Used for: peek dock, drop-zone
+  // halo, and on-release snap test.
   const fabRect = useChatLauncherRectStore((s) => s.rect);
   const fabRectRef = useRef(fabRect);
   useEffect(() => {
@@ -276,6 +279,9 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
     setDisplayFace((cur) => (cur === wantFace ? cur : wantFace));
     // Drop-zone only shows while dragging.
     setDropZoneVisible(next === "drag");
+    // Publish out-of-FAB signal so ChatLauncher hides its embedded character
+    // whenever the mascot is anywhere except docked.
+    useMascotOutStore.getState().setIsOut(next !== "peek");
   }
 
   function pickTarget(bounds: DOMRect) {
@@ -326,6 +332,69 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseleave", onLeave);
     };
+  }, []);
+
+  // ── FAB → mascot drag handoff ────────────────────────────────────────────
+  // The chat launcher fires `gooni:spawn-drag` once it detects a drag (pointer
+  // moved >5px while pressed). We adopt the drag here: position the mascot at
+  // the pointer, switch to drag phase, install window pointer listeners since
+  // the original pointerdown was on the FAB and capture has been released
+  // there. On release we either snap back near the FAB / sidebar seam, or
+  // land + walk wherever the user dropped.
+  useEffect(() => {
+    function onSpawnDrag(ev: Event) {
+      const detail = (ev as CustomEvent<{ clientX: number; clientY: number; pointerId: number }>).detail;
+      const bounds = dashboardRef.current?.getBoundingClientRect();
+      if (!bounds || !detail) return;
+      const s = stateRef.current;
+      // Center the mascot on the pointer — feels like he was just pulled out.
+      s.dragOffsetDx = WRAPPER_W / 2;
+      s.dragOffsetDy = WRAPPER_H / 2;
+      s.x = clamp(detail.clientX - bounds.left - s.dragOffsetDx, -WRAPPER_W / 2, Math.max(0, bounds.width - WRAPPER_W));
+      s.y = clamp(detail.clientY - bounds.top - s.dragOffsetDy, 0, Math.max(0, bounds.height - WRAPPER_H));
+      s.dragStartMs = performance.now();
+      s.facingDir = "S";
+      setPhase("drag");
+
+      function onWindowMove(ev: PointerEvent) {
+        const b = dashboardRef.current?.getBoundingClientRect();
+        if (!b) return;
+        s.x = clamp(ev.clientX - b.left - s.dragOffsetDx, -WRAPPER_W / 2, Math.max(0, b.width - WRAPPER_W));
+        s.y = clamp(ev.clientY - b.top - s.dragOffsetDy, 0, Math.max(0, b.height - WRAPPER_H));
+      }
+      function onWindowUp(ev: PointerEvent) {
+        window.removeEventListener("pointermove", onWindowMove);
+        window.removeEventListener("pointerup", onWindowUp);
+        window.removeEventListener("pointercancel", onWindowUp);
+        // Snap to FAB: drop within FAB_SNAP_RADIUS of FAB center → peek (back
+        // into the launcher). Sidebar edge fallback when no FAB rect.
+        const fab = fabRectRef.current;
+        let snapped = false;
+        if (fab) {
+          const fabCx = fab.left + fab.width / 2;
+          const fabCy = fab.top + fab.height / 2;
+          if (Math.hypot(ev.clientX - fabCx, ev.clientY - fabCy) < FAB_SNAP_RADIUS) {
+            s.facingDir = "S";
+            setPhase("peek");
+            snapped = true;
+          }
+        } else if (s.x < SIDEBAR_SNAP_PX) {
+          s.facingDir = "S";
+          setPhase("peek");
+          snapped = true;
+        }
+        if (!snapped) {
+          s.landingUntilMs = performance.now() + LANDING_MS;
+          setPhase("landing");
+        }
+      }
+      window.addEventListener("pointermove", onWindowMove);
+      window.addEventListener("pointerup", onWindowUp);
+      window.addEventListener("pointercancel", onWindowUp);
+    }
+    window.addEventListener("gooni:spawn-drag", onSpawnDrag);
+    return () => window.removeEventListener("gooni:spawn-drag", onSpawnDrag);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Main RAF loop ─────────────────────────────────────────────────────────
@@ -385,12 +454,12 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
       // ── Phase logic ───────────────────────────────────────────────────────
       switch (s.phase) {
         case "peek": {
-          // Dock the mascot inside the floating chat launcher (FAB). Position
-          // it so the head peeks out of the top-center of the FAB. Falls back
-          // to the legacy sidebar-seam peek when the FAB rect isn't ready yet.
+          // Dock invisibly at the FAB position — the FAB's embedded character
+          // is the visible "Gooni at home" while peek is active; snapping back
+          // here visually drops the live mascot back into the launcher.
+          // Sidebar-seam fallback when the FAB rect hasn't published yet.
           const fab = fabRectRef.current;
           if (fab) {
-            // Head sits ~12px above FAB top so it visibly peeks out.
             s.x = fab.left - bounds.left + (fab.width - WRAPPER_W) / 2;
             s.y = fab.top - bounds.top - WRAPPER_H * 0.35;
           } else {
@@ -521,14 +590,12 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
       wrapper.style.transform = `translateY(${wrapperBob}px) scale(${scale * flipX}, ${scale})`;
       wrapper.style.transformOrigin = "50% 100%";
 
-      // Drop zone position — overlays the FAB so dropping the mascot there
-      // visibly "docks" it back into the launcher. Falls back to the old
-      // sidebar-edge anchor when the FAB rect isn't available.
+      // Drop zone — overlays the FAB so dropping the mascot back inside reads
+      // as "putting Gooni back home." Sidebar-seam fallback when no FAB rect.
       if (dropZoneRef.current) {
         const fab = fabRectRef.current;
         if (fab) {
-          // Slightly larger than the FAB so the visual halo is forgiving.
-          const pad = 10;
+          const pad = 12;
           dropZoneRef.current.style.left = `${fab.left - pad}px`;
           dropZoneRef.current.style.top = `${fab.top - pad}px`;
           dropZoneRef.current.style.width = `${fab.width + pad * 2}px`;
@@ -538,6 +605,9 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
           const dzH = 120;
           dropZoneRef.current.style.left = `${bounds.left + 8}px`;
           dropZoneRef.current.style.top = `${bounds.top + bounds.height / 2 - dzH / 2}px`;
+          dropZoneRef.current.style.width = "56px";
+          dropZoneRef.current.style.height = `${dzH}px`;
+          dropZoneRef.current.style.borderRadius = "12px";
         }
       }
 
@@ -730,26 +800,18 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
     if (s.phase !== "drag") return;
     try { (e.currentTarget as Element).releasePointerCapture(e.pointerId); } catch {}
 
-    // If dropped near the FAB, snap back to docked peek. Otherwise land
-    // in place and resume walking. Distance is measured in viewport coords
-    // since the mascot wrapper uses position:fixed.
+    // Drop near FAB → peek (back home). Sidebar edge fallback. Otherwise land+walk.
     const fab = fabRectRef.current;
     let snapped = false;
     if (fab) {
       const fabCx = fab.left + fab.width / 2;
       const fabCy = fab.top + fab.height / 2;
-      // Mascot center in viewport coords (mouse-driven during drag).
-      const m = mouseRef.current;
-      if (m) {
-        const dist = Math.hypot(m.x - fabCx, m.y - fabCy);
-        if (dist < FAB_SNAP_RADIUS) {
-          s.facingDir = "S";
-          setPhase("peek");
-          snapped = true;
-        }
+      if (Math.hypot(e.clientX - fabCx, e.clientY - fabCy) < FAB_SNAP_RADIUS) {
+        s.facingDir = "S";
+        setPhase("peek");
+        snapped = true;
       }
     } else if (s.x < SIDEBAR_SNAP_PX) {
-      // Legacy fallback when FAB hasn't published its rect yet.
       s.facingDir = "S";
       setPhase("peek");
       snapped = true;
@@ -897,16 +959,16 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
               <Face face={displayFace} />
             </g>
           </g>
-
-          {/* Peek hitbox — LAST child so it's topmost in SVG hit-testing. Transparent
-              fill + pointer-events: all (during peek only) means the cursor flips to
-              grab over the full 90×130 bounding box, even where no painted shape
-              exists. Off in other phases so notes beneath stay clickable. */}
+          {/* Peek-only enlarged hit target — covers JUST the head area so it's
+              easier to grab the mascot when only the head is visible above the
+              FAB. Stays narrow horizontally and short vertically so it does
+              NOT extend down into the FAB and steal FAB clicks. */}
           <rect
             className="gooni-peek-hitbox"
-            x="0" y="0" width="90" height="130"
+            x="15" y="0" width="60" height="64"
             fill="transparent"
           />
+
         </svg>
       </div>
     </>

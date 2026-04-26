@@ -170,6 +170,36 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
     const nodeIndex = new Map(nodes.map((n) => [n.id, n]));
     let hovered: SimNode | null = null;
 
+    // Pre-warm the force sim so the camera fit below sees the settled
+    // layout, not the initial circle. 200 steps is enough for the typical
+    // 30-200 node graph to spread out.
+    for (let i = 0; i < 200; i++) {
+      step(nodes, graph.edges, nodeIndex, panelW, panelH);
+    }
+    // Fit camera to bbox of all nodes — guarantees every note is visible
+    // on open without the user having to zoom out manually.
+    {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of nodes) {
+        minX = Math.min(minX, n.x - n.radius);
+        minY = Math.min(minY, n.y - n.radius);
+        maxX = Math.max(maxX, n.x + n.radius);
+        maxY = Math.max(maxY, n.y + n.radius);
+      }
+      const PAD = 70;
+      const contentW = (maxX - minX) + PAD * 2;
+      const contentH = (maxY - minY) + PAD * 2;
+      // Clamp to [0.25, 1.6] — same range as wheel zoom keeps it sane.
+      const fitScale = Math.max(0.25, Math.min(1.6, Math.min(panelW / contentW, panelH / contentH)));
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      viewRef.current = {
+        scale: fitScale,
+        tx: panelW / 2 - cx * fitScale,
+        ty: panelH / 2 - cy * fitScale,
+      };
+    }
+
     // Random periodic flashes — every ~900ms, pick a node and stamp its
     // lastFlash. Multiple flashes can overlap since the 500ms fade is
     // shorter than the 900ms pick cadence; gives the graph a "neurons

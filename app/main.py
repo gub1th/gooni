@@ -1703,6 +1703,95 @@ def mcp_search_notes(q: str, limit: int = 5, db: Session = Depends(get_db)):
     return [_serialize_note(n) for n in related]
 
 
+# ── Memory dashboard endpoints ──────────────────────────────────────────────────
+# Daniel's UI dashboard at /memories reads + edits memories. Separate from the
+# /mcp/memories/* routes (which Claude Code consumes via MCP) so the two surfaces
+# can evolve independently. All return full Memory rows, not the legacy "memory"
+# alias used by Mem0-era callers.
+
+
+def _memory_to_dashboard(m) -> dict:
+    """Full row shape for the dashboard table. Skips embedding (huge JSON
+    string) since the table never displays it."""
+    return {
+        "id": m.id,
+        "type": m.type,
+        "key": m.key,
+        "content": m.content,
+        "confidence": m.confidence,
+        "is_active": bool(m.is_active),
+        "superseded_by": m.superseded_by,
+        "focus_id": m.focus_id,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+        "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+    }
+
+
+@app.get("/memories")
+def list_memories(
+    type: str | None = None,
+    q: str | None = None,
+    include_inactive: bool = False,
+    limit: int = 200,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """List memories for the dashboard. Filters by type (optional), text
+    substring (optional), and active flag. Paged via limit/offset. Newest
+    first."""
+    from .db.models import Memory  # local to avoid circular at import time
+    query = db.query(Memory)
+    if not include_inactive:
+        query = query.filter(Memory.is_active == True)  # noqa: E712
+    if type:
+        query = query.filter(Memory.type == type)
+    if q:
+        # Case-insensitive content substring match — cheap, works without FTS.
+        query = query.filter(Memory.content.ilike(f"%{q}%"))
+    total = query.count()
+    rows = query.order_by(Memory.created_at.desc()).offset(offset).limit(limit).all()
+    return {
+        "total": total,
+        "memories": [_memory_to_dashboard(m) for m in rows],
+    }
+
+
+@app.get("/memories/stats")
+def memory_stats(db: Session = Depends(get_db)):
+    """Counts per type for the dashboard header tabs."""
+    from .db.models import Memory
+    from sqlalchemy import func as sqlfunc
+    rows = (
+        db.query(Memory.type, sqlfunc.count(Memory.id))
+        .filter(Memory.is_active == True)  # noqa: E712
+        .group_by(Memory.type)
+        .all()
+    )
+    return {
+        "total": sum(c for _, c in rows),
+        "by_type": {t: c for t, c in rows},
+    }
+
+
+@app.delete("/memories/{memory_id}")
+def delete_memory(memory_id: int, db: Session = Depends(get_db)):
+    """Soft-delete (is_active=False). Same as MCP forget."""
+    if not memory_service.delete(memory_id, db=db):
+        raise HTTPException(status_code=404, detail="memory not found")
+    return {"ok": True, "id": memory_id}
+
+
+@app.patch("/memories/{memory_id}")
+def edit_memory(memory_id: int, body: dict, db: Session = Depends(get_db)):
+    """Update content via supersede chain (preserves audit history)."""
+    content = body.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+    if not memory_service.update_memory(memory_id, content, db=db):
+        raise HTTPException(status_code=404, detail="memory not found")
+    return {"ok": True, "id": memory_id}
+
+
 # ── Public portfolio ────────────────────────────────────────────────────────────
 
 

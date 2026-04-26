@@ -8,9 +8,12 @@ import { ChatGraphView } from "./chat/ChatGraphView";
 
 interface GooniPanelProps {
   fullscreen?: boolean;
+  // New: panel rendered inside the floating shell anchored to the FAB.
+  // Skips the drag-to-resize handle and uses 100% width/height of its parent.
+  floating?: boolean;
 }
 
-export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
+export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelProps) {
   const { width, setWidth } = useGooniStore();
   const { messages, sending, send, activeId } = useConversationsStore();
   const [viewMode, setViewMode] = useState<"chat" | "graph">("chat");
@@ -72,7 +75,18 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
     window.addEventListener("mouseup", onMouseUp);
   }, [fullscreen, width, setWidth]);
 
-  const containerStyle: React.CSSProperties = fullscreen
+  const containerStyle: React.CSSProperties = floating
+    ? {
+        flex: 1,
+        width: "100%",
+        height: "100%",
+        background: "#FFFFFF",
+        display: "flex",
+        flexDirection: "column",
+        boxSizing: "border-box",
+        position: "relative",
+      }
+    : fullscreen
     ? {
         flex: 1,
         height: "100vh",
@@ -97,8 +111,8 @@ export function GooniPanel({ fullscreen = false }: GooniPanelProps) {
 
   return (
     <div style={containerStyle}>
-      {/* Drag handle — left edge, sidebar only */}
-      {!fullscreen && (
+      {/* Drag handle — left edge, sidebar only (not in floating + not fullscreen) */}
+      {!fullscreen && !floating && (
         <div
           onMouseDown={onDragMouseDown}
           style={{
