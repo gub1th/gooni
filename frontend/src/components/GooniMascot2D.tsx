@@ -919,29 +919,28 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
           <defs>
             <pattern
               id="gooni-dropzone-stripes"
-              width="10"
-              height="10"
+              width="8"
+              height="8"
               patternUnits="userSpaceOnUse"
               patternTransform="rotate(45)"
             >
-              <rect width="10" height="10" fill="rgba(74,222,128,0.10)" />
-              <rect width="5" height="10" fill="rgba(74,222,128,0.30)" />
+              <rect width="8" height="8" fill="rgba(74,222,128,0.12)" />
+              <rect width="3.5" height="8" fill="rgba(74,222,128,0.55)" />
             </pattern>
+            {/* Clip path = head + body silhouette. Stripes only paint inside. */}
+            <clipPath id="gooni-dropzone-silhouette">
+              <circle cx="32" cy="22" r="11" />
+              <rect x="22" y="34" width="20" height="26" rx="4" />
+            </clipPath>
           </defs>
-          {/* Outer FAB outline — circular dashed boundary, lightly filled. */}
-          <circle
-            cx="32"
-            cy="32"
-            r="30"
+          {/* Stripe fill, clipped to the silhouette so diagonals only cover
+              head + body (not the rest of the FAB circle). */}
+          <rect
+            x="0" y="0" width="64" height="64"
             fill="url(#gooni-dropzone-stripes)"
-            stroke="#1C1C1E"
-            strokeWidth="1.6"
-            strokeDasharray="4 3"
-            opacity="0.85"
+            clipPath="url(#gooni-dropzone-silhouette)"
           />
-          {/* Body silhouette — rounded rect, dashed outline. Sits low so
-              part is "cropped" by the circle, matching the embedded FAB
-              character's posture. */}
+          {/* Body outline — green dashed. */}
           <rect
             x="22"
             y="34"
@@ -949,21 +948,19 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
             height="26"
             rx="4"
             fill="none"
-            stroke="#1C1C1E"
-            strokeWidth="1.4"
+            stroke="#16A34A"
+            strokeWidth="1.6"
             strokeDasharray="3 2.5"
-            opacity="0.9"
           />
-          {/* Head silhouette — circle, dashed. */}
+          {/* Head outline — green dashed. */}
           <circle
             cx="32"
             cy="22"
             r="11"
             fill="none"
-            stroke="#1C1C1E"
-            strokeWidth="1.4"
+            stroke="#16A34A"
+            strokeWidth="1.6"
             strokeDasharray="3 2.5"
-            opacity="0.9"
           />
         </svg>
       </div>
