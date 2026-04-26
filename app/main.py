@@ -897,6 +897,15 @@ def heartbeat_focus(focus_id: int, db: Session = Depends(get_db)):
     return _serialize_focus(focus)
 
 
+@app.post("/focuses/suggest")
+def suggest_focuses(db: Session = Depends(get_db)):
+    """Return up to 4 focus suggestions based on recurring themes in
+    Daniel's last 30 days of notes. Skips themes that match existing
+    focuses. Empty list if nothing strong enough.
+    """
+    return {"suggestions": focus_service.suggest_from_notes(db)}
+
+
 # ── Suggestions ──────────────────────────────────────────────────────────────
 
 

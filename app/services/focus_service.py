@@ -1,9 +1,10 @@
 import json
+import re
 from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Focus
+from ..db.models import Focus, Note
 from ..llm.client import llm_client
 
 
@@ -206,6 +207,103 @@ class FocusService:
             meta = ", ".join(parts)
             lines.append(f"- {f.name} ({meta}): {f.endgoal}")
         return "\n".join(lines)
+
+
+    def suggest_from_notes(
+        self, db: Session, days: int = 30, limit: int = 4
+    ) -> list[dict]:
+        """Pull last `days` of notes, hand titles + excerpts to the LLM,
+        ask for up to `limit` recurring-theme focus suggestions. Skips any
+        whose name overlaps an existing focus by simple token similarity.
+        Returns [{name, reason}, ...] — empty list if nothing useful.
+        """
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        notes = (
+            db.query(Note)
+            .filter(Note.updated_at >= cutoff)
+            .order_by(Note.updated_at.desc())
+            .limit(60)
+            .all()
+        )
+        if len(notes) < 5:
+            return []
+
+        existing = self.list_focuses(
+            db, statuses=["committed", "pending", "someday"]
+        )
+        existing_names = [f.name.strip().lower() for f in existing if f.name]
+
+        def _plain(html: str | None) -> str:
+            if not html:
+                return ""
+            t = re.sub(r"<[^>]+>", " ", html)
+            return re.sub(r"\s+", " ", t).strip()
+
+        note_lines = []
+        for n in notes:
+            title = (n.title or "").strip() or "Untitled"
+            body = _plain(n.content)[:160]
+            note_lines.append(f"- {title}: {body}" if body else f"- {title}")
+        note_block = "\n".join(note_lines)
+
+        existing_block = (
+            "\n".join(f"- {f.name}" for f in existing) if existing else "(none)"
+        )
+
+        prompt = (
+            "You analyze a user's notes to identify recurring themes that "
+            "suggest genuine commitment — things they keep returning to.\n\n"
+            "For each strong theme cluster (5+ notes touching it), return a "
+            "short focus name (3-6 words) and a casual 1-2 sentence reason "
+            "that references note count and recency. Sound like a friend "
+            "who's been reading their notes — not a coach.\n\n"
+            f"Return at most {limit} suggestions. Skip any theme that is "
+            "already an existing focus below.\n\n"
+            "Return JSON only, no preamble: "
+            '{"suggestions": [{"name": "...", "reason": "..."}, ...]}\n\n'
+            f"Existing focuses (skip these):\n{existing_block}\n\n"
+            f"Recent notes (last {days} days):\n{note_block}\n\n"
+            "JSON:"
+        )
+        try:
+            raw = llm_client.generate_simple_completion(prompt, max_tokens=500)
+        except Exception as e:
+            print(f"focus suggest error: {e}")
+            return []
+
+        cleaned = (raw or "").strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("```", 2)[1].strip()
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:].strip()
+            cleaned = cleaned.rsplit("```", 1)[0].strip()
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            return []
+
+        items = parsed.get("suggestions") if isinstance(parsed, dict) else None
+        if not isinstance(items, list):
+            return []
+
+        out = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = (item.get("name") or "").strip()
+            reason = (item.get("reason") or "").strip()
+            if not name or not reason:
+                continue
+            # Cheap dedupe: any existing focus whose lowercased name shares a
+            # 4-char prefix-ish overlap is "the same idea." Errs toward
+            # filtering — better to under-suggest than re-pitch.
+            low = name.lower()
+            if any(low == e or e in low or low in e for e in existing_names):
+                continue
+            out.append({"name": name, "reason": reason})
+            if len(out) >= limit:
+                break
+        return out
 
 
 focus_service = FocusService()

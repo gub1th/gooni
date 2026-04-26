@@ -11,7 +11,7 @@ import { extractFirstImage, stripHtmlForExcerpt } from "../utils/notePreview";
 import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
-import { FocusBubbles } from "./FocusBubbles";
+import { FocusesSection } from "./FocusesSection";
 import { FocusCheckinCard } from "./FocusCheckinCard";
 import { SuggestionsCard } from "./SuggestionsCard";
 
@@ -1446,7 +1446,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           )}
           {/* Focuses live INSIDE Gooni's Take now — they read as part of the
               same daily framing instead of a separate stacked section. */}
-          <FocusBubbles />
+          <FocusesSection />
             <button
               onClick={refreshTake}
               disabled={takeRefreshing}
