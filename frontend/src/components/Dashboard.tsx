@@ -251,6 +251,27 @@ function DueChip({
   onChange: (iso: string | null) => void;
 }) {
   const [hover, setHover] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Open the native picker on chip click. Previously the chip relied on a
+  // transparent <input type="date"> overlay, which Chrome/Safari refuse to
+  // open when effective opacity is 0 — leaving the "+ date" button dead on
+  // hover. showPicker() is the modern, explicit API and works regardless of
+  // visibility.
+  const openPicker = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const el = inputRef.current;
+    if (!el) return;
+    try {
+      el.showPicker();
+    } catch {
+      // Older browser fallback: focus + click.
+      el.focus();
+      el.click();
+    }
+  };
+
   if (hidden) return null;
 
   if (due) {
@@ -262,6 +283,7 @@ function DueChip({
       <span
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
+        onClick={openPicker}
         style={{
           position: "relative",
           display: "inline-flex", alignItems: "center", gap: 4,
@@ -275,26 +297,26 @@ function DueChip({
         }}
       >
         <input
+          ref={inputRef}
           type="date"
           value={value}
           onChange={(e) => onChange(e.target.value || null)}
-          onClick={(e) => e.stopPropagation()}
+          // sr-only-ish: the input is intentionally invisible/unclickable;
+          // the chip wrapper drives the picker via showPicker().
           style={{
-            position: "absolute", inset: 0,
-            opacity: 0, cursor: "pointer",
+            position: "absolute", left: 0, top: 0,
+            width: 1, height: 1,
+            opacity: 0, pointerEvents: "none",
             border: "none", background: "transparent",
-            padding: 0, margin: 0, width: "100%", height: "100%",
-            // Keep the picker behind the × button so the × can be clicked.
-            zIndex: 1,
+            padding: 0, margin: 0,
           }}
         />
-        <span style={{ position: "relative", zIndex: 0 }}>{label}</span>
+        <span>{label}</span>
         {hover && (
           <button
             onClick={(e) => { e.stopPropagation(); e.preventDefault(); onChange(null); }}
             title="Clear due date"
             style={{
-              position: "relative", zIndex: 2,
               background: "transparent", border: "none", cursor: "pointer",
               padding: 0, marginLeft: 1, lineHeight: 1,
               color: style.fg === "#fff" ? "rgba(255,255,255,0.85)" : "rgba(0,0,0,0.45)",
@@ -311,6 +333,7 @@ function DueChip({
   return (
     <span
       className="todo-hover"
+      onClick={openPicker}
       style={{
         position: "relative",
         display: "inline-flex", alignItems: "center",
@@ -333,18 +356,19 @@ function DueChip({
       }}
     >
       <input
+        ref={inputRef}
         type="date"
         value=""
         onChange={(e) => onChange(e.target.value || null)}
-        onClick={(e) => e.stopPropagation()}
         style={{
-          position: "absolute", inset: 0,
-          opacity: 0, cursor: "pointer",
+          position: "absolute", left: 0, top: 0,
+          width: 1, height: 1,
+          opacity: 0, pointerEvents: "none",
           border: "none", background: "transparent",
-          padding: 0, margin: 0, width: "100%", height: "100%",
+          padding: 0, margin: 0,
         }}
       />
-      <span style={{ position: "relative" }}>+ date</span>
+      <span>+ date</span>
     </span>
   );
 }
