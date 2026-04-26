@@ -34,6 +34,48 @@ export function ChatLauncher() {
   // mascot drag-handoff once the pointer has moved beyond the click threshold.
   const pointerStateRef = useRef<{ x: number; y: number; t: number } | null>(null);
   const handedOffRef = useRef(false);
+  // Eye-tracking refs — eyes follow the cursor while the embedded character
+  // is visible (i.e. mascot is "in," panel is closed). Set transform via DOM
+  // ref so we don't re-render on every mousemove.
+  const eyeLeftRef = useRef<SVGCircleElement>(null);
+  const eyeRightRef = useRef<SVGCircleElement>(null);
+
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      if (characterHidden) return;
+      const el = ref.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const dx = e.clientX - cx;
+      const dy = e.clientY - cy;
+      const dist = Math.hypot(dx, dy) || 1;
+      // Eye pupils have ~2.5px travel along each axis — small enough to stay
+      // inside the white face plate at the embedded character's scale.
+      const MAX = 2.5;
+      const ux = dx / dist;
+      const uy = dy / dist;
+      // Soft falloff with distance so eyes "lock on" only when cursor is
+      // close-ish, then drift back to center as the cursor moves far away.
+      const t = Math.min(1, dist / 240);
+      const tx = ux * MAX * t;
+      const ty = uy * MAX * t;
+      const transform = `translate(${tx.toFixed(2)} ${ty.toFixed(2)})`;
+      eyeLeftRef.current?.setAttribute("transform", transform);
+      eyeRightRef.current?.setAttribute("transform", transform);
+    }
+    window.addEventListener("mousemove", onMove, { passive: true });
+    return () => window.removeEventListener("mousemove", onMove);
+  }, [characterHidden]);
+
+  // Reset pupils to center whenever character is hidden so the next reveal
+  // doesn't briefly show stale offsets.
+  useEffect(() => {
+    if (!characterHidden) return;
+    eyeLeftRef.current?.setAttribute("transform", "translate(0 0)");
+    eyeRightRef.current?.setAttribute("transform", "translate(0 0)");
+  }, [characterHidden]);
 
   useEffect(() => {
     function publish() {
@@ -193,9 +235,10 @@ export function ChatLauncher() {
           {/* Head — dark circle with f2 face plate */}
           <circle cx="45" cy="32" r="22" fill="#1A1A1A" />
           <circle cx="45" cy="32" r="17" fill="#F2F2F2" />
-          {/* Smirk face — eyes + curve mouth */}
-          <circle cx="38" cy="30" r="3" fill="#1A1A1A" />
-          <circle cx="52" cy="30" r="3" fill="#1A1A1A" />
+          {/* Smirk face — eyes + curve mouth. Eyes carry refs so they can
+              translate to follow the cursor (without React re-renders). */}
+          <circle ref={eyeLeftRef}  cx="38" cy="30" r="3" fill="#1A1A1A" />
+          <circle ref={eyeRightRef} cx="52" cy="30" r="3" fill="#1A1A1A" />
           <path d="M38 39 Q45 45 52 40" stroke="#1A1A1A" strokeWidth="2.2" fill="none" strokeLinecap="round" />
         </svg>
 
