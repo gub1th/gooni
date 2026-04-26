@@ -595,11 +595,12 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
       if (dropZoneRef.current) {
         const fab = fabRectRef.current;
         if (fab) {
-          const pad = 12;
-          dropZoneRef.current.style.left = `${fab.left - pad}px`;
-          dropZoneRef.current.style.top = `${fab.top - pad}px`;
-          dropZoneRef.current.style.width = `${fab.width + pad * 2}px`;
-          dropZoneRef.current.style.height = `${fab.height + pad * 2}px`;
+          // Drop zone matches the FAB rect exactly so the SVG silhouette is
+          // painted inside the black circle (instead of bleeding out past it).
+          dropZoneRef.current.style.left = `${fab.left}px`;
+          dropZoneRef.current.style.top = `${fab.top}px`;
+          dropZoneRef.current.style.width = `${fab.width}px`;
+          dropZoneRef.current.style.height = `${fab.height}px`;
           dropZoneRef.current.style.borderRadius = "50%";
         } else {
           const dzH = 120;
