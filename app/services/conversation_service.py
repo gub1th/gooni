@@ -222,6 +222,20 @@ class ConversationService:
         db.commit()
         return summary
 
+    def get_last_assistant_message(
+        self, conversation_id: int, db: Session
+    ) -> Message | None:
+        """Most recent assistant Message in this conversation, or None."""
+        return (
+            db.query(Message)
+            .filter(
+                Message.conversation_id == conversation_id,
+                Message.role == "assistant",
+            )
+            .order_by(Message.id.desc())
+            .first()
+        )
+
     def get_recent_messages(
         self, conversation_id: int, limit: int, db: Session
     ) -> list[Message]:

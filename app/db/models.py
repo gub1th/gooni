@@ -60,6 +60,13 @@ class Message(Base):
     role = Column(String, nullable=False)  # "user" | "assistant"
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # When set, this user message is feedback on the referenced assistant
+    # message — the orchestrator's feedback detector flagged it. Used by the
+    # audit page and to skip running normal reply generation on pure feedback.
+    feedback_for_message_id = Column(
+        Integer, ForeignKey("messages.id"), nullable=True
+    )
+    is_feedback = Column(Boolean, nullable=False, default=False)
 
 
 class Note(Base):

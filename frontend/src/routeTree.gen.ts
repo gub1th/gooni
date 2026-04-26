@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as PublicRouteImport } from './routes/public'
 import { Route as MemoriesRouteImport } from './routes/memories'
+import { Route as ChatAuditRouteImport } from './routes/chat-audit'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PublicIndexRouteImport } from './routes/public.index'
 import { Route as PublicMcpRouteImport } from './routes/public.mcp'
@@ -24,6 +25,11 @@ const PublicRoute = PublicRouteImport.update({
 const MemoriesRoute = MemoriesRouteImport.update({
   id: '/memories',
   path: '/memories',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChatAuditRoute = ChatAuditRouteImport.update({
+  id: '/chat-audit',
+  path: '/chat-audit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -49,6 +55,7 @@ const PublicNoteIdRoute = PublicNoteIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/chat-audit': typeof ChatAuditRoute
   '/memories': typeof MemoriesRoute
   '/public': typeof PublicRouteWithChildren
   '/public/$noteId': typeof PublicNoteIdRoute
@@ -57,6 +64,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/chat-audit': typeof ChatAuditRoute
   '/memories': typeof MemoriesRoute
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/mcp': typeof PublicMcpRoute
@@ -65,6 +73,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/chat-audit': typeof ChatAuditRoute
   '/memories': typeof MemoriesRoute
   '/public': typeof PublicRouteWithChildren
   '/public/$noteId': typeof PublicNoteIdRoute
@@ -75,16 +84,24 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/chat-audit'
     | '/memories'
     | '/public'
     | '/public/$noteId'
     | '/public/mcp'
     | '/public/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/memories' | '/public/$noteId' | '/public/mcp' | '/public'
+  to:
+    | '/'
+    | '/chat-audit'
+    | '/memories'
+    | '/public/$noteId'
+    | '/public/mcp'
+    | '/public'
   id:
     | '__root__'
     | '/'
+    | '/chat-audit'
     | '/memories'
     | '/public'
     | '/public/$noteId'
@@ -94,6 +111,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ChatAuditRoute: typeof ChatAuditRoute
   MemoriesRoute: typeof MemoriesRoute
   PublicRoute: typeof PublicRouteWithChildren
 }
@@ -112,6 +130,13 @@ declare module '@tanstack/react-router' {
       path: '/memories'
       fullPath: '/memories'
       preLoaderRoute: typeof MemoriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/chat-audit': {
+      id: '/chat-audit'
+      path: '/chat-audit'
+      fullPath: '/chat-audit'
+      preLoaderRoute: typeof ChatAuditRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -162,6 +187,7 @@ const PublicRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ChatAuditRoute: ChatAuditRoute,
   MemoriesRoute: MemoriesRoute,
   PublicRoute: PublicRouteWithChildren,
 }
