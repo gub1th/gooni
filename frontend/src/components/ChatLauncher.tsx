@@ -114,6 +114,18 @@ export function ChatLauncher() {
           0%, 100% { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 0 rgba(74,222,128,0.0); }
           50%      { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 6px rgba(74,222,128,0.18); }
         }
+        /* When the mascot is out, the FAB radiates a brighter, faster
+           green halo — visual cue that it's the drop target. Pulse cycles
+           through three states so the glow feels alive, not metronomic. */
+        @keyframes gooni-fab-out-glow {
+          0%   { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 0 0 0   rgba(74,222,128,0.55), 0 0 14px 2px rgba(74,222,128,0.30); }
+          50%  { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 0 0 10px rgba(74,222,128,0.0),  0 0 26px 6px rgba(74,222,128,0.55); }
+          100% { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 0 0 0   rgba(74,222,128,0.55), 0 0 14px 2px rgba(74,222,128,0.30); }
+        }
+        @keyframes gooni-fab-out-border {
+          0%, 100% { border-color: #4ADE80; }
+          50%      { border-color: #86EFAC; }
+        }
       `}</style>
 
       <button
@@ -142,8 +154,15 @@ export function ChatLauncher() {
           outline: "none",
           transform: `scale(${scale})`,
           transition: "transform 0.15s ease, border-color 0.18s ease",
-          // Idle aura pulse — stops when open since the X already says "active".
-          animation: isOpen ? "none" : "gooni-fab-aura 3.6s ease-in-out infinite",
+          // Three states:
+          // - open: no aura (X is the affordance)
+          // - mascot out: bright green glow + border pulse (drop-target cue)
+          // - idle: subtle background aura
+          animation: isOpen
+            ? "none"
+            : isOut
+            ? "gooni-fab-out-glow 1.4s ease-in-out infinite, gooni-fab-out-border 1.4s ease-in-out infinite"
+            : "gooni-fab-aura 3.6s ease-in-out infinite",
         }}
       >
         {/* Embedded Gooni character — head + body, legs cropped by circle.
