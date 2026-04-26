@@ -12,7 +12,7 @@ load_dotenv()  # must run before any service imports that read env vars
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from .db.database import engine, get_db
 from .db.database import SessionLocal
@@ -267,6 +267,8 @@ def _run_column_migrations(engine):
             ("conversations", "summary", "TEXT"),
             ("todo_items", "due_date", "DATETIME"),
             ("suggestions", "note_id", "INTEGER"),
+            ("messages", "feedback_for_message_id", "INTEGER"),
+            ("messages", "is_feedback", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -279,6 +281,8 @@ def _run_column_migrations(engine):
                 # Backfill NULLs to 0 for boolean-like columns so filters
                 # on `column == False` still match existing rows.
                 if table == "notes" and col in ("is_public", "is_pinned"):
+                    conn.execute(text(f"UPDATE {table} SET {col} = 0 WHERE {col} IS NULL"))
+                if table == "messages" and col == "is_feedback":
                     conn.execute(text(f"UPDATE {table} SET {col} = 0 WHERE {col} IS NULL"))
         # Even if the column already existed, catch any stragglers with NULL state
         # from a previous migration that ran before the backfill step existed.
@@ -1816,6 +1820,87 @@ def edit_memory(memory_id: int, body: dict, db: Session = Depends(get_db)):
     if not memory_service.update_memory(memory_id, content, db=db):
         raise HTTPException(status_code=404, detail="memory not found")
     return {"ok": True, "id": memory_id}
+
+
+# ── Chat audit ──────────────────────────────────────────────────────────────────
+
+
+@app.get("/chat-audit")
+def list_chat_audit(
+    has_feedback_only: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """Audit feed: every assistant reply with any linked feedback inline.
+
+    Each entry: assistant message + the user followup that was flagged as
+    feedback (if any) + conversation context. Default returns all assistant
+    replies, newest first. `has_feedback_only=true` filters to flagged ones.
+    """
+    from .db.models import Memory  # local to avoid circular at import time
+
+    asst = aliased(Message)
+    fb = aliased(Message)
+    conv = aliased(Conversation)
+    q = (
+        db.query(asst, fb, conv)
+        .outerjoin(
+            fb,
+            (fb.feedback_for_message_id == asst.id) & (fb.is_feedback == True),  # noqa: E712
+        )
+        .outerjoin(conv, conv.id == asst.conversation_id)
+        .filter(asst.role == "assistant")
+    )
+    if has_feedback_only:
+        q = q.filter(fb.id.isnot(None))
+    total = q.count()
+    rows = q.order_by(asst.id.desc()).offset(offset).limit(limit).all()
+
+    # Top-level: every active feedback-derived preference. Surfaced separately
+    # because we don't persist message↔memory links (avoids another schema
+    # migration) — the audit UI uses this list to render dismiss buttons.
+    active_feedback_prefs = (
+        db.query(Memory)
+        .filter(
+            Memory.type == "preference",
+            Memory.is_active == True,  # noqa: E712
+            Memory.key.like("feedback__%"),
+        )
+        .order_by(Memory.id.desc())
+        .all()
+    )
+
+    entries = []
+    for asst_m, fb_m, conv_m in rows:
+        feedback = None
+        if fb_m is not None:
+            feedback = {
+                "id": fb_m.id,
+                "content": fb_m.content,
+                "created_at": fb_m.created_at.isoformat() if fb_m.created_at else None,
+            }
+        entries.append({
+            "id": asst_m.id,
+            "conversation_id": asst_m.conversation_id,
+            "conversation_title": conv_m.title if conv_m else None,
+            "conversation_source": conv_m.source if conv_m else None,
+            "content": asst_m.content,
+            "created_at": asst_m.created_at.isoformat() if asst_m.created_at else None,
+            "feedback": feedback,
+        })
+    return {
+        "total": total,
+        "entries": entries,
+        "active_rules": [
+            {
+                "memory_id": p.id,
+                "rule": p.content,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in active_feedback_prefs
+        ],
+    }
 
 
 # ── Public portfolio ────────────────────────────────────────────────────────────

@@ -1,12 +1,22 @@
+import re
 import threading
 
 from ..db.database import SessionLocal
 from ..db.models import Conversation as ConvModel
 from ..llm.client import llm_client
 from .conversation_service import conversation_service
+from .feedback_detector import feedback_detector
 from .focus_service import focus_service
 from .memory_service import memory_service
 from .list_service import list_service
+
+
+# Cheap regex for the explicit "undo" command. Runs before the detector so
+# Daniel can always reach for the override even on noisy turns.
+_UNDO_FEEDBACK_RE = re.compile(
+    r"\b(undo|forget|disregard|nevermind|never mind|cancel)\b.{0,30}\b(feedback|correction|last (rule|note))\b",
+    re.IGNORECASE,
+)
 
 
 # Above this length, raw note content is summarized before injection so the
@@ -73,7 +83,63 @@ class Orchestrator:
             saved_message = f"[Photo: {message}]" if message.strip() else "[Photo]"
         else:
             saved_message = message
-        conversation_service.add_message(conv.id, "user", saved_message, db)
+        user_msg = conversation_service.add_message(conv.id, "user", saved_message, db)
+
+        # ── Feedback handling (text-only turns) ─────────────────────────────
+        # Feedback is just chat: the user types "less eager" or similar and
+        # the orchestrator stamps the message + writes a tone preference into
+        # memory. Skipped for image turns since those carry no critique signal.
+        feedback_ack: str | None = None
+        skip_normal_reply = False
+        if not image_url and saved_message.strip():
+            # Explicit undo command — runs before the detector so it always wins.
+            if _UNDO_FEEDBACK_RE.search(saved_message):
+                removed = memory_service.deactivate_last_feedback_preference(db=db)
+                if removed:
+                    feedback_ack = (
+                        f"Feedback removed: \"{removed.content}\"."
+                    )
+                else:
+                    feedback_ack = "No active feedback to undo."
+                skip_normal_reply = True
+            else:
+                prev_assistant = conversation_service.get_last_assistant_message(
+                    conv.id, db
+                )
+                # Skip the user_msg row itself (just inserted) by checking id.
+                if prev_assistant and prev_assistant.id != user_msg.id:
+                    fb = feedback_detector.classify(
+                        prev_assistant.content, saved_message
+                    )
+                    if fb["is_feedback"] and fb["rule"]:
+                        user_msg.feedback_for_message_id = prev_assistant.id
+                        user_msg.is_feedback = True
+                        db.commit()
+                        # Memory write is best-effort + off-thread to avoid
+                        # blocking the reply.
+                        threading.Thread(
+                            target=memory_service.add_feedback_preference,
+                            args=(fb["rule"], prev_assistant.content),
+                            daemon=True,
+                        ).start()
+                        # Always-visible flag so Daniel can see at a glance
+                        # that the message was logged as feedback (works the
+                        # same on Telegram + web). Undo escape included so
+                        # false positives are reversible without ceremony.
+                        feedback_ack = (
+                            f"Feedback detected: {fb['rule']}. "
+                            "Say \"undo last feedback\" to revert."
+                        )
+                        # If the user *also* asked something new, fall through
+                        # and run the normal reply pipeline. Else short-circuit.
+                        skip_normal_reply = not fb["also_new_question"]
+
+        if skip_normal_reply and feedback_ack is not None:
+            conversation_service.add_message(conv.id, "assistant", feedback_ack, db)
+            return feedback_ack, {
+                "intention": "feedback acknowledgment",
+                "tools_used": ["feedback_detector"],
+            }
 
         # Build recent history. If a rolling summary exists, prepend it as a
         # system-style message so long sessions retain early context past the
@@ -128,6 +194,11 @@ class Orchestrator:
                 message, full_context, recent_history,
                 is_first_time=is_first_time, db=db, model=model,
             )
+
+        # Mixed turn (feedback + new question): prepend the ack so Daniel
+        # sees that the correction was logged before the actual answer.
+        if feedback_ack is not None:
+            response = f"{feedback_ack}\n\n{response}"
 
         conversation_service.add_message(conv.id, "assistant", response, db)
 

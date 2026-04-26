@@ -42,6 +42,19 @@ RETRIEVAL_TOP_K = 5
 # Max content length for an extracted candidate before we drop it as garbage.
 MAX_CANDIDATE_LEN = 600
 
+# Prefix on the `key` column used for feedback-derived preferences. Lets the
+# undo command find feedback memories without touching user-curated ones.
+_FEEDBACK_KEY_PREFIX = "feedback__"
+
+
+def _slug_rule(rule: str) -> str:
+    """Stable snake_case key for a feedback rule, prefixed for filtering."""
+    import re as _re
+    slug = _re.sub(r"[^a-z0-9]+", "_", rule.lower()).strip("_")[:60]
+    if not slug:
+        slug = "rule"
+    return f"{_FEEDBACK_KEY_PREFIX}{slug}"
+
 
 def _serialize(m: Memory) -> dict:
     """For routes/MCP that historically consumed Mem0's dict shape."""
@@ -263,6 +276,79 @@ class MemoryService:
         else:
             # Unrecognized — default to ADD to preserve information
             self._apply_add(db, candidate, embedding or [])
+
+    def add_feedback_preference(
+        self, rule: str, evidence: str, db: Session | None = None
+    ) -> Memory | None:
+        """Persist a tone-correction rule from chat feedback.
+
+        Goes through the same reconcile path as `add_exchange` so a repeated
+        rule supersedes the older row instead of stacking. Stored as
+        type='preference' so it's always injected into the system prompt by
+        `build_memory_context`.
+        """
+        rule = (rule or "").strip()
+        if not rule:
+            return None
+        candidate = {
+            "type": "preference",
+            "key": _slug_rule(rule),
+            "content": rule,
+            "context": {"time": None, "location": None, "scope": "global"},
+            "confidence": 0.9,
+        }
+        sess, owns = self._scoped(db)
+        try:
+            self._reconcile_and_apply(sess, candidate)
+            self._has_memories_cache = True
+            # Return the freshly-inserted/active row for this key for caller
+            # convenience (e.g. so we can link it to the audit page later).
+            return (
+                sess.query(Memory)
+                .filter(
+                    Memory.type == "preference",
+                    Memory.key == candidate["key"],
+                    Memory.is_active == True,
+                )
+                .order_by(Memory.id.desc())
+                .first()
+            )
+        except Exception as e:
+            print(f"memory add_feedback_preference error: {e}")
+            return None
+        finally:
+            if owns:
+                sess.close()
+
+    def deactivate_last_feedback_preference(
+        self, db: Session | None = None
+    ) -> Memory | None:
+        """Mark the most recently added feedback-derived preference inactive.
+
+        Used by the orchestrator's "undo last feedback" command. Only affects
+        active preferences whose key starts with the feedback prefix used by
+        `_slug_rule` — leaves user-curated preferences alone.
+        """
+        sess, owns = self._scoped(db)
+        try:
+            row = (
+                sess.query(Memory)
+                .filter(
+                    Memory.type == "preference",
+                    Memory.is_active == True,
+                    Memory.key.like(f"{_FEEDBACK_KEY_PREFIX}%"),
+                )
+                .order_by(Memory.id.desc())
+                .first()
+            )
+            if not row:
+                return None
+            row.is_active = False
+            sess.commit()
+            return row
+        finally:
+            if owns:
+                sess.close()
 
     def add_memory(
         self,

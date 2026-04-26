@@ -584,6 +584,8 @@ export interface ApiMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  is_feedback?: boolean;
+  feedback_for_message_id?: number | null;
 }
 
 export async function fetchConversations(): Promise<ApiConversation[]> {
@@ -676,6 +678,50 @@ export async function patchMemory(id: number, content: string): Promise<void> {
     body: JSON.stringify({ content }),
   });
   if (!res.ok) throw new Error("Failed to update memory");
+}
+
+// ── Chat audit ────────────────────────────────────────────────────────────────
+
+export interface ChatAuditFeedback {
+  id: number;
+  content: string;
+  created_at: string | null;
+}
+
+export interface ChatAuditEntry {
+  id: number;
+  conversation_id: number;
+  conversation_title: string | null;
+  conversation_source: string | null;
+  content: string;
+  created_at: string | null;
+  feedback: ChatAuditFeedback | null;
+}
+
+export interface ChatAuditActiveRule {
+  memory_id: number;
+  rule: string;
+  created_at: string | null;
+}
+
+export interface ChatAuditResponse {
+  total: number;
+  entries: ChatAuditEntry[];
+  active_rules: ChatAuditActiveRule[];
+}
+
+export async function fetchChatAudit(opts: {
+  hasFeedbackOnly?: boolean;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<ChatAuditResponse> {
+  const params = new URLSearchParams();
+  if (opts.hasFeedbackOnly) params.set("has_feedback_only", "true");
+  if (opts.limit != null) params.set("limit", String(opts.limit));
+  if (opts.offset != null) params.set("offset", String(opts.offset));
+  const res = await apiFetch(`${BASE}/chat-audit?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch chat audit");
+  return res.json();
 }
 
 // ── Gooni ─────────────────────────────────────────────────────────────────────

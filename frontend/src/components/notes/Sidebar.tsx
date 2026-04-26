@@ -7,7 +7,7 @@ import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
-  PenLine, FileText, Pin, MessageSquare, Bug, Brain, Settings as SettingsIcon,
+  PenLine, FileText, Pin, MessageSquare, Bug, Brain, ClipboardList, Settings as SettingsIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -21,6 +21,7 @@ const ICON_TINT = {
   newChat:  "#10B981",   // emerald
   gooni:    "#A855F7",   // violet
   memories: "#0EA5E9",  // sky
+  chatAudit: "#0891B2",  // cyan
   devTools: "#F43F5E",   // rose
   settings: "#64748B",   // slate
 } as const;
@@ -566,6 +567,28 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
             >
               <Brain size={14} strokeWidth={1.7} color={ICON_TINT.memories} style={{ flexShrink: 0 }} />
               Memories
+            </button>
+          </div>
+
+          {/* Chat audit — every Gooni reply + any feedback Daniel gave inline. */}
+          <div style={{ padding: "0 6px 2px" }}>
+            <button
+              onClick={() => navigate({ to: "/chat-audit" })}
+              title="Chat audit"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                border: "none", background: "transparent", cursor: "pointer",
+                textAlign: "left",
+                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontSize: 13.5, color: "#3C3C43",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+            >
+              <ClipboardList size={14} strokeWidth={1.7} color={ICON_TINT.chatAudit} style={{ flexShrink: 0 }} />
+              Chat audit
             </button>
           </div>
 
