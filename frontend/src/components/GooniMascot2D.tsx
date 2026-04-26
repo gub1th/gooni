@@ -883,7 +883,11 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
            launcher's circular shape. */
         .gooni-drop-zone {
           position: fixed;
-          z-index: 49;
+          /* Above the FAB (z 1000) so the silhouette overlays the launcher.
+             Equal to the dragged mascot (also z 1001); DOM order puts the
+             mascot wrapper after this div, so the live mascot still paints
+             on top during the drag. */
+          z-index: 1001;
           pointer-events: none;
           background: transparent;
           border: none;
