@@ -91,7 +91,7 @@ export function FocusCheckinCard() {
         </span>
       </div>
       <p style={{ fontSize: 13.5, color: "#3C3C43", margin: "0 0 10px", lineHeight: 1.5 }}>
-        You haven't touched <strong>{focus.name}</strong> in {heat}. What's blocking?
+        You haven't worked on <strong>{focus.name}</strong> in {heat}. What's blocking?
       </p>
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={talkThrough} style={primaryBtn()}>Talk it through</button>

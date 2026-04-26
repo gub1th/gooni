@@ -1,17 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
-import { ChatLauncher } from "../components/ChatLauncher";
 import { Dashboard } from "../components/Dashboard";
-import { GooniMascot } from "../components/GooniMascot";
-import { GooniPanel } from "../components/GooniPanel";
+import { GooniLayer } from "../components/GooniLayer";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { Sidebar } from "../components/notes/Sidebar";
 import { PasswordGate } from "../components/PasswordGate";
 import { useWindowWidth } from "../hooks/useWindowWidth";
-import { useGooniActivatedStore } from "../stores/useGooniActivatedStore";
-import { useGooniStore } from "../stores/useGooniStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
@@ -31,16 +27,10 @@ const SIDEBAR_BREAKPOINT = 768;
 function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
   const { selectedSpaceId, selectSpace, loadNotes, createNote, selectNote } = useNotesContentStore();
-  const isGooniOpen = useGooniStore((s) => s.isOpen);
-  const gooniActivated = useGooniActivatedStore((s) => s.activated);
   const windowWidth = useWindowWidth();
   const { fetchConversations, newChat, selectConversation } = useConversationsStore();
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
-  // Bounds the mascot walks within. Refs the right-side content area so the
-  // mascot doesn't wander over the sidebar — applies to every view (notes,
-  // dashboard, chat). Mascot was previously dashboard-only.
-  const pageRef = useRef<HTMLDivElement>(null);
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
   const [view, setView] = useState<"notes" | "dashboard" | "chat">(() =>
@@ -56,20 +46,36 @@ function NotesPage() {
   useEffect(() => {
     fetchSpaces();
     fetchConversations();
-
-    if (search.note) {
-      fetchNote(search.note).then((note) => {
-        const spaceId = note.space_id == null ? "general" : String(note.space_id);
-        selectSpace(spaceId);
-        selectNote(note.id); // set eagerly so editor doesn't show a different note while notes load
-        loadNotes(spaceId);
-      }).catch(() => {
-        setView("dashboard");
-      });
-    } else if (search.conv) {
-      selectConversation(search.conv);
-    }
+    // Note: search.note / search.conv handling moved to dedicated effect below
+    // so navigation TO this page (e.g. from the notes-map "open this note")
+    // also takes effect, not just the first mount.
   }, []);
+
+  // React to search.note changes — fires both on initial mount and on
+  // subsequent navigations (e.g. clicking a node in the notes map while
+  // already on /). Without this, navigate({ to: "/", search: { note } })
+  // from elsewhere would silently no-op when the page is already mounted.
+  useEffect(() => {
+    if (!search.note) return;
+    fetchNote(search.note).then((note) => {
+      const spaceId = note.space_id == null ? "general" : String(note.space_id);
+      selectSpace(spaceId);
+      selectNote(note.id);
+      loadNotes(spaceId);
+      setView("notes");
+    }).catch(() => {
+      setView("dashboard");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.note]);
+
+  // Same pattern for conversation deep-links.
+  useEffect(() => {
+    if (!search.conv) return;
+    selectConversation(search.conv);
+    setView("chat");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.conv]);
 
   useEffect(() => {
     if (view === "notes") {
@@ -100,8 +106,6 @@ function NotesPage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [selectedSpaceId, view]);
-
-  const isSmall = windowWidth < 1100;
 
   function setViewAndUrl(v: "notes" | "dashboard" | "chat", noteId?: number, convId?: number) {
     setView(v);
@@ -159,10 +163,7 @@ function NotesPage() {
         />
       )}
 
-      {/* Right-side content area, ref'd so the mascot can walk within it on
-          every view — not just the dashboard. Excludes the sidebar so the
-          mascot stays out of the nav rail. */}
-      <div ref={pageRef} style={{ flex: 1, display: "flex", minWidth: 0, position: "relative", overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", minWidth: 0, position: "relative", overflow: "hidden" }}>
         {view === "dashboard" ? (
           <Dashboard onOpenNote={() => setView("notes")} />
         ) : view === "chat" ? (
@@ -171,28 +172,13 @@ function NotesPage() {
           <>
             <NotesList />
             <NoteEditor />
-            {isGooniOpen && (
-              isSmall ? (
-                <div style={{ position: "absolute", right: 0, top: 0, height: "100%", zIndex: 50, boxShadow: "-4px 0 20px rgba(0,0,0,0.12)" }}>
-                  <GooniPanel />
-                </div>
-              ) : (
-                <GooniPanel />
-              )
-            )}
           </>
         )}
       </div>
 
-      {/* Mascot mounts globally now (was dashboard-only). Bounds tracked via
-          pageRef so it walks across notes / dashboard / chat without overlap
-          into the sidebar. The dashboard's own mount has been removed. */}
-      {gooniActivated && <GooniMascot dashboardRef={pageRef} />}
-
-      {/* Floating chat launcher — bottom-right FAB. Click toggles GooniPanel.
-          Replaces the old in-panel header + close button. Mascot's drop zone
-          and docked idle position anchor to this launcher. */}
-      <ChatLauncher />
+      {/* FAB + floating panel + mascot all live in GooniLayer so /memories and
+          any other authed route get the same chat affordance for free. */}
+      <GooniLayer />
     </div>
     </PasswordGate>
   );

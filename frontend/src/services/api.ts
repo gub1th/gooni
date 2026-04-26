@@ -380,7 +380,7 @@ export async function createTodoPlan(todoId: number): Promise<ApiNote> {
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
 
-export type SuggestionCategory = "discovery" | "whimsy";
+export type SuggestionCategory = "read" | "do" | "revisit";
 
 export interface ApiSuggestion {
   id: number;
@@ -388,13 +388,29 @@ export interface ApiSuggestion {
   title: string;
   body: string;
   source_url: string | null;
+  note_id: number | null;
   generated_at: string | null;
 }
 
-export async function fetchSuggestionsToday(): Promise<{ discovery: ApiSuggestion[]; whimsy: ApiSuggestion[] }> {
+export async function fetchSuggestionsToday(): Promise<{ read: ApiSuggestion[]; do: ApiSuggestion[]; revisit: ApiSuggestion[] }> {
   const res = await apiFetch(`${BASE}/suggestions/today`);
   if (!res.ok) throw new Error("Failed to fetch suggestions");
   return res.json();
+}
+
+export async function fetchSuggestionPrompts(): Promise<{ read: string; do: string; revisit: string }> {
+  const res = await apiFetch(`${BASE}/suggestions/prompts`);
+  if (!res.ok) throw new Error("Failed to fetch suggestion prompts");
+  return res.json();
+}
+
+export async function patchSuggestionPrompt(category: SuggestionCategory, prompt: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/suggestions/prompts/${category}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) throw new Error("Failed to update suggestion prompt");
 }
 
 export async function dismissSuggestion(id: number): Promise<void> {
@@ -605,6 +621,61 @@ export async function fetchConversationMessages(convId: number): Promise<ApiMess
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`);
   if (!res.ok) throw new Error("Failed to fetch messages");
   return res.json();
+}
+
+// ── Memories ──────────────────────────────────────────────────────────────────
+
+export type MemoryType = "preference" | "goal" | "fact" | "routine" | "constraint" | "episode";
+
+export interface ApiMemory {
+  id: number;
+  type: MemoryType;
+  key: string | null;
+  content: string;
+  confidence: number;
+  is_active: boolean;
+  superseded_by: number | null;
+  focus_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export async function fetchMemories(opts: {
+  type?: MemoryType;
+  q?: string;
+  includeInactive?: boolean;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<{ total: number; memories: ApiMemory[] }> {
+  const params = new URLSearchParams();
+  if (opts.type) params.set("type", opts.type);
+  if (opts.q) params.set("q", opts.q);
+  if (opts.includeInactive) params.set("include_inactive", "true");
+  if (opts.limit != null) params.set("limit", String(opts.limit));
+  if (opts.offset != null) params.set("offset", String(opts.offset));
+  const res = await apiFetch(`${BASE}/memories?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch memories");
+  return res.json();
+}
+
+export async function fetchMemoryStats(): Promise<{ total: number; by_type: Record<string, number> }> {
+  const res = await apiFetch(`${BASE}/memories/stats`);
+  if (!res.ok) throw new Error("Failed to fetch memory stats");
+  return res.json();
+}
+
+export async function deleteMemory(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/memories/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete memory");
+}
+
+export async function patchMemory(id: number, content: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/memories/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Failed to update memory");
 }
 
 // ── Gooni ─────────────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as PublicRouteImport } from './routes/public'
+import { Route as MemoriesRouteImport } from './routes/memories'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PublicIndexRouteImport } from './routes/public.index'
 import { Route as PublicMcpRouteImport } from './routes/public.mcp'
@@ -18,6 +19,11 @@ import { Route as PublicNoteIdRouteImport } from './routes/public.$noteId'
 const PublicRoute = PublicRouteImport.update({
   id: '/public',
   path: '/public',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MemoriesRoute = MemoriesRouteImport.update({
+  id: '/memories',
+  path: '/memories',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -43,6 +49,7 @@ const PublicNoteIdRoute = PublicNoteIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/memories': typeof MemoriesRoute
   '/public': typeof PublicRouteWithChildren
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/mcp': typeof PublicMcpRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/memories': typeof MemoriesRoute
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/mcp': typeof PublicMcpRoute
   '/public': typeof PublicIndexRoute
@@ -57,6 +65,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/memories': typeof MemoriesRoute
   '/public': typeof PublicRouteWithChildren
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/mcp': typeof PublicMcpRoute
@@ -64,12 +73,19 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/public' | '/public/$noteId' | '/public/mcp' | '/public/'
+  fullPaths:
+    | '/'
+    | '/memories'
+    | '/public'
+    | '/public/$noteId'
+    | '/public/mcp'
+    | '/public/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/public/$noteId' | '/public/mcp' | '/public'
+  to: '/' | '/memories' | '/public/$noteId' | '/public/mcp' | '/public'
   id:
     | '__root__'
     | '/'
+    | '/memories'
     | '/public'
     | '/public/$noteId'
     | '/public/mcp'
@@ -78,6 +94,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  MemoriesRoute: typeof MemoriesRoute
   PublicRoute: typeof PublicRouteWithChildren
 }
 
@@ -88,6 +105,13 @@ declare module '@tanstack/react-router' {
       path: '/public'
       fullPath: '/public'
       preLoaderRoute: typeof PublicRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/memories': {
+      id: '/memories'
+      path: '/memories'
+      fullPath: '/memories'
+      preLoaderRoute: typeof MemoriesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -138,6 +162,7 @@ const PublicRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  MemoriesRoute: MemoriesRoute,
   PublicRoute: PublicRouteWithChildren,
 }
 export const routeTree = rootRouteImport

@@ -26,6 +26,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     PublicProfile,
     Space,
     Suggestion,
+    SuggestionPrompt,
     TodoItem,
     TodoNote,
     Visit,
@@ -265,6 +266,7 @@ def _run_column_migrations(engine):
             ("conversations", "topic_graph", "TEXT"),
             ("conversations", "summary", "TEXT"),
             ("todo_items", "due_date", "DATETIME"),
+            ("suggestions", "note_id", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -901,6 +903,7 @@ def _serialize_suggestion(s: Suggestion) -> dict:
         "title": s.title,
         "body": s.body,
         "source_url": s.source_url,
+        "note_id": getattr(s, "note_id", None),
         "generated_at": s.generated_at.isoformat() if s.generated_at else None,
     }
 
@@ -909,8 +912,9 @@ def _serialize_suggestion(s: Suggestion) -> dict:
 def get_suggestions_today(db: Session = Depends(get_db)):
     grouped = suggestions_service.today(db)
     return {
-        "discovery": [_serialize_suggestion(s) for s in grouped.get("discovery", [])],
-        "whimsy": [_serialize_suggestion(s) for s in grouped.get("whimsy", [])],
+        "read":    [_serialize_suggestion(s) for s in grouped.get("read", [])],
+        "do":      [_serialize_suggestion(s) for s in grouped.get("do", [])],
+        "revisit": [_serialize_suggestion(s) for s in grouped.get("revisit", [])],
     }
 
 
@@ -925,6 +929,28 @@ def dismiss_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
 def refresh_suggestions(db: Session = Depends(get_db)):
     created = suggestions_service.regenerate(db)
     return {"created": len(created)}
+
+
+@app.get("/suggestions/prompts")
+def get_suggestion_prompts(db: Session = Depends(get_db)):
+    """Per-category user prompts. Empty string when not set."""
+    prompts = suggestions_service.get_user_prompts(db)
+    return {
+        "read": prompts.get("read", ""),
+        "do": prompts.get("do", ""),
+        "revisit": prompts.get("revisit", ""),
+    }
+
+
+@app.patch("/suggestions/prompts/{category}")
+def patch_suggestion_prompt(category: str, body: dict, db: Session = Depends(get_db)):
+    """Set the user prompt for a single category. Empty string clears it."""
+    prompt = (body.get("prompt") or "").strip()
+    try:
+        row = suggestions_service.set_user_prompt(db, category, prompt)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"category": row.category, "user_prompt": row.user_prompt}
 
 
 @app.post("/auth")
@@ -1701,6 +1727,95 @@ def mcp_search_notes(q: str, limit: int = 5, db: Session = Depends(get_db)):
     """Search notes by semantic similarity to a query string."""
     related = note_service.search_by_query(q, limit, db)
     return [_serialize_note(n) for n in related]
+
+
+# ── Memory dashboard endpoints ──────────────────────────────────────────────────
+# Daniel's UI dashboard at /memories reads + edits memories. Separate from the
+# /mcp/memories/* routes (which Claude Code consumes via MCP) so the two surfaces
+# can evolve independently. All return full Memory rows, not the legacy "memory"
+# alias used by Mem0-era callers.
+
+
+def _memory_to_dashboard(m) -> dict:
+    """Full row shape for the dashboard table. Skips embedding (huge JSON
+    string) since the table never displays it."""
+    return {
+        "id": m.id,
+        "type": m.type,
+        "key": m.key,
+        "content": m.content,
+        "confidence": m.confidence,
+        "is_active": bool(m.is_active),
+        "superseded_by": m.superseded_by,
+        "focus_id": m.focus_id,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+        "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+    }
+
+
+@app.get("/memories")
+def list_memories(
+    type: str | None = None,
+    q: str | None = None,
+    include_inactive: bool = False,
+    limit: int = 200,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """List memories for the dashboard. Filters by type (optional), text
+    substring (optional), and active flag. Paged via limit/offset. Newest
+    first."""
+    from .db.models import Memory  # local to avoid circular at import time
+    query = db.query(Memory)
+    if not include_inactive:
+        query = query.filter(Memory.is_active == True)  # noqa: E712
+    if type:
+        query = query.filter(Memory.type == type)
+    if q:
+        # Case-insensitive content substring match — cheap, works without FTS.
+        query = query.filter(Memory.content.ilike(f"%{q}%"))
+    total = query.count()
+    rows = query.order_by(Memory.created_at.desc()).offset(offset).limit(limit).all()
+    return {
+        "total": total,
+        "memories": [_memory_to_dashboard(m) for m in rows],
+    }
+
+
+@app.get("/memories/stats")
+def memory_stats(db: Session = Depends(get_db)):
+    """Counts per type for the dashboard header tabs."""
+    from .db.models import Memory
+    from sqlalchemy import func as sqlfunc
+    rows = (
+        db.query(Memory.type, sqlfunc.count(Memory.id))
+        .filter(Memory.is_active == True)  # noqa: E712
+        .group_by(Memory.type)
+        .all()
+    )
+    return {
+        "total": sum(c for _, c in rows),
+        "by_type": {t: c for t, c in rows},
+    }
+
+
+@app.delete("/memories/{memory_id}")
+def delete_memory(memory_id: int, db: Session = Depends(get_db)):
+    """Soft-delete (is_active=False). Same as MCP forget."""
+    if not memory_service.delete(memory_id, db=db):
+        raise HTTPException(status_code=404, detail="memory not found")
+    return {"ok": True, "id": memory_id}
+
+
+@app.patch("/memories/{memory_id}")
+def edit_memory(memory_id: int, body: dict, db: Session = Depends(get_db)):
+    """Update content via supersede chain (preserves audit history)."""
+    content = body.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+    if not memory_service.update_memory(memory_id, content, db=db):
+        raise HTTPException(status_code=404, detail="memory not found")
+    return {"ok": True, "id": memory_id}
 
 
 # ── Public portfolio ────────────────────────────────────────────────────────────

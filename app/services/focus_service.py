@@ -198,9 +198,9 @@ class FocusService:
             if f.last_activity_at:
                 days_ago = (now - f.last_activity_at).days
                 if days_ago == 0:
-                    parts.append("touched today")
+                    parts.append("worked on today")
                 else:
-                    parts.append(f"last touched {days_ago}d ago")
+                    parts.append(f"last worked on {days_ago}d ago")
             else:
                 parts.append("no activity yet")
             meta = ", ".join(parts)

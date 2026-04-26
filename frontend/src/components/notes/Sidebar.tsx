@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
-import { useGooniActivatedStore } from "../../stores/useGooniActivatedStore";
 import {
-  PenLine, FileText, Pin, MessageSquare, Sparkles, Moon, Bug, Settings as SettingsIcon,
+  PenLine, FileText, Pin, MessageSquare, Bug, Brain, Settings as SettingsIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -20,6 +20,7 @@ const ICON_TINT = {
   pinned:   "#F59E0B",   // amber
   newChat:  "#10B981",   // emerald
   gooni:    "#A855F7",   // violet
+  memories: "#0EA5E9",  // sky
   devTools: "#F43F5E",   // rose
   settings: "#64748B",   // slate
 } as const;
@@ -157,6 +158,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat }: SidebarProps) {
+  const navigate = useNavigate();
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId, removeSpace } = useNotesContentStore();
   const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
 
@@ -165,8 +167,6 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
-  const gooniActivated = useGooniActivatedStore((s) => s.activated);
-  const gooniToggle = useGooniActivatedStore((s) => s.toggle);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
 
@@ -546,12 +546,12 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
             </button>
           </div>
 
-          {/* Activate / Hide Gooni — mounts or unmounts the mascot character.
-              Hidden by default until the user opts in from here. */}
+          {/* Memories — full dashboard at /memories. Sits above Dev tools so
+              it reads as a top-level surface (not a debug affordance). */}
           <div style={{ padding: "0 6px 2px" }}>
             <button
-              onClick={gooniToggle}
-              title={gooniActivated ? "Hide Gooni" : "Drop Gooni in the center"}
+              onClick={() => navigate({ to: "/memories" })}
+              title="Memory dashboard"
               style={{
                 display: "flex", alignItems: "center", gap: 8,
                 width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
@@ -564,12 +564,8 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
               onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
             >
-              {gooniActivated ? (
-                <Moon size={14} strokeWidth={1.7} color={ICON_TINT.gooni} style={{ flexShrink: 0 }} />
-              ) : (
-                <Sparkles size={14} strokeWidth={1.7} color={ICON_TINT.gooni} style={{ flexShrink: 0 }} />
-              )}
-              {gooniActivated ? "Hide Gooni" : "Activate Gooni"}
+              <Brain size={14} strokeWidth={1.7} color={ICON_TINT.memories} style={{ flexShrink: 0 }} />
+              Memories
             </button>
           </div>
 

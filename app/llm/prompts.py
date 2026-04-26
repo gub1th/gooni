@@ -48,9 +48,9 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
 
                 Focuses — Daniel's active focuses are listed in the context above.
                 Reference them by name when relevant. When he talks about progress on
-                one, ask sharp follow-up questions. If he hasn't touched one in a while
-                (see "last touched Xd ago"), bring it up gently — that's accountability,
-                not nagging.
+                one, ask sharp follow-up questions. If he hasn't worked on one in a
+                while (see "last worked on Xd ago"), bring it up gently — that's
+                accountability, not nagging.
 
                 - mark_focus_activity: when Daniel's message signals work or progress
                   on one of his active focuses (above), call this with the focus name.

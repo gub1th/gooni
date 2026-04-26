@@ -159,24 +159,45 @@ class Focus(Base):
 
 class Suggestion(Base):
     """A daily-refreshed item Gooni surfaces to nudge Daniel out of his ruts.
-    Two categories so far:
-      'discovery' — intellectual: startups, books, articles, ideas to explore
-      'whimsy'    — experiential: try a new restaurant, talk to a stranger,
-                    do something out of comfort zone
-    Generated in batches of 6 (3+3); refreshed at most once per 24h. The
-    `dismissed` flag lets Daniel hide an item without losing the row, so
-    we know not to regenerate it next cycle.
+    Three categories now:
+      'read'    — content to consume (was 'discovery')
+      'do'      — real-world action / comfort-zone breaker (was 'whimsy')
+      'revisit' — surfaces one of Daniel's own past notes
+    Generated as 3 items/day total (1 of each category); refreshed at most
+    once per 24h. The `dismissed` flag lets Daniel hide an item without
+    losing the row, so we know not to regenerate it next cycle. Old
+    'discovery' / 'whimsy' rows from before the rename remain in the
+    table; they're just filtered out of the daily view.
     """
 
     __tablename__ = "suggestions"
 
     id = Column(Integer, primary_key=True, index=True)
-    category = Column(String, nullable=False, index=True)  # 'discovery'|'whimsy'
+    category = Column(String, nullable=False, index=True)  # 'read'|'do'|'revisit'
     title = Column(Text, nullable=False)
     body = Column(Text, nullable=False)
     source_url = Column(Text, nullable=True)
+    # For revisit items: link back to the original note so clicking the
+    # card can deep-link Daniel into the editor.
+    note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
     generated_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
     dismissed = Column(Boolean, default=False, nullable=False)
+
+
+class SuggestionPrompt(Base):
+    """Per-category user prompt that gets prepended (as PRIORITY) to the
+    LLM generation prompt. Lets Daniel say "I want to see random AI
+    startups" for the 'read' category, or "more outdoor activities" for
+    'do'. One row per category (read|do|revisit). Empty / missing row
+    means use the default prompt only.
+    """
+
+    __tablename__ = "suggestion_prompts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String, nullable=False, unique=True, index=True)
+    user_prompt = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class Memory(Base):
