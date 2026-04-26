@@ -317,6 +317,56 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
     };
   }, []);
 
+  // ── FAB → mascot drag handoff ────────────────────────────────────────────
+  // The chat launcher fires `gooni:spawn-drag` once it detects a drag (pointer
+  // moved >5px while pressed). We adopt the drag here: position the mascot at
+  // the pointer, switch to drag phase, install window pointer listeners since
+  // the original pointerdown was on the FAB and capture has been released
+  // there. On release we either snap back near the FAB / sidebar seam, or
+  // land + walk wherever the user dropped.
+  useEffect(() => {
+    function onSpawnDrag(ev: Event) {
+      const detail = (ev as CustomEvent<{ clientX: number; clientY: number; pointerId: number }>).detail;
+      const bounds = dashboardRef.current?.getBoundingClientRect();
+      if (!bounds || !detail) return;
+      const s = stateRef.current;
+      // Center the mascot on the pointer — feels like he was just pulled out.
+      s.dragOffsetDx = WRAPPER_W / 2;
+      s.dragOffsetDy = WRAPPER_H / 2;
+      s.x = clamp(detail.clientX - bounds.left - s.dragOffsetDx, -WRAPPER_W / 2, Math.max(0, bounds.width - WRAPPER_W));
+      s.y = clamp(detail.clientY - bounds.top - s.dragOffsetDy, 0, Math.max(0, bounds.height - WRAPPER_H));
+      s.dragStartMs = performance.now();
+      s.facingDir = "S";
+      setPhase("drag");
+
+      function onWindowMove(ev: PointerEvent) {
+        const b = dashboardRef.current?.getBoundingClientRect();
+        if (!b) return;
+        s.x = clamp(ev.clientX - b.left - s.dragOffsetDx, -WRAPPER_W / 2, Math.max(0, b.width - WRAPPER_W));
+        s.y = clamp(ev.clientY - b.top - s.dragOffsetDy, 0, Math.max(0, b.height - WRAPPER_H));
+      }
+      function onWindowUp() {
+        window.removeEventListener("pointermove", onWindowMove);
+        window.removeEventListener("pointerup", onWindowUp);
+        window.removeEventListener("pointercancel", onWindowUp);
+        // Snap rules mirror the SVG drag handler in onPointerUp below.
+        if (s.x < SIDEBAR_SNAP_PX) {
+          s.facingDir = "S";
+          setPhase("peek");
+        } else {
+          s.landingUntilMs = performance.now() + LANDING_MS;
+          setPhase("landing");
+        }
+      }
+      window.addEventListener("pointermove", onWindowMove);
+      window.addEventListener("pointerup", onWindowUp);
+      window.addEventListener("pointercancel", onWindowUp);
+    }
+    window.addEventListener("gooni:spawn-drag", onSpawnDrag);
+    return () => window.removeEventListener("gooni:spawn-drag", onSpawnDrag);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Main RAF loop ─────────────────────────────────────────────────────────
 
   useEffect(() => {
