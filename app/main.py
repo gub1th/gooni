@@ -1254,8 +1254,13 @@ def notes_graph(db: Session = Depends(get_db)):
 
 @app.post("/notes/cleanup")
 def cleanup_empty_notes(db: Session = Depends(get_db)):
-    """Delete notes whose plaintext content is < 6 chars and title is empty.
-    Used by the 'Clean Inbox' button — these are typically accidental creates.
+    """Delete notes whose plaintext body is < 6 chars, regardless of title.
+
+    Covers two accidental-create patterns:
+      1. Title empty + body empty (the original case)
+      2. Title typed but body never written (Daniel jotted a header and
+         walked away)
+
     Pinned notes are always preserved.
     """
     import re
@@ -1276,8 +1281,7 @@ def cleanup_empty_notes(db: Session = Depends(get_db)):
     )
     deleted_ids = []
     for n in candidates:
-        title_empty = not (n.title or "").strip()
-        if title_empty and _plaintext_len(n.content) < 6:
+        if _plaintext_len(n.content) < 6:
             deleted_ids.append(n.id)
             db.delete(n)
     db.commit()
