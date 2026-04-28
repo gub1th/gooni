@@ -179,14 +179,19 @@ def classify_note(note_id: int) -> None:
         text_for_llm = f"{(note.title or '').strip()}\n\n{plaintext}".strip()
         signals = extract_signals(text_for_llm, prev_assistant=None)
 
-        # Memories: route through the same reconciler as chat. Off-thread
-        # would be more conservative, but we're already in a worker thread.
+        # Memories: route through the same reconciler as chat. Tag each
+        # written row with source_note_id so the editor disclosure can
+        # surface "this note created N memories".
+        memories_written: list = []
         if signals["memories"]:
-            memory_service.apply_memory_candidates(signals["memories"], db=db)
+            memories_written = memory_service.apply_memory_candidates(
+                signals["memories"], db=db, source_note_id=note.id,
+            )
 
-        # Feature requests: write into the Backlog space. Link the FIRST
-        # one back to this note so the editor chip has something to point at.
-        first_backlog_id: int | None = note.backlog_note_id
+        # Feature requests: write items to the canonical Backlog List. Each
+        # ListItem carries source_note_id back to this note. We capture the
+        # ids so the editor disclosure can deep-link to each new item.
+        feature_summaries: list[dict] = []
         for fr in signals["feature_requests"]:
             try:
                 result = feature_request_tool.execute(
@@ -194,18 +199,31 @@ def classify_note(note_id: int) -> None:
                     title=fr["title"],
                     why=fr.get("why")
                         or f"From note #{note.id}: {plaintext[:200]}",
+                    source_note_id=note.id,
                 )
-                # Tool returns "Logged feature request #N: title".
-                if first_backlog_id is None:
-                    import re as _re
-                    m = _re.search(r"#(\d+)", result or "")
-                    if m:
-                        first_backlog_id = int(m.group(1))
+                # Tool returns "Logged feature request #N: title" — extract id
+                import re as _re
+                m = _re.search(r"#(\d+)", result or "")
+                if m:
+                    feature_summaries.append({
+                        "title": fr["title"],
+                        "list_item_id": int(m.group(1)),
+                    })
             except Exception as e:
                 print(f"classify_note feature_request error: {e}")
 
-        if first_backlog_id is not None and note.backlog_note_id != first_backlog_id:
-            note.backlog_note_id = first_backlog_id
+        # Persist the signals snapshot so the editor can render a "Routed:"
+        # disclosure mirroring the chat bubble. Empty payload still writes
+        # so the frontend can tell "yes we classified, no signals" apart
+        # from "haven't classified yet".
+        from datetime import datetime, timezone
+        signals_summary = {
+            "feature_requests": feature_summaries,
+            "memory_count": len(memories_written),
+            "memory_types": [m.type for m in memories_written],
+            "classified_at": datetime.now(timezone.utc).isoformat(),
+        }
+        note.last_classify_signals = json.dumps(signals_summary)
 
         # Snapshot the embedding we just classified against. Future saves
         # will compare against this to decide whether to re-run.

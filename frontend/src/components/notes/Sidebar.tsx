@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
+import { useListsStore } from "../../stores/useListsStore";
 import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
@@ -152,17 +153,35 @@ interface SidebarProps {
   isDashboard: boolean;
   isNotes: boolean;
   isChat: boolean;
+  isLists: boolean;
+  activeListId: number | null;
   showCompose: boolean;
   onLogoClick: () => void;
   onSpaceSelect: () => void;
   onCompose: () => void;
   onNewChat: () => void;
+  onSelectList: (id: number) => void;
 }
 
-export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat }: SidebarProps) {
+export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList }: SidebarProps) {
   const navigate = useNavigate();
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId, removeSpace } = useNotesContentStore();
   const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
+  const lists = useListsStore((s) => s.lists);
+  const createListInStore = useListsStore((s) => s.createList);
+  const [listsOpen, setListsOpen] = useState(true);
+
+  async function handleAddList() {
+    const name = window.prompt("New list name:");
+    if (!name?.trim()) return;
+    try {
+      const lst = await createListInStore(name.trim(), "generic", null);
+      onSelectList(lst.id);
+    } catch (e) {
+      console.error("createList failed", e);
+      alert("Failed to create list.");
+    }
+  }
 
   const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
   const [spacesOpen, setSpacesOpen] = useState(true);
@@ -522,6 +541,61 @@ export function Sidebar({ isDashboard, isNotes, isChat, showCompose, onLogoClick
               );
             })}
           </div>
+
+          {/* Lists — unified todo / backlog / generic. Independent of Spaces. */}
+          <div style={{ padding: "0 6px 4px" }}>
+            <div style={{ display: "flex", alignItems: "center", padding: "6px 6px 2px" }}>
+              <button
+                onClick={() => setListsOpen((o) => !o)}
+                style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
+              >
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>LISTS</span>
+                <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{listsOpen ? "▾" : "▸"}</span>
+              </button>
+              <button
+                onClick={handleAddList}
+                title="New list"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#AEAEB2", fontSize: 16, lineHeight: 1, padding: "0 2px", display: "flex", alignItems: "center" }}
+              >+</button>
+            </div>
+          </div>
+          {listsOpen && (
+            <div style={{ padding: "0 6px 4px" }}>
+              {lists.length === 0 && (
+                <div style={{
+                  padding: "4px 10px", fontSize: 12, color: "#9CA3AF",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                }}>
+                  No lists yet
+                </div>
+              )}
+              {lists.map((lst) => {
+                const isSelected = isLists && activeListId === lst.id;
+                return (
+                  <button
+                    key={lst.id}
+                    onClick={() => onSelectList(lst.id)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      width: "100%", padding: "0 10px", height: 30, borderRadius: 8,
+                      cursor: "pointer", background: isSelected ? "rgba(0,0,0,0.09)" : "transparent",
+                      border: "none", textAlign: "left",
+                      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                      fontWeight: isSelected ? 600 : 400, fontSize: 13.5, color: "#1C1C1E",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+                    onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                  >
+                    <span style={{ fontSize: 13, flexShrink: 0 }}>{lst.emoji || "•"}</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {lst.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Spacer — push New chat + Settings to the bottom */}
           <div style={{ flex: 1, minHeight: 20 }} />

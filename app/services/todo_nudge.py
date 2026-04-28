@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.db.models import TodoItem
+from app.db.models import ListItem
+from app.services.list_service import list_service
 
 
 def _today_bounds() -> tuple[datetime, datetime]:
@@ -29,26 +30,29 @@ def build_nudge_message(db: Session) -> tuple[str, list[int]] | None:
     can resolve to a real todo without re-querying.
     """
     today, tomorrow = _today_bounds()
+    todo_list = list_service.get_or_create_todo_list(db)
 
     overdue = (
-        db.query(TodoItem)
+        db.query(ListItem)
         .filter(
-            TodoItem.done.is_(False),
-            TodoItem.due_date.is_not(None),
-            TodoItem.due_date < today,
+            ListItem.list_id == todo_list.id,
+            ListItem.done.is_(False),
+            ListItem.due_date.is_not(None),
+            ListItem.due_date < today,
         )
-        .order_by(TodoItem.due_date.asc(), TodoItem.sort_order.asc())
+        .order_by(ListItem.due_date.asc(), ListItem.sort_order.asc())
         .all()
     )
     due_today = (
-        db.query(TodoItem)
+        db.query(ListItem)
         .filter(
-            TodoItem.done.is_(False),
-            TodoItem.due_date.is_not(None),
-            TodoItem.due_date >= today,
-            TodoItem.due_date < tomorrow,
+            ListItem.list_id == todo_list.id,
+            ListItem.done.is_(False),
+            ListItem.due_date.is_not(None),
+            ListItem.due_date >= today,
+            ListItem.due_date < tomorrow,
         )
-        .order_by(TodoItem.sort_order.asc())
+        .order_by(ListItem.sort_order.asc())
         .all()
     )
 

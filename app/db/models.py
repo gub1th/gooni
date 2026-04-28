@@ -96,6 +96,17 @@ class Note(Base):
     # content triggered a feature_request. Drives the editor chip so
     # Daniel sees that the note actually fed the self-improvement loop.
     backlog_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+    # JSON snapshot of what classify_note routed for this note's most recent
+    # save. Mirrors the chat-side `signals` payload so the editor can render
+    # the same "Routed:" disclosure as MessageBubble. Shape:
+    #   {
+    #     "feature_requests": [{"title": str, "list_item_id": int}],
+    #     "memory_count": int,
+    #     "memory_types": [str, ...],
+    #     "classified_at": iso8601,
+    #   }
+    # Empty / null when no signals fired or note hasn't been classified yet.
+    last_classify_signals = Column(Text, nullable=True)
 
 
 class PublicProfile(Base):
@@ -173,49 +184,6 @@ class Focus(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-class Suggestion(Base):
-    """A daily-refreshed item Gooni surfaces to nudge Daniel out of his ruts.
-    Three categories now:
-      'read'    — content to consume (was 'discovery')
-      'do'      — real-world action / comfort-zone breaker (was 'whimsy')
-      'revisit' — surfaces one of Daniel's own past notes
-    Generated as 3 items/day total (1 of each category); refreshed at most
-    once per 24h. The `dismissed` flag lets Daniel hide an item without
-    losing the row, so we know not to regenerate it next cycle. Old
-    'discovery' / 'whimsy' rows from before the rename remain in the
-    table; they're just filtered out of the daily view.
-    """
-
-    __tablename__ = "suggestions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    category = Column(String, nullable=False, index=True)  # 'read'|'do'|'revisit'
-    title = Column(Text, nullable=False)
-    body = Column(Text, nullable=False)
-    source_url = Column(Text, nullable=True)
-    # For revisit items: link back to the original note so clicking the
-    # card can deep-link Daniel into the editor.
-    note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
-    generated_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    dismissed = Column(Boolean, default=False, nullable=False)
-
-
-class SuggestionPrompt(Base):
-    """Per-category user prompt that gets prepended (as PRIORITY) to the
-    LLM generation prompt. Lets Daniel say "I want to see random AI
-    startups" for the 'read' category, or "more outdoor activities" for
-    'do'. One row per category (read|do|revisit). Empty / missing row
-    means use the default prompt only.
-    """
-
-    __tablename__ = "suggestion_prompts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    category = Column(String, nullable=False, unique=True, index=True)
-    user_prompt = Column(Text, nullable=False, default="")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-
 class Memory(Base):
     """Daniel's persistent knowledge of himself. Replaces the Mem0 hosted
     service with a local SQL store + LLM extraction + LLM reconciliation.
@@ -249,12 +217,60 @@ class Memory(Base):
     embedding = Column(Text, nullable=True)
     # Optional link to a Focus when the memory is goal/aspiration-shaped.
     focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=True)
+    # Origin tracking — set when this memory was extracted from a note's
+    # classify_note run. Lets the editor surface "this note created N
+    # memories" disclosure. NULL for memories from chat or other paths.
+    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
     is_active = Column(Boolean, nullable=False, default=True)
     superseded_by = Column(Integer, ForeignKey("memories.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+
+class List(Base):
+    """User-facing structured list. `type` drives small UI variations
+    (todo / backlog / generic) but storage is uniform.
+
+    Conceptually replaces:
+      - TodoItem (the hardcoded "Todo list" — becomes a List(type=todo) row)
+      - Lists feature (Notes with <ul><li> in space "Lists" — items move to ListItem rows)
+      - Gooni Backlog Space (auto-logged feature requests become ListItem rows
+        in List(type=backlog))
+    """
+
+    __tablename__ = "lists"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(Text, nullable=False)
+    # 'todo' | 'backlog' | 'generic'
+    type = Column(String, nullable=False, default="generic", index=True)
+    emoji = Column(String, nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ListItem(Base):
+    """A single item within a List. Same shape regardless of list type —
+    the consumer (UI / LLM) decides which fields to surface based on
+    `list.type`. `subtitle` carries the "why" for backlog items; nullable
+    for todos. `source_note_id` links back to the Note that spawned this
+    item (used by feature_request_tool to anchor backlog entries).
+    """
+
+    __tablename__ = "list_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    list_id = Column(Integer, ForeignKey("lists.id"), nullable=False, index=True)
+    text = Column(Text, nullable=False)
+    subtitle = Column(Text, nullable=True)
+    done = Column(Boolean, default=False, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+    due_date = Column(DateTime, nullable=True)
+    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class GoogleOAuthToken(Base):

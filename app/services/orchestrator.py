@@ -88,9 +88,7 @@ class Orchestrator:
 
         # ── Unified signal extraction ───────────────────────────────────────
         # One LLM call per turn surfaces all three signal types (tone
-        # corrections, feature requests, memory candidates). Replaces the
-        # older split between feedback_detector + memory_extractor that ran
-        # two overlapping classifiers per turn.
+        # corrections, feature requests, memory candidates).
         feedback_ack: str | None = None
         feedback_tools: list[str] = []
         signals_summary: dict = {

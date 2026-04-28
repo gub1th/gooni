@@ -12,9 +12,10 @@ import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 
 import { SlashCommand } from "./slash-command";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchRelatedNotes, patchNote as apiPatchNote, suggestNoteQuestions, type ApiNote, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchRelatedNotes, patchNote as apiPatchNote, suggestNoteQuestions, type ApiNote, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
 import { useConversationsStore } from "../../stores/useConversationsStore";
@@ -192,9 +193,15 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
   useEditorStyles();
   const embedded = variant === "embedded";
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote } = useNotesContentStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote } = useNotesContentStore();
   const { isOpen: gooniOpen, toggle: toggleGooni } = useGooniStore();
   const { spaces } = useSpacesStore();
+  const navigate = useNavigate();
+  const [signalsExpanded, setSignalsExpanded] = useState(false);
+  // Surface for the embedded composer — the last submitted note's classify
+  // result. Embedded variant doesn't render the title/disclosure block, so
+  // we shadow a small pill underneath the composer. Cleared on next submit.
+  const [embeddedToast, setEmbeddedToast] = useState<{ noteId: number; signals: NoteClassifySignals } | null>(null);
 
   const spaceId = selectedSpaceId ?? "general";
   const activeNote = (notes[spaceId] ?? []).find((n) => n.id === activeNoteId) ?? null;
@@ -428,6 +435,34 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
       editor.commands.clearContent();
     }
 
+    // Fire embed → classify → signals pipeline on submit too. Without this
+    // the dashboard quick-note + plan paths never trigger classification —
+    // embed only ran via the editor's onBlur, which submit doesn't go through.
+    if (savedNote?.id) {
+      const submittedId = savedNote.id;
+      embedAndCheck(submittedId);
+      // Embedded composer surfaces a transient toast since the disclosure
+      // block lives in the full-variant render path. Clear any prior toast
+      // and start a poll for the classify_signals payload.
+      if (embedded) {
+        setEmbeddedToast(null);
+        setTimeout(async () => {
+          try {
+            const fresh = await apiFetchNote(submittedId);
+            const sig = fresh.classify_signals;
+            if (sig && (sig.feature_requests?.length || sig.memory_count > 0)) {
+              setEmbeddedToast({ noteId: submittedId, signals: sig });
+              setTimeout(() => {
+                setEmbeddedToast((curr) => (curr?.noteId === submittedId ? null : curr));
+              }, 12000);
+            }
+          } catch {
+            // note may have been deleted — ignore
+          }
+        }, 3500);
+      }
+    }
+
     onSubmitted?.(savedNote, buttonRect);
   }
 
@@ -485,6 +520,11 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
     } catch {
       // note may have been deleted — ignore
     }
+    // classify_note runs in a daemon thread on the backend — by the time the
+    // /embed POST returns, classification hasn't finished. Schedule a refetch
+    // ~3s out so the editor picks up the new `classify_signals` payload and
+    // renders the "Routed:" disclosure.
+    setTimeout(() => { refetchNote(noteId).catch(() => {}); }, 3000);
     // Generate probing questions in parallel — only fires LLM call when the
     // note is substantive enough (server-side gate at ~200 chars plaintext).
     try {
@@ -837,6 +877,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
 
       {/* Editor content */}
       {embedded ? (
+        <>
         <div
           className="gooni-note-glow"
           onMouseMove={(e) => {
@@ -943,6 +984,63 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
               </svg>
             </button>
         </div>
+        {embeddedToast && (() => {
+          const sig = embeddedToast.signals;
+          const fr = sig.feature_requests || [];
+          const memCount = sig.memory_count || 0;
+          const parts: string[] = [];
+          if (fr.length) parts.push(`backlog (${fr.length})`);
+          if (memCount) parts.push(`memory (${memCount})`);
+          const summary = parts.join(" · ");
+          const openBacklog = async () => {
+            try {
+              const { useListsStore } = await import("../../stores/useListsStore");
+              const lists = useListsStore.getState().lists;
+              const backlog = lists.find((l) => l.type === "backlog");
+              if (backlog) {
+                navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id } });
+              }
+            } catch (e) { console.error(e); }
+          };
+          const openNote = () => {
+            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined } });
+          };
+          return (
+            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={fr.length ? openBacklog : openNote}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "4px 10px", borderRadius: 999,
+                  border: "1px solid rgba(22,163,74,0.30)",
+                  background: "rgba(22,163,74,0.08)",
+                  color: "#166534",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                  fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
+                  cursor: "pointer",
+                  transition: "background 0.12s",
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.14)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.08)")}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A" }} />
+                Routed: {summary}
+                {fr[0] ? ` — ${fr[0].title}` : ""}
+                <span style={{ marginLeft: 2 }}>↗</span>
+              </button>
+              <button
+                onClick={() => setEmbeddedToast(null)}
+                title="Dismiss"
+                style={{
+                  border: "none", background: "transparent", color: "#8E8E93",
+                  cursor: "pointer", fontSize: 14, padding: "0 4px",
+                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                }}
+              >×</button>
+            </div>
+          );
+        })()}
+        </>
       ) : (
         <div
           ref={scrollContainerRef}
@@ -988,29 +1086,108 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                     lineHeight: 1.3,
                   }}
                 />
-                {activeNote.backlog_note_id != null && (
-                  <button
-                    onClick={() => selectNote(activeNote.backlog_note_id!)}
-                    title="Open the derived backlog note"
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                      marginBottom: 14,
-                      padding: "4px 10px", borderRadius: 999,
-                      border: "1px solid rgba(22,163,74,0.30)",
-                      background: "rgba(22,163,74,0.08)",
-                      color: "#166534",
-                      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                      fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
-                      cursor: "pointer",
-                      transition: "background 0.12s",
-                    }}
-                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.14)")}
-                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.08)")}
-                  >
-                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A" }} />
-                    → Logged to Gooni Backlog (#{activeNote.backlog_note_id})
-                  </button>
-                )}
+                {(() => {
+                  const sig = activeNote.classify_signals;
+                  if (!sig) return null;
+                  const fr = sig.feature_requests || [];
+                  const memCount = sig.memory_count || 0;
+                  if (fr.length === 0 && memCount === 0) return null;
+
+                  const parts: string[] = [];
+                  if (fr.length) parts.push(`backlog (${fr.length})`);
+                  if (memCount) parts.push(`memory (${memCount})`);
+                  const summary = parts.join(" · ");
+
+                  // Find the backlog list id for the deep-link. We import lazily
+                  // via the store at click time; no need to subscribe here.
+                  const openBacklog = async () => {
+                    try {
+                      const { useListsStore } = await import("../../stores/useListsStore");
+                      const lists = useListsStore.getState().lists;
+                      const backlog = lists.find((l) => l.type === "backlog");
+                      if (backlog) {
+                        navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id } });
+                      }
+                    } catch (e) {
+                      console.error("openBacklog failed", e);
+                    }
+                  };
+
+                  return (
+                    <div style={{ marginBottom: 14, maxWidth: 720 }}>
+                      <button
+                        onClick={() => setSignalsExpanded((v) => !v)}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                          padding: "4px 10px", borderRadius: 999,
+                          border: "1px solid rgba(22,163,74,0.30)",
+                          background: "rgba(22,163,74,0.08)",
+                          color: "#166534",
+                          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                          fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
+                          cursor: "pointer",
+                          transition: "background 0.12s",
+                        }}
+                        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.14)")}
+                        onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.08)")}
+                      >
+                        <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A" }} />
+                        Routed: {summary}
+                        <span style={{ fontSize: 9, marginLeft: 2 }}>{signalsExpanded ? "▾" : "▸"}</span>
+                      </button>
+                      {signalsExpanded && (
+                        <div
+                          style={{
+                            marginTop: 6,
+                            padding: "8px 12px",
+                            borderRadius: 8,
+                            background: "rgba(0,0,0,0.03)",
+                            border: "1px solid rgba(0,0,0,0.07)",
+                            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                            fontSize: 12.5,
+                            color: "#3C3C43",
+                            lineHeight: 1.5,
+                            display: "inline-block",
+                          }}
+                        >
+                          {fr.length > 0 && (
+                            <div style={{ marginBottom: memCount ? 6 : 0 }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "#9CA3AF", marginBottom: 2 }}>
+                                Feature requests — Gooni Backlog
+                              </div>
+                              {fr.map((f) => (
+                                <div key={f.list_item_id}>
+                                  ·{" "}
+                                  <button
+                                    onClick={openBacklog}
+                                    style={{
+                                      background: "none", border: "none", padding: 0,
+                                      color: "#0EA5E9", cursor: "pointer", fontSize: "inherit",
+                                      fontFamily: "inherit",
+                                    }}
+                                  >
+                                    {f.title} ↗
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {memCount > 0 && (
+                            <div>
+                              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "#9CA3AF", marginBottom: 2 }}>
+                                Memories — reconciler
+                              </div>
+                              <div>
+                                · {memCount} written
+                                {sig.memory_types?.length ? ` (${sig.memory_types.join(", ")})` : ""}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 {editor && (
                   <BubbleMenu
                     editor={editor}

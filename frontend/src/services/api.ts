@@ -75,6 +75,13 @@ export async function deleteSpace(id: number): Promise<void> {
 
 // ── Notes ──────────────────────────────────────────────────────────────────────
 
+export interface NoteClassifySignals {
+  feature_requests: { title: string; list_item_id: number }[];
+  memory_count: number;
+  memory_types: string[];
+  classified_at: string;
+}
+
 export interface ApiNote {
   id: number;
   title: string | null;
@@ -85,10 +92,11 @@ export interface ApiNote {
   last_opened_at: string | null;
   is_public: boolean;
   is_pinned: boolean;
-  // Set by the unified extractor on note save when this note's content was
-  // routed to the "Gooni Backlog" space as a feature_request. Drives the
-  // editor chip linking back to the derived Backlog note.
-  backlog_note_id?: number | null;
+  // Snapshot of what classify_note routed for this note's most recent save.
+  // Mirrors the chat-side `signals` payload — drives the "Routed:" disclosure
+  // under the title so Daniel sees memory writes + backlog items as soon as
+  // the async classifier finishes. Null until classify has run.
+  classify_signals?: NoteClassifySignals | null;
 }
 
 export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiNote[]> {
@@ -382,50 +390,111 @@ export async function createTodoPlan(todoId: number): Promise<ApiNote> {
   return res.json();
 }
 
-// ── Suggestions ──────────────────────────────────────────────────────────────
+// ── Lists (unified) ─────────────────────────────────────────────────────────
+//
+// Backed by the List + ListItem tables. Replaces the old "Lists" feature
+// (Notes-with-checklists in a Lists Space) and the "Gooni Backlog" Space.
+// Type drives small UI variations only — the storage shape is uniform.
 
-export type SuggestionCategory = "read" | "do" | "revisit";
+export type ListType = "todo" | "backlog" | "generic";
 
-export interface ApiSuggestion {
+export interface ApiList {
   id: number;
-  category: SuggestionCategory;
-  title: string;
-  body: string;
-  source_url: string | null;
-  note_id: number | null;
-  generated_at: string | null;
+  name: string;
+  type: ListType;
+  emoji: string | null;
+  sort_order: number;
+  created_at: string | null;
 }
 
-export async function fetchSuggestionsToday(): Promise<{ read: ApiSuggestion[]; do: ApiSuggestion[]; revisit: ApiSuggestion[] }> {
-  const res = await apiFetch(`${BASE}/suggestions/today`);
-  if (!res.ok) throw new Error("Failed to fetch suggestions");
+export interface ApiListItem {
+  id: number;
+  list_id: number;
+  text: string;
+  subtitle: string | null;
+  done: boolean;
+  completed_at: string | null;
+  sort_order: number;
+  due_date: string | null;
+  source_note_id: number | null;
+  created_at: string | null;
+}
+
+export interface ApiListWithItems extends ApiList {
+  items: ApiListItem[];
+}
+
+export async function fetchLists(): Promise<ApiList[]> {
+  const res = await apiFetch(`${BASE}/lists`);
+  if (!res.ok) throw new Error("Failed to fetch lists");
   return res.json();
 }
 
-export async function fetchSuggestionPrompts(): Promise<{ read: string; do: string; revisit: string }> {
-  const res = await apiFetch(`${BASE}/suggestions/prompts`);
-  if (!res.ok) throw new Error("Failed to fetch suggestion prompts");
+export async function fetchList(id: number): Promise<ApiListWithItems> {
+  const res = await apiFetch(`${BASE}/lists/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch list");
   return res.json();
 }
 
-export async function patchSuggestionPrompt(category: SuggestionCategory, prompt: string): Promise<void> {
-  const res = await apiFetch(`${BASE}/suggestions/prompts/${category}`, {
+export async function createList(
+  name: string,
+  type: ListType = "generic",
+  emoji?: string | null,
+): Promise<ApiList> {
+  const res = await apiFetch(`${BASE}/lists`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, type, emoji }),
+  });
+  if (!res.ok) throw new Error("Failed to create list");
+  return res.json();
+}
+
+export async function addListItem(
+  listId: number,
+  text: string,
+  opts: { subtitle?: string | null; source_note_id?: number | null } = {},
+): Promise<ApiListItem> {
+  const res = await apiFetch(`${BASE}/lists/${listId}/items`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, ...opts }),
+  });
+  if (!res.ok) throw new Error("Failed to add list item");
+  return res.json();
+}
+
+export async function updateListItem(
+  itemId: number,
+  patch: {
+    text?: string;
+    subtitle?: string | null;
+    done?: boolean;
+    sort_order?: number;
+    due_date?: string | null;
+  },
+): Promise<ApiListItem> {
+  const res = await apiFetch(`${BASE}/list-items/${itemId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error("Failed to update suggestion prompt");
-}
-
-export async function dismissSuggestion(id: number): Promise<void> {
-  const res = await apiFetch(`${BASE}/suggestions/${id}/dismiss`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to dismiss suggestion");
-}
-
-export async function refreshSuggestions(): Promise<{ created: number }> {
-  const res = await apiFetch(`${BASE}/suggestions/refresh`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to refresh suggestions");
+  if (!res.ok) throw new Error("Failed to update list item");
   return res.json();
+}
+
+export async function deleteListItem(itemId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/list-items/${itemId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete list item");
+}
+
+export async function reorderListItems(ids: number[]): Promise<void> {
+  const res = await apiFetch(`${BASE}/list-items/reorder`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error("Failed to reorder list items");
 }
 
 export interface ChatGraphNode {
@@ -479,12 +548,6 @@ export async function fetchFocuses(opts?: {
   const qs = params.toString();
   const res = await apiFetch(`${BASE}/focuses${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error("Failed to fetch focuses");
-  return res.json();
-}
-
-export async function fetchStaleFocuses(days = 5): Promise<ApiFocus[]> {
-  const res = await apiFetch(`${BASE}/focuses/stale?days=${days}`);
-  if (!res.ok) throw new Error("Failed to fetch stale focuses");
   return res.json();
 }
 

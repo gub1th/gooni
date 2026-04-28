@@ -25,7 +25,8 @@ class AddToListTool(BaseTool):
     def execute(self, db=None, list_name: str = "", item: str = "", **kwargs) -> str:
         from ..services.list_service import list_service
 
-        return list_service.add_item(list_name, item, db)
+        lst, _ = list_service.add_item_by_list_name(list_name, item, db)
+        return f'Added "{item}" to {lst.name}.'
 
 
 class ShowListTool(BaseTool):

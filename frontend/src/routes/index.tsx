@@ -3,11 +3,13 @@ import { useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
 import { GooniLayer } from "../components/GooniLayer";
+import { ListView } from "../components/lists/ListView";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { Sidebar } from "../components/notes/Sidebar";
 import { PasswordGate } from "../components/PasswordGate";
 import { useWindowWidth } from "../hooks/useWindowWidth";
+import { useListsStore } from "../stores/useListsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
@@ -17,6 +19,7 @@ export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>) => ({
     note: typeof search.note === "number" ? search.note : typeof search.note === "string" ? Number(search.note) : undefined,
     conv: typeof search.conv === "number" ? search.conv : typeof search.conv === "string" ? Number(search.conv) : undefined,
+    list: typeof search.list === "number" ? search.list : typeof search.list === "string" ? Number(search.list) : undefined,
   }),
   component: NotesPage,
 });
@@ -29,13 +32,15 @@ function NotesPage() {
   const { selectedSpaceId, selectSpace, loadNotes, createNote, selectNote } = useNotesContentStore();
   const windowWidth = useWindowWidth();
   const { fetchConversations, newChat, selectConversation } = useConversationsStore();
+  const fetchAllLists = useListsStore((s) => s.fetchAll);
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
-  const [view, setView] = useState<"notes" | "dashboard" | "chat">(() =>
-    search.note ? "notes" : search.conv ? "chat" : "dashboard"
+  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists">(() =>
+    search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
   );
+  const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
 
   useEffect(() => {
@@ -46,6 +51,7 @@ function NotesPage() {
   useEffect(() => {
     fetchSpaces();
     fetchConversations();
+    fetchAllLists();
     // Note: search.note / search.conv handling moved to dedicated effect below
     // so navigation TO this page (e.g. from the notes-map "open this note")
     // also takes effect, not just the first mount.
@@ -107,15 +113,27 @@ function NotesPage() {
     return () => window.removeEventListener("keydown", handler);
   }, [selectedSpaceId, view]);
 
-  function setViewAndUrl(v: "notes" | "dashboard" | "chat", noteId?: number, convId?: number) {
+  function setViewAndUrl(
+    v: "notes" | "dashboard" | "chat" | "lists",
+    noteId?: number,
+    convId?: number,
+    listId?: number,
+  ) {
     setView(v);
     if (v === "notes" && noteId) {
-      navigate({ search: { note: noteId, conv: undefined }, replace: true });
+      navigate({ search: { note: noteId, conv: undefined, list: undefined }, replace: true });
     } else if (v === "chat" && convId) {
-      navigate({ search: { note: undefined, conv: convId }, replace: true });
+      navigate({ search: { note: undefined, conv: convId, list: undefined }, replace: true });
+    } else if (v === "lists" && listId) {
+      navigate({ search: { note: undefined, conv: undefined, list: listId }, replace: true });
     } else {
-      navigate({ search: { note: undefined, conv: undefined }, replace: true });
+      navigate({ search: { note: undefined, conv: undefined, list: undefined }, replace: true });
     }
+  }
+
+  function handleSelectList(id: number) {
+    setActiveListId(id);
+    setViewAndUrl("lists", undefined, undefined, id);
   }
 
   function handleNewChat() {
@@ -128,14 +146,14 @@ function NotesPage() {
     setView("notes");
     selectSpace(spaceId);
     createNote(spaceId);
-    navigate({ search: { note: undefined, conv: undefined }, replace: true });
+    navigate({ search: { note: undefined, conv: undefined, list: undefined }, replace: true });
   }
 
   // When active note changes while in notes view, update URL
   const { activeNoteId } = useNotesContentStore();
   useEffect(() => {
     if (view === "notes" && activeNoteId && activeNoteId > 0) {
-      navigate({ search: { note: activeNoteId, conv: undefined }, replace: true });
+      navigate({ search: { note: activeNoteId, conv: undefined, list: undefined }, replace: true });
     }
   }, [activeNoteId, view]);
 
@@ -143,7 +161,7 @@ function NotesPage() {
   const { activeId: activeConvId } = useConversationsStore();
   useEffect(() => {
     if (view === "chat" && activeConvId) {
-      navigate({ search: { note: undefined, conv: activeConvId }, replace: true });
+      navigate({ search: { note: undefined, conv: activeConvId, list: undefined }, replace: true });
     }
   }, [activeConvId, view]);
 
@@ -155,11 +173,14 @@ function NotesPage() {
           isDashboard={view === "dashboard"}
           isNotes={view === "notes"}
           isChat={view === "chat"}
+          isLists={view === "lists"}
+          activeListId={view === "lists" ? activeListId : null}
           showCompose={view !== "notes"}
           onLogoClick={() => setViewAndUrl("dashboard")}
           onSpaceSelect={() => setView("notes")}
           onCompose={handleCompose}
           onNewChat={handleNewChat}
+          onSelectList={handleSelectList}
         />
       )}
 
@@ -168,6 +189,11 @@ function NotesPage() {
           <Dashboard onOpenNote={() => setView("notes")} />
         ) : view === "chat" ? (
           <ChatView />
+        ) : view === "lists" && activeListId != null ? (
+          <ListView
+            listId={activeListId}
+            onOpenSourceNote={(noteId) => setViewAndUrl("notes", noteId)}
+          />
         ) : (
           <>
             <NotesList />

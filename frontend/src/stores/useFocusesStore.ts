@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import {
   fetchFocuses as apiFetchFocuses,
-  fetchStaleFocuses as apiFetchStale,
   createFocus as apiCreateFocus,
   updateFocus as apiUpdateFocus,
   deleteFocus as apiDeleteFocus,
@@ -12,11 +11,9 @@ import {
 
 interface FocusesStore {
   focuses: ApiFocus[];
-  staleFocuses: ApiFocus[];
   loaded: boolean;
 
   fetch: () => Promise<void>;
-  fetchStale: (days?: number) => Promise<void>;
   create: (body: { name: string; endgoal: string; status?: FocusStatus; due_date?: string | null }) => Promise<ApiFocus>;
   update: (id: number, patch: { name?: string; endgoal?: string; status?: FocusStatus; due_date?: string | null }) => Promise<void>;
   remove: (id: number) => Promise<void>;
@@ -25,22 +22,12 @@ interface FocusesStore {
 
 export const useFocusesStore = create<FocusesStore>((set, get) => ({
   focuses: [],
-  staleFocuses: [],
   loaded: false,
 
   fetch: async () => {
     try {
       const list = await apiFetchFocuses({ include_someday: true });
       set({ focuses: list, loaded: true });
-    } catch (e) {
-      console.error(e);
-    }
-  },
-
-  fetchStale: async (days = 5) => {
-    try {
-      const stale = await apiFetchStale(days);
-      set({ staleFocuses: stale });
     } catch (e) {
       console.error(e);
     }
@@ -63,7 +50,6 @@ export const useFocusesStore = create<FocusesStore>((set, get) => ({
     await apiDeleteFocus(id);
     set({
       focuses: get().focuses.filter((f) => f.id !== id),
-      staleFocuses: get().staleFocuses.filter((f) => f.id !== id),
     });
   },
 
@@ -71,7 +57,6 @@ export const useFocusesStore = create<FocusesStore>((set, get) => ({
     const updated = await apiHeartbeat(id);
     set({
       focuses: get().focuses.map((f) => (f.id === id ? updated : f)),
-      staleFocuses: get().staleFocuses.filter((f) => f.id !== id),
     });
   },
 }));

@@ -1,11 +1,9 @@
 """LLM-driven extraction + reconciliation for memories, tone corrections,
 and feature requests.
 
-Single unified extractor (`extract_signals`) replaces the older split between
-`feedback_detector.classify` (chat-only, regex pre-filter) and
-`extract_candidates` (memory-only). One LLM call per text input emits all
-three signal types so the orchestrator and note-save path don't run two
-overlapping classifiers per turn.
+Single unified extractor (`extract_signals`) emits all three signal types in
+one LLM call so the orchestrator and note-save path don't run overlapping
+classifiers per turn.
 
 Pipeline:
 1. extract_signals(text, prev_assistant?) → {tone_corrections, feature_requests, memories}

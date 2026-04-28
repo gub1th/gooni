@@ -144,22 +144,60 @@ def forget_memory(memory_id: str) -> str:
     return f"Forgotten: {memory_id}"
 
 
+def _resolve_space_id(space_name: str, emoji: str | None = None) -> int | str:
+    """Map a human space name to its current ID. Creates the space if missing.
+
+    Returns the space.id (int) for named spaces, or the literal "general"
+    when space_name == "General" (since the backend keeps General as a
+    pseudo-space outside the spaces table).
+
+    Robust by name — survives DB rebuilds where IDs shift. Caller passes
+    the name; this function does the lookup.
+    """
+    if space_name.strip().lower() == "general":
+        return "general"
+
+    resp = _session.get(f"{BASE_URL}/spaces", timeout=10)
+    resp.raise_for_status()
+    spaces = resp.json()
+    for s in spaces:
+        if (s.get("name") or "").strip().lower() == space_name.strip().lower():
+            return int(s["id"])
+
+    # Not found — create it
+    payload: dict = {"name": space_name}
+    if emoji:
+        payload["emoji"] = emoji
+    create = _session.post(f"{BASE_URL}/spaces", json=payload, timeout=10)
+    create.raise_for_status()
+    return int(create.json()["id"])
+
+
 @mcp.tool()
-def add_note(title: str, content: str) -> str:
+def add_note(title: str, content: str, space_name: str = "Claude Code") -> str:
     """Create a new note in Gooni.
+
+    Defaults to the "Claude Code" space — anything Claude Code logs about
+    a coding session belongs there, not in General. Pass `space_name` to
+    override (e.g. "General" for free-floating notes, or any other space).
+
+    The space is resolved by name and auto-created if missing, so this
+    tool stays correct even after DB rebuilds where IDs shift.
 
     Args:
         title: short note title
-        content: note body (plain text)
+        content: note body (plain text or HTML)
+        space_name: target space (defaults to "Claude Code")
     """
+    space_id = _resolve_space_id(space_name, emoji="🤖" if space_name == "Claude Code" else None)
     resp = _session.post(
-        f"{BASE_URL}/spaces/general/notes",
+        f"{BASE_URL}/spaces/{space_id}/notes",
         json={"title": title, "content": content},
         timeout=10,
     )
     resp.raise_for_status()
     n = resp.json()
-    return f"Created note #{n['id']}: {n['title']}"
+    return f"Created note #{n['id']} in {space_name}: {n['title']}"
 
 
 @mcp.tool()
