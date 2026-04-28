@@ -84,8 +84,56 @@ FRONTEND_CMD="cd '$DIR/frontend' && VITE_API_URL='${API_URL}' npm run dev -- --p
 DATASETTE_CMD="cd '$DIR' && source '${VENV}' && datasette '${DB_FILE}' -p ${DS_PORT}"
 
 if command -v cmux >/dev/null 2>&1; then
-  # ----- cmux path: one workspace, three splits -----
+  # ----- cmux path -----
+  # If invoked from inside a cmux pane, add a new tab to the CURRENT workspace
+  # and split that tab into BE/FE/DS. Keeps the user's shell pane untouched
+  # and reuses the workspace's title (e.g. "Chat Eval Loop") in the sidebar.
+  # If invoked from outside cmux, fall back to spawning a new workspace.
 
+  send_cmd() {
+    # send_cmd <workspace> <surface> <cmd>
+    cmux send --workspace "$1" --surface "$2" "$3" >/dev/null
+    cmux send-key --workspace "$1" --surface "$2" Enter >/dev/null
+  }
+
+  if [[ -n "${CMUX_WORKSPACE_ID:-}" ]]; then
+    WS="$CMUX_WORKSPACE_ID"
+
+    # Make a new tab to the right of the current one in this workspace.
+    # Output: "OK action=new_terminal_right tab=tab:N workspace=ws created=tab:M"
+    TAB_OUT=$(cmux tab-action --action new-terminal-right --workspace "$WS")
+    BE_TAB=$(echo "$TAB_OUT" | tr ' ' '\n' | awk -F= '/^created=/{print $2}')
+    if [[ -z "$BE_TAB" ]]; then
+      echo "Failed to create dev tab: $TAB_OUT" >&2
+      exit 1
+    fi
+
+    cmux tab-action --action rename --tab "$BE_TAB" --workspace "$WS" --title "dev: ${NAME}" >/dev/null 2>&1 || true
+
+    # Run backend in the new tab.
+    send_cmd "$WS" "$BE_TAB" "$BACKEND_CMD"
+
+    # Split that tab's pane: down → frontend, right → datasette.
+    split_in_tab() {
+      local dir="$1" cmd="$2"
+      local out surface
+      out=$(cmux new-split "$dir" --workspace "$WS" --surface "$BE_TAB")
+      surface=$(awk '{print $2}' <<< "$out")
+      [[ -n "$surface" ]] || { echo "split failed: $out" >&2; return 1; }
+      send_cmd "$WS" "$surface" "$cmd"
+      # Make sure subsequent splits split off the FRESHLY-created pane, not BE_TAB.
+      BE_TAB="$surface"
+    }
+
+    BASE_TAB="$BE_TAB"
+    BE_TAB="$BASE_TAB"; split_in_tab down  "$FRONTEND_CMD"
+    BE_TAB="$BASE_TAB"; split_in_tab right "$DATASETTE_CMD"
+
+    echo "cmux dev tab ready in current workspace ($WS)"
+    exit 0
+  fi
+
+  # Outside cmux: spawn a fresh workspace.
   WS_OUT=$(cmux new-workspace --name "gooni-${NAME}" --cwd "$DIR" --command "$BACKEND_CMD")
   WS=$(awk '{print $2}' <<< "$WS_OUT")
   if [[ -z "$WS" ]]; then
@@ -98,11 +146,9 @@ if command -v cmux >/dev/null 2>&1; then
     local dir="$1" cmd="$2"
     local out surface
     out=$(cmux new-split "$dir" --workspace "$WS")
-    # Output: "OK surface:M workspace:N"
     surface=$(awk '{print $2}' <<< "$out")
     [[ -n "$surface" ]] || { echo "split failed: $out" >&2; return 1; }
-    cmux send --workspace "$WS" --surface "$surface" "$cmd" >/dev/null
-    cmux send-key --workspace "$WS" --surface "$surface" Enter >/dev/null
+    send_cmd "$WS" "$surface" "$cmd"
   }
 
   split_and_run down  "$FRONTEND_CMD"
