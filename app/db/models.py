@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.sql import func
 
@@ -248,24 +249,46 @@ class Memory(Base):
     )
 
 
-class GoogleOAuthToken(Base):
-    """Stored OAuth credentials for the single Gooni user. One row max —
-    the app is single-tenant. Refresh-token rotation replaces the values
-    in place rather than appending. `provider` left as a column so we can
-    support e.g. gmail later without a second table.
+class OAuthToken(Base):
+    """Stored OAuth credentials for any third-party connector. Single-tenant
+    Gooni: one row per provider. `provider` is the discriminator
+    ("google_calendar", "github", ...). Some providers (GitHub OAuth Apps)
+    don't expire access tokens; we store refresh_token = "" and
+    expires_at = 0 in that case.
     """
 
-    __tablename__ = "google_oauth_tokens"
+    __tablename__ = "oauth_tokens"
 
     id = Column(Integer, primary_key=True)
-    provider = Column(String, nullable=False, default="google_calendar", unique=True)
+    provider = Column(String, nullable=False, unique=True)
     access_token = Column(Text, nullable=False)
-    refresh_token = Column(Text, nullable=False)
+    # GitHub doesn't issue refresh tokens for non-rotating OAuth Apps.
+    refresh_token = Column(Text, nullable=False, default="")
     # Unix seconds since epoch — easier to compare than tz-aware datetimes.
-    expires_at = Column(Integer, nullable=False)
+    # 0 means "no expiry" (e.g. GitHub).
+    expires_at = Column(Integer, nullable=False, default=0)
     scope = Column(Text, nullable=True)
-    account_email = Column(Text, nullable=True)  # user's Google email for display
+    # Display label: Google = email, GitHub = "@username".
+    account_email = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TrackedRepo(Base):
+    """A repo the user wants surfaced on the Dev Activity dashboard. The
+    `provider` field is here so we can layer GitLab / Bitbucket on later
+    without a schema change.
+    """
+
+    __tablename__ = "tracked_repos"
+    __table_args__ = (
+        UniqueConstraint("provider", "owner", "name", name="uq_tracked_repo"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    provider = Column(String, nullable=False, default="github")
+    owner = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 
