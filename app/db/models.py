@@ -87,6 +87,15 @@ class Note(Base):
     #   {"hash": "<sha1>", "questions": ["...", "..."]}
     # Cached so opening the note doesn't re-fire the LLM call.
     suggested_questions = Column(Text, nullable=True)
+    # Snapshot of the note's embedding at the moment the unified extractor
+    # last classified its content. Used as the dedup gate for re-running
+    # the classifier — if the live embedding has cosine ≥ ~0.92 vs this
+    # snapshot, the meaning hasn't shifted enough to warrant another pass.
+    classified_embedding = Column(Text, nullable=True)
+    # FK back to a Note in the "Gooni Backlog" space when this note's
+    # content triggered a feature_request. Drives the editor chip so
+    # Daniel sees that the note actually fed the self-improvement loop.
+    backlog_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
 
 
 class PublicProfile(Base):

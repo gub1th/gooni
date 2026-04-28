@@ -85,6 +85,10 @@ export interface ApiNote {
   last_opened_at: string | null;
   is_public: boolean;
   is_pinned: boolean;
+  // Set by the unified extractor on note save when this note's content was
+  // routed to the "Gooni Backlog" space as a feature_request. Drives the
+  // editor chip linking back to the derived Backlog note.
+  backlog_note_id?: number | null;
 }
 
 export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiNote[]> {
@@ -616,12 +620,22 @@ export async function createConversation(content?: string): Promise<ApiConversat
   return res.json();
 }
 
+// Signal summary returned from the unified extractor in the orchestrator.
+// Drives the chat-side router visualization so Daniel sees what the turn
+// was classified as (tone correction, feature request, memory) without
+// reading the raw debug payload.
+export interface RouterSignals {
+  tone_corrections: { rule: string }[];
+  feature_requests: { title: string; why: string }[];
+  memory_count: number;
+}
+
 export async function sendConversationMessage(
   convId: number,
   content: string,
   noteContent?: string,
   model?: string
-): Promise<{ messages: ApiMessage[]; intention: string; tools_used: string[] }> {
+): Promise<{ messages: ApiMessage[]; intention: string; tools_used: string[]; signals?: RouterSignals }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -199,6 +199,11 @@ class MemoryService:
     ) -> None:
         """Extract → reconcile → apply for a single chat turn. Failures are
         logged but never raised, since this runs after the response is sent.
+
+        Legacy path. The orchestrator now uses the unified `extract_signals`
+        and feeds candidates into `apply_memory_candidates` directly so we
+        don't run two LLM extractions per turn. Kept for any callers that
+        still want the old extract+apply convenience.
         """
         if not user_message or len(user_message.strip()) < MIN_EXCHANGE_LEN:
             return
@@ -211,6 +216,28 @@ class MemoryService:
                 self._has_memories_cache = True
         except Exception as e:
             print(f"memory add_exchange error: {e}")
+        finally:
+            if owns:
+                sess.close()
+
+    def apply_memory_candidates(
+        self,
+        candidates: list[dict],
+        db: Session | None = None,
+    ) -> None:
+        """Reconcile + apply pre-extracted memory candidates. Used when the
+        orchestrator has already run the unified extractor and just wants
+        the memory side of the pipeline. Failures logged, never raised.
+        """
+        if not candidates:
+            return
+        sess, owns = self._scoped(db)
+        try:
+            for c in candidates:
+                self._reconcile_and_apply(sess, c)
+            self._has_memories_cache = True
+        except Exception as e:
+            print(f"apply_memory_candidates error: {e}")
         finally:
             if owns:
                 sess.close()

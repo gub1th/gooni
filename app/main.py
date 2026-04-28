@@ -269,6 +269,8 @@ def _run_column_migrations(engine):
             ("suggestions", "note_id", "INTEGER"),
             ("messages", "feedback_for_message_id", "INTEGER"),
             ("messages", "is_feedback", "INTEGER"),
+            ("notes", "classified_embedding", "TEXT"),
+            ("notes", "backlog_note_id", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -1081,6 +1083,10 @@ def _serialize_note(n: Note) -> dict:
         "last_opened_at": n.last_opened_at,
         "is_public": bool(n.is_public),
         "is_pinned": bool(n.is_pinned),
+        # Set when this note's content was classified as a feature_request and
+        # routed to the Backlog space. Drives the editor chip so Daniel sees
+        # that the note actually fed the self-improvement loop.
+        "backlog_note_id": n.backlog_note_id,
     }
 
 
@@ -1289,8 +1295,12 @@ def embed_note(note_id: int, db: Session = Depends(get_db)):
     """Generate embedding for a note and check for space suggestion.
     Called on blur (not on every save) to avoid wasteful API calls.
     Also runs the focus-activity matcher so focuses get heartbeats from
-    note writing without an explicit FK linkage.
+    note writing without an explicit FK linkage. Kicks the unified
+    classifier off-thread so notes about Gooni gaps land in the Backlog
+    space without blocking the response.
     """
+    import threading
+
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
@@ -1309,6 +1319,16 @@ def embed_note(note_id: int, db: Session = Depends(get_db)):
                 focus_service.mark_activity(db, fid)
         except Exception as e:
             print(f"focus classify (embed_note) failed: {e}")
+
+    # Unified extractor: runs in a daemon thread so the embed endpoint
+    # returns fast. Internally dedup-gates via `Note.classified_embedding`
+    # so trivial edits don't make duplicate Backlog rows.
+    from .services.note_service import classify_note
+    threading.Thread(
+        target=classify_note,
+        args=(note_id,),
+        daemon=True,
+    ).start()
 
     return {"ok": True, **suggestion}
 

@@ -988,6 +988,29 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                     lineHeight: 1.3,
                   }}
                 />
+                {activeNote.backlog_note_id != null && (
+                  <button
+                    onClick={() => selectNote(activeNote.backlog_note_id!)}
+                    title="Open the derived backlog note"
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      marginBottom: 14,
+                      padding: "4px 10px", borderRadius: 999,
+                      border: "1px solid rgba(22,163,74,0.30)",
+                      background: "rgba(22,163,74,0.08)",
+                      color: "#166534",
+                      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                      fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
+                      cursor: "pointer",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.14)")}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.08)")}
+                  >
+                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A" }} />
+                    → Logged to Gooni Backlog (#{activeNote.backlog_note_id})
+                  </button>
+                )}
                 {editor && (
                   <BubbleMenu
                     editor={editor}

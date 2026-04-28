@@ -122,3 +122,98 @@ class NoteService:
 
 
 note_service = NoteService()
+
+
+# ── Note classification (unified extractor) ─────────────────────────────────
+# Runs the same extract_signals pipeline used in chat against note bodies so
+# notes about Gooni gaps land in the Backlog space without Daniel needing to
+# open a chat. Dedup gate uses an embedding snapshot so typos / minor edits
+# don't re-trigger and create duplicate Backlog rows.
+
+# Cosine threshold above which we treat the note's meaning as "unchanged"
+# since the last classification. Tuned to skip wording polish / typos but
+# fire on additions of new ideas. Adjustable.
+_CLASSIFY_DEDUP_THRESHOLD = 0.92
+
+# Minimum plaintext length before we even attempt classification — empty
+# or scratchpad-sized notes carry no signal.
+_CLASSIFY_MIN_CHARS = 30
+
+
+def classify_note(note_id: int) -> None:
+    """Background-safe: open own session, classify the note, route signals
+    into the same memory + backlog pipelines the chat orchestrator uses.
+
+    Idempotency: if `note.classified_embedding` is set and cosine similarity
+    against the current embedding is >= threshold, this is a no-op. So
+    typos and minor edits won't generate duplicate Backlog rows.
+    """
+    from ..db.database import SessionLocal
+    from .memory_extraction import extract_signals
+    from .memory_service import memory_service
+    from ..tools.feature_request_tool import feature_request_tool
+
+    db = SessionLocal()
+    try:
+        note = db.query(Note).filter(Note.id == note_id).first()
+        if not note:
+            return
+        plaintext = NoteService._strip_html(note.content or "").strip()
+        if len(plaintext) < _CLASSIFY_MIN_CHARS:
+            return
+
+        # Dedup gate: skip if meaning hasn't materially shifted since last
+        # classification. Compares the live note embedding to the snapshot
+        # taken at the moment we last classified.
+        if note.embedding and note.classified_embedding:
+            try:
+                live_vec = json.loads(note.embedding)
+                snap_vec = json.loads(note.classified_embedding)
+                sim = _cosine_similarity(live_vec, snap_vec)
+                if sim >= _CLASSIFY_DEDUP_THRESHOLD:
+                    return
+            except Exception as e:
+                print(f"classify_note dedup compare error: {e}")
+                # fall through and re-classify
+
+        text_for_llm = f"{(note.title or '').strip()}\n\n{plaintext}".strip()
+        signals = extract_signals(text_for_llm, prev_assistant=None)
+
+        # Memories: route through the same reconciler as chat. Off-thread
+        # would be more conservative, but we're already in a worker thread.
+        if signals["memories"]:
+            memory_service.apply_memory_candidates(signals["memories"], db=db)
+
+        # Feature requests: write into the Backlog space. Link the FIRST
+        # one back to this note so the editor chip has something to point at.
+        first_backlog_id: int | None = note.backlog_note_id
+        for fr in signals["feature_requests"]:
+            try:
+                result = feature_request_tool.execute(
+                    db=db,
+                    title=fr["title"],
+                    why=fr.get("why")
+                        or f"From note #{note.id}: {plaintext[:200]}",
+                )
+                # Tool returns "Logged feature request #N: title".
+                if first_backlog_id is None:
+                    import re as _re
+                    m = _re.search(r"#(\d+)", result or "")
+                    if m:
+                        first_backlog_id = int(m.group(1))
+            except Exception as e:
+                print(f"classify_note feature_request error: {e}")
+
+        if first_backlog_id is not None and note.backlog_note_id != first_backlog_id:
+            note.backlog_note_id = first_backlog_id
+
+        # Snapshot the embedding we just classified against. Future saves
+        # will compare against this to decide whether to re-run.
+        if note.embedding:
+            note.classified_embedding = note.embedding
+
+        db.commit()
+    except Exception as e:
+        print(f"classify_note error: {e}")
+    finally:
+        db.close()
