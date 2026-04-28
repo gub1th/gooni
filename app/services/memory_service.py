@@ -123,7 +123,11 @@ class MemoryService:
     # ── reconcile/apply ─────────────────────────────────────────────────────
 
     def _apply_add(
-        self, db: Session, candidate: dict, embedding: list[float]
+        self,
+        db: Session,
+        candidate: dict,
+        embedding: list[float],
+        source_note_id: int | None = None,
     ) -> Memory:
         ctx = candidate.get("context")
         key = candidate.get("key")
@@ -134,6 +138,7 @@ class MemoryService:
             context=json.dumps(ctx) if ctx else None,
             confidence=float(candidate.get("confidence", 0.8)),
             embedding=json.dumps(embedding) if embedding else None,
+            source_note_id=source_note_id,
             is_active=True,
         )
         db.add(m)
@@ -166,9 +171,10 @@ class MemoryService:
         candidate: dict,
         embedding: list[float],
         target_id: int,
+        source_note_id: int | None = None,
     ) -> Memory:
         # Mark the old row inactive, point superseded_by at the new row.
-        new_m = self._apply_add(db, candidate, embedding)
+        new_m = self._apply_add(db, candidate, embedding, source_note_id=source_note_id)
         old = db.query(Memory).filter(Memory.id == target_id).first()
         if old:
             old.is_active = False
@@ -199,6 +205,11 @@ class MemoryService:
     ) -> None:
         """Extract → reconcile → apply for a single chat turn. Failures are
         logged but never raised, since this runs after the response is sent.
+
+        Legacy path. The orchestrator now uses the unified `extract_signals`
+        and feeds candidates into `apply_memory_candidates` directly so we
+        don't run two LLM extractions per turn. Kept for any callers that
+        still want the old extract+apply convenience.
         """
         if not user_message or len(user_message.strip()) < MIN_EXCHANGE_LEN:
             return
@@ -215,7 +226,42 @@ class MemoryService:
             if owns:
                 sess.close()
 
-    def _reconcile_and_apply(self, db: Session, candidate: dict) -> None:
+    def apply_memory_candidates(
+        self,
+        candidates: list[dict],
+        db: Session | None = None,
+        source_note_id: int | None = None,
+    ) -> list[Memory]:
+        """Reconcile + apply pre-extracted memory candidates. Returns the list
+        of Memory rows actually written (ADDs + UPDATEs) so callers can record
+        which note spawned which memories. NONE / DELETE actions don't return
+        new rows. Failures logged, never raised.
+        """
+        if not candidates:
+            return []
+        written: list[Memory] = []
+        sess, owns = self._scoped(db)
+        try:
+            for c in candidates:
+                m = self._reconcile_and_apply(sess, c, source_note_id=source_note_id)
+                if m is not None:
+                    written.append(m)
+            self._has_memories_cache = True
+        except Exception as e:
+            print(f"apply_memory_candidates error: {e}")
+        finally:
+            if owns:
+                sess.close()
+        return written
+
+    def _reconcile_and_apply(
+        self,
+        db: Session,
+        candidate: dict,
+        source_note_id: int | None = None,
+    ) -> Memory | None:
+        """Returns the Memory row written (ADD/UPDATE), or None when the
+        decision was NONE / DELETE-only / reconcile failed without a write."""
         embedding = self._embed(candidate["content"])
         # Skip embedding-less candidates only on the search side; we still
         # want to ADD them so the memory isn't lost.
@@ -257,25 +303,22 @@ class MemoryService:
 
         decision = reconcile_candidate(candidate, existing)
         if not decision:
-            # Reconcile bombed — fall back to ADD so we don't lose the fact.
-            self._apply_add(db, candidate, embedding or [])
-            return
+            return self._apply_add(db, candidate, embedding or [], source_note_id=source_note_id)
 
         action = decision["action"]
         target = decision.get("target_id")
         if action == "ADD":
-            self._apply_add(db, candidate, embedding or [])
+            return self._apply_add(db, candidate, embedding or [], source_note_id=source_note_id)
         elif action == "UPDATE" and isinstance(target, int):
-            self._apply_update(db, candidate, embedding or [], target)
+            return self._apply_update(db, candidate, embedding or [], target, source_note_id=source_note_id)
         elif action == "DELETE" and isinstance(target, int):
             self._apply_delete(db, target)
-            # Also ADD the contradicting candidate so the new state is captured.
-            self._apply_add(db, candidate, embedding or [])
+            return self._apply_add(db, candidate, embedding or [], source_note_id=source_note_id)
         elif action == "NONE" and isinstance(target, int):
             self._apply_none(db, target)
+            return None
         else:
-            # Unrecognized — default to ADD to preserve information
-            self._apply_add(db, candidate, embedding or [])
+            return self._apply_add(db, candidate, embedding or [], source_note_id=source_note_id)
 
     def add_feedback_preference(
         self, rule: str, evidence: str, db: Session | None = None

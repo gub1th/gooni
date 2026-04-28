@@ -5,10 +5,11 @@ from ..db.database import SessionLocal
 from ..db.models import Conversation as ConvModel
 from ..llm.client import llm_client
 from .conversation_service import conversation_service
-from .feedback_detector import feedback_detector
 from .focus_service import focus_service
+from .memory_extraction import extract_signals
 from .memory_service import memory_service
 from .list_service import list_service
+from ..tools.feature_request_tool import feature_request_tool
 
 
 # Cheap regex for the explicit "undo" command. Runs before the detector so
@@ -85,87 +86,125 @@ class Orchestrator:
             saved_message = message
         user_msg = conversation_service.add_message(conv.id, "user", saved_message, db)
 
-        # ── Feedback handling (text-only turns) ─────────────────────────────
-        # Feedback is just chat: the user types "less eager" or similar and
-        # the orchestrator stamps the message + writes a tone preference into
-        # memory. Skipped for image turns since those carry no critique signal.
+        # ── Unified signal extraction ───────────────────────────────────────
+        # One LLM call per turn surfaces all three signal types (tone
+        # corrections, feature requests, memory candidates).
         feedback_ack: str | None = None
         feedback_tools: list[str] = []
+        signals_summary: dict = {
+            "tone_corrections": [],
+            "feature_requests": [],
+            "memory_count": 0,
+        }
+        memory_candidates: list[dict] = []
         skip_normal_reply = False
+
         if not image_url and saved_message.strip():
-            # Explicit undo command — runs before the detector so it always wins.
             if _UNDO_FEEDBACK_RE.search(saved_message):
+                # Explicit undo command — runs before extraction so it always wins.
                 removed = memory_service.deactivate_last_feedback_preference(db=db)
                 if removed:
-                    feedback_ack = (
-                        f"Feedback removed: \"{removed.content}\"."
-                    )
+                    feedback_ack = f"Feedback removed: \"{removed.content}\"."
                 else:
                     feedback_ack = "No active feedback to undo."
                 skip_normal_reply = True
+                feedback_tools.append("undo_feedback")
             else:
                 prev_assistant = conversation_service.get_last_assistant_message(
                     conv.id, db
                 )
-                # Skip the user_msg row itself (just inserted) by checking id.
-                if prev_assistant and prev_assistant.id != user_msg.id:
-                    fb = feedback_detector.classify(
-                        prev_assistant.content, saved_message
-                    )
-                    if fb["kind"] == "tone" and fb["rule"]:
-                        user_msg.feedback_for_message_id = prev_assistant.id
-                        user_msg.is_feedback = True
-                        db.commit()
-                        feedback_tools.append("feedback_detector:tone")
-                        # Memory write is best-effort + off-thread to avoid
-                        # blocking the reply.
+                prev_text = (
+                    prev_assistant.content
+                    if prev_assistant and prev_assistant.id != user_msg.id
+                    else None
+                )
+                signals = extract_signals(saved_message, prev_assistant=prev_text)
+                memory_candidates = signals["memories"]
+                signals_summary = {
+                    "tone_corrections": [
+                        {"rule": t["rule"]} for t in signals["tone_corrections"]
+                    ],
+                    "feature_requests": [
+                        {"title": f["title"], "why": f.get("why", "")}
+                        for f in signals["feature_requests"]
+                    ],
+                    "memory_count": len(memory_candidates),
+                }
+
+                tone_rules: list[str] = []
+                if signals["tone_corrections"] and prev_assistant is not None:
+                    user_msg.feedback_for_message_id = prev_assistant.id
+                    user_msg.is_feedback = True
+                    db.commit()
+                    feedback_tools.append("router:tone")
+                    for t in signals["tone_corrections"]:
+                        rule = t["rule"]
+                        tone_rules.append(rule)
                         threading.Thread(
                             target=memory_service.add_feedback_preference,
-                            args=(fb["rule"], prev_assistant.content),
+                            args=(rule, prev_assistant.content),
                             daemon=True,
                         ).start()
-                        # Always-visible flag so Daniel can see at a glance
-                        # that the message was logged as feedback (works the
-                        # same on Telegram + web). Undo escape included so
-                        # false positives are reversible without ceremony.
-                        feedback_ack = (
-                            f"Feedback detected: {fb['rule']}. "
-                            "Say \"undo last feedback\" to revert."
+
+                feature_titles: list[str] = []
+                for fr in signals["feature_requests"]:
+                    try:
+                        feature_request_tool.execute(
+                            db=db,
+                            title=fr["title"],
+                            why=fr.get("why") or saved_message[:300],
                         )
-                        # If the user *also* asked something new, fall through
-                        # and run the normal reply pipeline. Else short-circuit.
-                        skip_normal_reply = not fb["also_new_question"]
-                    elif fb["kind"] == "capability_gap" and fb["feature_title"]:
-                        # Daniel is calling out a hallucination / missing
-                        # capability. Log the feature inline (synchronous so
-                        # the ack reflects success) instead of routing through
-                        # the LLM tool path — the user's message itself IS
-                        # the request, no extra inference needed.
-                        from ..tools.feature_request_tool import feature_request_tool
-                        try:
-                            feature_request_tool.execute(
-                                db=db,
-                                title=fb["feature_title"],
-                                why=fb["feature_why"] or saved_message[:300],
-                            )
-                            feedback_tools.append("request_feature")
-                        except Exception as e:
-                            print(f"feature_request via detector error: {e}")
-                        feedback_tools.append("feedback_detector:capability_gap")
+                        feature_titles.append(fr["title"])
+                        feedback_tools.append("router:feature_request")
+                    except Exception as e:
+                        print(f"feature_request via router error: {e}")
+                    if prev_assistant is not None:
                         user_msg.feedback_for_message_id = prev_assistant.id
                         user_msg.is_feedback = True
                         db.commit()
-                        feedback_ack = (
-                            f"You're right — I can't. Logged it as a feature "
-                            f"request: \"{fb['feature_title']}\"."
-                        )
-                        skip_normal_reply = not fb["also_new_question"]
+
+                # Build the ack from whichever signals fired. Multi-signal
+                # turns get a combined line so Daniel sees what landed where.
+                ack_parts: list[str] = []
+                if tone_rules:
+                    ack_parts.append(
+                        f"Feedback detected: {tone_rules[0]}."
+                        + (f" (+{len(tone_rules) - 1} more)" if len(tone_rules) > 1 else "")
+                    )
+                if feature_titles:
+                    titles_joined = ", ".join(f'"{t}"' for t in feature_titles[:2])
+                    ack_parts.append(
+                        f"Logged feature request: {titles_joined}"
+                        + (f" (+{len(feature_titles) - 2} more)" if len(feature_titles) > 2 else "")
+                        + "."
+                    )
+                if ack_parts:
+                    feedback_ack = " ".join(ack_parts)
+                    if tone_rules:
+                        feedback_ack += " Say \"undo last feedback\" to revert."
+                    # Skip the LLM reply only when the message was *purely*
+                    # tone/feature signal — heuristic: no extracted memories
+                    # AND ack is short. Otherwise fall through so Daniel
+                    # gets a real answer to his actual question.
+                    pure_signal = (
+                        not memory_candidates
+                        and len(saved_message.split()) < 25
+                    )
+                    skip_normal_reply = pure_signal
 
         if skip_normal_reply and feedback_ack is not None:
             conversation_service.add_message(conv.id, "assistant", feedback_ack, db)
+            # Reconcile any memory candidates off-thread even on short-circuit.
+            if memory_candidates:
+                threading.Thread(
+                    target=memory_service.apply_memory_candidates,
+                    args=(memory_candidates,),
+                    daemon=True,
+                ).start()
             return feedback_ack, {
                 "intention": "feedback acknowledgment",
-                "tools_used": feedback_tools or ["feedback_detector"],
+                "tools_used": feedback_tools or ["router"],
+                "signals": signals_summary,
             }
 
         # Build recent history. If a rolling summary exists, prepend it as a
@@ -229,12 +268,14 @@ class Orchestrator:
 
         conversation_service.add_message(conv.id, "assistant", response, db)
 
-        # Local memory pipeline (extract → reconcile → apply). Fire-and-forget
-        # in a daemon thread so the response isn't blocked by 1-2 LLM calls.
-        if saved_message.strip() and len(saved_message.strip()) > 10:
+        # Reconcile memory candidates that the unified extractor already
+        # surfaced. Avoids the second LLM call the legacy add_exchange path
+        # used to make per turn. Fire-and-forget so the response isn't
+        # blocked by reconcile.
+        if memory_candidates:
             threading.Thread(
-                target=memory_service.add_exchange,
-                args=(saved_message, response),
+                target=memory_service.apply_memory_candidates,
+                args=(memory_candidates,),
                 daemon=True,
             ).start()
 
@@ -247,6 +288,10 @@ class Orchestrator:
         ).start()
 
         usage["intention"] = intention_context
+        usage["signals"] = signals_summary
+        if feedback_tools:
+            existing_tools = list(usage.get("tools_used") or [])
+            usage["tools_used"] = existing_tools + feedback_tools
 
         return response, usage
 

@@ -1,12 +1,19 @@
-"""LLM-driven memory extraction + reconciliation.
+"""LLM-driven extraction + reconciliation for memories, tone corrections,
+and feature requests.
 
-Two-step pipeline mirroring Mem0's architecture:
-1. Extract candidate memories from a chat exchange (single LLM call)
-2. Reconcile each candidate against semantically-similar existing memories
-   and decide ADD / UPDATE / DELETE / NONE per candidate (single LLM call)
+Single unified extractor (`extract_signals`) emits all three signal types in
+one LLM call so the orchestrator and note-save path don't run overlapping
+classifiers per turn.
 
-The reconcile step is what makes memory self-clean. Without it, contradictory
-facts pile up forever and confidence numbers stop meaning anything.
+Pipeline:
+1. extract_signals(text, prev_assistant?) → {tone_corrections, feature_requests, memories}
+2. for each memory candidate:
+     cosine-search similar active memories of the same type
+     reconcile_candidate (LLM) — decide ADD / UPDATE / DELETE / NONE
+     apply the decision
+
+Reconcile is what makes memory self-clean. Without it, contradictory facts
+pile up forever and confidence numbers stop meaning anything.
 """
 
 import json
@@ -137,7 +144,11 @@ def _validate_candidate(c: dict) -> bool:
 
 def extract_candidates(user_message: str, assistant_reply: str) -> list[dict[str, Any]]:
     """Run the extraction LLM call. Returns validated list of candidate dicts.
-    Empty list on parse failure or no signal — never raises."""
+    Empty list on parse failure or no signal — never raises.
+
+    Kept for backwards compatibility; prefer `extract_signals` which also
+    surfaces tone corrections and feature requests in the same call.
+    """
     if not user_message or not user_message.strip():
         return []
     prompt = _EXTRACTION_PROMPT.format(
@@ -147,6 +158,149 @@ def extract_candidates(user_message: str, assistant_reply: str) -> list[dict[str
     raw = llm_client.generate_simple_completion(prompt, max_tokens=600)
     parsed = _parse_json_array(raw)
     return [c for c in parsed if _validate_candidate(c)]
+
+
+_SIGNALS_PROMPT = """Analyze the TEXT below and emit ALL signals it carries. Single JSON object with three arrays.
+
+PRIOR ASSISTANT REPLY (may be empty when text is a standalone note save):
+\"\"\"{prev_assistant}\"\"\"
+
+TEXT (Daniel just sent / saved):
+\"\"\"{text}\"\"\"
+
+Return JSON shaped exactly like this — no preamble, no markdown fence:
+{{
+  "tone_corrections": [
+    {{"rule": "<short imperative rule, max 15 words>"}}
+  ],
+  "feature_requests": [
+    {{
+      "title": "<short imperative title, max 10 words>",
+      "why":   "<one sentence describing what's missing today>"
+    }}
+  ],
+  "memories": [
+    {{
+      "type": "preference" | "goal" | "fact" | "routine" | "constraint" | "episode",
+      "key":  "snake_case_key" | null,
+      "content": "natural-language description of the memory",
+      "context": {{"time": null|str, "location": null|str, "scope": "global"|"contextual"}},
+      "confidence": 0.0-1.0
+    }}
+  ]
+}}
+
+Rules per array:
+
+tone_corrections:
+- Critique of the prior assistant reply's tone, style, length, structure, or approach.
+- Examples: "too eager", "stop ending with questions", "less teacher-y", "no bullets".
+- Empty when no prior assistant reply or no critique signal.
+
+feature_requests:
+- Daniel describes a Gooni capability that doesn't exist or is broken.
+- Includes: hallucination call-outs ("you can't actually do that"), missing tools
+  ("you don't have a scheduler"), feature asks ("you need to allow hyperlinks"),
+  capability gaps phrased as commands or wishes.
+- Title is imperative, terse. Why is one sentence describing the gap.
+- Empty when text isn't asking for or critiquing a Gooni capability.
+
+memories:
+- Persistent facts about Daniel — same shape as before.
+- "preference" = stable like/dislike. "goal" = aspiration. "fact" = declarative truth.
+  "routine" = recurring habit. "constraint" = hard limit. "episode" = notable moment.
+- key is snake_case for typed memories; null for episodes.
+- scope: "global" = always applies; "contextual" = situation-specific.
+- confidence: 0.85+ for explicit; 0.6-0.7 for inferences.
+- Skip temporary states or one-off remarks.
+- Empty when text is just a question, a thought, or a feature request with nothing
+  declarative about Daniel.
+
+If no signals across all three, return all-empty arrays.
+
+JSON:"""
+
+
+def _normalize_tone(items: Any) -> list[dict]:
+    out = []
+    if not isinstance(items, list):
+        return out
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        rule = it.get("rule")
+        if isinstance(rule, str) and rule.strip():
+            out.append({"rule": rule.strip()})
+    return out
+
+
+def _normalize_features(items: Any) -> list[dict]:
+    out = []
+    if not isinstance(items, list):
+        return out
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        title = it.get("title")
+        why = it.get("why")
+        if isinstance(title, str) and title.strip():
+            out.append({
+                "title": title.strip()[:120],
+                "why": why.strip() if isinstance(why, str) else "",
+            })
+    return out
+
+
+def _normalize_memories(items: Any) -> list[dict]:
+    if not isinstance(items, list):
+        return []
+    return [c for c in items if _validate_candidate(c)]
+
+
+def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, list[dict]]:
+    """Single LLM call that emits all three signal types from one input.
+
+    Returns:
+      {
+        "tone_corrections": [{"rule": str}],
+        "feature_requests": [{"title": str, "why": str}],
+        "memories":         [memory candidate dicts],
+      }
+
+    Empty across all three on parse failure or no signal — never raises.
+    Pass prev_assistant when this text is a chat reply (helps tone detection);
+    leave None for note saves (tone usually empty for those).
+    """
+    empty = {"tone_corrections": [], "feature_requests": [], "memories": []}
+    if not text or not text.strip():
+        return empty
+    prompt = _SIGNALS_PROMPT.format(
+        prev_assistant=(prev_assistant or "")[:1200],
+        text=text[:2000],
+    )
+    try:
+        raw = llm_client.generate_simple_completion(prompt, max_tokens=700)
+    except Exception as e:
+        print(f"extract_signals LLM error: {e}")
+        return empty
+    cleaned = (raw or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```", 2)[1].strip()
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:].strip()
+        cleaned = cleaned.rsplit("```", 1)[0].strip()
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        print(f"extract_signals JSON parse error: {e} | raw: {cleaned[:240]}")
+        return empty
+    if not isinstance(parsed, dict):
+        return empty
+    return {
+        "tone_corrections": _normalize_tone(parsed.get("tone_corrections")),
+        "feature_requests": _normalize_features(parsed.get("feature_requests")),
+        "memories":         _normalize_memories(parsed.get("memories")),
+    }
 
 
 def reconcile_candidate(

@@ -252,7 +252,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
       const h = hitTest(e.clientX, e.clientY);
       if (h) {
         onClose();
-        navigate({ to: "/", search: { note: h.id, conv: undefined } });
+        navigate({ to: "/", search: { note: h.id, conv: undefined, list: undefined } });
         return;
       }
       dragState.current = {

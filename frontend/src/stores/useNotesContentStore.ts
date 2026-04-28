@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import {
   createNote as apiCreateNote,
   deleteNote as apiDeleteNote,
+  fetchNote as apiFetchNote,
   moveNote as apiMoveNote,
   type ApiNote,
   updateNote as apiUpdateNote,
@@ -22,6 +23,7 @@ interface NotesContentState {
   loadNotes: (spaceId: string) => Promise<void>;
   createNote: (spaceId: string) => Promise<ApiNote | null>;
   updateNote: (id: number, title: string, content: string) => Promise<void>;
+  refetchNote: (id: number) => Promise<void>;
   deleteNote: (id: number, spaceId: string) => Promise<void>;
   removeSpace: (spaceId: string) => void;
   selectNote: (id: number | null) => void;
@@ -107,6 +109,24 @@ export const useNotesContentStore = create<NotesContentState>()(
           }
           return { notes: newNotes };
         });
+      },
+
+      refetchNote: async (id: number) => {
+        // Pulls server-of-record state into the store. Used after async
+        // backend work (classify_note) finishes — without this, the editor
+        // never sees the new classify_signals payload until manual reload.
+        try {
+          const fresh = await apiFetchNote(id);
+          set((s) => {
+            const newNotes: Record<string, ApiNote[]> = {};
+            for (const [key, list] of Object.entries(s.notes)) {
+              newNotes[key] = list.map((n) => (n.id === id ? fresh : n));
+            }
+            return { notes: newNotes };
+          });
+        } catch {
+          // note may have been deleted — ignore
+        }
       },
 
       deleteNote: async (id: number, spaceId: string) => {

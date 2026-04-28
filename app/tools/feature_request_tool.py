@@ -1,14 +1,14 @@
 """Capture-feature-gap tool. Called when Gooni recognizes Master is asking
-for capability that doesn't exist yet. Logs a Note in the auto-created
-"Gooni Backlog" space — zero schema, reuses existing notes infra. Master
-sees the backlog grow in his sidebar like any other space.
+for a capability that doesn't exist yet. Logs an item to the canonical
+"Gooni Backlog" List (auto-created on first call). Master sees the
+backlog grow under the unified Lists UI.
+
+Switched from creating a Note row in a "Gooni Backlog" Space to creating
+a ListItem under a List(type=backlog) — the unified List/ListItem model
+replaces the old Space-as-bucket hack.
 """
 
 from .base import BaseTool
-
-
-BACKLOG_SPACE_NAME = "Gooni Backlog"
-BACKLOG_SPACE_EMOJI = "🛠"
 
 
 class RequestFeatureTool(BaseTool):
@@ -34,51 +34,39 @@ class RequestFeatureTool(BaseTool):
                 "type": "string",
                 "description": (
                     "One sentence describing what Master asked for and what's "
-                    "missing today. Will be the body of the backlog note."
+                    "missing today. Becomes the subtitle on the backlog item."
                 ),
             },
         },
         "required": ["title", "why"],
     }
 
-    def execute(self, db=None, title: str = "", why: str = "", **kwargs) -> str:
-        from ..db.models import Note, Space
-        from datetime import datetime
+    def execute(
+        self,
+        db=None,
+        title: str = "",
+        why: str = "",
+        source_note_id: int | None = None,
+        **kwargs,
+    ) -> str:
+        from ..services.list_service import list_service
 
         title = (title or "").strip()
         why = (why or "").strip()
         if not title:
             return "request_feature: title required"
-
         if db is None:
             return "request_feature: no db session"
 
-        space = (
-            db.query(Space)
-            .filter(Space.name == BACKLOG_SPACE_NAME)
-            .first()
+        backlog = list_service.get_or_create_backlog_list(db)
+        item = list_service.add_item(
+            backlog.id,
+            text=title[:120],
+            db=db,
+            subtitle=why or None,
+            source_note_id=source_note_id,
         )
-        if not space:
-            space = Space(name=BACKLOG_SPACE_NAME, emoji=BACKLOG_SPACE_EMOJI)
-            db.add(space)
-            db.commit()
-            db.refresh(space)
-
-        body = (
-            f"<p>{why}</p>"
-            if why else f"<p>(captured by Gooni; no detail)</p>"
-        )
-        note = Note(
-            title=title[:120],
-            content=body,
-            space_id=space.id,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-        db.add(note)
-        db.commit()
-        db.refresh(note)
-        return f"Logged feature request #{note.id}: {title}"
+        return f"Logged feature request #{item.id}: {title}"
 
 
 feature_request_tool = RequestFeatureTool()
