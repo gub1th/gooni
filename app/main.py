@@ -251,6 +251,13 @@ def _run_column_migrations(engine):
                 text("SELECT name FROM sqlite_master WHERE type='table'")
             )
         }
+        # Rename legacy google_oauth_tokens → oauth_tokens (generic connector
+        # store). Idempotent: skip if already renamed or if neither exists.
+        if "google_oauth_tokens" in existing_tables and "oauth_tokens" not in existing_tables:
+            conn.execute(text("ALTER TABLE google_oauth_tokens RENAME TO oauth_tokens"))
+            print("Migration: renamed google_oauth_tokens → oauth_tokens")
+            existing_tables.discard("google_oauth_tokens")
+            existing_tables.add("oauth_tokens")
         # (table, col, sql_type)
         for table, col, col_type in [
             ("conversations", "space_id", "INTEGER"),
@@ -350,6 +357,7 @@ async def auth_middleware(request: Request, call_next):
         # OAuth callback is hit by Google's redirect with no bearer; must be open.
         # The code value itself is the auth proof. `state` can carry a CSRF token.
         or path == "/auth/google/callback"
+        or path == "/auth/github/callback"
         or path == "/healthz"
         or path.startswith("/assets")
         or path == "/"
@@ -2231,3 +2239,153 @@ def calendar_create_event(body: dict, db: Session = Depends(get_db)):
         "start": event.get("start"),
         "end": event.get("end"),
     }
+
+
+# ── GitHub OAuth + Dev Activity ────────────────────────────────────────────────
+
+from .services import github as gh  # noqa: E402
+from .db.models import TrackedRepo  # noqa: E402
+
+
+@app.get("/auth/github/start")
+def auth_github_start():
+    if not gh.is_configured():
+        raise HTTPException(status_code=503, detail="GitHub OAuth env vars not set")
+    return {"authorize_url": gh.build_authorize_url()}
+
+
+@app.get("/auth/github/callback")
+def auth_github_callback(
+    code: str | None = None,
+    error: str | None = None,
+    db: Session = Depends(get_db),
+):
+    from fastapi.responses import HTMLResponse
+    if error:
+        return HTMLResponse(f"<p>GitHub OAuth returned: {error}. You can close this tab.</p>", status_code=400)
+    if not code:
+        return HTMLResponse("<p>Missing code parameter.</p>", status_code=400)
+    try:
+        tokens = gh.exchange_code_for_tokens(code)
+        label = None
+        try:
+            info = gh.fetch_userinfo(tokens.get("access_token", ""))
+            login = info.get("login")
+            if login:
+                label = f"@{login}"
+        except Exception:
+            pass
+        gh.save_tokens_from_exchange(db, tokens, account_label=label)
+    except Exception as e:
+        return HTMLResponse(f"<p>Token exchange failed: {e}. You can close this tab.</p>", status_code=500)
+    return HTMLResponse(
+        """
+        <!doctype html>
+        <meta charset="utf-8">
+        <title>GitHub connected</title>
+        <style>body{font-family:system-ui;padding:40px;color:#1C1C1E;}</style>
+        <p>GitHub connected. You can close this tab.</p>
+        <script>
+          try { window.opener && window.opener.postMessage({type:"gooni-oauth-done"}, "*"); } catch(e){}
+          setTimeout(() => { window.close(); }, 600);
+        </script>
+        """,
+        status_code=200,
+    )
+
+
+@app.get("/auth/github/status")
+def auth_github_status(db: Session = Depends(get_db)):
+    return gh.connection_status(db)
+
+
+@app.delete("/auth/github")
+def auth_github_disconnect(db: Session = Depends(get_db)):
+    disconnected = gh.disconnect(db)
+    return {"disconnected": disconnected}
+
+
+@app.get("/integrations/github/repos")
+def github_list_repos(db: Session = Depends(get_db)):
+    """List repos the authenticated GitHub user can access. Returned shape
+    is a thin slice — full GitHub repo objects are heavy.
+    """
+    try:
+        repos = gh.list_user_repos(db)
+    except RuntimeError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"GitHub API error: {e}")
+    tracked_keys = {
+        (r.owner, r.name)
+        for r in db.query(TrackedRepo).filter(TrackedRepo.provider == "github").all()
+    }
+    return [
+        {
+            "owner": r["owner"]["login"],
+            "name": r["name"],
+            "full_name": r["full_name"],
+            "description": r.get("description"),
+            "private": r.get("private", False),
+            "pushed_at": r.get("pushed_at"),
+            "tracked": (r["owner"]["login"], r["name"]) in tracked_keys,
+        }
+        for r in repos
+    ]
+
+
+@app.get("/integrations/github/tracked")
+def github_list_tracked(db: Session = Depends(get_db)):
+    rows = (
+        db.query(TrackedRepo)
+        .filter(TrackedRepo.provider == "github")
+        .order_by(TrackedRepo.added_at.desc())
+        .all()
+    )
+    return [{"owner": r.owner, "name": r.name, "added_at": r.added_at.isoformat()} for r in rows]
+
+
+@app.post("/integrations/github/repos/{owner}/{name}")
+def github_track_repo(owner: str, name: str, db: Session = Depends(get_db)):
+    existing = (
+        db.query(TrackedRepo)
+        .filter(
+            TrackedRepo.provider == "github",
+            TrackedRepo.owner == owner,
+            TrackedRepo.name == name,
+        )
+        .first()
+    )
+    if existing:
+        return {"tracked": True, "already": True}
+    row = TrackedRepo(provider="github", owner=owner, name=name)
+    db.add(row)
+    db.commit()
+    return {"tracked": True, "already": False}
+
+
+@app.delete("/integrations/github/repos/{owner}/{name}")
+def github_untrack_repo(owner: str, name: str, db: Session = Depends(get_db)):
+    row = (
+        db.query(TrackedRepo)
+        .filter(
+            TrackedRepo.provider == "github",
+            TrackedRepo.owner == owner,
+            TrackedRepo.name == name,
+        )
+        .first()
+    )
+    if not row:
+        return {"tracked": False, "removed": False}
+    db.delete(row)
+    db.commit()
+    return {"tracked": False, "removed": True}
+
+
+@app.get("/dashboard/dev-activity")
+def dashboard_dev_activity(db: Session = Depends(get_db)):
+    """Per-repo dev activity (today, recent commits, streak) + aggregate
+    streak and weekly LLM summary across all tracked repos.
+    """
+    from .services import dev_activity_service as das
+    return das.dev_activity_service.build(db)

@@ -259,6 +259,91 @@ export async function createCalendarEvent(body: {
   return res.json();
 }
 
+// ── GitHub integration ──────────────────────────────────────────────────────
+
+export interface GithubStatus {
+  configured: boolean;
+  connected: boolean;
+  account_email: string | null;   // reused field — holds @login for GitHub
+}
+export async function fetchGithubStatus(): Promise<GithubStatus> {
+  const res = await apiFetch(`${BASE}/auth/github/status`);
+  if (!res.ok) throw new Error("Failed to fetch GitHub status");
+  return res.json();
+}
+export async function startGithubOAuth(): Promise<{ authorize_url: string }> {
+  const res = await apiFetch(`${BASE}/auth/github/start`);
+  if (!res.ok) throw new Error("GitHub OAuth not configured on backend");
+  return res.json();
+}
+export async function disconnectGithub(): Promise<void> {
+  const res = await apiFetch(`${BASE}/auth/github`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to disconnect GitHub");
+}
+
+export interface GithubRepo {
+  owner: string;
+  name: string;
+  full_name: string;
+  description: string | null;
+  private: boolean;
+  pushed_at: string | null;
+  tracked: boolean;
+}
+export async function listGithubRepos(): Promise<GithubRepo[]> {
+  const res = await apiFetch(`${BASE}/integrations/github/repos`);
+  if (!res.ok) throw new Error(`Failed to list repos (${res.status})`);
+  return res.json();
+}
+export async function trackRepo(owner: string, name: string): Promise<void> {
+  const res = await apiFetch(
+    `${BASE}/integrations/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error("Failed to track repo");
+}
+export async function untrackRepo(owner: string, name: string): Promise<void> {
+  const res = await apiFetch(
+    `${BASE}/integrations/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error("Failed to untrack repo");
+}
+
+export interface DevActivityCommit {
+  sha: string;
+  subject: string;
+  body: string;
+  html_url: string | null;
+  committed_at: string;
+}
+export interface DevActivityRepo {
+  owner: string;
+  name: string;
+  today?: {
+    commits: number;
+    additions: number;
+    deletions: number;
+    files_changed: number;
+    subjects: string[];
+  };
+  recent?: DevActivityCommit[];
+  streak_days?: number;
+  error?: string;
+}
+export interface DevActivity {
+  configured: boolean;
+  connected: boolean;
+  repos: DevActivityRepo[];
+  aggregate: { streak_days: number; today_commits: number };
+  week_summary: string | null;
+}
+export async function fetchDevActivity(): Promise<DevActivity> {
+  const res = await apiFetch(`${BASE}/dashboard/dev-activity`);
+  if (!res.ok) throw new Error("Failed to fetch dev activity");
+  return res.json();
+}
+
 export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: number[] }> {
   const res = await apiFetch(`${BASE}/notes/cleanup`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to clean up notes");

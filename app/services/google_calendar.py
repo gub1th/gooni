@@ -30,7 +30,7 @@ from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
-from ..db.models import GoogleOAuthToken
+from ..db.models import OAuthToken
 
 
 AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -136,7 +136,7 @@ def save_tokens_from_exchange(
     db: Session,
     token_response: dict[str, Any],
     account_email: str | None = None,
-) -> GoogleOAuthToken:
+) -> OAuthToken:
     """Persist the first-time token exchange result. Creates the row if
     none exists (single-tenant), otherwise updates in place.
     """
@@ -149,11 +149,11 @@ def save_tokens_from_exchange(
 
     expires_at = int(time.time()) + expires_in - 60  # 60s safety margin
 
-    row = db.query(GoogleOAuthToken).filter(
-        GoogleOAuthToken.provider == "google_calendar"
+    row = db.query(OAuthToken).filter(
+        OAuthToken.provider == "google_calendar"
     ).first()
     if row is None:
-        row = GoogleOAuthToken(
+        row = OAuthToken(
             provider="google_calendar",
             access_token=access_token,
             refresh_token=refresh_token,
@@ -178,8 +178,8 @@ def get_valid_access_token(db: Session) -> str | None:
     """Return a valid access token, refreshing if needed. None if the user
     hasn't connected Calendar yet.
     """
-    row = db.query(GoogleOAuthToken).filter(
-        GoogleOAuthToken.provider == "google_calendar"
+    row = db.query(OAuthToken).filter(
+        OAuthToken.provider == "google_calendar"
     ).first()
     if row is None:
         return None
@@ -202,8 +202,8 @@ def get_valid_access_token(db: Session) -> str | None:
 
 def disconnect(db: Session) -> bool:
     """Revoke the token with Google and delete the row."""
-    row = db.query(GoogleOAuthToken).filter(
-        GoogleOAuthToken.provider == "google_calendar"
+    row = db.query(OAuthToken).filter(
+        OAuthToken.provider == "google_calendar"
     ).first()
     if row is None:
         return False
@@ -219,8 +219,8 @@ def disconnect(db: Session) -> bool:
 
 def connection_status(db: Session) -> dict[str, Any]:
     configured = is_configured()
-    row = db.query(GoogleOAuthToken).filter(
-        GoogleOAuthToken.provider == "google_calendar"
+    row = db.query(OAuthToken).filter(
+        OAuthToken.provider == "google_calendar"
     ).first()
     return {
         "configured": configured,

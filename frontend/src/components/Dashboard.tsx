@@ -12,6 +12,7 @@ import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
 import { FocusesSection } from "./FocusesSection";
+import { DevActivityCard } from "./DevActivityCard";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#4ADE80";
@@ -1432,6 +1433,10 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
           )}
         </div>
+
+        {/* Dev Activity — sourced from tracked GitHub repos. Hidden if not
+            connected or no repos picked. */}
+        <DevActivityCard />
 
         {/* Gooni's Take — green dot + uppercase label. Renders even when there's
             no take yet so focuses still have a home. */}

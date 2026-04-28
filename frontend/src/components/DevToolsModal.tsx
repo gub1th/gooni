@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import pkg from "../../package.json";
+import { IntegrationSection } from "./IntegrationSection";
+import { RepoPicker } from "./RepoPicker";
 
 interface DevToolsModalProps {
   open: boolean;
@@ -254,67 +256,14 @@ export function DevToolsModal({ open, onClose }: DevToolsModalProps) {
           Pings use <code>fetch(&hellip;, {`{mode: "no-cors"}`})</code> so any response counts as "reachable." A green dot means the host answered, not that the app is healthy end-to-end.
         </div>
 
-        <CalendarSection />
+        <IntegrationsBlock />
       </div>
     </div>
   );
 }
 
-// ── Google Calendar connection panel ─────────────────────────────────────────
-function CalendarSection() {
-  const [status, setStatus] = useState<{ configured: boolean; connected: boolean; account_email: string | null } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function refresh() {
-    try {
-      const s = await (await import("../services/api")).fetchCalendarStatus();
-      setStatus(s);
-    } catch (e) {
-      setStatus({ configured: false, connected: false, account_email: null });
-      setErr(String(e));
-    }
-  }
-
-  useEffect(() => { refresh(); }, []);
-
-  // Refresh on return from OAuth popup — callback posts a message.
-  useEffect(() => {
-    function onMsg(e: MessageEvent) {
-      if (e?.data?.type === "gooni-oauth-done") refresh();
-    }
-    window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
-  }, []);
-
-  async function connect() {
-    setErr(null);
-    setLoading(true);
-    try {
-      const { startCalendarOAuth } = await import("../services/api");
-      const { authorize_url } = await startCalendarOAuth();
-      // Open in a popup so we can listen for the callback postMessage.
-      window.open(authorize_url, "gooni-oauth", "width=520,height=640");
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function disconnect() {
-    setLoading(true);
-    try {
-      const { disconnectCalendar } = await import("../services/api");
-      await disconnectCalendar();
-      await refresh();
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
+// ── Integrations: Google Calendar + GitHub ──────────────────────────────────
+function IntegrationsBlock() {
   return (
     <div style={{ marginTop: 22 }}>
       <div style={{
@@ -323,52 +272,20 @@ function CalendarSection() {
       }}>
         Integrations
       </div>
-      <div style={{
-        border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10,
-        padding: "12px 14px", background: "#FDFCFA",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <span style={{
-            width: 8, height: 8, borderRadius: "50%",
-            background: status?.connected ? "#30D158" : (status?.configured ? "#C7C7CC" : "#FF9500"),
-            flexShrink: 0,
-          }} />
-          <span style={{ fontSize: 13.5, fontWeight: 600, color: "#1C1C1E" }}>Google Calendar</span>
-          <span style={{ fontSize: 11, color: "#8E8E93", marginLeft: "auto" }}>
-            {!status
-              ? "…"
-              : !status.configured
-              ? "backend env vars not set"
-              : status.connected
-              ? (status.account_email ?? "connected")
-              : "not connected"}
-          </span>
-        </div>
-        <div style={{ fontSize: 11.5, color: "#6B6B70", marginBottom: 10, lineHeight: 1.55 }}>
-          {status?.configured
-            ? "Connect to let Gooni create calendar events from todo plans."
-            : "Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI on the backend to enable."}
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {status?.connected ? (
-            <button onClick={disconnect} disabled={loading} style={btn}>disconnect</button>
-          ) : (
-            <button
-              onClick={connect}
-              disabled={loading || !status?.configured}
-              style={{
-                ...btn,
-                background: status?.configured ? "#1C1C1E" : "#F2F2F2",
-                color: status?.configured ? "#fff" : "#AEAEB2",
-                border: status?.configured ? "none" : btn.border,
-                cursor: status?.configured ? "pointer" : "default",
-              }}
-            >
-              {loading ? "opening…" : "connect"}
-            </button>
-          )}
-          {err && <span style={{ fontSize: 11, color: "#C44" }}>{err}</span>}
-        </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <IntegrationSection
+          provider="google"
+          label="Google Calendar"
+          blurbConfigured="Connect to let Gooni create calendar events from todo plans."
+          blurbNotConfigured="Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI on the backend to enable."
+        />
+        <IntegrationSection
+          provider="github"
+          label="GitHub"
+          blurbConfigured="Connect to surface today's commits, streak, and a weekly summary on the dashboard."
+          blurbNotConfigured="Set GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET / GITHUB_REDIRECT_URI on the backend to enable."
+          extras={<RepoPicker />}
+        />
       </div>
     </div>
   );
