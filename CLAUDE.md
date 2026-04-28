@@ -20,6 +20,20 @@ Telegram bot exists for mobile capture — messages become conversations in the 
 Evolving toward an ambient physical assistant — a device that knows you passively and proactively surfaces relevant context. Gooni is the brain. See `docs/VISION.md`.
 
 ## Rules
+- **Lock the end goal before non-trivial work.** After 2–4 turns of design back-and-forth, before writing any code, pause and post the goal as an explicit checklist:
+
+  ```
+  Goal: <one sentence>
+  In scope:
+    - <bullet>
+    - <bullet>
+  Out of scope:
+    - <bullet>
+    - <bullet>
+  Success = <how I'll know it's done>
+  ```
+
+  Wait for "yes" / revisions before coding. Skip only for trivial fixes (typo, one-line edit) where a wrong assumption costs <10 min to undo.
 - Don't add new features without being asked
 - Don't change the DB schema without flagging it
 - Don't install new dependencies without asking first

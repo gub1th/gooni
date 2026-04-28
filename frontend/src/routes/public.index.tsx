@@ -1,6 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import LinkExtension from "@tiptap/extension-link";
 import { fetchPublicNotes, fetchPublicProfile, fetchPublicVisitCount, updatePublicProfile, getStoredToken, type PublicNote } from "../services/api";
+import { PublicChatLauncher } from "../components/PublicChatLauncher";
+import { GooniMascot } from "../components/GooniMascot";
 
 export const Route = createFileRoute("/public/")(({
   component: PublicPage,
@@ -54,8 +59,35 @@ function PublicPage() {
 
   const isOwner = getStoredToken() !== null;
   const [editing, setEditing] = useState(false);
-  const [draftBio, setDraftBio] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const bioEditor = useEditor({
+    extensions: [
+      StarterKit,
+      LinkExtension.configure({
+        openOnClick: false,
+        autolink: true,
+        linkOnPaste: true,
+        HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" },
+      }),
+    ],
+    content: "",
+    editorProps: {
+      attributes: {
+        style: [
+          "font-family: 'Manrope', system-ui, sans-serif",
+          "font-size: 15.5px",
+          "line-height: 1.7",
+          "color: #444",
+          "outline: none",
+          "min-height: 80px",
+          "padding: 10px 14px",
+          "border: 1px solid rgba(0,0,0,0.12)",
+          "border-radius: 10px",
+        ].join("; "),
+      },
+    },
+  });
 
   useEffect(() => {
     fetchPublicNotes().then(setNotes).catch(() => {});
@@ -68,10 +100,12 @@ function PublicPage() {
   }, []);
 
   async function handleSaveBio() {
+    if (!bioEditor) return;
+    const html = bioEditor.isEmpty ? "" : bioEditor.getHTML();
     setSaving(true);
     try {
-      await updatePublicProfile(draftBio);
-      setBio(draftBio);
+      await updatePublicProfile(html);
+      setBio(html);
       setEditing(false);
     } finally {
       setSaving(false);
@@ -79,9 +113,16 @@ function PublicPage() {
   }
 
   function handleStartEdit() {
-    setDraftBio(bio ?? "");
+    bioEditor?.commands.setContent(bio ?? "");
     setEditing(true);
+    setTimeout(() => bioEditor?.commands.focus("end"), 0);
   }
+
+  // Treat legacy plain-text bios as text; new HTML bios render rich.
+  const bioIsHtml = bio !== null && /<[a-z][\s\S]*>/i.test(bio);
+
+  // Invisible viewport bounds for the mascot to walk in (matches GooniLayer).
+  const mascotBoundsRef = useRef<HTMLDivElement>(null);
 
   const spaceNames = Array.from(
     new Set(notes.map((n) => n.space_name).filter((s): s is string => s !== null))
@@ -120,21 +161,25 @@ function PublicPage() {
                 {visitors.toLocaleString()} unique {visitors === 1 ? "visitor" : "visitors"}
               </span>
             )}
+            <Link
+              to="/public/mcp"
+              style={{
+                fontSize: 12, color: "#666", textDecoration: "none",
+                border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12,
+                padding: "3px 10px", fontFamily: FONT,
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.background = "rgba(0,0,0,0.04)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.background = "transparent")}
+            >
+              MCP
+            </Link>
           </div>
           {editing ? (
             <div style={{ margin: "14px 0 0" }}>
-              <textarea
-                value={draftBio}
-                onChange={(e) => setDraftBio(e.target.value)}
-                placeholder="Write a short bio..."
-                rows={4}
-                style={{
-                  width: "100%", padding: "10px 14px", borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.12)", fontSize: 14, fontFamily: FONT,
-                  color: "#111", outline: "none", resize: "vertical",
-                  boxSizing: "border-box", lineHeight: 1.65,
-                }}
-              />
+              <EditorContent editor={bioEditor} />
+              <div style={{ fontSize: 11.5, color: "#999", marginTop: 6, fontFamily: FONT }}>
+                Tip: select text, paste a URL to make it a link.
+              </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
                 <button
                   onClick={handleSaveBio}
@@ -163,9 +208,17 @@ function PublicPage() {
           ) : (
             <div style={{ display: "flex", alignItems: "flex-start", gap: 10, margin: "14px 0 0" }}>
               {bio ? (
-                <p style={{ fontSize: 15.5, color: "#444", lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap", flex: 1 }}>
-                  {bio}
-                </p>
+                bioIsHtml ? (
+                  <div
+                    className="gooni-public-bio"
+                    style={{ fontSize: 15.5, color: "#444", lineHeight: 1.7, flex: 1 }}
+                    dangerouslySetInnerHTML={{ __html: bio }}
+                  />
+                ) : (
+                  <p style={{ fontSize: 15.5, color: "#444", lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap", flex: 1 }}>
+                    {bio}
+                  </p>
+                )
               ) : isOwner ? (
                 <p style={{ fontSize: 15, color: "#bbb", fontStyle: "italic", margin: 0, flex: 1 }}>
                   No bio yet.
@@ -246,6 +299,13 @@ function PublicPage() {
           </ul>
         )}
       </div>
+      <div
+        ref={mascotBoundsRef}
+        aria-hidden
+        style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 1 }}
+      />
+      <GooniMascot dashboardRef={mascotBoundsRef} />
+      <PublicChatLauncher />
     </div>
   );
 }
