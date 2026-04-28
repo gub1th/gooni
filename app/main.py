@@ -22,11 +22,11 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Focus,
     Memory,
     Message,
+    List as ListModel,
+    ListItem,
     Note,
     PublicProfile,
     Space,
-    Suggestion,
-    SuggestionPrompt,
     TodoItem,
     TodoNote,
     Visit,
@@ -38,7 +38,6 @@ from .services.focus_service import focus_service
 from .services.memory_service import memory_service
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
-from .services.suggestions_service import suggestions_service
 
 
 def _drop_legacy_focus_activities(engine):
@@ -273,9 +272,12 @@ def _run_column_migrations(engine):
             ("conversations", "topic_graph", "TEXT"),
             ("conversations", "summary", "TEXT"),
             ("todo_items", "due_date", "DATETIME"),
-            ("suggestions", "note_id", "INTEGER"),
             ("messages", "feedback_for_message_id", "INTEGER"),
             ("messages", "is_feedback", "INTEGER"),
+            ("notes", "classified_embedding", "TEXT"),
+            ("notes", "backlog_note_id", "INTEGER"),
+            ("notes", "last_classify_signals", "TEXT"),
+            ("memories", "source_note_id", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -619,7 +621,11 @@ def get_visits_summary(db: Session = Depends(get_db)):
 # ── Todos ────────────────────────────────────────────────────────────────────
 
 
-def _serialize_todo(t: TodoItem) -> dict:
+def _serialize_todo(t: ListItem) -> dict:
+    """Backwards-compatible serializer — the /todos endpoints now read from
+    the unified ListItem table (under the canonical todo List) but the
+    response shape mirrors the original TodoItem schema so the frontend
+    Todo UI works without changes."""
     return {
         "id": t.id,
         "text": t.text,
@@ -631,10 +637,21 @@ def _serialize_todo(t: TodoItem) -> dict:
     }
 
 
+def _todo_list_id(db: Session) -> int:
+    from .services.list_service import list_service
+    return list_service.get_or_create_todo_list(db).id
+
+
 @app.get("/todos")
 def list_todos(db: Session = Depends(get_db)):
     """All todos, ordered by sort_order ascending. Client filters the day-boundary view."""
-    items = db.query(TodoItem).order_by(TodoItem.sort_order, TodoItem.id).all()
+    list_id = _todo_list_id(db)
+    items = (
+        db.query(ListItem)
+        .filter(ListItem.list_id == list_id)
+        .order_by(ListItem.sort_order, ListItem.id)
+        .all()
+    )
     return [_serialize_todo(t) for t in items]
 
 
@@ -653,8 +670,19 @@ def create_todo(body: dict, db: Session = Depends(get_db)):
             parsed_due = datetime.fromisoformat(cleaned)
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="invalid due_date")
-    max_order = db.query(sqlfunc.max(TodoItem.sort_order)).scalar() or 0
-    item = TodoItem(text=text, sort_order=max_order + 1, due_date=parsed_due)
+    list_id = _todo_list_id(db)
+    max_order = (
+        db.query(sqlfunc.max(ListItem.sort_order))
+        .filter(ListItem.list_id == list_id)
+        .scalar()
+        or 0
+    )
+    item = ListItem(
+        list_id=list_id,
+        text=text,
+        sort_order=max_order + 1,
+        due_date=parsed_due,
+    )
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -664,7 +692,7 @@ def create_todo(body: dict, db: Session = Depends(get_db)):
 @app.patch("/todos/{todo_id}")
 def update_todo(todo_id: int, body: dict, db: Session = Depends(get_db)):
     from datetime import datetime
-    item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    item = db.query(ListItem).filter(ListItem.id == todo_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="todo not found")
     if "text" in body:
@@ -679,14 +707,11 @@ def update_todo(todo_id: int, body: dict, db: Session = Depends(get_db)):
     if "sort_order" in body:
         item.sort_order = int(body["sort_order"])
     if "due_date" in body:
-        # Accepts an ISO string (YYYY-MM-DD or full datetime) or null to clear.
-        # Stored as naive UTC midnight to match the date-only semantics of the UI.
         raw = body["due_date"]
         if raw is None or raw == "":
             item.due_date = None
         else:
             try:
-                # Strip any trailing Z so fromisoformat is happy on Python <3.11.
                 cleaned = raw[:-1] if isinstance(raw, str) and raw.endswith("Z") else raw
                 parsed = datetime.fromisoformat(cleaned)
                 item.due_date = parsed
@@ -699,7 +724,7 @@ def update_todo(todo_id: int, body: dict, db: Session = Depends(get_db)):
 
 @app.delete("/todos/{todo_id}")
 def delete_todo(todo_id: int, db: Session = Depends(get_db)):
-    item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    item = db.query(ListItem).filter(ListItem.id == todo_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="todo not found")
     db.delete(item)
@@ -716,7 +741,7 @@ def reorder_todos(body: dict, db: Session = Depends(get_db)):
         so = entry.get("sort_order")
         if tid is None or so is None:
             continue
-        db.query(TodoItem).filter(TodoItem.id == int(tid)).update({"sort_order": int(so)})
+        db.query(ListItem).filter(ListItem.id == int(tid)).update({"sort_order": int(so)})
     db.commit()
     return {"ok": True}
 
@@ -727,13 +752,13 @@ def create_todo_plan(todo_id: int, db: Session = Depends(get_db)):
     via the todo_notes table. The frontend uses this to open a quick
     typing-animation flow that lands the user in a ready-to-write plan.
     """
-    todo = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    todo = db.query(ListItem).filter(ListItem.id == todo_id).first()
     if not todo:
         raise HTTPException(status_code=404, detail="todo not found")
     title = f"Plan for {todo.text}"
     note = Note(title=title, content="", space_id=None)
     db.add(note)
-    db.flush()  # populate note.id before creating the link
+    db.flush()
     link = TodoNote(todo_id=todo.id, note_id=note.id, relation_type="plan")
     db.add(link)
     db.commit()
@@ -761,6 +786,134 @@ def list_todo_notes(todo_id: int, db: Session = Depends(get_db)):
             "note": _serialize_note(note),
         })
     return out
+
+
+# ── Lists (unified) ──────────────────────────────────────────────────────────
+
+
+def _serialize_list(lst: ListModel) -> dict:
+    return {
+        "id": lst.id,
+        "name": lst.name,
+        "type": lst.type,
+        "emoji": lst.emoji,
+        "sort_order": lst.sort_order,
+        "created_at": lst.created_at.isoformat() if lst.created_at else None,
+    }
+
+
+def _serialize_list_item(it: ListItem) -> dict:
+    return {
+        "id": it.id,
+        "list_id": it.list_id,
+        "text": it.text,
+        "subtitle": it.subtitle,
+        "done": bool(it.done),
+        "completed_at": it.completed_at.isoformat() if it.completed_at else None,
+        "sort_order": it.sort_order,
+        "due_date": it.due_date.isoformat() if it.due_date else None,
+        "source_note_id": it.source_note_id,
+        "created_at": it.created_at.isoformat() if it.created_at else None,
+    }
+
+
+@app.get("/lists")
+def get_lists(db: Session = Depends(get_db)):
+    from .services.list_service import list_service
+    return [_serialize_list(lst) for lst in list_service.get_all_lists(db)]
+
+
+@app.get("/lists/{list_id}")
+def get_list(list_id: int, db: Session = Depends(get_db)):
+    from .services.list_service import list_service
+    lst = db.query(ListModel).filter(ListModel.id == list_id).first()
+    if not lst:
+        raise HTTPException(status_code=404, detail="list not found")
+    items = list_service.get_items(list_id, db)
+    return {
+        **_serialize_list(lst),
+        "items": [_serialize_list_item(it) for it in items],
+    }
+
+
+@app.post("/lists")
+def create_list(body: dict, db: Session = Depends(get_db)):
+    from .services.list_service import list_service
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    type_ = body.get("type") or "generic"
+    if type_ not in ("todo", "backlog", "generic"):
+        raise HTTPException(status_code=400, detail="type must be todo|backlog|generic")
+    emoji = body.get("emoji")
+    lst = list_service.get_or_create_list(name, type_, emoji, db)
+    return _serialize_list(lst)
+
+
+@app.post("/lists/{list_id}/items")
+def add_list_item(list_id: int, body: dict, db: Session = Depends(get_db)):
+    from .services.list_service import list_service
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    lst = db.query(ListModel).filter(ListModel.id == list_id).first()
+    if not lst:
+        raise HTTPException(status_code=404, detail="list not found")
+    item = list_service.add_item(
+        list_id, text, db,
+        subtitle=(body.get("subtitle") or None),
+        source_note_id=body.get("source_note_id"),
+    )
+    return _serialize_list_item(item)
+
+
+@app.patch("/list-items/{item_id}")
+def update_list_item(item_id: int, body: dict, db: Session = Depends(get_db)):
+    from datetime import datetime
+    from .services.list_service import list_service
+
+    due_kwarg: dict = {}
+    if "due_date" in body:
+        raw = body["due_date"]
+        if raw is None or raw == "":
+            due_kwarg["due_date"] = None  # type: ignore[assignment]
+        else:
+            try:
+                cleaned = raw[:-1] if isinstance(raw, str) and raw.endswith("Z") else raw
+                due_kwarg["due_date"] = datetime.fromisoformat(cleaned)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="invalid due_date")
+
+    item = list_service.update_item(
+        item_id, db,
+        text=body.get("text"),
+        subtitle=body.get("subtitle"),
+        done=body.get("done"),
+        sort_order=body.get("sort_order"),
+        **due_kwarg,
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    return _serialize_list_item(item)
+
+
+@app.delete("/list-items/{item_id}")
+def delete_list_item(item_id: int, db: Session = Depends(get_db)):
+    from .services.list_service import list_service
+    if not list_service.delete_item(item_id, db):
+        raise HTTPException(status_code=404, detail="item not found")
+    return {"ok": True}
+
+
+@app.post("/list-items/reorder")
+def reorder_list_items(body: dict, db: Session = Depends(get_db)):
+    """Batch sort_order update. Body: {ids: [item_id, item_id, ...]} in target order."""
+    from .services.list_service import list_service
+    ids = body.get("ids") or []
+    if not isinstance(ids, list):
+        raise HTTPException(status_code=400, detail="ids must be a list")
+    list_service.reorder_items([int(i) for i in ids], db)
+    return {"ok": True}
 
 
 # ── Focuses ──────────────────────────────────────────────────────────────────
@@ -810,11 +963,6 @@ def list_focuses(
     if include_done:
         statuses.append("done")
     return [_serialize_focus(f) for f in focus_service.list_focuses(db, statuses)]
-
-
-@app.get("/focuses/stale")
-def list_stale_focuses(days: int = 5, db: Session = Depends(get_db)):
-    return [_serialize_focus(f) for f in focus_service.stale_focuses(db, days=days)]
 
 
 @app.post("/focuses")
@@ -912,66 +1060,6 @@ def suggest_focuses(db: Session = Depends(get_db)):
     focuses. Empty list if nothing strong enough.
     """
     return {"suggestions": focus_service.suggest_from_notes(db)}
-
-
-# ── Suggestions ──────────────────────────────────────────────────────────────
-
-
-def _serialize_suggestion(s: Suggestion) -> dict:
-    return {
-        "id": s.id,
-        "category": s.category,
-        "title": s.title,
-        "body": s.body,
-        "source_url": s.source_url,
-        "note_id": getattr(s, "note_id", None),
-        "generated_at": s.generated_at.isoformat() if s.generated_at else None,
-    }
-
-
-@app.get("/suggestions/today")
-def get_suggestions_today(db: Session = Depends(get_db)):
-    grouped = suggestions_service.today(db)
-    return {
-        "read":    [_serialize_suggestion(s) for s in grouped.get("read", [])],
-        "do":      [_serialize_suggestion(s) for s in grouped.get("do", [])],
-        "revisit": [_serialize_suggestion(s) for s in grouped.get("revisit", [])],
-    }
-
-
-@app.post("/suggestions/{suggestion_id}/dismiss")
-def dismiss_suggestion(suggestion_id: int, db: Session = Depends(get_db)):
-    if not suggestions_service.dismiss(db, suggestion_id):
-        raise HTTPException(status_code=404, detail="suggestion not found")
-    return {"ok": True}
-
-
-@app.post("/suggestions/refresh")
-def refresh_suggestions(db: Session = Depends(get_db)):
-    created = suggestions_service.regenerate(db)
-    return {"created": len(created)}
-
-
-@app.get("/suggestions/prompts")
-def get_suggestion_prompts(db: Session = Depends(get_db)):
-    """Per-category user prompts. Empty string when not set."""
-    prompts = suggestions_service.get_user_prompts(db)
-    return {
-        "read": prompts.get("read", ""),
-        "do": prompts.get("do", ""),
-        "revisit": prompts.get("revisit", ""),
-    }
-
-
-@app.patch("/suggestions/prompts/{category}")
-def patch_suggestion_prompt(category: str, body: dict, db: Session = Depends(get_db)):
-    """Set the user prompt for a single category. Empty string clears it."""
-    prompt = (body.get("prompt") or "").strip()
-    try:
-        row = suggestions_service.set_user_prompt(db, category, prompt)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"category": row.category, "user_prompt": row.user_prompt}
 
 
 @app.post("/auth")
@@ -1079,6 +1167,14 @@ def delete_space(space_id: int, db: Session = Depends(get_db)):
 
 
 def _serialize_note(n: Note) -> dict:
+    # Parse the JSON signals snapshot so the frontend gets a structured
+    # object, not a string blob. None when classify_note hasn't run yet.
+    signals = None
+    if n.last_classify_signals:
+        try:
+            signals = json.loads(n.last_classify_signals)
+        except (ValueError, TypeError):
+            signals = None
     return {
         "id": n.id,
         "title": n.title,
@@ -1089,6 +1185,11 @@ def _serialize_note(n: Note) -> dict:
         "last_opened_at": n.last_opened_at,
         "is_public": bool(n.is_public),
         "is_pinned": bool(n.is_pinned),
+        # Snapshot of what classify_note routed for this note's most recent
+        # save. Drives the "Routed:" disclosure under the title — same shape
+        # as the chat bubble so Daniel sees memory writes + backlog items
+        # as soon as the async classifier finishes.
+        "classify_signals": signals,
     }
 
 
@@ -1297,8 +1398,12 @@ def embed_note(note_id: int, db: Session = Depends(get_db)):
     """Generate embedding for a note and check for space suggestion.
     Called on blur (not on every save) to avoid wasteful API calls.
     Also runs the focus-activity matcher so focuses get heartbeats from
-    note writing without an explicit FK linkage.
+    note writing without an explicit FK linkage. Kicks the unified
+    classifier off-thread so notes about Gooni gaps land in the Backlog
+    space without blocking the response.
     """
+    import threading
+
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
@@ -1317,6 +1422,16 @@ def embed_note(note_id: int, db: Session = Depends(get_db)):
                 focus_service.mark_activity(db, fid)
         except Exception as e:
             print(f"focus classify (embed_note) failed: {e}")
+
+    # Unified extractor: runs in a daemon thread so the embed endpoint
+    # returns fast. Internally dedup-gates via `Note.classified_embedding`
+    # so trivial edits don't make duplicate Backlog rows.
+    from .services.note_service import classify_note
+    threading.Thread(
+        target=classify_note,
+        args=(note_id,),
+        daemon=True,
+    ).start()
 
     return {"ok": True, **suggestion}
 

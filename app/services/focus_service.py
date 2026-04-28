@@ -150,22 +150,6 @@ class FocusService:
                 out.append(fid)
         return out
 
-    def stale_focuses(self, db: Session, days: int = 5) -> list[Focus]:
-        cutoff = datetime.utcnow() - timedelta(days=days)
-        focuses = (
-            db.query(Focus)
-            .filter(Focus.status.in_(("committed", "pending")))
-            .all()
-        )
-        stale = [
-            f for f in focuses
-            if f.last_activity_at is None or f.last_activity_at < cutoff
-        ]
-        stale.sort(
-            key=lambda f: f.last_activity_at or datetime.min
-        )
-        return stale
-
     def get_focus_context(self, db: Session) -> str:
         """Return a human-readable block listing Daniel's active focuses for
         injection into the orchestrator system prompt. The LLM uses this

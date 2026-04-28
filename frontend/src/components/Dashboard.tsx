@@ -12,8 +12,6 @@ import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
 import { FocusesSection } from "./FocusesSection";
-import { FocusCheckinCard } from "./FocusCheckinCard";
-import { SuggestionsCard } from "./SuggestionsCard";
 import { DevActivityCard } from "./DevActivityCard";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -1415,11 +1413,6 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
           </div>
         </div>
 
-        {/* Stale-focus check-in. Renders nothing if no focus is stale or
-            today's nudge has been dismissed. Sits between greeting + note input
-            so it lands in the eyeline without crowding the writing surface. */}
-        <FocusCheckinCard />
-
         {/* Note input — swaps into a PlanAnimation when user clicks "plan"
             on a todo. Otherwise the normal embedded NoteEditor quick-input. */}
         <div style={{ marginBottom: 22 }}>
@@ -1502,12 +1495,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
 
         {/* Focus card lifted into Gooni's Take above as floating bubbles. */}
 
-        {/* Suggestions — discovery + whimsy. Below focuses so it reads as a
-            companion feed: 'here's what you're committed to, here's what
-            else might catch your eye.' Hidden until ≥1 focus exists. */}
-        <SuggestionsCard />
-
-        {/* Todo card — backed by dedicated TodoItem model with timestamps + sort order */}
+        {/* Todo card — backed by ListItem under the canonical Todo list */}
         <TodoCard todos={todos} onMutate={setTodos} onPlan={handlePlanFromTodo} />
 
         {/* Recent notes — two preview cards */}

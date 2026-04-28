@@ -6,6 +6,7 @@ import {
   fetchConversationMessages as apiFetchMessages,
   fetchIntention,
   type ApiConversation,
+  type RouterSignals,
 } from "../services/api";
 import { useModelStore } from "./useModelStore";
 
@@ -16,6 +17,7 @@ interface ConversationMessage {
   created_at: string;
   intention?: string;
   tools_used?: string[];
+  signals?: RouterSignals;
 }
 
 interface ConversationsStore {
@@ -85,14 +87,20 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
       });
 
       const model = useModelStore.getState().model;
-      const { messages: allMessages, intention: fallbackIntention, tools_used } = await apiSendMessage(convId, content, noteContent, model);
+      const { messages: allMessages, intention: fallbackIntention, tools_used, signals } = await apiSendMessage(convId, content, noteContent, model);
       const intentionToUse = get().pendingIntention || fallbackIntention || "";
+      const hasSignals = !!signals && (
+        signals.tone_corrections.length > 0
+        || signals.feature_requests.length > 0
+        || signals.memory_count > 0
+      );
       const messagesWithMeta = allMessages.map((m, i) => {
         if (i !== allMessages.length - 1 || m.role !== "assistant") return m;
         return {
           ...m,
           ...(intentionToUse ? { intention: intentionToUse } : {}),
           ...(tools_used?.length ? { tools_used } : {}),
+          ...(hasSignals && signals ? { signals } : {}),
         };
       });
       set({ messages: messagesWithMeta, sending: false, pendingIntention: null });
