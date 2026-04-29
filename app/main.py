@@ -189,8 +189,11 @@ def _run_column_migrations(engine):
                     conn.execute(text(f"UPDATE {table} SET {col} = 0 WHERE {col} IS NULL"))
         # Even if the column already existed, catch any stragglers with NULL state
         # from a previous migration that ran before the backfill step existed.
-        conn.execute(text("UPDATE notes SET is_pinned = 0 WHERE is_pinned IS NULL"))
-        conn.execute(text("UPDATE notes SET is_public = 0 WHERE is_public IS NULL"))
+        # Guarded: on a fresh DB the `notes` table doesn't exist yet — Base.metadata
+        # .create_all() runs after this — so skip the backfill in that case.
+        if "notes" in existing_tables:
+            conn.execute(text("UPDATE notes SET is_pinned = 0 WHERE is_pinned IS NULL"))
+            conn.execute(text("UPDATE notes SET is_public = 0 WHERE is_public IS NULL"))
         # Unified-item refactor: drop the legacy focuses / todo_items / todo_notes
         # tables (and the older focus_activities table). Existing data is wiped
         # per design — see plan focuses-todos-unified.md. Memory.focus_id rows
