@@ -131,60 +131,6 @@ class Visit(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
-class TodoItem(Base):
-    """A single todo. Lives in its own table so we can track per-item timestamps,
-    sort order, and completion independently of any containing note.
-    `sort_order` is a plain int — the item placed at the end of the list gets
-    max(sort_order)+1. Drag-reorder issues a batch update. Gaps on delete are fine.
-    """
-
-    __tablename__ = "todo_items"
-
-    id = Column(Integer, primary_key=True, index=True)
-    text = Column(Text, nullable=False)
-    done = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-    sort_order = Column(Integer, default=0, nullable=False)
-    due_date = Column(DateTime, nullable=True)
-
-
-class TodoNote(Base):
-    """Link between a TodoItem and a Note. Kept narrow (not a general
-    entity-links system) so queries stay typed: `relation_type` is a small
-    enum of concrete relationships. Today only "plan" is used — the note
-    spawned when the user clicks the Plan button on a todo.
-    """
-
-    __tablename__ = "todo_notes"
-
-    id = Column(Integer, primary_key=True, index=True)
-    todo_id = Column(Integer, ForeignKey("todo_items.id"), nullable=False, index=True)
-    note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
-    relation_type = Column(String, nullable=False, default="plan")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
-class Focus(Base):
-    """A long-running thing Daniel is working on. Has an endgoal description
-    so Gooni knows what 'done' means. `last_activity_at` is rolled forward
-    by the implicit matcher (notes/messages that mention the focus) and by
-    explicit heartbeats. Status is a small string enum, consistent with
-    other models in this codebase.
-    """
-
-    __tablename__ = "focuses"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(Text, nullable=False)
-    endgoal = Column(Text, nullable=False)
-    # 'committed' | 'pending' | 'someday' | 'done'
-    status = Column(String, nullable=False, default="committed")
-    due_date = Column(DateTime, nullable=True)
-    last_activity_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
 class Memory(Base):
     """Daniel's persistent knowledge of himself. Replaces the Mem0 hosted
     service with a local SQL store + LLM extraction + LLM reconciliation.
@@ -216,8 +162,10 @@ class Memory(Base):
     confidence = Column(Float, nullable=False, default=0.8)
     # JSON-serialized embedding vector for cosine search.
     embedding = Column(Text, nullable=True)
-    # Optional link to a Focus when the memory is goal/aspiration-shaped.
-    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=True)
+    # Optional link to a top-level ListItem (focus) when the memory is
+    # goal/aspiration-shaped. Re-pointed from the legacy `focuses` table
+    # to `list_items` after the unified-item refactor.
+    focus_id = Column(Integer, ForeignKey("list_items.id"), nullable=True)
     # Origin tracking — set when this memory was extracted from a note's
     # classify_note run. Lets the editor surface "this note created N
     # memories" disclosure. NULL for memories from chat or other paths.
@@ -253,25 +201,34 @@ class List(Base):
 
 
 class ListItem(Base):
-    """A single item within a List. Same shape regardless of list type —
-    the consumer (UI / LLM) decides which fields to surface based on
-    `list.type`. `subtitle` carries the "why" for backlog items; nullable
-    for todos. `source_note_id` links back to the Note that spawned this
-    item (used by feature_request_tool to anchor backlog entries).
+    """A single item — the unified "thing to do" record. With:
+      - `endgoal` set + no parent → renders as a focus (long-running goal)
+      - `parent_id` set           → renders as a child step under its parent
+      - both null                 → leaf todo
+    `committed` is the boolean replacement for the old Focus.status enum:
+    True = actively pursuing, False = parked.
+    `subtitle` carries the "why" for backlog items.
+    `source_note_id` links back to the Note that spawned this item.
     """
 
     __tablename__ = "list_items"
 
     id = Column(Integer, primary_key=True, index=True)
     list_id = Column(Integer, ForeignKey("lists.id"), nullable=False, index=True)
+    parent_id = Column(Integer, ForeignKey("list_items.id"), nullable=True, index=True)
     text = Column(Text, nullable=False)
     subtitle = Column(Text, nullable=True)
+    endgoal = Column(Text, nullable=True)
+    committed = Column(Boolean, default=False, nullable=False)
     done = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
     due_date = Column(DateTime, nullable=True)
     source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
 
 class OAuthToken(Base):

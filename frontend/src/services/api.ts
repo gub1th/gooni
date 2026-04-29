@@ -336,7 +336,6 @@ export interface DevActivity {
   connected: boolean;
   repos: DevActivityRepo[];
   aggregate: { streak_days: number; today_commits: number };
-  week_summary: string | null;
 }
 export async function fetchDevActivity(): Promise<DevActivity> {
   const res = await apiFetch(`${BASE}/dashboard/dev-activity`);
@@ -412,67 +411,107 @@ export async function fetchPublicVisitCount(): Promise<{ unique_visitors: number
   return res.json();
 }
 
-// ── Todos ────────────────────────────────────────────────────────────────────
+// ── Items (unified focus + todo) ────────────────────────────────────────────
+//
+// One concept, one table. An item with `endgoal` and no parent renders as a
+// focus; a leaf item renders as a todo; anything in between renders as a
+// checklist node.
 
-export interface ApiTodo {
+export interface ApiItem {
   id: number;
+  list_id: number;
+  parent_id: number | null;
   text: string;
+  subtitle: string | null;
+  endgoal: string | null;
+  committed: boolean;
   done: boolean;
-  created_at: string;
+  due_date: string | null;
   completed_at: string | null;
   sort_order: number;
-  due_date: string | null;
+  source_note_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
-export async function fetchTodos(): Promise<ApiTodo[]> {
-  const res = await apiFetch(`${BASE}/todos`);
-  if (!res.ok) throw new Error("Failed to fetch todos");
+export interface ApiItemNode extends ApiItem {
+  children: ApiItemNode[];
+  progress: { done: number; total: number };
+  stale: boolean;
+}
+
+export interface ApiItemTree {
+  focuses: ApiItemNode[];
+  inbox: ApiItemNode[];
+}
+
+export interface ApiTodayItem extends ApiItem {
+  parent_chain: string[];
+}
+
+export async function fetchItemTree(): Promise<ApiItemTree> {
+  const res = await apiFetch(`${BASE}/items`);
+  if (!res.ok) throw new Error("Failed to fetch items");
   return res.json();
 }
 
-export async function createTodo(text: string, due_date?: string | null): Promise<ApiTodo> {
-  const res = await apiFetch(`${BASE}/todos`, {
+export async function fetchTodayItems(): Promise<ApiTodayItem[]> {
+  const res = await apiFetch(`${BASE}/items/today`);
+  if (!res.ok) throw new Error("Failed to fetch today items");
+  return res.json();
+}
+
+export async function createItem(body: {
+  text: string;
+  parent_id?: number | null;
+  endgoal?: string | null;
+  committed?: boolean;
+  due_date?: string | null;
+  source_note_id?: number | null;
+}): Promise<ApiItem> {
+  const res = await apiFetch(`${BASE}/items`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(due_date ? { text, due_date } : { text }),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error("Failed to create todo");
+  if (!res.ok) throw new Error("Failed to create item");
   return res.json();
 }
 
-export async function updateTodo(
+export async function updateItem(
   id: number,
-  patch: { text?: string; done?: boolean; sort_order?: number; due_date?: string | null },
-): Promise<ApiTodo> {
-  const res = await apiFetch(`${BASE}/todos/${id}`, {
+  patch: Partial<{
+    text: string;
+    endgoal: string | null;
+    committed: boolean;
+    done: boolean;
+    due_date: string | null;
+    subtitle: string | null;
+    sort_order: number;
+    parent_id: number | null;
+  }>,
+): Promise<ApiItem> {
+  const res = await apiFetch(`${BASE}/items/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error("Failed to update todo");
+  if (!res.ok) throw new Error("Failed to update item");
   return res.json();
 }
 
-export async function deleteTodo(id: number): Promise<void> {
-  const res = await apiFetch(`${BASE}/todos/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete todo");
+export async function deleteItem(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/items/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete item");
 }
 
-export async function reorderTodos(items: { id: number; sort_order: number }[]): Promise<void> {
-  const res = await apiFetch(`${BASE}/todos/reorder`, {
+export async function reorderItems(ids: number[]): Promise<void> {
+  const res = await apiFetch(`${BASE}/items/reorder`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items }),
+    body: JSON.stringify({ ids }),
   });
-  if (!res.ok) throw new Error("Failed to reorder todos");
-}
-
-// Spawn a "Plan for <todo text>" note in General, linked to the todo via
-// todo_notes. Returns the new note so the frontend can animate its title in.
-export async function createTodoPlan(todoId: number): Promise<ApiNote> {
-  const res = await apiFetch(`${BASE}/todos/${todoId}/plan`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to create plan from todo");
-  return res.json();
+  if (!res.ok) throw new Error("Failed to reorder items");
 }
 
 // ── Lists (unified) ─────────────────────────────────────────────────────────
@@ -606,85 +645,6 @@ export async function suggestNoteQuestions(id: number): Promise<string[]> {
   if (!res.ok) throw new Error("Failed to suggest questions");
   const json = await res.json();
   return json.questions ?? [];
-}
-
-// ── Focuses ──────────────────────────────────────────────────────────────────
-
-export type FocusStatus = "committed" | "pending" | "someday" | "done";
-
-export interface ApiFocus {
-  id: number;
-  name: string;
-  endgoal: string;
-  status: FocusStatus;
-  due_date: string | null;
-  last_activity_at: string | null;
-  days_since_activity: number | null;
-  created_at: string | null;
-}
-
-export async function fetchFocuses(opts?: {
-  include_done?: boolean;
-  include_someday?: boolean;
-}): Promise<ApiFocus[]> {
-  const params = new URLSearchParams();
-  if (opts?.include_done) params.set("include_done", "true");
-  if (opts?.include_someday === false) params.set("include_someday", "false");
-  const qs = params.toString();
-  const res = await apiFetch(`${BASE}/focuses${qs ? `?${qs}` : ""}`);
-  if (!res.ok) throw new Error("Failed to fetch focuses");
-  return res.json();
-}
-
-export async function createFocus(body: {
-  name: string;
-  endgoal: string;
-  status?: FocusStatus;
-  due_date?: string | null;
-}): Promise<ApiFocus> {
-  const res = await apiFetch(`${BASE}/focuses`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error("Failed to create focus");
-  return res.json();
-}
-
-export async function updateFocus(
-  id: number,
-  patch: { name?: string; endgoal?: string; status?: FocusStatus; due_date?: string | null },
-): Promise<ApiFocus> {
-  const res = await apiFetch(`${BASE}/focuses/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error("Failed to update focus");
-  return res.json();
-}
-
-export async function deleteFocus(id: number): Promise<void> {
-  const res = await apiFetch(`${BASE}/focuses/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete focus");
-}
-
-export async function heartbeatFocus(id: number): Promise<ApiFocus> {
-  const res = await apiFetch(`${BASE}/focuses/${id}/heartbeat`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to heartbeat focus");
-  return res.json();
-}
-
-export interface ApiFocusSuggestion {
-  name: string;
-  reason: string;
-}
-
-export async function suggestFocuses(): Promise<ApiFocusSuggestion[]> {
-  const res = await apiFetch(`${BASE}/focuses/suggest`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to suggest focuses");
-  const json = await res.json();
-  return json.suggestions ?? [];
 }
 
 export async function updatePublicProfile(bio: string): Promise<void> {
