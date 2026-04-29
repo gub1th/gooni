@@ -99,6 +99,7 @@ class ListService:
         subtitle: str | None = None,
         due_date: datetime | None = None,
         source_note_id: int | None = None,
+        actionable: bool = True,
     ) -> ListItem:
         max_order = (
             db.query(sqlfunc.max(ListItem.sort_order))
@@ -113,6 +114,7 @@ class ListService:
             sort_order=max_order + 1,
             due_date=due_date,
             source_note_id=source_note_id,
+            actionable=actionable,
         )
         db.add(item)
         db.commit()
@@ -143,6 +145,7 @@ class ListService:
         text: str | None = None,
         subtitle: str | None = None,
         done: bool | None = None,
+        actionable: bool | None = None,
         due_date: datetime | None = None,
         sort_order: int | None = None,
     ) -> ListItem | None:
@@ -156,6 +159,12 @@ class ListService:
         if done is not None:
             item.done = done
             item.completed_at = datetime.utcnow() if done else None
+        if actionable is not None:
+            item.actionable = bool(actionable)
+            # Idea rows can't be "done" — clear stale state when flipping to idea.
+            if not actionable:
+                item.done = False
+                item.completed_at = None
         if due_date is not None:
             item.due_date = due_date
         if sort_order is not None:

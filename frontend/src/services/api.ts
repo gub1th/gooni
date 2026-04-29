@@ -537,6 +537,7 @@ export interface ApiListItem {
   text: string;
   subtitle: string | null;
   done: boolean;
+  actionable: boolean;
   completed_at: string | null;
   sort_order: number;
   due_date: string | null;
@@ -574,10 +575,31 @@ export async function createList(
   return res.json();
 }
 
+export async function updateList(
+  listId: number,
+  patch: { name?: string; emoji?: string | null },
+): Promise<ApiList> {
+  const res = await apiFetch(`${BASE}/lists/${listId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update list");
+  return res.json();
+}
+
+export async function deleteList(listId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/lists/${listId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail || "Failed to delete list");
+  }
+}
+
 export async function addListItem(
   listId: number,
   text: string,
-  opts: { subtitle?: string | null; source_note_id?: number | null } = {},
+  opts: { subtitle?: string | null; source_note_id?: number | null; actionable?: boolean } = {},
 ): Promise<ApiListItem> {
   const res = await apiFetch(`${BASE}/lists/${listId}/items`, {
     method: "POST",
@@ -594,6 +616,7 @@ export async function updateListItem(
     text?: string;
     subtitle?: string | null;
     done?: boolean;
+    actionable?: boolean;
     sort_order?: number;
     due_date?: string | null;
   },
