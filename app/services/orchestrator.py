@@ -50,7 +50,7 @@ class Orchestrator:
         db,
         image_url: str = None,
         conversation_id: int = None,
-        source: str = "telegram",
+        source: str = "web",
         entry_content: str = "",
         model: str = None,
     ) -> tuple[str, dict | None]:
@@ -58,7 +58,7 @@ class Orchestrator:
 
         - conversation_id=None  → find/create session by source + gap logic
         - conversation_id=<id>  → use that conversation directly (note threads)
-        - source                → 'telegram' | 'web' (determines session bucket)
+        - source                → 'web' | 'telegram' | 'imessage' | ...
         - entry_content         → original note text injected as context (web only)
         """
         stripped = message.strip()
@@ -68,8 +68,8 @@ class Orchestrator:
         if command == "/memory":
             return self._handle_memory_command(db), None
 
-        # First-time greeting only for Telegram
-        is_first_time = source == "telegram" and not memory_service.has_memories(db=db)
+        # First-time greeting fires on bot channels (telegram, imessage, ...).
+        is_first_time = source != "web" and not memory_service.has_memories(db=db)
 
         # Session management
         if conversation_id is not None:
