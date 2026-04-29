@@ -7,6 +7,7 @@ import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { ModelSelector } from "./ModelSelector";
 import { ChatGraphView } from "./chat/ChatGraphView";
+import { ThinkingIndicator } from "./chat/ThinkingIndicator";
 
 interface GooniPanelProps {
   fullscreen?: boolean;
@@ -34,6 +35,14 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
   const [input, setInput] = useState("");
   const [savingPlan, setSavingPlan] = useState(false);
   const [savedPlanIds, setSavedPlanIds] = useState<Set<number>>(new Set());
+  // Per-message map of "which option(s) the user picked" so chips can
+  // render in a "selected" state (highlighted bg + border) instead of
+  // disappearing or echoing the choice as a separate user bubble.
+  const [pickedByMessage, setPickedByMessage] = useState<Record<number, string[]>>({});
+  // Inline free-text editor for the "Other" chip — keyed by assistant
+  // message id so multiple turns don't share state.
+  const [otherEditingFor, setOtherEditingFor] = useState<number | null>(null);
+  const [otherDraft, setOtherDraft] = useState("");
 
   const [expandedIntentions, setExpandedIntentions] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -60,9 +69,32 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
   }
 
   // Click handler for option chips inside an assistant plan-mode message.
-  async function handleOptionPick(option: string) {
+  // Records the pick so the chip renders selected, then sends the answer.
+  // The "PLAN_PICK::" prefix lets the bubble renderer suppress this user
+  // turn visually — the selected chip already shows the choice; an extra
+  // "Daniel chose: X" bubble would be noise.
+  async function handleOptionPick(messageId: number, option: string) {
     if (sending || !planContext) return;
-    await send(`Daniel chose: ${option}`, planContext.noteContent, "plan");
+    setPickedByMessage((prev) => ({
+      ...prev,
+      [messageId]: [...(prev[messageId] ?? []), option],
+    }));
+    await send(`PLAN_PICK::${option}`, planContext.noteContent, "plan");
+  }
+
+  // "Other" chip → inline text input; submits as a regular user message
+  // so Gooni gets free-form context. Suppression prefix not used here —
+  // we want Daniel's words visible since they aren't a chip label.
+  function handleOtherStart(messageId: number) {
+    setOtherEditingFor(messageId);
+    setOtherDraft("");
+  }
+  async function handleOtherSubmit() {
+    if (!planContext || !otherDraft.trim() || sending) return;
+    const text = otherDraft.trim();
+    setOtherEditingFor(null);
+    setOtherDraft("");
+    await send(text, planContext.noteContent, "plan");
   }
 
   // "Save to note" — appends the plan markdown (converted to TipTap HTML)
@@ -91,7 +123,9 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && e.metaKey) {
+    // Enter sends, Shift+Enter inserts a newline (standard chat UX).
+    // Cmd+Enter still sends as a backup for muscle memory.
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -246,7 +280,11 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
               : "Ask Gooni anything. Your active note is shared as context."}
           </div>
         )}
-        {messages.map((m) => (
+        {messages.map((m) => {
+          // Synthetic chip-pick user turn — render nothing at all (no
+          // wrapper either, otherwise we leak an empty flex item).
+          if (m.role === "user" && m.content.startsWith("PLAN_PICK::")) return null;
+          return (
           <div
             key={m.id}
             style={{
@@ -308,22 +346,21 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
               isPlanMode={Boolean(planContext)}
               isSavingPlan={savingPlan}
               isPlanSaved={savedPlanIds.has(m.id)}
+              pickedOptions={pickedByMessage[m.id] ?? []}
+              isOtherEditing={otherEditingFor === m.id}
+              otherDraft={otherDraft}
               onOptionPick={handleOptionPick}
+              onOtherStart={handleOtherStart}
+              onOtherChange={setOtherDraft}
+              onOtherSubmit={handleOtherSubmit}
+              onOtherCancel={() => { setOtherEditingFor(null); setOtherDraft(""); }}
               onSavePlan={handleSavePlan}
             />
           </div>
-        ))}
+          );
+        })}
         {sending && (
-          <div
-            style={{
-              color: "#AEAEB2",
-              fontSize: 13,
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-              fontStyle: "italic",
-            }}
-          >
-            Gooni is thinking...
-          </div>
+          <ThinkingIndicator />
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -458,7 +495,14 @@ function AssistantOrUserBubble({
   isPlanMode,
   isSavingPlan,
   isPlanSaved,
+  pickedOptions,
+  isOtherEditing,
+  otherDraft,
   onOptionPick,
+  onOtherStart,
+  onOtherChange,
+  onOtherSubmit,
+  onOtherCancel,
   onSavePlan,
 }: {
   message: BubbleMsg;
@@ -466,7 +510,14 @@ function AssistantOrUserBubble({
   isPlanMode: boolean;
   isSavingPlan: boolean;
   isPlanSaved: boolean;
-  onOptionPick: (option: string) => void;
+  pickedOptions: string[];
+  isOtherEditing: boolean;
+  otherDraft: string;
+  onOptionPick: (messageId: number, option: string) => void;
+  onOtherStart: (messageId: number) => void;
+  onOtherChange: (text: string) => void;
+  onOtherSubmit: () => void;
+  onOtherCancel: () => void;
   onSavePlan: (messageId: number, planMd: string) => void;
 }) {
   const baseStyle: React.CSSProperties = {
@@ -482,6 +533,12 @@ function AssistantOrUserBubble({
     fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
   };
 
+  // Hide synthetic chip-pick user turns: the selected chip already shows
+  // the choice, an extra "you said: X" bubble is just noise.
+  if (m.role === "user" && m.content.startsWith("PLAN_PICK::")) {
+    return null;
+  }
+
   if (m.role === "user" || !isPlanMode) {
     return <div style={baseStyle}>{renderMarkdown(m.content)}</div>;
   }
@@ -493,6 +550,7 @@ function AssistantOrUserBubble({
   const headerText = plan ? before : m.content;
   const { body: parsedBody, options } = extractOptions(headerText);
   const trailingText = plan ? after : "";
+  const hasPick = pickedOptions.length > 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8, maxWidth: fullscreen ? 640 : "88%" }}>
@@ -501,23 +559,75 @@ function AssistantOrUserBubble({
       )}
       {options.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {options.map((opt, i) => (
+          {options.map((opt, i) => {
+            const picked = pickedOptions.includes(opt);
+            return (
+              <button
+                key={`${m.id}-opt-${i}`}
+                onClick={() => onOptionPick(m.id, opt)}
+                disabled={hasPick}
+                style={{
+                  fontSize: 12, fontFamily: baseStyle.fontFamily,
+                  color: picked ? "#fff" : "#1C1C1E",
+                  background: picked ? "#30A14E" : "rgba(74,222,128,0.10)",
+                  border: picked
+                    ? "0.5px solid #30A14E"
+                    : "0.5px solid rgba(74,222,128,0.45)",
+                  borderRadius: 999, padding: "4px 12px",
+                  cursor: hasPick ? "default" : "pointer",
+                  opacity: hasPick && !picked ? 0.45 : 1,
+                  transition: "background 0.15s, color 0.15s, opacity 0.15s",
+                }}
+              >
+                {picked ? `✓ ${opt}` : opt}
+              </button>
+            );
+          })}
+          {/* "Other" chip — opens an inline text input so Daniel can answer
+              freely when none of the options fit. Only offered before any
+              chip pick on this message; once picked, the panel is locked. */}
+          {!hasPick && !isOtherEditing && (
             <button
-              key={`${m.id}-opt-${i}`}
-              onClick={() => onOptionPick(opt)}
+              onClick={() => onOtherStart(m.id)}
               style={{
                 fontSize: 12, fontFamily: baseStyle.fontFamily,
-                color: "#1C1C1E",
-                background: "rgba(74,222,128,0.10)",
-                border: "0.5px solid rgba(74,222,128,0.45)",
+                color: "#6B6B70",
+                background: "transparent",
+                border: "0.5px dashed rgba(0,0,0,0.20)",
                 borderRadius: 999, padding: "4px 12px",
                 cursor: "pointer",
               }}
-              title={`Send "Daniel chose: ${opt}"`}
-            >
-              {opt}
-            </button>
-          ))}
+            >Other…</button>
+          )}
+        </div>
+      )}
+      {isOtherEditing && (
+        <div style={{ display: "flex", gap: 6, width: "100%" }}>
+          <input
+            autoFocus
+            value={otherDraft}
+            onChange={(e) => onOtherChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); onOtherSubmit(); }
+              if (e.key === "Escape") onOtherCancel();
+            }}
+            placeholder="type your answer…"
+            style={{
+              flex: 1, fontSize: 12, fontFamily: baseStyle.fontFamily,
+              padding: "6px 10px", borderRadius: 999,
+              border: "0.5px solid rgba(0,0,0,0.20)", background: "#fff",
+              color: "#1C1C1E",
+            }}
+          />
+          <button
+            onClick={onOtherSubmit}
+            style={{
+              fontSize: 12, fontFamily: baseStyle.fontFamily,
+              color: "#fff", background: "#1C1C1E",
+              border: "none", borderRadius: 999, padding: "6px 14px",
+              cursor: "pointer",
+            }}
+          >Send</button>
         </div>
       )}
       {plan && (

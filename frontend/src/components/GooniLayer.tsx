@@ -65,7 +65,9 @@ export function GooniLayer() {
               boxShadow:
                 "0 24px 60px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)",
               overflow: "hidden",
-              zIndex: 999,
+              // Above the mascot's landing/dragging z=1001 — otherwise the
+              // walking Gooni can render over the panel's send button.
+              zIndex: 1100,
               display: "flex",
               transformOrigin: "bottom right",
               animation: "gooni-bubble-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1)",

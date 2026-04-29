@@ -19,8 +19,6 @@ export function PlanView({ noteId, onExit }: Props) {
   const [note, setNote] = useState<ApiNote | null>(null);
   const [loadError, setLoadError] = useState(false);
   const planNote = useConversationsStore((s) => s.planNote);
-  const sending = useConversationsStore((s) => s.sending);
-  const messages = useConversationsStore((s) => s.messages);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,14 +83,6 @@ export function PlanView({ noteId, onExit }: Props) {
               // Note bodies are TipTap HTML — already trusted, written by Daniel.
               dangerouslySetInnerHTML={{ __html: note.content ?? "" }}
             />
-            {sending && messages.length <= 1 && (
-              <div style={{
-                marginTop: 18, fontSize: 12, color: "#8E8E93",
-                fontStyle: "italic",
-              }}>
-                Gooni is thinking through this with you…
-              </div>
-            )}
           </>
         ) : (
           <p style={{ color: "#C7C7CC" }}>Loading…</p>

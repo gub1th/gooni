@@ -48,8 +48,12 @@ export function planMarkdownToHtml(md: string): string {
 // Option chip parser. The PLAN_MODE_PROMPT instructs Gooni to drop
 // `[ ] option text` lines into the message. We pull those out so the
 // chip renderer can show them as buttons; the remaining text renders
-// as normal markdown.
-const OPTION_RE = /^\[\s*\]\s+(.+)$/;
+// as normal markdown. The regex is forgiving:
+//   - Allow leading whitespace (LLM may indent).
+//   - Allow `[x]` / `[X]` (pre-marked) variants.
+//   - Allow an optional leading bullet (`-`, `*`, `•`) since LLMs often
+//     slip a list bullet in front despite the prompt.
+const OPTION_RE = /^\s*(?:[-*•]\s+)?\[\s*[xX]?\s*\]\s+(.+?)\s*$/;
 
 export function extractOptions(text: string): { body: string; options: string[] } {
   const lines = text.split(/\r?\n/);
