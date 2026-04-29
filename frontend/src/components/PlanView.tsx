@@ -101,7 +101,16 @@ export function PlanView({ noteId, onExit }: Props) {
 
       {/* Right: docked Gooni chat. Drag-to-resize edge already lives in
           GooniPanel. Width persists via useGooniStore. */}
-      <GooniPanel />
+      <GooniPanel
+        planContext={note ? {
+          noteId: note.id,
+          noteContent: note.content ?? "",
+          onSaved: () => {
+            // Refetch so the left-side viewer shows the appended plan.
+            fetchNote(noteId).then(setNote).catch(console.error);
+          },
+        } : undefined}
+      />
     </div>
   );
 }

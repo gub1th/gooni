@@ -1,5 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { renderMarkdown } from "../utils/markdown";
+import { extractOptions, extractPlanBlock, planMarkdownToHtml } from "../utils/planMarkdown";
+import { fetchNote, updateNote } from "../services/api";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -11,14 +13,27 @@ interface GooniPanelProps {
   // New: panel rendered inside the floating shell anchored to the FAB.
   // Skips the drag-to-resize handle and uses 100% width/height of its parent.
   floating?: boolean;
+  // When set, this panel is hosting a plan-mode session: every send uses
+  // mode="plan" and entry_content=noteContent so the orchestrator engages
+  // PLAN_MODE_PROMPT every turn (entry context isn't persisted in the
+  // conversation, so it has to be re-injected on each call). Assistant
+  // messages get parsed for `[ ] option` chips and `<plan>...</plan>`
+  // finalize blocks; the latter renders a Save-to-note card.
+  planContext?: {
+    noteId: number;
+    noteContent: string;
+    onSaved?: () => void;
+  };
 }
 
-export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelProps) {
+export function GooniPanel({ fullscreen = false, floating = false, planContext }: GooniPanelProps) {
   const { width, setWidth } = useGooniStore();
   const { messages, sending, send, activeId } = useConversationsStore();
   const [viewMode, setViewMode] = useState<"chat" | "graph">("chat");
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
   const [input, setInput] = useState("");
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [savedPlanIds, setSavedPlanIds] = useState<Set<number>>(new Set());
 
   const [expandedIntentions, setExpandedIntentions] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -37,7 +52,42 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
     const text = input.trim();
     if (!text || sending) return;
     setInput("");
-    await send(text, activeNote?.content ?? undefined);
+    if (planContext) {
+      await send(text, planContext.noteContent, "plan");
+    } else {
+      await send(text, activeNote?.content ?? undefined);
+    }
+  }
+
+  // Click handler for option chips inside an assistant plan-mode message.
+  async function handleOptionPick(option: string) {
+    if (sending || !planContext) return;
+    await send(`Daniel chose: ${option}`, planContext.noteContent, "plan");
+  }
+
+  // "Save to note" — appends the plan markdown (converted to TipTap HTML)
+  // to the source note below an <hr/>, preserving the original body. We
+  // refetch the note to avoid clobbering anything Daniel might have edited
+  // in another tab while planning.
+  async function handleSavePlan(messageId: number, planMd: string) {
+    if (!planContext || savingPlan) return;
+    setSavingPlan(true);
+    try {
+      const fresh = await fetchNote(planContext.noteId);
+      const planHtml = planMarkdownToHtml(planMd);
+      const merged = `${fresh.content ?? ""}<hr/>${planHtml}`.trim();
+      await updateNote(planContext.noteId, fresh.title ?? "", merged);
+      setSavedPlanIds((prev) => {
+        const next = new Set(prev);
+        next.add(messageId);
+        return next;
+      });
+      planContext.onSaved?.();
+    } catch (e) {
+      console.error("save plan failed:", e);
+    } finally {
+      setSavingPlan(false);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -252,22 +302,15 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                 )}
               </div>
             )}
-            <div
-              style={{
-                maxWidth: fullscreen ? 640 : "88%",
-                padding: "8px 12px",
-                borderRadius: 14,
-                fontSize: 13.5,
-                lineHeight: 1.5,
-                background: m.role === "user" ? "#1C1C1E" : "rgba(0,0,0,0.05)",
-                color: m.role === "user" ? "#FFFFFF" : "#1C1C1E",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-              }}
-            >
-              {renderMarkdown(m.content)}
-            </div>
+            <AssistantOrUserBubble
+              message={m}
+              fullscreen={fullscreen}
+              isPlanMode={Boolean(planContext)}
+              isSavingPlan={savingPlan}
+              isPlanSaved={savedPlanIds.has(m.id)}
+              onOptionPick={handleOptionPick}
+              onSavePlan={handleSavePlan}
+            />
           </div>
         ))}
         {sending && (
@@ -385,6 +428,174 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
         </div>
         <ModelSelector />
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Message bubble with plan-mode awareness ─────────────────────────────────
+//
+// Default: render the bubble exactly as before (markdown body in a chat
+// bubble). Plan mode adds two parsers on top of assistant messages:
+//   1. `<plan>...</plan>` blocks → render as a "finalized plan" card with
+//      a Save-to-note button next to a Keep-editing dismissal.
+//   2. `[ ] option text` lines → render below the body as clickable chips
+//      that auto-send "Daniel chose: <opt>" so the conversation continues
+//      without typing.
+// Both parsers are pure-text: if the patterns don't appear, the message
+// renders identically to a normal chat turn.
+
+interface BubbleMsg {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+}
+
+function AssistantOrUserBubble({
+  message: m,
+  fullscreen,
+  isPlanMode,
+  isSavingPlan,
+  isPlanSaved,
+  onOptionPick,
+  onSavePlan,
+}: {
+  message: BubbleMsg;
+  fullscreen: boolean;
+  isPlanMode: boolean;
+  isSavingPlan: boolean;
+  isPlanSaved: boolean;
+  onOptionPick: (option: string) => void;
+  onSavePlan: (messageId: number, planMd: string) => void;
+}) {
+  const baseStyle: React.CSSProperties = {
+    maxWidth: fullscreen ? 640 : "88%",
+    padding: "8px 12px",
+    borderRadius: 14,
+    fontSize: 13.5,
+    lineHeight: 1.5,
+    background: m.role === "user" ? "#1C1C1E" : "rgba(0,0,0,0.05)",
+    color: m.role === "user" ? "#FFFFFF" : "#1C1C1E",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+  };
+
+  if (m.role === "user" || !isPlanMode) {
+    return <div style={baseStyle}>{renderMarkdown(m.content)}</div>;
+  }
+
+  // Plan-mode assistant: pull out finalize block first, then options.
+  const { before, plan, after } = extractPlanBlock(m.content);
+
+  // For the non-plan portion, extract option chips out of body lines.
+  const headerText = plan ? before : m.content;
+  const { body: parsedBody, options } = extractOptions(headerText);
+  const trailingText = plan ? after : "";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8, maxWidth: fullscreen ? 640 : "88%" }}>
+      {parsedBody && (
+        <div style={baseStyle}>{renderMarkdown(parsedBody)}</div>
+      )}
+      {options.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {options.map((opt, i) => (
+            <button
+              key={`${m.id}-opt-${i}`}
+              onClick={() => onOptionPick(opt)}
+              style={{
+                fontSize: 12, fontFamily: baseStyle.fontFamily,
+                color: "#1C1C1E",
+                background: "rgba(74,222,128,0.10)",
+                border: "0.5px solid rgba(74,222,128,0.45)",
+                borderRadius: 999, padding: "4px 12px",
+                cursor: "pointer",
+              }}
+              title={`Send "Daniel chose: ${opt}"`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+      {plan && (
+        <PlanFinalizeCard
+          planMd={plan}
+          isSaving={isSavingPlan}
+          isSaved={isPlanSaved}
+          onSave={() => onSavePlan(m.id, plan)}
+        />
+      )}
+      {trailingText && (
+        <div style={baseStyle}>{renderMarkdown(trailingText)}</div>
+      )}
+    </div>
+  );
+}
+
+function PlanFinalizeCard({
+  planMd, isSaving, isSaved, onSave,
+}: {
+  planMd: string;
+  isSaving: boolean;
+  isSaved: boolean;
+  onSave: () => void;
+}) {
+  return (
+    <div
+      style={{
+        background: "#FDFCFA",
+        border: "1px solid rgba(74,222,128,0.45)",
+        borderRadius: 12,
+        padding: "12px 14px",
+        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+        display: "flex", flexDirection: "column", gap: 10,
+        width: "100%",
+      }}
+    >
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        fontSize: 11, color: "#3A8C3F", letterSpacing: 0.5,
+        textTransform: "uppercase", fontWeight: 600,
+      }}>
+        <span>📋</span><span>Plan ready</span>
+      </div>
+      <div
+        style={{
+          fontSize: 13, color: "#1C1C1E", lineHeight: 1.5,
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {renderMarkdown(planMd)}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {isSaved ? (
+          <span style={{
+            fontSize: 12, color: "#3A8C3F", fontWeight: 500,
+          }}>✓ Saved to note</span>
+        ) : (
+          <>
+            <button
+              onClick={onSave}
+              disabled={isSaving}
+              style={{
+                fontSize: 12, fontWeight: 500,
+                color: "#fff", background: "#1C1C1E",
+                border: "none", borderRadius: 8,
+                padding: "6px 12px",
+                cursor: isSaving ? "default" : "pointer",
+                opacity: isSaving ? 0.6 : 1,
+              }}
+            >
+              {isSaving ? "Saving…" : "Save to note"}
+            </button>
+            <span style={{ fontSize: 11.5, color: "#8E8E93" }}>
+              or keep editing — ask Gooni to revise
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
