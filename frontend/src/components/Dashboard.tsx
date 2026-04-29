@@ -8,7 +8,7 @@ import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
 import { displayTitle, stripHtmlForExcerpt } from "../utils/notePreview";
 import { NoteEditor } from "./notes/NoteEditor";
-import { BrainOrb } from "./BrainOrb";
+import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
 import { DevStreakStat } from "./DevStreakStat";
@@ -250,7 +250,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
           <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "stretch", flexWrap: "wrap", justifyContent: "flex-end" }}>
             {/* 3D brain — opens the notes visualization. Left of the stat cards
                 so it reads as a peer affordance, not buried in a toolbar. */}
-            <BrainOrb size={60} onClick={() => setExploreOpen(true)} />
+            <NeuralBrain size={60} onClick={() => setExploreOpen(true)} />
 
             {/* notes this week */}
             <div style={{
