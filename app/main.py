@@ -164,6 +164,7 @@ def _run_column_migrations(engine):
             ("conversations", "summary", "TEXT"),
             ("messages", "feedback_for_message_id", "INTEGER"),
             ("messages", "is_feedback", "INTEGER"),
+            ("messages", "trace", "TEXT"),
             ("notes", "classified_embedding", "TEXT"),
             ("notes", "backlog_note_id", "INTEGER"),
             ("notes", "last_classify_signals", "TEXT"),
@@ -1397,12 +1398,19 @@ def _serialize_conversation(c: Conversation) -> dict:
 
 
 def _serialize_message(m: Message) -> dict:
+    parsed_trace = None
+    if m.trace:
+        try:
+            parsed_trace = json.loads(m.trace)
+        except (ValueError, TypeError):
+            parsed_trace = None
     return {
         "id": m.id,
         "conversation_id": m.conversation_id,
         "role": m.role,
         "content": m.content,
         "created_at": m.created_at,
+        "trace": parsed_trace,
     }
 
 

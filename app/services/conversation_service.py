@@ -147,9 +147,13 @@ class ConversationService:
     # ── Messages ───────────────────────────────────────────────────────────────
 
     def add_message(
-        self, conversation_id: int, role: str, content: str, db: Session
+        self, conversation_id: int, role: str, content: str, db: Session,
+        trace: str | None = None,
     ) -> Message:
-        msg = Message(conversation_id=conversation_id, role=role, content=content)
+        msg = Message(
+            conversation_id=conversation_id, role=role, content=content,
+            trace=trace,
+        )
         db.add(msg)
         db.commit()
         # Update last_message_at on the conversation

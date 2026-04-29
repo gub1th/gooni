@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { renderMarkdown } from "../../utils/markdown";
-import type { RouterSignals } from "../../services/api";
+import type { RouterSignals, MessageTraceStep } from "../../services/api";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -8,6 +8,13 @@ const TOOL_LABELS: Record<string, string> = {
   web_search: "🔍 Searched the web",
   save_memory: "💾 Saved a memory",
   fetch_url: "🔗 Fetched a URL",
+};
+
+const TRACE_ICON: Record<MessageTraceStep["type"], string> = {
+  intention: "⊙",
+  memory_recall: "◇",
+  tool_call: "▸",
+  reply: "✎",
 };
 
 interface MessageBubbleProps {
@@ -18,6 +25,7 @@ interface MessageBubbleProps {
     intention?: string;
     tools_used?: string[];
     signals?: RouterSignals;
+    trace?: MessageTraceStep[] | null;
   };
 }
 
@@ -25,6 +33,11 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const [expanded, setExpanded] = useState(false);
   const [signalsExpanded, setSignalsExpanded] = useState(false);
+  const [traceExpanded, setTraceExpanded] = useState(false);
+
+  // Unified trace overrides the legacy intention/tools_used/signals visuals.
+  // Older messages stored before the trace column was wired fall back below.
+  const trace = message.trace && message.trace.length > 0 ? message.trace : null;
 
   const signals = message.signals;
   const signalCounts = signals
@@ -50,7 +63,47 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         marginBottom: 12,
       }}
     >
-      {!isUser && !!message.tools_used?.length && (
+      {!isUser && trace && (
+        <div style={{ marginBottom: 6, maxWidth: "80%" }}>
+          <button
+            onClick={() => setTraceExpanded((v) => !v)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "2px 0",
+              color: "#6B7280",
+              fontSize: 12.5,
+              fontFamily: FONT,
+              fontWeight: 500,
+            }}
+          >
+            <span>Orchestrated reply</span>
+            <span style={{ fontSize: 10 }}>{traceExpanded ? "▾" : "▸"}</span>
+            <span style={{ fontSize: 11, color: "#9CA3AF" }}>
+              · {trace.length} step{trace.length === 1 ? "" : "s"}
+            </span>
+          </button>
+          {traceExpanded && (
+            <div
+              style={{
+                marginTop: 6,
+                paddingLeft: 4,
+                borderLeft: "1px solid rgba(0,0,0,0.08)",
+                fontFamily: FONT,
+              }}
+            >
+              {trace.map((step, idx) => (
+                <TraceStep key={idx} step={step} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {!isUser && !trace && !!message.tools_used?.length && (
         <div style={{ marginBottom: 4 }}>
           {message.tools_used.map((tool) => (
             <div
@@ -71,7 +124,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           ))}
         </div>
       )}
-      {!isUser && message.intention && (
+      {!isUser && !trace && message.intention && (
         <div style={{ marginBottom: 4, maxWidth: "80%" }}>
           <button
             onClick={() => setExpanded((v) => !v)}
@@ -114,7 +167,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           )}
         </div>
       )}
-      {!isUser && signals && (
+      {!isUser && !trace && signals && (
         <div style={{ marginBottom: 4, maxWidth: "80%" }}>
           <button
             onClick={() => setSignalsExpanded((v) => !v)}
@@ -197,6 +250,59 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       >
         {renderMarkdown(message.content)}
       </div>
+    </div>
+  );
+}
+
+function TraceStep({ step }: { step: MessageTraceStep }) {
+  const [open, setOpen] = useState(false);
+  const hasDetail = !!step.detail || (step.args && Object.keys(step.args).length > 0);
+  return (
+    <div style={{ padding: "4px 0 4px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
+      <button
+        onClick={() => hasDetail && setOpen((v) => !v)}
+        style={{
+          display: "flex", alignItems: "center", gap: 8,
+          background: "none", border: "none",
+          cursor: hasDetail ? "pointer" : "default",
+          padding: 0, fontFamily: FONT, color: "#1C1C1E",
+          fontSize: 12.5, lineHeight: 1.4, textAlign: "left",
+        }}
+      >
+        <span style={{ color: "#9CA3AF", fontSize: 11, width: 14, flexShrink: 0 }}>
+          {TRACE_ICON[step.type]}
+        </span>
+        <span>{step.label}</span>
+        {hasDetail && (
+          <span style={{ fontSize: 9, color: "#9CA3AF" }}>{open ? "▾" : "▸"}</span>
+        )}
+      </button>
+      {open && step.detail && (
+        <div
+          style={{
+            marginLeft: 22,
+            fontSize: 12, color: "#636366", lineHeight: 1.5,
+            background: "rgba(0,0,0,0.03)",
+            padding: "6px 10px", borderRadius: 6,
+            wordBreak: "break-word",
+          }}
+        >
+          {step.detail}
+        </div>
+      )}
+      {open && step.args && Object.keys(step.args).length > 0 && (
+        <div
+          style={{
+            marginLeft: 22,
+            fontSize: 11, color: "#8E8E93", lineHeight: 1.5,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          }}
+        >
+          {Object.entries(step.args).map(([k, v]) => (
+            <div key={k}>{k}: {String(v)}</div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

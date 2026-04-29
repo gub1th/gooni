@@ -1,3 +1,4 @@
+import json
 import re
 import threading
 
@@ -203,7 +204,17 @@ class Orchestrator:
                     skip_normal_reply = pure_signal
 
         if skip_normal_reply and feedback_ack is not None:
-            conversation_service.add_message(conv.id, "assistant", feedback_ack, db)
+            short_trace = _build_trace(
+                intention=None,
+                memory_context=None,
+                signals_summary=signals_summary,
+                feedback_tools=feedback_tools,
+                feedback_ack=feedback_ack,
+            )
+            conversation_service.add_message(
+                conv.id, "assistant", feedback_ack, db,
+                trace=json.dumps(short_trace) if short_trace else None,
+            )
             # Reconcile any memory candidates off-thread even on short-circuit.
             if memory_candidates:
                 threading.Thread(
@@ -278,7 +289,17 @@ class Orchestrator:
         if feedback_ack is not None:
             response = f"{feedback_ack}\n\n{response}"
 
-        conversation_service.add_message(conv.id, "assistant", response, db)
+        full_trace = _build_trace(
+            intention=intention_context,
+            memory_context=memory_context,
+            signals_summary=signals_summary,
+            feedback_tools=feedback_tools,
+            feedback_ack=feedback_ack,
+        )
+        conversation_service.add_message(
+            conv.id, "assistant", response, db,
+            trace=json.dumps(full_trace) if full_trace else None,
+        )
 
         # Reconcile memory candidates that the unified extractor already
         # surfaced. Avoids the second LLM call the legacy add_exchange path
@@ -324,6 +345,64 @@ class Orchestrator:
         for m in memories:
             lines.append(f"  - {m.get('content') or m.get('memory', '')[:120]}")
         return "\n".join(lines)
+
+
+def _build_trace(
+    *,
+    intention: str | None,
+    memory_context: str | None,
+    signals_summary: dict,
+    feedback_tools: list[str],
+    feedback_ack: str | None,
+) -> list[dict]:
+    """Translate per-turn orchestrator state into a structured trace the
+    chat UI can render as steps. Each entry has a `type` and human-readable
+    `label`; optional `detail` carries a short expandable description.
+    """
+    steps: list[dict] = []
+    if intention:
+        steps.append({
+            "type": "intention",
+            "label": "Read intent",
+            "detail": intention,
+        })
+    if memory_context:
+        # Cheap heuristic: count "- " bullets in the memory block to surface
+        # how many memories were recalled.
+        recalled = max(0, memory_context.count("\n- "))
+        if recalled > 0:
+            steps.append({
+                "type": "memory_recall",
+                "label": f"Recalled {recalled} memor{'y' if recalled == 1 else 'ies'}",
+                "detail": None,
+            })
+    for fr in signals_summary.get("feature_requests") or []:
+        steps.append({
+            "type": "tool_call",
+            "label": "Logged feature request",
+            "detail": fr.get("title") or "",
+            "args": {"why": fr.get("why") or ""},
+        })
+    for tc in signals_summary.get("tone_corrections") or []:
+        steps.append({
+            "type": "tool_call",
+            "label": "Captured tone correction",
+            "detail": tc.get("rule") or "",
+        })
+    if signals_summary.get("memory_count"):
+        n = signals_summary["memory_count"]
+        steps.append({
+            "type": "tool_call",
+            "label": f"Stored {n} memor{'y' if n == 1 else 'ies'}",
+            "detail": None,
+        })
+    if "undo_feedback" in (feedback_tools or []):
+        steps.append({
+            "type": "tool_call",
+            "label": "Undid last feedback",
+            "detail": feedback_ack,
+        })
+    return steps
 
 
 Orchestrator = Orchestrator()

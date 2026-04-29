@@ -732,6 +732,13 @@ export interface ApiConversation {
   last_message_at: string | null;
 }
 
+export interface MessageTraceStep {
+  type: "intention" | "memory_recall" | "tool_call" | "reply";
+  label: string;
+  detail?: string | null;
+  args?: Record<string, unknown> | null;
+}
+
 export interface ApiMessage {
   id: number;
   conversation_id: number;
@@ -740,6 +747,7 @@ export interface ApiMessage {
   created_at: string;
   is_feedback?: boolean;
   feedback_for_message_id?: number | null;
+  trace?: MessageTraceStep[] | null;
 }
 
 export async function fetchConversations(): Promise<ApiConversation[]> {
