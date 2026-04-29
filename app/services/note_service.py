@@ -221,6 +221,7 @@ def classify_note(note_id: int) -> None:
             "feature_requests": feature_summaries,
             "memory_count": len(memories_written),
             "memory_types": [m.type for m in memories_written],
+            "worth_expanding": bool(signals.get("worth_expanding")),
             "classified_at": datetime.now(timezone.utc).isoformat(),
         }
         note.last_classify_signals = json.dumps(signals_summary)

@@ -160,7 +160,7 @@ def extract_candidates(user_message: str, assistant_reply: str) -> list[dict[str
     return [c for c in parsed if _validate_candidate(c)]
 
 
-_SIGNALS_PROMPT = """Analyze the TEXT below and emit ALL signals it carries. Single JSON object with three arrays.
+_SIGNALS_PROMPT = """Analyze the TEXT below and emit ALL signals it carries. Single JSON object.
 
 PRIOR ASSISTANT REPLY (may be empty when text is a standalone note save):
 \"\"\"{prev_assistant}\"\"\"
@@ -187,10 +187,11 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "context": {{"time": null|str, "location": null|str, "scope": "global"|"contextual"}},
       "confidence": 0.0-1.0
     }}
-  ]
+  ],
+  "worth_expanding": true | false
 }}
 
-Rules per array:
+Rules per field:
 
 tone_corrections:
 - Critique of the prior assistant reply's tone, style, length, structure, or approach.
@@ -216,7 +217,17 @@ memories:
 - Empty when text is just a question, a thought, or a feature request with nothing
   declarative about Daniel.
 
-If no signals across all three, return all-empty arrays.
+worth_expanding (bool):
+- TRUE if the text names a topic, idea, concept, project, or open question that
+  Daniel would benefit from thinking through with a planning partner.
+- TRUE for short topic-noun phrases that imply work to do: "cursor for content
+  creators", "ambient device for the kitchen", "why is auth eating my afternoon".
+- FALSE for journals ("lunch was good"), completed tasks ("taxes done"),
+  one-off facts ("meeting at 3pm"), feedback for Gooni, pure emotional venting,
+  or memories already covered by the memories array.
+- When unsure, lean FALSE — false positives waste Daniel's attention.
+
+If no signals across all fields, return all-empty arrays and worth_expanding=false.
 
 JSON:"""
 
@@ -257,21 +268,27 @@ def _normalize_memories(items: Any) -> list[dict]:
     return [c for c in items if _validate_candidate(c)]
 
 
-def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, list[dict]]:
-    """Single LLM call that emits all three signal types from one input.
+def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, Any]:
+    """Single LLM call that emits all signal types from one input.
 
     Returns:
       {
         "tone_corrections": [{"rule": str}],
         "feature_requests": [{"title": str, "why": str}],
         "memories":         [memory candidate dicts],
+        "worth_expanding":  bool,
       }
 
-    Empty across all three on parse failure or no signal — never raises.
+    All-empty / False on parse failure or no signal — never raises.
     Pass prev_assistant when this text is a chat reply (helps tone detection);
     leave None for note saves (tone usually empty for those).
     """
-    empty = {"tone_corrections": [], "feature_requests": [], "memories": []}
+    empty = {
+        "tone_corrections": [],
+        "feature_requests": [],
+        "memories": [],
+        "worth_expanding": False,
+    }
     if not text or not text.strip():
         return empty
     prompt = _SIGNALS_PROMPT.format(
@@ -300,6 +317,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, l
         "tone_corrections": _normalize_tone(parsed.get("tone_corrections")),
         "feature_requests": _normalize_features(parsed.get("feature_requests")),
         "memories":         _normalize_memories(parsed.get("memories")),
+        "worth_expanding":  bool(parsed.get("worth_expanding")),
     }
 
 

@@ -79,6 +79,7 @@ export interface NoteClassifySignals {
   feature_requests: { title: string; list_item_id: number }[];
   memory_count: number;
   memory_types: string[];
+  worth_expanding?: boolean;
   classified_at: string;
 }
 
