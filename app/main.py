@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session, aliased
@@ -33,6 +33,7 @@ from .llm.client import llm_client
 from .services.conversation_service import conversation_service
 from .services.item_service import item_service
 from .services.memory_service import memory_service
+from .services.messaging import dispatch_inbound, imessage_channel
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
 
@@ -904,6 +905,46 @@ async def chat(body: ChatRequest, db: Session = Depends(get_db)):
         model=body.model,
     )
     return {"content": content, "usage": usage, "intention": usage.get("intention") or ""}
+
+
+# ── iMessage webhook (BlueBubbles) ────────────────────────────────────────────
+
+@app.post("/webhooks/imessage")
+async def imessage_webhook(
+    payload: dict,
+    x_secret: str | None = Header(None, alias="X-Secret"),
+    db: Session = Depends(get_db),
+):
+    """Receive a BlueBubbles 'new-message' event, route it through the
+    orchestrator, and POST a reply back via BlueBubbles. Auth: shared-secret
+    header configured in BlueBubbles' webhook settings.
+
+    Inbound events from the user's own Apple ID (i.e. messages Daniel sent FROM
+    his Mac/iPhone) carry isFromMe=true on the BlueBubbles payload. We treat
+    those as the user talking TO Gooni only when they originate from an
+    allowlisted handle on the recipient side — i.e. Daniel iMessage'ing his own
+    number from a different device. For now we drop isFromMe events to avoid
+    feedback loops where Gooni's own outbound message triggers a webhook back.
+    """
+    expected = os.getenv("IMESSAGE_WEBHOOK_SECRET")
+    if not expected or x_secret != expected:
+        raise HTTPException(status_code=401, detail="bad secret")
+
+    data = payload.get("data") or {}
+    if data.get("isFromMe"):
+        return {"ok": True, "skipped": "from_me"}
+
+    handle = (data.get("handle") or {}).get("address") or ""
+    text = data.get("text") or ""
+    if not handle or not text:
+        return {"ok": True, "skipped": "missing handle or text"}
+
+    result = dispatch_inbound(imessage_channel, handle, text, db)
+    if result is None:
+        return {"ok": True, "skipped": "not_allowlisted"}
+    _raw, formatted = result
+    imessage_channel.send(handle, formatted)
+    return {"ok": True}
 
 
 # ── Spaces ────────────────────────────────────────────────────────────────────

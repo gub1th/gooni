@@ -6,6 +6,9 @@ import tempfile
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
+
+load_dotenv()  # must run before app.* imports that read env at import time
+
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -18,86 +21,46 @@ from telegram.ext import (
 from app.db.database import SessionLocal, engine
 from app.db.models import Base
 from app.llm.client import llm_client
-from app.services.orchestrator import Orchestrator
+from app.services.messaging import dispatch_inbound, telegram_channel
 from app.services.todo_nudge import build_nudge_message, seconds_until_next
-
-load_dotenv()
-
-
-def _markdown_to_telegram_html(text: str) -> str:
-    """Convert the LLM's markdown to Telegram HTML so **bold** / `code` /
-    [text](url) actually render. parse_mode='HTML' is more lenient than
-    Telegram's MarkdownV2 (no need to escape every `.`/`-`/etc).
-
-    Order matters: escape HTML chars first, THEN substitute markdown so the
-    pattern characters aren't blown away by escaping.
-    """
-    if not text:
-        return ""
-    # Escape HTML chars so user content can't accidentally break parsing.
-    out = (
-        text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-    )
-    # Bold: **text**
-    out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out, flags=re.DOTALL)
-    # Inline code: `text`
-    out = re.sub(r"`([^`\n]+?)`", r"<code>\1</code>", out)
-    # Links: [text](url)
-    out = re.sub(
-        r"\[([^\]]+)\]\((https?://[^\s)]+)\)",
-        r'<a href="\2">\1</a>',
-        out,
-    )
-    # Italic: *text* (must run AFTER bold). Skip when a digit is on either
-    # side (avoids 2*3 etc) — Telegram has no italic-via-asterisk in HTML
-    # anyway, so fall back to <i>.
-    out = re.sub(
-        r"(?<![\*\w])\*([^\*\n]+?)\*(?!\w)",
-        r"<i>\1</i>",
-        out,
-    )
-    return out
 
 Base.metadata.create_all(bind=engine)
 
 
 async def _respond(update: Update, message: str, image_url: str | None = None) -> None:
+    chat_id = update.message.chat_id
+
     def chat_fn():
         db = SessionLocal()
         try:
-            return Orchestrator.handle_chat(message, db, image_url=image_url)
+            return dispatch_inbound(
+                telegram_channel,
+                str(chat_id),
+                message,
+                db,
+                image_url=image_url,
+            )
         finally:
             db.close()
 
-    response, usage = await asyncio.to_thread(chat_fn)
-    rendered = _markdown_to_telegram_html(response)
+    result = await asyncio.to_thread(chat_fn)
+    if result is None:
+        # Sender not allowlisted. The chat_filter on the handler should also
+        # reject these, but defense in depth.
+        return
+    raw, rendered = result
     try:
         await update.message.reply_text(rendered, parse_mode="HTML")
     except Exception as e:
-        # If Telegram rejects the HTML (rare — we escape, but a stray tag
-        # could slip through), retry as plain text rather than dropping
-        # the response on the floor.
+        # If Telegram rejects our HTML (rare — escapes are conservative, but
+        # a stray tag can slip through), retry as raw markdown rather than
+        # dropping the response on the floor.
         print(f"telegram HTML send error: {e}; falling back to plain text")
-        await update.message.reply_text(response)
-
-    if usage:
-        tools_used = usage.get("tools_used", [])
-        if tools_used:
-            print(f"[tools] {', '.join(tools_used)}")
-        mem = usage.get("memory", {})
-        parts = []
-        if mem.get("memories_saved"):
-            parts.append(f"{mem['memories_saved']} memories")
-        if mem.get("note_saved"):
-            parts.append("note logged")
-        if parts:
-            print(f"[memory] {' · '.join(parts)}")
+        await update.message.reply_text(raw)
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # Get highest-resolution photo (Telegram sends multiple sizes; last = largest)
+    # Telegram sends multiple sizes; last entry = highest resolution.
     tg_file = await update.message.photo[-1].get_file()
     photo_bytes = await tg_file.download_as_bytearray()
     b64 = base64.b64encode(photo_bytes).decode("utf-8")
@@ -242,22 +205,6 @@ async def handle_digest_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
         db.close()
 
 
-def _parse_chat_ids(raw: str | None) -> list[int]:
-    """Parse TELEGRAM_CHAT_ID env var. Accepts a single id or comma-separated list."""
-    if not raw:
-        return []
-    ids: list[int] = []
-    for chunk in raw.split(","):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        try:
-            ids.append(int(chunk))
-        except ValueError:
-            raise ValueError(f"TELEGRAM_CHAT_ID contains non-integer value: {chunk!r}")
-    return ids
-
-
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -267,8 +214,9 @@ def main():
     # message, and without a chat-ID filter anyone who finds the bot can run
     # up the bill + pollute the conversation DB. Opt-in override for local
     # testing: set ALLOW_UNFILTERED_TELEGRAM=1 (never use in prod).
-    allowed_chat_ids = _parse_chat_ids(os.getenv("TELEGRAM_CHAT_ID"))
-    if not allowed_chat_ids and os.getenv("ALLOW_UNFILTERED_TELEGRAM") != "1":
+    allowed_chat_ids = telegram_channel.allowed_chat_ids
+    unfiltered_ok = os.getenv("ALLOW_UNFILTERED_TELEGRAM") == "1"
+    if not allowed_chat_ids and not unfiltered_ok:
         raise ValueError(
             "TELEGRAM_CHAT_ID is not set. Set it to your personal Telegram chat ID "
             "(message @userinfobot to find yours; comma-separate multiple). "
@@ -276,11 +224,18 @@ def main():
             "ALLOW_UNFILTERED_TELEGRAM=1 — never do this in prod."
         )
 
-    chat_filter = filters.Chat(chat_id=allowed_chat_ids) if allowed_chat_ids else filters.ALL
+    chat_filter = (
+        filters.Chat(chat_id=allowed_chat_ids) if allowed_chat_ids else filters.ALL
+    )
 
     nudge_enabled = os.getenv("NUDGE_ENABLED", "1") != "0"
 
     async def _post_init(application):
+        # Wire the bot handle into the channel singleton so proactive sends
+        # (currently unused; reserved for cross-channel nudge fan-out) can
+        # route through telegram_channel.send.
+        telegram_channel.attach_bot(application.bot)
+
         # Spawn the daily nudge once the loop is alive. Skip if no chat_ids —
         # we don't know who to ping in unfiltered dev mode, and silent dev is
         # better than fan-out spam.
