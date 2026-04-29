@@ -145,8 +145,17 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         setInk((s) => (s && s.id === inkId ? null : s));
         setRowPulsing(false);
       }, 1280);
+      // Classifier runs async (~2-4s). Re-fetch stats once it's likely
+      // done so the new card picks up its `worth_expanding` pill without
+      // a manual refresh.
+      setTimeout(() => {
+        fetchDashboardStats().then(setStats).catch(console.error);
+      }, 4500);
     } else {
       refresh.then(setStats).catch(console.error);
+      setTimeout(() => {
+        fetchDashboardStats().then(setStats).catch(console.error);
+      }, 4500);
     }
   }
 
