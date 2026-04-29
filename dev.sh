@@ -100,22 +100,21 @@ if command -v cmux >/dev/null 2>&1; then
   }
 
   # If we're inside cmux, derive the parent workspace title for naming.
-  # Outside cmux: use just the worktree name.
+  # `--id-format uuids` produces lines like:
+  #   "  <uuid>  <title>"             (non-selected)
+  #   "* <uuid>  <title>  [selected]" (currently selected)
+  # so we strip leading "*" / whitespace, match the UUID prefix, and
+  # trim a trailing "[selected]" token if present.
   PARENT_TITLE=""
   if [[ -n "${CMUX_WORKSPACE_ID:-}" ]]; then
-    # `--id-format uuids` puts the UUID first; strip leading "* " (selected
-    # marker) and any "[selected]" trailing token to recover the title.
     PARENT_TITLE=$(cmux --id-format uuids list-workspaces 2>/dev/null \
       | awk -v id="$CMUX_WORKSPACE_ID" '
-          { line=$0; sub(/^\* /, "", line); split(line, a, /[ \t]+/);
-            if (a[1] == id) {
-              # Reassemble title: everything after the UUID, drop trailing
-              # "[selected]" if present.
-              t = ""; for (i = 2; i <= length(a); i++) {
-                if (a[i] == "[selected]") break;
-                t = (t == "" ? a[i] : t " " a[i]);
-              }
-              print t; exit;
+          { sub(/^[ \t*]+/, "");
+            if (substr($0, 1, length(id)) == id) {
+              rest = substr($0, length(id) + 1);
+              sub(/^[ \t]+/, "", rest);
+              sub(/[ \t]+\[selected\]$/, "", rest);
+              print rest; exit;
             }
           }')
   fi
