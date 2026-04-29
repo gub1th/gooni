@@ -426,6 +426,8 @@ export interface ApiItem {
   subtitle: string | null;
   endgoal: string | null;
   committed: boolean;
+  actionable: boolean;
+  is_primary: boolean;
   done: boolean;
   due_date: string | null;
   completed_at: string | null;
@@ -485,6 +487,8 @@ export async function updateItem(
     text: string;
     endgoal: string | null;
     committed: boolean;
+    actionable: boolean;
+    is_primary: boolean;
     done: boolean;
     due_date: string | null;
     subtitle: string | null;
@@ -539,6 +543,7 @@ export interface ApiListItem {
   subtitle: string | null;
   done: boolean;
   actionable: boolean;
+  is_primary: boolean;
   completed_at: string | null;
   sort_order: number;
   due_date: string | null;
@@ -618,6 +623,7 @@ export async function updateListItem(
     subtitle?: string | null;
     done?: boolean;
     actionable?: boolean;
+    is_primary?: boolean;
     sort_order?: number;
     due_date?: string | null;
   },

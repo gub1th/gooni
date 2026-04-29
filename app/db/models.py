@@ -223,6 +223,10 @@ class ListItem(Base):
     # actionable=True → renders with checkbox (a thing to do).
     # actionable=False → renders as a bullet/idea (no toggle, no completion state).
     actionable = Column(Boolean, default=True, nullable=False)
+    # Singleton: only one ListItem in the whole table can be is_primary=True.
+    # The "primary focus" surfaced front-and-center on the dashboard. Service
+    # enforces uniqueness.
+    is_primary = Column(Boolean, default=False, nullable=False)
     done = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)

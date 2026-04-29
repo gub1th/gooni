@@ -101,12 +101,18 @@ class ItemService:
         item = self.get(db, item_id)
         if not item:
             return None
+        if patch.get("is_primary") is True:
+            # Singleton: clear any existing primary before setting this one.
+            db.query(ListItem).filter(
+                ListItem.is_primary.is_(True), ListItem.id != item_id
+            ).update({"is_primary": False}, synchronize_session=False)
         for key in (
             "text",
             "endgoal",
             "committed",
             "done",
             "actionable",
+            "is_primary",
             "due_date",
             "subtitle",
             "sort_order",
@@ -318,6 +324,7 @@ def _serialize(it: ListItem) -> dict[str, Any]:
         "committed": bool(it.committed),
         "done": bool(it.done),
         "actionable": bool(it.actionable),
+        "is_primary": bool(it.is_primary),
         "due_date": it.due_date.isoformat() if it.due_date else None,
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
         "sort_order": it.sort_order,

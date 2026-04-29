@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  fetchDashboardStats, fetchGooniTake,
+  fetchDashboardStats,
   type ApiNote, type DashboardStats,
 } from "../services/api";
+import { PrimaryFocusCard } from "./PrimaryFocusCard";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
 import { displayTitle, stripHtmlForExcerpt } from "../utils/notePreview";
@@ -60,8 +61,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
   onPlanNote?: (noteId: number) => void;
 }) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [take, setTake] = useState<string>("");
-  const [takeRefreshing, setTakeRefreshing] = useState(false);
   const [ink, setInk] = useState<InkState | null>(null);
   const [cardPulsing, setRowPulsing] = useState(false);
   const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
@@ -85,7 +84,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
   useEffect(() => {
     fetchDashboardStats().then(setStats).catch(console.error);
-    fetchGooniTake().then((r) => setTake(r.take)).catch(console.error);
   }, []);
 
   function startTyping(noteId: number, total: number) {
@@ -156,19 +154,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
       setTimeout(() => {
         fetchDashboardStats().then(setStats).catch(console.error);
       }, 4500);
-    }
-  }
-
-  async function refreshTake() {
-    if (takeRefreshing) return;
-    setTakeRefreshing(true);
-    try {
-      const r = await fetchGooniTake({ force: true });
-      setTake(r.take);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setTakeRefreshing(false);
     }
   }
 
@@ -440,56 +425,8 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
           </div>
         )}
 
-        {/* Gooni's Take — small banner above the unified Activity card. */}
-        <div style={{
-          background: "#fff",
-          border: "0.5px solid rgba(0,0,0,0.08)",
-          borderRadius: 12,
-          padding: 14,
-          marginBottom: 14,
-          position: "relative",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: GREEN, flexShrink: 0 }} />
-            <span style={{
-              fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
-              textTransform: "uppercase",
-            }}>
-              Gooni's Take
-            </span>
-          </div>
-          {take ? (
-            <p style={{ fontSize: 12.5, color: "#3C3C43", lineHeight: 1.55, margin: 0, paddingRight: 24 }}>
-              {take}
-            </p>
-          ) : (
-            <p style={{ fontSize: 12.5, color: "#C7C7CC", lineHeight: 1.55, margin: 0 }}>
-              No take yet — write a note and Gooni will weigh in.
-            </p>
-          )}
-          <button
-            onClick={refreshTake}
-            disabled={takeRefreshing}
-            title="Regenerate"
-            style={{
-              position: "absolute", top: 10, right: 10,
-              width: 22, height: 22, borderRadius: 6, border: "none",
-              background: "transparent", color: "#8E8E93", cursor: takeRefreshing ? "default" : "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "background 0.1s, color 0.1s",
-            }}
-            onMouseEnter={(e) => { if (!takeRefreshing) { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLButtonElement).style.color = "#3C3C43"; } }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.color = "#8E8E93"; }}
-          >
-            <svg
-              width="12" height="12" viewBox="0 0 16 16" fill="none"
-              style={{ animation: takeRefreshing ? "gooni-spin 0.8s linear infinite" : undefined, opacity: takeRefreshing ? 0.6 : 1 }}
-            >
-              <path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9L13 3v3.5H9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-              <path d="M13.5 8a5.5 5.5 0 0 1-9.4 3.9L3 13v-3.5h3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-            </svg>
-          </button>
-        </div>
+        {/* Primary Focus — drop a focus or click to promote. Replaces Gooni's Take. */}
+        <PrimaryFocusCard />
 
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />

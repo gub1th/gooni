@@ -146,6 +146,7 @@ class ListService:
         subtitle: str | None = None,
         done: bool | None = None,
         actionable: bool | None = None,
+        is_primary: bool | None = None,
         due_date: datetime | None = None,
         sort_order: int | None = None,
     ) -> ListItem | None:
@@ -165,6 +166,13 @@ class ListService:
             if not actionable:
                 item.done = False
                 item.completed_at = None
+        if is_primary is not None:
+            if is_primary:
+                # Singleton: clear any existing primary before setting this one.
+                db.query(ListItem).filter(
+                    ListItem.is_primary.is_(True), ListItem.id != item_id
+                ).update({"is_primary": False}, synchronize_session=False)
+            item.is_primary = bool(is_primary)
         if due_date is not None:
             item.due_date = due_date
         if sort_order is not None:
