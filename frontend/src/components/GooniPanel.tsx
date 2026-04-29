@@ -452,11 +452,13 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
 // Both parsers are pure-text: if the patterns don't appear, the message
 // renders identically to a normal chat turn.
 
-// Top-bar surface toggle (modal popup ↔ docked sidebar). Lives inside
-// the panel so the user can flip without going through Settings.
+// Top-bar surface toggle (modal popup ↔ docked sidebar) + close button.
+// Lives inside the panel so the user can flip surfaces and dismiss the
+// chat without the FAB hovering over the input area.
 function SurfaceToggleBar() {
   const surface = useGooniStore((s) => s.surface);
   const setSurface = useGooniStore((s) => s.setSurface);
+  const toggle = useGooniStore((s) => s.toggle);
   const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 
   return (
@@ -494,6 +496,21 @@ function SurfaceToggleBar() {
           );
         })}
       </div>
+      <button
+        onClick={toggle}
+        title="Close chat"
+        aria-label="Close Gooni chat"
+        style={{
+          width: 22, height: 22, borderRadius: 6,
+          border: "none", background: "transparent",
+          color: "#8E8E93", cursor: "pointer",
+          fontSize: 14, lineHeight: 1,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontFamily: FONT,
+        }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+      >×</button>
     </div>
   );
 }

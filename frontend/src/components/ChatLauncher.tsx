@@ -145,6 +145,11 @@ export function ChatLauncher() {
   const borderColor = hovered ? "#6EE7A0" : "#4ADE80";
   const scale = pressed ? 0.94 : hovered ? 1.08 : 1;
 
+  // When the panel is open, hide the FAB entirely. The panel's top-bar
+  // close button (added in GooniPanel's SurfaceToggleBar) takes over the
+  // dismiss affordance, and the orb stops crowding the panel's input.
+  if (isOpen) return null;
+
   return (
     <>
       <style>{`
