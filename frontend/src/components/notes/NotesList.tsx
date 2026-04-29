@@ -4,7 +4,7 @@ import { useSpacesStore } from "../../stores/useSpacesStore";
 import { cleanupEmptyNotes, patchNote, type ApiNote } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { SpaceIcon } from "./SpaceIcon";
-import { extractFirstImage } from "../../utils/notePreview";
+import { displayTitle, extractFirstImage } from "../../utils/notePreview";
 
 // Module-level drag state so Sidebar can read it without prop drilling
 export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
@@ -87,22 +87,21 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
   const plain = note.content ? stripHtml(note.content) : "";
   const trimmedTitle = note.title?.trim() ?? "";
   const thumbSrc = note.content ? extractFirstImage(note.content) : null;
-  let title: string;
+  const hasBody = plain.length > 0;
+  const title = trimmedTitle
+    ? trimmedTitle
+    : hasBody
+      ? displayTitle(note)
+      : thumbSrc
+        ? "Image"
+        : "Untitled";
   let preview: string;
   if (trimmedTitle) {
-    title = trimmedTitle;
     preview = plain.slice(0, 60);
-  } else if (plain) {
-    // First line (or first ~50 chars) becomes the display title.
-    const firstLineBreak = plain.search(/[\n\r]/);
-    title = plain.slice(0, firstLineBreak > 0 ? firstLineBreak : 50).trim() || "Untitled";
+  } else if (hasBody) {
     const rest = plain.slice(title.length).trim();
     preview = rest.slice(0, 60);
-  } else if (thumbSrc) {
-    title = "Image";
-    preview = "";
   } else {
-    title = "Untitled";
     preview = "";
   }
 

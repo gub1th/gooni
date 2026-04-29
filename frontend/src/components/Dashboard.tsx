@@ -5,7 +5,7 @@ import {
 } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
-import { stripHtmlForExcerpt } from "../utils/notePreview";
+import { displayTitle, stripHtmlForExcerpt } from "../utils/notePreview";
 import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
@@ -134,7 +134,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
             setStats(s);
             const first = s.recent_notes[0];
             if (first) {
-              const t = (first.title ?? "").trim() || "Untitled";
+              const t = displayTitle(first);
               const ex = stripHtml(first.content ?? "");
               startTyping(first.id, t.length + ex.length);
             }
@@ -341,7 +341,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
             }}>recent notes</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               {stats.recent_notes.slice(0, 4).map((note, idx) => {
-                const fullTitle = note.title?.trim() || "Untitled";
+                const fullTitle = displayTitle(note);
                 const fullExcerpt = stripHtmlForExcerpt(note.content ?? "");
                 const isFirst = idx === 0;
                 const isTyping = typing !== null && typing.noteId === note.id;

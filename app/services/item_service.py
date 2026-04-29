@@ -106,6 +106,7 @@ class ItemService:
             "endgoal",
             "committed",
             "done",
+            "actionable",
             "due_date",
             "subtitle",
             "sort_order",
@@ -115,6 +116,10 @@ class ItemService:
                 setattr(item, key, patch[key])
         if "done" in patch:
             item.completed_at = datetime.utcnow() if patch["done"] else None
+        if patch.get("actionable") is False:
+            # Flipping to idea clears completion state.
+            item.done = False
+            item.completed_at = None
         db.commit()
         db.refresh(item)
         return item
@@ -312,6 +317,7 @@ def _serialize(it: ListItem) -> dict[str, Any]:
         "endgoal": it.endgoal,
         "committed": bool(it.committed),
         "done": bool(it.done),
+        "actionable": bool(it.actionable),
         "due_date": it.due_date.isoformat() if it.due_date else None,
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
         "sort_order": it.sort_order,

@@ -101,18 +101,20 @@ class ConversationService:
     # ── Session management ─────────────────────────────────────────────────────
 
     def find_or_create_session(self, source: str, db: Session) -> Conversation:
-        """For telegram: always reuse the single persistent conversation.
-        For web: reuse the active conversation if last message was < SESSION_GAP_MINUTES ago."""
-        if source == "telegram":
+        """Bot channels (telegram, imessage, ...) reuse a single persistent
+        conversation per source — they're always-on threads, no gap-based
+        sessions. Web reuses the active conversation if last message was <
+        SESSION_GAP_MINUTES ago, else opens a new one."""
+        if source != "web":
             existing = (
                 db.query(Conversation)
-                .filter(Conversation.source == "telegram")
+                .filter(Conversation.source == source)
                 .order_by(Conversation.created_at.asc())
                 .first()
             )
             if existing:
                 return existing
-            return self.create(source="telegram", db=db)
+            return self.create(source=source, db=db)
 
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=SESSION_GAP_MINUTES)

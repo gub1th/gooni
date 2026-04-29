@@ -9,9 +9,9 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session, aliased
 
 from .db.database import engine, get_db
@@ -33,6 +33,7 @@ from .llm.client import llm_client
 from .services.conversation_service import conversation_service
 from .services.item_service import item_service
 from .services.memory_service import memory_service
+from .services.messaging import dispatch_inbound, imessage_channel
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
 
@@ -172,6 +173,7 @@ def _run_column_migrations(engine):
             ("list_items", "endgoal", "TEXT"),
             ("list_items", "committed", "INTEGER"),
             ("list_items", "updated_at", "DATETIME"),
+            ("list_items", "actionable", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -208,6 +210,7 @@ def _run_column_migrations(engine):
         # Backfill committed=0 on list_items so existing rows aren't NULL.
         if "list_items" in existing_tables:
             conn.execute(text("UPDATE list_items SET committed = 0 WHERE committed IS NULL"))
+            conn.execute(text("UPDATE list_items SET actionable = 1 WHERE actionable IS NULL"))
         conn.commit()
 
 
@@ -224,6 +227,55 @@ _migrate_memories_legacy_schema(engine)
 Base.metadata.create_all(bind=engine)
 # 5. Restore legacy memory rows onto the new schema (no-op if no migration ran)
 _backfill_memories(engine)
+
+
+def _dedupe_singleton_lists(engine):
+    """Older code paths could spawn duplicate canonical lists (focus, todo,
+    backlog) under race conditions. Squash to one row per type — keep the
+    lowest id, repoint items, delete the rest. Idempotent.
+    """
+    with engine.connect() as conn:
+        existing = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
+        if "lists" not in existing or "list_items" not in existing:
+            return
+        for type_ in ("focus", "todo", "backlog"):
+            rows = list(
+                conn.execute(
+                    text("SELECT id FROM lists WHERE type = :t ORDER BY id ASC"),
+                    {"t": type_},
+                )
+            )
+            if len(rows) <= 1:
+                continue
+            keep = rows[0][0]
+            drop = [r[0] for r in rows[1:]]
+            conn.execute(
+                text(
+                    "UPDATE list_items SET list_id = :keep "
+                    "WHERE list_id IN :drop"
+                ).bindparams(
+                    bindparam("drop", expanding=True),
+                ),
+                {"keep": keep, "drop": drop},
+            )
+            conn.execute(
+                text("DELETE FROM lists WHERE id IN :drop").bindparams(
+                    bindparam("drop", expanding=True)
+                ),
+                {"drop": drop},
+            )
+            print(
+                f"Migration: deduped {len(drop)} extra '{type_}' list(s) → kept id={keep}"
+            )
+        conn.commit()
+
+
+_dedupe_singleton_lists(engine)
 
 app = FastAPI()
 
@@ -543,6 +595,7 @@ def _serialize_list_item(it: ListItem) -> dict:
         "text": it.text,
         "subtitle": it.subtitle,
         "done": bool(it.done),
+        "actionable": bool(it.actionable),
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
         "sort_order": it.sort_order,
         "due_date": it.due_date.isoformat() if it.due_date else None,
@@ -584,6 +637,45 @@ def create_list(body: dict, db: Session = Depends(get_db)):
     return _serialize_list(lst)
 
 
+@app.patch("/lists/{list_id}")
+def update_list(list_id: int, body: dict, db: Session = Depends(get_db)):
+    lst = db.query(ListModel).filter(ListModel.id == list_id).first()
+    if not lst:
+        raise HTTPException(status_code=404, detail="list not found")
+    if "name" in body:
+        name = (body.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name cannot be empty")
+        lst.name = name
+    if "emoji" in body:
+        emoji = body.get("emoji")
+        lst.emoji = emoji if emoji else None
+    db.commit()
+    db.refresh(lst)
+    return _serialize_list(lst)
+
+
+@app.delete("/lists/{list_id}")
+def delete_list(list_id: int, db: Session = Depends(get_db)):
+    """Cascade delete the list and all of its items."""
+    lst = db.query(ListModel).filter(ListModel.id == list_id).first()
+    if not lst:
+        raise HTTPException(status_code=404, detail="list not found")
+    # Refuse to delete the canonical singletons — they're recreated on next
+    # boot and break tools/orchestrator that look them up by type.
+    if lst.type in ("todo", "backlog", "focus"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"cannot delete canonical {lst.type} list",
+        )
+    db.query(ListItem).filter(ListItem.list_id == list_id).delete(
+        synchronize_session=False
+    )
+    db.delete(lst)
+    db.commit()
+    return {"ok": True}
+
+
 @app.post("/lists/{list_id}/items")
 def add_list_item(list_id: int, body: dict, db: Session = Depends(get_db)):
     from .services.list_service import list_service
@@ -593,10 +685,12 @@ def add_list_item(list_id: int, body: dict, db: Session = Depends(get_db)):
     lst = db.query(ListModel).filter(ListModel.id == list_id).first()
     if not lst:
         raise HTTPException(status_code=404, detail="list not found")
+    actionable = body.get("actionable")
     item = list_service.add_item(
         list_id, text, db,
         subtitle=(body.get("subtitle") or None),
         source_note_id=body.get("source_note_id"),
+        actionable=(True if actionable is None else bool(actionable)),
     )
     return _serialize_list_item(item)
 
@@ -623,6 +717,7 @@ def update_list_item(item_id: int, body: dict, db: Session = Depends(get_db)):
         text=body.get("text"),
         subtitle=body.get("subtitle"),
         done=body.get("done"),
+        actionable=body.get("actionable"),
         sort_order=body.get("sort_order"),
         **due_kwarg,
     )
@@ -814,6 +909,46 @@ async def chat(body: ChatRequest, db: Session = Depends(get_db)):
         mode=body.mode,
     )
     return {"content": content, "usage": usage, "intention": usage.get("intention") or ""}
+
+
+# ── iMessage webhook (BlueBubbles) ────────────────────────────────────────────
+
+@app.post("/webhooks/imessage")
+async def imessage_webhook(
+    payload: dict,
+    x_secret: str | None = Header(None, alias="X-Secret"),
+    db: Session = Depends(get_db),
+):
+    """Receive a BlueBubbles 'new-message' event, route it through the
+    orchestrator, and POST a reply back via BlueBubbles. Auth: shared-secret
+    header configured in BlueBubbles' webhook settings.
+
+    Inbound events from the user's own Apple ID (i.e. messages Daniel sent FROM
+    his Mac/iPhone) carry isFromMe=true on the BlueBubbles payload. We treat
+    those as the user talking TO Gooni only when they originate from an
+    allowlisted handle on the recipient side — i.e. Daniel iMessage'ing his own
+    number from a different device. For now we drop isFromMe events to avoid
+    feedback loops where Gooni's own outbound message triggers a webhook back.
+    """
+    expected = os.getenv("IMESSAGE_WEBHOOK_SECRET")
+    if not expected or x_secret != expected:
+        raise HTTPException(status_code=401, detail="bad secret")
+
+    data = payload.get("data") or {}
+    if data.get("isFromMe"):
+        return {"ok": True, "skipped": "from_me"}
+
+    handle = (data.get("handle") or {}).get("address") or ""
+    text = data.get("text") or ""
+    if not handle or not text:
+        return {"ok": True, "skipped": "missing handle or text"}
+
+    result = dispatch_inbound(imessage_channel, handle, text, db)
+    if result is None:
+        return {"ok": True, "skipped": "not_allowlisted"}
+    _raw, formatted = result
+    imessage_channel.send(handle, formatted)
+    return {"ok": True}
 
 
 # ── Spaces ────────────────────────────────────────────────────────────────────

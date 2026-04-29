@@ -220,6 +220,9 @@ class ListItem(Base):
     subtitle = Column(Text, nullable=True)
     endgoal = Column(Text, nullable=True)
     committed = Column(Boolean, default=False, nullable=False)
+    # actionable=True → renders with checkbox (a thing to do).
+    # actionable=False → renders as a bullet/idea (no toggle, no completion state).
+    actionable = Column(Boolean, default=True, nullable=False)
     done = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)

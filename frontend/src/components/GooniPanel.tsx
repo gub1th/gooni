@@ -2,6 +2,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { renderMarkdown } from "../utils/markdown";
 import { extractOptions, extractPlanBlock, planMarkdownToHtml } from "../utils/planMarkdown";
 import { fetchNote, updateNote } from "../services/api";
+import { displayTitle } from "../utils/notePreview";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -374,7 +375,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
                 whiteSpace: "nowrap",
               }}
             >
-              {activeNote.title?.trim() || "Untitled note"}
+              {displayTitle(activeNote, "Untitled note")}
             </span>
           </div>
         )}
