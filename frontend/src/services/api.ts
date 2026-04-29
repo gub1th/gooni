@@ -742,12 +742,13 @@ export async function sendConversationMessage(
   convId: number,
   content: string,
   noteContent?: string,
-  model?: string
+  model?: string,
+  mode?: "plan" | "chat"
 ): Promise<{ messages: ApiMessage[]; intention: string; tools_used: string[]; signals?: RouterSignals }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", content, entry_content: noteContent, model }),
+    body: JSON.stringify({ role: "user", content, entry_content: noteContent, model, mode }),
   });
   if (!res.ok) throw new Error("Failed to send message");
   return res.json();

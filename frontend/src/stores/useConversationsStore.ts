@@ -30,7 +30,7 @@ interface ConversationsStore {
   fetchConversations: () => Promise<void>;
   selectConversation: (id: number) => Promise<void>;
   newChat: () => void;
-  send: (content: string, noteContent?: string) => Promise<void>;
+  send: (content: string, noteContent?: string, mode?: "plan" | "chat") => Promise<void>;
 }
 
 export const useConversationsStore = create<ConversationsStore>((set, get) => ({
@@ -63,7 +63,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
     set({ activeId: null, messages: [] });
   },
 
-  send: async (content, noteContent) => {
+  send: async (content, noteContent, mode) => {
     const optimistic: ConversationMessage = {
       id: Date.now(),
       role: "user",
@@ -87,7 +87,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
       });
 
       const model = useModelStore.getState().model;
-      const { messages: allMessages, intention: fallbackIntention, tools_used, signals } = await apiSendMessage(convId, content, noteContent, model);
+      const { messages: allMessages, intention: fallbackIntention, tools_used, signals } = await apiSendMessage(convId, content, noteContent, model, mode);
       const intentionToUse = get().pendingIntention || fallbackIntention || "";
       const hasSignals = !!signals && (
         signals.tone_corrections.length > 0
