@@ -101,14 +101,17 @@ if command -v cmux >/dev/null 2>&1; then
 
     # Make a new tab to the right of the current one in this workspace.
     # Output: "OK action=new_terminal_right tab=tab:N workspace=ws created=tab:M"
+    # `created=tab:M` and `surface:M` reference the same entity, but `send`
+    # and `new-split` only accept the `surface:` form — rewrite the prefix.
     TAB_OUT=$(cmux tab-action --action new-terminal-right --workspace "$WS")
-    BE_TAB=$(echo "$TAB_OUT" | tr ' ' '\n' | awk -F= '/^created=/{print $2}')
-    if [[ -z "$BE_TAB" ]]; then
+    CREATED_TAB=$(echo "$TAB_OUT" | tr ' ' '\n' | awk -F= '/^created=/{print $2}')
+    if [[ -z "$CREATED_TAB" ]]; then
       echo "Failed to create dev tab: $TAB_OUT" >&2
       exit 1
     fi
+    BE_TAB="${CREATED_TAB/#tab:/surface:}"
 
-    cmux tab-action --action rename --tab "$BE_TAB" --workspace "$WS" --title "dev: ${NAME}" >/dev/null 2>&1 || true
+    cmux tab-action --action rename --tab "$CREATED_TAB" --workspace "$WS" --title "dev: ${NAME}" >/dev/null 2>&1 || true
 
     # Run backend in the new tab.
     send_cmd "$WS" "$BE_TAB" "$BACKEND_CMD"
