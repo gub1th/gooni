@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { renderMarkdown } from "../utils/markdown";
+import { displayTitle } from "../utils/notePreview";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -325,7 +326,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                 whiteSpace: "nowrap",
               }}
             >
-              {activeNote.title?.trim() || "Untitled note"}
+              {displayTitle(activeNote, "Untitled note")}
             </span>
           </div>
         )}

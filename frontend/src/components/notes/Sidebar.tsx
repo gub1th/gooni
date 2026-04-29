@@ -4,6 +4,7 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { useListsStore } from "../../stores/useListsStore";
 import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
+import { displayTitle } from "../../utils/notePreview";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
@@ -453,7 +454,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                         fontWeight: selected ? 600 : 400, color: "#1C1C1E",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       }}>
-                        {note.title?.trim() || "Untitled"}
+                        {displayTitle(note)}
                       </span>
                       <button
                         className="pin-action"

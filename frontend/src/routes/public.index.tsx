@@ -4,6 +4,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import LinkExtension from "@tiptap/extension-link";
 import { fetchPublicNotes, fetchPublicProfile, fetchPublicVisitCount, updatePublicProfile, getStoredToken, type PublicNote } from "../services/api";
+import { displayTitle } from "../utils/notePreview";
 import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
 
@@ -283,7 +284,7 @@ function PublicPage() {
                     onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "underline")}
                     onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "none")}
                   >
-                    {note.title || "Untitled"}
+                    {displayTitle({ title: note.title, content: note.excerpt })}
                   </Link>
                   <span style={{ fontSize: 13.5, color: "#999", marginTop: 3, display: "block" }}>
                     {formatDate(note.updated_at)} · {note.read_time_minutes} min read
