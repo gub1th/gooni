@@ -3,6 +3,8 @@ import {
   fetchLists,
   fetchList,
   createList as apiCreateList,
+  updateList as apiUpdateList,
+  deleteList as apiDeleteList,
   addListItem as apiAddItem,
   updateListItem as apiUpdateItem,
   deleteListItem as apiDeleteItem,
@@ -21,10 +23,12 @@ interface ListsStore {
   fetchAll: () => Promise<void>;
   selectList: (id: number) => Promise<void>;
   createList: (name: string, type?: ListType, emoji?: string | null) => Promise<ApiList>;
+  updateList: (id: number, patch: { name?: string; emoji?: string | null }) => Promise<void>;
+  deleteList: (id: number) => Promise<void>;
   addItem: (
     listId: number,
     text: string,
-    opts?: { subtitle?: string | null; source_note_id?: number | null },
+    opts?: { subtitle?: string | null; source_note_id?: number | null; actionable?: boolean },
   ) => Promise<ApiListItem>;
   updateItem: (
     itemId: number,
@@ -32,6 +36,7 @@ interface ListsStore {
       text?: string;
       subtitle?: string | null;
       done?: boolean;
+      actionable?: boolean;
       sort_order?: number;
       due_date?: string | null;
     },
@@ -74,6 +79,26 @@ export const useListsStore = create<ListsStore>((set, get) => ({
     const lst = await apiCreateList(name, type, emoji);
     set((s) => ({ lists: [...s.lists, lst] }));
     return lst;
+  },
+
+  updateList: async (id, patch) => {
+    const updated = await apiUpdateList(id, patch);
+    set((s) => ({
+      lists: s.lists.map((l) => (l.id === id ? updated : l)),
+    }));
+  },
+
+  deleteList: async (id) => {
+    await apiDeleteList(id);
+    set((s) => {
+      const nextItems = { ...s.itemsByListId };
+      delete nextItems[id];
+      return {
+        lists: s.lists.filter((l) => l.id !== id),
+        itemsByListId: nextItems,
+        activeListId: s.activeListId === id ? null : s.activeListId,
+      };
+    });
   },
 
   addItem: async (listId, text, opts) => {

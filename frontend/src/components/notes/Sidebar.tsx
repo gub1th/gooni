@@ -16,6 +16,15 @@ import { DevToolsModal } from "../DevToolsModal";
 import { SpaceIcon, SPACE_ICON_OPTIONS, lucideIconValue } from "./SpaceIcon";
 
 // Per-item color tints — Tolaria-style subtle hues.
+function defaultListIcon(type: string): string {
+  switch (type) {
+    case "focus": return "🎯";
+    case "todo": return "📋";
+    case "backlog": return "🛠";
+    default: return "📁";
+  }
+}
+
 const ICON_TINT = {
   allNotes: "#6366F1",   // indigo
   pinned:   "#F59E0B",   // amber
@@ -587,7 +596,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                     onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
                     onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
                   >
-                    <span style={{ fontSize: 13, flexShrink: 0 }}>{lst.emoji || "•"}</span>
+                    <span style={{ fontSize: 13, flexShrink: 0 }}>{lst.emoji || defaultListIcon(lst.type)}</span>
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {lst.name}
                     </span>
