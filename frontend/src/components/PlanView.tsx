@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchNote, type ApiNote } from "../services/api";
 import { useConversationsStore } from "../stores/useConversationsStore";
+import { useGooniStore } from "../stores/useGooniStore";
 import { GooniPanel } from "./GooniPanel";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -19,9 +20,11 @@ export function PlanView({ noteId, onExit }: Props) {
   const [note, setNote] = useState<ApiNote | null>(null);
   const [loadError, setLoadError] = useState(false);
   const planNote = useConversationsStore((s) => s.planNote);
+  const setMascotSuppressed = useGooniStore((s) => s.setMascotSuppressed);
 
   useEffect(() => {
     let cancelled = false;
+    setMascotSuppressed(true);
     fetchNote(noteId).then((n) => {
       if (cancelled) return;
       setNote(n);
@@ -31,7 +34,10 @@ export function PlanView({ noteId, onExit }: Props) {
         planNote({ title: n.title, content: n.content }).catch(console.error);
       }
     }).catch(() => setLoadError(true));
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      setMascotSuppressed(false);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteId]);
 
@@ -92,6 +98,7 @@ export function PlanView({ noteId, onExit }: Props) {
       {/* Right: docked Gooni chat. Drag-to-resize edge already lives in
           GooniPanel. Width persists via useGooniStore. */}
       <GooniPanel
+        dockedWidth={420}
         planContext={note ? {
           noteId: note.id,
           noteContent: note.content ?? "",

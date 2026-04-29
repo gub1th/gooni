@@ -6,7 +6,6 @@ import { useGooniStore } from "../stores/useGooniStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { ModelSelector } from "./ModelSelector";
-import { ChatGraphView } from "./chat/ChatGraphView";
 import { ThinkingIndicator } from "./chat/ThinkingIndicator";
 
 interface GooniPanelProps {
@@ -25,12 +24,16 @@ interface GooniPanelProps {
     noteContent: string;
     onSaved?: () => void;
   };
+  // Override the persisted sidebar width — pass a fixed number (px) or a
+  // CSS string. When set, the drag-to-resize handle is also disabled
+  // (plan view locks the proportion so the note isn't crushed).
+  dockedWidth?: number | string;
 }
 
-export function GooniPanel({ fullscreen = false, floating = false, planContext }: GooniPanelProps) {
-  const { width, setWidth } = useGooniStore();
-  const { messages, sending, send, activeId } = useConversationsStore();
-  const [viewMode, setViewMode] = useState<"chat" | "graph">("chat");
+export function GooniPanel({ fullscreen = false, floating = false, planContext, dockedWidth }: GooniPanelProps) {
+  const { width: storedWidth, setWidth } = useGooniStore();
+  const width = dockedWidth ?? storedWidth;
+  const { messages, sending, send } = useConversationsStore();
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
   const [input, setInput] = useState("");
   const [savingPlan, setSavingPlan] = useState(false);
@@ -131,13 +134,15 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
     }
   }
 
-  // Drag-to-resize (only in sidebar mode)
+  // Drag-to-resize (only in sidebar mode, and only when width isn't
+  // externally locked via dockedWidth — plan view, for example, fixes
+  // the proportion so the note can't get crushed).
   const onDragMouseDown = useCallback((e: React.MouseEvent) => {
-    if (fullscreen) return;
+    if (fullscreen || dockedWidth != null) return;
     e.preventDefault();
     isDragging.current = true;
     dragStartX.current = e.clientX;
-    dragStartWidth.current = width;
+    dragStartWidth.current = storedWidth;
 
     function onMouseMove(e: MouseEvent) {
       if (!isDragging.current) return;
@@ -151,7 +156,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
     }
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
-  }, [fullscreen, width, setWidth]);
+  }, [fullscreen, dockedWidth, storedWidth, setWidth]);
 
   const containerStyle: React.CSSProperties = floating
     ? {
@@ -189,8 +194,9 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
 
   return (
     <div style={containerStyle}>
-      {/* Drag handle — left edge, sidebar only (not in floating + not fullscreen) */}
-      {!fullscreen && !floating && (
+      {/* Drag handle — left edge, sidebar only (not in floating + not fullscreen
+          and not when width is externally locked via dockedWidth). */}
+      {!fullscreen && !floating && dockedWidth == null && (
         <div
           onMouseDown={onDragMouseDown}
           style={{
@@ -211,50 +217,14 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
         />
       )}
 
-      {/* View toggle — small floating chip top-right. Replaces the old header
-          bar. Only shown when the conversation has enough turns to graph,
-          and only in sidebar mode (fullscreen has its own ergonomics).
-          Close behavior moved to the floating ChatLauncher (FAB). */}
-      {!fullscreen && activeId !== null && messages.length > 6 && (
-        <div style={{
-          position: "absolute",
-          top: 12,
-          right: 12,
-          zIndex: 5,
-          display: "flex", gap: 0,
-          border: "1px solid rgba(0,0,0,0.10)", borderRadius: 6,
-          overflow: "hidden",
-          background: "#fff",
-          boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-        }}>
-          {(["chat", "graph"] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => setViewMode(m)}
-              style={{
-                fontSize: 11, padding: "3px 9px",
-                background: viewMode === m ? "#1C1C1E" : "#fff",
-                color: viewMode === m ? "#fff" : "#6E6E73",
-                border: "none", cursor: "pointer",
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontWeight: 500,
-              }}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Graph view — renders in place of messages when toggled on. */}
-      {viewMode === "graph" && activeId !== null && (
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          <ChatGraphView conversationId={activeId} />
-        </div>
+      {/* Top toolbar — surface toggle (modal ↔ sidebar). Only shown when
+          panel is open via the FAB (floating or sidebar through GooniLayer);
+          plan view + fullscreen lock the layout so they skip it. */}
+      {!fullscreen && !planContext && (
+        <SurfaceToggleBar />
       )}
 
       {/* Messages */}
-      {viewMode === "chat" && (
       <div
         style={{
           flex: 1,
@@ -364,7 +334,6 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
         )}
         <div ref={messagesEndRef} />
       </div>
-      )}
 
       {/* Input area */}
       <div
@@ -482,6 +451,53 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext }
 //      without typing.
 // Both parsers are pure-text: if the patterns don't appear, the message
 // renders identically to a normal chat turn.
+
+// Top-bar surface toggle (modal popup ↔ docked sidebar). Lives inside
+// the panel so the user can flip without going through Settings.
+function SurfaceToggleBar() {
+  const surface = useGooniStore((s) => s.surface);
+  const setSurface = useGooniStore((s) => s.setSurface);
+  const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 6,
+        padding: "6px 10px",
+        borderBottom: "1px solid rgba(0,0,0,0.06)",
+        flexShrink: 0,
+        fontFamily: FONT,
+      }}
+    >
+      <span style={{ fontSize: 10.5, color: "#8E8E93", letterSpacing: 0.4, flex: 1 }}>
+        Gooni
+      </span>
+      <div style={{
+        display: "flex", border: "1px solid rgba(0,0,0,0.10)",
+        borderRadius: 6, overflow: "hidden", background: "#fff",
+      }}>
+        {(["modal", "sidebar"] as const).map((s) => {
+          const active = surface === s;
+          return (
+            <button
+              key={s}
+              onClick={() => setSurface(s)}
+              title={s === "modal" ? "Floating bubble" : "Docked sidebar"}
+              style={{
+                fontSize: 10.5, padding: "3px 8px",
+                background: active ? "#1C1C1E" : "#fff",
+                color: active ? "#fff" : "#6E6E73",
+                border: "none", cursor: "pointer",
+                fontFamily: FONT, fontWeight: 500,
+              }}
+            >{s}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 
 interface BubbleMsg {
   id: number;

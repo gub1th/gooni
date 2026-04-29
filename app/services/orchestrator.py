@@ -102,7 +102,14 @@ class Orchestrator:
         memory_candidates: list[dict] = []
         skip_normal_reply = False
 
-        if not image_url and saved_message.strip():
+        # Plan-mode skips signal extraction entirely. Plan replies are
+        # conversational answers about a topic, not feedback to Gooni —
+        # running the tone-correction detector here mis-flags things like
+        # "I don't care about that" as a tone rule. The plan prompt has
+        # its own discipline; the orchestrator stays out of the way.
+        if mode == "plan":
+            pass
+        elif not image_url and saved_message.strip():
             if _UNDO_FEEDBACK_RE.search(saved_message):
                 # Explicit undo command — runs before extraction so it always wins.
                 removed = memory_service.deactivate_last_feedback_preference(db=db)
