@@ -31,6 +31,11 @@ interface ConversationsStore {
   selectConversation: (id: number) => Promise<void>;
   newChat: () => void;
   send: (content: string, noteContent?: string, mode?: "plan" | "chat") => Promise<void>;
+  // Kick off a planning conversation about a specific note. Creates a fresh
+  // conversation, seeds it with a "plan this" prompt + entry_content, and
+  // engages plan-mode on the backend so the LLM behaves as a planning
+  // partner (clarifying questions, optioned chips, finalize-on-`<plan>`).
+  planNote: (note: { title: string | null; content: string | null }) => Promise<void>;
 }
 
 export const useConversationsStore = create<ConversationsStore>((set, get) => ({
@@ -61,6 +66,13 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
 
   newChat: () => {
     set({ activeId: null, messages: [] });
+  },
+
+  planNote: async (note) => {
+    const title = (note.title ?? "").trim() || "this";
+    const seed = `Help me plan: ${title}`;
+    set({ activeId: null, messages: [] });
+    await get().send(seed, note.content ?? undefined, "plan");
   },
 
   send: async (content, noteContent, mode) => {

@@ -54,7 +54,10 @@ type InkState = {
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 // The dashboard itself:
 
-export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
+export function Dashboard({ onOpenNote, onPlanNote }: {
+  onOpenNote: () => void;
+  onPlanNote?: (noteId: number) => void;
+}) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [take, setTake] = useState<string>("");
   const [takeRefreshing, setTakeRefreshing] = useState(false);
@@ -393,10 +396,13 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            // §3.B/C will wire this to planNote() — for now,
-                            // open the note normally so the pill is at least
-                            // a discoverability surface.
-                            openNote(note.space_id, note.id);
+                            if (onPlanNote) {
+                              onPlanNote(note.id);
+                            } else {
+                              // Fallback: if mounted somewhere without the
+                              // plan handler, just open the note.
+                              openNote(note.space_id, note.id);
+                            }
                           }}
                           style={{
                             fontSize: 10.5, fontWeight: 500, fontFamily: FONT,
