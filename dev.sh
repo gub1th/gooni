@@ -85,10 +85,13 @@ DATASETTE_CMD="cd '$DIR' && source '${VENV}' && datasette '${DB_FILE}' -p ${DS_P
 
 if command -v cmux >/dev/null 2>&1; then
   # ----- cmux path -----
-  # If invoked from inside a cmux pane, add a new tab to the CURRENT workspace
-  # and split that tab into BE/FE/DS. Keeps the user's shell pane untouched
-  # and reuses the workspace's title (e.g. "Chat Eval Loop") in the sidebar.
-  # If invoked from outside cmux, fall back to spawning a new workspace.
+  # Always spawn a fresh workspace named after the source workspace
+  # (e.g. "dev: gooni: fix-up-focuses"). Earlier versions tried to add a
+  # tab + splits to the CURRENT workspace, but cmux's tab/pane model
+  # doesn't allow nested panes inside a tab — splits ended up scattered
+  # across the user's working pane. A separate workspace gives the dev
+  # processes a clean BE/FE/DS layout the user can switch to via the
+  # sidebar, with no pollution of the source workspace.
 
   send_cmd() {
     # send_cmd <workspace> <surface> <cmd>
@@ -96,51 +99,40 @@ if command -v cmux >/dev/null 2>&1; then
     cmux send-key --workspace "$1" --surface "$2" Enter >/dev/null
   }
 
+  # If we're inside cmux, derive the parent workspace title for naming.
+  # `--id-format uuids` produces lines like:
+  #   "  <uuid>  <title>"             (non-selected)
+  #   "* <uuid>  <title>  [selected]" (currently selected)
+  # so we strip leading "*" / whitespace, match the UUID prefix, and
+  # trim a trailing "[selected]" token if present.
+  PARENT_TITLE=""
   if [[ -n "${CMUX_WORKSPACE_ID:-}" ]]; then
-    WS="$CMUX_WORKSPACE_ID"
-
-    # Make a new tab to the right of the current one in this workspace.
-    # Output: "OK action=new_terminal_right tab=tab:N workspace=ws created=tab:M"
-    TAB_OUT=$(cmux tab-action --action new-terminal-right --workspace "$WS")
-    BE_TAB=$(echo "$TAB_OUT" | tr ' ' '\n' | awk -F= '/^created=/{print $2}')
-    if [[ -z "$BE_TAB" ]]; then
-      echo "Failed to create dev tab: $TAB_OUT" >&2
-      exit 1
-    fi
-
-    cmux tab-action --action rename --tab "$BE_TAB" --workspace "$WS" --title "dev: ${NAME}" >/dev/null 2>&1 || true
-
-    # Run backend in the new tab.
-    send_cmd "$WS" "$BE_TAB" "$BACKEND_CMD"
-
-    # Split that tab's pane: down → frontend, right → datasette.
-    split_in_tab() {
-      local dir="$1" cmd="$2"
-      local out surface
-      out=$(cmux new-split "$dir" --workspace "$WS" --surface "$BE_TAB")
-      surface=$(awk '{print $2}' <<< "$out")
-      [[ -n "$surface" ]] || { echo "split failed: $out" >&2; return 1; }
-      send_cmd "$WS" "$surface" "$cmd"
-      # Make sure subsequent splits split off the FRESHLY-created pane, not BE_TAB.
-      BE_TAB="$surface"
-    }
-
-    BASE_TAB="$BE_TAB"
-    BE_TAB="$BASE_TAB"; split_in_tab down  "$FRONTEND_CMD"
-    BE_TAB="$BASE_TAB"; split_in_tab right "$DATASETTE_CMD"
-
-    echo "cmux dev tab ready in current workspace ($WS)"
-    exit 0
+    PARENT_TITLE=$(cmux --id-format uuids list-workspaces 2>/dev/null \
+      | awk -v id="$CMUX_WORKSPACE_ID" '
+          { sub(/^[ \t*]+/, "");
+            if (substr($0, 1, length(id)) == id) {
+              rest = substr($0, length(id) + 1);
+              sub(/^[ \t]+/, "", rest);
+              sub(/[ \t]+\[selected\]$/, "", rest);
+              print rest; exit;
+            }
+          }')
   fi
 
-  # Outside cmux: spawn a fresh workspace.
-  WS_OUT=$(cmux new-workspace --name "gooni-${NAME}" --cwd "$DIR" --command "$BACKEND_CMD")
+  if [[ -n "$PARENT_TITLE" ]]; then
+    WS_NAME="dev: ${PARENT_TITLE}"
+  else
+    WS_NAME="dev: ${NAME}"
+  fi
+
+  # Spawn the new workspace running BE as its initial command.
+  WS_OUT=$(cmux new-workspace --name "$WS_NAME" --cwd "$DIR" --command "$BACKEND_CMD")
   WS=$(awk '{print $2}' <<< "$WS_OUT")
   if [[ -z "$WS" ]]; then
     echo "Failed to create cmux workspace: $WS_OUT" >&2
     exit 1
   fi
-  echo "Created cmux workspace $WS (be-${NAME})"
+  echo "Created cmux workspace $WS — \"$WS_NAME\""
 
   split_and_run() {
     local dir="$1" cmd="$2"

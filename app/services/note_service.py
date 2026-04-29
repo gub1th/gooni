@@ -136,8 +136,11 @@ note_service = NoteService()
 _CLASSIFY_DEDUP_THRESHOLD = 0.92
 
 # Minimum plaintext length before we even attempt classification — empty
-# or scratchpad-sized notes carry no signal.
-_CLASSIFY_MIN_CHARS = 30
+# or scratchpad-sized notes carry no signal. Tuned low because topic-shape
+# notes ("cursor for content creators", "ambient kitchen device") deserve
+# classification even though they're short. The LLM still rejects truly
+# trivial inputs with empty signal arrays.
+_CLASSIFY_MIN_CHARS = 8
 
 
 def classify_note(note_id: int) -> None:
@@ -221,6 +224,7 @@ def classify_note(note_id: int) -> None:
             "feature_requests": feature_summaries,
             "memory_count": len(memories_written),
             "memory_types": [m.type for m in memories_written],
+            "worth_expanding": bool(signals.get("worth_expanding")),
             "classified_at": datetime.now(timezone.utc).isoformat(),
         }
         note.last_classify_signals = json.dumps(signals_summary)

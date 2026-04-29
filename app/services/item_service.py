@@ -264,8 +264,8 @@ class ItemService:
                 top = top_ancestor(it)
                 if top.id == it.id and it.list_id == todo_list.id:
                     include = True  # inbox todo
-                elif top.committed:
-                    include = True  # leaf under a committed focus
+                elif top.committed and top.id != it.id:
+                    include = True  # leaf strictly under a committed focus
             if include:
                 out.append({**_serialize(it), "parent_chain": parent_chain(it)})
         return out
