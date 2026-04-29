@@ -10,6 +10,7 @@ import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
+import { DevStreakStat } from "./DevStreakStat";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#4ADE80";
@@ -249,7 +250,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "stretch" }}>
+          <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "stretch", flexWrap: "wrap", justifyContent: "flex-end" }}>
             {/* 3D brain — opens the notes visualization. Left of the stat cards
                 so it reads as a peer affordance, not buried in a toolbar. */}
             <BrainOrb size={60} onClick={() => setExploreOpen(true)} />
@@ -305,6 +306,10 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
               </div>
             </div>
 
+            {/* dev streak — fetches its own data, shows commits + adds/dels.
+                Click to expand a commits panel that wraps below the stat row
+                via flexBasis: 100% on the panel + flexWrap on the parent. */}
+            <DevStreakStat />
           </div>
         </div>
 
