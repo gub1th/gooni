@@ -30,7 +30,12 @@ interface ConversationsStore {
   fetchConversations: () => Promise<void>;
   selectConversation: (id: number) => Promise<void>;
   newChat: () => void;
-  send: (content: string, noteContent?: string) => Promise<void>;
+  send: (content: string, noteContent?: string, mode?: "plan" | "chat") => Promise<void>;
+  // Kick off a planning conversation about a specific note. Creates a fresh
+  // conversation, seeds it with a "plan this" prompt + entry_content, and
+  // engages plan-mode on the backend so the LLM behaves as a planning
+  // partner (clarifying questions, optioned chips, finalize-on-`<plan>`).
+  planNote: (note: { title: string | null; content: string | null }) => Promise<void>;
 }
 
 export const useConversationsStore = create<ConversationsStore>((set, get) => ({
@@ -63,7 +68,14 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
     set({ activeId: null, messages: [] });
   },
 
-  send: async (content, noteContent) => {
+  planNote: async (note) => {
+    const title = (note.title ?? "").trim() || "this";
+    const seed = `Help me plan: ${title}`;
+    set({ activeId: null, messages: [] });
+    await get().send(seed, note.content ?? undefined, "plan");
+  },
+
+  send: async (content, noteContent, mode) => {
     const optimistic: ConversationMessage = {
       id: Date.now(),
       role: "user",
@@ -87,7 +99,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
       });
 
       const model = useModelStore.getState().model;
-      const { messages: allMessages, intention: fallbackIntention, tools_used, signals } = await apiSendMessage(convId, content, noteContent, model);
+      const { messages: allMessages, intention: fallbackIntention, tools_used, signals } = await apiSendMessage(convId, content, noteContent, model, mode);
       const intentionToUse = get().pendingIntention || fallbackIntention || "";
       const hasSignals = !!signals && (
         signals.tone_corrections.length > 0

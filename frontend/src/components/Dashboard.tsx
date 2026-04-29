@@ -5,11 +5,12 @@ import {
 } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
-import { extractFirstImage, stripHtmlForExcerpt } from "../utils/notePreview";
+import { stripHtmlForExcerpt } from "../utils/notePreview";
 import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
+import { DevStreakStat } from "./DevStreakStat";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#4ADE80";
@@ -54,7 +55,10 @@ type InkState = {
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 // The dashboard itself:
 
-export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
+export function Dashboard({ onOpenNote, onPlanNote }: {
+  onOpenNote: () => void;
+  onPlanNote?: (noteId: number) => void;
+}) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [take, setTake] = useState<string>("");
   const [takeRefreshing, setTakeRefreshing] = useState(false);
@@ -249,7 +253,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "stretch" }}>
+          <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "stretch", flexWrap: "wrap", justifyContent: "flex-end" }}>
             {/* 3D brain — opens the notes visualization. Left of the stat cards
                 so it reads as a peer affordance, not buried in a toolbar. */}
             <BrainOrb size={60} onClick={() => setExploreOpen(true)} />
@@ -305,13 +309,127 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
               </div>
             </div>
 
+            {/* dev streak — fetches its own data, shows commits + adds/dels.
+                Click to expand a commits panel that wraps below the stat row
+                via flexBasis: 100% on the panel + flexWrap on the parent. */}
+            <DevStreakStat />
           </div>
         </div>
 
         {/* Note input — embedded NoteEditor quick-input. */}
-        <div style={{ marginBottom: 22 }}>
+        <div style={{ marginBottom: 14 }}>
           <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
         </div>
+
+        {/* Recent notes — compact 2x2 grid directly under the composer so a
+            new note's animation lands in Daniel's eyeline. Cards in a "topic /
+            idea" shape get a 'Plan this' pill that hands off to Gooni. */}
+        {stats && stats.recent_notes.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{
+              fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+              textTransform: "uppercase", marginBottom: 8, fontWeight: 600,
+            }}>recent notes</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {stats.recent_notes.slice(0, 4).map((note, idx) => {
+                const fullTitle = note.title?.trim() || "Untitled";
+                const fullExcerpt = stripHtmlForExcerpt(note.content ?? "");
+                const isFirst = idx === 0;
+                const isTyping = typing !== null && typing.noteId === note.id;
+                const revealed = isTyping ? typing!.revealed : Infinity;
+                const shownTitle = isTyping ? fullTitle.slice(0, Math.min(revealed, fullTitle.length)) : fullTitle;
+                const excerptBudget = isTyping ? Math.max(0, revealed - fullTitle.length) : Infinity;
+                const shownExcerpt = isTyping ? fullExcerpt.slice(0, excerptBudget) : fullExcerpt;
+                const caretInTitle = isTyping && revealed <= fullTitle.length;
+                const caretInExcerpt = isTyping && revealed > fullTitle.length;
+                const worthExpanding = note.classify_signals?.worth_expanding === true;
+                return (
+                  <div
+                    key={note.id}
+                    ref={isFirst ? firstCardRef : undefined}
+                    onClick={() => openNote(note.space_id, note.id)}
+                    style={{
+                      display: "flex", flexDirection: "column", alignItems: "stretch",
+                      gap: 4, padding: "10px 12px", borderRadius: 10,
+                      border: "1px solid rgba(0,0,0,0.07)", background: "#fff", cursor: "pointer",
+                      textAlign: "left", width: "100%", minHeight: 96, boxSizing: "border-box",
+                      transition: "background 0.12s, border-color 0.12s",
+                      animation: isFirst && cardPulsing ? `gooni-card-pulse 0.6s cubic-bezier(0.22,1,0.36,1)` : undefined,
+                      position: "relative",
+                    }}
+                    onMouseEnter={(e) => {
+                      const el = e.currentTarget;
+                      el.style.borderColor = "rgba(0,0,0,0.15)";
+                      el.style.background = "#FDFDFD";
+                    }}
+                    onMouseLeave={(e) => {
+                      const el = e.currentTarget;
+                      el.style.borderColor = "rgba(0,0,0,0.07)";
+                      el.style.background = "#fff";
+                    }}
+                  >
+                    <div style={{
+                      fontSize: 13, fontWeight: 600, color: "#1C1C1E", fontFamily: FONT,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      flexShrink: 0,
+                    }}>
+                      {shownTitle || (isFirst && isTyping ? " " : "Untitled")}
+                      {caretInTitle && <span className="gooni-caret">▍</span>}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12, color: "#6C6C70", lineHeight: 1.45, fontFamily: FONT,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {shownExcerpt || (isTyping ? "" : <span style={{ color: "#C7C7CC", fontStyle: "italic" }}>empty note</span>)}
+                      {caretInExcerpt && <span className="gooni-caret">▍</span>}
+                    </div>
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      marginTop: "auto", paddingTop: 4,
+                    }}>
+                      <span style={{ fontSize: 10.5, color: "#AEAEB2", fontFamily: FONT, flex: 1 }}>
+                        {formatNoteDate(note.updated_at)}
+                      </span>
+                      {worthExpanding && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (onPlanNote) {
+                              onPlanNote(note.id);
+                            } else {
+                              // Fallback: if mounted somewhere without the
+                              // plan handler, just open the note.
+                              openNote(note.space_id, note.id);
+                            }
+                          }}
+                          style={{
+                            fontSize: 10.5, fontWeight: 500, fontFamily: FONT,
+                            color: "#1C1C1E",
+                            background: "rgba(74,222,128,0.14)",
+                            border: "0.5px solid rgba(74,222,128,0.45)",
+                            borderRadius: 999, padding: "2px 8px",
+                            cursor: "pointer",
+                            display: "inline-flex", alignItems: "center", gap: 4,
+                          }}
+                          title="Plan this note with Gooni"
+                        >
+                          💬 Plan this
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Gooni's Take — small banner above the unified Activity card. */}
         <div style={{
@@ -366,120 +484,6 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
 
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />
-
-        {/* Recent notes — two preview cards */}
-        <div style={{ marginBottom: 44 }}>
-          <div style={{
-            fontSize: 12, color: "#8E8E93", letterSpacing: 0.6,
-            textTransform: "uppercase", marginBottom: 10,
-          }}>recent notes</div>
-          {stats ? (
-            stats.recent_notes.length === 0 ? (
-              <p style={{ fontSize: 13.5, color: "#C7C7CC" }}>No notes yet.</p>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {stats.recent_notes.slice(0, 2).map((note, idx) => {
-                  const fullTitle = note.title?.trim() || "Untitled";
-                  const fullExcerpt = stripHtmlForExcerpt(note.content ?? "");
-                  const thumbSrc = extractFirstImage(note.content ?? "");
-                  const isFirst = idx === 0;
-                  const isTyping = typing !== null && typing.noteId === note.id;
-                  const revealed = isTyping ? typing!.revealed : Infinity;
-                  const shownTitle = isTyping ? fullTitle.slice(0, Math.min(revealed, fullTitle.length)) : fullTitle;
-                  const excerptBudget = isTyping ? Math.max(0, revealed - fullTitle.length) : Infinity;
-                  const shownExcerpt = isTyping ? fullExcerpt.slice(0, excerptBudget) : fullExcerpt;
-                  const caretInTitle = isTyping && revealed <= fullTitle.length;
-                  const caretInExcerpt = isTyping && revealed > fullTitle.length;
-                  return (
-                    <div
-                      key={note.id}
-                      ref={isFirst ? firstCardRef : undefined}
-                      onClick={() => openNote(note.space_id, note.id)}
-                      style={{
-                        // Use minHeight instead of fixed height so the card grows
-                        // with its content up to the line-clamp ceiling. The grid
-                        // row naturally stretches so both cards still match heights.
-                        display: "flex", flexDirection: "column", alignItems: "stretch",
-                        gap: 6, padding: "14px 16px", borderRadius: 12,
-                        border: "1px solid rgba(0,0,0,0.07)", background: "#fff", cursor: "pointer",
-                        textAlign: "left", width: "100%", minHeight: 160, boxSizing: "border-box",
-                        transition: "background 0.12s, border-color 0.12s",
-                        animation: isFirst && cardPulsing ? `gooni-card-pulse 0.6s cubic-bezier(0.22,1,0.36,1)` : undefined,
-                      }}
-                      onMouseEnter={(e) => {
-                        const el = e.currentTarget;
-                        el.style.borderColor = "rgba(0,0,0,0.15)";
-                        el.style.background = "#FDFDFD";
-                      }}
-                      onMouseLeave={(e) => {
-                        const el = e.currentTarget;
-                        el.style.borderColor = "rgba(0,0,0,0.07)";
-                        el.style.background = "#fff";
-                      }}
-                    >
-                      <div style={{
-                        fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: FONT,
-                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        flexShrink: 0,
-                      }}>
-                        {shownTitle || (isFirst && isTyping ? " " : "Untitled")}
-                        {caretInTitle && <span className="gooni-caret">▍</span>}
-                      </div>
-                      <div
-                        style={{
-                          // NO `flex: 1` — that makes the div fill the remaining
-                          // card height and breaks -webkit-line-clamp (you get
-                          // mid-line clipping instead of a clean "…"). Without
-                          // flex:1 the div is its intrinsic ~4-line height.
-                          fontSize: 12.5, color: "#6C6C70", lineHeight: 1.5, fontFamily: FONT,
-                          display: "-webkit-box",
-                          WebkitLineClamp: 4,
-                          WebkitBoxOrient: "vertical",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {shownExcerpt || (isTyping ? "" : <span style={{ color: "#C7C7CC", fontStyle: "italic" }}>empty note</span>)}
-                        {caretInExcerpt && <span className="gooni-caret">▍</span>}
-                      </div>
-                      {/* Image preview — small chip below the excerpt. Reads as
-                          "card has an image" without dominating the layout. */}
-                      {thumbSrc && (
-                        <div style={{
-                          width: 72,
-                          height: 54,
-                          borderRadius: 6,
-                          overflow: "hidden",
-                          flexShrink: 0,
-                          background: "rgba(0,0,0,0.04)",
-                          marginTop: 8,
-                        }}>
-                          <img
-                            src={thumbSrc}
-                            alt=""
-                            style={{
-                              width: "100%", height: "100%",
-                              objectFit: "cover", display: "block",
-                            }}
-                          />
-                        </div>
-                      )}
-                      {/* marginTop:auto pins the date to the bottom regardless of
-                          how tall the excerpt ended up, so short-content cards
-                          still show the timestamp at the card bottom. */}
-                      <div style={{ fontSize: 11, color: "#AEAEB2", fontFamily: FONT, flexShrink: 0, marginTop: "auto" }}>
-                        {formatNoteDate(note.updated_at)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )
-          ) : (
-            <p style={{ fontSize: 13.5, color: "#C7C7CC" }}>Loading…</p>
-          )}
-        </div>
 
       </div>
 

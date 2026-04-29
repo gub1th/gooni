@@ -9,6 +9,7 @@ from .item_service import item_service
 from .memory_extraction import extract_signals
 from .memory_service import memory_service
 from .list_service import list_service
+from ..llm.prompts import PLAN_MODE_PROMPT
 from ..tools.feature_request_tool import feature_request_tool
 
 
@@ -53,6 +54,7 @@ class Orchestrator:
         source: str = "telegram",
         entry_content: str = "",
         model: str = None,
+        mode: str | None = None,
     ) -> tuple[str, dict | None]:
         """Unified chat handler for all sources.
 
@@ -60,6 +62,7 @@ class Orchestrator:
         - conversation_id=<id>  → use that conversation directly (note threads)
         - source                → 'telegram' | 'web' (determines session bucket)
         - entry_content         → original note text injected as context (web only)
+        - mode                  → "plan" engages PLAN_MODE_PROMPT; None = chat
         """
         stripped = message.strip()
         command = stripped.lower()
@@ -243,7 +246,9 @@ class Orchestrator:
             f"Daniel's current intent: {intention_context}"
             if intention_context else ""
         )
+        plan_mode_block = PLAN_MODE_PROMPT if mode == "plan" else ""
         full_context = "\n\n".join(filter(None, [
+            plan_mode_block,
             intention_block,
             memory_context,
             entry_context,

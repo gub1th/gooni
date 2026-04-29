@@ -6,6 +6,7 @@ import { GooniLayer } from "../components/GooniLayer";
 import { ListView } from "../components/lists/ListView";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
+import { PlanView } from "../components/PlanView";
 import { Sidebar } from "../components/notes/Sidebar";
 import { PasswordGate } from "../components/PasswordGate";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -37,10 +38,14 @@ function NotesPage() {
   const search = Route.useSearch();
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
-  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists">(() =>
+  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "plan">(() =>
     search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
   );
   const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
+  // Note currently being planned (set by Dashboard's "💬 Plan this" pill).
+  // Lives in route state so the Plan view can mount/unmount cleanly without
+  // polluting the conversations store with a "current planning target" field.
+  const [planNoteId, setPlanNoteId] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
 
   useEffect(() => {
@@ -114,7 +119,7 @@ function NotesPage() {
   }, [selectedSpaceId, view]);
 
   function setViewAndUrl(
-    v: "notes" | "dashboard" | "chat" | "lists",
+    v: "notes" | "dashboard" | "chat" | "lists" | "plan",
     noteId?: number,
     convId?: number,
     listId?: number,
@@ -139,6 +144,16 @@ function NotesPage() {
   function handleNewChat() {
     newChat();
     setViewAndUrl("chat");
+  }
+
+  function handlePlanNote(noteId: number) {
+    // Reset chat state — PlanView's effect will fire planNote() on mount
+    // with the resolved note content (PlanView fetches the note itself
+    // so we don't need to plumb the entry text through here).
+    newChat();
+    setPlanNoteId(noteId);
+    setView("plan");
+    navigate({ search: { note: undefined, conv: undefined, list: undefined }, replace: true });
   }
 
   function handleCompose() {
@@ -186,9 +201,17 @@ function NotesPage() {
 
       <div style={{ flex: 1, display: "flex", minWidth: 0, position: "relative", overflow: "hidden" }}>
         {view === "dashboard" ? (
-          <Dashboard onOpenNote={() => setView("notes")} />
+          <Dashboard
+            onOpenNote={() => setView("notes")}
+            onPlanNote={handlePlanNote}
+          />
         ) : view === "chat" ? (
           <ChatView />
+        ) : view === "plan" && planNoteId != null ? (
+          <PlanView
+            noteId={planNoteId}
+            onExit={() => { setPlanNoteId(null); setView("dashboard"); }}
+          />
         ) : view === "lists" && activeListId != null ? (
           <ListView
             listId={activeListId}

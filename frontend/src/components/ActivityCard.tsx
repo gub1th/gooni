@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
-  fetchItemTree, fetchTodayItems, fetchDevActivity, createItem,
-  type ApiItemTree, type ApiTodayItem, type DevActivity,
+  fetchItemTree, fetchTodayItems, createItem,
+  type ApiItemTree, type ApiTodayItem,
 } from "../services/api";
 import { Item, TodayRow } from "./Item";
 
@@ -10,7 +10,6 @@ const FONT = "'Manrope', -apple-system, sans-serif";
 export function ActivityCard() {
   const [tree, setTree] = useState<ApiItemTree | null>(null);
   const [today, setToday] = useState<ApiTodayItem[]>([]);
-  const [dev, setDev] = useState<DevActivity | null>(null);
 
   async function refresh() {
     try {
@@ -20,13 +19,7 @@ export function ActivityCard() {
     } catch (e) { console.error(e); }
   }
 
-  useEffect(() => {
-    refresh();
-    fetchDevActivity().then(setDev).catch(() => setDev(null));
-    function onChange() { refresh(); }
-    window.addEventListener("gooni-tracked-repos-changed", onChange);
-    return () => window.removeEventListener("gooni-tracked-repos-changed", onChange);
-  }, []);
+  useEffect(() => { refresh(); }, []);
 
   return (
     <div style={{
@@ -43,9 +36,6 @@ export function ActivityCard() {
         focuses={tree?.focuses ?? []}
         onChange={refresh}
       />
-      {dev && dev.connected && dev.repos.length > 0 && (
-        <DevSection data={dev} />
-      )}
     </div>
   );
 }
@@ -262,87 +252,3 @@ function FocusAdder({ onDone }: { onDone: () => void }) {
   );
 }
 
-// ── DEV ACTIVITY (compressed) ───────────────────────────────────────────────
-
-function DevSection({ data }: { data: DevActivity }) {
-  return (
-    <div>
-      <SectionHeader dotColor="#8E8E93" label="Dev Activity" right={
-        <span style={{ fontSize: 11, color: "#8E8E93", fontWeight: 500 }}>
-          {data.aggregate.today_commits} today · {data.aggregate.streak_days}d streak
-        </span>
-      } />
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {data.repos.map((r) => (
-          <RepoCompact key={`${r.owner}/${r.name}`} repo={r} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function RepoCompact({ repo }: { repo: import("../services/api").DevActivityRepo }) {
-  const today = repo.today;
-  const recent = (repo.recent ?? []).slice(0, 3);
-  return (
-    <div>
-      <div style={{
-        display: "flex", alignItems: "baseline", gap: 8,
-        fontSize: 11.5, color: "#1C1C1E",
-      }}>
-        <span style={{ fontWeight: 600 }}>{repo.owner}/{repo.name}</span>
-        {today && today.commits > 0 ? (
-          <span style={{ fontSize: 11, color: "#6B6B70", display: "flex", gap: 6 }}>
-            <span>{today.commits} today</span>
-            <span style={{ color: "#30A14E" }}>+{today.additions}</span>
-            <span style={{ color: "#CF222E" }}>−{today.deletions}</span>
-            <span>· {repo.streak_days ?? 0}d</span>
-          </span>
-        ) : (
-          <span style={{ fontSize: 11, color: "#8E8E93" }}>
-            0 today · {repo.streak_days ?? 0}d
-          </span>
-        )}
-      </div>
-      {recent.length > 0 && (
-        <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
-          {recent.map((c) => (
-            <a
-              key={c.sha}
-              href={c.html_url ?? undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "flex", alignItems: "baseline", gap: 8,
-                textDecoration: "none", color: "inherit",
-                fontSize: 11.5,
-              }}
-            >
-              <span style={{
-                color: "#AEAEB2", fontFamily: "ui-monospace, monospace",
-                flexShrink: 0,
-              }}>─</span>
-              <span style={{ color: "#3A3A3C", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {c.subject}
-              </span>
-              <span style={{ color: "#AEAEB2", fontSize: 10.5, flexShrink: 0 }}>
-                {relTime(c.committed_at)}
-              </span>
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function relTime(iso: string): string {
-  const t = new Date(iso).getTime();
-  const diff = Date.now() - t;
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "now";
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  return `${Math.floor(hr / 24)}d`;
-}
