@@ -5,7 +5,7 @@ from ..db.database import SessionLocal
 from ..db.models import Conversation as ConvModel
 from ..llm.client import llm_client
 from .conversation_service import conversation_service
-from .focus_service import focus_service
+from .item_service import item_service
 from .memory_extraction import extract_signals
 from .memory_service import memory_service
 from .list_service import list_service
@@ -236,7 +236,7 @@ class Orchestrator:
         else:
             entry_context = ""
         list_context = list_service.get_list_context(db)
-        focus_context = focus_service.get_focus_context(db)
+        focus_context = item_service.get_active_context(db)
         # Promote intention into the prompt so the LLM knows what Daniel is
         # trying to do right now. Previously this was computed and discarded.
         intention_block = (

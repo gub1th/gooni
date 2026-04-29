@@ -75,13 +75,6 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
                 while (see "last worked on Xd ago"), bring it up gently — that's
                 accountability, not nagging.
 
-                - mark_focus_activity: when Daniel's message signals work or progress
-                  on one of his active focuses (above), call this with the focus name.
-                  Don't ask permission, just call it. Examples: "I made progress on
-                  Ship Gooni v2", "spent 30 min on the lift program", "sketched out
-                  the content app idea". Skip if uncertain — false positives are
-                  worse than misses.
-
                 - request_feature: call this when Daniel asks you to do something
                   outside CAPABILITIES above. Args: title (short, imperative,
                   e.g. "outbound time-based reminders"), why (one sentence

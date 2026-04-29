@@ -11,9 +11,6 @@ is a follow-up.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -21,14 +18,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..db.models import TrackedRepo
-from ..llm.client import llm_client
 from . import github as gh
 
 
 _CACHE_TTL_SECONDS = 60
-_SUMMARY_CACHE_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "misc"
-)
 
 
 class DevActivityService:
@@ -62,7 +55,6 @@ class DevActivityService:
                 "connected": connected,
                 "repos": [],
                 "aggregate": {"streak_days": 0, "today_commits": 0},
-                "week_summary": None,
             }
             self._cache_at = now
             self._cache_payload = payload
@@ -73,11 +65,6 @@ class DevActivityService:
 
         repos_payload: list[dict[str, Any]] = []
         union_days: set[str] = set()
-        # (provider, owner, name, head_sha) tuples — drives summary cache key.
-        head_shas: list[tuple[str, str, str, str]] = []
-        # repo_key -> list of {subject, body, day} for the LLM prompt.
-        commits_for_summary: dict[str, list[dict[str, str]]] = {}
-
         for tr in tracked:
             try:
                 commits = gh.list_recent_commits(db, tr.owner, tr.name, since_iso=since_iso)
@@ -88,12 +75,6 @@ class DevActivityService:
                     "error": str(e)[:200],
                 })
                 continue
-
-            head_shas.append((
-                "github", tr.owner, tr.name,
-                commits[0]["sha"] if commits else "",
-            ))
-            commits_for_summary[f"{tr.owner}/{tr.name}"] = []
 
             commit_days: set[str] = set()
             today_count = 0
@@ -117,11 +98,6 @@ class DevActivityService:
                 msg = (c.get("commit") or {}).get("message") or ""
                 subject = msg.split("\n", 1)[0]
                 body = msg.split("\n", 1)[1].strip() if "\n" in msg else ""
-                commits_for_summary[f"{tr.owner}/{tr.name}"].append({
-                    "subject": subject,
-                    "body": body,
-                    "day": day,
-                })
                 if len(recent) < 5:
                     recent.append({
                         "sha": c.get("sha", "")[:7],
@@ -165,8 +141,6 @@ class DevActivityService:
         aggregate_streak = _streak_from_days(union_days, today_utc)
         aggregate_today = sum((r.get("today") or {}).get("commits", 0) for r in repos_payload)
 
-        week_summary = _weekly_summary(head_shas, commits_for_summary)
-
         payload = {
             "configured": configured,
             "connected": connected,
@@ -175,7 +149,6 @@ class DevActivityService:
                 "streak_days": aggregate_streak,
                 "today_commits": aggregate_today,
             },
-            "week_summary": week_summary,
         }
 
         self._cache_at = now
@@ -198,77 +171,6 @@ def _streak_from_days(days: set[str], today) -> int:
         cursor = cursor - timedelta(days=1)
     return streak
 
-
-def _weekly_summary(
-    head_shas: list[tuple[str, str, str, str]],
-    commits_by_repo: dict[str, list[dict[str, str]]],
-) -> str | None:
-    """LLM-summarize the past 7 days of commits across all tracked repos.
-    Cached on disk by SHA-256 of the sorted (provider, owner, name, head_sha)
-    tuples — stable while no new commits land. Best-effort: returns None on
-    any error rather than failing the whole dashboard.
-    """
-    total_commits = sum(len(v) for v in commits_by_repo.values())
-    if total_commits == 0:
-        return None
-
-    key_input = "|".join(
-        f"{p}/{o}/{n}@{s}" for p, o, n, s in sorted(head_shas)
-    )
-    cache_key = hashlib.sha256(key_input.encode()).hexdigest()[:16]
-    cache_path = os.path.join(_SUMMARY_CACHE_DIR, f"dev_summary_{cache_key}.json")
-
-    # Cache hit — return persisted summary.
-    if os.path.exists(cache_path):
-        try:
-            with open(cache_path) as f:
-                return json.load(f).get("summary")
-        except Exception:
-            pass
-
-    # Build the prompt: group by repo, list each commit subject + body.
-    lines: list[str] = []
-    for repo_key, commits in commits_by_repo.items():
-        if not commits:
-            continue
-        lines.append(f"### {repo_key}")
-        for c in commits:
-            lines.append(f"- {c['subject']}")
-            if c["body"]:
-                # Indent body so the LLM treats it as commit detail.
-                for bl in c["body"].splitlines():
-                    if bl.strip():
-                        lines.append(f"    {bl.strip()}")
-    commits_block = "\n".join(lines)
-
-    prompt = (
-        "Summarize the past 7 days of development across the repos below. "
-        "Write one short paragraph (3–4 sentences). Highlight the dominant "
-        "theme, what shipped, and any noticeable refactors. Plain prose — "
-        "no headers, no bullet lists.\n\n"
-        f"{commits_block}"
-    )
-
-    try:
-        summary = llm_client.generate_simple_completion(prompt, max_tokens=400)
-    except Exception:
-        return None
-
-    summary = (summary or "").strip()
-    if not summary:
-        return None
-
-    try:
-        os.makedirs(_SUMMARY_CACHE_DIR, exist_ok=True)
-        with open(cache_path, "w") as f:
-            json.dump({
-                "summary": summary,
-                "generated_at": datetime.utcnow().isoformat() + "Z",
-                "head_shas": [list(t) for t in head_shas],
-            }, f)
-    except Exception:
-        pass
-    return summary
 
 
 dev_activity_service = DevActivityService()

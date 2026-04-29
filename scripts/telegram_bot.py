@@ -193,7 +193,7 @@ async def handle_digest_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     digest. Indices are 1-based and refer to the most recent digest sent to
     this chat. Multiple indices supported in one message: `done 1 3`.
     """
-    from app.db.models import TodoItem  # local import keeps cold-start cheap
+    from app.db.models import ListItem  # local import keeps cold-start cheap
 
     text = (update.message.text or "").strip()
     m = DIGEST_REPLY_RE.match(text)
@@ -221,7 +221,7 @@ async def handle_digest_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
                 results.append(f"#{idx} out of range")
                 continue
             tid = ordered_ids[idx - 1]
-            t = db.query(TodoItem).filter(TodoItem.id == tid).first()
+            t = db.query(ListItem).filter(ListItem.id == tid).first()
             if not t:
                 results.append(f"#{idx} not found (deleted?)")
                 continue
