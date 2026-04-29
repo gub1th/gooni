@@ -24,6 +24,7 @@ import { useSpacesStore } from "../../stores/useSpacesStore";
 import { GooniLogo } from "../GooniLogo";
 import { Tooltip } from "../Tooltip";
 import { SpaceIcon } from "./SpaceIcon";
+import { displayTitle } from "../../utils/notePreview";
 
 type Variant = "full" | "embedded";
 
@@ -1291,7 +1292,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
                         >
                           <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {n.title || "Untitled"}
+                            {displayTitle(n)}
                           </span>
                           <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
                             {formatNoteDate(n.updated_at)}

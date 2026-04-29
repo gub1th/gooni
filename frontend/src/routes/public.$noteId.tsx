@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { fetchPublicNote, type PublicNoteDetail } from "../services/api";
 import { sanitizeHtml } from "../utils/sanitize";
+import { displayTitle } from "../utils/notePreview";
 
 export const Route = createFileRoute("/public/$noteId")({
   component: PublicNotePage,
@@ -84,7 +85,7 @@ function PublicNotePage() {
                 lineHeight: 1.15,
               }}
             >
-              {note.title || "Untitled"}
+              {displayTitle(note)}
             </h1>
             <p style={{ fontSize: 13, color: "#AEAEB2", margin: "0 0 52px", letterSpacing: 0.1, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               {/* clock icon — inline SVG matches the meta line color via currentColor */}

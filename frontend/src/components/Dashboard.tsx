@@ -5,7 +5,7 @@ import {
 } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
-import { extractFirstImage, stripHtmlForExcerpt } from "../utils/notePreview";
+import { displayTitle, extractFirstImage, stripHtmlForExcerpt } from "../utils/notePreview";
 import { NoteEditor } from "./notes/NoteEditor";
 import { BrainOrb } from "./BrainOrb";
 import { ExploreModal } from "./ExploreModal";
@@ -130,7 +130,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             setStats(s);
             const first = s.recent_notes[0];
             if (first) {
-              const t = (first.title ?? "").trim() || "Untitled";
+              const t = displayTitle(first);
               const ex = stripHtml(first.content ?? "");
               startTyping(first.id, t.length + ex.length);
             }
@@ -379,7 +379,7 @@ export function Dashboard({ onOpenNote }: { onOpenNote: () => void }) {
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 {stats.recent_notes.slice(0, 2).map((note, idx) => {
-                  const fullTitle = note.title?.trim() || "Untitled";
+                  const fullTitle = displayTitle(note);
                   const fullExcerpt = stripHtmlForExcerpt(note.content ?? "");
                   const thumbSrc = extractFirstImage(note.content ?? "");
                   const isFirst = idx === 0;
