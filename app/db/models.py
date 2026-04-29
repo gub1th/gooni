@@ -68,6 +68,12 @@ class Message(Base):
         Integer, ForeignKey("messages.id"), nullable=True
     )
     is_feedback = Column(Boolean, nullable=False, default=False)
+    # Structured trace of the steps the orchestrator took to produce this
+    # assistant reply: intention text, memory recall, tool calls, etc.
+    # JSON-encoded list[dict]; null on user messages or older assistant rows.
+    # Schema: [{ "type": "intention" | "memory_recall" | "tool_call" | "reply",
+    #            "label": str, "detail": str | None, "args": dict | None }]
+    trace = Column(Text, nullable=True)
 
 
 class Note(Base):
