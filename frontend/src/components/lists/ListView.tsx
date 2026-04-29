@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useListsStore } from "../../stores/useListsStore";
 import type { ApiListItem, ListType } from "../../services/api";
+import { ItemModal } from "./ItemModal";
+import { getPrimaryDragBus } from "../PrimaryFocusCard";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 const CONTENT_MAX_WIDTH = 720;
@@ -86,6 +88,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
   const [confirmingListDelete, setConfirmingListDelete] = useState(false);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [dropBeforeId, setDropBeforeId] = useState<number | null>(null);
+  const [modalItemId, setModalItemId] = useState<number | null>(null);
   // Tick every minute so relative timestamps stay fresh without per-row state.
   const [, setNowTick] = useState(0);
   useEffect(() => {
@@ -166,9 +169,13 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       item={it}
       onToggle={() => updateItem(it.id, { done: !it.done })}
       onDelete={() => deleteItem(it.id)}
-      onChangeText={(text) => updateItem(it.id, { text })}
       onToggleActionable={() => updateItem(it.id, { actionable: !it.actionable })}
       onOpenSourceNote={onOpenSourceNote}
+      onOpenDetail={() => setModalItemId(it.id)}
+      onMakePrimary={(list?.type as string) === "focus" ? () => {
+        updateItem(it.id, { is_primary: true });
+        window.dispatchEvent(new CustomEvent("gooni-primary-changed"));
+      } : undefined}
       doneLabel={copy.doneLabel}
       flashing={flashId === it.id}
       registerRef={(el) => {
@@ -178,12 +185,23 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       draggable={opts.draggable}
       isDragging={draggingId === it.id}
       dropIndicator={dropBeforeId === it.id}
-      onDragStart={() => setDraggingId(it.id)}
-      onDragEnd={() => { setDraggingId(null); setDropBeforeId(null); }}
+      onDragStart={() => {
+        setDraggingId(it.id);
+        if ((list?.type as string) === "focus") {
+          getPrimaryDragBus().current = { id: it.id };
+        }
+      }}
+      onDragEnd={() => {
+        setDraggingId(null);
+        setDropBeforeId(null);
+        getPrimaryDragBus().current = null;
+      }}
       onDragOverRow={() => { if (draggingId != null && draggingId !== it.id) setDropBeforeId(it.id); }}
       onDropRow={() => handleDrop(it.id)}
     />
   );
+
+  const modalItem = modalItemId == null ? null : items.find((it) => it.id === modalItemId) || null;
 
   // Canonical singletons (todo / backlog / focus) are recreated on next boot,
   // so the backend refuses to delete them. Hide the trash for those.
@@ -474,6 +492,16 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
           100% { background: transparent; }
         }
       `}</style>
+
+      {modalItem && (
+        <ItemModal
+          item={modalItem}
+          isPrimary={modalItem.is_primary}
+          onClose={() => setModalItemId(null)}
+          onSave={(patch) => updateItem(modalItem.id, patch)}
+          onDelete={() => deleteItem(modalItem.id)}
+        />
+      )}
     </div>
   );
 }
@@ -482,9 +510,10 @@ interface RowProps {
   item: ApiListItem;
   onToggle: () => void;
   onDelete: () => void;
-  onChangeText: (t: string) => void;
   onToggleActionable: () => void;
   onOpenSourceNote?: (noteId: number) => void;
+  onOpenDetail: () => void;
+  onMakePrimary?: () => void;
   doneLabel: string;
   flashing: boolean;
   registerRef: (el: HTMLDivElement | null) => void;
@@ -498,15 +527,11 @@ interface RowProps {
 }
 
 function ListItemRow({
-  item, onToggle, onDelete, onChangeText, onToggleActionable, onOpenSourceNote, flashing, registerRef,
+  item, onToggle, onDelete, onToggleActionable, onOpenSourceNote, onOpenDetail, onMakePrimary, flashing, registerRef,
   draggable, isDragging, dropIndicator, onDragStart, onDragEnd, onDragOverRow, onDropRow,
 }: RowProps) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(item.text);
   const [hover, setHover] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-
-  useEffect(() => { setDraft(item.text); }, [item.text]);
 
   // Auto-bail confirm if mouse leaves row.
   useEffect(() => {
@@ -515,13 +540,6 @@ function ListItemRow({
       return () => window.clearTimeout(t);
     }
   }, [hover, confirmingDelete]);
-
-  function commit() {
-    setEditing(false);
-    const next = draft.trim();
-    if (next && next !== item.text) onChangeText(next);
-    else setDraft(item.text);
-  }
 
   return (
     <div
@@ -611,42 +629,24 @@ function ListItemRow({
       )}
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        {editing ? (
-          <input
-            value={draft}
-            autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit();
-              if (e.key === "Escape") { setDraft(item.text); setEditing(false); }
-            }}
-            style={{
-              width: "100%",
-              border: "none",
-              outline: "none",
-              background: "transparent",
-              fontFamily: FONT,
-              fontSize: 14,
-              color: "#1C1C1E",
-              textDecoration: item.actionable && item.done ? "line-through" : "none",
-            }}
-          />
-        ) : (
-          <div
-            onClick={() => setEditing(true)}
-            style={{
-              fontSize: 14,
-              color: item.actionable ? "#1C1C1E" : "#3F3F46",
-              fontStyle: item.actionable ? "normal" : "italic",
-              textDecoration: item.actionable && item.done ? "line-through" : "none",
-              cursor: "text",
-              wordBreak: "break-word",
-            }}
-          >
-            {item.text}
-          </div>
-        )}
+        <div
+          onClick={onOpenDetail}
+          title="Click to open details"
+          style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontSize: 14,
+            color: item.actionable ? "#1C1C1E" : "#3F3F46",
+            fontStyle: item.actionable ? "normal" : "italic",
+            textDecoration: item.actionable && item.done ? "line-through" : "none",
+            cursor: "pointer",
+            wordBreak: "break-word",
+          }}
+        >
+          {item.is_primary && (
+            <span title="Primary focus" style={{ color: "#F59E0B", fontSize: 14, lineHeight: 1, flexShrink: 0 }}>★</span>
+          )}
+          <span>{item.text}</span>
+        </div>
 
         {item.subtitle && (
           <div style={{ marginTop: 3, fontSize: 12.5, color: "#8E8E93", lineHeight: 1.45 }}>
@@ -713,6 +713,40 @@ function ListItemRow({
         </div>
         {hover && (
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {onMakePrimary && !item.is_primary && !confirmingDelete && (
+              <button
+                onClick={onMakePrimary}
+                title="Make this the primary focus"
+                aria-label="Make primary"
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "#FEF3C7";
+                  (e.currentTarget as HTMLButtonElement).style.color = "#B45309";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                  (e.currentTarget as HTMLButtonElement).style.color = "#6B7280";
+                }}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#6B7280",
+                  cursor: "pointer",
+                  padding: "3px 7px",
+                  borderRadius: 6,
+                  fontFamily: FONT,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  transition: "background 120ms, color 120ms",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 3,
+                }}
+              >
+                ★ make primary
+              </button>
+            )}
             {item.actionable && !confirmingDelete && (
               <button
                 onClick={onToggleActionable}

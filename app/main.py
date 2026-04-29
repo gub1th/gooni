@@ -174,6 +174,7 @@ def _run_column_migrations(engine):
             ("list_items", "committed", "INTEGER"),
             ("list_items", "updated_at", "DATETIME"),
             ("list_items", "actionable", "INTEGER"),
+            ("list_items", "is_primary", "INTEGER"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -211,6 +212,7 @@ def _run_column_migrations(engine):
         if "list_items" in existing_tables:
             conn.execute(text("UPDATE list_items SET committed = 0 WHERE committed IS NULL"))
             conn.execute(text("UPDATE list_items SET actionable = 1 WHERE actionable IS NULL"))
+            conn.execute(text("UPDATE list_items SET is_primary = 0 WHERE is_primary IS NULL"))
         conn.commit()
 
 
@@ -596,6 +598,7 @@ def _serialize_list_item(it: ListItem) -> dict:
         "subtitle": it.subtitle,
         "done": bool(it.done),
         "actionable": bool(it.actionable),
+        "is_primary": bool(it.is_primary),
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
         "sort_order": it.sort_order,
         "due_date": it.due_date.isoformat() if it.due_date else None,
@@ -718,6 +721,7 @@ def update_list_item(item_id: int, body: dict, db: Session = Depends(get_db)):
         subtitle=body.get("subtitle"),
         done=body.get("done"),
         actionable=body.get("actionable"),
+        is_primary=body.get("is_primary"),
         sort_order=body.get("sort_order"),
         **due_kwarg,
     )
@@ -825,6 +829,10 @@ def items_update(item_id: int, body: dict, db: Session = Depends(get_db)):
         patch["parent_id"] = (
             int(body["parent_id"]) if body["parent_id"] is not None else None
         )
+    if "actionable" in body:
+        patch["actionable"] = bool(body["actionable"])
+    if "is_primary" in body:
+        patch["is_primary"] = bool(body["is_primary"])
     item = item_service.update(db, item_id, **patch)
     if not item:
         raise HTTPException(status_code=404, detail="item not found")
@@ -856,6 +864,8 @@ def _serialize_item(it: ListItem) -> dict:
         "subtitle": it.subtitle,
         "endgoal": it.endgoal,
         "committed": bool(it.committed),
+        "actionable": bool(it.actionable),
+        "is_primary": bool(it.is_primary),
         "done": bool(it.done),
         "due_date": it.due_date.isoformat() if it.due_date else None,
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
