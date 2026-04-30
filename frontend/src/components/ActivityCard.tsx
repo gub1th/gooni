@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  fetchItemTree, createItem,
+  fetchItemTree, createItem, reorderItems,
   type ApiItemTree, type ApiItemNode,
 } from "../services/api";
 import { Item } from "./Item";
@@ -68,8 +68,18 @@ function FocusesSection({ focuses, onChange }: {
 }) {
   const committed = focuses.filter((f) => f.committed && !f.done);
   const uncommitted = focuses.filter((f) => !f.committed && !f.done);
-  const completed = focuses.filter((f) => f.done);
+  // Done sorted by completed_at desc so most recent is on top.
+  const done = focuses
+    .filter((f) => f.done)
+    .sort((a, b) => {
+      const ta = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+      const tb = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+      return tb - ta;
+    });
   const stale = committed.filter((f) => f.stale).length;
+
+  const recentDone = done.slice(0, 2);
+  const olderDone = done.slice(2);
 
   return (
     <div>
@@ -79,15 +89,10 @@ function FocusesSection({ focuses, onChange }: {
         </span>
       } />
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {committed.length === 0 ? (
-          <span style={{ fontSize: 11.5, color: "#C7C7CC", padding: "4px 0" }}>
-            no focuses yet — what's on your plate?
-          </span>
-        ) : (
-          committed.map((f) => (
-            <Item key={f.id} node={f} onChange={onChange} />
-          ))
-        )}
+        <ReorderableList
+          items={committed}
+          onChange={onChange}
+        />
 
         <FocusAdder onCreated={onChange} />
 
@@ -97,7 +102,7 @@ function FocusesSection({ focuses, onChange }: {
               fontSize: 11, color: "#8E8E93", cursor: "pointer",
               padding: "4px 0", listStyle: "none",
             }}>
-              {uncommitted.length} not committed
+              ▸ {uncommitted.length} not committed
             </summary>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
               {uncommitted.map((f) => (
@@ -107,22 +112,132 @@ function FocusesSection({ focuses, onChange }: {
           </details>
         )}
 
-        {completed.length > 0 && (
-          <details style={{ marginTop: 4 }}>
-            <summary style={{
-              fontSize: 11, color: "#8E8E93", cursor: "pointer",
-              padding: "4px 0", listStyle: "none",
-            }}>
-              {completed.length} done
-            </summary>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-              {completed.map((f) => (
-                <Item key={f.id} node={f} onChange={onChange} />
-              ))}
-            </div>
-          </details>
+        {recentDone.length > 0 && (
+          <DoneSection recent={recentDone} older={olderDone} onChange={onChange} />
         )}
       </div>
+    </div>
+  );
+}
+
+function DoneSection({
+  recent, older, onChange,
+}: { recent: ApiItemNode[]; older: ApiItemNode[]; onChange: () => void }) {
+  const [showAll, setShowAll] = useState(false);
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(0,0,0,0.05)" }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6, marginBottom: 6,
+      }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#30A14E" }} />
+        <span style={{
+          fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
+          letterSpacing: 0.6, fontWeight: 600,
+        }}>Done</span>
+        <span style={{ fontSize: 11, color: "#AEAEB2", marginLeft: 4 }}>
+          {recent.length + older.length}
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {recent.map((f) => (
+          <Item key={f.id} node={f} onChange={onChange} variant="done" />
+        ))}
+        {older.length > 0 && (
+          <>
+            {showAll && older.map((f) => (
+              <Item key={f.id} node={f} onChange={onChange} variant="done" />
+            ))}
+            <button
+              onClick={() => setShowAll((v) => !v)}
+              style={{
+                fontSize: 11, color: "#8E8E93",
+                background: "transparent", border: "none",
+                padding: "4px 0", cursor: "pointer", fontFamily: FONT,
+                textAlign: "left",
+              }}
+            >
+              {showAll ? "− hide" : `+ ${older.length} more done`}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Reorder ────────────────────────────────────────────────────────────────
+//
+// HTML5 drag-and-drop with drop slots between rows. We mutate a local copy
+// optimistically; if the API call fails, we restore from the server state.
+
+function ReorderableList({ items, onChange }: { items: ApiItemNode[]; onChange: () => void }) {
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
+  if (items.length === 0) {
+    return (
+      <span style={{ fontSize: 11.5, color: "#C7C7CC", padding: "4px 0" }}>
+        no focuses yet — what's on your plate?
+      </span>
+    );
+  }
+
+  async function commitReorder(targetIdx: number) {
+    if (draggingId == null) return;
+    const fromIdx = items.findIndex((i) => i.id === draggingId);
+    if (fromIdx === -1 || fromIdx === targetIdx || fromIdx + 1 === targetIdx) return;
+    const next = items.slice();
+    const [moved] = next.splice(fromIdx, 1);
+    const insertAt = targetIdx > fromIdx ? targetIdx - 1 : targetIdx;
+    next.splice(insertAt, 0, moved);
+    try {
+      await reorderItems(next.map((n) => n.id));
+      onChange();
+    } catch (e) { console.error(e); }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      <DropSlot
+        active={draggingId != null && hoverIdx === 0}
+        onEnter={() => setHoverIdx(0)}
+        onDrop={() => { commitReorder(0); setHoverIdx(null); }}
+      />
+      {items.map((f, i) => (
+        <div key={f.id}>
+          <Item
+            node={f}
+            onChange={onChange}
+            draggable={!f.done}
+            onDragStart={() => setDraggingId(f.id)}
+            onDragEnd={() => { setDraggingId(null); setHoverIdx(null); }}
+          />
+          <DropSlot
+            active={draggingId != null && draggingId !== f.id && hoverIdx === i + 1}
+            onEnter={() => setHoverIdx(i + 1)}
+            onDrop={() => { commitReorder(i + 1); setHoverIdx(null); }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DropSlot({
+  active, onEnter, onDrop,
+}: { active: boolean; onEnter: () => void; onDrop: () => void }) {
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; onEnter(); }}
+      onDrop={(e) => { e.preventDefault(); onDrop(); }}
+      style={{ position: "relative", height: 8, margin: "1px 0" }}
+    >
+      <div style={{
+        position: "absolute", left: 4, right: 4, top: 3, height: 2,
+        borderRadius: 1,
+        background: active ? "#3B82F6" : "transparent",
+        transition: "background 100ms",
+      }} />
     </div>
   );
 }
