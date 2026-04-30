@@ -20,6 +20,41 @@ const FLY_DASHBOARD = "https://fly.io/apps/gooni-bot";
 const VERCEL_DASHBOARD = "https://vercel.com/daniels-projects-eac22a07/gooni";
 const VERCEL_URL_KEY = "gooni_vercel_url";
 
+// Vercel injects VERCEL_URL etc at build; vercel.json re-exports as VITE_* so Vite bundles them.
+const env = import.meta.env as Record<string, string | undefined>;
+
+function withProtocol(host: string | undefined | null): string {
+  if (!host) return "";
+  if (host.startsWith("http://") || host.startsWith("https://")) return host.replace(/\/$/, "");
+  return `https://${host}`.replace(/\/$/, "");
+}
+
+// Last-resort default when no env, no vercel host, no localStorage entry.
+// Matches the prod URL listed in the project's .env.example so a fresh local
+// dev still shows something sensible without manual configuration.
+const VERCEL_DEFAULT_URL = "https://gooni.vercel.app";
+
+function detectVercelUrl(): string {
+  const fromEnv = withProtocol(env.VITE_VERCEL_PROJECT_PRODUCTION_URL || env.VITE_VERCEL_URL);
+  if (fromEnv) return fromEnv;
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host.endsWith(".vercel.app") || host === "gooni.app") return window.location.origin.replace(/\/$/, "");
+  }
+  return localStorage.getItem(VERCEL_URL_KEY) || VERCEL_DEFAULT_URL;
+}
+
+interface FlyInfo {
+  app?: string | null;
+  machine_id?: string | null;
+  machine_version?: string | null;
+  region?: string | null;
+  image_ref?: string | null;
+  release_version?: string | null;
+}
+
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
+
 async function pingUrl(url: string): Promise<HealthState> {
   if (!url) return { status: "idle", latencyMs: null, error: "not configured", checkedAt: new Date() };
   const t0 = performance.now();
@@ -72,9 +107,10 @@ interface DeploymentCardProps {
   state: HealthState;
   onRecheck: () => void;
   onEditUrl?: () => void;
+  meta?: { label: string; value: string; href?: string }[];
 }
 
-function DeploymentCard({ name, url, dashboardUrl, state, onRecheck, onEditUrl }: DeploymentCardProps) {
+function DeploymentCard({ name, url, dashboardUrl, state, onRecheck, onEditUrl, meta }: DeploymentCardProps) {
   // tick once a second so "last checked Xs ago" stays fresh while the modal is open
   useNow(1000);
   return (
@@ -96,9 +132,35 @@ function DeploymentCard({ name, url, dashboardUrl, state, onRecheck, onEditUrl }
       <div style={{ fontSize: 11.5, color: "#6B6B70", fontFamily: "'SF Mono', Menlo, monospace", marginBottom: 4, wordBreak: "break-all" }}>
         {url || "(not configured)"}
       </div>
-      <div style={{ fontSize: 10.5, color: "#AEAEB2", marginBottom: 10 }}>
+      <div style={{ fontSize: 10.5, color: "#AEAEB2", marginBottom: meta && meta.length ? 8 : 10 }}>
         {state.checkedAt ? `last checked ${formatRelativeTime(state.checkedAt)}` : "never checked"}
       </div>
+      {meta && meta.length > 0 && (
+        <div style={{
+          display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 8px",
+          fontSize: 10.5, marginBottom: 10,
+        }}>
+          {meta.map((m) => (
+            <div key={m.label} style={{ display: "contents" }}>
+              <span style={{ color: "#AEAEB2", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600 }}>
+                {m.label}
+              </span>
+              {m.href ? (
+                <a href={m.href} target="_blank" rel="noreferrer" style={{
+                  color: "#1C1C1E", fontFamily: "'SF Mono', Menlo, monospace",
+                  textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}>{m.value}</a>
+              ) : (
+                <span style={{
+                  color: "#1C1C1E", fontFamily: "'SF Mono', Menlo, monospace",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>{m.value}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <button
           onClick={onRecheck}
@@ -123,16 +185,52 @@ const btn: React.CSSProperties = {
   fontFamily: "'Inter', -apple-system, sans-serif",
 };
 
+function flyMeta(info: FlyInfo | null): { label: string; value: string }[] {
+  if (!info) return [];
+  const out: { label: string; value: string }[] = [];
+  if (info.region) out.push({ label: "region", value: info.region });
+  if (info.machine_version) out.push({ label: "version", value: info.machine_version });
+  if (info.image_ref) out.push({ label: "image", value: info.image_ref.split(":").pop() ?? info.image_ref });
+  if (info.machine_id) out.push({ label: "machine", value: info.machine_id });
+  return out;
+}
+
+function vercelMeta(): { label: string; value: string; href?: string }[] {
+  const out: { label: string; value: string; href?: string }[] = [];
+  const sha = env.VITE_VERCEL_GIT_COMMIT_SHA;
+  const ref = env.VITE_VERCEL_GIT_COMMIT_REF;
+  const dep = env.VITE_VERCEL_DEPLOYMENT_ID;
+  const venv = env.VITE_VERCEL_ENV;
+  if (venv) out.push({ label: "env", value: venv });
+  if (ref) out.push({ label: "branch", value: ref });
+  if (sha) out.push({
+    label: "commit",
+    value: sha.slice(0, 7),
+    href: `https://github.com/gub1th/gooni/commit/${sha}`,
+  });
+  if (dep) out.push({ label: "deploy", value: dep });
+  return out;
+}
+
 export function DevToolsModal({ open, onClose }: DevToolsModalProps) {
   const [flyState, setFlyState] = useState<HealthState>({ status: "idle", latencyMs: null, error: null, checkedAt: null });
   const [vercelState, setVercelState] = useState<HealthState>({ status: "idle", latencyMs: null, error: null, checkedAt: null });
-  const [vercelUrl, setVercelUrl] = useState<string>(() => localStorage.getItem(VERCEL_URL_KEY) ?? "");
+  const [vercelUrl, setVercelUrl] = useState<string>(detectVercelUrl);
   const [editingVercel, setEditingVercel] = useState(false);
   const [vercelDraft, setVercelDraft] = useState("");
+  const [flyInfo, setFlyInfo] = useState<FlyInfo | null>(null);
 
   async function checkFly() {
     setFlyState((s) => ({ ...s, status: "checking" }));
     setFlyState(await pingUrl(FLY_APP_URL));
+    // Fetch /health to surface what's actually running on the deployed machine.
+    try {
+      const r = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        if (j?.fly) setFlyInfo(j.fly);
+      }
+    } catch { /* swallow — health info is best-effort */ }
   }
   async function checkVercel() {
     setVercelState((s) => ({ ...s, status: "checking" }));
@@ -223,6 +321,7 @@ export function DevToolsModal({ open, onClose }: DevToolsModalProps) {
             dashboardUrl={FLY_DASHBOARD}
             state={flyState}
             onRecheck={checkFly}
+            meta={flyMeta(flyInfo)}
           />
           {editingVercel ? (
             <div style={{ border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10, padding: 12, background: "#FDFCFA" }}>
@@ -248,6 +347,7 @@ export function DevToolsModal({ open, onClose }: DevToolsModalProps) {
               state={vercelState}
               onRecheck={checkVercel}
               onEditUrl={() => { setVercelDraft(vercelUrl); setEditingVercel(true); }}
+              meta={vercelMeta()}
             />
           )}
         </div>
