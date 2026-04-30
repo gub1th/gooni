@@ -1621,7 +1621,19 @@ def get_conversation_graph(conversation_id: int, db: Session = Depends(get_db)):
 
 @app.get("/health")
 async def health():
-    return {"message": "Health check"}
+    # Fly injects these env vars on every machine; useful to surface so the
+    # dev-tools modal can show "what's actually deployed" without a dashboard hop.
+    return {
+        "message": "Health check",
+        "fly": {
+            "app": os.getenv("FLY_APP_NAME"),
+            "machine_id": os.getenv("FLY_MACHINE_ID"),
+            "machine_version": os.getenv("FLY_MACHINE_VERSION"),
+            "region": os.getenv("FLY_REGION"),
+            "image_ref": os.getenv("FLY_IMAGE_REF"),
+            "release_version": os.getenv("FLY_RELEASE_VERSION"),
+        },
+    }
 
 
 # ── Dashboard ──────────────────────────────────────────────────────────────────
