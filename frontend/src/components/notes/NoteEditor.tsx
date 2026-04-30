@@ -421,11 +421,18 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
   }, [editor, activeNoteId]);
 
   // Toggle .is-empty on the editor DOM so the placeholder CSS tracks real emptiness
-  // (not CSS :empty, which breaks the moment ProseMirror inserts a trailing <br>)
+  // (not CSS :empty, which breaks the moment ProseMirror inserts a trailing <br>).
+  // Guarded — when navigating between notes (e.g. brain-map → note), the editor
+  // can briefly be present-but-destroyed; touching `view` then throws and the
+  // ErrorBoundary surfaces a giant red banner. Skip if torn down.
   useEffect(() => {
-    if (!editor) return;
-    const el = editor.view.dom as HTMLElement;
-    el.classList.toggle("is-empty", editorEmpty);
+    if (!editor || editor.isDestroyed) return;
+    try {
+      const el = editor.view.dom as HTMLElement;
+      el.classList.toggle("is-empty", editorEmpty);
+    } catch {
+      // view not mounted yet — next effect run will catch up
+    }
   }, [editor, editorEmpty]);
 
   async function handleSubmit() {
