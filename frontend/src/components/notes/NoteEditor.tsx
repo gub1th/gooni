@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { SlashCommand } from "./slash-command";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchRelatedNotes, patchNote as apiPatchNote, suggestNoteQuestions, type ApiNote, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchRelatedNotes, fetchNoteMemories, patchNote as apiPatchNote, suggestNoteQuestions, type ApiNote, type ApiMemory, type RelatedNote, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
 import { useConversationsStore } from "../../stores/useConversationsStore";
@@ -163,6 +163,33 @@ function useEditorStyles() {
   }, []);
 }
 
+// Subtle tint per memory type so the pill row reads like a legend without
+// needing an actual key. Pulls from the same palette as the /memories page.
+function memoryTint(type: string): { bg: string; fg: string; border: string } {
+  switch (type) {
+    case "preference": return { bg: "#FFF7ED", fg: "#9A3412", border: "rgba(154,52,18,0.20)" };
+    case "goal":       return { bg: "#EEF2FF", fg: "#3730A3", border: "rgba(55,48,163,0.20)" };
+    case "fact":       return { bg: "#F1F5F9", fg: "#334155", border: "rgba(51,65,85,0.18)" };
+    case "routine":    return { bg: "#ECFDF5", fg: "#065F46", border: "rgba(6,95,70,0.20)" };
+    case "constraint": return { bg: "#FEF2F2", fg: "#991B1B", border: "rgba(153,27,27,0.20)" };
+    case "episode":    return { bg: "#FAF5FF", fg: "#6B21A8", border: "rgba(107,33,168,0.20)" };
+    default:           return { bg: "#F4F4F5", fg: "#52525B", border: "rgba(82,82,91,0.18)" };
+  }
+}
+
+// Cosine similarity score → yellow (low) → green (high) gradient. Score is
+// clamped 0..1 by the caller; we map to two anchor points and lerp.
+function similarityTint(score: number): { bg: string; fg: string } {
+  // Yellow: hsl(45, 95%, 55%). Green: hsl(140, 60%, 42%).
+  const t = Math.max(0, Math.min(1, score));
+  const hue = 45 + (140 - 45) * t;
+  const sat = 95 - (95 - 60) * t;
+  const lit = 55 - (55 - 42) * t;
+  const bg = `hsl(${hue}, ${sat}%, ${Math.min(92, lit + 38)}%)`;
+  const fg = `hsl(${hue}, ${sat - 15}%, ${Math.max(22, lit - 18)}%)`;
+  return { bg, fg };
+}
+
 function formatNoteDate(iso: string | null): string {
   if (!iso) return "";
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
@@ -223,7 +250,8 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
   const [editorEmpty, setEditorEmpty] = useState(true);
   const [movePicker, setMovePicker] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [relatedNotes, setRelatedNotes] = useState<ApiNote[]>([]);
+  const [relatedNotes, setRelatedNotes] = useState<RelatedNote[]>([]);
+  const [noteMemories, setNoteMemories] = useState<ApiMemory[]>([]);
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
   const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
@@ -259,18 +287,24 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
     setLastSavedTime(null);
     setSpaceSuggestion(null);
     setRelatedNotes([]);
+    setNoteMemories([]);
     setDeleteConfirm(false);
     setLocalIsPublic(activeNote?.is_public ?? false);
     setSuggestedQuestions([]);
     hasChanges.current = false;
   }, [activeNoteId]);
 
-  // Load related notes after note settles (quiet, non-blocking)
+  // Load related notes + memories tied to this note after it settles
+  // (quiet, non-blocking). Both feed the post-editor footer block.
   useEffect(() => {
     if (!activeNoteId || activeNoteId < 0) return;
     const t = setTimeout(async () => {
-      const notes = await fetchRelatedNotes(activeNoteId);
-      setRelatedNotes(notes.filter((n) => n.id !== activeNoteId));
+      const [related, mems] = await Promise.all([
+        fetchRelatedNotes(activeNoteId),
+        fetchNoteMemories(activeNoteId),
+      ]);
+      setRelatedNotes(related.filter((n) => n.id !== activeNoteId).slice(0, 2));
+      setNoteMemories(mems);
     }, 1000);
     return () => clearTimeout(t);
   }, [activeNoteId]);
@@ -1289,20 +1323,62 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                   <EditorContent editor={editor} />
                 </div>
 
-                {relatedNotes.length > 0 && (
+                {noteMemories.length > 0 && (
                   <div style={{ marginTop: 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>MEMORIES FROM THIS NOTE</p>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {noteMemories.map((m) => (
+                        <button
+                          key={m.id}
+                          onClick={() => navigate({ to: "/memories" })}
+                          title={m.content}
+                          style={{
+                            display: "inline-flex", alignItems: "center", gap: 6,
+                            padding: "4px 10px", borderRadius: 999,
+                            border: `0.5px solid ${memoryTint(m.type).border}`,
+                            background: memoryTint(m.type).bg,
+                            color: memoryTint(m.type).fg,
+                            fontSize: 11.5, fontWeight: 500,
+                            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                            cursor: "pointer", maxWidth: 260,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          }}
+                        >
+                          <span style={{ fontSize: 9.5, opacity: 0.7, textTransform: "uppercase", letterSpacing: 0.4 }}>{m.type}</span>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {m.content.length > 60 ? m.content.slice(0, 60) + "…" : m.content}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {relatedNotes.length > 0 && (
+                  <div style={{ marginTop: noteMemories.length > 0 ? 28 : 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
                     <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>RELATED</p>
                     {relatedNotes.map((n) => {
                       const targetSpaceId = n.space_id ? String(n.space_id) : "general";
+                      const sim = Math.max(0, Math.min(1, n.similarity ?? 0));
                       return (
                         <button
                           key={n.id}
                           onClick={async () => { selectSpace(targetSpaceId); await loadNotes(targetSpaceId); selectNote(n.id); }}
-                          style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", width: "100%", padding: "7px 0", background: "none", border: "none", cursor: "pointer", gap: 12, borderRadius: 6 }}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "7px 0", background: "none", border: "none", cursor: "pointer", gap: 12, borderRadius: 6 }}
                           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)")}
                           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
                         >
-                          <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{
+                            display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            minWidth: 30, height: 18, borderRadius: 9, padding: "0 6px",
+                            background: similarityTint(sim).bg, color: similarityTint(sim).fg,
+                            fontSize: 10.5, fontWeight: 600, fontVariantNumeric: "tabular-nums",
+                            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                            flexShrink: 0,
+                          }}>
+                            {Math.round(sim * 100)}
+                          </span>
+                          <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                             {displayTitle(n)}
                           </span>
                           <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>

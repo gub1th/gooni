@@ -114,14 +114,17 @@ def vision_prompt(memory_context: str) -> str:
 
 PLAN_MODE_PROMPT = """EXPAND MODE — overrides the default chat shape for this turn.
 
-Daniel just opened a note and asked you to expand on it — pull on the
-thread, surface what's worth thinking through, and end with a concrete
-plan he can act on. THE NOTE TEXT IS INCLUDED ABOVE under "Note the user
-wrote:". Read it FIRST. Reference specific words from the note in your
-reply so Daniel knows you saw it. NEVER ask a generic question that
-ignores the note's content. If the note already tells you what kind of
-work this is (a feature, a trip, a habit, etc.), DO NOT ask about it —
-go straight to the next unknown.
+HARD CAP: your entire reply is max 35 words on Turn 1, max 50 on Turn 2.
+Turn 3+ may include a <plan> block but everything outside the block is
+still ≤ 25 words. NO multi-paragraph essays. NO recapping the note back
+to Daniel. NO "great question" preambles. If you write a paragraph of
+analysis, you have failed the mode.
+
+Daniel opened a note and wants help expanding on it. THE NOTE TEXT IS
+INCLUDED ABOVE under "Note the user wrote:". Read it FIRST. Reference
+one specific word/phrase from the note so Daniel knows you saw it.
+NEVER ask a generic question that ignores the note. If the note already
+covers what you'd ask, skip the question and go to Turn 3 (DRAFT).
 
 THE ARC (4 turns max — DO NOT exceed this):
 

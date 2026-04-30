@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { fetchNote, type ApiNote } from "../services/api";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { useGooniStore } from "../stores/useGooniStore";
+import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { GooniPanel } from "./GooniPanel";
+import { NoteEditor } from "./notes/NoteEditor";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -21,6 +23,7 @@ export function PlanView({ noteId, onExit }: Props) {
   const [loadError, setLoadError] = useState(false);
   const planNote = useConversationsStore((s) => s.planNote);
   const setMascotSuppressed = useGooniStore((s) => s.setMascotSuppressed);
+  const { selectSpace, selectNote, loadNotes } = useNotesContentStore();
 
   useEffect(() => {
     let cancelled = false;
@@ -28,6 +31,12 @@ export function PlanView({ noteId, onExit }: Props) {
     fetchNote(noteId).then((n) => {
       if (cancelled) return;
       setNote(n);
+      // Push the note into the editor's store so NoteEditor renders it
+      // editably (instead of the prior dangerouslySetInnerHTML viewer).
+      const sid = n.space_id == null ? "general" : String(n.space_id);
+      selectSpace(sid);
+      loadNotes(sid).catch(() => {});
+      selectNote(n.id);
       // Auto-engage plan mode the first time we mount with this note.
       // Subsequent renders skip — `messages.length === 0` is the guard.
       if (useConversationsStore.getState().messages.length === 0) {
@@ -54,12 +63,13 @@ export function PlanView({ noteId, onExit }: Props) {
         }
       `}</style>
 
-      {/* Left: note viewer (read-only for v1). Daniel sees what he's
-          planning while Gooni writes the plan. */}
+      {/* Left: editable NoteEditor — Daniel can keep writing while Gooni
+          sketches a plan in the right panel. Same component as the regular
+          editor, so all the autosave / classify / image-paste behaviour
+          comes along for free. */}
       <div style={{
-        flex: 1, minWidth: 0, overflowY: "auto",
-        padding: "32px 48px",
-        display: "flex", flexDirection: "column", gap: 12,
+        flex: 1, minWidth: 0, display: "flex", flexDirection: "column",
+        position: "relative",
       }}>
         <button
           onClick={onExit}
@@ -67,32 +77,19 @@ export function PlanView({ noteId, onExit }: Props) {
             alignSelf: "flex-start",
             fontSize: 12, color: "#6B6B70",
             background: "transparent", border: "none",
-            padding: "4px 0", cursor: "pointer", fontFamily: FONT,
-            marginBottom: 4,
+            padding: "12px 0 4px 24px", cursor: "pointer", fontFamily: FONT,
           }}
           aria-label="Back to dashboard"
         >← back</button>
-
-        {loadError ? (
-          <p style={{ color: "#C7C7CC" }}>Couldn't load this note.</p>
-        ) : note ? (
-          <>
-            <h1 style={{
-              fontSize: 26, fontWeight: 700, color: "#1C1C1E",
-              margin: 0, lineHeight: 1.2,
-            }}>{note.title?.trim() || "Untitled"}</h1>
-            <div
-              style={{
-                fontSize: 14.5, color: "#3A3A3C", lineHeight: 1.6,
-                fontFamily: FONT,
-              }}
-              // Note bodies are TipTap HTML — already trusted, written by Daniel.
-              dangerouslySetInnerHTML={{ __html: note.content ?? "" }}
-            />
-          </>
-        ) : (
-          <p style={{ color: "#C7C7CC" }}>Loading…</p>
-        )}
+        <div style={{ flex: 1, minHeight: 0, display: "flex" }}>
+          {loadError ? (
+            <p style={{ color: "#C7C7CC", padding: 24 }}>Couldn't load this note.</p>
+          ) : note ? (
+            <NoteEditor />
+          ) : (
+            <p style={{ color: "#C7C7CC", padding: 24 }}>Loading…</p>
+          )}
+        </div>
       </div>
 
       {/* Right: docked Gooni chat. Drag-to-resize edge already lives in
