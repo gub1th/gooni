@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Sparkles } from "lucide-react";
 import {
   fetchDashboardStats,
   type ApiNote, type DashboardStats,
@@ -324,7 +325,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
         {/* Recent notes — compact 2x2 grid directly under the composer so a
             new note's animation lands in Daniel's eyeline. Cards in a "topic /
-            idea" shape get a 'Plan this' pill that hands off to Gooni. */}
+            idea" shape get an 'Expand' pill that hands off to Gooni. */}
         {stats && stats.recent_notes.length > 0 && (
           <div style={{ marginBottom: 18 }}>
             <div style={{
@@ -412,16 +413,17 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                           }}
                           style={{
                             fontSize: 10.5, fontWeight: 500, fontFamily: FONT,
-                            color: "#1C1C1E",
+                            color: "#15803D",
                             background: "rgba(74,222,128,0.14)",
                             border: "0.5px solid rgba(74,222,128,0.45)",
-                            borderRadius: 999, padding: "2px 8px",
+                            borderRadius: 999, padding: "2px 9px",
                             cursor: "pointer",
                             display: "inline-flex", alignItems: "center", gap: 4,
                           }}
-                          title="Plan this note with Gooni"
+                          title="Expand on this with Gooni"
                         >
-                          💬 Plan this
+                          <Sparkles size={11} strokeWidth={2} />
+                          Expand
                         </button>
                       )}
                     </div>
