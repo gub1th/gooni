@@ -344,6 +344,17 @@ export async function fetchDevActivity(): Promise<DevActivity> {
   return res.json();
 }
 
+export interface GooniSnapshot {
+  day: string;
+  taken_at: string | null;
+  digest: string;
+}
+export async function fetchSnapshotToday(): Promise<GooniSnapshot> {
+  const res = await apiFetch(`${BASE}/snapshot/today`);
+  if (!res.ok) throw new Error("Failed to fetch snapshot");
+  return res.json();
+}
+
 export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: number[] }> {
   const res = await apiFetch(`${BASE}/notes/cleanup`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to clean up notes");

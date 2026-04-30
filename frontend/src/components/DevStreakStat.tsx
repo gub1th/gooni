@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchDevActivity, type DevActivity, type DevActivityRepo } from "../services/api";
+import { fetchDevActivity, fetchSnapshotToday, type DevActivity, type DevActivityRepo, type GooniSnapshot } from "../services/api";
 import { Skeleton } from "./Skeleton";
 
 const FONT = "'Inter', -apple-system, sans-serif";
@@ -157,9 +157,10 @@ function DevExpandedPopover({ data, anchor }: { data: DevActivity; anchor: HTMLE
           to   { opacity: 1; transform: translateY(0); }
         }
       `}</style>
+      <GooniTake />
       <div style={{
         fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
-        letterSpacing: 0.6, fontWeight: 600, marginBottom: 10,
+        letterSpacing: 0.6, fontWeight: 600, marginBottom: 10, marginTop: 14,
       }}>Dev Activity</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: "60vh", overflowY: "auto" }}>
         {data.repos.map((r) => (
@@ -222,6 +223,61 @@ function RepoRow({ repo }: { repo: DevActivityRepo }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// Gooni's Take — daily reflection block at the top of the popover. Fetches
+// /snapshot/today which lazy-builds on first read of the day, so we don't
+// need a cron. While loading: skeleton lines in the same shape so the
+// popover doesn't jump when the digest lands.
+function GooniTake() {
+  const { data, isLoading } = useQuery<GooniSnapshot>({
+    queryKey: ["snapshot-today"],
+    queryFn: fetchSnapshotToday,
+    // Snapshot rarely changes within a session; keep it fresh for an hour.
+    staleTime: 60 * 60_000,
+  });
+
+  if (isLoading && !data) {
+    return (
+      <div style={{ marginBottom: 4 }}>
+        <div style={{
+          fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
+          letterSpacing: 0.6, fontWeight: 600, marginBottom: 8,
+        }}>Gooni's Take</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <Skeleton width="100%" height={11} />
+          <Skeleton width="92%" height={11} />
+          <Skeleton width="78%" height={11} />
+        </div>
+      </div>
+    );
+  }
+  if (!data || !data.digest) return null;
+
+  return (
+    <div style={{ marginBottom: 4 }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
+      }}>
+        <span style={{
+          fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
+          letterSpacing: 0.6, fontWeight: 600,
+        }}>Gooni's Take</span>
+        <span style={{ fontSize: 10.5, color: "#AEAEB2" }}>
+          {data.day}
+        </span>
+      </div>
+      <div style={{
+        fontSize: 12, color: "#3A3A3C", lineHeight: 1.5,
+        whiteSpace: "pre-wrap",
+        background: "linear-gradient(180deg, #FAFBFC, #F4F6F8)",
+        border: "0.5px solid rgba(0,0,0,0.06)",
+        borderRadius: 10, padding: "10px 12px",
+      }}>
+        {data.digest}
+      </div>
     </div>
   );
 }
