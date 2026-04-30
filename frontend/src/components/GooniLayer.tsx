@@ -68,7 +68,11 @@ export function GooniLayer() {
         </div>
       )}
 
-      <ChatLauncher />
+      {/* PlanView already hosts a docked Gooni panel on the right, so the
+          floating FAB would just stack on top of an existing chat. Reusing
+          mascotSuppressed since it already gates the same "chrome-heavy
+          view" cases. */}
+      {!mascotSuppressed && <ChatLauncher />}
     </>
   );
 }

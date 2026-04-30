@@ -219,10 +219,11 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
         />
       )}
 
-      {/* Top toolbar — surface toggle (modal ↔ sidebar). Only shown when
-          panel is open via the FAB (floating or sidebar through GooniLayer);
-          plan view + fullscreen lock the layout so they skip it. */}
-      {!fullscreen && !planContext && (
+      {/* Top toolbar — surface toggle (modal ↔ sidebar). Shown for the FAB-
+          opened surfaces and PlanView's docked panel so the chat chrome
+          stays consistent. fullscreen still skips it (the standalone chat
+          view has its own header). */}
+      {!fullscreen && (
         <SurfaceToggleBar />
       )}
 

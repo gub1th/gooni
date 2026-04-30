@@ -47,8 +47,8 @@ class NoteService:
         finally:
             db.close()
 
-    def get_related(self, note_id: int, limit: int, db: Session) -> list[Note]:
-        """Return notes most similar to the given note by cosine similarity."""
+    def get_related(self, note_id: int, limit: int, db: Session) -> list[tuple[Note, float]]:
+        """Return (note, cosine_similarity) tuples ordered by similarity desc."""
         note = db.query(Note).filter(Note.id == note_id).first()
         if not note or not note.embedding:
             return []
@@ -66,7 +66,7 @@ class NoteService:
             except Exception:
                 pass
         scored.sort(key=lambda x: x[1], reverse=True)
-        return [n for n, _ in scored[:limit]]
+        return scored[:limit]
 
     def suggest_space(self, note_id: int, db: Session) -> dict:
         """Return best-matching space for a note based on embedding similarity.

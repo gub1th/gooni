@@ -1487,9 +1487,27 @@ def delete_note(note_id: int, db: Session = Depends(get_db)):
 
 @app.get("/notes/{note_id}/related")
 def get_related_notes(note_id: int, limit: int = 5, db: Session = Depends(get_db)):
-    """Return notes similar to the given note, ranked by embedding cosine similarity."""
-    related = note_service.get_related(note_id, limit, db)
-    return [_serialize_note(n) for n in related]
+    """Return notes similar to the given note plus their cosine score (0..1)
+    so the editor can render a similarity pill."""
+    return [
+        {**_serialize_note(n), "similarity": round(sim, 3)}
+        for n, sim in note_service.get_related(note_id, limit, db)
+    ]
+
+
+@app.get("/notes/{note_id}/memories")
+def get_note_memories(note_id: int, limit: int = 6, db: Session = Depends(get_db)):
+    """Memories linked to this note (extracted via memorize). Used by the
+    editor's Memories pill section so Daniel sees what the note contributed."""
+    from .db.models import Memory
+    rows = (
+        db.query(Memory)
+        .filter(Memory.source_note_id == note_id, Memory.is_active == True)  # noqa: E712
+        .order_by(Memory.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [_memory_to_dashboard(m) for m in rows]
 
 
 # ── Serializers ────────────────────────────────────────────────────────────────

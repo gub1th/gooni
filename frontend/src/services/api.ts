@@ -179,9 +179,22 @@ export async function fetchNote(id: number): Promise<ApiNote> {
   return res.json();
 }
 
-export async function fetchRelatedNotes(id: number): Promise<ApiNote[]> {
+export interface RelatedNote extends ApiNote {
+  similarity: number;
+}
+export async function fetchRelatedNotes(id: number): Promise<RelatedNote[]> {
   try {
     const res = await apiFetch(`${BASE}/notes/${id}/related?limit=3`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchNoteMemories(id: number): Promise<ApiMemory[]> {
+  try {
+    const res = await apiFetch(`${BASE}/notes/${id}/memories?limit=6`);
     if (!res.ok) return [];
     return res.json();
   } catch {
