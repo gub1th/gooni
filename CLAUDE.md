@@ -12,9 +12,9 @@ Daniel is an eager software engineer actively learning. When working with him:
 Gooni is a **personal AI notebook** evolving toward an ambient home assistant. The core loop:
 1. You write notes (Apple Notes layout — spaces → notes list → editor)
 2. Gooni (GPT-4o-mini) reads your active note and answers questions / gives feedback
-3. Over time, Gooni builds a memory from your notes (stored in Mem0 cloud)
+3. Over time, Gooni builds a memory from your notes (stored locally in the SQLite `memories` table — extract → reconcile pipeline driven by LLM, retrieved by cosine similarity at chat time)
 
-Telegram bot exists for mobile capture — messages become conversations in the DB.
+Bots for mobile capture (Telegram, WhatsApp, iMessage planned). Each routes through the unified `MessagingChannel` abstraction in `app/services/messaging/`.
 
 ## North Star
 Evolving toward an ambient physical assistant — a device that knows you passively and proactively surfaces relevant context. Gooni is the brain. See `docs/VISION.md`.
@@ -38,20 +38,20 @@ Evolving toward an ambient physical assistant — a device that knows you passiv
 - Don't change the DB schema without flagging it
 - Don't install new dependencies without asking first
 - **Call `mcp__gooni__add_memory` after meaningful work or product discussions** — code changes, architectural decisions, feature ideas, design directions. Gooni should know what was built AND what Daniel is thinking about, even if he never told it directly
+- **Keep the docs honest.** When you change architecture, deps, env vars, or routes, update CLAUDE.md and README.md in the same PR. Stale docs poison every future session — outdated CLAUDE.md is worse than no CLAUDE.md. Focus on the high-leverage docs (CLAUDE.md > README.md > inline service docstrings); skip churn-prone files (TODO.md, VISION.md). If a section in CLAUDE.md describes something that's no longer true, fix it as part of the change that broke it, not as cleanup later.
 
 ## Current Priorities
-See **`docs/TODO.md`** for the full backlog. Top items:
-- Deploy Telegram bot
-- Spaces navigation in sidebar
+See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 
 ## Architecture
 
 ### Backend (`app/`)
 - **`app/main.py`** — All FastAPI routes + startup migrations. CORS allows `localhost:5173`.
-- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note`, `Conversation`, `Message`, `Focus`, `PublicProfile`
+- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note`, `Conversation`, `Message`, `Memory`, `List`, `ListItem`, `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
-- **`app/services/memory_service.py`** — Mem0 cloud client. `_is_memorable()` pre-check (len >= 8) gates all API calls. `has_memories()` cached for process lifetime.
-- **`app/services/orchestrator.py`** — Unified chat handler (web + Telegram). `Orchestrator` singleton.
+- **`app/services/memory_service.py`** — Local SQL-backed memory store (the `memories` table). Per chat exchange: `extract_candidates` (LLM) → cosine-search similar active memories → `reconcile_candidate` (LLM, ADD/UPDATE/DELETE/NONE) → apply. Retrieval injects always-included preferences plus top-5 facts/episodes by cosine similarity. Replaced the old Mem0 hosted service; legacy callers still see `{id, memory, ...}` dict shape via `_serialize`.
+- **`app/services/orchestrator.py`** — Unified chat handler across all surfaces (web, telegram, whatsapp, imessage). `Orchestrator` singleton. Source defaults to `"web"`; bot channels share a single persistent conversation per source (no gap-based sessioning).
+- **`app/services/messaging/`** — `MessagingChannel` ABC + `dispatch_inbound` pipeline. Per-channel impls: `telegram.py`, `whatsapp.py`, `imessage.py`. Each owns its outbound formatter (markdown → channel-native), allowlist, and send client. Webhook routes in `app/main.py` call `dispatch_inbound(channel, sender, text, db)` → orchestrator → channel-specific reply.
 - **`app/services/note_service.py`** — Embedding + space suggestion + related notes (OpenAI embeddings, cosine similarity).
 - **`app/llm/client.py`** — OpenAI wrapper (`llm_client`). Default model: `gpt-4o-mini`.
 
@@ -116,7 +116,7 @@ PATCH /notes/{id}               → update note { title?, content?, space_id?, i
 DELETE /notes/{id}              → delete note
 POST /notes/{id}/embed          → generate embedding + suggest space
 POST /notes/{id}/touch          → update last_opened_at
-POST /notes/{id}/memorize       → extract facts → Mem0
+POST /notes/{id}/memorize       → extract facts → memory store
 GET  /notes/{id}/related        → similar notes by embedding
 
 GET  /public/notes              → public notes list { id, title, space_name, excerpt, updated_at }
@@ -132,7 +132,10 @@ POST /conversations/{id}/messages → send message + get reply
 GET  /dashboard                 → stats + focuses + gooni_take briefing
 POST /focuses                   → create focus { name, commitment, due_date? }
 
-GET  /debug/memories            → inspect stored Mem0 memories
+GET  /debug/memories            → inspect stored memories
+POST /webhooks/whatsapp         → Meta Cloud API webhook (HMAC-verified)
+GET  /webhooks/whatsapp         → Meta verify-token handshake
+POST /webhooks/imessage         → BlueBubbles bridge webhook (X-Secret header)
 ```
 
 ## Code Patterns
