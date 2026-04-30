@@ -1,6 +1,6 @@
 # Gooni
 
-Personal AI accountability companion with persistent memory, goals tracking, and a notes-first UI.
+Personal AI accountability companion with persistent memory, lists, focuses, and a notes-first UI. Reachable via web, Telegram, and WhatsApp.
 
 ---
 
@@ -72,38 +72,60 @@ rm db/gooni.db
 
 ```
 app/
-  main.py                    # FastAPI routes
+  main.py                    # FastAPI routes + startup migrations + auth/rate-limit middleware
   db/
-    models.py                # SQLAlchemy models (Goal, Note, Conversation, Message, Memory)
+    models.py                # Space, Note, Conversation, Message, Memory, List, ListItem,
+                             # PublicProfile, Visit, OAuthToken, TrackedRepo
     schemas.py               # Pydantic request models
   services/
-    orchestrator.py          # Central chat handler (Telegram entry point)
-    goal_service.py          # Goal CRUD
-    note_service.py          # Note CRUD + streak / 7-day activity
-    conversation_service.py  # Conversation sessions + message threads
-    memory_service.py        # Vector memory (profile facts + episodes)
+    orchestrator.py          # Unified chat handler (web, telegram, whatsapp, imessage)
+    note_service.py          # Note CRUD + embeddings + space suggestion + related notes
+    conversation_service.py  # Conversation sessions + topic graph + rolling summary
+    memory_service.py        # Local SQL memory store; LLM extract → reconcile → cosine retrieval
+    item_service.py          # ListItem CRUD (focuses, todos, etc.)
+    list_service.py          # List CRUD + LLM context for AddToListTool
+    messaging/
+      base.py                # MessagingChannel ABC + dispatch_inbound
+      telegram.py, whatsapp.py, imessage.py
   llm/
-    client.py                # OpenAI wrapper (gpt-4o-mini / gpt-4o for vision)
+    client.py                # OpenAI wrapper (gpt-4o-mini default, gpt-4o for vision)
+  tools/                     # Pluggable LLM tools (lists, feature requests, etc.)
 
 frontend/
   src/
-    routes/index.tsx         # Main Notes UI (Sidebar + Editor)
+    routes/index.tsx         # Main UI: Sidebar | NotesList | NoteEditor | GooniPanel
+    routes/public.*.tsx      # Public portfolio pages (no auth)
     components/notes/
-      Sidebar.tsx            # Goal-backed spaces list
-      Editor.tsx             # Compose area + feed
-    stores/
-      notesStore.ts          # Feed, messages, UI state
-      useGoalsStore.ts       # Goals with streak data
-    services/api.ts          # All fetch calls to the backend
+      Sidebar.tsx            # 200px nav (notes + chat sections, draggable order)
+      NotesList.tsx          # 260px notes for selected space
+      NoteEditor.tsx         # Title + TipTap body, auto-save 1.5s, image paste/drop
+    components/Dashboard.tsx # Stats, focuses, dev activity, public bio editor
+    components/GooniPanel.tsx# Chat panel (note-aware context)
+    stores/                  # Zustand stores (per-feature, persist with versioned keys)
+    services/api.ts          # Typed fetch calls
+    utils/notePreview.ts     # displayTitle(), HTML strippers — note title fallbacks
 
 scripts/
-  telegram_bot.py            # Telegram bot entry point
+  telegram_bot.py            # Telegram bot (long-polling). Calls into messaging/dispatch_inbound.
+
+mcp/
+  server.py                  # MCP server exposing Gooni to Claude Code via stdio
 ```
 
 ## Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | Yes | Chat responses and embeddings |
-| `TELEGRAM_BOT_TOKEN` | Yes (for bot) | Telegram bot token |
+| `OPENAI_API_KEY` | Yes | Chat responses + embeddings |
 | `DATABASE_URL` | No | Defaults to `sqlite:///./db/gooni.db` |
+| `AUTH_PASSWORD` | No | When set, blocks non-public routes behind a Bearer-token gate |
+| `ALLOWED_ORIGINS` | No | Comma-separated frontend origins for CORS |
+| `TELEGRAM_BOT_TOKEN` | Bot only | From @BotFather |
+| `TELEGRAM_CHAT_ID` | Bot only | Inbound allowlist; comma-separated chat IDs |
+| `WHATSAPP_VERIFY_TOKEN` | WA only | Pick any string; matches Meta webhook config |
+| `WHATSAPP_PHONE_NUMBER_ID` | WA only | From Meta API Setup |
+| `WHATSAPP_ACCESS_TOKEN` | WA only | System User token, scopes: `whatsapp_business_messaging` + `whatsapp_business_management` |
+| `WHATSAPP_APP_SECRET` | WA only | For X-Hub-Signature-256 verification on inbound |
+| `WHATSAPP_ALLOWED_HANDLES` | WA only | Comma-separated phone numbers (any format; normalized to digits) |
+| `IMESSAGE_BRIDGE_URL`, `IMESSAGE_BRIDGE_PASSWORD`, `IMESSAGE_WEBHOOK_SECRET`, `IMESSAGE_ALLOWED_HANDLES` | iMessage only | BlueBubbles bridge config |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` | Dev Activity panel | OAuth app at github.com/settings/developers |
