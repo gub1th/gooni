@@ -15,16 +15,7 @@ import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
 import { DevToolsModal } from "../DevToolsModal";
 import { SpaceIcon, SPACE_ICON_OPTIONS, lucideIconValue } from "./SpaceIcon";
-
-// Per-item color tints — Tolaria-style subtle hues.
-function defaultListIcon(type: string): string {
-  switch (type) {
-    case "focus": return "🎯";
-    case "todo": return "📋";
-    case "backlog": return "🛠";
-    default: return "📁";
-  }
-}
+import { ListIcon } from "./ListIcon";
 
 const ICON_TINT = {
   allNotes: "#6366F1",   // indigo
@@ -592,7 +583,9 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                   marginBottom: 2,
                   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}>
-                  <span style={{ fontSize: 13, flexShrink: 0, color: "#30A14E" }}>📁</span>
+                  <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center" }}>
+                    <ListIcon emoji={null} type="generic" size={14} />
+                  </span>
                   <input
                     ref={newListInputRef}
                     value={newListDraft}
@@ -637,7 +630,9 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                     onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
                     onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
                   >
-                    <span style={{ fontSize: 13, flexShrink: 0 }}>{lst.emoji || defaultListIcon(lst.type)}</span>
+                    <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center" }}>
+                      <ListIcon emoji={lst.emoji} type={lst.type} size={14} />
+                    </span>
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {lst.name}
                     </span>

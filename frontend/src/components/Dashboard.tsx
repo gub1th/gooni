@@ -228,13 +228,18 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "48px 40px 120px" }}>
 
-        {/* Greeting + stats on the same row — greeting left, compact stat cards floated right */}
+        {/* Greeting + stats on the same row — greeting left, compact stat cards floated right.
+            flexWrap so stats drop below when the row is narrow instead of squeezing the greeting
+            to 3 lines. Greeting itself stays nowrap so "Good evening, Daniel." reads as one beat. */}
         <div style={{
           display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-          gap: 16, marginBottom: 26,
+          gap: 16, marginBottom: 26, flexWrap: "wrap",
         }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 28, fontWeight: 700, color: "#1C1C1E", letterSpacing: "-0.5px", lineHeight: 1.2 }}>
+          <div style={{ flexShrink: 0 }}>
+            <div style={{
+              fontSize: 28, fontWeight: 700, color: "#1C1C1E",
+              letterSpacing: "-0.5px", lineHeight: 1.2, whiteSpace: "nowrap",
+            }}>
               {getGreeting()}, Daniel.
             </div>
             <div style={{ fontSize: 13, color: "#8E8E93", marginTop: 4 }}>
@@ -325,7 +330,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
               textTransform: "uppercase", marginBottom: 8, fontWeight: 600,
             }}>recent notes</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {stats.recent_notes.slice(0, 4).map((note, idx) => {
+              {stats.recent_notes.slice(0, 2).map((note, idx) => {
                 const fullTitle = displayTitle(note);
                 const fullExcerpt = stripHtmlForExcerpt(note.content ?? "");
                 const isFirst = idx === 0;
