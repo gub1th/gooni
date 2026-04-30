@@ -29,6 +29,11 @@ function withProtocol(host: string | undefined | null): string {
   return `https://${host}`.replace(/\/$/, "");
 }
 
+// Last-resort default when no env, no vercel host, no localStorage entry.
+// Matches the prod URL listed in the project's .env.example so a fresh local
+// dev still shows something sensible without manual configuration.
+const VERCEL_DEFAULT_URL = "https://gooni.vercel.app";
+
 function detectVercelUrl(): string {
   const fromEnv = withProtocol(env.VITE_VERCEL_PROJECT_PRODUCTION_URL || env.VITE_VERCEL_URL);
   if (fromEnv) return fromEnv;
@@ -36,7 +41,7 @@ function detectVercelUrl(): string {
     const host = window.location.hostname;
     if (host.endsWith(".vercel.app") || host === "gooni.app") return window.location.origin.replace(/\/$/, "");
   }
-  return localStorage.getItem(VERCEL_URL_KEY) ?? "";
+  return localStorage.getItem(VERCEL_URL_KEY) || VERCEL_DEFAULT_URL;
 }
 
 interface FlyInfo {

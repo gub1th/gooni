@@ -1,0 +1,103 @@
+name: Version bump
+
+# Auto-bumps frontend/package.json version + appends a CHANGELOG entry on
+# every PR merge to main. Bump size derives from the conventional-commit
+# prefix of the squash commit subject (which is the PR title):
+#   - feat: → minor
+#   - fix:  → patch
+#   - foo!: or "BREAKING CHANGE" in body → major
+#   - anything else (chore:, docs:, refactor:, etc.) → no bump
+#
+# Skipped when the commit itself is the bump commit ([skip-bump] marker)
+# to prevent infinite loops.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    if: "!contains(github.event.head_commit.message, '[skip-bump]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Determine bump type
+        id: bump
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          # Read first line as the conventional-commit subject.
+          SUBJECT=$(printf '%s' "$MSG" | head -n 1)
+          # Major: explicit `!:` after type, or "BREAKING CHANGE" anywhere in body.
+          if echo "$SUBJECT" | grep -qE '^[a-z]+(\([^)]+\))?!:'; then
+            TYPE=major
+          elif echo "$MSG" | grep -q "BREAKING CHANGE"; then
+            TYPE=major
+          elif echo "$SUBJECT" | grep -qE '^feat(\([^)]+\))?:'; then
+            TYPE=minor
+          elif echo "$SUBJECT" | grep -qE '^fix(\([^)]+\))?:'; then
+            TYPE=patch
+          else
+            TYPE=none
+          fi
+          echo "type=$TYPE" >> "$GITHUB_OUTPUT"
+          echo "subject=$SUBJECT" >> "$GITHUB_OUTPUT"
+          echo "Bump type: $TYPE"
+
+      - name: Bump version
+        if: steps.bump.outputs.type != 'none'
+        id: version
+        working-directory: frontend
+        run: |
+          npm version ${{ steps.bump.outputs.type }} --no-git-tag-version
+          NEW=$(node -p "require('./package.json').version")
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Update CHANGELOG
+        if: steps.bump.outputs.type != 'none'
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          SUBJECT: ${{ steps.bump.outputs.subject }}
+          BUMP_TYPE: ${{ steps.bump.outputs.type }}
+        run: |
+          DATE=$(date -u +'%Y-%m-%d')
+          if [ ! -f CHANGELOG.md ]; then
+            printf '# Changelog\n\nAuto-maintained by .github/workflows/version-bump.yml.\n\n' > CHANGELOG.md
+          fi
+          # Find the first line that starts with "## " (existing entry) so we
+          # can insert above it. If none exists, append after the header block.
+          INSERT_AT=$(grep -n '^## ' CHANGELOG.md | head -n 1 | cut -d: -f1 || true)
+          {
+            if [ -n "$INSERT_AT" ]; then
+              head -n $((INSERT_AT - 1)) CHANGELOG.md
+            else
+              cat CHANGELOG.md
+            fi
+            printf '## %s — %s (%s)\n\n- %s\n\n' "$NEW_VERSION" "$DATE" "$BUMP_TYPE" "$SUBJECT"
+            if [ -n "$INSERT_AT" ]; then
+              tail -n +"$INSERT_AT" CHANGELOG.md
+            fi
+          } > CHANGELOG.md.new
+          mv CHANGELOG.md.new CHANGELOG.md
+
+      - name: Commit + push
+        if: steps.bump.outputs.type != 'none'
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/package.json frontend/package-lock.json CHANGELOG.md
+          git commit -m "chore: release v$NEW_VERSION [skip-bump]"
+          git push
