@@ -29,7 +29,7 @@ export function Tooltip({ label, children, placement = "bottom", delay = 200 }: 
       fontSize: "11.5px",
       fontWeight: "500",
       letterSpacing: "0.1px",
-      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
       boxShadow: "0 4px 16px rgba(0,0,0,0.20)",
       whiteSpace: "nowrap",
       pointerEvents: "none",

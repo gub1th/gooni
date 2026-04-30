@@ -12,12 +12,22 @@ export const Route = createFileRoute("/public/")(({
   component: PublicPage,
 }));
 
-const FONT = "'Manrope', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 
 function PenIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}>
       <path d="M9 2L11 4L4.5 10.5H2.5V8.5L9 2Z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none"/>
+    </svg>
+  );
+}
+
+function PlugIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+      <path d="M6 2v3M10 2v3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M4 5h8v3a4 4 0 0 1-4 4 4 4 0 0 1-4-4V5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
+      <path d="M8 12v2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   );
 }
@@ -76,7 +86,7 @@ function PublicPage() {
     editorProps: {
       attributes: {
         style: [
-          "font-family: 'Manrope', system-ui, sans-serif",
+          "font-family: 'Inter', system-ui, sans-serif",
           "font-size: 15.5px",
           "line-height: 1.7",
           "color: #444",
@@ -137,7 +147,7 @@ function PublicPage() {
         {/* Header */}
         <div style={{ marginBottom: 40 }}>
           <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.5px", marginBottom: 14 }}>
-            daniel gunawan
+            hi, my name is daniel
           </div>
           <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
             {noteCount !== null && (
@@ -165,14 +175,16 @@ function PublicPage() {
             <Link
               to="/public/mcp"
               style={{
-                fontSize: 12, color: "#666", textDecoration: "none",
-                border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12,
-                padding: "3px 10px", fontFamily: FONT,
+                fontSize: 13, color: "#666", textDecoration: "none",
+                fontFamily: FONT,
+                display: "inline-flex", alignItems: "center", gap: 5,
+                borderBottom: "1px dashed rgba(0,0,0,0.20)",
+                paddingBottom: 1,
               }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.background = "rgba(0,0,0,0.04)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.background = "transparent")}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#111")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#666")}
             >
-              MCP
+              <PlugIcon /> mcp
             </Link>
           </div>
           {editing ? (

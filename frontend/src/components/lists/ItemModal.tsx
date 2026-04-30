@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ApiListItem } from "../../services/api";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export interface ItemModalProps {
   item: ApiListItem;

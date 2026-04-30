@@ -4,7 +4,7 @@ import { useConversationsStore } from "../stores/useConversationsStore";
 import { useGooniStore } from "../stores/useGooniStore";
 import { GooniPanel } from "./GooniPanel";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface Props {
   noteId: number;

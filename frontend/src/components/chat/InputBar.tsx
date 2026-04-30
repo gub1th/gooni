@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { ModelSelector } from "../ModelSelector";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface InputBarProps {
   input: string;

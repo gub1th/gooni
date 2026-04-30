@@ -4,7 +4,7 @@ import type { ApiListItem, ListType } from "../../services/api";
 import { ItemModal } from "./ItemModal";
 import { getPrimaryDragBus } from "../PrimaryFocusCard";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const CONTENT_MAX_WIDTH = 720;
 
 interface ListViewProps {

@@ -39,7 +39,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         alignItems: "center",
         justifyContent: "center",
         zIndex: 200,
-        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
       }}
     >
       <div
@@ -166,7 +166,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     background: selected ? "rgba(0,0,0,0.04)" : "transparent",
                     cursor: "pointer", fontSize: 13, fontWeight: selected ? 600 : 500,
                     color: "#1C1C1E", textAlign: "center",
-                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                     transition: "border-color 0.12s, background 0.12s",
                   }}
                 >

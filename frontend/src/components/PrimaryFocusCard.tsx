@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchItemTree, updateItem, type ApiItemNode } from "../services/api";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 type DragSrc = { id: number };
 

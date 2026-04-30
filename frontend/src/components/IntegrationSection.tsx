@@ -35,7 +35,7 @@ const btn: React.CSSProperties = {
   fontSize: 11.5, padding: "4px 9px", borderRadius: 6,
   border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
   cursor: "pointer", color: "#1C1C1E", fontWeight: 500,
-  fontFamily: "'Manrope', -apple-system, sans-serif",
+  fontFamily: "'Inter', -apple-system, sans-serif",
 };
 
 interface Props {

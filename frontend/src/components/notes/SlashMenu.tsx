@@ -57,7 +57,7 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(({ items, comm
         maxHeight: 320,
         overflowY: "auto",
         boxShadow: "0 8px 28px rgba(0,0,0,0.16), 0 0 0 1px rgba(0,0,0,0.06)",
-        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
       }}
     >
       {items.length === 0 ? (

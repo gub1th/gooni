@@ -5,7 +5,7 @@ const btn: React.CSSProperties = {
   fontSize: 11, padding: "3px 8px", borderRadius: 6,
   border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
   cursor: "pointer", color: "#1C1C1E", fontWeight: 500,
-  fontFamily: "'Manrope', -apple-system, sans-serif",
+  fontFamily: "'Inter', -apple-system, sans-serif",
 };
 
 export function RepoPicker() {
@@ -63,7 +63,7 @@ export function RepoPicker() {
           style={{
             flex: 1, fontSize: 11.5, padding: "4px 8px", borderRadius: 6,
             border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
-            fontFamily: "'Manrope', -apple-system, sans-serif",
+            fontFamily: "'Inter', -apple-system, sans-serif",
           }}
         />
         <button onClick={refresh} disabled={loading} style={btn}>

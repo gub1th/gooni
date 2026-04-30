@@ -5,7 +5,7 @@ import {
   type ChatGraphEdge,
 } from "../../services/api";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface ChatGraphViewProps {
   conversationId: number;

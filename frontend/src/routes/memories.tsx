@@ -13,7 +13,7 @@ export const Route = createFileRoute("/memories")({
   component: MemoriesPage,
 });
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Type → tab color. Mirrors the brand palette so the type column reads at
 // a glance the way Mem0's category dots do.

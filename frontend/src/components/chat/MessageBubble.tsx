@@ -2,7 +2,7 @@ import { useState } from "react";
 import { renderMarkdown } from "../../utils/markdown";
 import type { RouterSignals, MessageTraceStep } from "../../services/api";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const TOOL_LABELS: Record<string, string> = {
   web_search: "🔍 Searched the web",

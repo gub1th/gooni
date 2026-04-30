@@ -4,7 +4,7 @@ import {
   updateItem, deleteItem, createItem,
 } from "../services/api";
 
-const FONT = "'Manrope', -apple-system, sans-serif";
+const FONT = "'Inter', -apple-system, sans-serif";
 
 interface ItemProps {
   node: ApiItemNode;

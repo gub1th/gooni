@@ -150,14 +150,14 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
           }}
         >
           {title}
         </div>
         <span style={{
           fontSize: 10.5, color: "#C7C7CC", flexShrink: 0,
-          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
           fontVariantNumeric: "tabular-nums",
         }}>
           {formatTime(note.updated_at)}
@@ -170,7 +170,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
           <div style={{
             flex: 1,
             fontSize: 11.5, color: "#8E8E93",
-            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             minWidth: 0,
           }}>
@@ -220,7 +220,7 @@ function SectionHeader({ label }: { label: string }) {
       color: "#AEAEB2",
       letterSpacing: 0.5,
       textTransform: "uppercase",
-      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
     }}>
       {label}
     </div>
@@ -324,7 +324,7 @@ export function NotesList() {
     >
       {/* Header */}
       <div style={{ height: 52, padding: "0 10px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 6 }}>
-        <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", whiteSpace: "nowrap" }}>
+        <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", whiteSpace: "nowrap" }}>
           {!isAllNotes && currentSpace && (
             <SpaceIcon emoji={currentSpace.emoji} size={14} />
           )}
@@ -339,7 +339,7 @@ export function NotesList() {
               height: 26, padding: "0 8px", borderRadius: 6,
               background: cleanConfirm ? "#FF3B30" : "transparent", border: "none",
               cursor: "pointer", color: cleanConfirm ? "#fff" : "#8E8E93", fontSize: 11.5,
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
               fontWeight: 500, flexShrink: 0, transition: "background 0.1s, color 0.1s",
             }}
             onMouseEnter={(e) => { if (!cleanConfirm) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
@@ -383,7 +383,7 @@ export function NotesList() {
               boxSizing: "border-box",
               borderRadius: 7, border: "1px solid rgba(0,0,0,0.08)",
               background: "#fff", outline: "none", fontSize: 12.5,
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
               color: "#1C1C1E",
             }}
           />
@@ -406,7 +406,7 @@ export function NotesList() {
       {/* Note list */}
       <div style={{ flex: 1, overflowY: "auto" }}>
         {noteList.length === 0 && (
-          <div style={{ padding: "32px 14px", textAlign: "center", color: "#AEAEB2", fontSize: 13, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+          <div style={{ padding: "32px 14px", textAlign: "center", color: "#AEAEB2", fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
             {searchTrimmed ? `No notes match “${search.trim()}”` : "No notes yet. Press + to create one."}
           </div>
         )}
@@ -461,7 +461,7 @@ export function NotesList() {
             boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
             padding: 6,
             minWidth: 160,
-            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
           }}
         >
           {!contextMenu.confirming ? (

@@ -171,7 +171,7 @@ export function PublicChatLauncher() {
             border: "1px solid rgba(74,222,128,0.4)",
             fontSize: 13,
             lineHeight: 1.55,
-            fontFamily: "'Manrope', system-ui, sans-serif",
+            fontFamily: "'Inter', system-ui, sans-serif",
             boxShadow: "0 10px 26px rgba(0,0,0,0.30)",
             zIndex: 1001,
             animation: "gooni-public-msg-in 0.18s ease-out",

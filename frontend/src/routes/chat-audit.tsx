@@ -13,7 +13,7 @@ export const Route = createFileRoute("/chat-audit")({
   component: ChatAuditPage,
 });
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const SIDEBAR_BREAKPOINT = 768;
 
 function relativeTime(iso: string | null): string {
