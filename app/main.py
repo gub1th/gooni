@@ -218,6 +218,10 @@ def _run_column_migrations(engine):
             conn.execute(text("UPDATE list_items SET is_primary = 0 WHERE is_primary IS NULL"))
         if "lists" in existing_tables:
             conn.execute(text("UPDATE lists SET kind = 'tasks' WHERE kind IS NULL"))
+            # Drop hardcoded emoji defaults so the frontend's lucide ListIcon
+            # takes over. Only clears the exact strings we used to seed; any
+            # user-customized emoji is left intact.
+            conn.execute(text("UPDATE lists SET emoji = NULL WHERE emoji IN ('📋', '🛠', '🎯', '📁')"))
         conn.commit()
 
 
