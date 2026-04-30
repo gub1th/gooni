@@ -381,6 +381,20 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
           </div>
         </div>
 
+        {(list.type as string) === "focus" && (
+          <PrimaryFocusDropStrip
+            items={items}
+            onPromote={(id) => {
+              updateItem(id, { is_primary: true });
+              window.dispatchEvent(new CustomEvent("gooni-primary-changed"));
+            }}
+            onUnset={(id) => {
+              updateItem(id, { is_primary: false });
+              window.dispatchEvent(new CustomEvent("gooni-primary-changed"));
+            }}
+          />
+        )}
+
         <div style={{ padding: "12px 0 4px" }}>
           <div
             style={{
@@ -858,5 +872,81 @@ function TrashIcon() {
       <path d="M6.5 7v5" />
       <path d="M9.5 7v5" />
     </svg>
+  );
+}
+
+// Inline drop strip for the focus ListView. Lets a user drag a focus row
+// onto it to set as primary — needed because the dashboard's PrimaryFocusCard
+// isn't visible while the list view is open (mutually exclusive layouts).
+function PrimaryFocusDropStrip({
+  items, onPromote, onUnset,
+}: {
+  items: ApiListItem[];
+  onPromote: (id: number) => void;
+  onUnset: (id: number) => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const primary = items.find((it) => it.is_primary) || null;
+  return (
+    <div
+      onDragOver={(e) => {
+        const bus = getPrimaryDragBus();
+        if (bus.current) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          setHover(true);
+        }
+      }}
+      onDragLeave={() => setHover(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setHover(false);
+        const bus = getPrimaryDragBus();
+        const src = bus.current;
+        bus.current = null;
+        if (src) onPromote(src.id);
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        margin: "12px 0 4px",
+        padding: "10px 14px",
+        borderRadius: 10,
+        border: hover
+          ? "2px dashed #F59E0B"
+          : primary
+          ? "1px solid #FCD34D"
+          : "1px dashed rgba(0,0,0,0.18)",
+        background: primary ? "#FFFBEB" : "transparent",
+        transition: "border-color 160ms, background 160ms",
+      }}
+    >
+      <span style={{ fontSize: 16, color: "#F59E0B", flexShrink: 0 }}>★</span>
+      <span style={{
+        fontSize: 11, color: primary ? "#92400E" : "#8E8E93",
+        letterSpacing: 0.5, textTransform: "uppercase", fontWeight: 700,
+        flexShrink: 0,
+      }}>
+        Primary
+      </span>
+      <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: primary ? "#1C1C1E" : "#9CA3AF", fontWeight: primary ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {primary ? primary.text : "Drag a focus here to set as primary"}
+      </span>
+      {primary && (
+        <button
+          onClick={() => onUnset(primary.id)}
+          style={{
+            border: "none", background: "transparent", color: "#92400E",
+            fontFamily: FONT, fontSize: 11, fontWeight: 600, cursor: "pointer",
+            padding: "3px 8px", borderRadius: 6, flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(146,64,14,0.08)"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+        >
+          Unset
+        </button>
+      )}
+    </div>
   );
 }
