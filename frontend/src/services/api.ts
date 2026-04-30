@@ -527,10 +527,13 @@ export async function reorderItems(ids: number[]): Promise<void> {
 
 export type ListType = "todo" | "backlog" | "generic";
 
+export type ListKind = "tasks" | "ideas";
+
 export interface ApiList {
   id: number;
   name: string;
   type: ListType;
+  kind: ListKind;
   emoji: string | null;
   sort_order: number;
   created_at: string | null;
@@ -583,7 +586,7 @@ export async function createList(
 
 export async function updateList(
   listId: number,
-  patch: { name?: string; emoji?: string | null },
+  patch: { name?: string; emoji?: string | null; kind?: ListKind },
 ): Promise<ApiList> {
   const res = await apiFetch(`${BASE}/lists/${listId}`, {
     method: "PATCH",

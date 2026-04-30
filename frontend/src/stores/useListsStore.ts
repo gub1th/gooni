@@ -23,7 +23,7 @@ interface ListsStore {
   fetchAll: () => Promise<void>;
   selectList: (id: number) => Promise<void>;
   createList: (name: string, type?: ListType, emoji?: string | null) => Promise<ApiList>;
-  updateList: (id: number, patch: { name?: string; emoji?: string | null }) => Promise<void>;
+  updateList: (id: number, patch: { name?: string; emoji?: string | null; kind?: "tasks" | "ideas" }) => Promise<void>;
   deleteList: (id: number) => Promise<void>;
   addItem: (
     listId: number,

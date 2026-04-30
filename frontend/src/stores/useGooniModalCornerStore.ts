@@ -1,35 +1,23 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-// One of the four screen corners. Modal anchors here and lays out from
-// that corner inward. Default = bottom-right (matches the FAB).
-export type Corner = "bottom-right" | "bottom-left" | "top-right" | "top-left";
-
+// Free-form modal position. Stores the top-left corner of the modal in
+// viewport coordinates. `null` = use the default (anchored bottom-right
+// near the FAB). When set, modal renders at exactly that position
+// (clamped to viewport at render time).
 interface State {
-  corner: Corner;
-  setCorner: (c: Corner) => void;
+  pos: { x: number; y: number } | null;
+  setPos: (p: { x: number; y: number } | null) => void;
   reset: () => void;
 }
 
 export const useGooniModalCornerStore = create<State>()(
   persist(
     (set) => ({
-      corner: "bottom-right",
-      setCorner: (corner) => set({ corner }),
-      reset: () => set({ corner: "bottom-right" }),
+      pos: null,
+      setPos: (pos) => set({ pos }),
+      reset: () => set({ pos: null }),
     }),
-    { name: "gooni-modal-corner-v1" },
+    { name: "gooni-modal-pos-v2" },
   ),
 );
-
-// Convert client coords (during drag) into the closest of the 4 corners.
-export function nearestCorner(
-  x: number,
-  y: number,
-  vw: number,
-  vh: number,
-): Corner {
-  const left = x < vw / 2;
-  const top = y < vh / 2;
-  return `${top ? "top" : "bottom"}-${left ? "left" : "right"}` as Corner;
-}

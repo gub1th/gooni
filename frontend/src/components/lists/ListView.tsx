@@ -81,7 +81,6 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
   const reorder = useListsStore((s) => s.reorder);
 
   const [composer, setComposer] = useState("");
-  const [composerKind, setComposerKind] = useState<"task" | "idea">("task");
   const [flashId, setFlashId] = useState<number | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -102,25 +101,29 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
 
   const copy = useMemo(() => copyForType(list?.type || "generic"), [list?.type]);
 
-  // Open vs done split — ideas (non-actionable) live in `open` regardless of `done`.
+  // Open vs done split — gated by list kind. In an idea list, nothing is
+  // ever "done" so the done section disappears entirely (the per-item
+  // done bit is preserved in the DB so flipping the list back to tasks
+  // restores prior state).
+  const listKindForSplit = list?.kind ?? "tasks";
   const { open, done } = useMemo(() => {
     const open: ApiListItem[] = [];
     const done: ApiListItem[] = [];
     for (const it of items) {
-      if (it.actionable && it.done) done.push(it);
+      if (listKindForSplit === "tasks" && it.done) done.push(it);
       else open.push(it);
     }
     open.sort((a, b) => a.sort_order - b.sort_order);
     done.sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || ""));
     return { open, done };
-  }, [items]);
+  }, [items, listKindForSplit]);
 
   async function handleAdd() {
     const text = composer.trim();
     if (!text) return;
     setComposer("");
     try {
-      const created = await addItem(listId, text, { actionable: composerKind === "task" });
+      const created = await addItem(listId, text);
       composerRef.current?.focus();
       // Scroll to + flash the new row so user sees it land.
       requestAnimationFrame(() => {
@@ -163,13 +166,19 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
     reorder(listId, ids).catch((e) => console.error("reorder failed", e));
   }
 
+  // List-level kind drives whether items render as tasks (with checkbox)
+  // or ideas (bullet only). Per-item `actionable` lingers in the DB but is
+  // no longer surfaced or edited by the UI.
+  const listKind = list.kind ?? "tasks";
+  const isTaskList = listKind === "tasks";
+
   const renderRow = (it: ApiListItem, opts: { draggable: boolean }) => (
     <ListItemRow
       key={it.id}
       item={it}
+      isTaskList={isTaskList}
       onToggle={() => updateItem(it.id, { done: !it.done })}
       onDelete={() => deleteItem(it.id)}
-      onToggleActionable={() => updateItem(it.id, { actionable: !it.actionable })}
       onOpenSourceNote={onOpenSourceNote}
       onOpenDetail={() => setModalItemId(it.id)}
       onMakePrimary={(list?.type as string) === "focus" ? () => {
@@ -184,7 +193,6 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       }}
       draggable={opts.draggable}
       isDragging={draggingId === it.id}
-      dropIndicator={dropBeforeId === it.id}
       onDragStart={() => {
         setDraggingId(it.id);
         if ((list?.type as string) === "focus") {
@@ -196,8 +204,6 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
         setDropBeforeId(null);
         getPrimaryDragBus().current = null;
       }}
-      onDragOverRow={() => { if (draggingId != null && draggingId !== it.id) setDropBeforeId(it.id); }}
-      onDropRow={() => handleDrop(it.id)}
     />
   );
 
@@ -307,6 +313,27 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
             >
               {list.type}
             </span>
+            <button
+              onClick={() => updateList(list.id, { kind: isTaskList ? "ideas" : "tasks" })}
+              title={isTaskList
+                ? "Switch to ideas list (no checkboxes; done state preserved)"
+                : "Switch to tasks list (checkboxes return)"}
+              style={{
+                marginLeft: 4,
+                fontSize: 11, fontWeight: 700,
+                color: isTaskList ? "#1C1C1E" : "#92400E",
+                background: isTaskList ? "#E5E5EA" : "#FEF3C7",
+                border: "none",
+                padding: "2px 10px",
+                borderRadius: 999,
+                cursor: "pointer",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                fontFamily: FONT,
+              }}
+            >
+              {isTaskList ? "tasks" : "ideas"}
+            </button>
             {canDeleteList && (
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
                 {confirmingListDelete ? (
@@ -406,26 +433,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
               padding: "8px 12px",
             }}
           >
-            <button
-              onClick={() => setComposerKind((k) => (k === "task" ? "idea" : "task"))}
-              title={composerKind === "task" ? "Switch to idea (no checkbox)" : "Switch to task (checkbox)"}
-              style={{
-                border: "none",
-                background: composerKind === "task" ? "#E5E5EA" : "#FEF3C7",
-                color: composerKind === "task" ? "#1C1C1E" : "#92400E",
-                fontFamily: FONT,
-                fontSize: 11,
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                padding: "3px 8px",
-                borderRadius: 6,
-                cursor: "pointer",
-                flexShrink: 0,
-              }}
-            >
-              {composerKind === "task" ? "task" : "idea"}
-            </button>
+            <span style={{ color: "#8E8E93", fontSize: 14, lineHeight: 1, marginRight: 2 }}>+</span>
             <input
               ref={composerRef}
               value={composer}
@@ -469,19 +477,44 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
             </div>
           )}
 
-          {open.map((it) => renderRow(it, { draggable: true }))}
-          {/* Bottom drop zone — drop here to send to end of open section. */}
-          {draggingId != null && (
-            <div
-              onDragOver={(e) => { e.preventDefault(); setDropBeforeId(null); }}
-              onDrop={(e) => { e.preventDefault(); handleDrop(null); }}
-              style={{
-                height: 24,
-                borderTop: dropBeforeId == null ? "2px solid #3B82F6" : "2px solid transparent",
-                transition: "border-color 100ms",
-              }}
+          {/* Drop slots between rows — fully separate elements that show a
+              clean horizontal line at the insertion point. Shown only while a
+              drag is in flight to avoid layout shift the rest of the time. */}
+          {open.length === 0 && draggingId != null && (
+            <DropSlot
+              active={dropBeforeId === null}
+              onEnter={() => setDropBeforeId(null)}
+              onDrop={() => handleDrop(null)}
             />
           )}
+          {open.map((it, idx) => (
+            <div key={it.id}>
+              {idx === 0 && draggingId != null && draggingId !== it.id && (
+                <DropSlot
+                  active={dropBeforeId === it.id}
+                  onEnter={() => setDropBeforeId(it.id)}
+                  onDrop={() => handleDrop(it.id)}
+                />
+              )}
+              {renderRow(it, { draggable: true })}
+              {/* Slot beneath this row points at the next item, or null if
+                  this is the last row (drop = send to end). */}
+              {draggingId != null && draggingId !== it.id && idx < open.length - 1 && (
+                <DropSlot
+                  active={dropBeforeId === open[idx + 1].id}
+                  onEnter={() => setDropBeforeId(open[idx + 1].id)}
+                  onDrop={() => handleDrop(open[idx + 1].id)}
+                />
+              )}
+              {draggingId != null && idx === open.length - 1 && (
+                <DropSlot
+                  active={dropBeforeId === null}
+                  onEnter={() => setDropBeforeId(null)}
+                  onDrop={() => handleDrop(null)}
+                />
+              )}
+            </div>
+          ))}
 
           {done.length > 0 && (
             <div
@@ -522,9 +555,9 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
 
 interface RowProps {
   item: ApiListItem;
+  isTaskList: boolean;
   onToggle: () => void;
   onDelete: () => void;
-  onToggleActionable: () => void;
   onOpenSourceNote?: (noteId: number) => void;
   onOpenDetail: () => void;
   onMakePrimary?: () => void;
@@ -533,16 +566,13 @@ interface RowProps {
   registerRef: (el: HTMLDivElement | null) => void;
   draggable: boolean;
   isDragging: boolean;
-  dropIndicator: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
-  onDragOverRow: () => void;
-  onDropRow: () => void;
 }
 
 function ListItemRow({
-  item, onToggle, onDelete, onToggleActionable, onOpenSourceNote, onOpenDetail, onMakePrimary, flashing, registerRef,
-  draggable, isDragging, dropIndicator, onDragStart, onDragEnd, onDragOverRow, onDropRow,
+  item, isTaskList, onToggle, onDelete, onOpenSourceNote, onOpenDetail, onMakePrimary, flashing, registerRef,
+  draggable, isDragging, onDragStart, onDragEnd,
 }: RowProps) {
   const [hover, setHover] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -566,17 +596,6 @@ function ListItemRow({
         onDragStart();
       }}
       onDragEnd={onDragEnd}
-      onDragOver={(e) => {
-        if (!draggable) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        onDragOverRow();
-      }}
-      onDrop={(e) => {
-        if (!draggable) return;
-        e.preventDefault();
-        onDropRow();
-      }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
@@ -584,15 +603,14 @@ function ListItemRow({
         alignItems: "flex-start",
         gap: 12,
         padding: "10px 8px",
-        borderTop: dropIndicator ? "2px solid #3B82F6" : "2px solid transparent",
         borderBottom: "1px solid #F2F2F7",
-        opacity: isDragging ? 0.4 : (item.actionable && item.done ? 0.55 : 1),
+        opacity: isDragging ? 0.4 : (isTaskList && item.done ? 0.55 : 1),
         borderRadius: 6,
         animation: flashing ? "gooni-row-flash 1100ms ease-out" : undefined,
         cursor: draggable && hover ? "grab" : "default",
       }}
     >
-      {item.actionable ? (
+      {isTaskList ? (
         <button
           onClick={onToggle}
           aria-label={item.done ? "Mark as not done" : "Mark as done"}
@@ -616,30 +634,15 @@ function ListItemRow({
           {item.done ? "✓" : ""}
         </button>
       ) : (
-        <button
-          onClick={onToggleActionable}
-          aria-label="Convert idea to task"
-          title="Idea — click to convert to task"
+        <span
+          aria-hidden
           style={{
-            marginTop: 2,
-            width: 18,
-            height: 18,
-            borderRadius: 999,
-            border: "none",
-            background: "transparent",
-            color: "#9CA3AF",
-            cursor: "pointer",
-            padding: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
+            marginTop: 9,
+            width: 6, height: 6, borderRadius: "50%",
+            background: "#9CA3AF",
             flexShrink: 0,
-            fontSize: 18,
-            lineHeight: 1,
           }}
-        >
-          ·
-        </button>
+        />
       )}
 
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -649,9 +652,9 @@ function ListItemRow({
           style={{
             display: "flex", alignItems: "center", gap: 6,
             fontSize: 14,
-            color: item.actionable ? "#1C1C1E" : "#3F3F46",
-            fontStyle: item.actionable ? "normal" : "italic",
-            textDecoration: item.actionable && item.done ? "line-through" : "none",
+            color: isTaskList ? "#1C1C1E" : "#3F3F46",
+            fontStyle: isTaskList ? "normal" : "italic",
+            textDecoration: isTaskList && item.done ? "line-through" : "none",
             cursor: "pointer",
             wordBreak: "break-word",
           }}
@@ -668,24 +671,8 @@ function ListItemRow({
           </div>
         )}
 
-        {(item.due_date || item.source_note_id || !item.actionable) && (
+        {(item.due_date || item.source_note_id) && (
           <div style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            {!item.actionable && (
-              <span
-                style={{
-                  fontSize: 10,
-                  color: "#92400E",
-                  background: "#FEF3C7",
-                  padding: "2px 6px",
-                  borderRadius: 999,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  fontWeight: 600,
-                }}
-              >
-                idea
-              </span>
-            )}
             {item.due_date && (
               <span
                 style={{
@@ -721,7 +708,7 @@ function ListItemRow({
       {/* Right-side meta column: timestamp (always) + hover actions. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0, minWidth: 90 }}>
         <div style={{ fontSize: 11, color: "#9CA3AF", whiteSpace: "nowrap" }}>
-          {item.actionable && item.done && item.completed_at
+          {isTaskList && item.done && item.completed_at
             ? `done ${relativeTime(item.completed_at)}`
             : relativeTime(item.created_at)}
         </div>
@@ -759,37 +746,6 @@ function ListItemRow({
                 }}
               >
                 ★ make primary
-              </button>
-            )}
-            {item.actionable && !confirmingDelete && (
-              <button
-                onClick={onToggleActionable}
-                title="Demote to idea (no checkbox)"
-                aria-label="Demote to idea"
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "#FEF3C7";
-                  (e.currentTarget as HTMLButtonElement).style.color = "#92400E";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                  (e.currentTarget as HTMLButtonElement).style.color = "#6B7280";
-                }}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  color: "#6B7280",
-                  cursor: "pointer",
-                  padding: "3px 7px",
-                  borderRadius: 6,
-                  fontFamily: FONT,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  transition: "background 120ms, color 120ms",
-                }}
-              >
-                → idea
               </button>
             )}
           {confirmingDelete ? (
@@ -947,6 +903,38 @@ function PrimaryFocusDropStrip({
           Unset
         </button>
       )}
+    </div>
+  );
+}
+
+// Discrete drop target rendered between rows during drag. Renders as a 6px
+// gap that lights up to a 2px blue line at the insertion point. Independent
+// from row borders so we don't get the rounded-corner artifacts the row's
+// own borderTop produced.
+function DropSlot({
+  active, onEnter, onDrop,
+}: { active: boolean; onEnter: () => void; onDrop: () => void }) {
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; onEnter(); }}
+      onDrop={(e) => { e.preventDefault(); onDrop(); }}
+      style={{
+        position: "relative",
+        height: 6,
+        margin: "1px 0",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 0, right: 0,
+          top: 2,
+          height: 2,
+          background: active ? "#3B82F6" : "transparent",
+          borderRadius: 1,
+          transition: "background 100ms",
+        }}
+      />
     </div>
   );
 }

@@ -203,6 +203,11 @@ class List(Base):
     type = Column(String, nullable=False, default="generic", index=True)
     emoji = Column(String, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
+    # 'tasks' | 'ideas' — list-level kind. tasks = items render with a checkbox
+    # and a done state; ideas = items render as bullets with no checkbox.
+    # ListItem.actionable lingers in storage for back-compat but the UI now
+    # derives this from the list's kind.
+    kind = Column(String, nullable=False, default="tasks")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
