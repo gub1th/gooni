@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchItemTree, updateItem, type ApiItemNode } from "../services/api";
+import { fetchItemTree, updateItem, createItem, type ApiItemNode } from "../services/api";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -21,7 +21,7 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
   const [primary, setPrimary] = useState<ApiItemNode | null>(null);
   const [focuses, setFocuses] = useState<ApiItemNode[]>([]);
   const [dragHover, setDragHover] = useState(false);
-  const [picking, setPicking] = useState(false);
+  const [newText, setNewText] = useState("");
   // Animation key — incremented each time primary changes so the vine border re-runs.
   const [animKey, setAnimKey] = useState(0);
   const lastPrimaryId = useRef<number | null>(null);
@@ -57,9 +57,21 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
     try {
       await updateItem(id, { is_primary: true });
       await load();
-      setPicking(false);
     } catch (e) {
       console.error("promote failed", e);
+    }
+  }
+
+  async function createAndPromote() {
+    const t = newText.trim();
+    if (!t) return;
+    try {
+      const created = await createItem({ text: t, committed: true });
+      await updateItem(created.id, { is_primary: true });
+      setNewText("");
+      await load();
+    } catch (e) {
+      console.error("createAndPromote failed", e);
     }
   }
 
@@ -76,10 +88,9 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
 
   // Visible state shapes:
   //   1. primary set → big card, vine animation, shows endgoal + progress
-  //   2. primary unset, has focuses → drop zone + "Pick a focus" picker
-  //   3. no focuses at all → empty hint
-  const hasFocuses = focuses.length > 0;
-  const isEmpty = !primary;
+  //   2. primary unset → inline input "+ new primary focus" + scrollable list
+  //      of existing focuses (done filtered out) to promote.
+  const pickable = focuses.filter((f) => !f.done && !f.is_primary);
 
   return (
     <div
@@ -171,59 +182,72 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
             </div>
           )}
         </div>
-      ) : isEmpty && hasFocuses ? (
-        <div style={{ position: "relative", zIndex: 2 }}>
-          {picking ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {focuses.map((f) => (
-                <button
-                  key={f.id}
-                  onClick={() => promote(f.id)}
-                  style={{
-                    border: "1px solid #E5E7EB", background: "#FFFFFF",
-                    color: "#1C1C1E", fontFamily: FONT, fontSize: 13,
-                    padding: "8px 12px", borderRadius: 8, cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#FFFFFF"; }}
-                >
-                  {f.text}
-                </button>
-              ))}
-              <button
-                onClick={() => setPicking(false)}
-                style={{
-                  border: "none", background: "transparent", color: "#9CA3AF",
-                  fontFamily: FONT, fontSize: 12, cursor: "pointer", padding: "4px 0",
-                  textAlign: "left",
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <p style={{ fontSize: 13, color: "#8E8E93", margin: 0, lineHeight: 1.5 }}>
-                Drop a focus here, or click to spotlight one.
-              </p>
-              <button
-                onClick={() => setPicking(true)}
-                style={{
-                  border: "1px solid #1C1C1E", background: "#1C1C1E", color: "#FFFFFF",
-                  fontFamily: FONT, fontSize: 12, fontWeight: 600,
-                  padding: "6px 12px", borderRadius: 8, cursor: "pointer", flexShrink: 0,
-                }}
-              >
-                Pick focus
-              </button>
-            </div>
+      ) : (
+        <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", gap: 8 }}>
+          <input
+            value={newText}
+            onChange={(e) => setNewText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") createAndPromote();
+              if (e.key === "Escape") setNewText("");
+            }}
+            placeholder="What's the most important thing right now?"
+            style={{
+              fontSize: 14, padding: "10px 12px", borderRadius: 10,
+              border: "1px solid rgba(0,0,0,0.12)", background: "#FFFFFF",
+              fontFamily: FONT, color: "#1C1C1E",
+              outline: "none", width: "100%", boxSizing: "border-box",
+              transition: "border-color 120ms",
+            }}
+            onFocus={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "#F59E0B"; }}
+            onBlur={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "rgba(0,0,0,0.12)"; }}
+          />
+          {pickable.length > 0 && (
+            <>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6, marginTop: 2,
+              }}>
+                <span style={{
+                  fontSize: 10, color: "#AEAEB2", textTransform: "uppercase",
+                  letterSpacing: 0.5, fontWeight: 600,
+                }}>or pick existing</span>
+                <span style={{ flex: 1, height: 1, background: "rgba(0,0,0,0.05)" }} />
+              </div>
+              <div style={{
+                display: "flex", flexDirection: "column", gap: 4,
+                maxHeight: 180, overflowY: "auto",
+              }}>
+                {pickable.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => promote(f.id)}
+                    style={{
+                      border: "1px solid transparent", background: "transparent",
+                      color: "#1C1C1E", fontFamily: FONT, fontSize: 13,
+                      padding: "6px 10px", borderRadius: 6, cursor: "pointer",
+                      textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8,
+                      transition: "background 100ms, border-color 100ms",
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.06)"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.borderColor = "transparent"; }}
+                  >
+                    <span style={{ color: "#F59E0B", fontSize: 12 }}>★</span>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {f.text}
+                    </span>
+                    {f.progress.total > 0 && (
+                      <span style={{
+                        fontSize: 10.5, color: "#8E8E93",
+                        fontFamily: "ui-monospace, monospace",
+                      }}>{f.progress.done}/{f.progress.total}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </div>
-      ) : (
-        <p style={{ fontSize: 13, color: "#C7C7CC", margin: 0, lineHeight: 1.55, position: "relative", zIndex: 2 }}>
-          No focuses yet. Add a focus first, then promote it here for the spotlight treatment.
-        </p>
       )}
     </div>
   );
