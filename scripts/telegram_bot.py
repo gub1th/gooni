@@ -3,7 +3,6 @@ import base64
 import os
 import re
 import tempfile
-from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 
@@ -22,7 +21,7 @@ from app.db.database import SessionLocal, engine
 from app.db.models import Base
 from app.llm.client import llm_client
 from app.services.messaging import dispatch_inbound, telegram_channel
-from app.services.todo_nudge import build_nudge_message, seconds_until_next
+from app.services.todo_nudge import resolve_digest_reply
 
 Base.metadata.create_all(bind=engine)
 
@@ -105,59 +104,16 @@ async def cmd_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _respond(update, f"/goal {name}")
 
 
-# Maps chat_id -> ordered list of todo IDs as they appeared in that chat's
-# most recent digest. Lets `done 2` resolve to a real todo without forcing
-# the user to remember backend IDs. Lost on restart, which is fine — the
-# next nudge repopulates it.
-_last_digest: dict[int, list[int]] = {}
-
 DIGEST_REPLY_RE = re.compile(r"^\s*(done|tom|kill)((?:\s+\d+)+)\s*$", re.IGNORECASE)
-
-
-async def daily_nudge_loop(app, chat_ids: list[int]) -> None:
-    """Sleep until the next NUDGE_HOUR:NUDGE_MINUTE local, then send the digest
-    to every allowlisted chat. No-news days send nothing at all (build_nudge_message
-    returns None). Loops forever; runs as a background task on the bot's event loop.
-    """
-    nudge_hour = int(os.getenv("NUDGE_HOUR", "9"))
-    nudge_minute = int(os.getenv("NUDGE_MINUTE", "0"))
-
-    while True:
-        wait = seconds_until_next(nudge_hour, nudge_minute)
-        try:
-            await asyncio.sleep(wait)
-        except asyncio.CancelledError:
-            return
-
-        try:
-            db = SessionLocal()
-            try:
-                result = build_nudge_message(db)
-            finally:
-                db.close()
-            if result:
-                msg, ordered_ids = result
-                for chat_id in chat_ids:
-                    try:
-                        await app.bot.send_message(chat_id=chat_id, text=msg)
-                        _last_digest[chat_id] = ordered_ids
-                    except Exception as e:
-                        print(f"[nudge] send failed for {chat_id}: {e}")
-        except Exception as e:
-            print(f"[nudge] error: {e}")
-
-        # Buffer past the firing minute so the loop doesn't immediately
-        # recompute "next 9:00" as today again on a clock that's still 09:00:00.
-        await asyncio.sleep(70)
 
 
 async def handle_digest_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle `done <n>...`, `tom <n>...`, `kill <n>...` replies to the daily
     digest. Indices are 1-based and refer to the most recent digest sent to
     this chat. Multiple indices supported in one message: `done 1 3`.
-    """
-    from app.db.models import ListItem  # local import keeps cold-start cheap
 
+    Resolution lives in app.services.todo_nudge so WhatsApp can share it.
+    """
     text = (update.message.text or "").strip()
     m = DIGEST_REPLY_RE.match(text)
     if not m:
@@ -166,43 +122,15 @@ async def handle_digest_reply(update: Update, context: ContextTypes.DEFAULT_TYPE
     indices = [int(p) for p in m.group(2).split()]
     chat_id = update.message.chat_id
 
-    ordered_ids = _last_digest.get(chat_id)
-    if not ordered_ids:
-        await update.message.reply_text(
-            "no recent digest to act on — wait for tomorrow's ping (or set NUDGE_HOUR earlier)."
-        )
-        return
+    def run() -> str:
+        db = SessionLocal()
+        try:
+            return resolve_digest_reply("telegram", str(chat_id), cmd, indices, db)
+        finally:
+            db.close()
 
-    db = SessionLocal()
-    try:
-        results: list[str] = []
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        tomorrow = today + timedelta(days=1)
-
-        for idx in indices:
-            if idx < 1 or idx > len(ordered_ids):
-                results.append(f"#{idx} out of range")
-                continue
-            tid = ordered_ids[idx - 1]
-            t = db.query(ListItem).filter(ListItem.id == tid).first()
-            if not t:
-                results.append(f"#{idx} not found (deleted?)")
-                continue
-            if cmd == "done":
-                if not t.done:
-                    t.done = True
-                    t.completed_at = datetime.utcnow()
-                results.append(f"✓ {t.text}")
-            elif cmd == "tom":
-                t.due_date = tomorrow
-                results.append(f"→ tomorrow: {t.text}")
-            elif cmd == "kill":
-                results.append(f"× {t.text}")
-                db.delete(t)
-        db.commit()
-        await update.message.reply_text("\n".join(results) if results else "(no-op)")
-    finally:
-        db.close()
+    reply = await asyncio.to_thread(run)
+    await update.message.reply_text(reply)
 
 
 def main():
@@ -228,23 +156,10 @@ def main():
         filters.Chat(chat_id=allowed_chat_ids) if allowed_chat_ids else filters.ALL
     )
 
-    nudge_enabled = os.getenv("NUDGE_ENABLED", "1") != "0"
-
     async def _post_init(application):
         # Wire the bot handle into the channel singleton so proactive sends
-        # (currently unused; reserved for cross-channel nudge fan-out) can
-        # route through telegram_channel.send.
+        # (FastAPI lifespan nudge scheduler) can route through telegram_channel.send.
         telegram_channel.attach_bot(application.bot)
-
-        # Spawn the daily nudge once the loop is alive. Skip if no chat_ids —
-        # we don't know who to ping in unfiltered dev mode, and silent dev is
-        # better than fan-out spam.
-        if nudge_enabled and allowed_chat_ids:
-            asyncio.create_task(daily_nudge_loop(application, allowed_chat_ids))
-            print(
-                f"Daily nudge scheduled at {os.getenv('NUDGE_HOUR', '9')}:"
-                f"{os.getenv('NUDGE_MINUTE', '00').zfill(2)} local"
-            )
 
     app = ApplicationBuilder().token(token).post_init(_post_init).build()
 

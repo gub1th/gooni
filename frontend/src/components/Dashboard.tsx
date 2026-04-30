@@ -13,6 +13,7 @@ import { NoteEditor } from "./notes/NoteEditor";
 import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
+import { SettingsPanel } from "./SettingsPanel";
 import { DevStreakStat } from "./DevStreakStat";
 import { Skeleton } from "./Skeleton";
 
@@ -493,6 +494,9 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />
+
+        {/* Daily nudge config — time, tz, channels, test send. */}
+        <SettingsPanel />
 
       </div>
 

@@ -26,6 +26,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     ListItem,
     Note,
     PublicProfile,
+    Settings,
     Space,
     Visit,
 )
@@ -34,9 +35,19 @@ from .llm.client import llm_client
 from .services.conversation_service import conversation_service
 from .services.item_service import item_service
 from .services.memory_service import memory_service
-from .services.messaging import dispatch_inbound, imessage_channel, whatsapp_channel
+from .services.messaging import (
+    dispatch_inbound,
+    imessage_channel,
+    telegram_channel,
+    whatsapp_channel,
+)
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
+from .services.todo_nudge import (
+    build_nudge_message,
+    remember_digest,
+    resolve_digest_reply,
+)
 
 
 def _migrate_memories_legacy_schema(engine):
@@ -288,7 +299,198 @@ def _dedupe_singleton_lists(engine):
 
 _dedupe_singleton_lists(engine)
 
-app = FastAPI()
+
+# ── Daily nudge scheduler ─────────────────────────────────────────────────────
+#
+# Lives in the FastAPI process (single source of truth) and replaces the
+# old loop in scripts/telegram_bot.py. Why FastAPI:
+#   1. The bot polling script restarts more often (deploys, polling timeouts);
+#      FastAPI is the long-lived API server, so the schedule survives better.
+#   2. Settings + idempotency are DB-backed, and FastAPI owns the DB session
+#      lifecycle. The bot would still need to call back here.
+#   3. WhatsApp send already goes through httpx — no python-telegram-bot
+#      dependency needed in this process.
+#
+# Scheduling uses zoneinfo + Settings.nudge_tz so 9:00 means 9:00 *in Daniel's
+# timezone* regardless of where the Fly machine clock is set. Idempotency:
+# write Settings.nudge_last_sent_day before fan-out — kills double-send even
+# if Fly scales to 2 machines.
+
+import asyncio  # noqa: E402 — import after env load + model side-effects above
+from datetime import datetime as _dt, timedelta as _td  # noqa: E402
+
+try:
+    from zoneinfo import ZoneInfo  # py3.9+
+except ImportError:  # pragma: no cover — Fly runs 3.11
+    ZoneInfo = None  # type: ignore
+
+
+# Same shape as the Telegram bot's regex — kept in sync so reply commands
+# behave identically across surfaces.
+_DIGEST_REPLY_RE = re.compile(r"^\s*(done|tom|kill)((?:\s+\d+)+)\s*$", re.IGNORECASE)
+
+
+def _settings_row(db: Session) -> Settings:
+    """Singleton accessor. Mirrors todo_nudge._get_settings but local copy
+    avoids a cross-module import cycle for the lifespan task."""
+    s = db.query(Settings).filter(Settings.id == 1).first()
+    if s is None:
+        s = Settings(id=1)
+        db.add(s)
+        db.commit()
+        db.refresh(s)
+    return s
+
+
+def _next_fire(now: _dt, hour: int, minute: int, tz_name: str) -> _dt:
+    """Compute the next wall-clock occurrence of HH:MM in tz_name. Returned
+    as a tz-aware datetime so subtraction is unambiguous."""
+    if ZoneInfo is None:
+        # Naïve fallback: assume host is in the right tz. Should never hit
+        # this on Fly (3.11) but keeps imports honest on older runtimes.
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            target += _td(days=1)
+        return target
+    tz = ZoneInfo(tz_name)
+    now_tz = now.astimezone(tz) if now.tzinfo else now.replace(tzinfo=tz)
+    target = now_tz.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now_tz:
+        target += _td(days=1)
+    return target
+
+
+async def _fire_nudge_once(force: bool = False) -> dict:
+    """Build + fan out the digest. Returns a small report dict for callers
+    (the test endpoint surfaces it). `force=True` skips the same-day idempotency
+    guard so Settings → "Send test now" always fires.
+    """
+    db = SessionLocal()
+    try:
+        s = _settings_row(db)
+        tz_name = s.nudge_tz or "America/Los_Angeles"
+        today_str = _dt.now(ZoneInfo(tz_name) if ZoneInfo else None).strftime("%Y-%m-%d")
+        if not force and s.nudge_last_sent_day == today_str:
+            return {"sent": False, "reason": "already sent today"}
+
+        result = build_nudge_message(db)
+        if result is None:
+            # No-news day — still stamp last_sent_day so we don't re-check
+            # every minute (the loop sleeps to next-fire after this returns).
+            if not force:
+                s.nudge_last_sent_day = today_str
+                db.commit()
+            return {"sent": False, "reason": "no overdue or due-today todos"}
+
+        msg, ordered_ids = result
+        try:
+            channels = json.loads(s.nudge_channels or '["telegram"]')
+        except json.JSONDecodeError:
+            channels = ["telegram"]
+
+        sent_to: list[str] = []
+        skipped: list[str] = []
+
+        if "telegram" in channels:
+            for chat_id in telegram_channel.allowed_chat_ids:
+                try:
+                    formatted = telegram_channel.format_outbound(msg)
+                    telegram_channel.send(str(chat_id), formatted)
+                    remember_digest("telegram", str(chat_id), ordered_ids, db)
+                    sent_to.append(f"telegram:{chat_id}")
+                except Exception as e:
+                    print(f"[nudge] telegram send failed for {chat_id}: {e}")
+
+        if "whatsapp" in channels:
+            # WA Business API rejects freeform sends outside the 24h
+            # customer-initiated window. Single-tenant Gooni: one conversation
+            # row per source, so we approximate the window via the most recent
+            # WA message timestamp. If silent for >24h, skip — user can DM
+            # Gooni any random thing to reopen the window.
+            from .db.models import Conversation as _Conv  # local import: tight scope
+            cutoff = _dt.utcnow() - _td(hours=24)
+            last_wa = (
+                db.query(_Conv)
+                .filter(_Conv.source == "whatsapp")
+                .order_by(_Conv.last_message_at.desc())
+                .first()
+            )
+            wa_open = bool(
+                last_wa and last_wa.last_message_at and last_wa.last_message_at >= cutoff
+            )
+            for handle in sorted({h for h in whatsapp_channel._allowed}):  # type: ignore[attr-defined]
+                if not wa_open:
+                    skipped.append(f"whatsapp:{handle} (>24h silent — outside window)")
+                    continue
+                try:
+                    formatted = whatsapp_channel.format_outbound(msg)
+                    whatsapp_channel.send(handle, formatted)
+                    remember_digest("whatsapp", handle, ordered_ids, db)
+                    sent_to.append(f"whatsapp:{handle}")
+                except Exception as e:
+                    print(f"[nudge] whatsapp send failed for {handle}: {e}")
+
+        if not force and sent_to:
+            s.nudge_last_sent_day = today_str
+            db.commit()
+
+        return {"sent": bool(sent_to), "to": sent_to, "skipped": skipped}
+    finally:
+        db.close()
+
+
+async def _nudge_loop():
+    """Sleep until the next configured fire time, then fire. Re-reads Settings
+    every iteration so a UI change to nudge_hour/minute/tz takes effect on the
+    next loop without restarting the process."""
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                s = _settings_row(db)
+                enabled = s.nudge_enabled
+                hour = s.nudge_hour
+                minute = s.nudge_minute
+                tz_name = s.nudge_tz or "America/Los_Angeles"
+            finally:
+                db.close()
+            if not enabled:
+                # Re-check every 5 min so toggling on in the UI doesn't take
+                # 24h to take effect.
+                await asyncio.sleep(300)
+                continue
+            now = _dt.now(ZoneInfo(tz_name) if ZoneInfo else None)
+            target = _next_fire(now, hour, minute, tz_name)
+            wait = max(1.0, (target - now).total_seconds())
+            await asyncio.sleep(wait)
+            await _fire_nudge_once()
+            # Buffer past the firing minute so we don't immediately recompute
+            # "next 9:00" as today again on a clock still at 09:00:00.
+            await asyncio.sleep(70)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[nudge] loop error: {e}")
+            await asyncio.sleep(60)
+
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    task = asyncio.create_task(_nudge_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+app = FastAPI(lifespan=_lifespan)
 
 _origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 
@@ -1063,6 +1265,17 @@ async def whatsapp_webhook(
                 body = (msg.get("text") or {}).get("body") or ""
                 if not sender or not body:
                     continue
+                # Digest-reply intercept (`done 1 3`, `tom 2`, `kill 4`) —
+                # mirror the Telegram path. Must run before dispatch_inbound
+                # so the orchestrator doesn't try to LLM-respond to it.
+                m = _DIGEST_REPLY_RE.match(body.strip())
+                if m and whatsapp_channel.is_allowed(sender):
+                    cmd = m.group(1).lower()
+                    indices = [int(p) for p in m.group(2).split()]
+                    reply = resolve_digest_reply("whatsapp", sender, cmd, indices, db)
+                    whatsapp_channel.send(sender, whatsapp_channel.format_outbound(reply))
+                    handled_any = True
+                    continue
                 result = dispatch_inbound(whatsapp_channel, sender, body, db)
                 if result is None:
                     continue  # not allowlisted; silent drop
@@ -1070,6 +1283,74 @@ async def whatsapp_webhook(
                 whatsapp_channel.send(sender, formatted)
                 handled_any = True
     return {"ok": True, "handled": handled_any}
+
+
+# ── Settings (daily nudge config) ──────────────────────────────────────────────
+
+
+def _serialize_settings(s: Settings) -> dict:
+    try:
+        channels = json.loads(s.nudge_channels or '["telegram"]')
+    except json.JSONDecodeError:
+        channels = ["telegram"]
+    return {
+        "nudge_enabled": bool(s.nudge_enabled),
+        "nudge_hour": int(s.nudge_hour),
+        "nudge_minute": int(s.nudge_minute),
+        "nudge_tz": s.nudge_tz or "America/Los_Angeles",
+        "nudge_channels": channels,
+        "nudge_last_sent_day": s.nudge_last_sent_day,
+    }
+
+
+@app.get("/settings")
+def get_settings(db: Session = Depends(get_db)):
+    return _serialize_settings(_settings_row(db))
+
+
+@app.patch("/settings")
+def patch_settings(body: dict, db: Session = Depends(get_db)):
+    s = _settings_row(db)
+    if "nudge_enabled" in body:
+        s.nudge_enabled = bool(body["nudge_enabled"])
+    if "nudge_hour" in body:
+        h = int(body["nudge_hour"])
+        if not 0 <= h <= 23:
+            raise HTTPException(status_code=400, detail="nudge_hour must be 0-23")
+        s.nudge_hour = h
+    if "nudge_minute" in body:
+        m = int(body["nudge_minute"])
+        if not 0 <= m <= 59:
+            raise HTTPException(status_code=400, detail="nudge_minute must be 0-59")
+        s.nudge_minute = m
+    if "nudge_tz" in body:
+        tz = (body["nudge_tz"] or "").strip()
+        # Validate via zoneinfo so we fail fast on typos rather than at next fire.
+        if ZoneInfo is not None:
+            try:
+                ZoneInfo(tz)
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"unknown timezone: {tz!r}")
+        s.nudge_tz = tz
+    if "nudge_channels" in body:
+        chans = body["nudge_channels"]
+        if not isinstance(chans, list) or not all(isinstance(c, str) for c in chans):
+            raise HTTPException(status_code=400, detail="nudge_channels must be list[str]")
+        valid = {"telegram", "whatsapp"}
+        bad = [c for c in chans if c not in valid]
+        if bad:
+            raise HTTPException(status_code=400, detail=f"unknown channel(s): {bad}")
+        s.nudge_channels = json.dumps(chans)
+    db.commit()
+    db.refresh(s)
+    return _serialize_settings(s)
+
+
+@app.post("/settings/test-nudge")
+async def test_nudge():
+    """Fire the nudge immediately, bypassing the same-day idempotency guard.
+    Returns the report from the fan-out so the UI can show what landed."""
+    return await _fire_nudge_once(force=True)
 
 
 # ── Spaces ────────────────────────────────────────────────────────────────────

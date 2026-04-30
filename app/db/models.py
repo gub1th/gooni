@@ -291,6 +291,37 @@ class GooniSnapshot(Base):
     digest = Column(Text, nullable=True)
 
 
+class Settings(Base):
+    """Singleton row (id=1) holding user-level config that used to live in env.
+
+    Daily nudge is the only consumer for now — but anything that needs runtime
+    toggling without a redeploy belongs here. Schedule + channel list are the
+    settable knobs; nudge_last_sent_day is the idempotency token (YYYY-MM-DD)
+    that prevents two-process double-fire.
+    """
+
+    __tablename__ = "settings"
+
+    id = Column(Integer, primary_key=True)  # always 1
+    nudge_enabled = Column(Boolean, nullable=False, default=True)
+    nudge_hour = Column(Integer, nullable=False, default=9)
+    nudge_minute = Column(Integer, nullable=False, default=0)
+    # IANA name, e.g. "America/Los_Angeles". Resolved via zoneinfo so the
+    # schedule is wall-clock correct regardless of host timezone.
+    nudge_tz = Column(String, nullable=False, default="America/Los_Angeles")
+    # JSON list[str], e.g. ["telegram", "whatsapp"]. Empty list = no fanout.
+    nudge_channels = Column(Text, nullable=False, default='["telegram"]')
+    # YYYY-MM-DD in nudge_tz. Refuse to send a second time on the same date.
+    nudge_last_sent_day = Column(String, nullable=True)
+    # JSON dict {channel: {recipient: [ordered_todo_ids]}}. Persisted instead
+    # of in-memory because FastAPI (sender) and the bot polling script
+    # (reply-handler) run as separate processes.
+    nudge_last_digests = Column(Text, nullable=False, default="{}")
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
 class TrackedRepo(Base):
     """A repo the user wants surfaced on the Dev Activity dashboard. The
     `provider` field is here so we can layer GitLab / Bitbucket on later

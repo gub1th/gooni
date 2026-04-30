@@ -82,14 +82,36 @@ class TelegramChannel(MessagingChannel):
         return chat_id in self._allowed
 
     def send(self, recipient: str, text: str) -> None:
-        """Proactive send (used by daily nudge). Inline replies should use
-        Update.reply_text directly to stay on the same asyncio context."""
-        if self._bot is None:
-            print(f"[telegram] no bot attached; would send to {recipient}: {text[:60]}")
+        """Proactive send (used by daily nudge).
+
+        Path A — same process as the bot polling loop: schedule on the bot's
+        asyncio loop so we don't open extra HTTPS connections.
+        Path B — separate process (FastAPI nudge scheduler in start.sh): the
+        bot handle is None here, so fall back to raw Telegram Bot API over
+        httpx. Same effect, costs one extra TLS handshake per send.
+
+        Inline replies should still use Update.reply_text directly to stay on
+        the same asyncio context.
+        """
+        if self._bot is not None:
+            import asyncio
+            asyncio.create_task(self._bot.send_message(chat_id=int(recipient), text=text))
             return
-        # Caller is in an async context — schedule on the bot's loop.
-        import asyncio
-        asyncio.create_task(self._bot.send_message(chat_id=int(recipient), text=text))
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not token:
+            print(f"[telegram] no bot, no token; would send to {recipient}: {text[:60]}")
+            return
+        try:
+            import httpx
+            r = httpx.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": int(recipient), "text": text},
+                timeout=10.0,
+            )
+            if r.status_code >= 400:
+                print(f"[telegram] http send failed {r.status_code}: {r.text[:200]}")
+        except Exception as e:
+            print(f"[telegram] http send error: {e}")
 
     @property
     def allowed_chat_ids(self) -> list[int]:
