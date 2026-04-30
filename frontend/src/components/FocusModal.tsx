@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  type ApiItemNode, updateItem, deleteItem, createItem,
+  type ApiItemNode, type FocusScale, type FocusStatus,
+  updateItem, deleteItem, createItem,
 } from "../services/api";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -31,6 +32,10 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
   const [done, setDone] = useState(node.done);
   const [isPrimary, setIsPrimary] = useState(node.is_primary);
   const [dueDate, setDueDate] = useState(toDateInputValue(node.due_date));
+  const [status, setStatus] = useState<FocusStatus>(
+    node.status ?? (node.committed ? "committed" : "someday")
+  );
+  const [scale, setScale] = useState<FocusScale | "">(node.scale ?? "");
   const [children, setChildren] = useState(node.children);
   const [adding, setAdding] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -45,7 +50,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [text, subtitle, endgoal, done, dueDate]);
+  }, [text, subtitle, endgoal, done, dueDate, status, scale]);
 
   const hasChildren = children.length > 0;
 
@@ -59,6 +64,10 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
     if ((eg || null) !== (node.endgoal ?? null)) patch.endgoal = eg || null;
     if (!hasChildren && done !== node.done) patch.done = done;
     if (isPrimary !== node.is_primary) patch.is_primary = isPrimary;
+    const currentStatus = node.status ?? (node.committed ? "committed" : "someday");
+    if (status !== currentStatus) patch.status = status;
+    const nextScale = scale || null;
+    if (nextScale !== (node.scale ?? null)) patch.scale = nextScale;
     const nextDue = fromDateInputValue(dueDate);
     if ((nextDue || null) !== (node.due_date || null)) patch.due_date = nextDue;
     if (Object.keys(patch).length > 0) {
@@ -225,6 +234,40 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
                 }}
               >Clear</button>
             )}
+          </div>
+          <div>
+            <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Status</div>
+            <div style={{ display: "inline-flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
+              {(["committed", "pending", "someday"] as FocusStatus[]).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  style={{
+                    padding: "6px 12px", fontSize: 12, fontFamily: FONT,
+                    background: status === s ? "#1C1C1E" : "#FFF",
+                    color: status === s ? "#FFF" : "#6B6B70",
+                    border: "none", cursor: "pointer",
+                  }}
+                >{s}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Scale</div>
+            <select
+              value={scale}
+              onChange={(e) => setScale(e.target.value as FocusScale | "")}
+              style={{
+                fontFamily: FONT, fontSize: 13, padding: "6px 10px",
+                border: "1px solid #E5E7EB", borderRadius: 8, color: "#1C1C1E",
+                outline: "none", background: "#FFF",
+              }}
+            >
+              <option value="">— unspecified —</option>
+              <option value="long_term">long-term</option>
+              <option value="medium">medium</option>
+              <option value="sprint">sprint</option>
+            </select>
           </div>
         </div>
 

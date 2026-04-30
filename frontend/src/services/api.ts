@@ -442,6 +442,9 @@ export async function fetchPublicVisitCount(): Promise<{ unique_visitors: number
 // focus; a leaf item renders as a todo; anything in between renders as a
 // checklist node.
 
+export type FocusStatus = "committed" | "pending" | "someday";
+export type FocusScale = "long_term" | "sprint" | "medium";
+
 export interface ApiItem {
   id: number;
   list_id: number;
@@ -453,6 +456,11 @@ export interface ApiItem {
   actionable: boolean;
   is_primary: boolean;
   done: boolean;
+  // Engagement state — distinct from `committed` so "pending" is user-set,
+  // not just auto-derived from staleness. NULL on legacy rows; UI falls
+  // back to deriving from `committed`.
+  status: FocusStatus | null;
+  scale: FocusScale | null;
   due_date: string | null;
   completed_at: string | null;
   sort_order: number;
@@ -495,6 +503,9 @@ export async function createItem(body: {
   committed?: boolean;
   due_date?: string | null;
   source_note_id?: number | null;
+  status?: FocusStatus | null;
+  scale?: FocusScale | null;
+  is_primary?: boolean;
 }): Promise<ApiItem> {
   const res = await apiFetch(`${BASE}/items`, {
     method: "POST",
@@ -518,6 +529,8 @@ export async function updateItem(
     subtitle: string | null;
     sort_order: number;
     parent_id: number | null;
+    status: FocusStatus | null;
+    scale: FocusScale | null;
   }>,
 ): Promise<ApiItem> {
   const res = await apiFetch(`${BASE}/items/${id}`, {
@@ -532,6 +545,18 @@ export async function updateItem(
 export async function deleteItem(id: number): Promise<void> {
   const res = await apiFetch(`${BASE}/items/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete item");
+}
+
+export interface FocusSuggestion {
+  text: string;
+  endgoal: string | null;
+  scale: FocusScale | null;
+}
+
+export async function suggestFocus(): Promise<FocusSuggestion> {
+  const res = await apiFetch(`${BASE}/items/suggest-focus`);
+  if (!res.ok) throw new Error("suggest failed");
+  return res.json();
 }
 
 export async function reorderItems(ids: number[]): Promise<void> {
