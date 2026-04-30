@@ -73,13 +73,14 @@ class ListService:
         existing = self.find_list_by_type("todo", db)
         if existing:
             return existing
-        return self.get_or_create_list(_TODO_LIST_NAME, "todo", "📋", db)
+        # No emoji default — frontend ListIcon resolves a lucide icon by type.
+        return self.get_or_create_list(_TODO_LIST_NAME, "todo", None, db)
 
     def get_or_create_backlog_list(self, db: Session) -> List:
         existing = self.find_list_by_type("backlog", db)
         if existing:
             return existing
-        return self.get_or_create_list(_BACKLOG_LIST_NAME, "backlog", "🛠", db)
+        return self.get_or_create_list(_BACKLOG_LIST_NAME, "backlog", None, db)
 
     # ── items ────────────────────────────────────────────────────────────
 

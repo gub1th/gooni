@@ -70,8 +70,11 @@ class ItemService:
                 raise ValueError(f"parent_id {parent_id} not found")
             list_id = parent.list_id
         else:
-            # Top-level: focus list if it has an endgoal, else inbox todo list.
-            list_obj = self.get_focus_list(db) if endgoal else self.get_todo_list(db)
+            # Top-level routing: anything the caller marked as a focus (committed
+            # OR has an endgoal) lands in the focus list so it shows up in
+            # tree.focuses. Bare "todo"-style adds go to the inbox todo list.
+            is_focus = bool(committed) or bool(endgoal)
+            list_obj = self.get_focus_list(db) if is_focus else self.get_todo_list(db)
             list_id = list_obj.id
 
         # Append to siblings.

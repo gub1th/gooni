@@ -92,7 +92,6 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
   //   1. primary set → big card, vine animation, shows endgoal + progress
   //   2. primary unset → inline input "+ new primary focus" + scrollable list
   //      of existing focuses (done filtered out) to promote.
-  const pickable = focuses.filter((f) => !f.done && !f.is_primary);
 
   return (
     <div
@@ -185,7 +184,7 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
           )}
         </div>
       ) : (
-        <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ position: "relative", zIndex: 2 }}>
           <input
             value={newText}
             onChange={(e) => setNewText(e.target.value)}
@@ -204,50 +203,12 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
             onFocus={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "#F59E0B"; }}
             onBlur={(e) => { (e.currentTarget as HTMLInputElement).style.borderColor = "rgba(0,0,0,0.12)"; }}
           />
-          {pickable.length > 0 && (
-            <>
-              <div style={{
-                display: "flex", alignItems: "center", gap: 6, marginTop: 2,
-              }}>
-                <span style={{
-                  fontSize: 10, color: "#AEAEB2", textTransform: "uppercase",
-                  letterSpacing: 0.5, fontWeight: 600,
-                }}>or pick existing</span>
-                <span style={{ flex: 1, height: 1, background: "rgba(0,0,0,0.05)" }} />
-              </div>
-              <div style={{
-                display: "flex", flexDirection: "column", gap: 4,
-                maxHeight: 180, overflowY: "auto",
-              }}>
-                {pickable.map((f) => (
-                  <button
-                    key={f.id}
-                    onClick={() => promote(f.id)}
-                    style={{
-                      border: "1px solid transparent", background: "transparent",
-                      color: "#1C1C1E", fontFamily: FONT, fontSize: 13,
-                      padding: "6px 10px", borderRadius: 6, cursor: "pointer",
-                      textAlign: "left",
-                      display: "flex", alignItems: "center", gap: 8,
-                      transition: "background 100ms, border-color 100ms",
-                    }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F9FAFB"; (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.06)"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.borderColor = "transparent"; }}
-                  >
-                    <span style={{ color: "#F59E0B", fontSize: 12 }}>★</span>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {f.text}
-                    </span>
-                    {f.progress.total > 0 && (
-                      <span style={{
-                        fontSize: 10.5, color: "#8E8E93",
-                        fontFamily: "ui-monospace, monospace",
-                      }}>{f.progress.done}/{f.progress.total}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </>
+          {focuses.length > 0 && (
+            <p style={{
+              margin: "8px 2px 0", fontSize: 11, color: "#AEAEB2", lineHeight: 1.4,
+            }}>
+              Or open one below and toggle "Set as primary."
+            </p>
           )}
         </div>
       )}

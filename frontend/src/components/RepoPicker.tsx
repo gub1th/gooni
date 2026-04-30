@@ -72,7 +72,9 @@ export function RepoPicker() {
       </div>
       {err && <div style={{ fontSize: 11, color: "#C44", marginBottom: 6 }}>{err}</div>}
       <div style={{
-        maxHeight: 220, overflowY: "auto",
+        // Caps at ~4 visible rows (each ~30px tall). Keeps the integrations
+        // panel compact instead of letting one repo list dominate the modal.
+        maxHeight: 132, overflowY: "auto",
         border: "1px solid rgba(0,0,0,0.06)", borderRadius: 8,
         background: "#fff",
       }}>
@@ -89,7 +91,7 @@ export function RepoPicker() {
                 key={key}
                 style={{
                   display: "flex", alignItems: "center", gap: 8,
-                  padding: "6px 10px",
+                  padding: "4px 10px",
                   borderBottom: "1px solid rgba(0,0,0,0.04)",
                   cursor: pending ? "wait" : "pointer",
                   opacity: pending ? 0.6 : 1,

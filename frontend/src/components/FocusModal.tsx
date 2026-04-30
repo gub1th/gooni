@@ -29,6 +29,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
   const [subtitle, setSubtitle] = useState(node.subtitle ?? "");
   const [endgoal, setEndgoal] = useState(node.endgoal ?? "");
   const [done, setDone] = useState(node.done);
+  const [isPrimary, setIsPrimary] = useState(node.is_primary);
   const [dueDate, setDueDate] = useState(toDateInputValue(node.due_date));
   const [children, setChildren] = useState(node.children);
   const [adding, setAdding] = useState(false);
@@ -57,11 +58,16 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
     const eg = endgoal.trim();
     if ((eg || null) !== (node.endgoal ?? null)) patch.endgoal = eg || null;
     if (!hasChildren && done !== node.done) patch.done = done;
+    if (isPrimary !== node.is_primary) patch.is_primary = isPrimary;
     const nextDue = fromDateInputValue(dueDate);
     if ((nextDue || null) !== (node.due_date || null)) patch.due_date = nextDue;
     if (Object.keys(patch).length > 0) {
       try { await updateItem(node.id, patch); } catch (e) { console.error(e); }
       onChange();
+      // Tell PrimaryFocusCard to refetch when primary toggled in either direction.
+      if (isPrimary !== node.is_primary) {
+        window.dispatchEvent(new CustomEvent("gooni-primary-changed"));
+      }
     }
     onClose();
   }
@@ -185,6 +191,12 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
         />
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
+          <ToggleRow
+            label="Set as primary"
+            help={isPrimary ? "Spotlighted at the top of the dashboard." : "Promote this above the rest."}
+            value={isPrimary}
+            onChange={setIsPrimary}
+          />
           {!hasChildren && (
             <ToggleRow
               label="Done"
