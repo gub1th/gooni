@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -33,7 +34,7 @@ from .llm.client import llm_client
 from .services.conversation_service import conversation_service
 from .services.item_service import item_service
 from .services.memory_service import memory_service
-from .services.messaging import dispatch_inbound, imessage_channel
+from .services.messaging import dispatch_inbound, imessage_channel, whatsapp_channel
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
 
@@ -969,6 +970,97 @@ async def imessage_webhook(
     _raw, formatted = result
     imessage_channel.send(handle, formatted)
     return {"ok": True}
+
+
+# ── WhatsApp webhook (Meta Cloud API) ─────────────────────────────────────────
+
+@app.get("/webhooks/whatsapp")
+async def whatsapp_webhook_verify(request: Request):
+    """Meta verification handshake. On webhook configuration save, Meta sends:
+
+      GET /webhooks/whatsapp?hub.mode=subscribe
+                            &hub.verify_token=<our shared secret>
+                            &hub.challenge=<random string>
+
+    We must echo `hub.challenge` as plain-text body with HTTP 200 if and only
+    if the verify_token matches our env-configured one. Anything else → 403.
+    """
+    from fastapi.responses import PlainTextResponse
+    expected = os.getenv("WHATSAPP_VERIFY_TOKEN")
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge") or ""
+    if mode == "subscribe" and expected and token == expected:
+        return PlainTextResponse(challenge, status_code=200)
+    raise HTTPException(status_code=403, detail="verify failed")
+
+
+def _verify_whatsapp_signature(raw_body: bytes, header: str | None) -> bool:
+    """X-Hub-Signature-256 verification. Header format: 'sha256=<hex>'.
+    Computed as HMAC-SHA256(app_secret, raw_body). When app_secret isn't
+    configured we accept everything (dev mode) but the allowlist still gates
+    inbound — the cost of a stray forged event in that posture is at most a
+    spammed conversation row, not auth bypass."""
+    secret = os.getenv("WHATSAPP_APP_SECRET")
+    if not secret:
+        return True  # not configured; rely on allowlist + verify_token
+    if not header or not header.startswith("sha256="):
+        return False
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header[len("sha256="):])
+
+
+@app.post("/webhooks/whatsapp")
+async def whatsapp_webhook(
+    request: Request,
+    x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
+    db: Session = Depends(get_db),
+):
+    """Receive a WhatsApp Cloud API event.
+
+    Meta delivers two kinds of events under `entry[].changes[].value`:
+      - `messages`  — actual user-sent text/media (what we care about)
+      - `statuses`  — delivery/read receipts for messages WE sent (ignore;
+                      otherwise every reply triggers an echo and we'd loop)
+
+    Auth layers (defense in depth):
+      1. HMAC-SHA256 signature header (Meta-issued; verified against app secret)
+      2. Allowlist on inbound `from` handle
+      3. Skip non-text message types for v1
+    """
+    raw_body = await request.body()
+    if not _verify_whatsapp_signature(raw_body, x_hub_signature_256):
+        raise HTTPException(status_code=401, detail="bad signature")
+
+    try:
+        payload = json.loads(raw_body or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="invalid json")
+
+    # Meta wraps each event in entry[].changes[]. There can be multiple, but
+    # for a single inbound message it's typically one change with one message.
+    entries = payload.get("entry") or []
+    handled_any = False
+    for entry in entries:
+        for change in entry.get("changes") or []:
+            value = change.get("value") or {}
+            messages = value.get("messages") or []
+            if not messages:
+                continue  # status update or other non-message event
+            for msg in messages:
+                if msg.get("type") != "text":
+                    continue  # v1: text only
+                sender = msg.get("from") or ""
+                body = (msg.get("text") or {}).get("body") or ""
+                if not sender or not body:
+                    continue
+                result = dispatch_inbound(whatsapp_channel, sender, body, db)
+                if result is None:
+                    continue  # not allowlisted; silent drop
+                _raw, formatted = result
+                whatsapp_channel.send(sender, formatted)
+                handled_any = True
+    return {"ok": True, "handled": handled_any}
 
 
 # ── Spaces ────────────────────────────────────────────────────────────────────
