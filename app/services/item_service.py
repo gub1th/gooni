@@ -63,6 +63,8 @@ class ItemService:
         committed: bool = False,
         due_date: datetime | None = None,
         source_note_id: int | None = None,
+        status: str | None = None,
+        scale: str | None = None,
     ) -> ListItem:
         if parent_id is not None:
             parent = self.get(db, parent_id)
@@ -85,6 +87,10 @@ class ItemService:
             sibling_q = sibling_q.filter(ListItem.parent_id == parent_id)
         max_order = max((s.sort_order for s in sibling_q.all()), default=0)
 
+        # Default status mirrors committed if caller didn't specify — keeps
+        # legacy callers and the unified extractor working without a flag.
+        if status is None:
+            status = "committed" if committed else "someday"
         item = ListItem(
             list_id=list_id,
             parent_id=parent_id,
@@ -94,6 +100,8 @@ class ItemService:
             due_date=due_date,
             source_note_id=source_note_id,
             sort_order=max_order + 1,
+            status=status,
+            scale=scale,
         )
         db.add(item)
         db.commit()
@@ -120,11 +128,19 @@ class ItemService:
             "subtitle",
             "sort_order",
             "parent_id",
+            "status",
+            "scale",
         ):
             if key in patch:
                 setattr(item, key, patch[key])
         if "done" in patch:
             item.completed_at = datetime.utcnow() if patch["done"] else None
+        # Keep `committed` and `status` consistent — they're two views of
+        # the same engagement axis. Caller patches one, we sync the other.
+        if "status" in patch:
+            item.committed = patch["status"] in ("committed", "pending")
+        elif "committed" in patch and item.status is None:
+            item.status = "committed" if patch["committed"] else "someday"
         if patch.get("actionable") is False:
             # Flipping to idea clears completion state.
             item.done = False
@@ -328,6 +344,8 @@ def _serialize(it: ListItem) -> dict[str, Any]:
         "done": bool(it.done),
         "actionable": bool(it.actionable),
         "is_primary": bool(it.is_primary),
+        "status": it.status,
+        "scale": it.scale,
         "due_date": it.due_date.isoformat() if it.due_date else None,
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
         "sort_order": it.sort_order,

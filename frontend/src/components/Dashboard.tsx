@@ -5,7 +5,6 @@ import {
   fetchDashboardStats,
   type ApiNote, type DashboardStats,
 } from "../services/api";
-import { PrimaryFocusCard } from "./PrimaryFocusCard";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
 import { displayTitle, stripHtmlForExcerpt } from "../utils/notePreview";
@@ -489,8 +488,9 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
           </div>
         )}
 
-        {/* Primary Focus — drop a focus or click to promote. Replaces Gooni's Take. */}
-        <PrimaryFocusCard />
+        {/* Primary focus treatment now lives inline in ActivityCard's focus
+            list (green left rail + tint + pulsing dot). The old heading-style
+            PrimaryFocusCard was removed. */}
 
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />

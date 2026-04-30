@@ -188,6 +188,8 @@ def _run_column_migrations(engine):
             ("list_items", "updated_at", "DATETIME"),
             ("list_items", "actionable", "INTEGER"),
             ("list_items", "is_primary", "INTEGER"),
+            ("list_items", "status", "TEXT"),
+            ("list_items", "scale", "TEXT"),
             ("lists", "kind", "TEXT"),
         ]:
             if table not in existing_tables:
@@ -227,6 +229,17 @@ def _run_column_migrations(engine):
             conn.execute(text("UPDATE list_items SET committed = 0 WHERE committed IS NULL"))
             conn.execute(text("UPDATE list_items SET actionable = 1 WHERE actionable IS NULL"))
             conn.execute(text("UPDATE list_items SET is_primary = 0 WHERE is_primary IS NULL"))
+            # Backfill `status` once. Pre-existing rows: committed=true → 'committed',
+            # committed=false → 'someday'. Skip rows that already have a value
+            # so manual overrides aren't clobbered on every restart.
+            conn.execute(text(
+                "UPDATE list_items SET status = 'committed' "
+                "WHERE status IS NULL AND committed = 1"
+            ))
+            conn.execute(text(
+                "UPDATE list_items SET status = 'someday' "
+                "WHERE status IS NULL AND committed = 0"
+            ))
         if "lists" in existing_tables:
             conn.execute(text("UPDATE lists SET kind = 'tasks' WHERE kind IS NULL"))
             # Drop hardcoded emoji defaults so the frontend's lucide ListIcon
@@ -987,6 +1000,26 @@ def _parse_optional_due(raw):
         raise HTTPException(status_code=400, detail="invalid due_date")
 
 
+_VALID_STATUS = {"committed", "pending", "someday"}
+_VALID_SCALE = {"long_term", "sprint", "medium"}
+
+
+def _validate_status(raw):
+    if raw is None or raw == "":
+        return None
+    if raw not in _VALID_STATUS:
+        raise HTTPException(status_code=400, detail=f"status must be one of {sorted(_VALID_STATUS)}")
+    return raw
+
+
+def _validate_scale(raw):
+    if raw is None or raw == "":
+        return None
+    if raw not in _VALID_SCALE:
+        raise HTTPException(status_code=400, detail=f"scale must be one of {sorted(_VALID_SCALE)}")
+    return raw
+
+
 @app.get("/items")
 def items_tree(db: Session = Depends(get_db)):
     """Full tree: focuses (top-level w/ endgoal) + inbox (top-level todos),
@@ -1012,6 +1045,9 @@ def items_create(body: dict, db: Session = Depends(get_db)):
     endgoal = (body.get("endgoal") or "").strip() or None
     committed = bool(body.get("committed", False))
     due_date = _parse_optional_due(body.get("due_date"))
+    status = _validate_status(body.get("status"))
+    scale = _validate_scale(body.get("scale"))
+    is_primary = bool(body.get("is_primary", False))
     try:
         item = item_service.create(
             db,
@@ -1021,9 +1057,15 @@ def items_create(body: dict, db: Session = Depends(get_db)):
             committed=committed,
             due_date=due_date,
             source_note_id=body.get("source_note_id"),
+            status=status,
+            scale=scale,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # is_primary is a singleton-toggle, handled in update() (which clears
+    # any other primary). Apply post-create when requested.
+    if is_primary:
+        item = item_service.update(db, item.id, is_primary=True) or item
     return _serialize_item(item)
 
 
@@ -1055,6 +1097,10 @@ def items_update(item_id: int, body: dict, db: Session = Depends(get_db)):
         patch["actionable"] = bool(body["actionable"])
     if "is_primary" in body:
         patch["is_primary"] = bool(body["is_primary"])
+    if "status" in body:
+        patch["status"] = _validate_status(body["status"])
+    if "scale" in body:
+        patch["scale"] = _validate_scale(body["scale"])
     item = item_service.update(db, item_id, **patch)
     if not item:
         raise HTTPException(status_code=404, detail="item not found")
@@ -1066,6 +1112,64 @@ def items_delete(item_id: int, db: Session = Depends(get_db)):
     if not item_service.delete(db, item_id):
         raise HTTPException(status_code=404, detail="item not found")
     return {"ok": True}
+
+
+@app.get("/items/suggest-focus")
+def items_suggest_focus(db: Session = Depends(get_db)):
+    """Propose one new focus based on the user's current focuses + recent note
+    titles. Frontend pre-fills the inline add form with the suggestion. Pure
+    suggestion — caller decides whether to accept it.
+
+    Returns: { text: str, endgoal?: str, scale?: 'long_term'|'sprint'|'medium' }
+    """
+    tree = item_service.list_tree(db)
+    active_focuses = [f for f in tree["focuses"] if not f["done"]]
+    focus_lines = [
+        f"- {f['text']}" + (f" (goal: {f['endgoal']})" if f.get("endgoal") else "")
+        for f in active_focuses[:8]
+    ]
+    recent_notes = (
+        db.query(Note)
+        .order_by(Note.updated_at.desc())
+        .limit(10)
+        .all()
+    )
+    note_titles = [n.title for n in recent_notes if n.title]
+
+    prompt = (
+        "You are Gooni — Daniel's personal AI notebook. Propose ONE new focus "
+        "Daniel might want to commit to, based on his existing focuses and "
+        "recent note activity. Don't repeat anything from the existing list. "
+        "If nothing obvious, return text='' and the rest empty.\n\n"
+        "Output strict JSON: {\"text\": str, \"endgoal\": str | null, "
+        "\"scale\": \"long_term\" | \"sprint\" | \"medium\" | null}. "
+        "scale heuristic: long_term = months+, medium = a few weeks, "
+        "sprint = days. text is a short imperative phrase (5-7 words max). "
+        "endgoal is one sentence describing what 'done' looks like.\n\n"
+        f"Existing focuses:\n{chr(10).join(focus_lines) or '  (none)'}\n\n"
+        f"Recent note titles:\n{chr(10).join(f'- {t}' for t in note_titles) or '  (none)'}"
+    )
+    try:
+        resp = llm_client.client.chat.completions.create(
+            model=llm_client.chat_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=180,
+            response_format={"type": "json_object"},
+        )
+        raw = resp.choices[0].message.content or "{}"
+        parsed = json.loads(raw)
+        text_val = (parsed.get("text") or "").strip()
+        if not text_val:
+            return {"text": "", "endgoal": None, "scale": None}
+        return {
+            "text": text_val,
+            "endgoal": (parsed.get("endgoal") or None),
+            "scale": parsed.get("scale") if parsed.get("scale") in _VALID_SCALE else None,
+        }
+    except Exception as e:
+        print(f"[suggest-focus] {e}")
+        return {"text": "", "endgoal": None, "scale": None}
 
 
 @app.post("/items/reorder")

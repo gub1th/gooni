@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Sparkles } from "lucide-react";
 import {
-  fetchItemTree, createItem, reorderItems,
+  fetchItemTree, createItem, reorderItems, suggestFocus,
   type ApiItemTree, type ApiItemNode,
+  type FocusScale, type FocusStatus,
 } from "../services/api";
-import { Item } from "./Item";
+import { FocusRow } from "./FocusRow";
 import { Skeleton } from "./Skeleton";
 
 const FONT = "'Inter', -apple-system, sans-serif";
@@ -67,9 +69,10 @@ function FocusesSkeleton() {
   );
 }
 
-function SectionHeader({ label, right }: {
+function SectionHeader({ label, right, actions }: {
   label: string;
   right?: React.ReactNode;
+  actions?: React.ReactNode;
 }) {
   return (
     <div style={{
@@ -80,11 +83,61 @@ function SectionHeader({ label, right }: {
         letterSpacing: 0.6, fontWeight: 600,
       }}>{label}</span>
       {right && (
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#8E8E93" }}>
+        <span style={{ fontSize: 12, color: "#8E8E93" }}>
           {right}
         </span>
       )}
+      {actions && (
+        <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          {actions}
+        </span>
+      )}
     </div>
+  );
+}
+
+function HeaderButton({ label, onClick, disabled }: {
+  label: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        background: "transparent", border: "none",
+        fontFamily: FONT, fontSize: 11.5, color: disabled ? "#C7C7CC" : "#6B6B70",
+        padding: "2px 8px", borderRadius: 6,
+        cursor: disabled ? "wait" : "pointer", letterSpacing: 0.2,
+      }}
+    >{label}</button>
+  );
+}
+
+function SuggestButton({ onSuggest }: {
+  onSuggest: (s: { text: string; endgoal: string | null; scale: FocusScale | null }) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function run() {
+    setBusy(true);
+    try {
+      const s = await suggestFocus();
+      if (s.text) onSuggest(s);
+    } catch (e) { console.error(e); }
+    finally { setBusy(false); }
+  }
+  return (
+    <HeaderButton
+      onClick={run}
+      disabled={busy}
+      label={
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <Sparkles size={11} />
+          {busy ? "thinking…" : "suggest"}
+        </span>
+      }
+    />
   );
 }
 
@@ -92,8 +145,17 @@ function FocusesSection({ focuses, onChange }: {
   focuses: ApiItemNode[];
   onChange: () => void;
 }) {
-  const committed = focuses.filter((f) => f.committed && !f.done);
-  const uncommitted = focuses.filter((f) => !f.committed && !f.done);
+  // Active = committed status (committed | pending). "someday" lives in the
+  // collapsed parking lot below, not the main list.
+  const active = focuses
+    .filter((f) => !f.done && resolveStatus(f) !== "someday")
+    .sort((a, b) => {
+      // Primary always sits at the top.
+      if (a.is_primary && !b.is_primary) return -1;
+      if (!a.is_primary && b.is_primary) return 1;
+      return a.sort_order - b.sort_order;
+    });
+  const someday = focuses.filter((f) => !f.done && resolveStatus(f) === "someday");
   // Done sorted by completed_at desc so most recent is on top.
   const done = focuses
     .filter((f) => f.done)
@@ -102,36 +164,60 @@ function FocusesSection({ focuses, onChange }: {
       const tb = b.completed_at ? new Date(b.completed_at).getTime() : 0;
       return tb - ta;
     });
-  const stale = committed.filter((f) => f.stale).length;
+  const stale = active.filter((f) => resolveStatus(f) === "pending").length;
 
-  // Done collapsed entirely now per UX critique — single tally line.
+  const [adding, setAdding] = useState(false);
+  const [seed, setSeed] = useState<{ text: string; endgoal: string | null; scale: FocusScale | null } | null>(null);
 
   return (
     <div>
-      <SectionHeader label="Focuses" right={
-        <span style={{ fontSize: 11, color: "#8E8E93", fontWeight: 500 }}>
-          {committed.length} active{stale > 0 ? ` · ${stale} stale` : ""}
-        </span>
-      } />
+      <SectionHeader
+        label="Focuses"
+        right={
+          <span style={{ fontSize: 11, color: "#8E8E93", fontWeight: 500 }}>
+            {active.length} active{stale > 0 ? ` · ${stale} stale` : ""}
+          </span>
+        }
+        actions={
+          <>
+            <SuggestButton
+              onSuggest={(s) => {
+                setSeed({ text: s.text, endgoal: s.endgoal, scale: s.scale });
+                setAdding(true);
+              }}
+            />
+            <HeaderButton
+              label="+ add"
+              onClick={() => { setSeed(null); setAdding(true); }}
+            />
+          </>
+        }
+      />
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <ReorderableList
-          items={committed}
+          items={active}
           onChange={onChange}
         />
 
-        <FocusAdder onCreated={onChange} />
+        {adding && (
+          <FocusAdderForm
+            seed={seed}
+            onClose={() => { setAdding(false); setSeed(null); }}
+            onCreated={() => { setAdding(false); setSeed(null); onChange(); }}
+          />
+        )}
 
-        {uncommitted.length > 0 && (
+        {someday.length > 0 && (
           <details style={{ marginTop: 6 }}>
             <summary style={{
               fontSize: 11, color: "#8E8E93", cursor: "pointer",
               padding: "4px 0", listStyle: "none",
             }}>
-              ▸ {uncommitted.length} not committed
+              ▸ {someday.length} someday
             </summary>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-              {uncommitted.map((f) => (
-                <Item key={f.id} node={f} onChange={onChange} />
+              {someday.map((f) => (
+                <FocusRow key={f.id} node={f} onChange={onChange} />
               ))}
             </div>
           </details>
@@ -143,6 +229,12 @@ function FocusesSection({ focuses, onChange }: {
       </div>
     </div>
   );
+}
+
+function resolveStatus(n: ApiItemNode): FocusStatus {
+  if (n.status) return n.status;
+  if (!n.committed) return "someday";
+  return n.stale ? "pending" : "committed";
 }
 
 function DoneSection({
@@ -167,7 +259,7 @@ function DoneSection({
       {open && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
           {done.map((f) => (
-            <Item key={f.id} node={f} onChange={onChange} variant="done" />
+            <FocusRow key={f.id} node={f} onChange={onChange} variant="done" />
           ))}
         </div>
       )}
@@ -215,7 +307,7 @@ function ReorderableList({ items, onChange }: { items: ApiItemNode[]; onChange: 
       />
       {items.map((f, i) => (
         <div key={f.id}>
-          <Item
+          <FocusRow
             node={f}
             onChange={onChange}
             draggable={!f.done}
@@ -252,57 +344,178 @@ function DropSlot({
   );
 }
 
-function FocusAdder({ onCreated }: { onCreated: () => void }) {
-  const [text, setText] = useState("");
-  const [active, setActive] = useState(false);
+function FocusAdderForm({ seed, onCreated, onClose }: {
+  seed: { text: string; endgoal: string | null; scale: FocusScale | null } | null;
+  onCreated: () => void;
+  onClose: () => void;
+}) {
+  const [text, setText] = useState(seed?.text ?? "");
+  const [endgoal, setEndgoal] = useState(seed?.endgoal ?? "");
+  const [dueDate, setDueDate] = useState("");
+  const [scale, setScale] = useState<FocusScale | "">(seed?.scale ?? "");
+  const [status, setStatus] = useState<FocusStatus>("committed");
+  const [isPrimary, setIsPrimary] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function submit() {
     const t = text.trim();
-    if (!t) { setActive(false); return; }
+    if (!t) return;
     setBusy(true);
     try {
-      await createItem({ text: t, committed: true });
-      setText("");
+      await createItem({
+        text: t,
+        endgoal: endgoal.trim() || null,
+        due_date: dueDate ? new Date(`${dueDate}T00:00:00`).toISOString() : null,
+        scale: scale || null,
+        status,
+        committed: status !== "someday",
+        is_primary: isPrimary,
+      });
       onCreated();
     } catch (e) { console.error(e); }
-    finally { setBusy(false); setActive(false); }
+    finally { setBusy(false); }
   }
 
-  // Quiet text-link by default — secondary action shouldn't compete with the
-  // active focus list. Click reveals an inline borderless input.
-  if (!active) {
-    return (
-      <button
-        onClick={() => setActive(true)}
-        style={{
-          alignSelf: "flex-start", marginTop: 2,
-          fontSize: 12, color: "#8E8E93",
-          background: "transparent", border: "none",
-          padding: "4px 0", cursor: "pointer", fontFamily: FONT,
-        }}
-      >+ add focus</button>
-    );
-  }
   return (
-    <input
-      autoFocus
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={submit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" && !busy) submit();
-        if (e.key === "Escape") { setText(""); setActive(false); }
-      }}
-      placeholder="focus name…"
+    <div
       style={{
-        fontSize: 13, padding: "4px 0",
-        border: "none", borderBottom: "1px solid rgba(0,0,0,0.18)",
-        background: "transparent",
-        fontFamily: FONT, color: "#1C1C1E",
-        outline: "none", marginTop: 2,
-        width: "100%", boxSizing: "border-box",
+        marginTop: 4,
+        padding: 12,
+        background: "#FAFAFA",
+        border: "0.5px solid rgba(0,0,0,0.08)",
+        borderRadius: 8,
+        display: "flex", flexDirection: "column", gap: 8,
+        fontFamily: FONT,
       }}
-    />
+    >
+      <input
+        autoFocus
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") submit();
+          if (e.key === "Escape") onClose();
+        }}
+        placeholder="focus name"
+        style={{
+          fontSize: 14, padding: "6px 8px",
+          border: "0.5px solid rgba(0,0,0,0.12)", borderRadius: 6,
+          background: "#FFF", fontFamily: FONT, color: "#1C1C1E",
+          outline: "none",
+        }}
+      />
+      <input
+        value={endgoal}
+        onChange={(e) => setEndgoal(e.target.value)}
+        placeholder="end goal (optional)"
+        style={{
+          fontSize: 13, padding: "5px 8px",
+          border: "0.5px solid rgba(0,0,0,0.10)", borderRadius: 6,
+          background: "#FFF", fontFamily: FONT, color: "#3C3C43",
+          outline: "none",
+        }}
+      />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+          title="target date"
+          style={{
+            fontSize: 12, padding: "4px 8px",
+            border: "0.5px solid rgba(0,0,0,0.10)", borderRadius: 6,
+            background: "#FFF", fontFamily: FONT, color: "#1C1C1E", outline: "none",
+          }}
+        />
+        <select
+          value={scale}
+          onChange={(e) => setScale(e.target.value as FocusScale | "")}
+          title="scale"
+          style={{
+            fontSize: 12, padding: "4px 8px",
+            border: "0.5px solid rgba(0,0,0,0.10)", borderRadius: 6,
+            background: "#FFF", fontFamily: FONT, color: "#1C1C1E", outline: "none",
+          }}
+        >
+          <option value="">scale…</option>
+          <option value="long_term">long-term</option>
+          <option value="medium">medium</option>
+          <option value="sprint">sprint</option>
+        </select>
+        <Segmented<FocusStatus>
+          value={status}
+          onChange={setStatus}
+          options={[
+            { value: "committed", label: "committed" },
+            { value: "pending",   label: "pending" },
+            { value: "someday",   label: "someday" },
+          ]}
+        />
+      </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3C3C43" }}>
+        <input
+          type="checkbox"
+          checked={isPrimary}
+          onChange={(e) => setIsPrimary(e.target.checked)}
+        />
+        make this my primary focus
+      </label>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button
+          onClick={onClose}
+          style={{
+            fontSize: 12, padding: "5px 10px",
+            background: "transparent", border: "none",
+            color: "#8E8E93", cursor: "pointer", fontFamily: FONT,
+          }}
+        >cancel</button>
+        <button
+          onClick={submit}
+          disabled={busy || !text.trim()}
+          style={{
+            fontSize: 12, padding: "5px 12px",
+            background: "#1C1C1E", color: "#FFF",
+            border: "none", borderRadius: 6, fontWeight: 600,
+            cursor: busy || !text.trim() ? "not-allowed" : "pointer",
+            opacity: busy || !text.trim() ? 0.5 : 1,
+            fontFamily: FONT,
+          }}
+        >{busy ? "adding…" : "add"}</button>
+      </div>
+    </div>
+  );
+}
+
+function Segmented<T extends string>({
+  value, onChange, options,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string }[];
+}) {
+  return (
+    <div style={{
+      display: "inline-flex",
+      border: "0.5px solid rgba(0,0,0,0.10)", borderRadius: 6,
+      overflow: "hidden",
+      fontFamily: FONT,
+    }}>
+      {options.map((opt) => {
+        const sel = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
+            style={{
+              fontSize: 12, padding: "4px 10px",
+              background: sel ? "#1C1C1E" : "#FFF",
+              color: sel ? "#FFF" : "#6B6B70",
+              border: "none", cursor: "pointer",
+              fontFamily: FONT,
+            }}
+          >{opt.label}</button>
+        );
+      })}
+    </div>
   );
 }
