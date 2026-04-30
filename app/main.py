@@ -314,6 +314,10 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
     # Always allow: public read-only routes, auth endpoint, static assets, CORS preflight
     # Mutations on /public/* (e.g. PATCH /public/profile) still require the Bearer token.
+    # Webhook routes bypass Bearer auth — the calling third party (Meta,
+    # BlueBubbles, etc) has no way to attach our Bearer token. Each webhook
+    # route enforces its own auth (signature verification, verify_token,
+    # shared-secret header) at the handler level.
     if (
         (path.startswith("/public") and request.method == "GET")
         or path == "/auth"
@@ -323,6 +327,7 @@ async def auth_middleware(request: Request, call_next):
         or path == "/auth/github/callback"
         or path == "/healthz"
         or path.startswith("/assets")
+        or path.startswith("/webhooks/")
         or path == "/"
         or request.method == "OPTIONS"
     ):
