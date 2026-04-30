@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.5.1 — 2026-04-30 (patch)
+
+- fix: focuses card UI — single shared card, pulse-only primary dot, compact inline form (#65)
+
 ## 0.5.0 — 2026-04-30 (minor)
 
 - feat: focuses dashboard redesign — status dots, scale badges, primary inline (#64)
