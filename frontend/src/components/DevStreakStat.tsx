@@ -1,15 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { fetchDevActivity, type DevActivity, type DevActivityRepo } from "../services/api";
 
 const FONT = "'Inter', -apple-system, sans-serif";
 const GREEN = "#30A14E";
 const RED = "#CF222E";
 
-// Stat-card sibling to "day streak". Same chrome, click to expand a
-// commits panel below the row. Hidden when no GitHub repos tracked.
+// Stat-card sibling to "day streak". Click opens a floating panel anchored
+// below the card (rendered via Portal so it doesn't disrupt the stat row's
+// flex layout). Hidden when no GitHub repos tracked.
 export function DevStreakStat() {
   const [dev, setDev] = useState<DevActivity | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     fetchDevActivity().then(setDev).catch(() => setDev(null));
@@ -19,6 +22,27 @@ export function DevStreakStat() {
     window.addEventListener("gooni-tracked-repos-changed", onChange);
     return () => window.removeEventListener("gooni-tracked-repos-changed", onChange);
   }, []);
+
+  // Close on outside click / Escape while open.
+  useEffect(() => {
+    if (!expanded) return;
+    function onDocClick(e: MouseEvent) {
+      const btn = buttonRef.current;
+      const target = e.target as Node;
+      if (btn?.contains(target)) return;
+      if ((target as HTMLElement)?.closest?.("[data-gooni-dev-popover]")) return;
+      setExpanded(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setExpanded(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [expanded]);
 
   if (!dev || !dev.connected || dev.repos.length === 0) return null;
 
@@ -30,6 +54,7 @@ export function DevStreakStat() {
   return (
     <>
       <button
+        ref={buttonRef}
         onClick={() => setExpanded((v) => !v)}
         title={expanded ? "Hide commit details" : "Show commit details"}
         style={{
@@ -60,29 +85,49 @@ export function DevStreakStat() {
         </div>
       </button>
 
-      {expanded && (
-        <DevExpandedPanel data={dev} />
+      {expanded && buttonRef.current && (
+        <DevExpandedPopover data={dev} anchor={buttonRef.current} />
       )}
     </>
   );
 }
 
-// Rendered as a sibling AFTER the stat-card row. The Dashboard wraps
-// the stat row + this panel in the same container; when expanded=false
-// this returns null and the layout is unchanged.
-function DevExpandedPanel({ data }: { data: DevActivity }) {
-  return (
+// Floating popover anchored to the stat card. Rendered through a portal so
+// the dashboard's flex row layout stays untouched (the in-flow expand was
+// pushing the row to wrap and overlap the greeting).
+function DevExpandedPopover({ data, anchor }: { data: DevActivity; anchor: HTMLElement }) {
+  // Re-measure on resize / scroll so the panel hugs the anchor.
+  const [rect, setRect] = useState(() => anchor.getBoundingClientRect());
+  useEffect(() => {
+    function update() { setRect(anchor.getBoundingClientRect()); }
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [anchor]);
+
+  const PANEL_WIDTH = 420;
+  // Default: anchor right edge of panel under right edge of button.
+  const left = Math.max(12, Math.min(window.innerWidth - PANEL_WIDTH - 12, rect.right - PANEL_WIDTH));
+  const top = rect.bottom + 8;
+
+  return createPortal(
     <div
+      data-gooni-dev-popover="true"
       style={{
-        flexBasis: "100%",
-        width: "100%",
-        marginTop: 12,
+        position: "fixed",
+        top, left,
+        width: PANEL_WIDTH,
         background: "#fff",
-        border: "0.5px solid rgba(0,0,0,0.08)",
+        border: "0.5px solid rgba(0,0,0,0.10)",
         borderRadius: 12,
         padding: "14px 16px",
         fontFamily: FONT,
-        animation: "gooni-dev-expand 200ms cubic-bezier(0.22, 1, 0.36, 1)",
+        boxShadow: "0 12px 32px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06)",
+        zIndex: 1200,
+        animation: "gooni-dev-expand 180ms cubic-bezier(0.22, 1, 0.36, 1)",
       }}
     >
       <style>{`
@@ -95,12 +140,13 @@ function DevExpandedPanel({ data }: { data: DevActivity }) {
         fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
         letterSpacing: 0.6, fontWeight: 600, marginBottom: 10,
       }}>Dev Activity</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: "60vh", overflowY: "auto" }}>
         {data.repos.map((r) => (
           <RepoRow key={`${r.owner}/${r.name}`} repo={r} />
         ))}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
