@@ -273,6 +273,24 @@ class OAuthToken(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class GooniSnapshot(Base):
+    """Daily reflection on Gooni + Daniel — one row per day. The raw_data JSON
+    captures the inputs (commit list, DB counts, deltas vs prior snapshot) and
+    `digest` holds the LLM-generated prose. Lazy-built on first read of the day
+    so we don't need a cron.
+    """
+
+    __tablename__ = "gooni_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    # Day key in YYYY-MM-DD form so we can dedupe/lookup without dealing with
+    # tz-shifted DateTime comparisons.
+    day = Column(String, unique=True, nullable=False, index=True)
+    taken_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    raw_data = Column(Text, nullable=True)  # JSON string
+    digest = Column(Text, nullable=True)
+
+
 class TrackedRepo(Base):
     """A repo the user wants surfaced on the Dev Activity dashboard. The
     `provider` field is here so we can layer GitLab / Bitbucket on later

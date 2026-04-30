@@ -2360,3 +2360,17 @@ def dashboard_dev_activity(db: Session = Depends(get_db)):
     """
     from .services import dev_activity_service as das
     return das.dev_activity_service.build(db)
+
+
+@app.get("/snapshot/today")
+def snapshot_today(db: Session = Depends(get_db)):
+    """Gooni's Take — daily reflection on the codebase + Daniel's activity.
+    Lazy-built on first read of the day; subsequent reads hit cache.
+    """
+    from .services.snapshot_service import snapshot_service
+    snap = snapshot_service.get_or_build_today(db)
+    return {
+        "day": snap.day,
+        "taken_at": snap.taken_at.isoformat() if snap.taken_at else None,
+        "digest": snap.digest or "",
+    }
