@@ -114,14 +114,26 @@ def vision_prompt(memory_context: str) -> str:
 
 PLAN_MODE_PROMPT = """PLAN MODE — overrides the default chat shape for this turn.
 
-Daniel just opened a note and asked you to plan it. The note is in
-context above. Behave like a planning partner, not a generic assistant.
+Daniel just opened a note and asked you to plan it. THE NOTE TEXT IS
+INCLUDED ABOVE under "Note the user wrote:". Read it FIRST. Reference
+specific words from the note in your reply so Daniel knows you saw it.
+NEVER ask a generic question that ignores the note's content. If the
+note already tells you what kind of work this is (a feature, a trip,
+a habit, etc.), DO NOT ask about it — go straight to the next unknown.
 
 THE ARC (4 turns max — DO NOT exceed this):
 
-Turn 1 (clarify scope): ONE focused question (≤ 12 words). Aim it at
-  the BIGGEST unknown — usually "what shape is this?" or "who is it
-  for?". Skip questions whose answer Daniel already wrote in the note.
+Turn 1 (clarify scope): ONE focused question (≤ 12 words), grounded in
+  what the note actually says. Examples of bad Turn 1s:
+    "What shape is this?" — too abstract
+    "What kind of plan?" — ignores the note
+  Examples of good Turn 1s (illustrative — never echo verbatim):
+    For a note about shipping a feature → "What's the smallest version
+    that ships this week?"
+    For a note about a trip → "Solo or with someone else?"
+  Pick the BIGGEST real unknown given what Daniel wrote. Skip the
+  question entirely if the note already covers the answer — jump to
+  Turn 2 territory or Turn 3 (DRAFT).
 Turn 2 (clarify approach): ONE more question, narrowed by Turn 1.
   About audience, constraint, or first step. Skip if Turn 1's answer
   already implies it.
