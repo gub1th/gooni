@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchDevActivity, type DevActivity, type DevActivityRepo } from "../services/api";
+import { Skeleton } from "./Skeleton";
 
 const FONT = "'Inter', -apple-system, sans-serif";
 const GREEN = "#30A14E";
@@ -10,18 +12,21 @@ const RED = "#CF222E";
 // below the card (rendered via Portal so it doesn't disrupt the stat row's
 // flex layout). Hidden when no GitHub repos tracked.
 export function DevStreakStat() {
-  const [dev, setDev] = useState<DevActivity | null>(null);
+  const queryClient = useQueryClient();
+  const { data: dev, isLoading } = useQuery<DevActivity | null>({
+    queryKey: ["dev-activity"],
+    queryFn: () => fetchDevActivity().catch(() => null),
+  });
   const [expanded, setExpanded] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
+  // RepoPicker fires this when a repo is tracked/untracked — invalidate the
+  // cache so dev activity refetches with the new repo set.
   useEffect(() => {
-    fetchDevActivity().then(setDev).catch(() => setDev(null));
-    function onChange() {
-      fetchDevActivity().then(setDev).catch(() => setDev(null));
-    }
+    function onChange() { queryClient.invalidateQueries({ queryKey: ["dev-activity"] }); }
     window.addEventListener("gooni-tracked-repos-changed", onChange);
     return () => window.removeEventListener("gooni-tracked-repos-changed", onChange);
-  }, []);
+  }, [queryClient]);
 
   // Close on outside click / Escape while open.
   useEffect(() => {
@@ -44,6 +49,22 @@ export function DevStreakStat() {
     };
   }, [expanded]);
 
+  // First-paint skeleton — shaped like the real card so the stat row layout
+  // doesn't reflow when data lands.
+  if (isLoading && !dev) {
+    return (
+      <div style={{
+        background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
+        borderRadius: 10, padding: "10px 14px",
+        display: "flex", flexDirection: "column", alignItems: "flex-start",
+        minWidth: 110, gap: 4,
+      }}>
+        <Skeleton width={50} height={11} />
+        <Skeleton width={28} height={20} />
+        <Skeleton width={70} height={11} />
+      </div>
+    );
+  }
   if (!dev || !dev.connected || dev.repos.length === 0) return null;
 
   const { aggregate } = dev;

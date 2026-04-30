@@ -1,23 +1,21 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchItemTree, createItem, reorderItems,
   type ApiItemTree, type ApiItemNode,
 } from "../services/api";
 import { Item } from "./Item";
+import { Skeleton } from "./Skeleton";
 
 const FONT = "'Inter', -apple-system, sans-serif";
 
 export function ActivityCard() {
-  const [tree, setTree] = useState<ApiItemTree | null>(null);
-
-  async function refresh() {
-    try {
-      const t = await fetchItemTree();
-      setTree(t);
-    } catch (e) { console.error(e); }
-  }
-
-  useEffect(() => { refresh(); }, []);
+  const queryClient = useQueryClient();
+  const { data: tree, isLoading } = useQuery<ApiItemTree>({
+    queryKey: ["item-tree"],
+    queryFn: fetchItemTree,
+  });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["item-tree"] });
 
   return (
     <div style={{
@@ -29,10 +27,40 @@ export function ActivityCard() {
       fontFamily: FONT,
       display: "flex", flexDirection: "column", gap: 18,
     }}>
-      <FocusesSection
-        focuses={tree?.focuses ?? []}
-        onChange={refresh}
-      />
+      {isLoading && !tree ? (
+        <FocusesSkeleton />
+      ) : (
+        <FocusesSection
+          focuses={tree?.focuses ?? []}
+          onChange={refresh}
+        />
+      )}
+    </div>
+  );
+}
+
+function FocusesSkeleton() {
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#1C1C1E", opacity: 0.4 }} />
+        <span style={{
+          fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
+          letterSpacing: 0.6, fontWeight: 600,
+        }}>Focuses</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {[0, 1, 2].map((i) => (
+          <div key={i} style={{
+            border: "0.5px solid rgba(0,0,0,0.06)", borderRadius: 8,
+            padding: "8px 12px", background: "#fff",
+            display: "flex", alignItems: "center", gap: 10,
+          }}>
+            <Skeleton width={16} height={16} radius={4} />
+            <Skeleton width={`${50 + i * 10}%`} height={13} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
