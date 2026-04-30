@@ -238,6 +238,16 @@ class ListItem(Base):
     # The "primary focus" surfaced front-and-center on the dashboard. Service
     # enforces uniqueness.
     is_primary = Column(Boolean, default=False, nullable=False)
+    # Focus engagement state — separate from `committed` so the UI can
+    # distinguish "I'm pursuing this but stalled" (pending) from "actively
+    # making progress" (committed) without drifting onto the stale auto-flag.
+    # NULL on legacy rows; frontend falls back to deriving from `committed`.
+    # Values: 'committed' | 'pending' | 'someday'.
+    status = Column(String, nullable=True)
+    # Time horizon — purely informational, drives a small badge on the
+    # focuses dashboard. NULL = unspecified. Values: 'long_term' | 'sprint'
+    # | 'medium'.
+    scale = Column(String, nullable=True)
     done = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)

@@ -142,7 +142,19 @@ POST /webhooks/imessage         → BlueBubbles bridge webhook (X-Secret header)
 GET  /settings                  → daily nudge config (hour/min/tz/channels/enabled)
 PATCH /settings                 → update any subset of nudge_* fields
 POST /settings/test-nudge       → fire the digest immediately (bypasses idempotency)
+
+GET  /items                     → focus + inbox tree (now includes status, scale per node)
+POST /items                     → create item; accepts status, scale, is_primary in body
+PATCH /items/{id}               → patches now accept status + scale; status syncs `committed`
+GET  /items/suggest-focus       → LLM proposes one new focus { text, endgoal?, scale? }
 ```
+
+### Focus model fields
+
+`list_items` rows representing focuses now carry:
+- `status: 'committed' | 'pending' | 'someday' | null` — engagement state. NULL on legacy rows; UI derives from `committed`. `committed`/`pending` both keep `committed=True`; `someday` flips it false.
+- `scale: 'long_term' | 'sprint' | 'medium' | null` — informational time horizon, drives a small badge.
+- `is_primary` (existing) — singleton; only one item across the whole `list_items` table can be `True`. The dashboard's focuses list pulls primary to the top with a green left rail + tint + pulsing dot.
 
 ### Daily nudge
 
