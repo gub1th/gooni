@@ -228,12 +228,14 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "48px 40px 120px" }}>
 
-        {/* Greeting + stats on the same row — greeting left, compact stat cards floated right.
-            flexWrap so stats drop below when the row is narrow instead of squeezing the greeting
-            to 3 lines. Greeting itself stays nowrap so "Good evening, Daniel." reads as one beat. */}
+        {/* Greeting + stats on the same row. Greeting holds its natural width
+            (whiteSpace:nowrap, flexShrink:0); stats container takes the
+            remainder and wraps internally — its cards reflow before forcing
+            the row itself to wrap. Keeps greeting + cards on one line at any
+            reasonable viewport without smashing the title to 3 lines. */}
         <div style={{
           display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-          gap: 16, marginBottom: 26, flexWrap: "wrap",
+          gap: 16, marginBottom: 26,
         }}>
           <div style={{ flexShrink: 0 }}>
             <div style={{
@@ -252,7 +254,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 10, flexShrink: 0, alignItems: "stretch", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 0, alignItems: "stretch", flexWrap: "wrap", justifyContent: "flex-end" }}>
             {/* 3D brain — opens the notes visualization. Left of the stat cards
                 so it reads as a peer affordance, not buried in a toolbar. */}
             <NeuralBrain size={60} onClick={() => setExploreOpen(true)} />
