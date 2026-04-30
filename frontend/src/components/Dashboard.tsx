@@ -13,6 +13,7 @@ import { NoteEditor } from "./notes/NoteEditor";
 import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
+import { SettingsPanel } from "./SettingsPanel";
 import { DevStreakStat } from "./DevStreakStat";
 import { Skeleton } from "./Skeleton";
 
@@ -28,6 +29,14 @@ function getGreeting(): string {
 
 function getDateStr(): string {
   return new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+}
+
+// First <img src="..."> in note content. TipTap stores pasted images as
+// base64 data URLs inline, so we don't need to hit the network — just pluck
+// the src and slap it in an <img>. Empty when no image present.
+function extractFirstImageSrc(html: string): string | null {
+  const m = html.match(/<img\b[^>]*\bsrc=["']([^"']+)["']/i);
+  return m ? m[1] : null;
 }
 
 function stripHtml(html: string): string {
@@ -270,7 +279,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
               background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
               borderRadius: 10, padding: "10px 14px",
               display: "flex", flexDirection: "column", alignItems: "flex-start",
-              minWidth: 110,
+              minWidth: 92,
             }}>
               <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>notes this week</div>
               <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
@@ -297,7 +306,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
               background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
               borderRadius: 10, padding: "10px 14px",
               display: "flex", flexDirection: "column", alignItems: "flex-start",
-              minWidth: 110,
+              minWidth: 92,
             }}>
               <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>day streak</div>
               <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
@@ -363,6 +372,10 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
               {stats.recent_notes.slice(0, 2).map((note, idx) => {
                 const fullTitle = displayTitle(note);
                 const fullExcerpt = stripHtmlForExcerpt(note.content ?? "");
+                // First inline image — shows as a small thumb so notes with
+                // pasted screenshots/sketches read at a glance instead of
+                // looking like an empty title row.
+                const firstImage = extractFirstImageSrc(note.content ?? "");
                 const isFirst = idx === 0;
                 const isTyping = typing !== null && typing.noteId === note.id;
                 const revealed = isTyping ? typing!.revealed : Infinity;
@@ -397,6 +410,21 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                       el.style.background = "#fff";
                     }}
                   >
+                    {firstImage && (
+                      <div style={{
+                        width: "100%", height: 70, marginBottom: 6,
+                        borderRadius: 6, overflow: "hidden",
+                        background: "#F4F4F5",
+                        flexShrink: 0,
+                      }}>
+                        <img
+                          src={firstImage}
+                          alt=""
+                          loading="lazy"
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                        />
+                      </div>
+                    )}
                     <div style={{
                       fontSize: 13, fontWeight: 600, color: "#1C1C1E", fontFamily: FONT,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -466,6 +494,9 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />
+
+        {/* Daily nudge config — time, tz, channels, test send. */}
+        <SettingsPanel />
 
       </div>
 

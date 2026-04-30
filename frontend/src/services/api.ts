@@ -924,6 +924,51 @@ export async function fetchChatAudit(opts: {
   return res.json();
 }
 
+// ── Settings (daily nudge) ────────────────────────────────────────────────────
+
+export type NudgeChannel = "telegram" | "whatsapp";
+
+export interface AppSettings {
+  nudge_enabled: boolean;
+  nudge_hour: number;        // 0-23
+  nudge_minute: number;      // 0-59
+  nudge_tz: string;          // IANA, e.g. "America/Los_Angeles"
+  nudge_channels: NudgeChannel[];
+  nudge_last_sent_day: string | null;
+}
+
+export async function fetchSettings(): Promise<AppSettings> {
+  const res = await apiFetch(`${BASE}/settings`);
+  if (!res.ok) throw new Error("Failed to fetch settings");
+  return res.json();
+}
+
+export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+  const res = await apiFetch(`${BASE}/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || "Failed to update settings");
+  }
+  return res.json();
+}
+
+export interface NudgeTestResult {
+  sent: boolean;
+  to?: string[];
+  skipped?: string[];
+  reason?: string;
+}
+
+export async function testNudge(): Promise<NudgeTestResult> {
+  const res = await apiFetch(`${BASE}/settings/test-nudge`, { method: "POST" });
+  if (!res.ok) throw new Error("test nudge failed");
+  return res.json();
+}
+
 // ── Gooni ─────────────────────────────────────────────────────────────────────
 
 export async function fetchIntention(

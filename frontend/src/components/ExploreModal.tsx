@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { fetchNotesGraph, type GraphNode, type GraphEdge } from "../services/api";
+import { useSpacesStore } from "../stores/useSpacesStore";
 
 // Full-screen modal version of the semantic graph. Rendered as a portal-ish
 // fixed overlay on top of the dashboard. Close via ×, backdrop click, or Esc.
@@ -170,6 +171,52 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
     const nodeIndex = new Map(nodes.map((n) => [n.id, n]));
     let hovered: SimNode | null = null;
 
+    // Connected components via union-find. Used to label the biggest cluster
+    // so the user has a stable anchor while the force sim drifts. Only the
+    // largest one gets a label — adding more would clutter the canvas.
+    const parent = new Map<number, number>();
+    function find(x: number): number {
+      let p = parent.get(x) ?? x;
+      while (p !== (parent.get(p) ?? p)) p = parent.get(p) ?? p;
+      parent.set(x, p);
+      return p;
+    }
+    for (const n of graph.nodes) parent.set(n.id, n.id);
+    for (const e of graph.edges) {
+      const ra = find(e.from), rb = find(e.to);
+      if (ra !== rb) parent.set(ra, rb);
+    }
+    const groups = new Map<number, number[]>();
+    for (const n of graph.nodes) {
+      const r = find(n.id);
+      if (!groups.has(r)) groups.set(r, []);
+      groups.get(r)!.push(n.id);
+    }
+    let largestIds: number[] = [];
+    for (const ids of groups.values()) {
+      if (ids.length > largestIds.length) largestIds = ids;
+    }
+    const clusterNodes: SimNode[] = largestIds.length >= 3
+      ? largestIds.map((id) => nodeIndex.get(id)!).filter(Boolean)
+      : [];
+    // Cluster label = most-common space among its nodes. Fallback "cluster".
+    let clusterLabel = "";
+    if (clusterNodes.length) {
+      const counts = new Map<number | "general" | null, number>();
+      for (const n of clusterNodes) {
+        const k: number | null = n.space_id;
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+      let bestKey: number | "general" | null = null;
+      let bestCount = 0;
+      for (const [k, c] of counts) {
+        if (c > bestCount) { bestCount = c; bestKey = k; }
+      }
+      const spaces = useSpacesStore.getState().spaces;
+      const sp = spaces.find((s) => s.id === (bestKey ?? "general"));
+      clusterLabel = sp ? sp.name : "cluster";
+    }
+
     // Pre-warm the force sim so the camera fit below sees the settled
     // layout, not the initial circle. 200 steps is enough for the typical
     // 30-200 node graph to spread out.
@@ -338,6 +385,28 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
       }
       ctx!.restore();
 
+      // Persistent label for the largest cluster. Anchored above the cluster
+      // bbox in screen space so it floats with the sim but stays clear of
+      // the nodes themselves (sits ~22px above the topmost node).
+      if (clusterNodes.length && clusterLabel) {
+        let cMinX = Infinity, cMaxX = -Infinity, cMinY = Infinity;
+        for (const n of clusterNodes) {
+          if (n.x < cMinX) cMinX = n.x;
+          if (n.x > cMaxX) cMaxX = n.x;
+          if (n.y - n.radius < cMinY) cMinY = n.y - n.radius;
+        }
+        const labelX = ((cMinX + cMaxX) / 2) * v.scale + v.tx;
+        const labelY = cMinY * v.scale + v.ty - 22;
+        ctx!.font = `700 11px ${FONT}`;
+        ctx!.textAlign = "center";
+        ctx!.textBaseline = "middle";
+        ctx!.fillStyle = "rgba(28,28,30,0.32)";
+        ctx!.fillText(clusterLabel.toUpperCase(), labelX, labelY);
+        // Reset to defaults so the hover label below isn't affected.
+        ctx!.textAlign = "start";
+        ctx!.textBaseline = "alphabetic";
+      }
+
       if (hovered) {
         const sx = hovered.x * v.scale + v.tx;
         const sy = hovered.y * v.scale + v.ty;
@@ -452,6 +521,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
           </div>
         </div>
 
+        {!graph && !err && <BrainLoadingOverlay />}
         {err && (
           <div style={{
             position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
@@ -479,6 +549,82 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
 
         {/* Suppress unused-var warning for hoveredNode (re-renders for cursor). */}
         <span style={{ display: "none" }}>{hoveredNode?.id ?? ""}</span>
+      </div>
+    </div>
+  );
+}
+
+// Loading overlay — pulsing constellation of dots with connecting lines that
+// chase. Sits at center while the graph payload loads. Pure CSS keyframes,
+// no canvas, so it doesn't conflict with the real canvas mount below.
+function BrainLoadingOverlay() {
+  // 6 dots arranged in a hex around the center. Each dot pulses on a stagger.
+  const dots = Array.from({ length: 6 }).map((_, i) => {
+    const angle = (i / 6) * Math.PI * 2;
+    return {
+      x: Math.cos(angle) * 32,
+      y: Math.sin(angle) * 32,
+      delay: (i * 120),
+    };
+  });
+  return (
+    <div style={{
+      position: "absolute", inset: 0,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      flexDirection: "column", gap: 22, pointerEvents: "none",
+    }}>
+      <style>{`
+        @keyframes gooni-brain-pulse {
+          0%, 100% { transform: scale(1); opacity: 0.55; }
+          50%      { transform: scale(1.6); opacity: 1; }
+        }
+        @keyframes gooni-brain-orbit {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+        @keyframes gooni-brain-line {
+          0%   { stroke-dashoffset: 200; opacity: 0.15; }
+          50%  { opacity: 0.45; }
+          100% { stroke-dashoffset: 0;   opacity: 0.15; }
+        }
+      `}</style>
+      <div style={{
+        position: "relative", width: 96, height: 96,
+        animation: "gooni-brain-orbit 14s linear infinite",
+      }}>
+        <svg viewBox="-50 -50 100 100" width="100%" height="100%" style={{ overflow: "visible" }}>
+          {dots.map((d, i) => {
+            const next = dots[(i + 1) % dots.length];
+            return (
+              <line
+                key={`l${i}`}
+                x1={d.x} y1={d.y} x2={next.x} y2={next.y}
+                stroke="#1C1C1E" strokeWidth="0.6"
+                strokeDasharray="200" strokeDashoffset="200"
+                style={{
+                  animation: `gooni-brain-line 2.4s ease-in-out ${d.delay}ms infinite`,
+                }}
+              />
+            );
+          })}
+          {dots.map((d, i) => (
+            <circle
+              key={`c${i}`}
+              cx={d.x} cy={d.y} r={3}
+              fill="#1C1C1E"
+              style={{
+                transformOrigin: `${d.x}px ${d.y}px`,
+                animation: `gooni-brain-pulse 1.6s ease-in-out ${d.delay}ms infinite`,
+              }}
+            />
+          ))}
+          {/* Center "core" dot — slower pulse, brand green */}
+          <circle cx={0} cy={0} r={4} fill="#30A14E"
+            style={{ transformOrigin: "center", animation: "gooni-brain-pulse 2.2s ease-in-out infinite" }} />
+        </svg>
+      </div>
+      <div style={{ fontSize: 12, color: "#8E8E93", letterSpacing: 0.5, textTransform: "uppercase", fontWeight: 600 }}>
+        wiring up your brain
       </div>
     </div>
   );

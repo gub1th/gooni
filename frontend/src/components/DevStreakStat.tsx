@@ -57,7 +57,7 @@ export function DevStreakStat() {
         background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
         borderRadius: 10, padding: "10px 14px",
         display: "flex", flexDirection: "column", alignItems: "flex-start",
-        minWidth: 110, gap: 4,
+        minWidth: 92, gap: 4,
       }}>
         <Skeleton width={50} height={11} />
         <Skeleton width={28} height={20} />
@@ -82,7 +82,7 @@ export function DevStreakStat() {
           background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
           borderRadius: 10, padding: "10px 14px",
           display: "flex", flexDirection: "column", alignItems: "flex-start",
-          minWidth: 110, cursor: "pointer", fontFamily: FONT, textAlign: "left",
+          minWidth: 92, cursor: "pointer", fontFamily: FONT, textAlign: "left",
           transition: "border-color 0.12s, background 0.12s",
         }}
         onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.18)"; }}

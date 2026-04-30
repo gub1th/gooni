@@ -19,10 +19,12 @@ export function ActivityCard() {
 
   return (
     <div style={{
-      background: "#fff",
-      border: "0.5px solid rgba(0,0,0,0.08)",
-      borderRadius: 12,
-      padding: "16px 18px",
+      // Drop the card chrome — gives the focuses block the same heading-style
+      // weight as PrimaryFocusCard. The dashboard already supplies enough
+      // visual rhythm; another bordered widget here was double-charging the
+      // hierarchy.
+      background: "transparent",
+      padding: "0",
       marginBottom: 16,
       fontFamily: FONT,
       display: "flex", flexDirection: "column", gap: 18,
@@ -65,8 +67,7 @@ function FocusesSkeleton() {
   );
 }
 
-function SectionHeader({ dotColor, label, right }: {
-  dotColor: string;
+function SectionHeader({ label, right }: {
   label: string;
   right?: React.ReactNode;
 }) {
@@ -75,14 +76,11 @@ function SectionHeader({ dotColor, label, right }: {
       display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
     }}>
       <span style={{
-        width: 8, height: 8, borderRadius: "50%", background: dotColor,
-      }} />
-      <span style={{
         fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
         letterSpacing: 0.6, fontWeight: 600,
       }}>{label}</span>
       {right && (
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#1C1C1E" }}>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#8E8E93" }}>
           {right}
         </span>
       )}
@@ -106,12 +104,11 @@ function FocusesSection({ focuses, onChange }: {
     });
   const stale = committed.filter((f) => f.stale).length;
 
-  const recentDone = done.slice(0, 2);
-  const olderDone = done.slice(2);
+  // Done collapsed entirely now per UX critique — single tally line.
 
   return (
     <div>
-      <SectionHeader dotColor="#1C1C1E" label="Focuses" right={
+      <SectionHeader label="Focuses" right={
         <span style={{ fontSize: 11, color: "#8E8E93", fontWeight: 500 }}>
           {committed.length} active{stale > 0 ? ` · ${stale} stale` : ""}
         </span>
@@ -140,8 +137,8 @@ function FocusesSection({ focuses, onChange }: {
           </details>
         )}
 
-        {recentDone.length > 0 && (
-          <DoneSection recent={recentDone} older={olderDone} onChange={onChange} />
+        {done.length > 0 && (
+          <DoneSection done={done} onChange={onChange} />
         )}
       </div>
     </div>
@@ -149,46 +146,31 @@ function FocusesSection({ focuses, onChange }: {
 }
 
 function DoneSection({
-  recent, older, onChange,
-}: { recent: ApiItemNode[]; older: ApiItemNode[]; onChange: () => void }) {
-  const [showAll, setShowAll] = useState(false);
+  done, onChange,
+}: { done: ApiItemNode[]; onChange: () => void }) {
+  // Daniel's UX critique: Done was competing with active focuses. Now it
+  // collapses behind a single muted line — open to expand the full list.
+  const [open, setOpen] = useState(false);
   return (
-    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(0,0,0,0.05)" }}>
-      <div style={{
-        display: "flex", alignItems: "center", gap: 6, marginBottom: 6,
-      }}>
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#30A14E" }} />
-        <span style={{
-          fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
-          letterSpacing: 0.6, fontWeight: 600,
-        }}>Done</span>
-        <span style={{ fontSize: 11, color: "#AEAEB2", marginLeft: 4 }}>
-          {recent.length + older.length}
-        </span>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {recent.map((f) => (
-          <Item key={f.id} node={f} onChange={onChange} variant="done" />
-        ))}
-        {older.length > 0 && (
-          <>
-            {showAll && older.map((f) => (
-              <Item key={f.id} node={f} onChange={onChange} variant="done" />
-            ))}
-            <button
-              onClick={() => setShowAll((v) => !v)}
-              style={{
-                fontSize: 11, color: "#8E8E93",
-                background: "transparent", border: "none",
-                padding: "4px 0", cursor: "pointer", fontFamily: FONT,
-                textAlign: "left",
-              }}
-            >
-              {showAll ? "− hide" : `+ ${older.length} more done`}
-            </button>
-          </>
-        )}
-      </div>
+    <div style={{ marginTop: 8 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          fontSize: 11.5, color: "#8E8E93",
+          background: "transparent", border: "none",
+          padding: "4px 0", cursor: "pointer", fontFamily: FONT,
+          textAlign: "left",
+        }}
+      >
+        {open ? `− hide ${done.length} completed` : `${done.length} completed`}
+      </button>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+          {done.map((f) => (
+            <Item key={f.id} node={f} onChange={onChange} variant="done" />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -272,38 +254,55 @@ function DropSlot({
 
 function FocusAdder({ onCreated }: { onCreated: () => void }) {
   const [text, setText] = useState("");
+  const [active, setActive] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function submit() {
     const t = text.trim();
-    if (!t) return;
+    if (!t) { setActive(false); return; }
     setBusy(true);
     try {
       await createItem({ text: t, committed: true });
       setText("");
       onCreated();
     } catch (e) { console.error(e); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setActive(false); }
   }
 
+  // Quiet text-link by default — secondary action shouldn't compete with the
+  // active focus list. Click reveals an inline borderless input.
+  if (!active) {
+    return (
+      <button
+        onClick={() => setActive(true)}
+        style={{
+          alignSelf: "flex-start", marginTop: 2,
+          fontSize: 12, color: "#8E8E93",
+          background: "transparent", border: "none",
+          padding: "4px 0", cursor: "pointer", fontFamily: FONT,
+        }}
+      >+ add focus</button>
+    );
+  }
   return (
     <input
+      autoFocus
       value={text}
       onChange={(e) => setText(e.target.value)}
+      onBlur={submit}
       onKeyDown={(e) => {
         if (e.key === "Enter" && !busy) submit();
-        if (e.key === "Escape") setText("");
+        if (e.key === "Escape") { setText(""); setActive(false); }
       }}
-      placeholder="+ add focus"
+      placeholder="focus name…"
       style={{
-        fontSize: 12.5, padding: "8px 12px", borderRadius: 8,
-        border: "1px dashed rgba(0,0,0,0.12)", background: "transparent",
+        fontSize: 13, padding: "4px 0",
+        border: "none", borderBottom: "1px solid rgba(0,0,0,0.18)",
+        background: "transparent",
         fontFamily: FONT, color: "#1C1C1E",
         outline: "none", marginTop: 2,
         width: "100%", boxSizing: "border-box",
       }}
-      onFocus={(e) => { (e.currentTarget as HTMLInputElement).style.borderStyle = "solid"; (e.currentTarget as HTMLInputElement).style.borderColor = "rgba(0,0,0,0.18)"; }}
-      onBlur={(e) => { (e.currentTarget as HTMLInputElement).style.borderStyle = "dashed"; (e.currentTarget as HTMLInputElement).style.borderColor = "rgba(0,0,0,0.12)"; }}
     />
   );
 }

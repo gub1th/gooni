@@ -138,7 +138,27 @@ GET  /debug/memories            → inspect stored memories
 POST /webhooks/whatsapp         → Meta Cloud API webhook (HMAC-verified)
 GET  /webhooks/whatsapp         → Meta verify-token handshake
 POST /webhooks/imessage         → BlueBubbles bridge webhook (X-Secret header)
+
+GET  /settings                  → daily nudge config (hour/min/tz/channels/enabled)
+PATCH /settings                 → update any subset of nudge_* fields
+POST /settings/test-nudge       → fire the digest immediately (bypasses idempotency)
 ```
+
+### Daily nudge
+
+Morning digest of overdue + due-today todos lives in `app/services/todo_nudge.py`.
+The scheduler runs in the FastAPI **lifespan** (not the Telegram bot script) so
+config + idempotency can be DB-backed and survive bot restarts. zoneinfo-aware
+fire time per `Settings.nudge_tz`. `Settings.nudge_last_sent_day` is the
+idempotency token — kills double-send if Fly scales to 2 machines.
+
+WhatsApp fan-out respects Meta's 24h customer-window: if no inbound WA message
+in the last 24h, nudge skips that channel for the day. Telegram has no such
+constraint and fires regardless.
+
+Reply commands (`done <n>`, `tom <n>`, `kill <n>`) are persisted in
+`Settings.nudge_last_digests` (JSON) so the Telegram bot polling process can
+resolve replies that were sent by the FastAPI process.
 
 ## Code Patterns
 
