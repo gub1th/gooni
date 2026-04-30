@@ -2,9 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { MODELS, useModelStore, type ModelId } from "../stores/useModelStore";
 
 const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
-// Tagline gets a different family (slimmer + italic-feeling) so it
-// reads as ancillary copy, not a model name.
-const TAGLINE_FONT = "'Iowan Old Style', Georgia, 'Times New Roman', serif";
 
 // Custom dropdown — replaces the OS-native <select> so it matches the
 // rest of the chat panel chrome. Closed state shows ONLY the label;
@@ -95,14 +92,16 @@ export function ModelSelector() {
                   {active && <span style={{ color: "#30A14E" }}>✓</span>}
                   {m.label}
                 </span>
-                <span style={{
-                  fontFamily: TAGLINE_FONT,
-                  fontSize: 11, color: "#8E8E93",
-                  fontStyle: "italic",
-                  paddingLeft: active ? 18 : 0,
-                }}>
-                  {m.tagline}
-                </span>
+                {m.tagline && (
+                  <span style={{
+                    fontFamily: FONT,
+                    fontSize: 11, color: "#8E8E93",
+                    fontWeight: 400,
+                    paddingLeft: active ? 18 : 0,
+                  }}>
+                    {m.tagline}
+                  </span>
+                )}
               </button>
             );
           })}

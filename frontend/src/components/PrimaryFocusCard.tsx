@@ -205,7 +205,7 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
           ) : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <p style={{ fontSize: 13, color: "#8E8E93", margin: 0, lineHeight: 1.5 }}>
-                Drop a focus here, or click a button to spotlight one. Animations included.
+                Drop a focus here, or click to spotlight one.
               </p>
               <button
                 onClick={() => setPicking(true)}

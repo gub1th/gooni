@@ -4,6 +4,7 @@ import { extractOptions, extractPlanBlock, planMarkdownToHtml } from "../utils/p
 import { fetchNote, updateNote } from "../services/api";
 import { displayTitle } from "../utils/notePreview";
 import { useGooniStore } from "../stores/useGooniStore";
+import { useGooniModalCornerStore } from "../stores/useGooniModalCornerStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { ModelSelector } from "./ModelSelector";
@@ -460,21 +461,52 @@ function SurfaceToggleBar() {
   const surface = useGooniStore((s) => s.surface);
   const setSurface = useGooniStore((s) => s.setSurface);
   const toggle = useGooniStore((s) => s.toggle);
+  const corner = useGooniModalCornerStore((s) => s.corner);
+  const resetCorner = useGooniModalCornerStore((s) => s.reset);
   const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
 
   return (
     <div
+      data-gooni-drag-handle="true"
       style={{
         display: "flex", alignItems: "center", gap: 6,
         padding: "6px 10px",
         borderBottom: "1px solid rgba(0,0,0,0.06)",
         flexShrink: 0,
         fontFamily: FONT,
+        cursor: surface === "modal" ? "grab" : "default",
       }}
     >
-      <span style={{ fontSize: 10.5, color: "#8E8E93", letterSpacing: 0.4, flex: 1 }}>
-        Gooni
+      <span
+        data-gooni-drag-handle="true"
+        style={{
+          fontSize: 10.5, color: "#8E8E93", letterSpacing: 0.4, flex: 1,
+          userSelect: "none",
+        }}
+      >
+        Gooni{surface === "modal" && corner !== "bottom-right" ? " · drag to move" : ""}
       </span>
+      {surface === "modal" && corner !== "bottom-right" && (
+        <button
+          onClick={resetCorner}
+          title="Reset to default position"
+          aria-label="Reset chat position"
+          style={{
+            width: 22, height: 22, borderRadius: 6,
+            border: "none", background: "transparent",
+            color: "#8E8E93", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontFamily: FONT,
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2.5 8a5.5 5.5 0 0 1 9.4-3.9L13 3v3.5H9.5" />
+            <path d="M13.5 8a5.5 5.5 0 0 1-9.4 3.9L3 13v-3.5h3.5" />
+          </svg>
+        </button>
+      )}
       <div style={{
         display: "flex", border: "1px solid rgba(0,0,0,0.10)",
         borderRadius: 6, overflow: "hidden", background: "#fff",
