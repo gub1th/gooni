@@ -1,6 +1,6 @@
 import { HamsterWheel } from "../animations/HamsterWheel";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export function ThinkingIndicator() {
   return (

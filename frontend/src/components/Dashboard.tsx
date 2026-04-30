@@ -13,7 +13,7 @@ import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
 import { DevStreakStat } from "./DevStreakStat";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#4ADE80";
 
 function getGreeting(): string {

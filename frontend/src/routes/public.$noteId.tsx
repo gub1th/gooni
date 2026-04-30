@@ -50,7 +50,7 @@ function PublicNotePage() {
       style={{
         minHeight: "100vh",
         background: "#fff",
-        fontFamily: "'Manrope', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+        fontFamily: "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
         color: "#111",
       }}
     >

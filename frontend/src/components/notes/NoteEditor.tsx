@@ -52,6 +52,17 @@ function useEditorStyles() {
       .gooni-note-editor ul,
       .gooni-note-editor ol { padding-left: 22px; margin: 0 0 12px; }
       .gooni-note-editor li > p { margin: 0 0 4px; }
+      /* Nested list styles — Tab/Shift-Tab in TipTap sinks/lifts list items.
+         Use a different marker per depth so the indent is visually obvious:
+         ordered: 1, a, i, 1, a, i …
+         unordered: disc, circle, square, disc, circle, square … */
+      .gooni-note-editor ol { list-style-type: decimal; }
+      .gooni-note-editor ol ol { list-style-type: lower-alpha; }
+      .gooni-note-editor ol ol ol { list-style-type: lower-roman; }
+      .gooni-note-editor ol ol ol ol { list-style-type: decimal; }
+      .gooni-note-editor ul { list-style-type: disc; }
+      .gooni-note-editor ul ul { list-style-type: circle; }
+      .gooni-note-editor ul ul ul { list-style-type: square; }
       .gooni-note-editor.is-empty > p:first-child { position: relative; }
       .gooni-note-editor.is-empty > p:first-child::before {
         content: "Start writing — press '/' for blocks";
@@ -334,7 +345,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
       editorProps: {
         attributes: {
           style: [
-            "font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            "font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
             embedded ? "font-size: 14.5px" : "font-size: 15.5px",
             "line-height: 1.65",
             "color: #1C1C1E",
@@ -635,7 +646,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
           style={{
             fontSize: 12,
             color: saveStatus === "saving" ? "#8E8E93" : saveStatus === "saved" ? "#34C759" : "#8E8E93",
-            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
             transition: "color 0.2s",
           }}
         >
@@ -651,7 +662,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {/* Space suggestion */}
           {spaceSuggestion?.suggested_space_id && activeNote?.space_id === null && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 14, background: "rgba(0,122,255,0.08)", fontSize: 12, color: "#007AFF", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 14, background: "rgba(0,122,255,0.08)", fontSize: 12, color: "#007AFF", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
               <SpaceIcon emoji={spaceSuggestion.suggested_space_emoji} size={13} color="#007AFF" />
               <span>{spaceSuggestion.suggested_space_name}?</span>
               <button
@@ -699,7 +710,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                     padding: 6,
                     minWidth: 160,
                     zIndex: 100,
-                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                   }}
                 >
                   {moveTargets.map((space) => (
@@ -762,7 +773,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                   background: "#FFFFFF", borderRadius: 10,
                   boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
                   padding: 6, minWidth: 160, zIndex: 100,
-                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}>
                   <div style={{ padding: "6px 10px 8px", fontSize: 12.5, color: "#636366" }}>
                     Delete this note?
@@ -859,7 +870,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
             cursor: "pointer",
             fontSize: 13,
             color: gooniOpen ? "#1C1C1E" : "#636366",
-            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
             fontWeight: gooniOpen ? 600 : 400,
             display: "flex",
             alignItems: "center",
@@ -1016,7 +1027,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                   border: "1px solid rgba(22,163,74,0.30)",
                   background: "rgba(22,163,74,0.08)",
                   color: "#166534",
-                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                   fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
                   cursor: "pointer",
                   transition: "background 0.12s",
@@ -1035,7 +1046,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                 style={{
                   border: "none", background: "transparent", color: "#8E8E93",
                   cursor: "pointer", fontSize: 14, padding: "0 4px",
-                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}
               >×</button>
             </div>
@@ -1053,7 +1064,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                 style={{
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                   minHeight: "70vh", textAlign: "center", color: "#AEAEB2",
-                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}
               >
                 <div style={{ fontSize: 28, marginBottom: 12 }}>📝</div>
@@ -1077,7 +1088,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                     width: "100%",
                     fontSize: 28,
                     fontWeight: 700,
-                    fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                     color: "#1C1C1E",
                     border: "none",
                     outline: "none",
@@ -1124,7 +1135,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                           border: "1px solid rgba(22,163,74,0.30)",
                           background: "rgba(22,163,74,0.08)",
                           color: "#166534",
-                          fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                           fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
                           cursor: "pointer",
                           transition: "background 0.12s",
@@ -1144,7 +1155,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                             borderRadius: 8,
                             background: "rgba(0,0,0,0.03)",
                             border: "1px solid rgba(0,0,0,0.07)",
-                            fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                             fontSize: 12.5,
                             color: "#3C3C43",
                             lineHeight: 1.5,
@@ -1280,7 +1291,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
 
                 {relatedNotes.length > 0 && (
                   <div style={{ marginTop: 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>RELATED</p>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>RELATED</p>
                     {relatedNotes.map((n) => {
                       const targetSpaceId = n.space_id ? String(n.space_id) : "general";
                       return (
@@ -1291,10 +1302,10 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)")}
                           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
                         >
-                          <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {displayTitle(n)}
                           </span>
-                          <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+                          <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
                             {formatNoteDate(n.updated_at)}
                           </span>
                         </button>
@@ -1305,14 +1316,14 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
 
                 {suggestedQuestions.length > 0 && (
                   <div style={{ marginTop: relatedNotes.length > 0 ? 28 : 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
                       QUESTIONS GOONI WOULD ASK
                     </p>
                     {suggestedQuestions.map((q, i) => (
                       <button
                         key={i}
                         onClick={() => askGooni(q)}
-                        style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", marginBottom: 6, background: "rgba(0,0,0,0.025)", border: "1px solid rgba(0,0,0,0.05)", borderRadius: 8, cursor: "pointer", fontSize: 13.5, color: "#1C1C1E", fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", lineHeight: 1.5 }}
+                        style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", marginBottom: 6, background: "rgba(0,0,0,0.025)", border: "1px solid rgba(0,0,0,0.05)", borderRadius: 8, cursor: "pointer", fontSize: 13.5, color: "#1C1C1E", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", lineHeight: 1.5 }}
                         onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
                         onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.025)")}
                       >

@@ -6,7 +6,7 @@ import { fetchNotesGraph, type GraphNode, type GraphEdge } from "../services/api
 // fixed overlay on top of the dashboard. Close via ×, backdrop click, or Esc.
 // Click a node → closes modal and navigates to that note.
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface SimNode extends GraphNode {
   x: number;

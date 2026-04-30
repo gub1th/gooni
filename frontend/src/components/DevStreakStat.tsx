@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchDevActivity, type DevActivity, type DevActivityRepo } from "../services/api";
 
-const FONT = "'Manrope', -apple-system, sans-serif";
+const FONT = "'Inter', -apple-system, sans-serif";
 const GREEN = "#30A14E";
 const RED = "#CF222E";
 

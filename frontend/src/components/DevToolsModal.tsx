@@ -120,7 +120,7 @@ const btn: React.CSSProperties = {
   fontSize: 11.5, padding: "4px 9px", borderRadius: 6,
   border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
   cursor: "pointer", color: "#1C1C1E", fontWeight: 500,
-  fontFamily: "'Manrope', -apple-system, sans-serif",
+  fontFamily: "'Inter', -apple-system, sans-serif",
 };
 
 export function DevToolsModal({ open, onClose }: DevToolsModalProps) {
@@ -172,7 +172,7 @@ export function DevToolsModal({ open, onClose }: DevToolsModalProps) {
         position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)",
         display: "flex", alignItems: "center", justifyContent: "center",
         zIndex: 200,
-        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
       }}
     >
       <div

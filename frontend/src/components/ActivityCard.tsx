@@ -5,7 +5,7 @@ import {
 } from "../services/api";
 import { Item, TodayRow } from "./Item";
 
-const FONT = "'Manrope', -apple-system, sans-serif";
+const FONT = "'Inter', -apple-system, sans-serif";
 
 export function ActivityCard() {
   const [tree, setTree] = useState<ApiItemTree | null>(null);

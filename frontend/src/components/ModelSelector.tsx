@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MODELS, useModelStore, type ModelId } from "../stores/useModelStore";
 
-const FONT = "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Custom dropdown — replaces the OS-native <select> so it matches the
 // rest of the chat panel chrome. Closed state shows ONLY the label;

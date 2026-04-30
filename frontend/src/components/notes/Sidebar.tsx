@@ -91,7 +91,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
             placeholder="Space name"
             style={{
               flex: 1, fontSize: 13.5, outline: "none", border: "none",
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
               fontWeight: 500, color: "#1C1C1E", background: "transparent",
             }}
           />
@@ -180,12 +180,24 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
   const lists = useListsStore((s) => s.lists);
   const createListInStore = useListsStore((s) => s.createList);
   const [listsOpen, setListsOpen] = useState(true);
+  // Inline new-list composer state. When non-null, an input row replaces
+  // the placeholder so the user can name + Enter without a browser prompt.
+  const [newListDraft, setNewListDraft] = useState<string | null>(null);
+  const newListInputRef = useRef<HTMLInputElement>(null);
 
-  async function handleAddList() {
-    const name = window.prompt("New list name:");
-    if (!name?.trim()) return;
+  function handleAddList() {
+    setListsOpen(true);
+    setNewListDraft("");
+    // Focus once the input is mounted on the next paint.
+    requestAnimationFrame(() => newListInputRef.current?.focus());
+  }
+
+  async function commitNewList() {
+    const name = (newListDraft ?? "").trim();
+    setNewListDraft(null);
+    if (!name) return;
     try {
-      const lst = await createListInStore(name.trim(), "generic", null);
+      const lst = await createListInStore(name, "generic", null);
       onSelectList(lst.id);
     } catch (e) {
       console.error("createList failed", e);
@@ -339,7 +351,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
               background: "transparent",
               border: "none", borderRadius: 8, padding: "3px 7px", cursor: "pointer",
               fontSize: 15, fontWeight: 700,
-              fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
               color: "#1C1C1E", transition: "background 0.1s", outline: "none",
               display: "flex", alignItems: "center", gap: 7,
             }}
@@ -366,7 +378,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}>
           {/* Section: NOTES */}
           <div style={{ padding: "8px 12px 4px" }}>
-            <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
               NOTES
             </span>
           </div>
@@ -388,7 +400,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
               <FileText size={15} strokeWidth={1.7} color={ICON_TINT.allNotes} style={{ flexShrink: 0 }} />
               <span style={{
                 flex: 1, fontSize: 13.5,
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontWeight: isAllNotes ? 600 : 400, color: "#1C1C1E",
               }}>All Notes</span>
             </div>
@@ -406,7 +418,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                     onClick={() => setPinnedOpen((o) => !o)}
                     style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
                   >
-                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
+                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
                     <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{pinnedOpen ? "▾" : "▸"}</span>
                   </button>
                 </div>
@@ -450,7 +462,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                       <Pin size={13} strokeWidth={1.8} color={ICON_TINT.pinned} fill={ICON_TINT.pinned} style={{ flexShrink: 0 }} />
                       <span style={{
                         flex: 1, fontSize: 13,
-                        fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                         fontWeight: selected ? 600 : 400, color: "#1C1C1E",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       }}>
@@ -477,7 +489,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                 onClick={() => setSpacesOpen((o) => !o)}
                 style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
               >
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>SPACES</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>SPACES</span>
                 <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{spacesOpen ? "▾" : "▸"}</span>
               </button>
               <button
@@ -531,12 +543,12 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                   <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, flexShrink: 0 }}>
                     <SpaceIcon emoji={space.emoji} size={14} />
                   </span>
-                  <span style={{ flex: 1, fontSize: 13, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ flex: 1, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {space.name}
                   </span>
                   {isDelConfirm ? (
                     <button className="space-action" onClick={(e) => { e.stopPropagation(); confirmDelete(space.id as number); }}
-                      style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+                      style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
                       sure?
                     </button>
                   ) : (
@@ -559,7 +571,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                 onClick={() => setListsOpen((o) => !o)}
                 style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
               >
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif" }}>LISTS</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>LISTS</span>
                 <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{listsOpen ? "▾" : "▸"}</span>
               </button>
               <button
@@ -571,10 +583,38 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
           </div>
           {listsOpen && (
             <div style={{ padding: "0 6px 4px" }}>
-              {lists.length === 0 && (
+              {newListDraft !== null && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "0 10px", height: 30, borderRadius: 8,
+                  background: "rgba(74,222,128,0.10)",
+                  border: "1px solid rgba(74,222,128,0.35)",
+                  marginBottom: 2,
+                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                }}>
+                  <span style={{ fontSize: 13, flexShrink: 0, color: "#30A14E" }}>📁</span>
+                  <input
+                    ref={newListInputRef}
+                    value={newListDraft}
+                    onChange={(e) => setNewListDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitNewList();
+                      if (e.key === "Escape") setNewListDraft(null);
+                    }}
+                    onBlur={commitNewList}
+                    placeholder="List name…"
+                    style={{
+                      flex: 1, minWidth: 0,
+                      border: "none", outline: "none", background: "transparent",
+                      fontFamily: "inherit", fontSize: 13.5, color: "#1C1C1E",
+                    }}
+                  />
+                </div>
+              )}
+              {lists.length === 0 && newListDraft === null && (
                 <div style={{
                   padding: "4px 10px", fontSize: 12, color: "#9CA3AF",
-                  fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}>
                   No lists yet
                 </div>
@@ -590,7 +630,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                       width: "100%", padding: "0 10px", height: 30, borderRadius: 8,
                       cursor: "pointer", background: isSelected ? "rgba(0,0,0,0.09)" : "transparent",
                       border: "none", textAlign: "left",
-                      fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                       fontWeight: isSelected ? 600 : 400, fontSize: 13.5, color: "#1C1C1E",
                       transition: "background 0.12s",
                     }}
@@ -620,7 +660,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                 width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
                 cursor: "pointer", background: isChat ? "rgba(0,0,0,0.09)" : "transparent",
                 border: "none", textAlign: "left",
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontWeight: isChat ? 600 : 400, fontSize: 13.5, color: "#1C1C1E",
                 transition: "background 0.12s",
               }}
@@ -643,7 +683,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                 width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
                 border: "none", background: "transparent", cursor: "pointer",
                 textAlign: "left",
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontSize: 13.5, color: "#3C3C43",
                 transition: "background 0.12s",
               }}
@@ -665,7 +705,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                 width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
                 border: "none", background: "transparent", cursor: "pointer",
                 textAlign: "left",
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontSize: 13.5, color: "#3C3C43",
                 transition: "background 0.12s",
               }}
@@ -674,6 +714,28 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
             >
               <ClipboardList size={14} strokeWidth={1.7} color={ICON_TINT.chatAudit} style={{ flexShrink: 0 }} />
               Chat audit
+            </button>
+          </div>
+
+          {/* Public profile — jumps to the public-facing landing page. */}
+          <div style={{ padding: "0 6px 2px" }}>
+            <button
+              onClick={() => navigate({ to: "/public" })}
+              title="Public profile (visitors see this)"
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                border: "none", background: "transparent", cursor: "pointer",
+                textAlign: "left",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontSize: 13.5, color: "#3C3C43",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+            >
+              <Globe size={14} strokeWidth={1.7} color={ICON_TINT.publicMcp} style={{ flexShrink: 0 }} />
+              Public profile
             </button>
           </div>
 
@@ -687,7 +749,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                 width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
                 border: "none", background: "transparent", cursor: "pointer",
                 textAlign: "left",
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontSize: 13.5, color: "#3C3C43",
                 transition: "background 0.12s",
               }}
@@ -709,7 +771,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                 width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
                 border: "none", background: "transparent", cursor: "pointer",
                 textAlign: "left",
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontSize: 13.5, color: "#3C3C43",
                 transition: "background 0.12s",
               }}
@@ -731,7 +793,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
                 width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
                 border: "none", background: "transparent", cursor: "pointer",
                 textAlign: "left",
-                fontFamily: "'Manrope', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontSize: 13.5, color: "#3C3C43",
                 transition: "background 0.12s",
               }}

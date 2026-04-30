@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-const FONT = "'Manrope', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 const MONO = "'SF Mono', 'Menlo', 'Monaco', ui-monospace, monospace";
 
 interface MCPServer {
