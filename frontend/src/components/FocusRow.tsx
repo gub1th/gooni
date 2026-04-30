@@ -10,9 +10,10 @@ const FONT = "'Inter', -apple-system, sans-serif";
 // Focus-specific row. Distinct from `Item` (which renders todos + nested
 // focus children with checkboxes) — focuses are commitments, not todos, so
 // the checkbox UI is intentionally absent. The row layout:
-//   [pulse-dot if primary][status dot][name][scale badge][last active][···][×]
-// Primary focus gets: green left-border, tint background, font-weight 600,
-// pulsing dot to the left of the status dot. Sorted to top by ActivityCard.
+//   [status-or-pulse dot][name][scale badge][last active][···][×]
+// Primary focus shows ONLY a pulsing green dot (no second status dot — they
+// looked like two separate buttons). Plus a 3px green left rail + faint tint.
+// Rows live inside a single shared card (no per-row borders).
 
 interface FocusRowProps {
   node: ApiItemNode;
@@ -25,10 +26,14 @@ interface FocusRowProps {
   //           completed_at timestamp, no menu, no delete button. Restore
   //           via clicking the row → modal → uncheck Done.
   variant?: "active" | "done";
+  // When true, draws a thin top separator. Used inside ReorderableList where
+  // sibling structure (rows + DropSlots) doesn't let CSS adjacent-sibling
+  // selectors fire reliably.
+  separator?: boolean;
 }
 
 export function FocusRow({
-  node, onChange, draggable, onDragStart, onDragEnd, variant = "active",
+  node, onChange, draggable, onDragStart, onDragEnd, variant = "active", separator,
 }: FocusRowProps) {
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -81,51 +86,52 @@ export function FocusRow({
         onDragEnd={() => { setDragging(false); onDragEnd?.(); }}
         style={{
           position: "relative",
-          // Primary gets a green left rail + subtle tint; everyone else gets
-          // a thin neutral border so the layout stays consistent.
-          borderLeft: isPrimary ? "3px solid #4ADE80" : "0.5px solid rgba(0,0,0,0.06)",
-          borderTop: "0.5px solid rgba(0,0,0,0.06)",
-          borderRight: "0.5px solid rgba(0,0,0,0.06)",
-          borderBottom: "0.5px solid rgba(0,0,0,0.06)",
-          borderRadius: 8,
-          padding: "8px 12px",
-          paddingLeft: isPrimary ? 12 : 12,
-          background: isPrimary ? "rgba(74, 222, 128, 0.04)" : "#fff",
+          // Live inside a shared parent card now — no per-row border.
+          // Primary keeps its green rail + tint, everyone else stays flat.
+          borderLeft: isPrimary ? "3px solid #4ADE80" : "3px solid transparent",
+          borderTop: separator ? "0.5px solid rgba(0,0,0,0.06)" : "none",
+          padding: "9px 10px",
+          background: isPrimary ? "rgba(74, 222, 128, 0.05)" : "transparent",
           cursor: "pointer",
           fontFamily: FONT,
           opacity: dragging ? 0.4 : 1,
-          transition: "background 100ms, border-color 100ms",
+          transition: "background 100ms",
         }}
         onMouseEnter={(e) => {
-          if (!isPrimary) (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(0,0,0,0.12)";
+          if (!isPrimary) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.025)";
         }}
         onMouseLeave={(e) => {
-          if (!isPrimary) (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(0,0,0,0.06)";
+          if (!isPrimary) (e.currentTarget as HTMLDivElement).style.background = "transparent";
         }}
       >
         <style>{PULSE_KEYFRAMES}</style>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {isPrimary && (
+          {/* Primary shows the glowing dot ONLY — no second status dot. The
+              two-dot version read like two adjacent buttons. */}
+          {isPrimary ? (
             <span
               aria-hidden
+              title="primary"
               style={{
                 width: 8, height: 8, borderRadius: "50%",
                 background: "#4ADE80",
+                boxShadow: "0 0 6px rgba(74,222,128,0.6)",
                 animation: "primaryPulse 1.6s ease-in-out infinite",
                 flexShrink: 0,
               }}
             />
+          ) : (
+            <span
+              aria-hidden
+              title={effectiveStatus}
+              style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: STATUS_DOT[effectiveStatus],
+                flexShrink: 0,
+              }}
+            />
           )}
-          <span
-            aria-hidden
-            title={effectiveStatus}
-            style={{
-              width: 8, height: 8, borderRadius: "50%",
-              background: STATUS_DOT[effectiveStatus],
-              flexShrink: 0,
-            }}
-          />
           <span style={{
             fontSize: 13,
             fontWeight: isPrimary ? 600 : 500,

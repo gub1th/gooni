@@ -193,40 +193,112 @@ function FocusesSection({ focuses, onChange }: {
           </>
         }
       />
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <ReorderableList
-          items={active}
-          onChange={onChange}
-        />
-
+      {/* Single shared card for all focus rows (active, someday, done).
+          Inner separators between rows; per-row borders dropped. Inline
+          adder lives at the top of the card so it's near the +add button
+          and feels like a quick-capture lane. */}
+      <div style={{
+        background: "#FFFFFF",
+        border: "0.5px solid rgba(0,0,0,0.08)",
+        borderRadius: 10,
+        overflow: "hidden",
+      }}>
         {adding && (
-          <FocusAdderForm
-            seed={seed}
-            onClose={() => { setAdding(false); setSeed(null); }}
-            onCreated={() => { setAdding(false); setSeed(null); onChange(); }}
-          />
+          <div style={{
+            padding: 10,
+            borderBottom: active.length > 0 ? "0.5px solid rgba(0,0,0,0.06)" : "none",
+            background: "#FAFAFA",
+          }}>
+            <FocusAdderForm
+              seed={seed}
+              onClose={() => { setAdding(false); setSeed(null); }}
+              onCreated={() => { setAdding(false); setSeed(null); onChange(); }}
+            />
+          </div>
+        )}
+        {active.length === 0 && !adding ? (
+          <div style={{
+            padding: "16px 12px", fontSize: 12, color: "#AEAEB2",
+            textAlign: "center",
+          }}>
+            no focuses yet — click + add or ✦ suggest
+          </div>
+        ) : (
+          <SeparatedList>
+            <ReorderableList items={active} onChange={onChange} />
+          </SeparatedList>
         )}
 
         {someday.length > 0 && (
-          <details style={{ marginTop: 6 }}>
-            <summary style={{
-              fontSize: 11, color: "#8E8E93", cursor: "pointer",
-              padding: "4px 0", listStyle: "none",
-            }}>
-              ▸ {someday.length} someday
-            </summary>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+          <CollapsibleSection
+            label={`${someday.length} someday`}
+            topBorder={active.length > 0 || adding}
+          >
+            <SeparatedList>
               {someday.map((f) => (
                 <FocusRow key={f.id} node={f} onChange={onChange} />
               ))}
-            </div>
-          </details>
+            </SeparatedList>
+          </CollapsibleSection>
         )}
 
         {done.length > 0 && (
-          <DoneSection done={done} onChange={onChange} />
+          <CollapsibleSection
+            label={`${done.length} completed`}
+            topBorder
+          >
+            <SeparatedList>
+              {done.map((f) => (
+                <FocusRow key={f.id} node={f} onChange={onChange} variant="done" />
+              ))}
+            </SeparatedList>
+          </CollapsibleSection>
         )}
       </div>
+    </div>
+  );
+}
+
+// Wraps a list of children with thin separators between siblings — used to
+// make rows inside the focuses card feel like one continuous list rather
+// than independent boxes.
+function SeparatedList({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="gooni-focus-list"
+      style={{ display: "flex", flexDirection: "column" }}
+    >
+      <style>{`
+        .gooni-focus-list > * + * {
+          border-top: 0.5px solid rgba(0,0,0,0.06);
+        }
+      `}</style>
+      {children}
+    </div>
+  );
+}
+
+function CollapsibleSection({
+  label, topBorder, children,
+}: { label: string; topBorder?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{
+      borderTop: topBorder ? "0.5px solid rgba(0,0,0,0.06)" : "none",
+    }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%", textAlign: "left",
+          padding: "8px 12px",
+          background: "transparent", border: "none",
+          fontFamily: FONT, fontSize: 11.5, color: "#8E8E93",
+          cursor: "pointer",
+        }}
+      >
+        {open ? `− hide ${label}` : `▸ ${label}`}
+      </button>
+      {open && children}
     </div>
   );
 }
@@ -235,36 +307,6 @@ function resolveStatus(n: ApiItemNode): FocusStatus {
   if (n.status) return n.status;
   if (!n.committed) return "someday";
   return n.stale ? "pending" : "committed";
-}
-
-function DoneSection({
-  done, onChange,
-}: { done: ApiItemNode[]; onChange: () => void }) {
-  // Daniel's UX critique: Done was competing with active focuses. Now it
-  // collapses behind a single muted line — open to expand the full list.
-  const [open, setOpen] = useState(false);
-  return (
-    <div style={{ marginTop: 8 }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          fontSize: 11.5, color: "#8E8E93",
-          background: "transparent", border: "none",
-          padding: "4px 0", cursor: "pointer", fontFamily: FONT,
-          textAlign: "left",
-        }}
-      >
-        {open ? `− hide ${done.length} completed` : `${done.length} completed`}
-      </button>
-      {open && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-          {done.map((f) => (
-            <FocusRow key={f.id} node={f} onChange={onChange} variant="done" />
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // ── Reorder ────────────────────────────────────────────────────────────────
@@ -300,11 +342,15 @@ function ReorderableList({ items, onChange }: { items: ApiItemNode[]; onChange: 
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
-      <DropSlot
-        active={draggingId != null && hoverIdx === 0}
-        onEnter={() => setHoverIdx(0)}
-        onDrop={() => { commitReorder(0); setHoverIdx(null); }}
-      />
+      {/* Top drop slot only renders mid-drag — keeps the card chrome
+          uncluttered when nobody's dragging. */}
+      {draggingId != null && (
+        <DropSlot
+          active={hoverIdx === 0}
+          onEnter={() => setHoverIdx(0)}
+          onDrop={() => { commitReorder(0); setHoverIdx(null); }}
+        />
+      )}
       {items.map((f, i) => (
         <div key={f.id}>
           <FocusRow
@@ -313,12 +359,15 @@ function ReorderableList({ items, onChange }: { items: ApiItemNode[]; onChange: 
             draggable={!f.done}
             onDragStart={() => setDraggingId(f.id)}
             onDragEnd={() => { setDraggingId(null); setHoverIdx(null); }}
+            separator={i > 0}
           />
-          <DropSlot
-            active={draggingId != null && draggingId !== f.id && hoverIdx === i + 1}
-            onEnter={() => setHoverIdx(i + 1)}
-            onDrop={() => { commitReorder(i + 1); setHoverIdx(null); }}
-          />
+          {draggingId != null && (
+            <DropSlot
+              active={draggingId !== f.id && hoverIdx === i + 1}
+              onEnter={() => setHoverIdx(i + 1)}
+              onDrop={() => { commitReorder(i + 1); setHoverIdx(null); }}
+            />
+          )}
         </div>
       ))}
     </div>
@@ -349,41 +398,38 @@ function FocusAdderForm({ seed, onCreated, onClose }: {
   onCreated: () => void;
   onClose: () => void;
 }) {
+  // Compact 2-line inline form: name + status segmented + 3 action buttons.
+  // Anything richer (end goal, scale, due date) lives in the focus modal —
+  // click the row after add to fill those in. Keeps quick-capture fast.
   const [text, setText] = useState(seed?.text ?? "");
-  const [endgoal, setEndgoal] = useState(seed?.endgoal ?? "");
-  const [dueDate, setDueDate] = useState("");
-  const [scale, setScale] = useState<FocusScale | "">(seed?.scale ?? "");
   const [status, setStatus] = useState<FocusStatus>("committed");
-  const [isPrimary, setIsPrimary] = useState(false);
-  const [busy, setBusy] = useState(false);
+  // seed lingers so suggest can still preload endgoal/scale even though
+  // they don't render here — we pass them through on submit.
+  const [busy, setBusy] = useState<"add" | "primary" | null>(null);
 
-  async function submit() {
+  async function submit(asPrimary: boolean) {
     const t = text.trim();
     if (!t) return;
-    setBusy(true);
+    setBusy(asPrimary ? "primary" : "add");
     try {
       await createItem({
         text: t,
-        endgoal: endgoal.trim() || null,
-        due_date: dueDate ? new Date(`${dueDate}T00:00:00`).toISOString() : null,
-        scale: scale || null,
+        endgoal: seed?.endgoal || null,
+        scale: seed?.scale ?? null,
         status,
         committed: status !== "someday",
-        is_primary: isPrimary,
+        is_primary: asPrimary,
       });
       onCreated();
     } catch (e) { console.error(e); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   }
+
+  const canSubmit = !!text.trim() && busy === null;
 
   return (
     <div
       style={{
-        marginTop: 4,
-        padding: 12,
-        background: "#FAFAFA",
-        border: "0.5px solid rgba(0,0,0,0.08)",
-        borderRadius: 8,
         display: "flex", flexDirection: "column", gap: 8,
         fontFamily: FONT,
       }}
@@ -393,55 +439,21 @@ function FocusAdderForm({ seed, onCreated, onClose }: {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") submit();
+          if (e.key === "Enter") submit(false);
           if (e.key === "Escape") onClose();
         }}
         placeholder="focus name"
         style={{
-          fontSize: 14, padding: "6px 8px",
+          fontSize: 14, padding: "8px 10px",
           border: "0.5px solid rgba(0,0,0,0.12)", borderRadius: 6,
           background: "#FFF", fontFamily: FONT, color: "#1C1C1E",
           outline: "none",
         }}
       />
-      <input
-        value={endgoal}
-        onChange={(e) => setEndgoal(e.target.value)}
-        placeholder="end goal (optional)"
-        style={{
-          fontSize: 13, padding: "5px 8px",
-          border: "0.5px solid rgba(0,0,0,0.10)", borderRadius: 6,
-          background: "#FFF", fontFamily: FONT, color: "#3C3C43",
-          outline: "none",
-        }}
-      />
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <input
-          type="date"
-          value={dueDate}
-          onChange={(e) => setDueDate(e.target.value)}
-          title="target date"
-          style={{
-            fontSize: 12, padding: "4px 8px",
-            border: "0.5px solid rgba(0,0,0,0.10)", borderRadius: 6,
-            background: "#FFF", fontFamily: FONT, color: "#1C1C1E", outline: "none",
-          }}
-        />
-        <select
-          value={scale}
-          onChange={(e) => setScale(e.target.value as FocusScale | "")}
-          title="scale"
-          style={{
-            fontSize: 12, padding: "4px 8px",
-            border: "0.5px solid rgba(0,0,0,0.10)", borderRadius: 6,
-            background: "#FFF", fontFamily: FONT, color: "#1C1C1E", outline: "none",
-          }}
-        >
-          <option value="">scale…</option>
-          <option value="long_term">long-term</option>
-          <option value="medium">medium</option>
-          <option value="sprint">sprint</option>
-        </select>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 10, flexWrap: "wrap",
+      }}>
         <Segmented<FocusStatus>
           value={status}
           onChange={setStatus}
@@ -451,36 +463,42 @@ function FocusAdderForm({ seed, onCreated, onClose }: {
             { value: "someday",   label: "someday" },
           ]}
         />
-      </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3C3C43" }}>
-        <input
-          type="checkbox"
-          checked={isPrimary}
-          onChange={(e) => setIsPrimary(e.target.checked)}
-        />
-        make this my primary focus
-      </label>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <button
-          onClick={onClose}
-          style={{
-            fontSize: 12, padding: "5px 10px",
-            background: "transparent", border: "none",
-            color: "#8E8E93", cursor: "pointer", fontFamily: FONT,
-          }}
-        >cancel</button>
-        <button
-          onClick={submit}
-          disabled={busy || !text.trim()}
-          style={{
-            fontSize: 12, padding: "5px 12px",
-            background: "#1C1C1E", color: "#FFF",
-            border: "none", borderRadius: 6, fontWeight: 600,
-            cursor: busy || !text.trim() ? "not-allowed" : "pointer",
-            opacity: busy || !text.trim() ? 0.5 : 1,
-            fontFamily: FONT,
-          }}
-        >{busy ? "adding…" : "add"}</button>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button
+            onClick={onClose}
+            style={{
+              fontSize: 12, padding: "6px 10px",
+              background: "transparent", border: "none",
+              color: "#8E8E93", cursor: "pointer", fontFamily: FONT,
+            }}
+          >cancel</button>
+          <button
+            onClick={() => submit(true)}
+            disabled={!canSubmit}
+            title="create and pin this as primary"
+            style={{
+              fontSize: 12, padding: "6px 11px",
+              background: "transparent",
+              color: !canSubmit ? "#C7C7CC" : "#15803D",
+              border: `0.5px solid ${!canSubmit ? "rgba(0,0,0,0.08)" : "#86EFAC"}`,
+              borderRadius: 6, fontWeight: 600,
+              cursor: !canSubmit ? "not-allowed" : "pointer",
+              fontFamily: FONT,
+            }}
+          >{busy === "primary" ? "adding…" : "set primary"}</button>
+          <button
+            onClick={() => submit(false)}
+            disabled={!canSubmit}
+            style={{
+              fontSize: 12, padding: "6px 14px",
+              background: !canSubmit ? "#E4E4E7" : "#1C1C1E",
+              color: !canSubmit ? "#9CA3AF" : "#FFF",
+              border: "none", borderRadius: 6, fontWeight: 600,
+              cursor: !canSubmit ? "not-allowed" : "pointer",
+              fontFamily: FONT,
+            }}
+          >{busy === "add" ? "adding…" : "add"}</button>
+        </div>
       </div>
     </div>
   );
