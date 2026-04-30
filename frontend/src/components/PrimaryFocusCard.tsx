@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { fetchItemTree, updateItem, createItem, type ApiItemNode } from "../services/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchItemTree, updateItem, createItem, type ApiItemTree } from "../services/api";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -18,45 +19,46 @@ interface Props {
 }
 
 export function PrimaryFocusCard({ refreshKey }: Props) {
-  const [primary, setPrimary] = useState<ApiItemNode | null>(null);
-  const [focuses, setFocuses] = useState<ApiItemNode[]>([]);
+  const queryClient = useQueryClient();
+  // Shares the cache key with ActivityCard — one fetch feeds both cards.
+  const { data: tree } = useQuery<ApiItemTree>({
+    queryKey: ["item-tree"],
+    queryFn: fetchItemTree,
+  });
+  const focuses = tree?.focuses ?? [];
+  const primary = useMemo(() => focuses.find((f) => f.is_primary) ?? null, [focuses]);
+
   const [dragHover, setDragHover] = useState(false);
   const [newText, setNewText] = useState("");
   // Animation key — incremented each time primary changes so the vine border re-runs.
   const [animKey, setAnimKey] = useState(0);
   const lastPrimaryId = useRef<number | null>(null);
-
-  async function load() {
-    try {
-      const tree = await fetchItemTree();
-      const all = tree.focuses;
-      const prim = all.find((f) => f.is_primary) || null;
-      setFocuses(all);
-      setPrimary(prim);
-      const newId = prim?.id ?? null;
-      if (newId !== lastPrimaryId.current) {
-        lastPrimaryId.current = newId;
-        if (newId != null) setAnimKey((k) => k + 1);
-      }
-    } catch (e) {
-      console.error("PrimaryFocusCard load failed", e);
-    }
-  }
-
-  useEffect(() => { load(); }, [refreshKey]);
-
-  // Listen for in-app promotion events from elsewhere (e.g. ListView's "Make
-  // primary" button) so the card refreshes without a manual reload.
   useEffect(() => {
-    const handler = () => { load(); };
+    const id = primary?.id ?? null;
+    if (id !== lastPrimaryId.current) {
+      lastPrimaryId.current = id;
+      if (id != null) setAnimKey((k) => k + 1);
+    }
+  }, [primary]);
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["item-tree"] });
+
+  // External promotions (ListView "make primary", FocusModal toggle) fire this
+  // event so the card refetches without prop drilling.
+  useEffect(() => {
+    const handler = () => { refresh(); };
     window.addEventListener("gooni-primary-changed", handler);
     return () => window.removeEventListener("gooni-primary-changed", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refetch when parent bumps refreshKey.
+  useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [refreshKey]);
 
   async function promote(id: number) {
     try {
       await updateItem(id, { is_primary: true });
-      await load();
+      refresh();
     } catch (e) {
       console.error("promote failed", e);
     }
@@ -69,7 +71,7 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
       const created = await createItem({ text: t, committed: true });
       await updateItem(created.id, { is_primary: true });
       setNewText("");
-      await load();
+      refresh();
     } catch (e) {
       console.error("createAndPromote failed", e);
     }
@@ -80,7 +82,7 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
     try {
       await updateItem(primary.id, { is_primary: false });
       lastPrimaryId.current = null;
-      await load();
+      refresh();
     } catch (e) {
       console.error("unsetPrimary failed", e);
     }

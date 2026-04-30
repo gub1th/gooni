@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Sparkles } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchDashboardStats,
   type ApiNote, type DashboardStats,
@@ -13,6 +14,7 @@ import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
 import { DevStreakStat } from "./DevStreakStat";
+import { Skeleton } from "./Skeleton";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#4ADE80";
@@ -61,7 +63,18 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
   onOpenNote: () => void;
   onPlanNote?: (noteId: number) => void;
 }) {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const queryClient = useQueryClient();
+  // Cached + de-duped via React Query. Navigating back to the dashboard hits
+  // the in-memory cache first (instant render), then refetches in background
+  // if data is stale (>30s). isLoading is only true on first ever fetch.
+  const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
+    queryKey: ["dashboard-stats"],
+    queryFn: fetchDashboardStats,
+  });
+  // Helpers so the imperative submit/typing flow can still update + refetch.
+  const setStats = (next: DashboardStats) => queryClient.setQueryData<DashboardStats>(["dashboard-stats"], next);
+  const refetchStats = () => queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+
   const [ink, setInk] = useState<InkState | null>(null);
   const [cardPulsing, setRowPulsing] = useState(false);
   const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
@@ -81,10 +94,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
   useEffect(() => () => {
     if (typingRaf.current != null) cancelAnimationFrame(typingRaf.current);
-  }, []);
-
-  useEffect(() => {
-    fetchDashboardStats().then(setStats).catch(console.error);
   }, []);
 
   function startTyping(noteId: number, total: number) {
@@ -147,14 +156,10 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
       // Classifier runs async (~2-4s). Re-fetch stats once it's likely
       // done so the new card picks up its `worth_expanding` pill without
       // a manual refresh.
-      setTimeout(() => {
-        fetchDashboardStats().then(setStats).catch(console.error);
-      }, 4500);
+      setTimeout(() => { refetchStats(); }, 4500);
     } else {
       refresh.then(setStats).catch(console.error);
-      setTimeout(() => {
-        fetchDashboardStats().then(setStats).catch(console.error);
-      }, 4500);
+      setTimeout(() => { refetchStats(); }, 4500);
     }
   }
 
@@ -269,7 +274,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
             }}>
               <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>notes this week</div>
               <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
-                {stats?.notes_this_week ?? "—"}
+                {stats ? stats.notes_this_week : <Skeleton width={32} height={20} />}
               </div>
               {stats && (() => {
                 const delta = stats.notes_this_week - stats.notes_last_week;
@@ -296,7 +301,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
             }}>
               <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>day streak</div>
               <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
-                {stats?.streak ?? "—"}
+                {stats ? stats.streak : <Skeleton width={28} height={20} />}
               </div>
               <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
                 {activityPerDay.map((v, i) => (
@@ -325,8 +330,30 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
         {/* Recent notes — compact 2x2 grid directly under the composer so a
             new note's animation lands in Daniel's eyeline. Cards in a "topic /
-            idea" shape get an 'Expand' pill that hands off to Gooni. */}
-        {stats && stats.recent_notes.length > 0 && (
+            idea" shape get an 'Expand' pill that hands off to Gooni. While
+            loading the first time, render skeleton cards in the same slot
+            shape so layout doesn't shift on data arrival. */}
+        {(statsLoading && !stats) ? (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{
+              fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+              textTransform: "uppercase", marginBottom: 8, fontWeight: 600,
+            }}>recent notes</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {[0, 1].map((i) => (
+                <div key={i} style={{
+                  padding: "10px 12px", borderRadius: 10,
+                  border: "1px solid rgba(0,0,0,0.07)", background: "#fff",
+                  minHeight: 96, display: "flex", flexDirection: "column", gap: 6,
+                }}>
+                  <Skeleton width="60%" height={14} />
+                  <Skeleton width="100%" height={11} />
+                  <Skeleton width="80%" height={11} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : stats && stats.recent_notes.length > 0 && (
           <div style={{ marginBottom: 18 }}>
             <div style={{
               fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
