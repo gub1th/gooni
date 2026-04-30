@@ -4,11 +4,7 @@ import { GooniMascot } from "./GooniMascot";
 import { GooniPanel } from "./GooniPanel";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useWindowWidth } from "../hooks/useWindowWidth";
-import {
-  useGooniModalCornerStore,
-  nearestCorner,
-  type Corner,
-} from "../stores/useGooniModalCornerStore";
+import { useGooniModalCornerStore } from "../stores/useGooniModalCornerStore";
 
 // Mounts the chat-related global UI: FAB, Gooni panel (modal or sidebar
 // surface), walking mascot. Used by every authed route so the experience
@@ -83,42 +79,51 @@ export function GooniLayer() {
 // nearest corner. Border glows + hue-rotates while dragging.
 
 function FloatingModal({ isSmall }: { isSmall: boolean }) {
-  const corner = useGooniModalCornerStore((s) => s.corner);
-  const setCorner = useGooniModalCornerStore((s) => s.setCorner);
-  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const pos = useGooniModalCornerStore((s) => s.pos);
+  const setPos = useGooniModalCornerStore((s) => s.setPos);
+  const [dragGrab, setDragGrab] = useState<{ dx: number; dy: number } | null>(null);
+  const [livePos, setLivePos] = useState<{ x: number; y: number } | null>(null);
+  const dragging = dragGrab != null;
 
-  function startDrag(e: React.PointerEvent) {
-    setDragging(true);
-    setDragOffset({ x: e.clientX, y: e.clientY });
-    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+  function startDrag(e: React.PointerEvent, modalRect: DOMRect) {
+    // Capture the offset from cursor → modal top-left so the modal
+    // doesn't jump when drag begins.
+    setDragGrab({ dx: e.clientX - modalRect.left, dy: e.clientY - modalRect.top });
+    setLivePos({ x: modalRect.left, y: modalRect.top });
+    try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch {}
   }
   function moveDrag(e: React.PointerEvent) {
-    if (!dragging) return;
-    setDragOffset({ x: e.clientX, y: e.clientY });
+    if (!dragGrab) return;
+    setLivePos({ x: e.clientX - dragGrab.dx, y: e.clientY - dragGrab.dy });
   }
   function endDrag(e: React.PointerEvent) {
-    if (!dragging) return;
-    setDragging(false);
-    const next = nearestCorner(e.clientX, e.clientY, window.innerWidth, window.innerHeight);
-    setCorner(next);
-    setDragOffset(null);
+    if (!dragGrab || !livePos) {
+      setDragGrab(null);
+      setLivePos(null);
+      return;
+    }
+    // Clamp to viewport so the modal can't be lost off-edge.
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const w = Math.min(isSmall ? vw - 48 : 380, 420);
+    const h = Math.min(isSmall ? vh - 130 : 560, vh - 24);
+    const clamped = {
+      x: Math.max(8, Math.min(vw - w - 8, livePos.x)),
+      y: Math.max(8, Math.min(vh - h - 8, livePos.y)),
+    };
+    setPos(clamped);
+    setDragGrab(null);
+    setLivePos(null);
     try { (e.currentTarget as Element).releasePointerCapture(e.pointerId); } catch {}
   }
 
-  // Anchor offsets — keep the FAB visible on bottom-right by leaving a
-  // taller gap there. Other corners hug the edge with a small margin.
-  const anchorStyle = anchorStyleFor(corner);
-  // While dragging, override anchor with the live cursor position so the
-  // modal feels glued to the pointer. The anchor reasserts on release.
-  const liveStyle: React.CSSProperties = dragging && dragOffset
-    ? {
-        left: dragOffset.x - 60,
-        top: dragOffset.y - 20,
-        right: "auto",
-        bottom: "auto",
-      }
-    : anchorStyle;
+  // Render position: live cursor while dragging, stored pos if set, else
+  // the default (bottom-right near the FAB).
+  const renderStyle: React.CSSProperties = dragging && livePos
+    ? { left: livePos.x, top: livePos.y, right: "auto", bottom: "auto" }
+    : pos
+    ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" }
+    : { right: 24, bottom: 88, left: "auto", top: "auto" };
 
   return (
     <>
@@ -137,19 +142,20 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
       `}</style>
       <div
         onPointerDown={(e) => {
-          // Only start drag from the dedicated handle area or from elements
-          // explicitly opted-in via [data-gooni-drag-handle]. Anything else
-          // (buttons, inputs) gets to do its own thing.
+          // Drag only fires on elements explicitly opted-in via
+          // [data-gooni-drag-handle]. Buttons inside the top bar must not
+          // carry that attribute, otherwise their click is swallowed.
           const target = e.target as HTMLElement;
           if (!target.closest?.("[data-gooni-drag-handle]")) return;
-          startDrag(e);
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          startDrag(e, rect);
         }}
         onPointerMove={moveDrag}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
         style={{
           position: "fixed",
-          ...liveStyle,
+          ...renderStyle,
           width: isSmall ? "calc(100vw - 48px)" : 380,
           maxWidth: 420,
           height: isSmall ? "calc(100vh - 130px)" : 560,
@@ -162,11 +168,10 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
           overflow: "hidden",
           zIndex: 1100,
           display: "flex",
-          transformOrigin: cornerToOrigin(corner),
+          transformOrigin: pos ? "top left" : "bottom right",
           animation: dragging
             ? "gooni-modal-drag-glow 1.4s ease-in-out infinite"
             : "gooni-bubble-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1)",
-          // Slight tilt + scale while dragging so it feels picked-up.
           transform: dragging ? "scale(1.02) rotate(-0.3deg)" : "none",
           transition: dragging ? "none" : "transform 200ms ease",
           userSelect: dragging ? "none" : undefined,
@@ -176,28 +181,4 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
       </div>
     </>
   );
-}
-
-function anchorStyleFor(corner: Corner): React.CSSProperties {
-  // Bottom-right keeps a 110px gap so the FAB stays visible. Other corners
-  // sit closer to their edge — 24px margin all round.
-  switch (corner) {
-    case "bottom-right":
-      return { right: 24, bottom: 88, left: "auto", top: "auto" };
-    case "bottom-left":
-      return { left: 24, bottom: 24, right: "auto", top: "auto" };
-    case "top-right":
-      return { right: 24, top: 24, left: "auto", bottom: "auto" };
-    case "top-left":
-      return { left: 24, top: 24, right: "auto", bottom: "auto" };
-  }
-}
-
-function cornerToOrigin(corner: Corner): string {
-  switch (corner) {
-    case "bottom-right": return "bottom right";
-    case "bottom-left":  return "bottom left";
-    case "top-right":    return "top right";
-    case "top-left":     return "top left";
-  }
 }

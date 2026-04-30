@@ -176,6 +176,7 @@ def _run_column_migrations(engine):
             ("list_items", "updated_at", "DATETIME"),
             ("list_items", "actionable", "INTEGER"),
             ("list_items", "is_primary", "INTEGER"),
+            ("lists", "kind", "TEXT"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -214,6 +215,8 @@ def _run_column_migrations(engine):
             conn.execute(text("UPDATE list_items SET committed = 0 WHERE committed IS NULL"))
             conn.execute(text("UPDATE list_items SET actionable = 1 WHERE actionable IS NULL"))
             conn.execute(text("UPDATE list_items SET is_primary = 0 WHERE is_primary IS NULL"))
+        if "lists" in existing_tables:
+            conn.execute(text("UPDATE lists SET kind = 'tasks' WHERE kind IS NULL"))
         conn.commit()
 
 
@@ -585,6 +588,7 @@ def _serialize_list(lst: ListModel) -> dict:
         "id": lst.id,
         "name": lst.name,
         "type": lst.type,
+        "kind": lst.kind or "tasks",
         "emoji": lst.emoji,
         "sort_order": lst.sort_order,
         "created_at": lst.created_at.isoformat() if lst.created_at else None,
@@ -654,6 +658,11 @@ def update_list(list_id: int, body: dict, db: Session = Depends(get_db)):
     if "emoji" in body:
         emoji = body.get("emoji")
         lst.emoji = emoji if emoji else None
+    if "kind" in body:
+        kind = body.get("kind")
+        if kind not in ("tasks", "ideas"):
+            raise HTTPException(status_code=400, detail="kind must be tasks|ideas")
+        lst.kind = kind
     db.commit()
     db.refresh(lst)
     return _serialize_list(lst)

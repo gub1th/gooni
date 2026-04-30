@@ -461,34 +461,35 @@ function SurfaceToggleBar() {
   const surface = useGooniStore((s) => s.surface);
   const setSurface = useGooniStore((s) => s.setSurface);
   const toggle = useGooniStore((s) => s.toggle);
-  const corner = useGooniModalCornerStore((s) => s.corner);
-  const resetCorner = useGooniModalCornerStore((s) => s.reset);
+  const pos = useGooniModalCornerStore((s) => s.pos);
+  const resetPos = useGooniModalCornerStore((s) => s.reset);
   const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+  const isCustomPosition = surface === "modal" && pos !== null;
 
   return (
     <div
-      data-gooni-drag-handle="true"
       style={{
         display: "flex", alignItems: "center", gap: 6,
         padding: "6px 10px",
         borderBottom: "1px solid rgba(0,0,0,0.06)",
         flexShrink: 0,
         fontFamily: FONT,
-        cursor: surface === "modal" ? "grab" : "default",
       }}
     >
       <span
-        data-gooni-drag-handle="true"
+        data-gooni-drag-handle={surface === "modal" ? "true" : undefined}
         style={{
           fontSize: 10.5, color: "#8E8E93", letterSpacing: 0.4, flex: 1,
           userSelect: "none",
+          cursor: surface === "modal" ? "grab" : "default",
+          padding: "4px 0",
         }}
       >
-        Gooni{surface === "modal" && corner !== "bottom-right" ? " · drag to move" : ""}
+        Gooni{surface === "modal" ? " · drag to move" : ""}
       </span>
-      {surface === "modal" && corner !== "bottom-right" && (
+      {isCustomPosition && (
         <button
-          onClick={resetCorner}
+          onClick={resetPos}
           title="Reset to default position"
           aria-label="Reset chat position"
           style={{
