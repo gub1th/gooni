@@ -1607,7 +1607,25 @@ def update_note(
     if "title" in body:
         note.title = body["title"]
     if "content" in body:
-        note.content = body["content"]
+        # Safety net for the empty-overwrite bug class (a frontend race or a
+        # silently-failed request could otherwise wipe a populated note). Refuse
+        # to replace non-trivial existing content with whitespace-only content
+        # unless the caller opts in via {"force": true}. Returns 409 so the
+        # frontend can surface it in the save-status pill instead of pretending
+        # the write succeeded. Title/space/visibility patches still apply.
+        new_content = body["content"]
+        prev_content = (note.content or "").strip()
+        new_stripped = (new_content or "").strip() if isinstance(new_content, str) else ""
+        force = bool(body.get("force"))
+        if prev_content and not new_stripped and not force:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "refusing to overwrite non-empty note content with empty "
+                    "content; pass force=true to override"
+                ),
+            )
+        note.content = new_content
     if "title" in body or "content" in body:
         note.updated_at = datetime.utcnow()
     if "space_id" in body:

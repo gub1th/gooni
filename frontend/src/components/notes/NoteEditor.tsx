@@ -6,7 +6,7 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TaskItem } from "@tiptap/extension-task-item";
 import { TaskList } from "@tiptap/extension-task-list";
 import { BubbleMenu } from "@tiptap/react/menus";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
@@ -214,7 +214,7 @@ function formatShortDate(iso: string | null): string {
     : { month: "short", day: "numeric", year: "numeric" });
 }
 
-type SaveStatus = "idle" | "saving" | "saved";
+type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 interface NoteEditorProps {
   variant?: Variant;
@@ -266,16 +266,51 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
   const titleInputRef = useRef<HTMLInputElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
   const hasChanges = useRef(false);
+  // Tracks which note id the editor was last hydrated from. We re-sync editor
+  // content from the server only when this differs from the current activeNoteId
+  // (a real note switch) — never on autosave round-trips, which previously could
+  // race with live typing and wipe in-progress edits when the new content
+  // happened to differ from the editor's local state (notably with base64
+  // images, where server normalization or a silently-failed save left the
+  // store holding empty content that then clobbered the editor).
+  const hydratedNoteId = useRef<number | null>(null);
+  // Editor handle exposed as a ref so effects declared *before* useEditor (the
+  // save-on-leave + beforeunload flushes) can read editor.getHTML() at flush
+  // time without hitting a temporal dead zone error. The ref is populated by a
+  // sync effect right after useEditor returns.
+  const editorRef = useRef<Editor | null>(null);
   // Embedded mode is ephemeral: no server note is created until the user submits.
   // Ref so handleKeyDown (captured once inside useEditor) always calls the latest handleSubmit.
   const handleSubmitRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
-    // Flush any unsaved changes (e.g. a dropped image) before leaving the previous note
+    // Flush any unsaved changes (e.g. a dropped image, an in-flight image
+    // replace) before leaving the previous note.
+    //
+    // Three weak points in the original gate were causing notes to silently
+    // lose their last-edit-before-switch:
+    //   1. `hasChanges.current` could be racily false — if an autosave just
+    //      succeeded one tick before the switch, hasChanges flipped back to
+    //      false and this whole branch was skipped.
+    //   2. `bodyRef.current` could be stale — TipTap's setImage/setContent
+    //      transactions commit synchronously but onUpdate (which writes
+    //      bodyRef) fires after; if the user switched notes in the same JS
+    //      task as an image insert, bodyRef hadn't caught up.
+    //   3. `.catch(() => {})` swallowed all PATCH failures (oversize body,
+    //      network blip, 4xx/5xx) — no console log, no UI signal.
+    //
+    // Fix: always read from the editor directly, drop the hasChanges gate,
+    // and surface failures to the console at minimum. Cost is one extra PATCH
+    // per note switch even when nothing changed — backend's empty-overwrite
+    // guard makes that safe, and the updated_at bump is cheap.
     const prevId = prevActiveNoteId.current;
-    if (hasChanges.current && prevId && prevId > 0 && prevId !== activeNoteId) {
+    if (prevId && prevId > 0 && prevId !== activeNoteId) {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      updateNote(prevId, titleRef.current, bodyRef.current).catch(() => {});
+      const currentBody = editorRef.current?.getHTML() ?? bodyRef.current;
+      const currentTitle = titleRef.current;
+      updateNote(prevId, currentTitle, currentBody).catch((err) => {
+        console.error(`[NoteEditor] save-on-leave failed for note #${prevId}:`, err);
+      });
     }
 
     setLocalTitle(activeNote?.title ?? "");
@@ -346,12 +381,16 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
     return () => document.removeEventListener("mousedown", handle);
   }, [movePicker]);
 
-  // Flush pending save on tab close (keepalive: true in api.ts ensures the request survives)
+  // Flush pending save on tab close (keepalive: true in api.ts ensures the request survives).
+  // Same hasChanges/bodyRef race as save-on-leave — read from editor directly and don't gate
+  // on hasChanges. Worst case is one extra PATCH on tab close; backend's empty-overwrite
+  // guard makes that safe.
   useEffect(() => {
     function onBeforeUnload() {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      if (activeNoteId && activeNoteId > 0 && hasChanges.current) {
-        apiUpdateNote(activeNoteId, titleRef.current, bodyRef.current);
+      if (activeNoteId && activeNoteId > 0) {
+        const currentBody = editorRef.current?.getHTML() ?? bodyRef.current;
+        apiUpdateNote(activeNoteId, titleRef.current, currentBody);
         if (useNotesContentStore.getState().isDirty) {
           apiMemorizeNote(activeNoteId);
         }
@@ -414,6 +453,12 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
     },
     [activeNoteId]
   );
+
+  // Mirror the editor handle into a ref so the early effects (save-on-leave,
+  // beforeunload) can read editor.getHTML() at flush time. Sync assignment —
+  // this runs every render before any effect, so the ref is current by the
+  // time React fires the leave/unload callbacks.
+  editorRef.current = editor;
 
   // Keep editorEmpty in sync when switching notes
   useEffect(() => {
@@ -522,16 +567,29 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
   // Keep handleSubmitRef current so the editor's once-captured handleKeyDown always calls fresh state.
   handleSubmitRef.current = handleSubmit;
 
-  // Sync editor + local refs from activeNote. Deps include activeNote.content/title so we
-  // catch the common case where a note is selected BEFORE its space has loaded — activeNote
-  // starts null, then arrives async via loadNotes. The hasChanges guard prevents clobbering
-  // the user's in-progress typing when a save round-trip updates the store.
+  // Sync editor + local refs from activeNote.
+  //
+  // Body content: setContent ONLY when the editor hasn't been hydrated for the
+  // current activeNoteId yet. That covers two real cases:
+  //   (a) note switch — activeNoteId changed, load the new body
+  //   (b) lazy load — note was selected before its space's notes finished loading;
+  //       activeNote starts null then arrives, editor is still empty
+  // Once hydrated, the editor is the source of truth until the user navigates
+  // to another note. We do NOT re-sync from activeNote.content on autosave
+  // round-trips — that's the bug class that wiped notes when starting with an
+  // image (server-normalized or empty content clobbering live edits).
+  //
+  // Title + is_public stay reactive — they're controlled inputs without the
+  // same race surface and benefit from updates after server-side normalization.
   useEffect(() => {
-    if (!editor || !activeNote || hasChanges.current) return;
-    const desired = activeNote.content ?? "";
-    if (editor.getHTML() !== desired) {
-      editor.commands.setContent(desired);
-      bodyRef.current = desired;
+    if (!editor || !activeNote) return;
+    if (hydratedNoteId.current !== activeNoteId) {
+      const desired = activeNote.content ?? "";
+      if (editor.getHTML() !== desired) {
+        editor.commands.setContent(desired);
+        bodyRef.current = desired;
+      }
+      hydratedNoteId.current = activeNoteId;
     }
     const title = activeNote.title ?? "";
     if (titleRef.current !== title) {
@@ -558,8 +616,13 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
       setSaveStatus("saved");
       if (savedTimer.current) clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSaveStatus("idle"), 3000);
-    } catch {
-      setSaveStatus("idle");
+    } catch (err) {
+      // Surface the failure instead of swallowing it. hasChanges stays true so
+      // the next keystroke or scheduleSave() retries automatically — and the
+      // editor's content is NOT discarded. Logging the error makes the
+      // image-too-large / 409-empty-overwrite / network-blip cases debuggable.
+      console.error(`[NoteEditor] save failed for note #${activeNoteId}:`, err);
+      setSaveStatus("error");
     }
   }
 
@@ -686,7 +749,11 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
         <span
           style={{
             fontSize: 12,
-            color: saveStatus === "saving" ? "#8E8E93" : saveStatus === "saved" ? "#34C759" : "#8E8E93",
+            color:
+              saveStatus === "saving" ? "#8E8E93"
+              : saveStatus === "saved" ? "#34C759"
+              : saveStatus === "error" ? "#FF3B30"
+              : "#8E8E93",
             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
             transition: "color 0.2s",
           }}
@@ -695,6 +762,8 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
             ? "Saving…"
             : saveStatus === "saved"
             ? `Saved ${lastSavedTime}`
+            : saveStatus === "error"
+            ? "Save failed — your changes are still in the editor. Retrying on next edit."
             : activeNote
             ? `Created ${formatShortDate(activeNote.created_at)} · Updated ${formatNoteDate(activeNote.updated_at)}`
             : ""}
