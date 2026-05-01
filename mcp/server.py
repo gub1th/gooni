@@ -99,6 +99,47 @@ def add_memory(content: str) -> str:
 
 
 @mcp.tool()
+def list_preferences(limit: int = 50) -> str:
+    """List Daniel's active preferences — the always-injected memory rows.
+
+    Distinguishes manually-curated entries from auto-generated feedback rules
+    (key prefixed with `feedback__`). Feedback rules are written every time a
+    chat correction fires; over time they bloat the system prompt, so this
+    tool is the inspect-side of the recently-shipped cap (FEEDBACK_PREF_CAP =
+    8 most-recent feedback prefs always inject; older feedback rules sit on
+    the bench until manually pinned).
+
+    Args:
+        limit: max rows to return (default 50)
+    """
+    resp = _session.get(
+        f"{BASE_URL}/memories",
+        params={"type": "preference", "limit": limit},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    rows = payload.get("memories") or []
+    if not rows:
+        return "(no preferences)"
+    lines = [f"# {payload.get('total', len(rows))} active preference(s)"]
+    curated, feedback = [], []
+    for m in rows:
+        bucket = feedback if (m.get("key") or "").startswith("feedback__") else curated
+        bucket.append(m)
+    if curated:
+        lines.append("\n## Curated (always inject):")
+        for m in curated:
+            lines.append(f"- #{m['id']} {m.get('content', '').strip()[:140]}")
+    if feedback:
+        lines.append(f"\n## Feedback-derived ({len(feedback)} total; top 8 most recent inject):")
+        for i, m in enumerate(feedback):
+            mark = " ★" if i < 8 else "  "
+            lines.append(f"-{mark}#{m['id']} {m.get('content', '').strip()[:140]}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def search_memories(query: str, limit: int = 8) -> str:
     """Search Gooni's memory by semantic similarity.
 
