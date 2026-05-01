@@ -204,7 +204,7 @@ function NotesPage() {
 
   return (
     <PasswordGate>
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#FFFFFF", position: "relative" }}>
+    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--gooni-bg, #FFFFFF)", position: "relative" }}>
       {sidebarOpen && (
         <Sidebar
           isDashboard={view === "dashboard"}

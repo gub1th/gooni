@@ -42,7 +42,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "#fff",
+          background: "var(--gooni-card, #fff)",
           border: "0.5px solid rgba(0,0,0,0.1)",
           borderRadius: 14,
           padding: "22px 24px 24px",
@@ -67,7 +67,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             border: "none",
             background: "transparent",
             cursor: "pointer",
-            color: "#8E8E93",
+            color: "var(--gooni-muted, #8E8E93)",
             fontSize: 16,
             lineHeight: 1,
             display: "flex",
@@ -88,13 +88,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         </button>
 
         <h2 style={{
-          fontSize: 16, fontWeight: 600, color: "#1C1C1E", margin: 0, marginBottom: 18,
+          fontSize: 16, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", margin: 0, marginBottom: 18,
           letterSpacing: "-0.2px",
         }}>Settings</h2>
 
         <section style={{ marginBottom: 22 }}>
           <div style={{
-            fontSize: 11, fontWeight: 600, color: "#8E8E93",
+            fontSize: 11, fontWeight: 600, color: "var(--gooni-muted, #8E8E93)",
             letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12,
           }}>
             theme
@@ -147,7 +147,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         <section>
           <div style={{
-            fontSize: 11, fontWeight: 600, color: "#8E8E93",
+            fontSize: 11, fontWeight: 600, color: "var(--gooni-muted, #8E8E93)",
             letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12,
           }}>
             gooni's face

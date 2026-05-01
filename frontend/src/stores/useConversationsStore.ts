@@ -30,7 +30,7 @@ interface ConversationsStore {
   fetchConversations: () => Promise<void>;
   selectConversation: (id: number) => Promise<void>;
   newChat: () => void;
-  send: (content: string, noteContent?: string, mode?: "plan" | "chat") => Promise<void>;
+  send: (content: string, noteContent?: string, mode?: "plan" | "chat", imageUrl?: string) => Promise<void>;
   // Kick off a planning conversation about a specific note. Creates a fresh
   // conversation, seeds it with an "expand on this" prompt + entry_content, and
   // engages plan-mode on the backend so the LLM behaves as a planning
@@ -75,7 +75,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
     await get().send(seed, note.content ?? undefined, "plan");
   },
 
-  send: async (content, noteContent, mode) => {
+  send: async (content, noteContent, mode, imageUrl) => {
     const optimistic: ConversationMessage = {
       id: Date.now(),
       role: "user",
@@ -88,7 +88,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
 
     try {
       if (convId === null) {
-        const conv = await apiCreateConversation(content);
+        const conv = await apiCreateConversation(content || "(image)");
         convId = conv.id;
         set({ activeId: convId });
       }
@@ -99,7 +99,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
       });
 
       const model = useModelStore.getState().model;
-      const { messages: allMessages, intention: fallbackIntention, tools_used, signals } = await apiSendMessage(convId, content, noteContent, model, mode);
+      const { messages: allMessages, intention: fallbackIntention, tools_used, signals } = await apiSendMessage(convId, content, noteContent, model, mode, imageUrl);
       const intentionToUse = get().pendingIntention || fallbackIntention || "";
       const hasSignals = !!signals && (
         signals.tone_corrections.length > 0

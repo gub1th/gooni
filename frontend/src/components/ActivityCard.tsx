@@ -49,7 +49,7 @@ function FocusesSkeleton() {
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#1C1C1E", opacity: 0.4 }} />
         <span style={{
-          fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
+          fontSize: 11, color: "var(--gooni-muted, #8E8E93)", textTransform: "uppercase",
           letterSpacing: 0.6, fontWeight: 600,
         }}>Focuses</span>
       </div>
@@ -57,7 +57,7 @@ function FocusesSkeleton() {
         {[0, 1, 2].map((i) => (
           <div key={i} style={{
             border: "0.5px solid rgba(0,0,0,0.06)", borderRadius: 8,
-            padding: "8px 12px", background: "#fff",
+            padding: "8px 12px", background: "var(--gooni-card, #fff)",
             display: "flex", alignItems: "center", gap: 10,
           }}>
             <Skeleton width={16} height={16} radius={4} />
@@ -79,11 +79,11 @@ function SectionHeader({ label, right, actions }: {
       display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
     }}>
       <span style={{
-        fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
+        fontSize: 11, color: "var(--gooni-muted, #8E8E93)", textTransform: "uppercase",
         letterSpacing: 0.6, fontWeight: 600,
       }}>{label}</span>
       {right && (
-        <span style={{ fontSize: 12, color: "#8E8E93" }}>
+        <span style={{ fontSize: 12, color: "var(--gooni-muted, #8E8E93)" }}>
           {right}
         </span>
       )}
@@ -174,7 +174,7 @@ function FocusesSection({ focuses, onChange }: {
       <SectionHeader
         label="Focuses"
         right={
-          <span style={{ fontSize: 11, color: "#8E8E93", fontWeight: 500 }}>
+          <span style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", fontWeight: 500 }}>
             {active.length} active{stale > 0 ? ` · ${stale} stale` : ""}
           </span>
         }
@@ -198,8 +198,8 @@ function FocusesSection({ focuses, onChange }: {
           adder lives at the top of the card so it's near the +add button
           and feels like a quick-capture lane. */}
       <div style={{
-        background: "#FFFFFF",
-        border: "0.5px solid rgba(0,0,0,0.08)",
+        background: "var(--gooni-card, #FFFFFF)",
+        border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
         borderRadius: 10,
         overflow: "hidden",
       }}>
@@ -292,7 +292,7 @@ function CollapsibleSection({
           width: "100%", textAlign: "left",
           padding: "8px 12px",
           background: "transparent", border: "none",
-          fontFamily: FONT, fontSize: 11.5, color: "#8E8E93",
+          fontFamily: FONT, fontSize: 11.5, color: "var(--gooni-muted, #8E8E93)",
           cursor: "pointer",
         }}
       >
@@ -446,7 +446,7 @@ function FocusAdderForm({ seed, onCreated, onClose }: {
         style={{
           fontSize: 14, padding: "8px 10px",
           border: "0.5px solid rgba(0,0,0,0.12)", borderRadius: 6,
-          background: "#FFF", fontFamily: FONT, color: "#1C1C1E",
+          background: "#FFF", fontFamily: FONT, color: "var(--gooni-text, #1C1C1E)",
           outline: "none",
         }}
       />
@@ -469,7 +469,7 @@ function FocusAdderForm({ seed, onCreated, onClose }: {
             style={{
               fontSize: 12, padding: "6px 10px",
               background: "transparent", border: "none",
-              color: "#8E8E93", cursor: "pointer", fontFamily: FONT,
+              color: "var(--gooni-muted, #8E8E93)", cursor: "pointer", fontFamily: FONT,
             }}
           >cancel</button>
           <button

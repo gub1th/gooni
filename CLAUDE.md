@@ -69,13 +69,15 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 - **`components/notes/Sidebar.tsx`** — 200px. Two draggable sections (Notes / Chat), order persisted in localStorage. Notes section has: All Notes, collapsible Spaces list, recent notes. Chat section has: New Chat + recent conversations.
 - **`components/notes/NotesList.tsx`** — Notes for selected space (260px).
 - **`components/notes/NoteEditor.tsx`** — Title + TipTap body. Auto-saves after 1.5s. `🌐 Public` toggle pill. Supports image drag/drop + paste (base64 inline). `hasChanges` ref prevents spurious saves on blur.
-- **`components/ChatView.tsx`** — Full chat view when chat section is active.
+- **`components/ChatView.tsx`** — Full chat view when chat section is active. Uses `chat/InputBar` (Gemini-style: + popup → upload image, model selector, mic for Web-Speech-API voice-to-text, send). Image attachments flow as base64 data URL via `image_url` to `/conversations/{id}/messages`.
 - **`components/Dashboard.tsx`** — Stats, Focuses (committed/pending/someday), public bio editor.
+- **`components/FocusOverlay.tsx`** — Distraction-free overlay surfaced from the primary focus row's "focus" pill. Blurs the page, shows meditating Gooni, fades chrome on idle, exits via X / Esc.
 - **`components/GooniPanel.tsx`** — Chat panel (300px). Passes active note as context.
 - **`stores/useNotesContentStore.ts`** — Selected space, notes per space, active note, isDirty. Persist key: `gooni-notes-v1`.
 - **`stores/useSpacesStore.ts`** — Space list from backend (includes General).
-- **`stores/useConversationsStore.ts`** — Conversations list + active conversation.
+- **`stores/useConversationsStore.ts`** — Conversations list + active conversation. `send()` accepts `imageUrl` for chat-input image attachments.
 - **`stores/useGooniStore.ts`** — GooniPanel open state. Persist key: `gooni-v1`.
+- **`stores/useGooniThemeStore.ts`** — Themes: `cool|warm|mint|rose|slate|dark`. `routes/__root.tsx` syncs the selected palette to CSS custom properties (`--gooni-bg`, `--gooni-text`, etc.) so migrated components render theme-aware via `var()` w/ light fallbacks. Non-migrated surfaces stay light under dark mode until incrementally migrated.
 - **`services/api.ts`** — All fetch calls. Key interfaces: `ApiNote`, `ApiSpace`, `PublicNote`, `PublicNoteDetail`.
 
 ### MCP Server (`mcp/server.py`)

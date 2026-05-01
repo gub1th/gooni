@@ -2116,8 +2116,9 @@ def send_conversation_message(
 ):
     """Send a user message; returns full thread after Claude replies."""
     user_content = body.get("content", "").strip()
-    if not user_content:
-        raise HTTPException(status_code=400, detail="content is required")
+    image_url = body.get("image_url") or None
+    if not user_content and not image_url:
+        raise HTTPException(status_code=400, detail="content or image_url is required")
     entry_content = body.get("entry_content", "")
     model = body.get("model") or None
     mode = body.get("mode") or None
@@ -2129,6 +2130,7 @@ def send_conversation_message(
             entry_content=entry_content,
             model=model,
             mode=mode,
+            image_url=image_url,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

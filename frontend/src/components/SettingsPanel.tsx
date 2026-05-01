@@ -80,14 +80,14 @@ export function SettingsPanel() {
         display: "flex", alignItems: "center", gap: 8, marginBottom: 12,
       }}>
         <div style={{
-          fontSize: 11, fontWeight: 600, color: "#8E8E93",
+          fontSize: 11, fontWeight: 600, color: "var(--gooni-muted, #8E8E93)",
           letterSpacing: 0.6, textTransform: "uppercase",
         }}>
           daily nudge
         </div>
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}>
           {saving && (
-            <span style={{ fontSize: 11, color: "#8E8E93" }}>
+            <span style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
               saving…
             </span>
           )}
@@ -112,7 +112,7 @@ export function SettingsPanel() {
                 checked={settings.nudge_enabled}
                 onChange={(e) => patch({ nudge_enabled: e.target.checked })}
               />
-              <span style={{ fontSize: 13, color: "#1C1C1E" }}>
+              <span style={{ fontSize: 13, color: "var(--gooni-text, #1C1C1E)" }}>
                 send a daily digest
               </span>
             </label>
@@ -172,7 +172,7 @@ export function SettingsPanel() {
           {/* WhatsApp 24h-window note */}
           {settings.nudge_channels.includes("whatsapp") && (
             <p style={{
-              margin: 0, fontSize: 11, color: "#8E8E93", lineHeight: 1.5,
+              margin: 0, fontSize: 11, color: "var(--gooni-muted, #8E8E93)", lineHeight: 1.5,
               padding: "8px 10px", background: "#FAFAFA", borderRadius: 8,
               border: "0.5px dashed rgba(0,0,0,0.08)",
             }}>
@@ -233,7 +233,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
       <span style={{
-        fontSize: 11, color: "#8E8E93", fontWeight: 600,
+        fontSize: 11, color: "var(--gooni-muted, #8E8E93)", fontWeight: 600,
         textTransform: "uppercase", letterSpacing: 0.4,
         width: 84, flexShrink: 0,
       }}>{label}</span>
@@ -252,6 +252,6 @@ const inputStyle: React.CSSProperties = {
   borderRadius: 6,
   fontSize: 13,
   fontFamily: "inherit",
-  color: "#1C1C1E",
+  color: "var(--gooni-text, #1C1C1E)",
   background: "#FFF",
 };

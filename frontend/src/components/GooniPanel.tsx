@@ -165,7 +165,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
         flex: 1,
         width: "100%",
         height: "100%",
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         display: "flex",
         flexDirection: "column",
         boxSizing: "border-box",
@@ -175,7 +175,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
     ? {
         flex: 1,
         height: "100vh",
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         borderLeft: "1px solid rgba(0,0,0,0.08)",
         display: "flex",
         flexDirection: "column",
@@ -186,7 +186,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
         width,
         minWidth: width,
         height: "100vh",
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         borderLeft: "1px solid rgba(0,0,0,0.08)",
         display: "flex",
         flexDirection: "column",
@@ -297,7 +297,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
                       padding: "8px 10px",
                       borderRadius: 8,
                       background: "rgba(0,0,0,0.03)",
-                      border: "1px solid rgba(0,0,0,0.07)",
+                      border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))",
                       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                     }}
                   >
@@ -361,7 +361,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
               padding: "5px 10px",
               borderRadius: 8,
               background: "rgba(0,0,0,0.04)",
-              border: "1px solid rgba(0,0,0,0.07)",
+              border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))",
               width: "fit-content",
               maxWidth: "100%",
             }}
@@ -390,7 +390,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
             background: "#F2F2F7",
             borderRadius: 12,
             padding: "8px 12px",
-            border: "1px solid rgba(0,0,0,0.08)",
+            border: "1px solid var(--gooni-border, rgba(0,0,0,0.08))",
           }}
         >
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
@@ -409,7 +409,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
               outline: "none",
               background: "transparent",
-              color: "#1C1C1E",
+              color: "var(--gooni-text, #1C1C1E)",
               lineHeight: 1.4,
             }}
           />
@@ -480,7 +480,7 @@ function SurfaceToggleBar() {
       <span
         data-gooni-drag-handle={surface === "modal" ? "true" : undefined}
         style={{
-          fontSize: 10.5, color: "#8E8E93", letterSpacing: 0.4, flex: 1,
+          fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.4, flex: 1,
           userSelect: "none",
           cursor: surface === "modal" ? "grab" : "default",
           padding: "4px 0",
@@ -496,7 +496,7 @@ function SurfaceToggleBar() {
           style={{
             width: 22, height: 22, borderRadius: 6,
             border: "none", background: "transparent",
-            color: "#8E8E93", cursor: "pointer",
+            color: "var(--gooni-muted, #8E8E93)", cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
             fontFamily: FONT,
           }}
@@ -511,7 +511,7 @@ function SurfaceToggleBar() {
       )}
       <div style={{
         display: "flex", border: "1px solid rgba(0,0,0,0.10)",
-        borderRadius: 6, overflow: "hidden", background: "#fff",
+        borderRadius: 6, overflow: "hidden", background: "var(--gooni-card, #fff)",
       }}>
         {(["modal", "sidebar"] as const).map((s) => {
           const active = surface === s;
@@ -538,7 +538,7 @@ function SurfaceToggleBar() {
         style={{
           width: 22, height: 22, borderRadius: 6,
           border: "none", background: "transparent",
-          color: "#8E8E93", cursor: "pointer",
+          color: "var(--gooni-muted, #8E8E93)", cursor: "pointer",
           fontSize: 14, lineHeight: 1,
           display: "flex", alignItems: "center", justifyContent: "center",
           fontFamily: FONT,
@@ -683,8 +683,8 @@ function AssistantOrUserBubble({
             style={{
               flex: 1, fontSize: 12, fontFamily: baseStyle.fontFamily,
               padding: "6px 10px", borderRadius: 999,
-              border: "0.5px solid rgba(0,0,0,0.20)", background: "#fff",
-              color: "#1C1C1E",
+              border: "0.5px solid rgba(0,0,0,0.20)", background: "var(--gooni-card, #fff)",
+              color: "var(--gooni-text, #1C1C1E)",
             }}
           />
           <button
@@ -742,7 +742,7 @@ function PlanFinalizeCard({
       </div>
       <div
         style={{
-          fontSize: 13, color: "#1C1C1E", lineHeight: 1.5,
+          fontSize: 13, color: "var(--gooni-text, #1C1C1E)", lineHeight: 1.5,
           whiteSpace: "pre-wrap",
         }}
       >
@@ -769,7 +769,7 @@ function PlanFinalizeCard({
             >
               {isSaving ? "Saving…" : "Save to note"}
             </button>
-            <span style={{ fontSize: 11.5, color: "#8E8E93" }}>
+            <span style={{ fontSize: 11.5, color: "var(--gooni-muted, #8E8E93)" }}>
               or keep editing — ask Gooni to revise
             </span>
           </>

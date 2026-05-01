@@ -52,11 +52,12 @@ export function ChatView() {
     }
   }, [messages, chatStarted]);
 
-  async function handleSend() {
+  async function handleSend(imageUrl?: string) {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text && !imageUrl) return;
+    if (sending) return;
     setInput("");
-    await send(text);
+    await send(text, undefined, undefined, imageUrl);
   }
 
   return (
@@ -66,7 +67,7 @@ export function ChatView() {
       flexDirection: "column",
       height: "100vh",
       overflow: "hidden",
-      background: "#FFFFFF",
+      background: "var(--gooni-card, #FFFFFF)",
       fontFamily: FONT,
     }}>
       {/* Greeting + Stats — collapses when chat starts */}
@@ -78,10 +79,10 @@ export function ChatView() {
         flexShrink: 0,
         padding: chatStarted ? 0 : "40px 48px 0",
       }}>
-        <div style={{ fontSize: 28, fontWeight: 700, fontFamily: DISPLAY_FONT, color: "#1C1C1E", letterSpacing: "-0.3px" }}>
+        <div style={{ fontSize: 28, fontWeight: 700, fontFamily: DISPLAY_FONT, color: "var(--gooni-text, #1C1C1E)", letterSpacing: "-0.3px" }}>
           {getGreeting()}, Daniel
         </div>
-        <div style={{ fontSize: 13, color: "#8E8E93", marginTop: 4 }}>{getDateStr()}</div>
+        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", marginTop: 4 }}>{getDateStr()}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
           <StatChip value={stats?.notes_this_week ?? "—"} label="notes this week" />
           <StatChip value={stats && stats.streak > 0 ? `${stats.streak} 🔥` : (stats?.streak ?? "—")} label="streak" />
@@ -108,7 +109,7 @@ export function ChatView() {
                   <span>Assessed your intention</span>
                   <span style={{ fontSize: 10 }}>▾</span>
                 </div>
-                <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.07)", fontFamily: FONT }}>
+                <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(0,0,0,0.03)", border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))", fontFamily: FONT }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
                     <span style={{ color: "#AEAEB2", fontSize: 13, marginTop: 1 }}>⊙</span>
                     <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{pendingIntention}</span>

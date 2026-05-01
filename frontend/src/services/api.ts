@@ -848,12 +848,13 @@ export async function sendConversationMessage(
   content: string,
   noteContent?: string,
   model?: string,
-  mode?: "plan" | "chat"
+  mode?: "plan" | "chat",
+  imageUrl?: string,
 ): Promise<{ messages: ApiMessage[]; intention: string; tools_used: string[]; signals?: RouterSignals }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", content, entry_content: noteContent, model, mode }),
+    body: JSON.stringify({ role: "user", content, entry_content: noteContent, model, mode, image_url: imageUrl }),
   });
   if (!res.ok) throw new Error("Failed to send message");
   return res.json();
