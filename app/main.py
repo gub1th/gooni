@@ -2799,3 +2799,135 @@ def snapshot_today(db: Session = Depends(get_db)):
         "taken_at": snap.taken_at.isoformat() if snap.taken_at else None,
         "digest": snap.digest or "",
     }
+
+
+# ── Eval loop ────────────────────────────────────────────────────────────────
+# See app/services/eval_service.py for segmentation + dispatch logic.
+
+
+@app.get("/eval/segments")
+def eval_list_segments(
+    sources: str | None = None,
+    statuses: str | None = None,
+    has_flag: bool = False,
+    search: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """Grid feed for the eval tab. Sorted by last_message_at DESC.
+
+    Query params:
+      sources   = comma-separated subset of web|telegram|whatsapp|imessage
+      statuses  = comma-separated subset of not_yet|pending|done
+      has_flag  = true → only segments that have at least one step flag
+      search    = case-insensitive substring across preview + title + summary
+    """
+    from .services import eval_service
+
+    src_list = [s.strip() for s in sources.split(",")] if sources else None
+    status_list = [s.strip() for s in statuses.split(",")] if statuses else None
+    return eval_service.list_segments(
+        db,
+        sources=src_list,
+        statuses=status_list,
+        has_flag_only=has_flag,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get("/eval/segments/{segment_id}/full")
+def eval_segment_full(segment_id: int, db: Session = Depends(get_db)):
+    """All messages in a segment, each with its decoded trace + per-step
+    feedback. Returns 404 if the segment doesn't exist."""
+    from .services import eval_service
+
+    full = eval_service.get_segment_full(db, segment_id)
+    if not full:
+        raise HTTPException(status_code=404, detail="segment not found")
+    return full
+
+
+@app.post("/eval/feedback")
+def eval_post_feedback(body: dict, db: Session = Depends(get_db)):
+    """Upsert a step-level feedback. Body:
+      {segment_id, message_id, step_key, step_index, rating: 1|2|3, comment?}
+    Re-posting (same message_id+step_key+step_index) overwrites the prior rating."""
+    from .services import eval_service
+
+    required = ("segment_id", "message_id", "step_key", "step_index", "rating")
+    for k in required:
+        if k not in body:
+            raise HTTPException(status_code=400, detail=f"missing field: {k}")
+    try:
+        fb = eval_service.upsert_feedback(
+            db,
+            segment_id=int(body["segment_id"]),
+            message_id=int(body["message_id"]),
+            step_key=str(body["step_key"]),
+            step_index=int(body["step_index"]),
+            rating=int(body["rating"]),
+            comment=body.get("comment"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": fb.id, "ok": True}
+
+
+@app.delete("/eval/feedback/{feedback_id}")
+def eval_delete_feedback(feedback_id: int, db: Session = Depends(get_db)):
+    from .services import eval_service
+
+    if not eval_service.delete_feedback(db, feedback_id):
+        raise HTTPException(status_code=404, detail="feedback not found")
+    return {"ok": True}
+
+
+@app.patch("/eval/segments/{segment_id}/summary")
+def eval_patch_summary(segment_id: int, body: dict, db: Session = Depends(get_db)):
+    """Update overall rating, comment, and status. Body fields are all optional;
+    only the provided ones are written."""
+    from .services import eval_service
+
+    try:
+        seg = eval_service.update_summary(
+            db,
+            segment_id,
+            eval_status=body.get("eval_status"),
+            overall_rating=body.get("overall_rating"),
+            overall_comment=body.get("overall_comment"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not seg:
+        raise HTTPException(status_code=404, detail="segment not found")
+    return {
+        "id": seg.id,
+        "eval_status": seg.eval_status,
+        "overall_rating": seg.overall_rating,
+        "overall_comment": seg.overall_comment,
+    }
+
+
+@app.post("/eval/segments/{segment_id}/dispatch-to-cc")
+def eval_dispatch_to_cc(segment_id: int, db: Session = Depends(get_db)):
+    """Bundle the eval into a Claude Code space note + a backlog item.
+    Idempotent: re-dispatching overwrites the prior note rather than spawning
+    duplicates. Returns the note id and backlog list id."""
+    from .services import eval_service
+
+    try:
+        return eval_service.dispatch_to_cc(db, segment_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/eval/tools-legend")
+def eval_tools_legend():
+    """Static legend of tools / steps the orchestrator can take. Used by the
+    eval UI's ⓘ popup so the reviewer knows what each step means."""
+    from .services import eval_service
+
+    return {"tools": eval_service.TOOL_LEGEND}

@@ -155,6 +155,7 @@ interface SidebarProps {
   isNotes: boolean;
   isChat: boolean;
   isLists: boolean;
+  isEval?: boolean;
   activeListId: number | null;
   showCompose: boolean;
   onLogoClick: () => void;
@@ -162,9 +163,10 @@ interface SidebarProps {
   onCompose: () => void;
   onNewChat: () => void;
   onSelectList: (id: number) => void;
+  onOpenEval?: () => void;
 }
 
-export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList }: SidebarProps) {
+export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList, onOpenEval }: SidebarProps) {
   const navigate = useNavigate();
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId, removeSpace } = useNotesContentStore();
   const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
@@ -690,25 +692,42 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
             </button>
           </div>
 
-          {/* Chat audit — every Gooni reply + any feedback Daniel gave inline. */}
+          {/* Audit — Eval grid + Chat audit as tabs in one page. Always
+              renders so it's reachable from /memories, /chat-audit, or any
+              future route that mounts the Sidebar; navigation goes through
+              the router via ?audit=1, not a parent-passed callback. The
+              optional `onOpenEval` short-circuit still works for index.tsx
+              where we'd rather flip view state than re-route. */}
           <div style={{ padding: "0 6px 2px" }}>
             <button
-              onClick={() => navigate({ to: "/chat-audit" })}
-              title="Chat audit"
+              onClick={() => {
+                if (onOpenEval) {
+                  onOpenEval();
+                  return;
+                }
+                navigate({
+                  to: "/",
+                  search: { audit: true, note: undefined, conv: undefined, list: undefined },
+                });
+              }}
+              title="Audit — score Gooni's replies + dispatch to Claude Code"
               style={{
                 display: "flex", alignItems: "center", gap: 8,
                 width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
-                border: "none", background: "transparent", cursor: "pointer",
+                border: "none",
+                background: isEval ? "rgba(0,0,0,0.09)" : "transparent",
+                cursor: "pointer",
                 textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontSize: 13.5, color: "#3C3C43",
+                fontWeight: isEval ? 600 : 400,
+                fontSize: 13.5, color: "#1C1C1E",
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+              onMouseEnter={(e) => { if (!isEval) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+              onMouseLeave={(e) => { if (!isEval) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
               <ClipboardList size={14} strokeWidth={1.7} color={ICON_TINT.chatAudit} style={{ flexShrink: 0 }} />
-              Chat audit
+              Audit
             </button>
           </div>
 

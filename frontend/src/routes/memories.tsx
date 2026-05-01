@@ -137,7 +137,7 @@ function MemoriesPage() {
   // navigate back to dashboard. The other handlers redirect to / since this
   // page doesn't host notes/chat composers.
   function gotoDashboard() {
-    navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined } });
+    navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined , audit: undefined} });
   }
 
   const tabs = useMemo(() => {
@@ -164,7 +164,7 @@ function MemoriesPage() {
             onSpaceSelect={gotoDashboard}
             onCompose={gotoDashboard}
             onNewChat={gotoDashboard}
-            onSelectList={(id) => navigate({ to: "/", search: { note: undefined, conv: undefined, list: id } })}
+            onSelectList={(id) => navigate({ to: "/", search: { note: undefined, conv: undefined, list: id , audit: undefined} })}
           />
         )}
 

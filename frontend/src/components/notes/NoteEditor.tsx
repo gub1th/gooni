@@ -1120,12 +1120,12 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
               const lists = useListsStore.getState().lists;
               const backlog = lists.find((l) => l.type === "backlog");
               if (backlog) {
-                navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id } });
+                navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined} });
               }
             } catch (e) { console.error(e); }
           };
           const openNote = () => {
-            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined } });
+            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined , audit: undefined} });
           };
           return (
             <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -1228,7 +1228,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
                       const lists = useListsStore.getState().lists;
                       const backlog = lists.find((l) => l.type === "backlog");
                       if (backlog) {
-                        navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id } });
+                        navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined} });
                       }
                     } catch (e) {
                       console.error("openBacklog failed", e);

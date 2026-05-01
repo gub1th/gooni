@@ -79,7 +79,7 @@ function ChatAuditPage() {
   }
 
   function gotoDashboard() {
-    navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined } });
+    navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined , audit: undefined} });
   }
 
   return (
@@ -97,7 +97,7 @@ function ChatAuditPage() {
             onSpaceSelect={gotoDashboard}
             onCompose={gotoDashboard}
             onNewChat={gotoDashboard}
-            onSelectList={(id) => navigate({ to: "/", search: { note: undefined, conv: undefined, list: id } })}
+            onSelectList={(id) => navigate({ to: "/", search: { note: undefined, conv: undefined, list: id , audit: undefined} })}
           />
         )}
 

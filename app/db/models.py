@@ -350,4 +350,69 @@ class TrackedRepo(Base):
     added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class EvalSegment(Base):
+    """An evaluable slice of a Conversation. Web sources have one segment per
+    conversation (gap-bounded upstream by find_or_create_session); bot sources
+    (telegram/whatsapp/imessage) reuse a single persistent conversation, so we
+    slice them on demand by message gap (> EVAL_GAP_HOURS).
+
+    Computed-on-demand and cached: the segmenter rebuilds rows when message
+    counts drift. Eval state (status / rating / comment / dispatched_to_cc_at)
+    is stored here, not on Conversation, so a single bot conversation can have
+    independent ratings per segment.
+    """
+
+    __tablename__ = "eval_segments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False, index=True)
+    # Inclusive bounds. start_message_id can be the first user message in the
+    # window; end_message_id the last assistant or user message.
+    start_message_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
+    end_message_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
+    last_message_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    message_count = Column(Integer, nullable=False, default=0)
+    # 'not_yet' (no human review) | 'pending' (started) | 'done'
+    eval_status = Column(String, nullable=False, default="not_yet", index=True)
+    # 1 = bad, 2 = meh, 3 = good. Null until reviewer scores.
+    overall_rating = Column(Integer, nullable=True)
+    overall_comment = Column(Text, nullable=True)
+    # Stamped when the reviewer hits "Dispatch to Claude Code". Bundles the
+    # eval into a Claude Code space note + a backlog list item.
+    dispatched_to_cc_at = Column(DateTime(timezone=True), nullable=True)
+    dispatched_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+    # When the segmenter last rebuilt this row. Used to invalidate when the
+    # underlying conversation grows past the cached message_count.
+    computed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class EvalStepFeedback(Base):
+    """A reviewer's flag on a single trace step inside an assistant message.
+    Many feedbacks per message — one per (message_id, step_key, step_index)
+    pair. step_index disambiguates when a single message has multiple steps
+    of the same type (e.g. two tool_call entries in one trace).
+    """
+
+    __tablename__ = "eval_step_feedback"
+    __table_args__ = (
+        UniqueConstraint("message_id", "step_key", "step_index", name="uq_eval_step_feedback"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    segment_id = Column(Integer, ForeignKey("eval_segments.id"), nullable=False, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id"), nullable=False, index=True)
+    # Step type from the trace list — e.g. 'intent', 'memory_recall',
+    # 'master_prompt', 'extracted_signals', 'memories_applied', 'tool_call'.
+    # Free-form so new step types can be flagged without a migration.
+    step_key = Column(String, nullable=False)
+    # Position in the trace list for the message — needed when a message has
+    # multiple steps of the same key.
+    step_index = Column(Integer, nullable=False, default=0)
+    # 1 = bad, 2 = meh, 3 = good
+    rating = Column(Integer, nullable=False)
+    comment = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+
 
