@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { Wind } from "lucide-react";
 import {
   type ApiItemNode, type FocusScale, type FocusStatus,
   updateItem, deleteItem,
 } from "../services/api";
 import { FocusModal } from "./FocusModal";
+import { FocusOverlay } from "./FocusOverlay";
 
 const FONT = "'Inter', -apple-system, sans-serif";
 
@@ -38,6 +40,7 @@ export function FocusRow({
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [focusModeOpen, setFocusModeOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isDone = variant === "done";
@@ -160,6 +163,27 @@ export function FocusRow({
             {fmtAgo(tsIso)}
           </span>
 
+          {/* Focus-mode entry — primary only. Opens the meditative overlay. */}
+          {isPrimary && !isDone && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setFocusModeOpen(true); }}
+              aria-label="Enter focus mode"
+              title="Enter focus mode"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "3px 9px", borderRadius: 999,
+                background: "rgba(74,222,128,0.14)",
+                border: "0.5px solid rgba(74,222,128,0.45)",
+                color: "#15803D",
+                fontSize: 11, fontWeight: 600, cursor: "pointer",
+                fontFamily: FONT, flexShrink: 0,
+              }}
+            >
+              <Wind size={11} strokeWidth={2.2} />
+              focus
+            </button>
+          )}
+
           {!isDone && (
             <div ref={menuRef} style={{ position: "relative" }}>
               <button
@@ -211,6 +235,12 @@ export function FocusRow({
           onClose={() => setOpen(false)}
         />
       )}
+      {focusModeOpen && (
+        <FocusOverlay
+          focusName={node.text}
+          onExit={() => setFocusModeOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -251,7 +281,7 @@ const SCALE_BADGE_STYLE: Record<FocusScale, React.CSSProperties> = {
 const MENU_BTN: React.CSSProperties = {
   display: "block", width: "100%",
   padding: "6px 10px", border: "none",
-  background: "transparent", color: "#1C1C1E",
+  background: "transparent", color: "var(--gooni-text, #1C1C1E)",
   fontSize: 12, fontFamily: FONT,
   textAlign: "left", cursor: "pointer", borderRadius: 6,
 };

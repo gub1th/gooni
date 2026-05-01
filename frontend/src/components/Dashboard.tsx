@@ -275,12 +275,12 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
               container widths — the cramped 3-card group + brain just didn't
               fit next to the greeting. Stacking gives stats their full row. */}
           <div style={{
-            fontSize: 28, fontWeight: 700, color: "#1C1C1E",
+            fontSize: 28, fontWeight: 700, color: "var(--gooni-text, #1C1C1E)",
             letterSpacing: "-0.5px", lineHeight: 1.2,
           }}>
             {getGreeting()}, Daniel.
           </div>
-          <div style={{ fontSize: 13, color: "#8E8E93", marginTop: 4, marginBottom: 14 }}>
+          <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", marginTop: 4, marginBottom: 14 }}>
             {getDateStr()}
           </div>
 
@@ -291,13 +291,13 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
             {/* notes this week */}
             <div style={{
-              background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
+              background: "var(--gooni-card, #fff)", border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
               borderRadius: 10, padding: "10px 14px",
               display: "flex", flexDirection: "column", alignItems: "flex-start",
               minWidth: 92,
             }}>
-              <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>notes this week</div>
-              <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
+              <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>notes this week</div>
+              <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
                 {stats ? stats.notes_this_week : <Skeleton width={32} height={20} />}
               </div>
               {stats && (() => {
@@ -318,13 +318,13 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
             {/* day streak */}
             <div style={{
-              background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
+              background: "var(--gooni-card, #fff)", border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
               borderRadius: 10, padding: "10px 14px",
               display: "flex", flexDirection: "column", alignItems: "flex-start",
               minWidth: 92,
             }}>
-              <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>day streak</div>
-              <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
+              <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>day streak</div>
+              <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
                 {stats ? stats.streak : <Skeleton width={28} height={20} />}
               </div>
               <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
@@ -365,14 +365,14 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         {(statsLoading && !stats) ? (
           <div style={{ marginBottom: 18 }}>
             <div style={{
-              fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+              fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.6,
               textTransform: "uppercase", marginBottom: 8, fontWeight: 600,
             }}>recent notes</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               {[0, 1].map((i) => (
                 <div key={i} style={{
                   padding: "10px 12px", borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.07)", background: "#fff",
+                  border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))", background: "var(--gooni-card, #fff)",
                   minHeight: 96, display: "flex", flexDirection: "column", gap: 6,
                 }}>
                   <Skeleton width="60%" height={14} />
@@ -399,7 +399,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
               marginBottom: 8,
             }}>
               <div style={{
-                fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+                fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.6,
                 textTransform: "uppercase", fontWeight: 600,
               }}>
                 recent notes
@@ -457,7 +457,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                     style={{
                       display: "flex", flexDirection: "column", alignItems: "stretch",
                       gap: 4, padding: "10px 12px", borderRadius: 10,
-                      border: "1px solid rgba(0,0,0,0.07)", background: "#fff", cursor: "pointer",
+                      border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))", background: "var(--gooni-card, #fff)", cursor: "pointer",
                       textAlign: "left", width: "100%", minHeight: 96, boxSizing: "border-box",
                       transition: "background 0.12s, border-color 0.12s",
                       animation: isFirst && cardPulsing ? `gooni-card-pulse 0.6s cubic-bezier(0.22,1,0.36,1)` : undefined,
@@ -490,7 +490,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                       </div>
                     )}
                     <div style={{
-                      fontSize: 13, fontWeight: 600, color: "#1C1C1E", fontFamily: FONT,
+                      fontSize: 13, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", fontFamily: FONT,
                       overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       flexShrink: 0,
                     }}>

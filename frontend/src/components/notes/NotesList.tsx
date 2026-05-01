@@ -146,7 +146,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
             flex: 1,
             fontSize: 13.5,
             fontWeight: 600,
-            color: "#1C1C1E",
+            color: "var(--gooni-text, #1C1C1E)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -169,7 +169,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
           <div style={{
             flex: 1,
-            fontSize: 11.5, color: "#8E8E93",
+            fontSize: 11.5, color: "var(--gooni-muted, #8E8E93)",
             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             minWidth: 0,
@@ -324,7 +324,7 @@ export function NotesList() {
     >
       {/* Header */}
       <div style={{ height: 52, padding: "0 10px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 6 }}>
-        <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", whiteSpace: "nowrap" }}>
+        <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", whiteSpace: "nowrap" }}>
           {!isAllNotes && currentSpace && (
             <SpaceIcon emoji={currentSpace.emoji} size={14} />
           )}
@@ -381,10 +381,10 @@ export function NotesList() {
             style={{
               flex: 1, minWidth: 0, height: 28, padding: "0 26px",
               boxSizing: "border-box",
-              borderRadius: 7, border: "1px solid rgba(0,0,0,0.08)",
-              background: "#fff", outline: "none", fontSize: 12.5,
+              borderRadius: 7, border: "1px solid var(--gooni-border, rgba(0,0,0,0.08))",
+              background: "var(--gooni-card, #fff)", outline: "none", fontSize: 12.5,
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-              color: "#1C1C1E",
+              color: "var(--gooni-text, #1C1C1E)",
             }}
           />
           {search && (
@@ -394,7 +394,7 @@ export function NotesList() {
               style={{
                 position: "absolute", right: 4, width: 20, height: 20,
                 borderRadius: 4, border: "none", background: "transparent",
-                cursor: "pointer", color: "#8E8E93", fontSize: 14,
+                cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 14,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 padding: 0,
               }}
@@ -456,7 +456,7 @@ export function NotesList() {
             top: contextMenu.y,
             left: contextMenu.x,
             zIndex: 1000,
-            background: "#FFFFFF",
+            background: "var(--gooni-card, #FFFFFF)",
             borderRadius: 10,
             boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
             padding: 6,
@@ -475,7 +475,7 @@ export function NotesList() {
             </button>
           ) : (
             <div style={{ padding: "6px 10px" }}>
-              <div style={{ fontSize: 13, color: "#1C1C1E", marginBottom: 8, fontWeight: 500 }}>Delete this note?</div>
+              <div style={{ fontSize: 13, color: "var(--gooni-text, #1C1C1E)", marginBottom: 8, fontWeight: 500 }}>Delete this note?</div>
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   onClick={handleDelete}
@@ -485,7 +485,7 @@ export function NotesList() {
                 </button>
                 <button
                   onClick={() => setContextMenu(null)}
-                  style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "none", background: "rgba(0,0,0,0.07)", color: "#1C1C1E", fontSize: 13, cursor: "pointer" }}
+                  style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "none", background: "rgba(0,0,0,0.07)", color: "var(--gooni-text, #1C1C1E)", fontSize: 13, cursor: "pointer" }}
                 >
                   Cancel
                 </button>

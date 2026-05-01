@@ -123,7 +123,7 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
             <span style={{ fontSize: 14, color: "#F59E0B", flexShrink: 0 }}>★</span>
             <span style={{
-              fontSize: 24, fontWeight: 700, color: "#1C1C1E",
+              fontSize: 24, fontWeight: 700, color: "var(--gooni-text, #1C1C1E)",
               lineHeight: 1.25, letterSpacing: "-0.3px",
               flex: 1, minWidth: 0,
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -175,7 +175,7 @@ export function PrimaryFocusCard({ refreshKey }: Props) {
                 fontSize: 17, padding: "4px 0",
                 border: "none", borderBottom: "1px solid transparent",
                 background: "transparent",
-                fontFamily: FONT, color: "#1C1C1E",
+                fontFamily: FONT, color: "var(--gooni-text, #1C1C1E)",
                 outline: "none", flex: 1, minWidth: 0,
                 transition: "border-color 120ms",
               }}

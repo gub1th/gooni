@@ -697,8 +697,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       style={
         embedded
           ? {
-              background: "#FFFFFF",
-              border: "1px solid rgba(0,0,0,0.07)",
+              background: "var(--gooni-card, #FFFFFF)",
+              border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))",
               borderRadius: 14,
               display: "flex",
               flexDirection: "column",
@@ -708,7 +708,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           : {
               flex: 1,
               height: "100vh",
-              background: "#FFFFFF",
+              background: "var(--gooni-card, #FFFFFF)",
               display: "flex",
               flexDirection: "column",
               overflow: "hidden",
@@ -764,7 +764,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
               >Move</button>
               <button
                 onClick={() => setSpaceSuggestion(null)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 13, padding: 0, lineHeight: 1 }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 13, padding: 0, lineHeight: 1 }}
               >×</button>
             </div>
           )}
@@ -797,7 +797,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                     position: "absolute",
                     top: "calc(100% + 6px)",
                     right: 0,
-                    background: "#FFFFFF",
+                    background: "var(--gooni-card, #FFFFFF)",
                     borderRadius: 10,
                     boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
                     padding: 6,
@@ -824,7 +824,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                         cursor: "pointer",
                         borderRadius: 6,
                         fontSize: 13.5,
-                        color: "#1C1C1E",
+                        color: "var(--gooni-text, #1C1C1E)",
                         textAlign: "left",
                       }}
                       onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
@@ -863,7 +863,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
               {deleteConfirm && (
                 <div style={{
                   position: "absolute", top: "calc(100% + 6px)", right: 0,
-                  background: "#FFFFFF", borderRadius: 10,
+                  background: "var(--gooni-card, #FFFFFF)", borderRadius: 10,
                   boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
                   padding: 6, minWidth: 160, zIndex: 100,
                   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -1137,7 +1137,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                 onClick={() => setEmbeddedToast(null)}
                 title="Dismiss"
                 style={{
-                  border: "none", background: "transparent", color: "#8E8E93",
+                  border: "none", background: "transparent", color: "var(--gooni-muted, #8E8E93)",
                   cursor: "pointer", fontSize: 14, padding: "0 4px",
                   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}
@@ -1161,7 +1161,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                 }}
               >
                 <div style={{ fontSize: 28, marginBottom: 12 }}>📝</div>
-                <div style={{ fontSize: 15, color: "#8E8E93", marginBottom: 4 }}>No note selected</div>
+                <div style={{ fontSize: 15, color: "var(--gooni-muted, #8E8E93)", marginBottom: 4 }}>No note selected</div>
                 <div style={{ fontSize: 13, color: "#C7C7CC" }}>
                   Pick one from the list, or press <kbd style={{ padding: "1px 5px", borderRadius: 4, background: "rgba(0,0,0,0.06)", fontSize: 12, fontFamily: "inherit" }}>⌘N</kbd> to start a new one.
                 </div>
@@ -1182,7 +1182,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                     fontSize: 28,
                     fontWeight: 700,
                     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                    color: "#1C1C1E",
+                    color: "var(--gooni-text, #1C1C1E)",
                     border: "none",
                     outline: "none",
                     background: "transparent",
@@ -1247,7 +1247,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                             padding: "8px 12px",
                             borderRadius: 8,
                             background: "rgba(0,0,0,0.03)",
-                            border: "1px solid rgba(0,0,0,0.07)",
+                            border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))",
                             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                             fontSize: 12.5,
                             color: "#3C3C43",
@@ -1437,7 +1437,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                           }}>
                             {Math.round(sim * 100)}
                           </span>
-                          <span style={{ fontSize: 14, color: "#1C1C1E", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                          <span style={{ fontSize: 14, color: "var(--gooni-text, #1C1C1E)", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                             {displayTitle(n)}
                           </span>
                           <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
@@ -1458,7 +1458,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                       <button
                         key={i}
                         onClick={() => askGooni(q)}
-                        style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", marginBottom: 6, background: "rgba(0,0,0,0.025)", border: "1px solid rgba(0,0,0,0.05)", borderRadius: 8, cursor: "pointer", fontSize: 13.5, color: "#1C1C1E", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", lineHeight: 1.5 }}
+                        style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", marginBottom: 6, background: "rgba(0,0,0,0.025)", border: "1px solid rgba(0,0,0,0.05)", borderRadius: 8, cursor: "pointer", fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", lineHeight: 1.5 }}
                         onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
                         onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.025)")}
                       >

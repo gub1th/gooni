@@ -47,7 +47,7 @@ export function ModelSelector() {
         }}
       >
         <span>{current.label}</span>
-        <span style={{ fontSize: 8, color: "#8E8E93" }}>▾</span>
+        <span style={{ fontSize: 8, color: "var(--gooni-muted, #8E8E93)" }}>▾</span>
       </button>
       {open && (
         <div
@@ -57,8 +57,8 @@ export function ModelSelector() {
             bottom: "calc(100% + 4px)",
             left: 0,
             minWidth: 220,
-            background: "#fff",
-            border: "1px solid rgba(0,0,0,0.08)",
+            background: "var(--gooni-card, #fff)",
+            border: "1px solid var(--gooni-border, rgba(0,0,0,0.08))",
             borderRadius: 10,
             boxShadow: "0 8px 24px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)",
             padding: 4,
@@ -86,7 +86,7 @@ export function ModelSelector() {
               >
                 <span style={{
                   fontFamily: FONT, fontWeight: 600, fontSize: 12.5,
-                  color: "#1C1C1E",
+                  color: "var(--gooni-text, #1C1C1E)",
                   display: "flex", alignItems: "center", gap: 6,
                 }}>
                   {active && <span style={{ color: "#30A14E" }}>✓</span>}
@@ -95,7 +95,7 @@ export function ModelSelector() {
                 {m.tagline && (
                   <span style={{
                     fontFamily: FONT,
-                    fontSize: 11, color: "#8E8E93",
+                    fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
                     fontWeight: 400,
                     paddingLeft: active ? 18 : 0,
                   }}>

@@ -52,7 +52,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
         onClick={(e) => e.stopPropagation()}
         style={{
           position: "fixed", top: anchor.top, left: anchor.left,
-          zIndex: 100, background: "#fff", borderRadius: 10,
+          zIndex: 100, background: "var(--gooni-card, #fff)", borderRadius: 10,
           boxShadow: "0 4px 24px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.08)",
           padding: "12px 12px 10px", width: 228,
         }}
@@ -83,7 +83,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
             style={{
               flex: 1, fontSize: 13.5, outline: "none", border: "none",
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-              fontWeight: 500, color: "#1C1C1E", background: "transparent",
+              fontWeight: 500, color: "var(--gooni-text, #1C1C1E)", background: "transparent",
             }}
           />
         </div>
@@ -126,7 +126,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
             onClick={onCancel}
             style={{
               fontSize: 12, background: "none", border: "none",
-              cursor: "pointer", color: "#8E8E93",
+              cursor: "pointer", color: "var(--gooni-muted, #8E8E93)",
               padding: "4px 8px", borderRadius: 6,
             }}
           >
@@ -345,7 +345,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               border: "none", borderRadius: 8, padding: "3px 7px", cursor: "pointer",
               fontSize: 15, fontWeight: 700,
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-              color: "#1C1C1E", transition: "background 0.1s", outline: "none",
+              color: "var(--gooni-text, #1C1C1E)", transition: "background 0.1s", outline: "none",
               display: "flex", alignItems: "center", gap: 7,
             }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
@@ -394,7 +394,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               <span style={{
                 flex: 1, fontSize: 13.5,
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontWeight: isAllNotes ? 600 : 400, color: "#1C1C1E",
+                fontWeight: isAllNotes ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
               }}>All Notes</span>
             </div>
           </div>
@@ -456,7 +456,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                       <span style={{
                         flex: 1, fontSize: 13,
                         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                        fontWeight: selected ? 600 : 400, color: "#1C1C1E",
+                        fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       }}>
                         {displayTitle(note)}
@@ -465,7 +465,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                         className="pin-action"
                         onClick={(e) => { e.stopPropagation(); handleUnpin(note.id); }}
                         title="Unpin"
-                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
+                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
                       >×</button>
                     </div>
                   );
@@ -536,7 +536,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                   <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, flexShrink: 0 }}>
                     <SpaceIcon emoji={space.emoji} size={14} />
                   </span>
-                  <span style={{ flex: 1, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ flex: 1, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {space.name}
                   </span>
                   {isDelConfirm ? (
@@ -547,9 +547,9 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                   ) : (
                     <>
                       <button className="space-action" onClick={(e) => openEditPopover(e, space.id as number, space.name, space.emoji)}
-                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Rename">✎</button>
+                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Rename">✎</button>
                       <button className="space-action" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(space.id as number); }}
-                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "#8E8E93", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Delete">×</button>
+                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Delete">×</button>
                     </>
                   )}
                 </div>
@@ -601,7 +601,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     style={{
                       flex: 1, minWidth: 0,
                       border: "none", outline: "none", background: "transparent",
-                      fontFamily: "inherit", fontSize: 13.5, color: "#1C1C1E",
+                      fontFamily: "inherit", fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
                     }}
                   />
                 </div>
@@ -626,7 +626,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                       cursor: "pointer", background: isSelected ? "rgba(0,0,0,0.09)" : "transparent",
                       border: "none", textAlign: "left",
                       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                      fontWeight: isSelected ? 600 : 400, fontSize: 13.5, color: "#1C1C1E",
+                      fontWeight: isSelected ? 600 : 400, fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
                       transition: "background 0.12s",
                     }}
                     onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
@@ -658,7 +658,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                 cursor: "pointer", background: isChat ? "rgba(0,0,0,0.09)" : "transparent",
                 border: "none", textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontWeight: isChat ? 600 : 400, fontSize: 13.5, color: "#1C1C1E",
+                fontWeight: isChat ? 600 : 400, fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
@@ -720,7 +720,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                 textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontWeight: isEval ? 600 : 400,
-                fontSize: 13.5, color: "#1C1C1E",
+                fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) => { if (!isEval) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
