@@ -190,7 +190,11 @@ TEXT (Daniel just sent / saved):
 Return JSON shaped exactly like this — no preamble, no markdown fence:
 {{
   "tone_corrections": [
-    {{"rule": "<short imperative rule, max 15 words>"}}
+    {{
+      "rule": "<short imperative rule, max 18 words, anchored on the SPECIFIC pattern Daniel objected to>",
+      "evidence": "<short verbatim phrase or behavior in the prior assistant reply that triggered Daniel — max 12 words>",
+      "anti_pattern": "<concrete example of the kind of phrasing future-Gooni must AVOID — max 18 words. Empty string if not applicable>"
+    }}
   ],
   "feature_requests": [
     {{
@@ -214,7 +218,29 @@ Rules per field:
 
 tone_corrections:
 - Critique of the prior assistant reply's tone, style, length, structure, or approach.
-- Examples: "too eager", "stop ending with questions", "less teacher-y", "no bullets".
+- BE SPECIFIC. Bland abstractions like "be more concise" are useless — capture
+  the actual offense. If Daniel says "stop saying 'great question'", the rule
+  is `no flattery openers like "great question"`, NOT `more concise`.
+- `evidence` is mandatory: quote the specific phrase or pattern in the
+  PRIOR ASSISTANT REPLY that triggered the correction. If you can't point at
+  a specific phrase, the correction is too vague — emit an empty array.
+- `anti_pattern` (optional) is a concrete bad example future-Gooni should
+  recognize and avoid. Use for stylistic patterns (openers, fillers, format
+  habits). Leave as "" when the rule is self-explanatory from `rule` alone.
+- Examples (good):
+    rule: "no flattery openers like 'great question' or 'of course'"
+    evidence: "Sure! Great question." anti_pattern: "Great question! Let's…"
+    --
+    rule: "stop ending replies with a follow-up question Daniel didn't ask for"
+    evidence: "What else are you thinking about?" anti_pattern: "Let me know if you'd like to dive deeper."
+    --
+    rule: "drop the 'I'd be happy to help' / 'I'd love to' filler"
+    evidence: "I'd be happy to help with that!" anti_pattern: "Happy to dive in!"
+- Examples (BAD — do NOT emit these vague rules):
+    "less directive", "be more concise", "User prefers concise responses",
+    "avoid being too directive or harsh" — these don't teach future-Gooni
+    anything specific. If you'd write one of these, you're under-extracting;
+    look harder at the prior reply for the actual offense.
 - Empty when no prior assistant reply or no critique signal.
 
 feature_requests:
@@ -259,8 +285,15 @@ def _normalize_tone(items: Any) -> list[dict]:
         if not isinstance(it, dict):
             continue
         rule = it.get("rule")
-        if isinstance(rule, str) and rule.strip():
-            out.append({"rule": rule.strip()})
+        if not (isinstance(rule, str) and rule.strip()):
+            continue
+        evidence = it.get("evidence")
+        anti_pattern = it.get("anti_pattern")
+        out.append({
+            "rule": rule.strip()[:240],
+            "evidence": evidence.strip()[:240] if isinstance(evidence, str) else "",
+            "anti_pattern": anti_pattern.strip()[:240] if isinstance(anti_pattern, str) else "",
+        })
     return out
 
 

@@ -393,7 +393,11 @@ class MemoryService:
             return self._apply_add(db, candidate, embedding or [], source_note_id=source_note_id)
 
     def add_feedback_preference(
-        self, rule: str, evidence: str, db: Session | None = None
+        self,
+        rule: str,
+        evidence: str,
+        db: Session | None = None,
+        anti_pattern: str = "",
     ) -> Memory | None:
         """Persist a tone-correction rule from chat feedback.
 
@@ -401,14 +405,33 @@ class MemoryService:
         rule supersedes the older row instead of stacking. Stored as
         type='preference' so it's always injected into the system prompt by
         `build_memory_context`.
+
+        `evidence` is the offending phrase from the prior assistant reply that
+        triggered Daniel's correction. `anti_pattern` is a concrete bad
+        example for future-Gooni to recognize. Both are appended to the
+        stored content when present so the system prompt teaches future
+        Gooni *what specifically to avoid*, not just an abstract rule.
         """
         rule = (rule or "").strip()
         if not rule:
             return None
+        # Compose stored content. Future Gooni reads this verbatim; richer
+        # phrasing (with concrete pattern) generalizes better than a bland
+        # rule like "less directive".
+        parts = [rule]
+        anti = (anti_pattern or "").strip()
+        if anti:
+            parts.append(f'(avoid e.g. "{anti}")')
+        ev = (evidence or "").strip()
+        if ev and not anti:
+            # Only fall back to evidence in the content if anti_pattern is
+            # missing — anti_pattern is the cleaner future-facing signal.
+            parts.append(f'(triggered by: "{ev[:120]}")')
+        content = " ".join(parts)
         candidate = {
             "type": "preference",
             "key": _slug_rule(rule),
-            "content": rule,
+            "content": content,
             "context": {"time": None, "location": None, "scope": "global"},
             "confidence": 0.9,
         }
