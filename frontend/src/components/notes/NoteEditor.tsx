@@ -219,16 +219,12 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 interface NoteEditorProps {
   variant?: Variant;
   onSubmitted?: (note: ApiNote | null, buttonRect: DOMRect | null) => void;
-  // When set in embedded mode, the submit path patches THIS note's content
-  // instead of creating a new one. Used by the Plan-from-todo flow where
-  // the plan note already exists on the backend.
-  submitToNoteId?: number;
   // Fires when the editor's empty state changes — lets parents react to
   // "user started typing" without reading editor internals.
   onEmptyChange?: (empty: boolean) => void;
 }
 
-export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEmptyChange }: NoteEditorProps = {}) {
+export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: NoteEditorProps = {}) {
   useEditorStyles();
   const embedded = variant === "embedded";
 
@@ -489,20 +485,7 @@ export function NoteEditor({ variant = "full", onSubmitted, submitToNoteId, onEm
     const contentToSave = bodyRef.current;
     let savedNote: ApiNote | null = null;
 
-    if (embedded && submitToNoteId) {
-      // Plan-from-todo path: the note already exists (title was set by
-      // POST /todos/{id}/plan). We only need to PATCH in the body content.
-      try {
-        savedNote = await apiPatchNote(submitToNoteId, { content: contentToSave });
-      } catch {
-        // silent
-      }
-      editor.commands.clearContent();
-      bodyRef.current = "";
-      hasChanges.current = false;
-      setEditorEmpty(true);
-      onEmptyChange?.(true);
-    } else if (embedded && !activeNoteId) {
+    if (embedded && !activeNoteId) {
       // Ephemeral quick-note path: create the note server-side NOW with the final content.
       try {
         savedNote = await apiCreateNote("general", { content: contentToSave });
