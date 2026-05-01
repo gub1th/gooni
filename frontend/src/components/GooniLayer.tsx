@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatLauncher } from "./ChatLauncher";
 import { GooniMascot } from "./GooniMascot";
 import { GooniPanel } from "./GooniPanel";
@@ -88,6 +88,13 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
   const [dragGrab, setDragGrab] = useState<{ dx: number; dy: number } | null>(null);
   const [livePos, setLivePos] = useState<{ x: number; y: number } | null>(null);
   const dragging = dragGrab != null;
+  // Bubble-pop animation should fire ONCE on mount, not every time the
+  // user releases a drag. Without this gate, dragging→false retriggers
+  // the keyframe animation and the modal "bounces" on every drop.
+  const hasMountedRef = useRef(false);
+  useEffect(() => {
+    hasMountedRef.current = true;
+  }, []);
 
   function startDrag(e: React.PointerEvent, modalRect: DOMRect) {
     // Capture the offset from cursor → modal top-left so the modal
@@ -111,8 +118,13 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
     const vh = window.innerHeight;
     const w = Math.min(isSmall ? vw - 48 : 380, 420);
     const h = Math.min(isSmall ? vh - 130 : 560, vh - 24);
+    // Snap-to-side: x always anchors to the nearest screen edge so the
+    // modal can't float in the middle. Y stays free so Daniel can park
+    // it at any vertical position.
+    const centerX = livePos.x + w / 2;
+    const snappedX = centerX < vw / 2 ? 8 : vw - w - 8;
     const clamped = {
-      x: Math.max(8, Math.min(vw - w - 8, livePos.x)),
+      x: snappedX,
       y: Math.max(8, Math.min(vh - h - 8, livePos.y)),
     };
     setPos(clamped);
@@ -122,12 +134,13 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
   }
 
   // Render position: live cursor while dragging, stored pos if set, else
-  // the default (bottom-right near the FAB).
+  // the default (very bottom-right corner — sits next to the FAB which
+  // hides itself when the modal is open, so flush corner is safe).
   const renderStyle: React.CSSProperties = dragging && livePos
     ? { left: livePos.x, top: livePos.y, right: "auto", bottom: "auto" }
     : pos
     ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" }
-    : { right: 24, bottom: 88, left: "auto", top: "auto" };
+    : { right: 24, bottom: 24, left: "auto", top: "auto" };
 
   return (
     <>
@@ -173,11 +186,17 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
           zIndex: 1100,
           display: "flex",
           transformOrigin: pos ? "top left" : "bottom right",
+          // Animations: drag glow while dragging; pop ONLY on first mount.
+          // Subsequent renders (post-drop, store updates) get no animation —
+          // that was the source of the "bouncy on release" bug.
           animation: dragging
             ? "gooni-modal-drag-glow 1.4s ease-in-out infinite"
-            : "gooni-bubble-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+            : hasMountedRef.current
+              ? "none"
+              : "gooni-bubble-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+          // Transform stays null after drop too — no spring-back.
           transform: dragging ? "scale(1.02) rotate(-0.3deg)" : "none",
-          transition: dragging ? "none" : "transform 200ms ease",
+          transition: dragging ? "none" : "left 180ms cubic-bezier(0.22,1,0.36,1), top 180ms cubic-bezier(0.22,1,0.36,1)",
           userSelect: dragging ? "none" : undefined,
         }}
       >

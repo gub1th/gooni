@@ -50,8 +50,12 @@ const WRAPPER_H = 68;
 // back to peek (sidebar-seam fallback when no FAB rect is published).
 const SIDEBAR_SNAP_PX = 40;
 // Snap radius around the FAB center — drop the mascot inside this circle and
-// he returns to docked peek inside the FAB.
-const FAB_SNAP_RADIUS = 80;
+// he returns to docked peek inside the FAB. The FAB button is 80px square but
+// the visible AuraOrb silhouette is roughly half that wide; previously the
+// snap radius matched the bounding box (160px diameter), so drops well outside
+// the visible button still snapped. Tightened to match the orb's halo so the
+// dropzone visually aligns with what the user sees.
+const FAB_SNAP_RADIUS = 48;
 const LANDING_MS = 220;
 const TURN_MS = 200;
 // Smooth scale ramp when picking the mascot up out of the FAB.
