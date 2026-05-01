@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.6.0 — 2026-05-01 (minor)
+
+- feat: dashboard polish — sticky header, graph nav fix, recent-notes pager, settings into modal (#68)
+
 ## 0.5.1 — 2026-04-30 (patch)
 
 - fix: focuses card UI — single shared card, pulse-only primary dot, compact inline form (#65)
