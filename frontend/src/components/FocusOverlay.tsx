@@ -5,15 +5,38 @@ const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const STORAGE_KEY = "gooni-focus-mode";
 const MUTE_KEY = "gooni-focus-mode-muted";
 
-// Ambient pad — three sines tuned to a soft major-7 chord, low-passed and
-// gently swayed by an LFO. No external audio asset; generated each session
-// via Web Audio so we can ship without a binary or licensing question.
+// Wii Mii Channel-vibe ambient layer. A quiet sine pad sets the "warm
+// room tone"; over the top a sparse marimba-style pluck sequencer triggers
+// pentatonic notes every 2–4 seconds. Pure pentatonic + identical envelope
+// per note guarantees consonance — any combo sounds intentional.
 //
-// Triggered on overlay mount. Browser autoplay policy treats the click that
-// opened the overlay as a user gesture, so resume() succeeds.
-function useAmbientPad(muted: boolean) {
+// Architecture (so mute actually mutes):
+//   pluckLayer ─┐
+//               ├─► masterGain ─► destination
+//   padLayer  ─┘                     │
+//                                    └ master is set by user (mute / unmute)
+//
+// breathingGain (separate node, LFO-modulated) sits BEFORE master so the
+// LFO can swell the pad without ever bumping master back above 0. The old
+// pad bug was wiring the LFO into master.gain itself; even after
+// linearRampToValueAtTime(0) the LFO kept oscillating ±0.15, so mute
+// reduced the volume ~70% and called it a day. New graph treats master as
+// a hard gate and runs ctx.suspend() in tandem for belt-and-suspenders.
+const PAD_TARGET_GAIN = 0.06;       // very quiet bed
+const PLUCK_TARGET_GAIN = 0.45;     // headroom for pluck transients
+const FADE_IN_MS = 2200;
+// C major pentatonic across two octaves — every combination is consonant
+// so the random sequencer can't pick a "wrong" note.
+const PENTATONIC_HZ = [
+  261.63, 293.66, 329.63, 392.00, 440.00, // C4 D4 E4 G4 A4
+  523.25, 587.33, 659.25, 783.99, 880.00, // C5 D5 E5 G5 A5
+];
+
+function useWiiAmbience(muted: boolean) {
   const ctxRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
+  const sequencerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const teardownRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const Ctor = (window as unknown as {
@@ -26,65 +49,134 @@ function useAmbientPad(muted: boolean) {
     const ctx = new Ctor();
     ctxRef.current = ctx;
 
+    // Master = hard gate. Nothing else writes to this gain — mute toggles
+    // it directly, no other modulator interferes.
     const master = ctx.createGain();
-    master.gain.value = 0; // fade in
+    master.gain.value = 0;
     master.connect(ctx.destination);
     masterRef.current = master;
 
-    // Low-pass keeps the high partials from feeling glassy.
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 1100;
-    filter.Q.value = 0.6;
-    filter.connect(master);
+    // ── Pad layer ────────────────────────────────────────────────────────
+    // Two octave-stacked sines low-passed, swayed by an LFO. The LFO drives
+    // breathingGain (a node BEFORE master), so the pad swells without ever
+    // pushing master.gain above its mute target.
+    const padFilter = ctx.createBiquadFilter();
+    padFilter.type = "lowpass";
+    padFilter.frequency.value = 900;
+    padFilter.Q.value = 0.5;
+    const breathingGain = ctx.createGain();
+    breathingGain.gain.value = PAD_TARGET_GAIN;
+    padFilter.connect(breathingGain).connect(master);
 
-    // C major-7 voicing — C3, E3, G3, B3. Lower octave keeps it pad-like.
-    const freqs = [130.81, 164.81, 196.00, 246.94];
-    const oscs: OscillatorNode[] = freqs.map((f, i) => {
+    const padFreqs = [196.00, 293.66]; // G3, D4 — open fifth, no thirds
+    const padOscs = padFreqs.map((f, i) => {
       const o = ctx.createOscillator();
-      o.type = i === 0 ? "triangle" : "sine"; // root has a touch more body
+      o.type = "sine";
       o.frequency.value = f;
-      // Slight per-voice detune ~6 cents drifts the chord ever so slightly.
-      o.detune.value = (i - 1.5) * 4;
+      o.detune.value = (i - 0.5) * 6;
       const g = ctx.createGain();
-      g.gain.value = i === 0 ? 0.18 : 0.12;
-      o.connect(g).connect(filter);
+      g.gain.value = i === 0 ? 0.55 : 0.45;
+      o.connect(g).connect(padFilter);
       o.start();
       return o;
     });
 
-    // LFO on master gain — slow ~0.07Hz breathing.
     const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.07;
-    const lfoGain = ctx.createGain();
-    lfoGain.gain.value = 0.15;
-    lfo.connect(lfoGain).connect(master.gain);
+    lfo.frequency.value = 0.06;
+    const lfoDepth = ctx.createGain();
+    lfoDepth.gain.value = PAD_TARGET_GAIN * 0.4;
+    lfo.connect(lfoDepth).connect(breathingGain.gain);
     lfo.start();
 
-    // Fade in over ~3.5s
+    // ── Pluck bus ────────────────────────────────────────────────────────
+    // Each note creates its own osc+envelope, schedules itself onto pluckBus.
+    // Bus carries a soft low-pass + soft high-shelf so the marimba reads
+    // warm, not glassy.
+    const pluckBus = ctx.createGain();
+    pluckBus.gain.value = PLUCK_TARGET_GAIN;
+    const pluckLP = ctx.createBiquadFilter();
+    pluckLP.type = "lowpass";
+    pluckLP.frequency.value = 3500;
+    pluckLP.Q.value = 0.4;
+    pluckBus.connect(pluckLP).connect(master);
+
+    function playPluck(freq: number, when: number) {
+      // Marimba-ish: triangle fundamental + sine octave at 1/3 amplitude.
+      // 5ms attack, 900ms exp decay — woody, not bell-like.
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0, when);
+      env.gain.linearRampToValueAtTime(0.9, when + 0.005);
+      env.gain.exponentialRampToValueAtTime(0.001, when + 1.0);
+      env.connect(pluckBus);
+
+      const fund = ctx.createOscillator();
+      fund.type = "triangle";
+      fund.frequency.value = freq;
+      const fundGain = ctx.createGain();
+      fundGain.gain.value = 0.7;
+      fund.connect(fundGain).connect(env);
+
+      const harm = ctx.createOscillator();
+      harm.type = "sine";
+      harm.frequency.value = freq * 2;
+      const harmGain = ctx.createGain();
+      harmGain.gain.value = 0.22;
+      harm.connect(harmGain).connect(env);
+
+      fund.start(when);
+      harm.start(when);
+      fund.stop(when + 1.1);
+      harm.stop(when + 1.1);
+    }
+
+    function scheduleNext() {
+      // Every 1.8–4.2s pick a random pentatonic note + the occasional rest.
+      // 12% silent ticks keep it from feeling like a machine.
+      const wait = 1800 + Math.random() * 2400;
+      sequencerRef.current = setTimeout(() => {
+        if (Math.random() > 0.12) {
+          const f = PENTATONIC_HZ[Math.floor(Math.random() * PENTATONIC_HZ.length)];
+          playPluck(f, ctx.currentTime + 0.02);
+        }
+        scheduleNext();
+      }, wait);
+    }
+    scheduleNext();
+
+    // Fade master in (only if not starting muted).
     const now = ctx.currentTime;
     master.gain.cancelScheduledValues(now);
     master.gain.setValueAtTime(0, now);
-    master.gain.linearRampToValueAtTime(muted ? 0 : 0.5, now + 3.5);
+    if (!muted) {
+      master.gain.linearRampToValueAtTime(1, now + FADE_IN_MS / 1000);
+    }
+    if (muted && ctx.state === "running") ctx.suspend().catch(() => {});
+    if (!muted && ctx.state === "suspended") ctx.resume().catch(() => {});
 
-    if (ctx.state === "suspended") ctx.resume().catch(() => {});
-
-    return () => {
+    teardownRef.current = () => {
+      if (sequencerRef.current) {
+        clearTimeout(sequencerRef.current);
+        sequencerRef.current = null;
+      }
       try {
         const t = ctx.currentTime;
         master.gain.cancelScheduledValues(t);
         master.gain.setValueAtTime(master.gain.value, t);
-        master.gain.linearRampToValueAtTime(0, t + 0.6);
-        oscs.forEach((o) => { try { o.stop(t + 0.7); } catch {} });
-        try { lfo.stop(t + 0.7); } catch {}
-        setTimeout(() => { try { ctx.close(); } catch {} }, 800);
+        master.gain.linearRampToValueAtTime(0, t + 0.5);
+        padOscs.forEach((o) => { try { o.stop(t + 0.6); } catch {} });
+        try { lfo.stop(t + 0.6); } catch {}
+        setTimeout(() => { try { ctx.close(); } catch {} }, 700);
       } catch { /* ignore */ }
       ctxRef.current = null;
       masterRef.current = null;
     };
+    return () => { teardownRef.current?.(); };
   }, []);
 
-  // Live-toggle mute without rebuilding the graph.
+  // Live mute toggle — both gate the gain AND suspend the context. Either
+  // alone leaves audible residue: gain ramp can be intercepted by node
+  // automation, suspend alone leaves the gain at ~1 if you unmute via
+  // resume(). Doing both is cheap and makes mute feel instant + complete.
   useEffect(() => {
     const ctx = ctxRef.current;
     const master = masterRef.current;
@@ -92,7 +184,17 @@ function useAmbientPad(muted: boolean) {
     const t = ctx.currentTime;
     master.gain.cancelScheduledValues(t);
     master.gain.setValueAtTime(master.gain.value, t);
-    master.gain.linearRampToValueAtTime(muted ? 0 : 0.5, t + 0.4);
+    master.gain.linearRampToValueAtTime(muted ? 0 : 1, t + 0.25);
+    if (muted) {
+      // Suspend after the ramp completes so we don't cut the fade-out.
+      setTimeout(() => {
+        if (ctxRef.current?.state === "running") {
+          ctxRef.current.suspend().catch(() => {});
+        }
+      }, 280);
+    } else if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
   }, [muted]);
 }
 
@@ -142,7 +244,7 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
   });
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useAmbientPad(muted);
+  useWiiAmbience(muted);
 
   function toggleMuted() {
     setMuted((prev) => {
