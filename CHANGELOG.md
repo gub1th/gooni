@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.14.0 — 2026-05-01 (minor)
+
+- feat: dashboard FlipStat — single-column header, rotating stat card (#85)
+
 ## 0.13.6 — 2026-05-01 (patch)
 
 - fix(focus): mute actually mutes + nicer Wii-vibe ambience (#84)
