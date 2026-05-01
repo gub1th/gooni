@@ -2,31 +2,61 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+const STORAGE_KEY = "gooni-focus-mode";
 
-// Distraction-free overlay anchored on a single focus name. The whole app
-// dims under a blurred backdrop; a meditating Gooni floats in the middle and
-// the focus name reads at the top. The X exit only surfaces when the mouse
-// moves and fades out after ~2s of stillness — keeps the canvas calm.
+// Distraction-free overlay anchored on a single focus name. Mounting persists
+// to localStorage so reload doesn't drop you out of focus mode mid-session;
+// `started_at` is also saved so the elapsed timer keeps counting from the
+// real start moment (not the moment the page reloaded).
 //
-// Uses fixed positioning + portal-less render (mount inside the parent's tree
-// so theme vars cascade). Esc also exits.
+// Chrome (top bar + timer + esc hint + cursor) fades after ~2s of mouse
+// stillness and returns on movement. Esc also exits.
+
+export interface FocusModeState {
+  focusId: number;
+  focusName: string;
+  startedAt: number; // epoch ms
+}
+
+export function loadFocusMode(): FocusModeState | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.startedAt !== "number" || typeof parsed?.focusName !== "string") return null;
+    return parsed as FocusModeState;
+  } catch { return null; }
+}
+
+export function saveFocusMode(state: FocusModeState) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+}
+
+export function clearFocusMode() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch {}
+}
 
 interface FocusOverlayProps {
   focusName: string;
+  startedAt: number;
   onExit: () => void;
 }
 
-export function FocusOverlay({ focusName, onExit }: FocusOverlayProps) {
+export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps) {
   const [chromeVisible, setChromeVisible] = useState(true);
+  const [elapsed, setElapsed] = useState(() => Date.now() - startedAt);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onExit();
-    }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onExit(); }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onExit]);
+
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
 
   function bump() {
     setChromeVisible(true);
@@ -61,7 +91,7 @@ export function FocusOverlay({ focusName, onExit }: FocusOverlayProps) {
     >
       <style>{KEYFRAMES}</style>
 
-      {/* Top bar — focus title + exit */}
+      {/* Top bar — focus title + exit. Fades alongside chrome. */}
       <div
         style={{
           position: "absolute",
@@ -82,7 +112,6 @@ export function FocusOverlay({ focusName, onExit }: FocusOverlayProps) {
             display: "flex",
             alignItems: "baseline",
             gap: 14,
-            color: "rgba(255,255,255,0.78)",
           }}
         >
           <span
@@ -145,114 +174,147 @@ export function FocusOverlay({ focusName, onExit }: FocusOverlayProps) {
         </button>
       </div>
 
-      {/* Mascot — meditating Gooni, floats with a slow up-down cycle. */}
-      <div
-        style={{
-          animation: "gooni-meditate-float 4.5s ease-in-out infinite",
-        }}
-      >
-        <MeditatingGooni />
+      {/* Mascot — meditating Gooni with a subtle aura glow behind it. The
+          glow is a slow-pulsing soft ring; the figure itself just floats. */}
+      <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            width: 360,
+            height: 360,
+            borderRadius: "50%",
+            background:
+              "radial-gradient(circle, rgba(74,222,128,0.22) 0%, rgba(74,222,128,0.05) 55%, rgba(74,222,128,0) 75%)",
+            filter: "blur(2px)",
+            animation: "gooni-aura-pulse 5.5s ease-in-out infinite",
+          }}
+        />
+        <div style={{ animation: "gooni-meditate-float 4s ease-in-out infinite", position: "relative" }}>
+          <MeditatingGooni />
+        </div>
       </div>
 
-      {/* Hint — fades alongside chrome. */}
+      {/* Timer + esc hint — bottom band; both fade with chrome. */}
       <div
         style={{
           position: "absolute",
           bottom: 36,
           left: 0,
           right: 0,
-          textAlign: "center",
-          fontSize: 11,
-          color: "rgba(255,255,255,0.36)",
-          letterSpacing: 1.6,
-          textTransform: "uppercase",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 10,
           opacity: chromeVisible ? 1 : 0,
           transition: "opacity 480ms ease",
+          pointerEvents: chromeVisible ? "auto" : "none",
         }}
       >
-        press esc to exit
+        <div
+          style={{
+            fontVariantNumeric: "tabular-nums",
+            fontSize: 28,
+            fontWeight: 300,
+            color: "rgba(255,255,255,0.85)",
+            letterSpacing: 1.5,
+          }}
+        >
+          {formatElapsed(elapsed)}
+        </div>
+        <div
+          style={{
+            fontSize: 11,
+            color: "rgba(255,255,255,0.36)",
+            letterSpacing: 1.6,
+            textTransform: "uppercase",
+          }}
+        >
+          press esc to exit
+        </div>
       </div>
     </div>
   );
 }
 
-// Inline SVG so the overlay has no asset dependency. Round body, crossed-leg
-// silhouette, hands resting at the knees, eyes closed (small arcs). Soft
-// gradient + glow ring around it matches the calm vibe.
+// Inline SVG mirroring `meditation_gooni_fixed.html` — black silhouette body,
+// green torso + aura ring, hands resting on knees, closed-eye arcs. The
+// ground shadow scale-pulses in counter-rhythm with the float for the
+// "settled in zen" vibe.
 function MeditatingGooni() {
   return (
     <svg
-      width="240"
-      height="240"
-      viewBox="0 0 240 240"
+      width="280"
+      height="300"
+      viewBox="0 0 140 150"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      style={{ filter: "drop-shadow(0 24px 60px rgba(74,222,128,0.25))" }}
+      style={{ filter: "drop-shadow(0 24px 60px rgba(74,222,128,0.18))" }}
     >
-      <defs>
-        <radialGradient id="gooniGlow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="rgba(74,222,128,0.35)" />
-          <stop offset="60%" stopColor="rgba(74,222,128,0.05)" />
-          <stop offset="100%" stopColor="rgba(74,222,128,0)" />
-        </radialGradient>
-        <radialGradient id="gooniBody" cx="50%" cy="40%" r="60%">
-          <stop offset="0%" stopColor="#FBFFF6" />
-          <stop offset="60%" stopColor="#E2F8E0" />
-          <stop offset="100%" stopColor="#A6E3A4" />
-        </radialGradient>
-      </defs>
-
-      {/* Aura */}
-      <circle cx="120" cy="120" r="115" fill="url(#gooniGlow)" />
-
-      {/* Crossed legs — two soft loops at the bottom */}
-      <ellipse cx="92" cy="170" rx="42" ry="14" fill="#7AC97A" opacity="0.55" />
-      <ellipse cx="148" cy="170" rx="42" ry="14" fill="#7AC97A" opacity="0.55" />
-      <path
-        d="M 60 170 Q 120 142 180 170 Q 168 184 120 184 Q 72 184 60 170 Z"
-        fill="#9BD89B"
+      {/* Ground shadow — pulses with float for parallax */}
+      <ellipse
+        cx="70" cy="142" rx="32" ry="6" fill="#4ADE80" opacity="0.3"
+        style={{
+          transformOrigin: "70px 142px",
+          animation: "gooni-shadow-pulse 4s ease-in-out infinite",
+        }}
       />
 
-      {/* Body */}
-      <circle cx="120" cy="120" r="62" fill="url(#gooniBody)" stroke="#7AC97A" strokeWidth="1.5" />
+      {/* Right leg (back) — folded left */}
+      <ellipse cx="50" cy="110" rx="16" ry="8" fill="#1a1a1a" transform="rotate(-15 50 110)" />
+      {/* Left leg (front) — folded right */}
+      <ellipse cx="90" cy="110" rx="16" ry="8" fill="#1a1a1a" transform="rotate(15 90 110)" />
+      {/* Right foot peeking out on left side */}
+      <ellipse cx="44" cy="113" rx="8" ry="5" fill="#1a1a1a" />
+      {/* Left foot peeking out on right side */}
+      <ellipse cx="96" cy="113" rx="8" ry="5" fill="#1a1a1a" />
 
-      {/* Hands resting on knees */}
-      <circle cx="68" cy="158" r="10" fill="#FBFFF6" stroke="#7AC97A" strokeWidth="1.2" />
-      <circle cx="172" cy="158" r="10" fill="#FBFFF6" stroke="#7AC97A" strokeWidth="1.2" />
-      {/* Tiny finger curls (OK gesture vibe) */}
-      <circle cx="65" cy="155" r="2" fill="#7AC97A" />
-      <circle cx="175" cy="155" r="2" fill="#7AC97A" />
+      {/* Seat base where legs meet */}
+      <ellipse cx="70" cy="108" rx="24" ry="14" fill="#1a1a1a" />
 
-      {/* Eyes — closed, gentle arcs */}
-      <path
-        d="M 96 116 Q 104 110 112 116"
-        stroke="#2F4F2F"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        fill="none"
-      />
-      <path
-        d="M 128 116 Q 136 110 144 116"
-        stroke="#2F4F2F"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        fill="none"
-      />
+      {/* Torso */}
+      <rect x="54" y="72" width="32" height="38" rx="8" fill="#4ADE80" />
 
-      {/* Calm smile */}
-      <path
-        d="M 108 138 Q 120 144 132 138"
-        stroke="#2F4F2F"
-        strokeWidth="2"
-        strokeLinecap="round"
-        fill="none"
-      />
+      {/* Arms curved down to knees */}
+      <path d="M54 85 Q40 95 38 108" stroke="#1a1a1a" strokeWidth="8" strokeLinecap="round" fill="none" />
+      <path d="M86 85 Q100 95 102 108" stroke="#1a1a1a" strokeWidth="8" strokeLinecap="round" fill="none" />
 
-      {/* Forehead bindi-style dot — focus point */}
-      <circle cx="120" cy="92" r="2.4" fill="#4ADE80" opacity="0.85" />
+      {/* Hands on knees */}
+      <circle cx="37" cy="109" r="6" fill="#1a1a1a" />
+      <circle cx="103" cy="109" r="6" fill="#1a1a1a" />
+
+      {/* Head — black silhouette ring + cream face */}
+      <circle cx="70" cy="52" r="30" fill="#1a1a1a" />
+      <circle cx="70" cy="52" r="24" fill="#f2f2f2" />
+
+      {/* Closed eyes */}
+      <path d="M58 50 Q61 47 64 50" stroke="#1a1a1a" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+      <path d="M76 50 Q79 47 82 50" stroke="#1a1a1a" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+
+      {/* Smile */}
+      <path d="M62 60 Q70 64 78 60" stroke="#1a1a1a" strokeWidth="2" fill="none" strokeLinecap="round" />
+
+      {/* Aura ring behind head */}
+      <circle cx="70" cy="52" r="34" fill="none" stroke="#4ADE80" strokeWidth="1.5" opacity="0.2" />
+
+      {/* Energy dots above head */}
+      <circle cx="70" cy="16" r="3" fill="#4ADE80" opacity="0.6" />
+      <circle cx="82" cy="20" r="2" fill="#4ADE80" opacity="0.4" />
+      <circle cx="58" cy="20" r="2" fill="#4ADE80" opacity="0.4" />
     </svg>
   );
 }
+
+function formatElapsed(ms: number): string {
+  if (ms < 0) ms = 0;
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${pad(m)}:${pad(s)}`;
+}
+function pad(n: number) { return n.toString().padStart(2, "0"); }
 
 const KEYFRAMES = `
 @keyframes gooni-focus-fade-in {
@@ -261,6 +323,14 @@ const KEYFRAMES = `
 }
 @keyframes gooni-meditate-float {
   0%, 100% { transform: translateY(0px); }
-  50%      { transform: translateY(-14px); }
+  50%      { transform: translateY(-12px); }
+}
+@keyframes gooni-shadow-pulse {
+  0%, 100% { transform: scaleX(1);   opacity: 0.30; }
+  50%      { transform: scaleX(0.8); opacity: 0.15; }
+}
+@keyframes gooni-aura-pulse {
+  0%, 100% { transform: scale(0.92); opacity: 0.85; }
+  50%      { transform: scale(1.08); opacity: 1; }
 }
 `;
