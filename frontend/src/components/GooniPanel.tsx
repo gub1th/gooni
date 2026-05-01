@@ -705,28 +705,35 @@ function ChatHeader() {
 
   return (
     <div
-      data-gooni-drag-handle={surface === "modal" ? "true" : undefined}
       style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "10px 14px",
         borderBottom: "0.5px solid rgba(0,0,0,0.08)",
         flexShrink: 0,
         fontFamily: FONT,
-        cursor: surface === "modal" ? "grab" : "default",
         userSelect: "none",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {/* Drag handle scoped to the title block ONLY — putting it on the
+          whole header eats clicks on the kebab + close buttons. */}
+      <div
+        data-gooni-drag-handle={surface === "modal" ? "true" : undefined}
+        style={{
+          display: "flex", alignItems: "center", gap: 8,
+          flex: 1, minWidth: 0,
+          cursor: surface === "modal" ? "grab" : "default",
+          padding: "2px 0",
+        }}
+      >
         <div
           aria-hidden
           style={{
-            width: 22, height: 22, borderRadius: "50%",
+            width: 8, height: 8, borderRadius: "50%",
             background: "#4ADE80",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 11,
-            boxShadow: "0 1px 3px rgba(74,222,128,0.35)",
+            boxShadow: "0 0 0 3px rgba(74,222,128,0.18)",
+            flexShrink: 0,
           }}
-        >🌱</div>
+        />
         <span style={{ fontSize: 14, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)" }}>
           Chat with Gooni
         </span>
