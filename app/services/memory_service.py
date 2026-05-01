@@ -33,8 +33,20 @@ MIN_EXCHANGE_LEN = 30
 # *consider* contradictions, not just exact dupes.
 RECONCILE_SIMILARITY_FLOOR = 0.70
 
+# Preferences are paraphrased a lot ("avoid being too directive" vs "less
+# directive" vs "be concise"). Dropping the floor lets near-paraphrases
+# surface as reconcile candidates so the LLM can collapse them into NONE
+# / UPDATE instead of writing a duplicate row. Other types keep the
+# stricter floor — they're declarative enough that surface similarity
+# tracks semantic similarity well.
+RECONCILE_PREFERENCE_FLOOR = 0.55
+
 # Number of similar existing memories pulled per candidate during reconcile.
 RECONCILE_TOP_K = 3
+# Preferences also get more candidate headroom — with N prefs in the DB,
+# top-3 can miss the actual paraphrase if unrelated-but-lexically-similar
+# rows rank higher.
+RECONCILE_PREFERENCE_TOP_K = 6
 
 # Retrieval limits when injecting into the system prompt.
 RETRIEVAL_TOP_K = 5
@@ -53,6 +65,30 @@ MAX_CANDIDATE_LEN = 600
 # Prefix on the `key` column used for feedback-derived preferences. Lets the
 # undo command find feedback memories without touching user-curated ones.
 _FEEDBACK_KEY_PREFIX = "feedback__"
+
+# Stopwords stripped during the deterministic dedup normalize. Tiny set —
+# only the words that genuinely add no semantic signal in profile content
+# ("user prefers X" vs "X" should dedupe). Bigger lists risk collapsing
+# meaningfully different rules together.
+_DEDUP_STOPWORDS = {
+    "a", "an", "the", "is", "to", "be", "of",
+    "user", "daniel", "i", "my", "me",
+    "prefers", "prefer", "wants", "want", "likes", "like", "enjoys",
+}
+
+
+def _normalize_for_dedup(text: str) -> str:
+    """Lowercase, strip punctuation, drop stopwords, collapse whitespace.
+    Returns "" for empty/garbage input. Used as a deterministic pre-LLM
+    dedup key — two memories whose normalized form is identical are treated
+    as duplicates. Cheap (~10µs) so we run it on every reconcile."""
+    if not text:
+        return ""
+    import re as _re
+    t = text.lower()
+    t = _re.sub(r"[^a-z0-9\s]", " ", t)
+    tokens = [w for w in t.split() if w and w not in _DEDUP_STOPWORDS]
+    return " ".join(tokens)
 
 
 def _slug_rule(rule: str) -> str:
@@ -270,11 +306,39 @@ class MemoryService:
     ) -> Memory | None:
         """Returns the Memory row written (ADD/UPDATE), or None when the
         decision was NONE / DELETE-only / reconcile failed without a write."""
+        # Cheap deterministic dedup BEFORE the LLM call: if the candidate's
+        # normalized content matches an existing active memory of the same
+        # type, treat as NONE — bump confidence on the existing row and
+        # skip the LLM. Catches exact + near-exact dupes (case, punctuation,
+        # whitespace, leading "User prefers" vs "user prefers"). Without this,
+        # every "User prefers concise responses" rephrase ate an LLM call AND
+        # often slipped through reconcile because cosine missed it.
+        cand_norm = _normalize_for_dedup(candidate.get("content", ""))
+        if cand_norm:
+            same_type_active = (
+                db.query(Memory)
+                .filter(
+                    Memory.type == candidate["type"],
+                    Memory.is_active == True,
+                )
+                .all()
+            )
+            for m in same_type_active:
+                if _normalize_for_dedup(m.content or "") == cand_norm:
+                    self._apply_none(db, m.id)
+                    return None
+
         embedding = self._embed(candidate["content"])
         # Skip embedding-less candidates only on the search side; we still
         # want to ADD them so the memory isn't lost.
         existing: list[dict] = []
         seen_ids: set[int] = set()
+
+        # Per-type tuning: prefs get a lower floor + higher top_k since
+        # paraphrases are common and we'd rather over-recall than miss a dupe.
+        is_pref = candidate.get("type") == "preference"
+        floor = RECONCILE_PREFERENCE_FLOOR if is_pref else RECONCILE_SIMILARITY_FLOOR
+        top_k = RECONCILE_PREFERENCE_TOP_K if is_pref else RECONCILE_TOP_K
 
         # Key-based retrieval first — catches "prefers dark mode" → "prefers
         # light mode" contradictions where cosine sim is misleadingly low
@@ -300,14 +364,14 @@ class MemoryService:
                 db,
                 embedding,
                 type_filter=[candidate["type"]],
-                limit=RECONCILE_TOP_K,
-                floor=RECONCILE_SIMILARITY_FLOOR,
+                limit=top_k,
+                floor=floor,
             )
             for m, _ in similar:
                 if m.id not in seen_ids:
                     seen_ids.add(m.id)
                     existing.append(_serialize(m))
-            existing = existing[:RECONCILE_TOP_K + 2]  # cap so prompt stays bounded
+            existing = existing[:top_k + 2]  # cap so prompt stays bounded
 
         decision = reconcile_candidate(candidate, existing)
         if not decision:

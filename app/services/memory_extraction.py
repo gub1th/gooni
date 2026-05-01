@@ -43,7 +43,10 @@ Schema per item:
 
 Rules:
 - Only extract PERSISTENT info — not temporary states or one-off remarks
-- "preference" = stable likes/dislikes (e.g. "prefers dark mode IDE")
+- "preference" = stable likes/dislikes (e.g. "prefers dark mode IDE").
+  HIGH BAR: only use this when Daniel is explicitly stating a stable
+  taste / style rule. Do NOT use it for chat transcripts, todo lists,
+  in-progress thoughts, or summaries of what the assistant just said.
 - "goal" = aspiration, has a desired outcome
 - "fact" = declarative truth about Daniel
 - "routine" = recurring habit/pattern
@@ -53,6 +56,17 @@ Rules:
 - scope: "global" = always applies; "contextual" = situation-specific
 - confidence: 0.85+ for explicit statements; 0.6-0.7 for inferences
 - Return [] if nothing extractable
+
+Anti-examples — DO NOT extract these as preferences:
+- A chat transcript snippet recapping the assistant's reply ("The user
+  inquired about X, the assistant said Y…") — that's an episode at best,
+  often nothing. Never a preference.
+- A todo list / planning bullet ("Finish resume / Email George / Buy X").
+  Never a preference. Skip entirely or treat as episode if notable.
+- The assistant restating its own behavior ("I will adjust as needed"). Skip.
+- "User wants Gooni to handle Markdown formatting" when this is just the
+  assistant agreeing to a one-off ask — preference only if Daniel asserts
+  a stable style.
 
 Examples:
 - "I prefer hot coffee" → preference, coffee_temperature, hot, global, 0.9
@@ -81,13 +95,18 @@ Pick exactly one action:
   "I switched to light mode" when there's an existing "prefers dark mode" —
   delete the old one and ADD the new one separately; you can return DELETE
   here and the caller will run a follow-up ADD)
-- "NONE" if this is already known (just bump confidence on the matched id)
+- "NONE" if this is already known (just bump confidence on the matched id).
+  PARAPHRASES ALWAYS COUNT AS NONE: if the candidate restates an existing
+  rule with different words but the same meaning, return NONE. Be greedy
+  about this — duplication compounds and bloats the system prompt.
 
 Return ONLY a JSON object. No preamble, no fence:
 {{"action": "ADD" | "UPDATE" | "DELETE" | "NONE", "target_id": int | null, "reason": "short why"}}
 
 Examples:
 - candidate "prefers dark IDE", existing has same → {{"action":"NONE","target_id":2,"reason":"already known"}}
+- candidate "wants concise responses", existing "User prefers concise responses" id=7 → {{"action":"NONE","target_id":7,"reason":"paraphrase of same rule"}}
+- candidate "less directive", existing "avoid being too directive or harsh" id=12 → {{"action":"NONE","target_id":12,"reason":"narrower paraphrase, same intent"}}
 - candidate "switched to light mode", existing has "prefers dark mode" id=2 → {{"action":"UPDATE","target_id":2,"reason":"preference flipped"}}
 - candidate "allergic to peanuts", existing empty → {{"action":"ADD","target_id":null,"reason":"new constraint"}}
 
