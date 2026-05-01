@@ -1,8 +1,100 @@
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { X, Volume2, VolumeX } from "lucide-react";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const STORAGE_KEY = "gooni-focus-mode";
+const MUTE_KEY = "gooni-focus-mode-muted";
+
+// Ambient pad — three sines tuned to a soft major-7 chord, low-passed and
+// gently swayed by an LFO. No external audio asset; generated each session
+// via Web Audio so we can ship without a binary or licensing question.
+//
+// Triggered on overlay mount. Browser autoplay policy treats the click that
+// opened the overlay as a user gesture, so resume() succeeds.
+function useAmbientPad(muted: boolean) {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const masterRef = useRef<GainNode | null>(null);
+
+  useEffect(() => {
+    const Ctor = (window as unknown as {
+      AudioContext?: typeof AudioContext;
+      webkitAudioContext?: typeof AudioContext;
+    }).AudioContext || (window as unknown as {
+      webkitAudioContext?: typeof AudioContext;
+    }).webkitAudioContext;
+    if (!Ctor) return;
+    const ctx = new Ctor();
+    ctxRef.current = ctx;
+
+    const master = ctx.createGain();
+    master.gain.value = 0; // fade in
+    master.connect(ctx.destination);
+    masterRef.current = master;
+
+    // Low-pass keeps the high partials from feeling glassy.
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 1100;
+    filter.Q.value = 0.6;
+    filter.connect(master);
+
+    // C major-7 voicing — C3, E3, G3, B3. Lower octave keeps it pad-like.
+    const freqs = [130.81, 164.81, 196.00, 246.94];
+    const oscs: OscillatorNode[] = freqs.map((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = i === 0 ? "triangle" : "sine"; // root has a touch more body
+      o.frequency.value = f;
+      // Slight per-voice detune ~6 cents drifts the chord ever so slightly.
+      o.detune.value = (i - 1.5) * 4;
+      const g = ctx.createGain();
+      g.gain.value = i === 0 ? 0.18 : 0.12;
+      o.connect(g).connect(filter);
+      o.start();
+      return o;
+    });
+
+    // LFO on master gain — slow ~0.07Hz breathing.
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.07;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 0.15;
+    lfo.connect(lfoGain).connect(master.gain);
+    lfo.start();
+
+    // Fade in over ~3.5s
+    const now = ctx.currentTime;
+    master.gain.cancelScheduledValues(now);
+    master.gain.setValueAtTime(0, now);
+    master.gain.linearRampToValueAtTime(muted ? 0 : 0.5, now + 3.5);
+
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+
+    return () => {
+      try {
+        const t = ctx.currentTime;
+        master.gain.cancelScheduledValues(t);
+        master.gain.setValueAtTime(master.gain.value, t);
+        master.gain.linearRampToValueAtTime(0, t + 0.6);
+        oscs.forEach((o) => { try { o.stop(t + 0.7); } catch {} });
+        try { lfo.stop(t + 0.7); } catch {}
+        setTimeout(() => { try { ctx.close(); } catch {} }, 800);
+      } catch { /* ignore */ }
+      ctxRef.current = null;
+      masterRef.current = null;
+    };
+  }, []);
+
+  // Live-toggle mute without rebuilding the graph.
+  useEffect(() => {
+    const ctx = ctxRef.current;
+    const master = masterRef.current;
+    if (!ctx || !master) return;
+    const t = ctx.currentTime;
+    master.gain.cancelScheduledValues(t);
+    master.gain.setValueAtTime(master.gain.value, t);
+    master.gain.linearRampToValueAtTime(muted ? 0 : 0.5, t + 0.4);
+  }, [muted]);
+}
 
 // Distraction-free overlay anchored on a single focus name. Mounting persists
 // to localStorage so reload doesn't drop you out of focus mode mid-session;
@@ -45,7 +137,20 @@ interface FocusOverlayProps {
 export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps) {
   const [chromeVisible, setChromeVisible] = useState(true);
   const [elapsed, setElapsed] = useState(() => Date.now() - startedAt);
+  const [muted, setMuted] = useState(() => {
+    try { return localStorage.getItem(MUTE_KEY) === "1"; } catch { return false; }
+  });
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useAmbientPad(muted);
+
+  function toggleMuted() {
+    setMuted((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(MUTE_KEY, next ? "1" : "0"); } catch {}
+      return next;
+    });
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onExit(); }
@@ -142,36 +247,23 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
           </span>
         </div>
 
-        <button
-          onClick={onExit}
-          aria-label="Exit focus mode"
-          style={{
-            position: "absolute",
-            top: 0,
-            right: 24,
-            width: 36,
-            height: 36,
-            borderRadius: "50%",
-            border: "none",
-            background: "rgba(255,255,255,0.08)",
-            color: "rgba(255,255,255,0.7)",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "background 0.15s, color 0.15s",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.16)";
-            (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.95)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.08)";
-            (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.7)";
-          }}
-        >
-          <X size={18} />
-        </button>
+        <div style={{
+          position: "absolute",
+          top: 0,
+          right: 24,
+          display: "flex",
+          gap: 8,
+        }}>
+          <ChromeButton
+            label={muted ? "Unmute" : "Mute"}
+            onClick={toggleMuted}
+          >
+            {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+          </ChromeButton>
+          <ChromeButton label="Exit focus mode" onClick={onExit}>
+            <X size={18} />
+          </ChromeButton>
+        </div>
       </div>
 
       {/* Mascot — meditating Gooni with a subtle aura glow behind it. The
@@ -241,6 +333,39 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
 // green torso + aura ring, hands resting on knees, closed-eye arcs. The
 // ground shadow scale-pulses in counter-rhythm with the float for the
 // "settled in zen" vibe.
+function ChromeButton({ label, onClick, children }: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      style={{
+        width: 36, height: 36,
+        borderRadius: "50%", border: "none",
+        background: "rgba(255,255,255,0.08)",
+        color: "rgba(255,255,255,0.7)",
+        cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        transition: "background 0.15s, color 0.15s",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.16)";
+        (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.95)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.08)";
+        (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.7)";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 function MeditatingGooni() {
   return (
     <svg
