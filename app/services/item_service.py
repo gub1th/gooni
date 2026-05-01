@@ -11,12 +11,14 @@ Top-level focus items live under the canonical "Focuses" List
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from ..db.models import List as ListModel, ListItem
+from .list_service import _item_embed_text, list_service
 
 
 _FOCUS_LIST_NAME = "Focuses"
@@ -91,6 +93,11 @@ class ItemService:
         # legacy callers and the unified extractor working without a flag.
         if status is None:
             status = "committed" if committed else "someday"
+        # Embed up-front so the row is immediately searchable by the
+        # conflict-detection / similarity helpers. Best-effort — failures
+        # don't block the insert.
+        embed_raw = _item_embed_text(text, endgoal)
+        embed_vec = list_service._embed_item_text(embed_raw)
         item = ListItem(
             list_id=list_id,
             parent_id=parent_id,
@@ -102,6 +109,7 @@ class ItemService:
             sort_order=max_order + 1,
             status=status,
             scale=scale,
+            embedding=json.dumps(embed_vec) if embed_vec else None,
         )
         db.add(item)
         db.commit()
@@ -145,6 +153,13 @@ class ItemService:
             # Flipping to idea clears completion state.
             item.done = False
             item.completed_at = None
+        # Re-embed on text/endgoal/subtitle edits so similarity hits stay
+        # accurate after rewords.
+        if any(k in patch for k in ("text", "endgoal", "subtitle")):
+            embed_raw = _item_embed_text(item.text, item.endgoal or item.subtitle)
+            vec = list_service._embed_item_text(embed_raw)
+            if vec:
+                item.embedding = json.dumps(vec)
         db.commit()
         db.refresh(item)
         return item

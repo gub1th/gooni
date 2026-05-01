@@ -93,7 +93,8 @@ Exposes Gooni to Claude Code via stdio. Tools:
 - `list_spaces()` — list all spaces
 - `list_notes(space_id, limit)` — browse notes in a space
 - `read_list(list_ref="backlog", limit, include_done)` — read items from any list. Resolves by type ("backlog"/"todo"/"focus") → name → numeric id, so callers don't hard-code shifting ids.
-- `add_list_item(text, list_ref="backlog", subtitle?)` — add to a list
+- `add_list_item(text, list_ref="backlog", subtitle?, skip_conflict_check=False)` — add to a list. Cosine-checks against existing items; near-duplicates surface as `conflicts: [{id, text, similarity, severity}]` in the response so the caller (or user) can merge instead of stacking dupes. Pass `skip_conflict_check=True` for bulk imports.
+- `find_similar_items(text, list_ref="backlog", threshold=0.78, limit=5)` — read-only similarity search over a list, no insert. Use before adding to confirm an idea doesn't already exist.
 - `check_list_item(match, list_ref="backlog", done=True)` — toggle done by text match (first-hit-wins)
 - `delete_list_item(match, list_ref="backlog")` — delete by text match; refuses ambiguous matches
 
@@ -157,6 +158,9 @@ GET  /items                     → focus + inbox tree (now includes status, sca
 POST /items                     → create item; accepts status, scale, is_primary in body
 PATCH /items/{id}               → patches now accept status + scale; status syncs `committed`
 GET  /items/suggest-focus       → LLM proposes one new focus { text, endgoal?, scale? }
+
+POST /lists/{id}/items          → add item; response includes `conflicts: [{id, text, similarity, severity}]` for near-duplicates already in the list. Pass `skip_conflict_check: true` to bypass the embed scan.
+POST /lists/{id}/similar        → cosine-search a list { text, threshold?, limit?, include_done?, exclude_item_id? } → { matches: [{id, text, similarity}] }. Read-only.
 ```
 
 ### Focus model fields
