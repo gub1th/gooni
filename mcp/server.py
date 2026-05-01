@@ -17,7 +17,10 @@ BASE_URL = os.getenv("GOONI_URL", "http://localhost:8000")
 # If GOONI_AUTH_PASSWORD is unset (e.g. running against unauthenticated dev),
 # the header is omitted and the backend lets requests through.
 _AUTH_PASSWORD = os.getenv("GOONI_AUTH_PASSWORD", "").strip()
-_session_headers: dict[str, str] = {}
+# Tag every outbound request so the backend can log MCP activity separately
+# from regular browser/web traffic. Surfaces as a "claude activity" stat on
+# the dashboard without needing to reach into Claude Code internals.
+_session_headers: dict[str, str] = {"X-Gooni-Source": "mcp"}
 if _AUTH_PASSWORD:
     _token = hashlib.sha256(_AUTH_PASSWORD.encode()).hexdigest()
     _session_headers["Authorization"] = f"Bearer {_token}"

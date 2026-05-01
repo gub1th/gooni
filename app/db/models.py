@@ -137,6 +137,21 @@ class Visit(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+class McpCall(Base):
+    """Append-only log of HTTP requests originating from the Gooni MCP server.
+    The MCP client tags itself with `X-Gooni-Source: mcp`; the auth middleware
+    inserts a row per matched request. Surfaced as a dashboard "claude
+    activity" stat — gives Daniel a glance at how active Claude has been
+    against Gooni without depending on Claude Code internals.
+    """
+
+    __tablename__ = "mcp_calls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    path = Column(Text, nullable=False)
+    called_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class Memory(Base):
     """Daniel's persistent knowledge of himself. Replaces the Mem0 hosted
     service with a local SQL store + LLM extraction + LLM reconciliation.
