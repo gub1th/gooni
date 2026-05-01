@@ -39,6 +39,14 @@ RECONCILE_TOP_K = 3
 # Retrieval limits when injecting into the system prompt.
 RETRIEVAL_TOP_K = 5
 
+# Cap on feedback-derived preferences (key prefixed with `feedback__`) that
+# get always-injected. Without this, every tone correction Daniel ever wrote
+# accumulates and bloats the system prompt — saw a turn pulling 50+ active
+# preferences. Manually-curated prefs (no feedback prefix) bypass the cap so
+# explicit user choices stay sticky. Most-recent-N is the simplest "still
+# relevant" heuristic until we have richer signals (usage count, last-used).
+FEEDBACK_PREF_CAP = 8
+
 # Max content length for an extracted candidate before we drop it as garbage.
 MAX_CANDIDATE_LEN = 600
 
@@ -443,11 +451,24 @@ class MemoryService:
         """
         sess, owns = self._scoped(db)
         try:
-            prefs = (
+            all_prefs = (
                 sess.query(Memory)
                 .filter(Memory.type == "preference", Memory.is_active == True)
+                .order_by(Memory.created_at.desc())
                 .all()
             )
+            # Manually-curated prefs (no feedback prefix) always inject.
+            # Feedback-derived prefs (auto-written from tone corrections) are
+            # capped at FEEDBACK_PREF_CAP most-recent so the prompt doesn't
+            # bloat to 50+ rules over time.
+            curated: list[Memory] = []
+            feedback: list[Memory] = []
+            for m in all_prefs:
+                if (m.key or "").startswith(_FEEDBACK_KEY_PREFIX):
+                    feedback.append(m)
+                else:
+                    curated.append(m)
+            prefs = curated + feedback[:FEEDBACK_PREF_CAP]
             facts: list[Memory] = []
             episodes: list[Memory] = []
             scored: list[tuple[Memory, float]] = []
