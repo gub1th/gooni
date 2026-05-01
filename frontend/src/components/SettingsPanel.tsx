@@ -75,31 +75,25 @@ export function SettingsPanel() {
   }
 
   return (
-    <section
-      style={{
-        marginTop: 28,
-        padding: 18,
-        background: "#FFFFFF",
-        borderRadius: 12,
-        border: "0.5px solid rgba(0,0,0,0.08)",
-      }}
-    >
-      <header
-        style={{
-          display: "flex", alignItems: "center", gap: 8,
-          marginBottom: 14,
-        }}
-      >
-        <SettingsIcon size={16} color="#6B6B70" />
-        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#1C1C1E" }}>
-          Daily nudge
-        </h3>
-        {saving && (
-          <span style={{ fontSize: 11, color: "#8E8E93", marginLeft: "auto" }}>
-            saving…
-          </span>
-        )}
-      </header>
+    <section>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8, marginBottom: 12,
+      }}>
+        <div style={{
+          fontSize: 11, fontWeight: 600, color: "#8E8E93",
+          letterSpacing: 0.6, textTransform: "uppercase",
+        }}>
+          daily nudge
+        </div>
+        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}>
+          {saving && (
+            <span style={{ fontSize: 11, color: "#8E8E93" }}>
+              saving…
+            </span>
+          )}
+          <SettingsIcon size={12} color="#C7C7CC" />
+        </span>
+      </div>
 
       {isLoading && <Skeleton style={{ height: 120 }} />}
       {error && (

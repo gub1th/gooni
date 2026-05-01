@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles, ChevronLeft, ChevronRight } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchDashboardStats,
@@ -12,7 +12,6 @@ import { NoteEditor } from "./notes/NoteEditor";
 import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
-import { SettingsPanel } from "./SettingsPanel";
 import { DevStreakStat } from "./DevStreakStat";
 import { Skeleton } from "./Skeleton";
 
@@ -40,6 +39,20 @@ function extractFirstImageSrc(html: string): string | null {
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function pagerBtnStyle(enabled: boolean): React.CSSProperties {
+  return {
+    width: 22, height: 22,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    background: enabled ? "#fff" : "transparent",
+    border: `1px solid ${enabled ? "rgba(0,0,0,0.10)" : "rgba(0,0,0,0.05)"}`,
+    borderRadius: 6,
+    color: enabled ? "#1C1C1E" : "#D1D1D6",
+    cursor: enabled ? "pointer" : "default",
+    transition: "background 0.1s, border-color 0.1s",
+    padding: 0,
+  };
 }
 
 function formatNoteDate(iso: string | null): string {
@@ -88,6 +101,10 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
   const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
   const typingRaf = useRef<number | null>(null);
   const [exploreOpen, setExploreOpen] = useState(false);
+  // Page index for the recent-notes pager. Each page shows 2 cards. Reset to
+  // 0 whenever fresh stats arrive so a newly-saved note lands in view (the
+  // submit-flow animation also assumes the new card is at index 0).
+  const [recentPage, setRecentPage] = useState(0);
   const { selectSpace, loadNotes, selectNote } = useNotesContentStore();
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
@@ -145,6 +162,9 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
       setTimeout(() => {
         setInk((s) => (s && s.id === inkId ? { ...s, phase: "absorb" } : s));
         setRowPulsing(true);
+        // Snap pager back to page 0 so the just-submitted note lands in view
+        // — typing animation below targets recent_notes[0].
+        setRecentPage(0);
         refresh
           .then((s) => {
             setStats(s);
@@ -240,17 +260,25 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         />
       )}
 
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "48px 40px 120px" }}>
-
-        {/* Greeting + stats on the same row. Greeting holds its natural width
-            (whiteSpace:nowrap, flexShrink:0); stats container takes the
-            remainder and wraps internally — its cards reflow before forcing
-            the row itself to wrap. Keeps greeting + cards on one line at any
-            reasonable viewport without smashing the title to 3 lines. */}
-        <div style={{
-          display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-          gap: 16, marginBottom: 26,
-        }}>
+      {/* Sticky header band — greeting + stats stay visible as the page
+          scrolls. position:sticky works against the scroll ancestor (the
+          outer overflow-y:auto div above). Full-width tinted band with the
+          centered 720px content inside, so the background fills behind the
+          inner container and content below scrolls cleanly underneath. */}
+      <div style={{
+        position: "sticky", top: 0, zIndex: 10,
+        background: palette.main,
+        borderBottom: "0.5px solid rgba(0,0,0,0.06)",
+      }}>
+        <div style={{ maxWidth: 720, margin: "0 auto", padding: "28px 40px 14px" }}>
+          {/* Greeting + stats on the same row. Greeting holds its natural width
+              (whiteSpace:nowrap, flexShrink:0); stats container takes the
+              remainder and wraps internally — its cards reflow before forcing
+              the row itself to wrap. */}
+          <div style={{
+            display: "flex", alignItems: "flex-start", justifyContent: "space-between",
+            gap: 16,
+          }}>
           <div style={{ flexShrink: 0 }}>
             <div style={{
               fontSize: 28, fontWeight: 700, color: "#1C1C1E",
@@ -330,6 +358,12 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
             <DevStreakStat />
           </div>
         </div>
+        </div>
+      </div>
+      {/* /sticky header */}
+
+      {/* Below-the-fold content — scrolls under the sticky band. */}
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
 
         {/* Note input — embedded NoteEditor quick-input. */}
         <div style={{ marginBottom: 14 }}>
@@ -361,21 +395,65 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
               ))}
             </div>
           </div>
-        ) : stats && stats.recent_notes.length > 0 && (
+        ) : stats && stats.recent_notes.length > 0 && (() => {
+          // Pager math — clamp page so it can't read past the end (e.g.
+          // after stats refetch shrinks the list).
+          const PER_PAGE = 2;
+          const totalPages = Math.max(1, Math.ceil(stats.recent_notes.length / PER_PAGE));
+          const page = Math.min(recentPage, totalPages - 1);
+          const start = page * PER_PAGE;
+          const visible = stats.recent_notes.slice(start, start + PER_PAGE);
+          const canPrev = page > 0;
+          const canNext = page < totalPages - 1;
+          return (
           <div style={{ marginBottom: 18 }}>
             <div style={{
-              fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
-              textTransform: "uppercase", marginBottom: 8, fontWeight: 600,
-            }}>recent notes</div>
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              marginBottom: 8,
+            }}>
+              <div style={{
+                fontSize: 11, color: "#8E8E93", letterSpacing: 0.6,
+                textTransform: "uppercase", fontWeight: 600,
+              }}>
+                recent notes
+                {totalPages > 1 && (
+                  <span style={{ marginLeft: 8, color: "#C7C7CC", fontWeight: 500, letterSpacing: 0.3 }}>
+                    {page + 1} / {totalPages}
+                  </span>
+                )}
+              </div>
+              {totalPages > 1 && (
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button
+                    aria-label="older recent notes"
+                    onClick={() => setRecentPage((p) => Math.max(0, p - 1))}
+                    disabled={!canPrev}
+                    style={pagerBtnStyle(canPrev)}
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  <button
+                    aria-label="newer recent notes"
+                    onClick={() => setRecentPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={!canNext}
+                    style={pagerBtnStyle(canNext)}
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              {stats.recent_notes.slice(0, 2).map((note, idx) => {
+              {visible.map((note, idx) => {
                 const fullTitle = displayTitle(note);
                 const fullExcerpt = stripHtmlForExcerpt(note.content ?? "");
                 // First inline image — shows as a small thumb so notes with
                 // pasted screenshots/sketches read at a glance instead of
                 // looking like an empty title row.
                 const firstImage = extractFirstImageSrc(note.content ?? "");
-                const isFirst = idx === 0;
+                // Animation targets stats.recent_notes[0] (the absolute newest);
+                // a card on a later page must NOT pulse / hold the firstCardRef.
+                const isFirst = page === 0 && idx === 0;
                 const isTyping = typing !== null && typing.noteId === note.id;
                 const revealed = isTyping ? typing!.revealed : Infinity;
                 const shownTitle = isTyping ? fullTitle.slice(0, Math.min(revealed, fullTitle.length)) : fullTitle;
@@ -486,7 +564,8 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
               })}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* Primary focus treatment now lives inline in ActivityCard's focus
             list (green left rail + tint + pulsing dot). The old heading-style
@@ -494,9 +573,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />
-
-        {/* Daily nudge config — time, tz, channels, test send. */}
-        <SettingsPanel />
 
       </div>
 
