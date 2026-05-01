@@ -74,21 +74,33 @@ function NotesPage() {
   useEffect(() => {
     if (!search.note) return;
     fetchNote(search.note).then((note) => {
-      const spaceId = note.space_id == null ? "general" : String(note.space_id);
-      selectSpace(spaceId);
+      const noteSpaceId = note.space_id == null ? "general" : String(note.space_id);
+      // Don't yank the user out of "All Notes" just because they clicked a
+      // note that lives in a specific space. If selectedSpaceId is "general"
+      // (or unset), keep them there so the second column doesn't reflow.
+      // Otherwise, follow the note into its space — that's the deep-link
+      // case (notes-map / search), where the user expects to land in
+      // context.
+      const current = useNotesContentStore.getState().selectedSpaceId;
+      const stayOnAllNotes = current == null || current === "general";
+      const targetSpace = stayOnAllNotes ? "general" : noteSpaceId;
+      if (!stayOnAllNotes && current !== noteSpaceId) {
+        selectSpace(noteSpaceId);
+      } else if (current == null) {
+        selectSpace("general");
+      }
       // Seed the fetched note into the store so NoteEditor finds it on the
       // very next render. Without this, selectNote sets activeNoteId but the
       // editor's lookup `notes[spaceId].find(n => n.id === activeNoteId)`
-      // returns undefined until loadNotes(spaceId) resolves — leaving Daniel
-      // staring at an empty "All Notes" screen for the duration of that
-      // fetch, which was the bug from note #155.
+      // returns undefined until loadNotes resolves — leaving Daniel staring
+      // at an empty "All Notes" screen for the duration of that fetch.
       useNotesContentStore.setState((s) => {
-        const existing = s.notes[spaceId] ?? [];
+        const existing = s.notes[targetSpace] ?? [];
         const deduped = existing.filter((n) => n.id !== note.id);
-        return { notes: { ...s.notes, [spaceId]: [note, ...deduped] } };
+        return { notes: { ...s.notes, [targetSpace]: [note, ...deduped] } };
       });
       selectNote(note.id);
-      loadNotes(spaceId);
+      loadNotes(targetSpace);
       setView("notes");
     }).catch(() => {
       setView("dashboard");

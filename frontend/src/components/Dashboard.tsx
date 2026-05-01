@@ -16,7 +16,6 @@ import { DevStreakStat } from "./DevStreakStat";
 import { Skeleton } from "./Skeleton";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
-const GREEN = "#4ADE80";
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -53,6 +52,36 @@ function pagerBtnStyle(enabled: boolean): React.CSSProperties {
     transition: "background 0.1s, border-color 0.1s",
     padding: 0,
   };
+}
+
+// Header-row metric: tiny uppercase label on top, big number underneath.
+// Borderless + transparent — sits inside the header beside the brain.
+// `value === undefined` shows a skeleton; numbers can be 0.
+function InlineStat({ label, value, hint }: {
+  label: string;
+  value: number | undefined;
+  hint?: string;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", minWidth: 36 }}>
+      <div style={{
+        fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
+        letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 600,
+      }}>{label}</div>
+      <div style={{
+        fontSize: 17, fontWeight: 600,
+        color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1,
+        fontVariantNumeric: "tabular-nums",
+      }}>
+        {value !== undefined ? value : <Skeleton width={20} height={16} />}
+      </div>
+      {hint && (
+        <div style={{ fontSize: 10, color: "var(--gooni-muted, #8E8E93)", marginTop: 1 }}>
+          {hint}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Compact "Nm" / "Nh" / "Nd" relative-time. Used by the claude-activity
@@ -212,8 +241,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
     onOpenNote();
   }
 
-  const activityPerDay = stats?.activity_per_day ?? [0, 0, 0, 0, 0, 0, 0];
-
   return (
     <div ref={dashRef} style={{ flex: 1, overflowY: "auto", background: palette.main, fontFamily: FONT, position: "relative" }}>
       <style>{`
@@ -273,34 +300,40 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         />
       )}
 
-      {/* Two-column wrapper: main content on the left (centered to 720px),
-          metric cards stacked in a thin right column. Right column uses
-          position:sticky so metrics stay glanceable while you scroll. The
-          old in-header stats row is gone — header is just greeting + brain
-          now, and the underlining border was killed (created a stray hairline
-          across the whole viewport in dark mode + felt like a chrome seam). */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 28, padding: "0 28px 0 0" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ background: palette.main }}>
-            <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 14px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 28, fontWeight: 700, color: "var(--gooni-text, #1C1C1E)",
-                    letterSpacing: "-0.5px", lineHeight: 1.2,
-                  }}>
-                    {getGreeting()}, Daniel.
-                  </div>
-                  <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", marginTop: 4 }}>
-                    {getDateStr()}
-                  </div>
-                </div>
-                <NeuralBrain size={60} onClick={() => setExploreOpen(true)} />
+      {/* Header band — greeting/date on the left, brain + compact inline
+          metrics on the right. No card chrome on the metrics — Daniel asked
+          for borderless minimal stats. The right-column sidebar layout from
+          the previous PR was reverted; main content centers at 720px again. */}
+      <div style={{ background: palette.main }}>
+        <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 28, fontWeight: 700, color: "var(--gooni-text, #1C1C1E)",
+                letterSpacing: "-0.5px", lineHeight: 1.2,
+              }}>
+                {getGreeting()}, Daniel.
+              </div>
+              <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", marginTop: 4 }}>
+                {getDateStr()}
               </div>
             </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+              <NeuralBrain size={52} onClick={() => setExploreOpen(true)} />
+              <InlineStat label="notes" value={stats?.notes_this_week} />
+              <InlineStat label="streak" value={stats?.streak} />
+              <DevStreakStat compact />
+              <InlineStat
+                label="claude"
+                value={stats?.mcp_calls_today}
+                hint={stats?.mcp_last_active_at ? formatRelativeShort(stats.mcp_last_active_at) : undefined}
+              />
+            </div>
           </div>
+        </div>
+      </div>
 
-          <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
 
         {/* Note input — embedded NoteEditor quick-input. */}
         <div style={{ marginBottom: 14 }}>
@@ -506,104 +539,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />
 
-          </div>
-        </div>
-
-        {/* Right metrics column — sticky so it stays visible while the main
-            column scrolls. Three cards stacked: notes-this-week, day streak,
-            dev streak. Hidden under ~960px viewport (the brain + main content
-            already fight for room there). */}
-        <aside
-          style={{
-            width: 200,
-            flexShrink: 0,
-            position: "sticky",
-            top: 24,
-            paddingTop: 24,
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-          }}
-          className="gooni-metrics-col"
-        >
-          <style>{`
-            @media (max-width: 960px) {
-              .gooni-metrics-col { display: none !important; }
-            }
-          `}</style>
-
-          <div style={{
-            background: "var(--gooni-card, #fff)",
-            border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-            borderRadius: 10, padding: "10px 14px",
-            display: "flex", flexDirection: "column", alignItems: "flex-start",
-          }}>
-            <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>notes this week</div>
-            <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
-              {stats ? stats.notes_this_week : <Skeleton width={32} height={20} />}
-            </div>
-            {stats && (() => {
-              const delta = stats.notes_this_week - stats.notes_last_week;
-              if (delta === 0 && stats.notes_last_week === 0) return null;
-              const isUp = delta > 0;
-              const isFlat = delta === 0;
-              return (
-                <div style={{
-                  fontSize: 10.5, color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
-                  marginTop: 2, fontVariantNumeric: "tabular-nums",
-                }}>
-                  {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
-                </div>
-              );
-            })()}
-          </div>
-
-          <div style={{
-            background: "var(--gooni-card, #fff)",
-            border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-            borderRadius: 10, padding: "10px 14px",
-            display: "flex", flexDirection: "column", alignItems: "flex-start",
-          }}>
-            <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>day streak</div>
-            <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
-              {stats ? stats.streak : <Skeleton width={28} height={20} />}
-            </div>
-            <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
-              {activityPerDay.map((v, i) => (
-                <div
-                  key={i}
-                  style={{
-                    width: 6, height: 6, borderRadius: "50%",
-                    background: v > 0 ? GREEN : "rgba(0,0,0,0.08)",
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-
-          <DevStreakStat />
-
-          {/* claude activity — counts MCP calls Gooni receives from
-              mcp/server.py (tagged via X-Gooni-Source). Independent of
-              Claude Code internals — only fires when Claude actually
-              touches Gooni. */}
-          <div style={{
-            background: "var(--gooni-card, #fff)",
-            border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-            borderRadius: 10, padding: "10px 14px",
-            display: "flex", flexDirection: "column", alignItems: "flex-start",
-          }}>
-            <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>claude activity</div>
-            <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
-              {stats ? stats.mcp_calls_today : <Skeleton width={28} height={20} />}
-            </div>
-            <div style={{ fontSize: 10.5, color: "#AEAEB2", marginTop: 2 }}>
-              {stats?.mcp_last_active_at
-                ? `last ${formatRelativeShort(stats.mcp_last_active_at)}`
-                : "no calls yet"}
-            </div>
-          </div>
-        </aside>
       </div>
 
       {/* Mascot mounts at the route root now (see routes/index.tsx) so it

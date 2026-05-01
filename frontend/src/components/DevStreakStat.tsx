@@ -11,7 +11,7 @@ const RED = "#CF222E";
 // Stat-card sibling to "day streak". Click opens a floating panel anchored
 // below the card (rendered via Portal so it doesn't disrupt the stat row's
 // flex layout). Hidden when no GitHub repos tracked.
-export function DevStreakStat() {
+export function DevStreakStat({ compact = false }: { compact?: boolean } = {}) {
   const queryClient = useQueryClient();
   const { data: dev, isLoading } = useQuery<DevActivity | null>({
     queryKey: ["dev-activity"],
@@ -49,9 +49,17 @@ export function DevStreakStat() {
     };
   }, [expanded]);
 
-  // First-paint skeleton — shaped like the real card so the stat row layout
-  // doesn't reflow when data lands.
+  // First-paint skeleton — shape matches whichever variant is rendering so
+  // the surrounding row doesn't reflow when data lands.
   if (isLoading && !dev) {
+    if (compact) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start", minWidth: 36 }}>
+          <Skeleton width={28} height={11} />
+          <Skeleton width={20} height={16} />
+        </div>
+      );
+    }
     return (
       <div style={{
         background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
@@ -78,32 +86,57 @@ export function DevStreakStat() {
         ref={buttonRef}
         onClick={() => setExpanded((v) => !v)}
         title={expanded ? "Hide commit details" : "Show commit details"}
-        style={{
-          background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
-          borderRadius: 10, padding: "10px 14px",
-          display: "flex", flexDirection: "column", alignItems: "flex-start",
-          minWidth: 92, cursor: "pointer", fontFamily: FONT, textAlign: "left",
-          transition: "border-color 0.12s, background 0.12s",
-        }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.18)"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)"; }}
+        style={
+          compact
+            ? {
+                // Inline minimal: label / value stack, transparent + borderless.
+                background: "transparent", border: "none",
+                padding: 0, cursor: "pointer", fontFamily: FONT,
+                display: "flex", flexDirection: "column", alignItems: "flex-start",
+                color: "inherit", textAlign: "left",
+              }
+            : {
+                background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)",
+                borderRadius: 10, padding: "10px 14px",
+                display: "flex", flexDirection: "column", alignItems: "flex-start",
+                minWidth: 92, cursor: "pointer", fontFamily: FONT, textAlign: "left",
+                transition: "border-color 0.12s, background 0.12s",
+              }
+        }
+        onMouseEnter={(e) => { if (!compact) (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.18)"; }}
+        onMouseLeave={(e) => { if (!compact) (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)"; }}
       >
-        <div style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.3 }}>dev streak</div>
-        <div style={{ fontSize: 20, fontWeight: 600, color: "#1C1C1E", marginTop: 1, lineHeight: 1.1 }}>
-          {aggregate.streak_days}
+        <div style={{
+          fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
+          letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 600,
+        }}>
+          {compact ? "dev" : "dev streak"}
         </div>
         <div style={{
-          display: "flex", gap: 4, marginTop: 4, alignItems: "center",
-          fontSize: 10.5, fontVariantNumeric: "tabular-nums",
+          fontSize: compact ? 17 : 20, fontWeight: 600,
+          color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1,
         }}>
-          <span style={{ color: "#6B6B70" }}>{todayCommits} today</span>
-          {(adds > 0 || dels > 0) && (
-            <>
-              <span style={{ color: GREEN }}>+{adds}</span>
-              <span style={{ color: RED }}>−{dels}</span>
-            </>
-          )}
+          {aggregate.streak_days}
         </div>
+        {!compact && (
+          <div style={{
+            display: "flex", gap: 4, marginTop: 4, alignItems: "center",
+            fontSize: 10.5, fontVariantNumeric: "tabular-nums",
+          }}>
+            <span style={{ color: "#6B6B70" }}>{todayCommits} today</span>
+            {(adds > 0 || dels > 0) && (
+              <>
+                <span style={{ color: GREEN }}>+{adds}</span>
+                <span style={{ color: RED }}>−{dels}</span>
+              </>
+            )}
+          </div>
+        )}
+        {compact && todayCommits > 0 && (
+          <div style={{ fontSize: 10, color: "var(--gooni-muted, #8E8E93)", marginTop: 1, fontVariantNumeric: "tabular-nums" }}>
+            {todayCommits} today
+          </div>
+        )}
       </button>
 
       {expanded && buttonRef.current && (
