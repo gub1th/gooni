@@ -36,31 +36,34 @@ export function ModelSelector() {
         onClick={() => setOpen((v) => !v)}
         title={current.tagline}
         style={{
-          fontSize: 11, fontFamily: FONT, fontWeight: 500,
+          fontSize: 12, fontFamily: FONT, fontWeight: 500,
           color: "#3C3C43",
-          background: "rgba(0,0,0,0.04)",
-          border: "1px solid rgba(0,0,0,0.10)",
+          background: "transparent",
+          border: "none",
           borderRadius: 6,
-          padding: "3px 8px",
+          padding: "4px 6px",
           cursor: "pointer",
           display: "inline-flex", alignItems: "center", gap: 4,
+          transition: "background 0.12s",
         }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
       >
         <span>{current.label}</span>
-        <span style={{ fontSize: 8, color: "var(--gooni-muted, #8E8E93)" }}>▾</span>
+        <span style={{ fontSize: 9, color: "var(--gooni-muted, #8E8E93)", marginLeft: 1 }}>▾</span>
       </button>
       {open && (
         <div
           role="listbox"
           style={{
             position: "absolute",
-            bottom: "calc(100% + 4px)",
+            bottom: "calc(100% + 6px)",
             left: 0,
-            minWidth: 220,
+            minWidth: 240,
             background: "var(--gooni-card, #fff)",
-            border: "1px solid var(--gooni-border, rgba(0,0,0,0.08))",
+            border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
             borderRadius: 10,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)",
+            boxShadow: "0 10px 28px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)",
             padding: 4,
             zIndex: 1200,
           }}
@@ -73,34 +76,43 @@ export function ModelSelector() {
                 onClick={() => { setModel(m.id as ModelId); setOpen(false); }}
                 style={{
                   width: "100%",
-                  display: "flex", flexDirection: "column", alignItems: "flex-start",
-                  gap: 1,
-                  padding: "6px 10px",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  gap: 10,
+                  padding: "8px 10px",
                   borderRadius: 6,
-                  background: active ? "rgba(74,222,128,0.10)" : "transparent",
+                  // Unselected: no chrome at all (just hover bg). Selected:
+                  // darker bg only — no border, no accent — matches Claude.
+                  background: active ? "rgba(0,0,0,0.06)" : "transparent",
                   border: "none", cursor: "pointer", textAlign: "left",
                   transition: "background 0.1s",
                 }}
                 onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)"; }}
                 onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
               >
-                <span style={{
-                  fontFamily: FONT, fontWeight: 600, fontSize: 12.5,
-                  color: "var(--gooni-text, #1C1C1E)",
-                  display: "flex", alignItems: "center", gap: 6,
-                }}>
-                  {active && <span style={{ color: "#30A14E" }}>✓</span>}
-                  {m.label}
-                </span>
-                {m.tagline && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0, flex: 1 }}>
                   <span style={{
-                    fontFamily: FONT,
-                    fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
-                    fontWeight: 400,
-                    paddingLeft: active ? 18 : 0,
+                    fontFamily: FONT, fontWeight: 600, fontSize: 12.5,
+                    color: "var(--gooni-text, #1C1C1E)",
                   }}>
-                    {m.tagline}
+                    {m.label}
                   </span>
+                  {m.tagline && (
+                    <span style={{
+                      fontFamily: FONT,
+                      fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+                      fontWeight: 400,
+                    }}>
+                      {m.tagline}
+                    </span>
+                  )}
+                </div>
+                {/* Check moves to right edge — Claude's pattern. Only renders
+                    when active, so unselected rows have zero chrome. */}
+                {active && (
+                  <span style={{
+                    color: "#30A14E", fontSize: 14, flexShrink: 0,
+                    lineHeight: 1,
+                  }}>✓</span>
                 )}
               </button>
             );
