@@ -785,10 +785,25 @@ export interface ApiConversation {
 }
 
 export interface MessageTraceStep {
-  type: "intention" | "memory_recall" | "tool_call" | "reply";
+  type:
+    | "intention"
+    | "memory_recall"
+    | "tool_call"
+    | "reply"
+    | "pipeline_version"
+    | "master_prompt"
+    | "extracted_signals"
+    | "memories_applied";
   label: string;
   detail?: string | null;
   args?: Record<string, unknown> | null;
+  // Canonical TraceBuilder shape — duplicated from the legacy keys above so
+  // both the chat MessageBubble (legacy) and the eval UI (canonical) read
+  // from the same trace JSON without a second round trip.
+  key?: string;
+  input?: unknown;
+  output?: unknown;
+  meta?: Record<string, unknown> | null;
 }
 
 export interface ApiMessage {
@@ -1013,3 +1028,137 @@ export async function fetchIntention(
   }
 }
 
+
+// ── Eval loop ────────────────────────────────────────────────────────────────
+
+export type EvalSource = "web" | "telegram" | "whatsapp" | "imessage";
+export type EvalStatus = "not_yet" | "pending" | "done";
+
+export interface EvalSegmentSummary {
+  id: number;
+  conversation_id: number;
+  source: EvalSource | string;
+  title: string | null;
+  start_message_id: number;
+  end_message_id: number;
+  last_message_at: string | null;
+  message_count: number;
+  eval_status: EvalStatus;
+  overall_rating: number | null;
+  overall_comment: string | null;
+  dispatched_to_cc_at: string | null;
+  dispatched_note_id: number | null;
+  preview: string | null;
+  flag_count: number;
+}
+
+export interface EvalSegmentList {
+  segments: EvalSegmentSummary[];
+  total: number;
+}
+
+export interface EvalStepFeedback {
+  id: number;
+  step_key: string;
+  step_index: number;
+  rating: 1 | 2 | 3;
+  comment: string | null;
+  created_at: string | null;
+}
+
+export interface EvalMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string | null;
+  is_feedback: boolean;
+  feedback_for_message_id: number | null;
+  trace: MessageTraceStep[] | null;
+  step_feedback: EvalStepFeedback[];
+}
+
+export interface EvalSegmentFull {
+  segment: EvalSegmentSummary;
+  messages: EvalMessage[];
+}
+
+export interface EvalToolLegendEntry {
+  key: string;
+  name: string;
+  description: string;
+}
+
+export async function listEvalSegments(params: {
+  sources?: string[];
+  statuses?: string[];
+  hasFlag?: boolean;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<EvalSegmentList> {
+  const q = new URLSearchParams();
+  if (params.sources?.length) q.set("sources", params.sources.join(","));
+  if (params.statuses?.length) q.set("statuses", params.statuses.join(","));
+  if (params.hasFlag) q.set("has_flag", "true");
+  if (params.search) q.set("search", params.search);
+  if (params.limit != null) q.set("limit", String(params.limit));
+  if (params.offset != null) q.set("offset", String(params.offset));
+  const res = await apiFetch(`${BASE}/eval/segments?${q.toString()}`);
+  if (!res.ok) throw new Error("Failed to list eval segments");
+  return res.json();
+}
+
+export async function fetchEvalSegmentFull(id: number): Promise<EvalSegmentFull> {
+  const res = await apiFetch(`${BASE}/eval/segments/${id}/full`);
+  if (!res.ok) throw new Error("Failed to fetch eval segment");
+  return res.json();
+}
+
+export async function postEvalFeedback(payload: {
+  segment_id: number;
+  message_id: number;
+  step_key: string;
+  step_index: number;
+  rating: 1 | 2 | 3;
+  comment?: string | null;
+}): Promise<{ id: number; ok: boolean }> {
+  const res = await apiFetch(`${BASE}/eval/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to post eval feedback");
+  return res.json();
+}
+
+export async function deleteEvalFeedback(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/eval/feedback/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete eval feedback");
+}
+
+export async function patchEvalSummary(
+  id: number,
+  body: { eval_status?: EvalStatus; overall_rating?: number | null; overall_comment?: string | null }
+): Promise<{ id: number; eval_status: EvalStatus; overall_rating: number | null; overall_comment: string | null }> {
+  const res = await apiFetch(`${BASE}/eval/segments/${id}/summary`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to update eval summary");
+  return res.json();
+}
+
+export async function dispatchEvalToCc(
+  id: number
+): Promise<{ ok: boolean; note_id: number; backlog_list_id: number; dispatched_to_cc_at: string }> {
+  const res = await apiFetch(`${BASE}/eval/segments/${id}/dispatch-to-cc`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to dispatch eval to Claude Code");
+  return res.json();
+}
+
+export async function fetchEvalToolsLegend(): Promise<{ tools: EvalToolLegendEntry[] }> {
+  const res = await apiFetch(`${BASE}/eval/tools-legend`);
+  if (!res.ok) throw new Error("Failed to fetch tools legend");
+  return res.json();
+}

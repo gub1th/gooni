@@ -10,6 +10,7 @@ from .item_service import item_service
 from .memory_extraction import extract_signals
 from .memory_service import memory_service
 from .list_service import list_service
+from .trace_builder import TraceBuilder
 from ..llm.prompts import PLAN_MODE_PROMPT
 from ..tools.feature_request_tool import feature_request_tool
 
@@ -68,6 +69,11 @@ class Orchestrator:
         stripped = message.strip()
         command = stripped.lower()
 
+        # One TraceBuilder per turn — collects every step the pipeline takes
+        # so the eval UI can rate them. Pipeline version is auto-stamped as
+        # the first entry; the rest are appended in the order they happen.
+        tb = TraceBuilder()
+
         # Slash commands work from any source (web, Telegram)
         if command == "/memory":
             return self._handle_memory_command(db), None
@@ -120,6 +126,12 @@ class Orchestrator:
                     feedback_ack = "No active feedback to undo."
                 skip_normal_reply = True
                 feedback_tools.append("undo_feedback")
+                tb.tool_call(
+                    "undo_feedback",
+                    label="Undid last feedback",
+                    args=None,
+                    result={"removed": bool(removed), "content": removed.content if removed else None},
+                )
             else:
                 prev_assistant = conversation_service.get_last_assistant_message(
                     conv.id, db
@@ -141,6 +153,7 @@ class Orchestrator:
                     ],
                     "memory_count": len(memory_candidates),
                 }
+                tb.extracted_signals(saved_message, signals)
 
                 tone_rules: list[str] = []
                 if signals["tone_corrections"] and prev_assistant is not None:
@@ -151,6 +164,11 @@ class Orchestrator:
                     for t in signals["tone_corrections"]:
                         rule = t["rule"]
                         tone_rules.append(rule)
+                        tb.tool_call(
+                            "router:tone",
+                            label="Captured tone correction",
+                            args={"rule": rule},
+                        )
                         threading.Thread(
                             target=memory_service.add_feedback_preference,
                             args=(rule, prev_assistant.content),
@@ -167,6 +185,11 @@ class Orchestrator:
                         )
                         feature_titles.append(fr["title"])
                         feedback_tools.append("router:feature_request")
+                        tb.tool_call(
+                            "router:feature_request",
+                            label="Logged feature request",
+                            args={"title": fr["title"], "why": fr.get("why") or ""},
+                        )
                     except Exception as e:
                         print(f"feature_request via router error: {e}")
                     if prev_assistant is not None:
@@ -204,13 +227,8 @@ class Orchestrator:
                     skip_normal_reply = pure_signal
 
         if skip_normal_reply and feedback_ack is not None:
-            short_trace = _build_trace(
-                intention=None,
-                memory_context=None,
-                signals_summary=signals_summary,
-                feedback_tools=feedback_tools,
-                feedback_ack=feedback_ack,
-            )
+            tb.reply(feedback_ack, usage={"short_circuit": True})
+            short_trace = tb.build()
             conversation_service.add_message(
                 conv.id, "assistant", feedback_ack, db,
                 trace=json.dumps(short_trace) if short_trace else None,
@@ -242,7 +260,9 @@ class Orchestrator:
         query = message if message.strip() else "image"
 
         intention_context = llm_client.generate_intention_context(query, recent_history[-6:])
-        memory_context = memory_service.build_memory_context(query, db=db)
+        tb.intent(query, intention_context)
+        memory_context, recalled_memories = memory_service.build_memory_context_with_debug(query, db=db)
+        tb.memory_recall(query, recalled_memories)
         # If the active note is large, summarize it before injection to keep
         # the prompt focused. Below threshold, dump it raw as before.
         if entry_content.strip():
@@ -273,6 +293,7 @@ class Orchestrator:
             list_context,
             focus_context,
         ]))
+        tb.master_prompt(full_context, recent_history)
 
         if image_url:
             response, usage = llm_client.generate_response_with_image(
@@ -289,13 +310,8 @@ class Orchestrator:
         if feedback_ack is not None:
             response = f"{feedback_ack}\n\n{response}"
 
-        full_trace = _build_trace(
-            intention=intention_context,
-            memory_context=memory_context,
-            signals_summary=signals_summary,
-            feedback_tools=feedback_tools,
-            feedback_ack=feedback_ack,
-        )
+        tb.reply(response, usage=usage)
+        full_trace = tb.build()
         conversation_service.add_message(
             conv.id, "assistant", response, db,
             trace=json.dumps(full_trace) if full_trace else None,
@@ -345,64 +361,6 @@ class Orchestrator:
         for m in memories:
             lines.append(f"  - {m.get('content') or m.get('memory', '')[:120]}")
         return "\n".join(lines)
-
-
-def _build_trace(
-    *,
-    intention: str | None,
-    memory_context: str | None,
-    signals_summary: dict,
-    feedback_tools: list[str],
-    feedback_ack: str | None,
-) -> list[dict]:
-    """Translate per-turn orchestrator state into a structured trace the
-    chat UI can render as steps. Each entry has a `type` and human-readable
-    `label`; optional `detail` carries a short expandable description.
-    """
-    steps: list[dict] = []
-    if intention:
-        steps.append({
-            "type": "intention",
-            "label": "Read intent",
-            "detail": intention,
-        })
-    if memory_context:
-        # Cheap heuristic: count "- " bullets in the memory block to surface
-        # how many memories were recalled.
-        recalled = max(0, memory_context.count("\n- "))
-        if recalled > 0:
-            steps.append({
-                "type": "memory_recall",
-                "label": f"Recalled {recalled} memor{'y' if recalled == 1 else 'ies'}",
-                "detail": None,
-            })
-    for fr in signals_summary.get("feature_requests") or []:
-        steps.append({
-            "type": "tool_call",
-            "label": "Logged feature request",
-            "detail": fr.get("title") or "",
-            "args": {"why": fr.get("why") or ""},
-        })
-    for tc in signals_summary.get("tone_corrections") or []:
-        steps.append({
-            "type": "tool_call",
-            "label": "Captured tone correction",
-            "detail": tc.get("rule") or "",
-        })
-    if signals_summary.get("memory_count"):
-        n = signals_summary["memory_count"]
-        steps.append({
-            "type": "tool_call",
-            "label": f"Stored {n} memor{'y' if n == 1 else 'ies'}",
-            "detail": None,
-        })
-    if "undo_feedback" in (feedback_tools or []):
-        steps.append({
-            "type": "tool_call",
-            "label": "Undid last feedback",
-            "detail": feedback_ack,
-        })
-    return steps
 
 
 Orchestrator = Orchestrator()

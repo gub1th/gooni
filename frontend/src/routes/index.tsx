@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
+import { EvalView } from "../components/eval/EvalView";
 import { GooniLayer } from "../components/GooniLayer";
 import { ListView } from "../components/lists/ListView";
 import { NoteEditor } from "../components/notes/NoteEditor";
@@ -38,7 +39,7 @@ function NotesPage() {
   const search = Route.useSearch();
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
-  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "plan">(() =>
+  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "plan" | "eval">(() =>
     search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
   );
   const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
@@ -119,7 +120,7 @@ function NotesPage() {
   }, [selectedSpaceId, view]);
 
   function setViewAndUrl(
-    v: "notes" | "dashboard" | "chat" | "lists" | "plan",
+    v: "notes" | "dashboard" | "chat" | "lists" | "plan" | "eval",
     noteId?: number,
     convId?: number,
     listId?: number,
@@ -189,6 +190,7 @@ function NotesPage() {
           isNotes={view === "notes"}
           isChat={view === "chat"}
           isLists={view === "lists"}
+          isEval={view === "eval"}
           activeListId={view === "lists" ? activeListId : null}
           showCompose={view !== "notes"}
           onLogoClick={() => setViewAndUrl("dashboard")}
@@ -196,6 +198,7 @@ function NotesPage() {
           onCompose={handleCompose}
           onNewChat={handleNewChat}
           onSelectList={handleSelectList}
+          onOpenEval={() => setViewAndUrl("eval")}
         />
       )}
 
@@ -217,6 +220,8 @@ function NotesPage() {
             listId={activeListId}
             onOpenSourceNote={(noteId) => setViewAndUrl("notes", noteId)}
           />
+        ) : view === "eval" ? (
+          <EvalView />
         ) : (
           <>
             <NotesList />

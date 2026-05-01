@@ -15,6 +15,10 @@ const TRACE_ICON: Record<MessageTraceStep["type"], string> = {
   memory_recall: "◇",
   tool_call: "▸",
   reply: "✎",
+  pipeline_version: "⚙",
+  master_prompt: "▤",
+  extracted_signals: "⌖",
+  memories_applied: "★",
 };
 
 interface MessageBubbleProps {

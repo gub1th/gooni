@@ -155,6 +155,7 @@ interface SidebarProps {
   isNotes: boolean;
   isChat: boolean;
   isLists: boolean;
+  isEval?: boolean;
   activeListId: number | null;
   showCompose: boolean;
   onLogoClick: () => void;
@@ -162,9 +163,10 @@ interface SidebarProps {
   onCompose: () => void;
   onNewChat: () => void;
   onSelectList: (id: number) => void;
+  onOpenEval?: () => void;
 }
 
-export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList }: SidebarProps) {
+export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList, onOpenEval }: SidebarProps) {
   const navigate = useNavigate();
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId, removeSpace } = useNotesContentStore();
   const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
@@ -711,6 +713,33 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, activeListId, s
               Chat audit
             </button>
           </div>
+
+          {/* Eval — segmented conversations w/ trace flags + dispatch to CC. */}
+          {onOpenEval && (
+            <div style={{ padding: "0 6px 2px" }}>
+              <button
+                onClick={onOpenEval}
+                title="Eval — score Gooni's replies + dispatch to Claude Code"
+                style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                  border: "none",
+                  background: isEval ? "rgba(0,0,0,0.09)" : "transparent",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                  fontWeight: isEval ? 600 : 400,
+                  fontSize: 13.5, color: "#1C1C1E",
+                  transition: "background 0.12s",
+                }}
+                onMouseEnter={(e) => { if (!isEval) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+                onMouseLeave={(e) => { if (!isEval) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              >
+                <ClipboardList size={14} strokeWidth={1.7} color={ICON_TINT.chatAudit} style={{ flexShrink: 0 }} />
+                Eval
+              </button>
+            </div>
+          )}
 
           {/* Public profile — jumps to the public-facing landing page. */}
           <div style={{ padding: "0 6px 2px" }}>

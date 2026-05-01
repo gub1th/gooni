@@ -427,21 +427,20 @@ class MemoryService:
         """Format the system-prompt memory block. Preferences always go in;
         facts + episodes ride semantic similarity to the query.
         """
-        if not query or len(query.strip()) < MIN_EXCHANGE_LEN:
-            # For trivial queries we still want preferences — they're cheap
-            # and always relevant. Just skip semantic recall.
-            sess, owns = self._scoped(db)
-            try:
-                prefs = (
-                    sess.query(Memory)
-                    .filter(Memory.type == "preference", Memory.is_active == True)
-                    .all()
-                )
-                return self._format_block(prefs, [], [])
-            finally:
-                if owns:
-                    sess.close()
+        text, _debug = self.build_memory_context_with_debug(query, db=db)
+        return text
 
+    def build_memory_context_with_debug(
+        self, query: str, db: Session | None = None
+    ) -> tuple[str, list[dict]]:
+        """Same as build_memory_context but also returns a list describing
+        every memory injected into the prompt. Each entry is:
+          {"id": int, "type": str, "content": str,
+           "similarity": float | None, "always_inject": bool}
+        Preferences carry similarity=None + always_inject=True; cosine-
+        retrieved rows carry the actual score. Used by the eval visualizer
+        to show what informed Gooni this turn.
+        """
         sess, owns = self._scoped(db)
         try:
             prefs = (
@@ -449,23 +448,43 @@ class MemoryService:
                 .filter(Memory.type == "preference", Memory.is_active == True)
                 .all()
             )
-            query_vec = self._embed(query)
             facts: list[Memory] = []
             episodes: list[Memory] = []
-            if query_vec:
-                # Semantic search across non-preference active memories
-                hits = self._cosine_search(
-                    sess,
-                    query_vec,
-                    type_filter=["fact", "goal", "routine", "constraint", "episode"],
-                    limit=RETRIEVAL_TOP_K,
-                )
-                for m, _ in hits:
-                    if m.type == "episode":
-                        episodes.append(m)
-                    else:
-                        facts.append(m)
-            return self._format_block(prefs, facts, episodes)
+            scored: list[tuple[Memory, float]] = []
+            if query and len(query.strip()) >= MIN_EXCHANGE_LEN:
+                query_vec = self._embed(query)
+                if query_vec:
+                    scored = self._cosine_search(
+                        sess,
+                        query_vec,
+                        type_filter=["fact", "goal", "routine", "constraint", "episode"],
+                        limit=RETRIEVAL_TOP_K,
+                    )
+                    for m, _ in scored:
+                        if m.type == "episode":
+                            episodes.append(m)
+                        else:
+                            facts.append(m)
+
+            sim_lookup = {m.id: s for m, s in scored}
+            debug: list[dict] = []
+            for m in prefs:
+                debug.append({
+                    "id": m.id,
+                    "type": m.type,
+                    "content": m.content,
+                    "similarity": None,
+                    "always_inject": True,
+                })
+            for m in facts + episodes:
+                debug.append({
+                    "id": m.id,
+                    "type": m.type,
+                    "content": m.content,
+                    "similarity": sim_lookup.get(m.id),
+                    "always_inject": False,
+                })
+            return self._format_block(prefs, facts, episodes), debug
         finally:
             if owns:
                 sess.close()
