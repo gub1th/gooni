@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.8.0 — 2026-05-01 (minor)
+
+- feat: list-item conflict detection via cosine similarity (#72)
+
 ## 0.7.2 — 2026-05-01 (patch)
 
 - fix: sticky header → ListView (not Dashboard); concurrency-lock version-bump (#71)
