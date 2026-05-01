@@ -190,6 +190,7 @@ def _run_column_migrations(engine):
             ("list_items", "is_primary", "INTEGER"),
             ("list_items", "status", "TEXT"),
             ("list_items", "scale", "TEXT"),
+            ("list_items", "embedding", "TEXT"),
             ("lists", "kind", "TEXT"),
         ]:
             if table not in existing_tables:
@@ -490,17 +491,43 @@ async def _nudge_loop():
 from contextlib import asynccontextmanager  # noqa: E402
 
 
+async def _backfill_list_item_embeddings_loop():
+    """One-shot lazy backfill: list_items rows that predate the embedding
+    column have NULL embeddings, so similarity search ignores them. Walk
+    the table in small batches at startup until none remain. Sleeps between
+    batches so we don't block the event loop or burn the OpenAI quota in
+    one shot."""
+    from .services.list_service import list_service
+
+    await asyncio.sleep(5)  # let HTTP server bind first
+    while True:
+        db = SessionLocal()
+        try:
+            wrote = list_service.backfill_missing_embeddings(db, limit=25)
+        except Exception as e:
+            print(f"List embedding backfill error: {e}")
+            wrote = 0
+        finally:
+            db.close()
+        if wrote == 0:
+            return
+        print(f"List embedding backfill: embedded {wrote} item(s)")
+        await asyncio.sleep(2)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    task = asyncio.create_task(_nudge_loop())
+    nudge_task = asyncio.create_task(_nudge_loop())
+    backfill_task = asyncio.create_task(_backfill_list_item_embeddings_loop())
     try:
         yield
     finally:
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
+        for t in (nudge_task, backfill_task):
+            t.cancel()
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 app = FastAPI(lifespan=_lifespan)
@@ -916,7 +943,17 @@ def delete_list(list_id: int, db: Session = Depends(get_db)):
 
 @app.post("/lists/{list_id}/items")
 def add_list_item(list_id: int, body: dict, db: Session = Depends(get_db)):
-    from .services.list_service import list_service
+    """Insert a list item.
+
+    Conflict detection: by default we cosine-search existing items in the same
+    list and return any near-duplicates as `conflicts: [{id, text, similarity,
+    severity}]`. Caller decides how to surface them. Pass `skip_conflict_check`
+    in the body to bypass the embed call (used by bulk imports / migrations).
+    """
+    from .services.list_service import (
+        list_service,
+        CONFLICT_HIGH,
+    )
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
@@ -924,13 +961,79 @@ def add_list_item(list_id: int, body: dict, db: Session = Depends(get_db)):
     if not lst:
         raise HTTPException(status_code=404, detail="list not found")
     actionable = body.get("actionable")
-    item = list_service.add_item(
+    skip_check = bool(body.get("skip_conflict_check"))
+    if skip_check:
+        item = list_service.add_item(
+            list_id, text, db,
+            subtitle=(body.get("subtitle") or None),
+            source_note_id=body.get("source_note_id"),
+            actionable=(True if actionable is None else bool(actionable)),
+        )
+        return _serialize_list_item(item)
+    item, conflicts = list_service.add_item_with_conflict_check(
         list_id, text, db,
         subtitle=(body.get("subtitle") or None),
         source_note_id=body.get("source_note_id"),
         actionable=(True if actionable is None else bool(actionable)),
     )
-    return _serialize_list_item(item)
+    return {
+        **_serialize_list_item(item),
+        "conflicts": [
+            {
+                "id": c.id,
+                "text": c.text,
+                "subtitle": c.subtitle,
+                "similarity": round(sim, 3),
+                "severity": "high" if sim >= CONFLICT_HIGH else "medium",
+            }
+            for c, sim in conflicts
+        ],
+    }
+
+
+@app.post("/lists/{list_id}/similar")
+def find_similar_list_items(list_id: int, body: dict, db: Session = Depends(get_db)):
+    """Cosine-search items in a list against a query text. Read-only — does
+    not mutate. Powers the MCP `find_similar_items` tool + future UI
+    duplicate-warning surfaces."""
+    from .services.list_service import list_service, CONFLICT_MEDIUM
+
+    lst = db.query(ListModel).filter(ListModel.id == list_id).first()
+    if not lst:
+        raise HTTPException(status_code=404, detail="list not found")
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    try:
+        threshold = float(body.get("threshold", CONFLICT_MEDIUM))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="threshold must be a number")
+    try:
+        limit = int(body.get("limit", 5))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="limit must be an int")
+    matches = list_service.find_similar_in_list(
+        list_id,
+        text,
+        db,
+        subtitle=(body.get("subtitle") or None),
+        threshold=threshold,
+        limit=limit,
+        include_done=bool(body.get("include_done")),
+        exclude_item_id=body.get("exclude_item_id"),
+    )
+    return {
+        "matches": [
+            {
+                "id": it.id,
+                "text": it.text,
+                "subtitle": it.subtitle,
+                "done": bool(it.done),
+                "similarity": round(sim, 3),
+            }
+            for it, sim in matches
+        ],
+    }
 
 
 @app.patch("/list-items/{item_id}")

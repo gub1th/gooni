@@ -253,6 +253,11 @@ class ListItem(Base):
     sort_order = Column(Integer, default=0, nullable=False)
     due_date = Column(DateTime, nullable=True)
     source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+    # JSON-serialised float list. Generated on insert/edit from `text +
+    # subtitle` so add_item can cosine-search existing items in the same list
+    # for conflicts (near-duplicates). NULL on legacy rows; backfilled lazily
+    # by a startup worker.
+    embedding = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

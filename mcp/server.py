@@ -1125,13 +1125,25 @@ def read_list(list_ref: str = "backlog", limit: int = 50, include_done: bool = F
 
 
 @mcp.tool()
-def add_list_item(text: str, list_ref: str = "backlog", subtitle: str = None) -> str:
+def add_list_item(
+    text: str,
+    list_ref: str = "backlog",
+    subtitle: str = None,
+    skip_conflict_check: bool = False,
+) -> str:
     """Add an item to a Gooni list (defaults to backlog).
+
+    Conflict detection is on by default: the backend cosine-searches existing
+    items in the same list and surfaces near-duplicates. The item is still
+    inserted — but the response flags any matches so you (or the user) can
+    decide whether to merge or delete the new one. Pass
+    `skip_conflict_check=True` for bulk imports / migrations.
 
     Args:
         text: item text (e.g. "spike WhatsApp business onboarding")
         list_ref: 'backlog' (default), 'todo', 'focus', name, or numeric id
         subtitle: optional secondary line shown under the item
+        skip_conflict_check: bypass embed + dedup scan (default False)
     """
     text = (text or "").strip()
     if not text:
@@ -1139,13 +1151,69 @@ def add_list_item(text: str, list_ref: str = "backlog", subtitle: str = None) ->
     lst, err = _resolve_list(list_ref)
     if err:
         return err
-    body = {"text": text}
+    body: dict = {"text": text}
     if subtitle:
         body["subtitle"] = subtitle
-    resp = _session.post(f"{BASE_URL}/lists/{lst['id']}/items", json=body, timeout=10)
+    if skip_conflict_check:
+        body["skip_conflict_check"] = True
+    resp = _session.post(f"{BASE_URL}/lists/{lst['id']}/items", json=body, timeout=20)
     resp.raise_for_status()
     it = resp.json()
-    return f"added #{it['id']} to {lst['name']}: {it['text']}"
+    msg = f"added #{it['id']} to {lst['name']}: {it['text']}"
+    conflicts = it.get("conflicts") or []
+    if conflicts:
+        msg += "\n\n⚠ near-duplicate(s) already in list:"
+        for c in conflicts:
+            sev = c.get("severity", "medium")
+            sim = c.get("similarity", 0)
+            msg += f"\n  [{sev} {sim:.2f}] #{c['id']} {c['text']}"
+        msg += "\n(call delete_list_item or edit_list_item if this should be merged.)"
+    return msg
+
+
+@mcp.tool()
+def find_similar_items(
+    text: str,
+    list_ref: str = "backlog",
+    threshold: float = 0.78,
+    limit: int = 5,
+    include_done: bool = False,
+) -> str:
+    """Cosine-search a Gooni list for items similar to `text` without
+    inserting anything. Useful before adding to check if an idea already
+    exists, or to find merge candidates among existing items.
+
+    Args:
+        text: query string
+        list_ref: which list to search (default 'backlog')
+        threshold: minimum cosine similarity (0..1, default 0.78)
+        limit: max matches to return (default 5)
+        include_done: include checked-off items (default False)
+    """
+    text = (text or "").strip()
+    if not text:
+        return "(text required)"
+    lst, err = _resolve_list(list_ref)
+    if err:
+        return err
+    resp = _session.post(
+        f"{BASE_URL}/lists/{lst['id']}/similar",
+        json={
+            "text": text,
+            "threshold": float(threshold),
+            "limit": int(limit),
+            "include_done": bool(include_done),
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+    matches = resp.json().get("matches") or []
+    if not matches:
+        return f"(no items in {lst['name']} above similarity {threshold:.2f})"
+    lines = [f"# similar to '{text}' in {lst['name']}:"]
+    for m in matches:
+        lines.append(f"[{m['similarity']:.2f}] #{m['id']} {m['text']}")
+    return "\n".join(lines)
 
 
 @mcp.tool()

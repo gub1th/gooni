@@ -14,16 +14,47 @@ so the LLM knows which list names exist and can pick exact matches when
 calling `add_to_list` / `show_list` tools.
 """
 
+import json
+import math
 from datetime import datetime
 
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ..db.models import List, ListItem
+from ..llm.client import llm_client
 
 
 _TODO_LIST_NAME = "Todo list"
 _BACKLOG_LIST_NAME = "Gooni Backlog"
+
+# Cosine-similarity thresholds for the conflict detector.
+# - HIGH: caller (UI / agent) should treat this as a probable duplicate and
+#   surface a merge/skip prompt instead of silently inserting again.
+# - MEDIUM: weaker match — return as a hint but still safe to insert.
+CONFLICT_HIGH = 0.88
+CONFLICT_MEDIUM = 0.78
+
+
+def _cosine(vec1: list[float], vec2: list[float]) -> float:
+    if not vec1 or not vec2:
+        return 0.0
+    dot = sum(a * b for a, b in zip(vec1, vec2))
+    mag1 = math.sqrt(sum(a * a for a in vec1))
+    mag2 = math.sqrt(sum(b * b for b in vec2))
+    if mag1 == 0 or mag2 == 0:
+        return 0.0
+    return dot / (mag1 * mag2)
+
+
+def _item_embed_text(text: str, subtitle: str | None) -> str:
+    """Canonical string we feed the embedder for an item. Includes subtitle
+    so two items with the same headline but different `Why:` rationales don't
+    falsely collide."""
+    parts = [text or ""]
+    if subtitle:
+        parts.append(subtitle)
+    return "\n".join(p.strip() for p in parts if p and p.strip())
 
 
 class ListService:
@@ -101,13 +132,20 @@ class ListService:
         due_date: datetime | None = None,
         source_note_id: int | None = None,
         actionable: bool = True,
+        embedding: list[float] | None = None,
     ) -> ListItem:
+        """Insert. If `embedding` is provided we store it; otherwise we try to
+        generate one synchronously so future conflict checks have something to
+        compare against. Embedding failures are non-fatal — the row still
+        inserts."""
         max_order = (
             db.query(sqlfunc.max(ListItem.sort_order))
             .filter(ListItem.list_id == list_id)
             .scalar()
             or 0
         )
+        if embedding is None:
+            embedding = self._embed_item_text(_item_embed_text(text, subtitle))
         item = ListItem(
             list_id=list_id,
             text=text,
@@ -116,11 +154,147 @@ class ListService:
             due_date=due_date,
             source_note_id=source_note_id,
             actionable=actionable,
+            embedding=json.dumps(embedding) if embedding else None,
         )
         db.add(item)
         db.commit()
         db.refresh(item)
         return item
+
+    # ── conflict detection ──────────────────────────────────────────────
+
+    def _embed_item_text(self, raw: str) -> list[float] | None:
+        """Wrap llm_client.generate_embedding so callers stay synchronous and
+        ignore failures gracefully."""
+        if not raw:
+            return None
+        try:
+            embedding, _ = llm_client.generate_embedding(raw)
+            return embedding or None
+        except Exception as e:
+            print(f"List item embedding error: {e}")
+            return None
+
+    def find_similar_in_list(
+        self,
+        list_id: int,
+        text: str,
+        db: Session,
+        subtitle: str | None = None,
+        threshold: float = CONFLICT_MEDIUM,
+        limit: int = 5,
+        include_done: bool = False,
+        exclude_item_id: int | None = None,
+    ) -> list[tuple[ListItem, float]]:
+        """Cosine-search existing items in `list_id` against `text` (+optional
+        subtitle). Returns (item, similarity) pairs sorted desc, filtered to
+        sim >= threshold. Items with no embedding are skipped silently."""
+        raw = _item_embed_text(text, subtitle)
+        query_vec = self._embed_item_text(raw)
+        if not query_vec:
+            return []
+        q = (
+            db.query(ListItem)
+            .filter(ListItem.list_id == list_id, ListItem.embedding.isnot(None))
+        )
+        if exclude_item_id is not None:
+            q = q.filter(ListItem.id != exclude_item_id)
+        if not include_done:
+            q = q.filter(ListItem.done.is_(False))
+        scored: list[tuple[ListItem, float]] = []
+        for it in q.all():
+            try:
+                sim = _cosine(query_vec, json.loads(it.embedding))
+            except Exception:
+                continue
+            if sim >= threshold:
+                scored.append((it, sim))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:limit]
+
+    def add_item_with_conflict_check(
+        self,
+        list_id: int,
+        text: str,
+        db: Session,
+        subtitle: str | None = None,
+        due_date: datetime | None = None,
+        source_note_id: int | None = None,
+        actionable: bool = True,
+        threshold: float = CONFLICT_MEDIUM,
+    ) -> tuple[ListItem, list[tuple[ListItem, float]]]:
+        """Embed once, run conflict scan against existing items, then insert
+        (reusing the same embedding so we don't pay for two OpenAI calls).
+        Returns (inserted_item, conflicts). Caller decides whether to keep,
+        delete, or merge based on conflict severity (CONFLICT_HIGH vs MEDIUM).
+        """
+        raw = _item_embed_text(text, subtitle)
+        query_vec = self._embed_item_text(raw)
+        conflicts: list[tuple[ListItem, float]] = []
+        if query_vec:
+            existing = (
+                db.query(ListItem)
+                .filter(
+                    ListItem.list_id == list_id,
+                    ListItem.embedding.isnot(None),
+                    ListItem.done.is_(False),
+                )
+                .all()
+            )
+            for it in existing:
+                try:
+                    sim = _cosine(query_vec, json.loads(it.embedding))
+                except Exception:
+                    continue
+                if sim >= threshold:
+                    conflicts.append((it, sim))
+            conflicts.sort(key=lambda x: x[1], reverse=True)
+        item = self.add_item(
+            list_id,
+            text,
+            db,
+            subtitle=subtitle,
+            due_date=due_date,
+            source_note_id=source_note_id,
+            actionable=actionable,
+            embedding=query_vec,
+        )
+        return item, conflicts[:5]
+
+    def update_item_embedding(self, item_id: int, db: Session) -> None:
+        """Re-embed an item's text+subtitle and persist. Called after edits
+        that change the searchable content. Best-effort: failures are logged
+        and swallowed."""
+        item = db.query(ListItem).filter(ListItem.id == item_id).first()
+        if item is None:
+            return
+        raw = _item_embed_text(item.text, item.subtitle)
+        vec = self._embed_item_text(raw)
+        if vec:
+            item.embedding = json.dumps(vec)
+            db.commit()
+
+    def backfill_missing_embeddings(self, db: Session, limit: int = 200) -> int:
+        """Embed up to `limit` rows that don't have an embedding yet. Returns
+        how many we successfully populated. Cheap loop on top of the existing
+        embedder so a startup hook can chip away at backlog over restarts."""
+        rows = (
+            db.query(ListItem)
+            .filter(ListItem.embedding.is_(None))
+            .order_by(ListItem.id.asc())
+            .limit(limit)
+            .all()
+        )
+        wrote = 0
+        for it in rows:
+            raw = _item_embed_text(it.text, it.subtitle)
+            vec = self._embed_item_text(raw)
+            if vec:
+                it.embedding = json.dumps(vec)
+                wrote += 1
+        if wrote:
+            db.commit()
+        return wrote
 
     def add_item_by_list_name(
         self,
@@ -178,6 +352,13 @@ class ListService:
             item.due_date = due_date
         if sort_order is not None:
             item.sort_order = sort_order
+        # If the searchable text changed, re-embed so future conflict scans
+        # match the new content. Skip if neither field was touched.
+        if text is not None or subtitle is not None:
+            raw = _item_embed_text(item.text, item.subtitle)
+            vec = self._embed_item_text(raw)
+            if vec:
+                item.embedding = json.dumps(vec)
         db.commit()
         db.refresh(item)
         return item
