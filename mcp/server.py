@@ -773,17 +773,22 @@ def delete_todo(match: str) -> str:
 
 
 def _find_backlog_item(match: str, only_open: bool = True) -> tuple[dict | None, str | None]:
-    """Locate a ListItem inside the user's backlog list (kind='backlog').
+    """Locate a ListItem inside the user's backlog list (type='backlog').
     Returns (item, error_or_None). Substring match on text or subtitle —
     backlog rows often store the user-visible title in `text` and an
-    auto-generated `from note #N` blurb in `subtitle`."""
+    auto-generated `from note #N` blurb in `subtitle`. Backend's lists
+    field is `type`; an earlier version filtered on the wrong key (`kind`)
+    and silently returned no matches."""
     match_l = match.lower().strip()
     if not match_l:
         return None, "(empty match string)"
 
     lists = _session.get(f"{BASE_URL}/lists", timeout=10)
     lists.raise_for_status()
-    backlogs = [l for l in lists.json() if (l.get("kind") or "") == "backlog"]
+    backlogs = [
+        l for l in lists.json()
+        if (l.get("type") or l.get("kind") or "") == "backlog"
+    ]
     if not backlogs:
         return None, "(no backlog list)"
 
@@ -1076,7 +1081,14 @@ def _find_list_item(
     items = _fetch_list_items(list_id)
     if only_open:
         items = [it for it in items if not it.get("done")]
-    candidates = [it for it in items if match_l in (it.get("text") or "").lower()]
+    # Match text OR subtitle — backlog rows often store a short title in text
+    # and an auto-generated "from note #N" or descriptor in subtitle, so
+    # text-only match misses obvious references.
+    candidates = [
+        it for it in items
+        if match_l in (it.get("text") or "").lower()
+        or match_l in (it.get("subtitle") or "").lower()
+    ]
     if not candidates:
         return None, f"(no item matching '{match}' in list #{list_id})"
     if unique and len(candidates) > 1:

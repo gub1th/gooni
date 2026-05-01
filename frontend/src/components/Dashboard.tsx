@@ -260,97 +260,34 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         />
       )}
 
-      {/* Header band — greeting + stats. Was previously position:sticky so
-          stats followed the scroll, but the dashboard already has very
-          little above-the-fold content and the sticky bar squeezed everything
-          else. Sticky behavior moved to ListView (where a long item list
-          actually benefits from a pinned title). Plain band here. */}
-      <div style={{
-        background: palette.main,
-        borderBottom: "0.5px solid rgba(0,0,0,0.06)",
-      }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 14px" }}>
-          {/* Greeting on its own row, stats row underneath. Putting them on
-              one row used to wrap the dev-streak card below at typical 720px
-              container widths — the cramped 3-card group + brain just didn't
-              fit next to the greeting. Stacking gives stats their full row. */}
-          <div style={{
-            fontSize: 28, fontWeight: 700, color: "var(--gooni-text, #1C1C1E)",
-            letterSpacing: "-0.5px", lineHeight: 1.2,
-          }}>
-            {getGreeting()}, Daniel.
-          </div>
-          <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", marginTop: 4, marginBottom: 14 }}>
-            {getDateStr()}
-          </div>
-
-          <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
-            {/* 3D brain — opens the notes visualization. Left of the stat cards
-                so it reads as a peer affordance, not buried in a toolbar. */}
-            <NeuralBrain size={60} onClick={() => setExploreOpen(true)} />
-
-            {/* notes this week */}
-            <div style={{
-              background: "var(--gooni-card, #fff)", border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-              borderRadius: 10, padding: "10px 14px",
-              display: "flex", flexDirection: "column", alignItems: "flex-start",
-              minWidth: 92,
-            }}>
-              <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>notes this week</div>
-              <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
-                {stats ? stats.notes_this_week : <Skeleton width={32} height={20} />}
-              </div>
-              {stats && (() => {
-                const delta = stats.notes_this_week - stats.notes_last_week;
-                if (delta === 0 && stats.notes_last_week === 0) return null;
-                const isUp = delta > 0;
-                const isFlat = delta === 0;
-                return (
+      {/* Two-column wrapper: main content on the left (centered to 720px),
+          metric cards stacked in a thin right column. Right column uses
+          position:sticky so metrics stay glanceable while you scroll. The
+          old in-header stats row is gone — header is just greeting + brain
+          now, and the underlining border was killed (created a stray hairline
+          across the whole viewport in dark mode + felt like a chrome seam). */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 28, padding: "0 28px 0 0" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ background: palette.main }}>
+            <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 14px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
-                    fontSize: 10.5, color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
-                    marginTop: 2, fontVariantNumeric: "tabular-nums",
+                    fontSize: 28, fontWeight: 700, color: "var(--gooni-text, #1C1C1E)",
+                    letterSpacing: "-0.5px", lineHeight: 1.2,
                   }}>
-                    {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
+                    {getGreeting()}, Daniel.
                   </div>
-                );
-              })()}
-            </div>
-
-            {/* day streak */}
-            <div style={{
-              background: "var(--gooni-card, #fff)", border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-              borderRadius: 10, padding: "10px 14px",
-              display: "flex", flexDirection: "column", alignItems: "flex-start",
-              minWidth: 92,
-            }}>
-              <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>day streak</div>
-              <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
-                {stats ? stats.streak : <Skeleton width={28} height={20} />}
-              </div>
-              <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
-                {activityPerDay.map((v, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      width: 6, height: 6, borderRadius: "50%",
-                      background: v > 0 ? GREEN : "rgba(0,0,0,0.08)",
-                    }}
-                  />
-                ))}
+                  <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", marginTop: 4 }}>
+                    {getDateStr()}
+                  </div>
+                </div>
+                <NeuralBrain size={60} onClick={() => setExploreOpen(true)} />
               </div>
             </div>
-
-            {/* dev streak — fetches its own data, shows commits + adds/dels.
-                Click to expand a commits panel that wraps below the stat row
-                via flexBasis: 100% on the panel + flexWrap on the parent. */}
-            <DevStreakStat />
           </div>
-        </div>
-      </div>
-      {/* /sticky header */}
 
-      {/* Below-the-fold content — scrolls under the sticky band. */}
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
+          <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
 
         {/* Note input — embedded NoteEditor quick-input. */}
         <div style={{ marginBottom: 14 }}>
@@ -403,11 +340,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                 textTransform: "uppercase", fontWeight: 600,
               }}>
                 recent notes
-                {totalPages > 1 && (
-                  <span style={{ marginLeft: 8, color: "#C7C7CC", fontWeight: 500, letterSpacing: 0.3 }}>
-                    {page + 1} / {totalPages}
-                  </span>
-                )}
               </div>
               {totalPages > 1 && (
                 <div style={{ display: "flex", gap: 4 }}>
@@ -561,6 +493,83 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />
 
+          </div>
+        </div>
+
+        {/* Right metrics column — sticky so it stays visible while the main
+            column scrolls. Three cards stacked: notes-this-week, day streak,
+            dev streak. Hidden under ~960px viewport (the brain + main content
+            already fight for room there). */}
+        <aside
+          style={{
+            width: 200,
+            flexShrink: 0,
+            position: "sticky",
+            top: 24,
+            paddingTop: 24,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+          className="gooni-metrics-col"
+        >
+          <style>{`
+            @media (max-width: 960px) {
+              .gooni-metrics-col { display: none !important; }
+            }
+          `}</style>
+
+          <div style={{
+            background: "var(--gooni-card, #fff)",
+            border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+            borderRadius: 10, padding: "10px 14px",
+            display: "flex", flexDirection: "column", alignItems: "flex-start",
+          }}>
+            <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>notes this week</div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
+              {stats ? stats.notes_this_week : <Skeleton width={32} height={20} />}
+            </div>
+            {stats && (() => {
+              const delta = stats.notes_this_week - stats.notes_last_week;
+              if (delta === 0 && stats.notes_last_week === 0) return null;
+              const isUp = delta > 0;
+              const isFlat = delta === 0;
+              return (
+                <div style={{
+                  fontSize: 10.5, color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
+                  marginTop: 2, fontVariantNumeric: "tabular-nums",
+                }}>
+                  {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
+                </div>
+              );
+            })()}
+          </div>
+
+          <div style={{
+            background: "var(--gooni-card, #fff)",
+            border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+            borderRadius: 10, padding: "10px 14px",
+            display: "flex", flexDirection: "column", alignItems: "flex-start",
+          }}>
+            <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>day streak</div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
+              {stats ? stats.streak : <Skeleton width={28} height={20} />}
+            </div>
+            <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
+              {activityPerDay.map((v, i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: 6, height: 6, borderRadius: "50%",
+                    background: v > 0 ? GREEN : "rgba(0,0,0,0.08)",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <DevStreakStat />
+        </aside>
       </div>
 
       {/* Mascot mounts at the route root now (see routes/index.tsx) so it

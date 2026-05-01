@@ -5,7 +5,7 @@ import {
   updateItem, deleteItem,
 } from "../services/api";
 import { FocusModal } from "./FocusModal";
-import { FocusOverlay } from "./FocusOverlay";
+import { FocusOverlay, loadFocusMode, saveFocusMode, clearFocusMode } from "./FocusOverlay";
 
 const FONT = "'Inter', -apple-system, sans-serif";
 
@@ -40,7 +40,12 @@ export function FocusRow({
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [focusModeOpen, setFocusModeOpen] = useState(false);
+  // Restore focus mode across reloads if it was active for THIS focus.
+  const [focusModeStartedAt, setFocusModeStartedAt] = useState<number | null>(() => {
+    const saved = loadFocusMode();
+    return saved && saved.focusId === node.id ? saved.startedAt : null;
+  });
+  const focusModeOpen = focusModeStartedAt !== null;
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isDone = variant === "done";
@@ -166,7 +171,12 @@ export function FocusRow({
           {/* Focus-mode entry — primary only. Opens the meditative overlay. */}
           {isPrimary && !isDone && (
             <button
-              onClick={(e) => { e.stopPropagation(); setFocusModeOpen(true); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                const now = Date.now();
+                saveFocusMode({ focusId: node.id, focusName: node.text, startedAt: now });
+                setFocusModeStartedAt(now);
+              }}
               aria-label="Enter focus mode"
               title="Enter focus mode"
               style={{
@@ -235,10 +245,11 @@ export function FocusRow({
           onClose={() => setOpen(false)}
         />
       )}
-      {focusModeOpen && (
+      {focusModeOpen && focusModeStartedAt !== null && (
         <FocusOverlay
           focusName={node.text}
-          onExit={() => setFocusModeOpen(false)}
+          startedAt={focusModeStartedAt}
+          onExit={() => { clearFocusMode(); setFocusModeStartedAt(null); }}
         />
       )}
     </>
