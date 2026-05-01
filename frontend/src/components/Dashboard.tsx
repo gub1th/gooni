@@ -12,7 +12,8 @@ import { NoteEditor } from "./notes/NoteEditor";
 import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
-import { DevStreakStat } from "./DevStreakStat";
+import { FlipStat, type FlipFace } from "./FlipStat";
+import { fetchDevActivity, type DevActivity } from "../services/api";
 import { Skeleton } from "./Skeleton";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -53,6 +54,80 @@ function pagerBtnStyle(enabled: boolean): React.CSSProperties {
     transition: "background 0.1s, border-color 0.1s",
     padding: 0,
   };
+}
+
+// Faces fed into the FlipStat in the header. Order = display order:
+// 1. day streak (default visible)
+// 2. dev streak (commits)
+// 3. claude activity (MCP calls)
+// Each face is a (label, value, hint) tuple. Skeletons during stats load.
+function buildStatFaces(
+  stats: DashboardStats | undefined,
+  dev: DevActivity | null | undefined,
+  activityPerDay: number[],
+): FlipFace[] {
+  const dayHint = (
+    <div style={{ display: "flex", gap: 2.5 }}>
+      {activityPerDay.map((v, i) => (
+        <div
+          key={i}
+          style={{
+            width: 6, height: 6, borderRadius: "50%",
+            background: v > 0 ? GREEN : "rgba(0,0,0,0.10)",
+          }}
+        />
+      ))}
+    </div>
+  );
+
+  const devTodayCommits = dev?.aggregate?.today_commits ?? 0;
+  const devAdds = (dev?.repos ?? []).reduce((s, r) => s + (r.today?.additions ?? 0), 0);
+  const devDels = (dev?.repos ?? []).reduce((s, r) => s + (r.today?.deletions ?? 0), 0);
+  const devHint = devTodayCommits > 0 ? (
+    <span style={{
+      fontSize: 10.5, color: "#6B6B70", fontVariantNumeric: "tabular-nums",
+      display: "inline-flex", gap: 4,
+    }}>
+      <span>{devTodayCommits} today</span>
+      {(devAdds > 0 || devDels > 0) && (
+        <>
+          <span style={{ color: "#30A14E" }}>+{devAdds}</span>
+          <span style={{ color: "#CF222E" }}>−{devDels}</span>
+        </>
+      )}
+    </span>
+  ) : (
+    <span style={{ fontSize: 10.5, color: "#AEAEB2" }}>no commits today</span>
+  );
+
+  const claudeHint = (
+    <div style={{ fontSize: 10.5, color: "#AEAEB2" }}>
+      {stats?.mcp_last_active_at
+        ? `last ${formatRelativeShort(stats.mcp_last_active_at)}`
+        : "no calls yet"}
+    </div>
+  );
+
+  return [
+    {
+      key: "day-streak",
+      label: "day streak",
+      value: stats ? stats.streak : <Skeleton width={28} height={20} />,
+      hint: dayHint,
+    },
+    {
+      key: "dev-streak",
+      label: "dev streak",
+      value: dev ? (dev.aggregate?.streak_days ?? 0) : <Skeleton width={28} height={20} />,
+      hint: devHint,
+    },
+    {
+      key: "claude",
+      label: "claude activity",
+      value: stats ? stats.mcp_calls_today : <Skeleton width={28} height={20} />,
+      hint: claudeHint,
+    },
+  ];
 }
 
 // Compact card variant of the original right-column stat tile. Used in
@@ -134,6 +209,13 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["dashboard-stats"],
     queryFn: fetchDashboardStats,
+  });
+  // Dev activity is fetched separately so DevStreakStat's old internal query
+  // isn't relied on (we render dev streak inside the FlipStat now). Connected
+  // = false / no repos returns null and the dev face just shows "—".
+  const { data: dev } = useQuery<DevActivity | null>({
+    queryKey: ["dev-activity"],
+    queryFn: () => fetchDevActivity().catch(() => null),
   });
   // Helpers so the imperative submit/typing flow can still update + refetch.
   const setStats = (next: DashboardStats) => queryClient.setQueryData<DashboardStats>(["dashboard-stats"], next);
@@ -344,34 +426,19 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                   );
                 })()}
               </StatCard>
-              <StatCard
-                label="day streak"
-                value={stats ? stats.streak : <Skeleton width={28} height={20} />}
-              >
-                <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
-                  {activityPerDay.map((v, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        width: 6, height: 6, borderRadius: "50%",
-                        background: v > 0 ? GREEN : "rgba(0,0,0,0.08)",
-                      }}
-                    />
-                  ))}
-                </div>
-              </StatCard>
+              <FlipStat
+                faces={buildStatFaces(stats, dev, activityPerDay)}
+                autoIntervalMs={15000}
+                width={150}
+              />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Two-col body — main content stays centered at 720px; right side
-          column hosts Dev + Claude stat cards. The aside is sticky with a
-          paddingTop matching the main column so its top edge lines up with
-          the top of the composer (the first content card). Hidden on small
-          viewports — main column already fights for room there. */}
-      <div style={{ display: "flex", alignItems: "flex-start", padding: "0 28px 0 0" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+      {/* Single-column body. Dev + Claude stats moved into the header
+          FlipStat — no more right aside. */}
+      <div>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
 
         {/* Note input — embedded NoteEditor quick-input. */}
@@ -578,44 +645,7 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />
 
-          </div>
         </div>
-
-        {/* Right side column — sticky so the cards stay glanceable while
-            you scroll. paddingTop matches the main column's padding (20px)
-            so the top of the Dev card lines up with the top of the
-            composer below the header. Hidden under ~960px viewport so the
-            main column doesn't get crushed. */}
-        <aside
-          style={{
-            width: 200,
-            flexShrink: 0,
-            position: "sticky",
-            top: 20,
-            paddingTop: 20,
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-          }}
-          className="gooni-metrics-col"
-        >
-          <style>{`
-            @media (max-width: 960px) {
-              .gooni-metrics-col { display: none !important; }
-            }
-          `}</style>
-          <DevStreakStat />
-          <StatCard
-            label="claude activity"
-            value={stats ? stats.mcp_calls_today : <Skeleton width={28} height={20} />}
-          >
-            <div style={{ fontSize: 10.5, color: "#AEAEB2", marginTop: 2 }}>
-              {stats?.mcp_last_active_at
-                ? `last ${formatRelativeShort(stats.mcp_last_active_at)}`
-                : "no calls yet"}
-            </div>
-          </StatCard>
-        </aside>
       </div>
 
       {/* Mascot mounts at the route root now (see routes/index.tsx) so it
