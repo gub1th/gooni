@@ -84,8 +84,14 @@ Exposes Gooni to Claude Code via stdio. Tools:
 - `add_note(title, content)` — create a note in General space
 - `search_notes(query, limit)` — semantic note search
 - `edit_note(note_id, title?, content?)` — update an existing note
+- `find_note(match, limit)` — substring scan over recent notes; returns id + title preview
+- `delete_note(note_id)` — irreversible; pre-fetches title for audit
 - `list_spaces()` — list all spaces
 - `list_notes(space_id, limit)` — browse notes in a space
+- `read_list(list_ref="backlog", limit, include_done)` — read items from any list. Resolves by type ("backlog"/"todo"/"focus") → name → numeric id, so callers don't hard-code shifting ids.
+- `add_list_item(text, list_ref="backlog", subtitle?)` — add to a list
+- `check_list_item(match, list_ref="backlog", done=True)` — toggle done by text match (first-hit-wins)
+- `delete_list_item(match, list_ref="backlog")` — delete by text match; refuses ambiguous matches
 
 ## Running
 

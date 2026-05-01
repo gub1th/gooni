@@ -919,5 +919,255 @@ def list_recent_notes(limit: int = 10) -> str:
     return "\n".join(lines)
 
 
+# ── Generic lists (backlog / todo / focus singletons + user-created lists) ───
+#
+# Singletons live in the `lists` table with unique types — `backlog`, `todo`,
+# `focus`. Resolving by type avoids hard-coding numeric IDs that shift across
+# DB rebuilds. Generic lists fall back to name match.
+
+
+def _fetch_lists() -> list[dict]:
+    resp = _session.get(f"{BASE_URL}/lists", timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _resolve_list(list_ref: str) -> tuple[dict | None, str | None]:
+    """Resolve a list by type ('backlog'/'todo'/'focus'), name, or numeric id."""
+    ref = (list_ref or "").strip()
+    if not ref:
+        return None, "(empty list reference)"
+    lists = _fetch_lists()
+    # numeric id wins
+    if ref.isdigit():
+        target_id = int(ref)
+        for lst in lists:
+            if lst["id"] == target_id:
+                return lst, None
+        return None, f"(no list with id {target_id})"
+    ref_l = ref.lower()
+    # singleton type match (backlog/todo/focus)
+    by_type = [lst for lst in lists if (lst.get("type") or "").lower() == ref_l]
+    if len(by_type) == 1:
+        return by_type[0], None
+    if len(by_type) > 1:
+        names = ", ".join(f"#{lst['id']} {lst['name']}" for lst in by_type)
+        return None, f"(multiple lists with type '{ref}': {names})"
+    # fall back to case-insensitive name match
+    by_name = [lst for lst in lists if (lst.get("name") or "").lower() == ref_l]
+    if len(by_name) == 1:
+        return by_name[0], None
+    if len(by_name) > 1:
+        names = ", ".join(f"#{lst['id']} {lst['name']}" for lst in by_name)
+        return None, f"(multiple lists named '{ref}': {names})"
+    # last-resort substring on name
+    sub = [lst for lst in lists if ref_l in (lst.get("name") or "").lower()]
+    if len(sub) == 1:
+        return sub[0], None
+    if not sub:
+        return None, f"(no list matching '{ref}')"
+    names = ", ".join(f"#{lst['id']} {lst['name']}" for lst in sub)
+    return None, f"(ambiguous list '{ref}'; candidates: {names})"
+
+
+def _fetch_list_items(list_id: int) -> list[dict]:
+    resp = _session.get(f"{BASE_URL}/lists/{list_id}", timeout=10)
+    resp.raise_for_status()
+    return resp.json().get("items", [])
+
+
+def _find_list_item(
+    list_id: int, match: str, unique: bool = False, only_open: bool = False
+) -> tuple[dict | None, str | None]:
+    """Substring match on item text within a list.
+
+    `unique=True` refuses if 0 or >1 candidates (use for destructive ops).
+    `unique=False` returns shortest-text match (most specific) — safe for
+    non-destructive toggles like check_list_item.
+    """
+    match_l = (match or "").lower().strip()
+    if not match_l:
+        return None, "(empty match string)"
+    items = _fetch_list_items(list_id)
+    if only_open:
+        items = [it for it in items if not it.get("done")]
+    candidates = [it for it in items if match_l in (it.get("text") or "").lower()]
+    if not candidates:
+        return None, f"(no item matching '{match}' in list #{list_id})"
+    if unique and len(candidates) > 1:
+        previews = "\n".join(
+            f"  #{it['id']} {'[x]' if it['done'] else '[ ]'} {it['text']}"
+            for it in candidates[:6]
+        )
+        return None, (
+            f"(ambiguous: {len(candidates)} items match '{match}'. "
+            f"Refine match string or call again with the exact text.\n{previews})"
+        )
+    candidates.sort(key=lambda it: len(it.get("text") or ""))
+    return candidates[0], None
+
+
+@mcp.tool()
+def read_list(list_ref: str = "backlog", limit: int = 50, include_done: bool = False) -> str:
+    """Read items from a Gooni list — backlog, todo, focus, or any user-created list.
+
+    Lists are looked up by type ('backlog'/'todo'/'focus') first, then by name,
+    then by numeric id. Type-based lookup is the stable path: it survives DB
+    rebuilds where ids shift.
+
+    Args:
+        list_ref: 'backlog' (default), 'todo', 'focus', a list name, or a numeric id
+        limit: max items to return (default 50)
+        include_done: include checked-off items (default False)
+    """
+    lst, err = _resolve_list(list_ref)
+    if err:
+        return err
+    items = _fetch_list_items(lst["id"])
+    if not include_done:
+        items = [it for it in items if not it.get("done")]
+    items = items[:limit]
+    if not items:
+        return f"(list #{lst['id']} '{lst['name']}' has no {'items' if include_done else 'open items'})"
+    lines = [f"# {lst['name']} (list #{lst['id']}, type={lst['type']})"]
+    for it in items:
+        mark = "[x]" if it.get("done") else "[ ]"
+        primary = " ★" if it.get("is_primary") else ""
+        due = f" (due {it['due_date'][:10]})" if it.get("due_date") else ""
+        sub = f" — {it['subtitle']}" if it.get("subtitle") else ""
+        lines.append(f"#{it['id']} {mark}{primary} {it['text']}{sub}{due}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_list_item(text: str, list_ref: str = "backlog", subtitle: str = None) -> str:
+    """Add an item to a Gooni list (defaults to backlog).
+
+    Args:
+        text: item text (e.g. "spike WhatsApp business onboarding")
+        list_ref: 'backlog' (default), 'todo', 'focus', name, or numeric id
+        subtitle: optional secondary line shown under the item
+    """
+    text = (text or "").strip()
+    if not text:
+        return "(text required)"
+    lst, err = _resolve_list(list_ref)
+    if err:
+        return err
+    body = {"text": text}
+    if subtitle:
+        body["subtitle"] = subtitle
+    resp = _session.post(f"{BASE_URL}/lists/{lst['id']}/items", json=body, timeout=10)
+    resp.raise_for_status()
+    it = resp.json()
+    return f"added #{it['id']} to {lst['name']}: {it['text']}"
+
+
+@mcp.tool()
+def check_list_item(match: str, list_ref: str = "backlog", done: bool = True) -> str:
+    """Toggle a list item's done flag by text match (first-hit-wins, like claim_task).
+
+    Args:
+        match: substring of the item's text (case-insensitive)
+        list_ref: which list to look in (default 'backlog')
+        done: True to check, False to uncheck
+    """
+    lst, err = _resolve_list(list_ref)
+    if err:
+        return err
+    item, err = _find_list_item(lst["id"], match, unique=False, only_open=done)
+    if err:
+        return err
+    resp = _session.patch(
+        f"{BASE_URL}/list-items/{item['id']}", json={"done": bool(done)}, timeout=10
+    )
+    resp.raise_for_status()
+    mark = "[x]" if done else "[ ]"
+    return f"{mark} {item['text']} (in {lst['name']})"
+
+
+@mcp.tool()
+def delete_list_item(match: str, list_ref: str = "backlog") -> str:
+    """Delete a list item by text match. Refuses if the match is ambiguous —
+    you must narrow it to exactly one item.
+
+    Args:
+        match: substring of the item's text (case-insensitive). Must hit exactly one item.
+        list_ref: which list to look in (default 'backlog')
+    """
+    lst, err = _resolve_list(list_ref)
+    if err:
+        return err
+    item, err = _find_list_item(lst["id"], match, unique=True)
+    if err:
+        return err
+    resp = _session.delete(f"{BASE_URL}/list-items/{item['id']}", timeout=10)
+    resp.raise_for_status()
+    return f"deleted #{item['id']} from {lst['name']}: {item['text']}"
+
+
+# ── Notes: find + delete ─────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def find_note(match: str, limit: int = 5) -> str:
+    """Find notes by substring match across recent titles + content snippets.
+
+    Returns id + title + snippet so you can pick one before destructive ops.
+    For semantic search use search_notes() instead — this is for picking a
+    specific note out of a small recent set when you remember a phrase.
+
+    Args:
+        match: case-insensitive substring to look for
+        limit: max recent notes to scan (default 5; up to 100)
+    """
+    match_l = (match or "").lower().strip()
+    if not match_l:
+        return "(empty match string)"
+    scan_limit = max(1, min(int(limit) * 20, 100))
+    resp = _session.get(f"{BASE_URL}/notes/recent", params={"limit": scan_limit}, timeout=10)
+    resp.raise_for_status()
+    notes = resp.json()
+    hits = []
+    for n in notes:
+        title = (n.get("title") or "").lower()
+        content = (n.get("content") or "").lower()
+        if match_l in title or match_l in content:
+            hits.append(n)
+            if len(hits) >= limit:
+                break
+    if not hits:
+        return f"(no recent note matching '{match}' in last {scan_limit})"
+    lines = []
+    for n in hits:
+        snippet = (n.get("content") or "")[:120].replace("\n", " ")
+        lines.append(f"#{n['id']} {n['title'] or '(untitled)'} — {snippet}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def delete_note(note_id: int) -> str:
+    """Delete a note by numeric id. Irreversible — call find_note() first to confirm
+    you have the right id. Returns the deleted note's title for an audit trail.
+
+    Args:
+        note_id: numeric id of the note to delete (get from find_note, list_recent_notes, etc.)
+    """
+    if not isinstance(note_id, int) or note_id <= 0:
+        return "(note_id must be a positive integer)"
+    # Fetch first so we can echo the title back — also catches typoed ids before deletion.
+    pre = _session.get(f"{BASE_URL}/notes/{note_id}", timeout=10)
+    if pre.status_code == 404:
+        return f"(note #{note_id} not found)"
+    pre.raise_for_status()
+    snapshot = pre.json()
+    title = snapshot.get("title") or "(untitled)"
+    resp = _session.delete(f"{BASE_URL}/notes/{note_id}", timeout=10)
+    if resp.status_code == 404:
+        return f"(note #{note_id} not found)"
+    resp.raise_for_status()
+    return f"deleted note #{note_id}: {title}"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
