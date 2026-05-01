@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.10.0 — 2026-05-01 (minor)
+
+- feat: claude activity stat — log MCP-tagged requests, surface on dashboard (#75)
+
 ## 0.9.1 — 2026-05-01 (patch)
 
 - fix: stats sidebar + drop hairline, focus mode persistence/timer/new mascot, MCP backlog matching (#74)
