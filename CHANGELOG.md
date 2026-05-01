@@ -17,6 +17,11 @@ major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
 - feat: dashboard polish — sticky header, graph nav fix, recent-notes pager, settings into modal (#68)
 
+## 0.5.2 — 2026-05-01 (patch)
+
+- fix(notes): prevent autosave wipe + save-on-leave skip + silent failures (#66)
+- (backfilled by hand: workflow run for #66 raced with #67's bump and was dropped — concurrency lock added in a follow-up)
+
 ## 0.5.1 — 2026-04-30 (patch)
 
 - fix: focuses card UI — single shared card, pulse-only primary dot, compact inline form (#65)

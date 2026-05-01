@@ -15,6 +15,16 @@ on:
   push:
     branches: [main]
 
+# Serialize bumps. Two PRs merging within ~15s can race: each workflow
+# computes its bump from main HEAD at start time, then both try to push
+# the same parent — second push fails fast-forward. Concurrency lock
+# makes the second wait until the first finishes (so it sees the new
+# HEAD + new version) before running. Setting cancel-in-progress=false
+# means we never drop a bump request — every PR gets its CHANGELOG entry.
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
