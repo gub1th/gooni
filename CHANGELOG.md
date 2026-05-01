@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.13.4 — 2026-05-01 (patch)
+
+- fix(dashboard,mascot): restore card-style stats + fix mascot dropzone (#82)
+
 ## 0.13.3 — 2026-05-01 (patch)
 
 - fix(memory): tighten preference dedup at write-time, anti-examples in extractor (#81)
