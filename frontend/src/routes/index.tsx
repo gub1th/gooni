@@ -22,6 +22,10 @@ export const Route = createFileRoute("/")({
     note: typeof search.note === "number" ? search.note : typeof search.note === "string" ? Number(search.note) : undefined,
     conv: typeof search.conv === "number" ? search.conv : typeof search.conv === "string" ? Number(search.conv) : undefined,
     list: typeof search.list === "number" ? search.list : typeof search.list === "string" ? Number(search.list) : undefined,
+    // ?audit=1 → land on the Audit (eval) view. Lets the Sidebar Audit
+    // button navigate from any route (including /memories, /chat-audit)
+    // without each route having to wire an onOpenEval prop.
+    audit: search.audit === true || search.audit === "true" || search.audit === "1" || undefined,
   }),
   component: NotesPage,
 });
@@ -40,7 +44,7 @@ function NotesPage() {
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
   const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "plan" | "eval">(() =>
-    search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
+    search.audit ? "eval" : search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
   );
   const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
   // Note currently being planned (set by Dashboard's "💬 Plan this" pill).
@@ -89,6 +93,12 @@ function NotesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.conv]);
 
+  // ?audit=1 lands directly on the Audit tab.
+  useEffect(() => {
+    if (search.audit) setView("eval");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.audit]);
+
   useEffect(() => {
     if (view === "notes") {
       const spaceId = selectedSpaceId ?? "general";
@@ -127,13 +137,13 @@ function NotesPage() {
   ) {
     setView(v);
     if (v === "notes" && noteId) {
-      navigate({ search: { note: noteId, conv: undefined, list: undefined }, replace: true });
+      navigate({ search: { note: noteId, conv: undefined, list: undefined , audit: undefined}, replace: true });
     } else if (v === "chat" && convId) {
-      navigate({ search: { note: undefined, conv: convId, list: undefined }, replace: true });
+      navigate({ search: { note: undefined, conv: convId, list: undefined , audit: undefined}, replace: true });
     } else if (v === "lists" && listId) {
-      navigate({ search: { note: undefined, conv: undefined, list: listId }, replace: true });
+      navigate({ search: { note: undefined, conv: undefined, list: listId , audit: undefined}, replace: true });
     } else {
-      navigate({ search: { note: undefined, conv: undefined, list: undefined }, replace: true });
+      navigate({ search: { note: undefined, conv: undefined, list: undefined , audit: undefined}, replace: true });
     }
   }
 
@@ -154,7 +164,7 @@ function NotesPage() {
     newChat();
     setPlanNoteId(noteId);
     setView("plan");
-    navigate({ search: { note: undefined, conv: undefined, list: undefined }, replace: true });
+    navigate({ search: { note: undefined, conv: undefined, list: undefined , audit: undefined}, replace: true });
   }
 
   function handleCompose() {
@@ -162,14 +172,14 @@ function NotesPage() {
     setView("notes");
     selectSpace(spaceId);
     createNote(spaceId);
-    navigate({ search: { note: undefined, conv: undefined, list: undefined }, replace: true });
+    navigate({ search: { note: undefined, conv: undefined, list: undefined , audit: undefined}, replace: true });
   }
 
   // When active note changes while in notes view, update URL
   const { activeNoteId } = useNotesContentStore();
   useEffect(() => {
     if (view === "notes" && activeNoteId && activeNoteId > 0) {
-      navigate({ search: { note: activeNoteId, conv: undefined, list: undefined }, replace: true });
+      navigate({ search: { note: activeNoteId, conv: undefined, list: undefined , audit: undefined}, replace: true });
     }
   }, [activeNoteId, view]);
 
@@ -177,7 +187,7 @@ function NotesPage() {
   const { activeId: activeConvId } = useConversationsStore();
   useEffect(() => {
     if (view === "chat" && activeConvId) {
-      navigate({ search: { note: undefined, conv: activeConvId, list: undefined }, replace: true });
+      navigate({ search: { note: undefined, conv: activeConvId, list: undefined , audit: undefined}, replace: true });
     }
   }, [activeConvId, view]);
 

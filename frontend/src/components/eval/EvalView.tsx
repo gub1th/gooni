@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ChatAuditPanel } from "./ChatAuditPanel";
 import {
   dispatchEvalToCc,
   fetchEvalSegmentFull,
@@ -16,23 +17,24 @@ import {
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
-// Per-source visual identity. Border + badge so a glance at the grid tells
-// you whether a card is web (browser session), Telegram (bot), WhatsApp, or
-// iMessage. Match Apple-system colors for consistency with the rest of Gooni.
+// Per-source visual identity. Tone matches Apple-Notes restraint that the
+// rest of Gooni uses: muted accent dot + label, not loud full-fill badges.
+// `accent` colors stay deliberately desaturated so cards read as a quiet
+// grid, not a status board.
 const SOURCE_STYLE: Record<
   string,
-  { color: string; badge: string; label: string }
+  { accent: string; label: string }
 > = {
-  web: { color: "#0A84FF", badge: "🌐", label: "Web" },
-  telegram: { color: "#5AC8FA", badge: "✈", label: "Telegram" },
-  whatsapp: { color: "#34C759", badge: "💬", label: "WhatsApp" },
-  imessage: { color: "#8E8E93", badge: "📱", label: "iMessage" },
+  web: { accent: "#0A84FF", label: "Web" },
+  telegram: { accent: "#5AC8FA", label: "Telegram" },
+  whatsapp: { accent: "#34C759", label: "WhatsApp" },
+  imessage: { accent: "#8E8E93", label: "iMessage" },
 };
 
 const STATUS_STYLE: Record<EvalStatus, { color: string; bg: string; label: string }> = {
   not_yet: { color: "#8E8E93", bg: "#F2F2F7", label: "Not yet" },
-  pending: { color: "#FF9500", bg: "#FFF4E6", label: "Pending" },
-  done: { color: "#34C759", bg: "#E8F8EE", label: "Done" },
+  pending: { color: "#A1742B", bg: "#FFF8E6", label: "Pending" },
+  done: { color: "#2A8F4D", bg: "#EAF6EE", label: "Done" },
 };
 
 const SOURCES = ["web", "telegram", "whatsapp", "imessage"] as const;
@@ -44,7 +46,10 @@ const RATING_OPTIONS: { value: 1 | 2 | 3; label: string; emoji: string }[] = [
   { value: 3, label: "Good", emoji: "👍" },
 ];
 
+type Tab = "eval" | "audit";
+
 export function EvalView() {
+  const [tab, setTab] = useState<Tab>("eval");
   const [segments, setSegments] = useState<EvalSegmentSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -54,6 +59,10 @@ export function EvalView() {
   const [sourcesFilter, setSourcesFilter] = useState<string[]>([...SOURCES]);
   const [statusesFilter, setStatusesFilter] = useState<EvalStatus[]>([...STATUSES]);
   const [hasFlagOnly, setHasFlagOnly] = useState(false);
+  // Min message count: filters out the noise of one-off "asd" / "hi" segments
+  // that flood bot conversations. 3 is a low default that still cuts ~half
+  // the obviously-trivial segments without hiding short legitimate ones.
+  const [minMessages, setMinMessages] = useState(3);
   const [search, setSearch] = useState("");
 
   const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(null);
@@ -67,7 +76,7 @@ export function EvalView() {
         statuses: statusesFilter,
         hasFlag: hasFlagOnly,
         search: search.trim() || undefined,
-        limit: 100,
+        limit: 200,
       });
       setSegments(data.segments);
       setTotal(data.total);
@@ -95,6 +104,14 @@ export function EvalView() {
     );
   }
 
+  // Apply min-messages filter client-side so the slider feels instant.
+  // MUST be declared before any conditional return — React hooks have to
+  // run in the same order every render.
+  const visible = useMemo(
+    () => segments.filter((s) => s.message_count >= minMessages),
+    [segments, minMessages]
+  );
+
   if (selectedSegmentId != null) {
     return (
       <EvalDetailView
@@ -114,107 +131,162 @@ export function EvalView() {
         display: "flex",
         flexDirection: "column",
         minWidth: 0,
-        background: "#FAFAFA",
+        background: "#FFFFFF",
         fontFamily: FONT,
         overflow: "hidden",
       }}
     >
-      {/* Header + filters */}
+      {/* Header — title + tabs */}
       <div
         style={{
-          padding: "20px 24px 16px",
+          padding: "20px 24px 0",
           borderBottom: "1px solid rgba(0,0,0,0.06)",
           background: "#FFFFFF",
           flexShrink: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Eval</h1>
-          <span style={{ fontSize: 13, color: "#8E8E93" }}>{total} segments</span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "#1C1C1E" }}>Audit</h1>
+          {tab === "eval" && (
+            <span style={{ fontSize: 12, color: "#8E8E93" }}>
+              {visible.length}
+              {visible.length !== total ? ` of ${total}` : ""} segments
+            </span>
+          )}
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          <FilterGroup label="Source">
-            {SOURCES.map((src) => (
-              <FilterPill
-                key={src}
-                active={sourcesFilter.includes(src)}
-                color={SOURCE_STYLE[src]?.color ?? "#8E8E93"}
-                onClick={() => toggleSource(src)}
-              >
-                {SOURCE_STYLE[src]?.badge} {SOURCE_STYLE[src]?.label}
-              </FilterPill>
-            ))}
-          </FilterGroup>
-          <FilterGroup label="Status">
-            {STATUSES.map((s) => (
-              <FilterPill
-                key={s}
-                active={statusesFilter.includes(s)}
-                color={STATUS_STYLE[s].color}
-                onClick={() => toggleStatus(s)}
-              >
-                {STATUS_STYLE[s].label}
-              </FilterPill>
-            ))}
-          </FilterGroup>
-          <FilterPill
-            active={hasFlagOnly}
-            color="#FF3B30"
-            onClick={() => setHasFlagOnly((v) => !v)}
-          >
-            🚩 Has flag
-          </FilterPill>
-          <input
-            type="search"
-            placeholder="Search transcripts…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") loadSegments();
-            }}
-            style={{
-              marginLeft: "auto",
-              padding: "6px 12px",
-              border: "1px solid #E5E5EA",
-              borderRadius: 8,
-              fontSize: 13,
-              fontFamily: FONT,
-              minWidth: 220,
-              outline: "none",
-            }}
-          />
+        <div style={{ display: "flex", gap: 0, marginTop: 14 }}>
+          <TabButton active={tab === "eval"} onClick={() => setTab("eval")}>Eval</TabButton>
+          <TabButton active={tab === "audit"} onClick={() => setTab("audit")}>Chat audit</TabButton>
         </div>
       </div>
 
-      {/* Grid */}
-      <div style={{ flex: 1, overflow: "auto", padding: 24 }}>
-        {error && (
-          <div style={{ color: "#FF3B30", fontSize: 13, marginBottom: 12 }}>{error}</div>
-        )}
-        {loading && segments.length === 0 ? (
-          <div style={{ color: "#8E8E93", fontSize: 13 }}>Loading…</div>
-        ) : segments.length === 0 ? (
-          <div style={{ color: "#8E8E93", fontSize: 13 }}>
-            No segments match these filters. Try widening source / status, or clear search.
-          </div>
-        ) : (
+      {tab === "audit" ? (
+        // Inline the chat-audit content so the tab is the actual thing, not a
+        // jump-link. Same component is reused by the legacy /chat-audit route.
+        <div style={{ flex: 1, overflow: "auto", background: "#FAFAFA" }}>
+          <ChatAuditPanel />
+        </div>
+      ) : (
+        <>
+          {/* Filter rail */}
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-              gap: 16,
+              padding: "12px 24px 14px",
+              borderBottom: "1px solid rgba(0,0,0,0.04)",
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              alignItems: "center",
+              flexShrink: 0,
             }}
           >
-            {segments.map((seg) => (
-              <SegmentCard
-                key={seg.id}
-                seg={seg}
-                onClick={() => setSelectedSegmentId(seg.id)}
+            <FilterGroup label="Source">
+              {SOURCES.map((src) => (
+                <FilterPill
+                  key={src}
+                  active={sourcesFilter.includes(src)}
+                  accent={SOURCE_STYLE[src]?.accent ?? "#8E8E93"}
+                  onClick={() => toggleSource(src)}
+                >
+                  <Dot color={SOURCE_STYLE[src]?.accent ?? "#8E8E93"} />
+                  {SOURCE_STYLE[src]?.label}
+                </FilterPill>
+              ))}
+            </FilterGroup>
+            <FilterGroup label="Status">
+              {STATUSES.map((s) => (
+                <FilterPill
+                  key={s}
+                  active={statusesFilter.includes(s)}
+                  accent={STATUS_STYLE[s].color}
+                  onClick={() => toggleStatus(s)}
+                >
+                  {STATUS_STYLE[s].label}
+                </FilterPill>
+              ))}
+            </FilterGroup>
+            <FilterPill
+              active={hasFlagOnly}
+              accent="#FF3B30"
+              onClick={() => setHasFlagOnly((v) => !v)}
+            >
+              Flagged
+            </FilterPill>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 6 }}>
+              <span style={{ fontSize: 11, color: "#8E8E93" }}>Min msgs:</span>
+              <input
+                type="number"
+                min={1}
+                max={999}
+                value={minMessages}
+                onChange={(e) => setMinMessages(Math.max(1, Number(e.target.value) || 1))}
+                style={{
+                  width: 50,
+                  padding: "3px 6px",
+                  border: "1px solid #E5E5EA",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontFamily: FONT,
+                  outline: "none",
+                  textAlign: "center",
+                }}
               />
-            ))}
+            </div>
+            <input
+              type="search"
+              placeholder="Search transcripts…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") loadSegments();
+              }}
+              style={{
+                marginLeft: "auto",
+                padding: "6px 12px",
+                border: "1px solid #E5E5EA",
+                borderRadius: 8,
+                fontSize: 13,
+                fontFamily: FONT,
+                minWidth: 220,
+                outline: "none",
+                background: "#FAFAFA",
+              }}
+            />
           </div>
-        )}
-      </div>
+
+          {/* Grid */}
+          <div style={{ flex: 1, overflow: "auto", padding: 24, background: "#FAFAFA" }}>
+            {error && (
+              <div style={{ color: "#FF3B30", fontSize: 13, marginBottom: 12 }}>{error}</div>
+            )}
+            {loading && visible.length === 0 ? (
+              <div style={{ color: "#8E8E93", fontSize: 13 }}>Loading…</div>
+            ) : visible.length === 0 ? (
+              <div style={{ color: "#8E8E93", fontSize: 13 }}>
+                {segments.length === 0
+                  ? "No segments match these filters. Try widening source / status, or clear search."
+                  : `All ${segments.length} segment${segments.length === 1 ? "" : "s"} have fewer than ${minMessages} messages. Lower "Min msgs" to see them.`}
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                  gap: 14,
+                }}
+              >
+                {visible.map((seg) => (
+                  <SegmentCard
+                    key={seg.id}
+                    seg={seg}
+                    onClick={() => setSelectedSegmentId(seg.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -236,55 +308,68 @@ function SegmentCard({
       onClick={onClick}
       style={{
         textAlign: "left",
-        padding: 16,
-        borderRadius: 12,
+        padding: 14,
+        borderRadius: 10,
         background: "#FFFFFF",
-        border: `1px solid ${sourceStyle.color}33`,
-        borderLeft: `4px solid ${sourceStyle.color}`,
-        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+        border: "1px solid #E5E5EA",
         cursor: "pointer",
         fontFamily: FONT,
         display: "flex",
         flexDirection: "column",
         gap: 8,
-        minHeight: 140,
-        transition: "transform 0.1s, box-shadow 0.15s",
+        minHeight: 130,
+        transition: "background 0.12s, border-color 0.12s",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.08)";
-        e.currentTarget.style.transform = "translateY(-1px)";
+        e.currentTarget.style.background = "#FAFAFA";
+        e.currentTarget.style.borderColor = "#D1D1D6";
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)";
-        e.currentTarget.style.transform = "translateY(0)";
+        e.currentTarget.style.background = "#FFFFFF";
+        e.currentTarget.style.borderColor = "#E5E5EA";
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span
           style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
             fontSize: 11,
-            fontWeight: 600,
-            color: sourceStyle.color,
-            letterSpacing: 0.3,
-            textTransform: "uppercase",
+            color: "#3C3C43",
+            letterSpacing: 0.2,
           }}
         >
-          {sourceStyle.badge} {sourceStyle.label}
+          <Dot color={sourceStyle.accent} />
+          {sourceStyle.label}
         </span>
         <StatusPill status={seg.eval_status} />
       </div>
-      <div style={{ fontSize: 13, color: "#1C1C1E", lineHeight: 1.4, flex: 1 }}>
-        {seg.preview ? truncate(seg.preview, 160) : <em style={{ color: "#8E8E93" }}>(no user message)</em>}
+      <div style={{ fontSize: 13, color: "#1C1C1E", lineHeight: 1.45, flex: 1 }}>
+        {seg.preview
+          ? truncate(seg.preview, 160)
+          : <em style={{ color: "#8E8E93" }}>(no user message)</em>}
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, color: "#8E8E93" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 8,
+          fontSize: 11,
+          color: "#8E8E93",
+        }}
+      >
         <span>{seg.message_count} msg</span>
         <span>{when ? formatDate(when) : "—"}</span>
-        {seg.flag_count > 0 && (
-          <span style={{ color: "#FF3B30" }}>🚩 {seg.flag_count}</span>
-        )}
-        {seg.dispatched_to_cc_at && (
-          <span style={{ color: "#0A84FF" }}>→ CC</span>
-        )}
+        <span style={{ display: "flex", gap: 8 }}>
+          {seg.flag_count > 0 && (
+            <span style={{ color: "#A1742B" }}>{seg.flag_count} flag{seg.flag_count === 1 ? "" : "s"}</span>
+          )}
+          {seg.dispatched_to_cc_at && (
+            <span style={{ color: "#0A84FF" }}>→ CC</span>
+          )}
+        </span>
       </div>
     </button>
   );
@@ -378,8 +463,9 @@ function EvalDetailView({ segmentId, onClose }: { segmentId: number; onClose: ()
             <span style={{ fontSize: 13, fontWeight: 600 }}>
               Segment #{seg.id}
             </span>
-            <span style={{ fontSize: 12, color: "#8E8E93" }}>
-              {SOURCE_STYLE[seg.source]?.badge} {SOURCE_STYLE[seg.source]?.label}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3C3C43" }}>
+              <Dot color={SOURCE_STYLE[seg.source]?.accent ?? "#8E8E93"} />
+              {SOURCE_STYLE[seg.source]?.label}
             </span>
             <StatusPill status={seg.eval_status} />
           </>
@@ -575,8 +661,10 @@ function MessageCard({
   msg: EvalMessage;
   onFeedbackChanged: () => void;
 }) {
-  const [traceOpen, setTraceOpen] = useState(false);
+  // Trace defaults to expanded for assistant turns — that's the whole point
+  // of the eval view. User can still collapse if they want a clean transcript.
   const isAssistant = msg.role === "assistant";
+  const [traceOpen, setTraceOpen] = useState(isAssistant);
   const trace = msg.trace ?? [];
 
   // Index step feedback by (step_key, step_index) so each step card knows
@@ -589,11 +677,26 @@ function MessageCard({
     return map;
   }, [msg.step_feedback]);
 
+  // Subtle role distinction — Apple-Notes restraint, not iMessage bubbles.
+  // User = white card on the left half. Assistant = soft tinted card on the
+  // right half-ish, with a thin accent edge so the eye snaps to who said
+  // what without bright bubbles fighting the trace cards.
+  const cardStyle = isAssistant
+    ? {
+        background: "#F5F8FB",
+        border: "1px solid #E2E9F0",
+        borderLeft: "3px solid #B6CFE8",
+      }
+    : {
+        background: "#FFFFFF",
+        border: "1px solid #E5E5EA",
+        borderLeft: "3px solid #D1D1D6",
+      };
+
   return (
     <div
       style={{
-        background: "#FFFFFF",
-        border: "1px solid #E5E5EA",
+        ...cardStyle,
         borderRadius: 12,
         padding: 16,
       }}
@@ -605,14 +708,18 @@ function MessageCard({
           gap: 8,
           marginBottom: 8,
           fontSize: 11,
-          color: "#8E8E93",
           textTransform: "uppercase",
           letterSpacing: 0.3,
+          color: isAssistant ? "#3A6AA1" : "#6E6E73",
         }}
       >
         <strong>{msg.role}</strong>
-        <span>· #{msg.id}</span>
-        {msg.created_at && <span>· {new Date(msg.created_at).toLocaleString()}</span>}
+        <span style={{ color: "#8E8E93" }}>· #{msg.id}</span>
+        {msg.created_at && (
+          <span style={{ color: "#8E8E93" }}>
+            · {new Date(msg.created_at).toLocaleString()}
+          </span>
+        )}
         {msg.is_feedback && <span style={{ color: "#FF9500" }}>· feedback</span>}
       </div>
       <div
@@ -621,12 +728,13 @@ function MessageCard({
           lineHeight: 1.5,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
+          color: "#1C1C1E",
         }}
       >
         {msg.content}
       </div>
 
-      {isAssistant && trace.length > 0 && (
+      {isAssistant && (
         <div style={{ marginTop: 12 }}>
           <button
             onClick={() => setTraceOpen((v) => !v)}
@@ -640,9 +748,28 @@ function MessageCard({
               fontFamily: FONT,
             }}
           >
-            {traceOpen ? "▾" : "▸"} Trace ({trace.length} step{trace.length === 1 ? "" : "s"})
+            {traceOpen ? "▾" : "▸"} Trace
+            {trace.length > 0
+              ? ` (${trace.length} step${trace.length === 1 ? "" : "s"})`
+              : " (none recorded)"}
           </button>
-          {traceOpen && (
+          {traceOpen && trace.length === 0 && (
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 12,
+                color: "#8E8E93",
+                fontStyle: "italic",
+                lineHeight: 1.4,
+              }}
+            >
+              No trace recorded for this assistant turn. Older replies (sent before
+              the eval pipeline was instrumented) carry no trace data — only new
+              chat turns will have intent / memory_recall / master_prompt /
+              extracted_signals / memories_applied / tool_call / reply steps.
+            </div>
+          )}
+          {traceOpen && trace.length > 0 && (
             <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
               {trace.map((step, idx) => {
                 const stepKey = (step.key ?? step.type) as string;
@@ -978,12 +1105,52 @@ function FilterGroup({ label, children }: { label: string; children: React.React
 
 function FilterPill({
   active,
-  color,
+  accent,
   onClick,
   children,
 }: {
   active: boolean;
-  color: string;
+  accent: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  // Apple-Notes-restraint pill: light gray surface, no bright fill on active.
+  // The accent only colors the text (subtly) when active, leaving the grid
+  // visually quiet. Inactive = ghost.
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        background: active ? "#F2F2F7" : "transparent",
+        color: active ? "#1C1C1E" : "#8E8E93",
+        border: `1px solid ${active ? "#D1D1D6" : "#E5E5EA"}`,
+        borderRadius: 999,
+        padding: "3px 10px",
+        cursor: "pointer",
+        fontSize: 11,
+        fontWeight: active ? 500 : 400,
+        fontFamily: FONT,
+        opacity: active ? 1 : 0.85,
+        // accent shows up as a left-edge bar when active to give a quiet hint
+        // of which pill carries which source/status without filling the pill.
+        boxShadow: active ? `inset 2px 0 0 ${accent}` : "none",
+        transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -991,19 +1158,34 @@ function FilterPill({
     <button
       onClick={onClick}
       style={{
-        background: active ? color : "transparent",
-        color: active ? "#FFFFFF" : color,
-        border: `1px solid ${color}`,
-        borderRadius: 12,
-        padding: "3px 10px",
+        background: "transparent",
+        border: "none",
+        padding: "8px 14px",
+        marginBottom: -1,
         cursor: "pointer",
-        fontSize: 11,
-        fontWeight: 600,
+        fontSize: 13,
+        fontWeight: active ? 600 : 400,
         fontFamily: FONT,
+        color: active ? "#1C1C1E" : "#8E8E93",
+        borderBottom: active ? "2px solid #1C1C1E" : "2px solid transparent",
       }}
     >
       {children}
     </button>
+  );
+}
+
+function Dot({ color }: { color: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        width: 7,
+        height: 7,
+        borderRadius: "50%",
+        background: color,
+      }}
+    />
   );
 }
 
