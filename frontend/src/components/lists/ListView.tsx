@@ -252,7 +252,17 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       }}
     >
       <div style={{ width: "100%", maxWidth: CONTENT_MAX_WIDTH, margin: "0 auto", padding: "0 24px" }}>
-        <div style={{ padding: "32px 0 16px", borderBottom: "1px solid #F2F2F7" }}>
+        {/* Sticky header so the list title + meta stay visible while scrolling
+            through long lists. Lives inside the centered 720px column so the
+            list items below scroll under it cleanly. Opaque background covers
+            scrolling content; matches the outer container background.
+            position:sticky resolves against the outer overflow-y:auto. */}
+        <div style={{
+          position: "sticky", top: 0, zIndex: 5,
+          background: "#FFFFFF",
+          padding: "32px 0 16px",
+          borderBottom: "1px solid #F2F2F7",
+        }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {list.emoji && <span style={{ fontSize: 22 }}>{list.emoji}</span>}
             {editingTitle ? (

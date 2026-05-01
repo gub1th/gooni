@@ -260,13 +260,12 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         />
       )}
 
-      {/* Sticky header band — greeting + stats stay visible as the page
-          scrolls. position:sticky works against the scroll ancestor (the
-          outer overflow-y:auto div above). Full-width tinted band with the
-          centered 720px content inside, so the background fills behind the
-          inner container and content below scrolls cleanly underneath. */}
+      {/* Header band — greeting + stats. Was previously position:sticky so
+          stats followed the scroll, but the dashboard already has very
+          little above-the-fold content and the sticky bar squeezed everything
+          else. Sticky behavior moved to ListView (where a long item list
+          actually benefits from a pinned title). Plain band here. */}
       <div style={{
-        position: "sticky", top: 0, zIndex: 10,
         background: palette.main,
         borderBottom: "0.5px solid rgba(0,0,0,0.06)",
       }}>
