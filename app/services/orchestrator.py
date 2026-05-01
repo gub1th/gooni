@@ -145,7 +145,12 @@ class Orchestrator:
                 memory_candidates = signals["memories"]
                 signals_summary = {
                     "tone_corrections": [
-                        {"rule": t["rule"]} for t in signals["tone_corrections"]
+                        {
+                            "rule": t["rule"],
+                            "evidence": t.get("evidence", ""),
+                            "anti_pattern": t.get("anti_pattern", ""),
+                        }
+                        for t in signals["tone_corrections"]
                     ],
                     "feature_requests": [
                         {"title": f["title"], "why": f.get("why", "")}
@@ -163,15 +168,22 @@ class Orchestrator:
                     feedback_tools.append("router:tone")
                     for t in signals["tone_corrections"]:
                         rule = t["rule"]
+                        evidence = t.get("evidence", "")
+                        anti_pattern = t.get("anti_pattern", "")
                         tone_rules.append(rule)
                         tb.tool_call(
                             "router:tone",
                             label="Captured tone correction",
-                            args={"rule": rule},
+                            args={
+                                "rule": rule,
+                                "evidence": evidence,
+                                "anti_pattern": anti_pattern,
+                            },
                         )
                         threading.Thread(
                             target=memory_service.add_feedback_preference,
                             args=(rule, prev_assistant.content),
+                            kwargs={"anti_pattern": anti_pattern},
                             daemon=True,
                         ).start()
 
