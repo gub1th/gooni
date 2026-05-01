@@ -20,6 +20,7 @@ from .db.database import SessionLocal
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
+    McpCall,
     Memory,
     Message,
     List as ListModel,
@@ -671,6 +672,30 @@ def _client_ip(request: Request) -> str:
 
 def _hash_ip(ip: str) -> str:
     return hashlib.sha256(_VISIT_SALT + ip.encode()).hexdigest()[:16]
+
+
+@app.middleware("http")
+async def mcp_logger(request: Request, call_next):
+    """Log calls originating from the Gooni MCP server (mcp/server.py tags
+    every outbound request with `X-Gooni-Source: mcp`). Surfaces as a
+    "claude activity" stat on the dashboard. Logs after the route so we
+    only count successful calls — failed auth / 4xx / 5xx don't pad the
+    count.
+    """
+    response = await call_next(request)
+    if (
+        request.headers.get("x-gooni-source", "").lower() == "mcp"
+        and response.status_code < 400
+    ):
+        db = SessionLocal()
+        try:
+            db.add(McpCall(path=request.url.path[:500]))
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+    return response
 
 
 @app.middleware("http")
@@ -2257,6 +2282,26 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception:
         streak = 0
 
+    # MCP activity — calls today + most recent. Best-effort: missing table
+    # (fresh DB) shouldn't break the dashboard, so we wrap and fall back.
+    mcp_calls_today = 0
+    mcp_last_active_at: str | None = None
+    try:
+        mcp_calls_today = (
+            db.query(McpCall)
+            .filter(McpCall.called_at >= datetime.combine(today, datetime.min.time()))
+            .count()
+        )
+        last = (
+            db.query(McpCall)
+            .order_by(McpCall.called_at.desc())
+            .first()
+        )
+        if last and last.called_at:
+            mcp_last_active_at = last.called_at.isoformat()
+    except Exception:
+        pass
+
     return {
         "notes_this_week": notes_this_week,
         "notes_last_week": notes_last_week,
@@ -2264,6 +2309,8 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         "streak": streak,
         "notes_per_day": notes_per_day,
         "activity_per_day": activity_per_day,
+        "mcp_calls_today": mcp_calls_today,
+        "mcp_last_active_at": mcp_last_active_at,
     }
 
 

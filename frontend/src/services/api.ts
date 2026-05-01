@@ -747,6 +747,8 @@ export interface DashboardStats {
   streak: number;
   notes_per_day: number[];
   activity_per_day: number[];
+  mcp_calls_today: number;
+  mcp_last_active_at: string | null;
 }
 
 // Stats are cheap SQL — fetched fresh every time so recent-notes previews stay current.

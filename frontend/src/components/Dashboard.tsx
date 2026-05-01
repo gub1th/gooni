@@ -55,6 +55,19 @@ function pagerBtnStyle(enabled: boolean): React.CSSProperties {
   };
 }
 
+// Compact "Nm" / "Nh" / "Nd" relative-time. Used by the claude-activity
+// stat to fit a "last 4m" line under the count.
+function formatRelativeShort(iso: string): string {
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  const t = new Date(hasOffset ? iso : iso + "Z").getTime();
+  if (!Number.isFinite(t)) return "—";
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (sec < 60) return "just now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+  return `${Math.floor(sec / 86400)}d`;
+}
+
 function formatNoteDate(iso: string | null): string {
   if (!iso) return "—";
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
@@ -569,6 +582,27 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
           </div>
 
           <DevStreakStat />
+
+          {/* claude activity — counts MCP calls Gooni receives from
+              mcp/server.py (tagged via X-Gooni-Source). Independent of
+              Claude Code internals — only fires when Claude actually
+              touches Gooni. */}
+          <div style={{
+            background: "var(--gooni-card, #fff)",
+            border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+            borderRadius: 10, padding: "10px 14px",
+            display: "flex", flexDirection: "column", alignItems: "flex-start",
+          }}>
+            <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>claude activity</div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1 }}>
+              {stats ? stats.mcp_calls_today : <Skeleton width={28} height={20} />}
+            </div>
+            <div style={{ fontSize: 10.5, color: "#AEAEB2", marginTop: 2 }}>
+              {stats?.mcp_last_active_at
+                ? `last ${formatRelativeShort(stats.mcp_last_active_at)}`
+                : "no calls yet"}
+            </div>
+          </div>
         </aside>
       </div>
 
