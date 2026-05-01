@@ -98,6 +98,11 @@ export interface ApiNote {
   // under the title so Daniel sees memory writes + backlog items as soon as
   // the async classifier finishes. Null until classify has run.
   classify_signals?: NoteClassifySignals | null;
+  // Set when this note was extracted out of a parent via the BubbleMenu
+  // "↗ Extract to new note" action. The parent keeps a NoteLink chip in
+  // place of the selection; `excerpt_anchor` is the chip label.
+  parent_note_id?: number | null;
+  excerpt_anchor?: string | null;
 }
 
 export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiNote[]> {
@@ -144,6 +149,26 @@ export async function touchNote(id: number): Promise<void> {
 export async function memorizeNote(id: number): Promise<void> {
   // Fire-and-forget — called when leaving a note to extract a memory episode
   await apiFetch(`${BASE}/notes/${id}/memorize`, { method: "POST" });
+}
+
+export async function extractToChildNote(
+  parentId: number,
+  selectedHtml: string,
+  title?: string,
+): Promise<ApiNote> {
+  const res = await apiFetch(`${BASE}/notes/${parentId}/extract`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selected_html: selectedHtml, title }),
+  });
+  if (!res.ok) throw new Error("Failed to extract child note");
+  return res.json();
+}
+
+export async function fetchNoteChildren(parentId: number): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/notes/${parentId}/children`);
+  if (!res.ok) throw new Error("Failed to fetch note children");
+  return res.json();
 }
 
 export async function moveNote(id: number, toSpaceId: string): Promise<ApiNote> {
