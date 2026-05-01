@@ -181,6 +181,8 @@ def _run_column_migrations(engine):
             ("notes", "classified_embedding", "TEXT"),
             ("notes", "backlog_note_id", "INTEGER"),
             ("notes", "last_classify_signals", "TEXT"),
+            ("notes", "parent_note_id", "INTEGER"),
+            ("notes", "excerpt_anchor", "TEXT"),
             ("memories", "source_note_id", "INTEGER"),
             # ListItem unified-item refactor — adds focus/todo fields
             ("list_items", "parent_id", "INTEGER"),
@@ -1669,6 +1671,8 @@ def _serialize_note(n: Note) -> dict:
         # as the chat bubble so Daniel sees memory writes + backlog items
         # as soon as the async classifier finishes.
         "classify_signals": signals,
+        "parent_note_id": n.parent_note_id,
+        "excerpt_anchor": n.excerpt_anchor,
     }
 
 
@@ -1766,6 +1770,58 @@ def update_note(
     db.commit()
     db.refresh(note)
     return _serialize_note(note)
+
+
+@app.post("/notes/{note_id}/extract")
+def extract_to_child_note(note_id: int, body: dict, db: Session = Depends(get_db)):
+    """Carve a selection out of a parent note into a brand-new child note.
+
+    Returns the new child note. The frontend is responsible for replacing
+    the selected text in the parent's editor with a `noteLink` chip pointing
+    to `child.id` and saving the updated parent. We don't mutate the parent
+    here — the editor already has the in-memory state and a single PATCH
+    round-trip after this avoids a content-conflict if the user kept typing.
+    """
+    from datetime import datetime
+
+    parent = db.query(Note).filter(Note.id == note_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="parent note not found")
+    selected_html = body.get("selected_html") or ""
+    if not selected_html.strip():
+        raise HTTPException(status_code=400, detail="selected_html required")
+    title = (body.get("title") or "").strip() or None
+    # Anchor label = first ~40 chars of plain text from the selection. The
+    # editor renders this on the chip; backend just stashes it for callers
+    # that need it without parsing the child's HTML.
+    plain = re.sub(r"<[^>]+>", " ", selected_html).strip()
+    anchor = plain[:40].strip() if plain else None
+    child = Note(
+        title=title,
+        content=selected_html,
+        space_id=parent.space_id,
+        parent_note_id=parent.id,
+        excerpt_anchor=anchor,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(child)
+    db.commit()
+    db.refresh(child)
+    return _serialize_note(child)
+
+
+@app.get("/notes/{note_id}/children")
+def get_note_children(note_id: int, db: Session = Depends(get_db)):
+    """Direct children of `note_id` (notes whose parent_note_id points here).
+    Powers the related-notes panel + the chip-target preview."""
+    children = (
+        db.query(Note)
+        .filter(Note.parent_note_id == note_id)
+        .order_by(_notes_order())
+        .all()
+    )
+    return [_serialize_note(n) for n in children]
 
 
 @app.get("/notes/pinned")

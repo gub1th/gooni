@@ -114,6 +114,13 @@ class Note(Base):
     #   }
     # Empty / null when no signals fired or note hasn't been classified yet.
     last_classify_signals = Column(Text, nullable=True)
+    # Set when this note was extracted out of a parent note via the
+    # "↗ Extract to new note" BubbleMenu action. The parent's content keeps
+    # a clickable chip (TipTap noteLink node) where the selection used to
+    # be; `excerpt_anchor` is a short label (first ~40 chars of the
+    # extracted text) shown on that chip so the parent stays readable.
+    parent_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
+    excerpt_anchor = Column(Text, nullable=True)
 
 
 class PublicProfile(Base):

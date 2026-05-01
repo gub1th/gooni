@@ -15,7 +15,10 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { SlashCommand } from "./slash-command";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchRelatedNotes, fetchNoteMemories, patchNote as apiPatchNote, suggestNoteQuestions, type ApiNote, type ApiMemory, type RelatedNote, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { NoteLink } from "./NoteLinkExtension";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchRelatedNotes, fetchNoteMemories, patchNote as apiPatchNote, suggestNoteQuestions, extractToChildNote as apiExtractToChildNote, type ApiNote, type ApiMemory, type RelatedNote, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { DOMSerializer } from "@tiptap/pm/model";
+import { CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useGooniStore } from "../../stores/useGooniStore";
 import { useConversationsStore } from "../../stores/useConversationsStore";
@@ -91,6 +94,30 @@ function useEditorStyles() {
         border-radius: 6px;
         display: block;
         margin: 8px 0;
+      }
+      /* Extracted-to-child note chip — inline pill, click navigates to child. */
+      .gooni-note-editor a.gooni-note-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 8px;
+        margin: 0 2px;
+        background: rgba(74,222,128,0.10);
+        color: #16803C;
+        border: 0.5px solid rgba(22,128,60,0.25);
+        border-radius: 12px;
+        font-size: 0.88em;
+        text-decoration: none;
+        cursor: pointer;
+        transition: background 0.12s, border-color 0.12s;
+      }
+      .gooni-note-editor a.gooni-note-link:hover {
+        background: rgba(74,222,128,0.18);
+        border-color: rgba(22,128,60,0.45);
+      }
+      .gooni-note-editor a.gooni-note-link.ProseMirror-selectednode {
+        outline: 2px solid #007AFF;
+        outline-offset: 1px;
       }
       .gooni-note-editor img.ProseMirror-selectednode {
         outline: 2px solid #007AFF;
@@ -408,6 +435,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
         TableHeader,
         TableCell,
         SlashCommand,
+        NoteLink,
       ],
       content: activeNote?.content ?? "",
       autofocus: embedded ? "end" : false,
@@ -475,6 +503,69 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       // view not mounted yet — next effect run will catch up
     }
   }, [editor, editorEmpty]);
+
+  // Click delegation for the NoteLink chip. ProseMirror swallows the default
+  // anchor navigation, so we own the routing here: extract the noteId from the
+  // chip's data-attr and route via Zustand's selectNote (which updates the
+  // URL through the route's effect downstream).
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const dom = editor.view.dom as HTMLElement;
+    const onClick = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      const chip = target?.closest("a[data-note-link]") as HTMLAnchorElement | null;
+      if (!chip) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const id = Number(chip.getAttribute("data-note-id") || "");
+      if (!id) return;
+      // Persist any pending edits before yanking the active note out from
+      // under us — same pattern handleSubmit uses on quick-note submit.
+      void save();
+      selectNote(id);
+      navigate({ to: "/", search: { note: id, conv: undefined, list: undefined, audit: undefined } });
+    };
+    dom.addEventListener("click", onClick);
+    return () => dom.removeEventListener("click", onClick);
+  }, [editor, navigate, selectNote]);
+
+  /**
+   * BubbleMenu "↗ Extract" handler — carve the current selection out of the
+   * parent note into a new child note and replace the selection with a
+   * NoteLink chip. POSTing the selected HTML before mutating the parent
+   * editor avoids a race where the user keeps typing during the network
+   * round-trip and the autosave clobbers the chip insert.
+   */
+  async function handleExtractToChildNote() {
+    if (!editor || editor.isDestroyed) return;
+    if (!activeNoteId || activeNoteId <= 0) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) return;
+    const slice = editor.state.doc.slice(from, to);
+    const fragment = DOMSerializer.fromSchema(editor.state.schema).serializeFragment(slice.content);
+    const tmp = document.createElement("div");
+    tmp.appendChild(fragment);
+    const selectedHtml = tmp.innerHTML.trim();
+    if (!selectedHtml) return;
+    let child: ApiNote | null = null;
+    try {
+      child = await apiExtractToChildNote(activeNoteId, selectedHtml);
+    } catch {
+      return; // silent — selection stays intact
+    }
+    if (!child) return;
+    const labelSource = (child.excerpt_anchor || child.title || tmp.textContent || "note").trim();
+    const label = labelSource.length > 40 ? labelSource.slice(0, 40) + "…" : labelSource;
+    editor
+      .chain()
+      .focus()
+      .deleteRange({ from, to })
+      .insertContent({ type: "noteLink", attrs: { noteId: child.id, label } })
+      .run();
+    bodyRef.current = editor.getHTML();
+    hasChanges.current = true;
+    scheduleSave();
+  }
 
   async function handleSubmit() {
     if (!editor || editor.isEmpty) return;
@@ -1333,6 +1424,36 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                         <item.Icon size={14} strokeWidth={1.9} />
                       </button>
                     ))}
+                    {/* Vertical separator before the structural action — keeps
+                        the formatting marks visually grouped. */}
+                    {activeNoteId && activeNoteId > 0 && (
+                      <>
+                        <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.18)", margin: "0 4px" }} />
+                        <button
+                          title="Extract to new linked note"
+                          onMouseDown={(e) => { e.preventDefault(); void handleExtractToChildNote(); }}
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            gap: 4,
+                            height: 26,
+                            padding: "0 8px",
+                            borderRadius: 5,
+                            border: "none",
+                            background: "transparent",
+                            color: "rgba(255,255,255,0.78)",
+                            cursor: "pointer",
+                            fontSize: 11,
+                            fontWeight: 500,
+                            transition: "background 0.1s, color 0.1s",
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.12)"; e.currentTarget.style.color = "#fff"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.78)"; }}
+                        >
+                          <CornerUpRight size={13} strokeWidth={1.9} />
+                          Extract
+                        </button>
+                      </>
+                    )}
                   </BubbleMenu>
                 )}
 
