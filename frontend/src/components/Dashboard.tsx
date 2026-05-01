@@ -270,33 +270,22 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         background: palette.main,
         borderBottom: "0.5px solid rgba(0,0,0,0.06)",
       }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", padding: "28px 40px 14px" }}>
-          {/* Greeting + stats on the same row. Greeting holds its natural width
-              (whiteSpace:nowrap, flexShrink:0); stats container takes the
-              remainder and wraps internally — its cards reflow before forcing
-              the row itself to wrap. */}
+        <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 14px" }}>
+          {/* Greeting on its own row, stats row underneath. Putting them on
+              one row used to wrap the dev-streak card below at typical 720px
+              container widths — the cramped 3-card group + brain just didn't
+              fit next to the greeting. Stacking gives stats their full row. */}
           <div style={{
-            display: "flex", alignItems: "flex-start", justifyContent: "space-between",
-            gap: 16,
+            fontSize: 28, fontWeight: 700, color: "#1C1C1E",
+            letterSpacing: "-0.5px", lineHeight: 1.2,
           }}>
-          <div style={{ flexShrink: 0 }}>
-            <div style={{
-              fontSize: 28, fontWeight: 700, color: "#1C1C1E",
-              letterSpacing: "-0.5px", lineHeight: 1.2, whiteSpace: "nowrap",
-            }}>
-              {getGreeting()}, Daniel.
-            </div>
-            <div style={{ fontSize: 13, color: "#8E8E93", marginTop: 4 }}>
-              {getDateStr()}
-              {(() => {
-                // Headline counters live inside the new ActivityCard now —
-                // keep this slot empty so the greeting line stays clean.
-                return null;
-              })()}
-            </div>
+            {getGreeting()}, Daniel.
+          </div>
+          <div style={{ fontSize: 13, color: "#8E8E93", marginTop: 4, marginBottom: 14 }}>
+            {getDateStr()}
           </div>
 
-          <div style={{ display: "flex", gap: 10, flex: 1, minWidth: 0, alignItems: "stretch", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
             {/* 3D brain — opens the notes visualization. Left of the stat cards
                 so it reads as a peer affordance, not buried in a toolbar. */}
             <NeuralBrain size={60} onClick={() => setExploreOpen(true)} />
@@ -357,7 +346,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                 via flexBasis: 100% on the panel + flexWrap on the parent. */}
             <DevStreakStat />
           </div>
-        </div>
         </div>
       </div>
       {/* /sticky header */}

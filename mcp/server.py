@@ -627,10 +627,30 @@ def list_notes(space: str = "general", limit: int = 20) -> str:
     return "\n".join(lines)
 
 
+def _flatten_items(tree_node: list[dict]) -> list[dict]:
+    """Walk an /items tree (list of nodes with .children) and return a flat
+    list. Children are included recursively; the original ordering is kept."""
+    out: list[dict] = []
+    for n in tree_node:
+        out.append(n)
+        kids = n.get("children") or []
+        if kids:
+            out.extend(_flatten_items(kids))
+    return out
+
+
 def _fetch_todos() -> list[dict]:
-    resp = _session.get(f"{BASE_URL}/todos", timeout=10)
+    """Pull every actionable item — focuses + their nested children + inbox
+    todos — as a flat list. Backend renamed `/todos` → `/items` (PR #54);
+    the new endpoint returns a tree, so we flatten here so the rest of the
+    MCP tools stay intact."""
+    resp = _session.get(f"{BASE_URL}/items", timeout=10)
     resp.raise_for_status()
-    return resp.json()
+    payload = resp.json()
+    items: list[dict] = []
+    items.extend(_flatten_items(payload.get("focuses") or []))
+    items.extend(_flatten_items(payload.get("inbox") or []))
+    return items
 
 
 def _find_todo(match: str, only_open: bool = False) -> tuple[dict | None, str | None]:
@@ -639,13 +659,13 @@ def _find_todo(match: str, only_open: bool = False) -> tuple[dict | None, str | 
     if not match_l:
         return None, "(empty match string)"
     todos = _fetch_todos()
-    candidates = [t for t in todos if match_l in (t["text"] or "").lower()]
+    candidates = [t for t in todos if match_l in (t.get("text") or "").lower()]
     if only_open:
-        candidates = [t for t in candidates if not t["done"]]
+        candidates = [t for t in candidates if not t.get("done")]
     if not candidates:
         return None, f"(no todo matching '{match}')"
     # Prefer shortest text (most specific match)
-    candidates.sort(key=lambda t: len(t["text"]))
+    candidates.sort(key=lambda t: len(t.get("text") or ""))
     return candidates[0], None
 
 
@@ -662,7 +682,7 @@ def add_todo(text: str) -> str:
     text = (text or "").strip()
     if not text:
         return "(text required)"
-    resp = _session.post(f"{BASE_URL}/todos", json={"text": text}, timeout=10)
+    resp = _session.post(f"{BASE_URL}/items", json={"text": text}, timeout=10)
     resp.raise_for_status()
     t = resp.json()
     return f"added #{t['id']}: {t['text']}"
@@ -717,7 +737,7 @@ def complete_todo(match: str) -> str:
     t, err = _find_todo(match, only_open=True)
     if err:
         return err
-    resp = _session.patch(f"{BASE_URL}/todos/{t['id']}", json={"done": True}, timeout=10)
+    resp = _session.patch(f"{BASE_URL}/items/{t['id']}", json={"done": True}, timeout=10)
     resp.raise_for_status()
     return f"[x] {t['text']}"
 
@@ -732,7 +752,7 @@ def uncheck_todo(match: str) -> str:
     t, err = _find_todo(match)
     if err:
         return err
-    resp = _session.patch(f"{BASE_URL}/todos/{t['id']}", json={"done": False}, timeout=10)
+    resp = _session.patch(f"{BASE_URL}/items/{t['id']}", json={"done": False}, timeout=10)
     resp.raise_for_status()
     return f"[ ] {t['text']}"
 
@@ -747,33 +767,106 @@ def delete_todo(match: str) -> str:
     t, err = _find_todo(match)
     if err:
         return err
-    resp = _session.delete(f"{BASE_URL}/todos/{t['id']}", timeout=10)
+    resp = _session.delete(f"{BASE_URL}/items/{t['id']}", timeout=10)
     resp.raise_for_status()
     return f"deleted: {t['text']}"
 
 
-def _fetch_focuses(include_done: bool = False, include_someday: bool = True) -> list[dict]:
-    params = {}
-    if include_done:
-        params["include_done"] = "true"
-    if not include_someday:
-        params["include_someday"] = "false"
-    resp = _session.get(f"{BASE_URL}/focuses", params=params, timeout=10)
+def _find_backlog_item(match: str, only_open: bool = True) -> tuple[dict | None, str | None]:
+    """Locate a ListItem inside the user's backlog list (kind='backlog').
+    Returns (item, error_or_None). Substring match on text or subtitle —
+    backlog rows often store the user-visible title in `text` and an
+    auto-generated `from note #N` blurb in `subtitle`."""
+    match_l = match.lower().strip()
+    if not match_l:
+        return None, "(empty match string)"
+
+    lists = _session.get(f"{BASE_URL}/lists", timeout=10)
+    lists.raise_for_status()
+    backlogs = [l for l in lists.json() if (l.get("kind") or "") == "backlog"]
+    if not backlogs:
+        return None, "(no backlog list)"
+
+    candidates: list[dict] = []
+    for bl in backlogs:
+        detail = _session.get(f"{BASE_URL}/lists/{bl['id']}", timeout=10)
+        detail.raise_for_status()
+        for it in detail.json().get("items") or []:
+            if only_open and it.get("done"):
+                continue
+            text = (it.get("text") or "").lower()
+            sub = (it.get("subtitle") or "").lower()
+            if match_l in text or match_l in sub:
+                candidates.append(it)
+
+    if not candidates:
+        return None, f"(no backlog item matching '{match}')"
+    candidates.sort(key=lambda t: len(t.get("text") or ""))
+    return candidates[0], None
+
+
+@mcp.tool()
+def complete_backlog_item(match: str) -> str:
+    """Mark an item in the Gooni Backlog list as done by text match.
+
+    Backlog items live in a List with kind='backlog' (separate from
+    /items dashboard todos). They're typically auto-routed from notes via
+    feature_request_tool, with `subtitle` like "from note #157".
+
+    Args:
+        match: text contained in the backlog item (matches text OR subtitle)
+    """
+    item, err = _find_backlog_item(match)
+    if err:
+        return err
+    resp = _session.patch(
+        f"{BASE_URL}/list-items/{item['id']}",
+        json={"done": True},
+        timeout=10,
+    )
     resp.raise_for_status()
-    return resp.json()
+    return f"[x] {item['text']}"
+
+
+def _fetch_focuses(include_done: bool = False, include_someday: bool = True) -> list[dict]:
+    """Top-level focus items (committed roots in the new /items tree).
+
+    Backend renamed `/focuses` → focuses-as-root-items in PR #54. A focus is
+    now a top-level ListItem in the focus list, surfaced under the
+    `focuses` key of /items. We normalize to the legacy shape so existing
+    tools' string formatting still works: `name` aliases `text`, `status`
+    is derived from done/committed flags.
+
+    `include_someday` is no longer meaningful — committed flag is binary.
+    Kept as a no-op so existing tool signatures don't break.
+    """
+    del include_someday  # binary committed flag replaced the trinary status
+    resp = _session.get(f"{BASE_URL}/items", timeout=10)
+    resp.raise_for_status()
+    raw = resp.json().get("focuses") or []
+    out: list[dict] = []
+    for f in raw:
+        if not include_done and f.get("done"):
+            continue
+        out.append({
+            **f,
+            "name": f.get("text"),  # legacy alias
+            "status": "done" if f.get("done") else ("committed" if f.get("committed") else "pending"),
+        })
+    return out
 
 
 def _find_focus(match: str) -> tuple[dict | None, str | None]:
-    """Case-insensitive substring match on focus name. Returns (focus, error_or_None)."""
+    """Case-insensitive substring match on focus text. Returns (focus, error_or_None)."""
     match_l = match.lower().strip()
     if not match_l:
         return None, "(empty match string)"
     focuses = _fetch_focuses(include_done=True)
-    candidates = [f for f in focuses if match_l in (f["name"] or "").lower()]
+    candidates = [f for f in focuses if match_l in ((f.get("text") or f.get("name") or "")).lower()]
     if not candidates:
         return None, f"(no focus matching '{match}')"
-    # Prefer shortest name (most specific match)
-    candidates.sort(key=lambda f: len(f["name"]))
+    # Prefer shortest text (most specific match)
+    candidates.sort(key=lambda f: len(f.get("text") or f.get("name") or ""))
     return candidates[0], None
 
 
@@ -792,17 +885,11 @@ def list_focuses(include_done: bool = False, include_someday: bool = True, limit
         return "(no focuses)"
     lines = []
     for f in focuses:
-        days = f.get("days_since_activity")
-        if days is None:
-            heat = "no activity yet"
-        elif days == 0:
-            heat = "touched today"
-        else:
-            heat = f"{days}d ago"
+        name = f.get("text") or f.get("name") or "(untitled)"
         due = f" (due {f['due_date'][:10]})" if f.get("due_date") else ""
-        lines.append(
-            f"#{f['id']} [{f['status']}] {f['name']}{due} — {heat}\n    → {f['endgoal']}"
-        )
+        endgoal = f.get("endgoal")
+        endgoal_line = f"\n    → {endgoal}" if endgoal else ""
+        lines.append(f"#{f['id']} [{f['status']}] {name}{due}{endgoal_line}")
     return "\n".join(lines)
 
 
@@ -815,6 +902,10 @@ def add_focus(
 ) -> str:
     """Create a new focus on Daniel's dashboard.
 
+    A focus is a top-level item with an endgoal. The unified-item refactor
+    (PR #54) routes anything with `committed=True` OR an endgoal into the
+    focus list automatically — both are set here.
+
     Args:
         name: short label (e.g. "Ship Gooni v2")
         endgoal: what 'done' looks like — long enough that Gooni knows when Daniel's there
@@ -825,20 +916,29 @@ def add_focus(
     endgoal = (endgoal or "").strip()
     if not name or not endgoal:
         return "(name and endgoal required)"
-    if status not in ("committed", "pending", "someday", "done"):
-        return f"(invalid status '{status}'; use committed/pending/someday/done)"
-    body = {"name": name, "endgoal": endgoal, "status": status}
+    if status not in ("committed", "pending", "someday"):
+        return f"(invalid status '{status}'; use committed/pending/someday)"
+    body: dict = {
+        "text": name,
+        "endgoal": endgoal,
+        "committed": status == "committed",
+        "status": status,
+    }
     if due_date:
         body["due_date"] = due_date
-    resp = _session.post(f"{BASE_URL}/focuses", json=body, timeout=10)
+    resp = _session.post(f"{BASE_URL}/items", json=body, timeout=10)
     resp.raise_for_status()
     f = resp.json()
-    return f"added focus #{f['id']}: {f['name']} ({f['status']})"
+    return f"added focus #{f['id']}: {f['text']} ({status})"
 
 
 @mcp.tool()
 def update_focus_status(match: str, status: str) -> str:
     """Change a focus's status (committed/pending/someday/done) by name match.
+
+    `done` is a separate boolean on items; the other three map to the `status`
+    field. Setting `committed`/`pending` flips the `committed` flag too — same
+    rule the backend uses to keep status + flag consistent.
 
     Args:
         match: text contained in the focus name (case-insensitive substring)
@@ -849,34 +949,20 @@ def update_focus_status(match: str, status: str) -> str:
     f, err = _find_focus(match)
     if err:
         return err
-    resp = _session.patch(
-        f"{BASE_URL}/focuses/{f['id']}", json={"status": status}, timeout=10
-    )
+    body: dict = {}
+    if status == "done":
+        body["done"] = True
+    else:
+        body["status"] = status
+        body["done"] = False
+    resp = _session.patch(f"{BASE_URL}/items/{f['id']}", json=body, timeout=10)
     resp.raise_for_status()
-    return f"[{status}] {f['name']}"
-
-
-@mcp.tool()
-def mark_focus_activity(match: str) -> str:
-    """Record a manual heartbeat on a focus — bumps last_activity_at to now.
-    Use when Daniel mentions making progress on something but no note/message
-    captured it (e.g. real-world action).
-
-    Args:
-        match: text contained in the focus name
-    """
-    f, err = _find_focus(match)
-    if err:
-        return err
-    resp = _session.post(f"{BASE_URL}/focuses/{f['id']}/heartbeat", timeout=10)
-    resp.raise_for_status()
-    updated = resp.json()
-    return f"♥ {updated['name']} — touched today"
+    return f"[{status}] {f.get('text') or f.get('name')}"
 
 
 @mcp.tool()
 def read_focus(match: str) -> str:
-    """Read a focus's full details — name, endgoal, status, last activity.
+    """Read a focus's full details — name, endgoal, status, due date.
 
     Args:
         match: text contained in the focus name
@@ -884,17 +970,16 @@ def read_focus(match: str) -> str:
     f, err = _find_focus(match)
     if err:
         return err
+    name = f.get("text") or f.get("name")
     lines = [
-        f"#{f['id']} {f['name']} ({f['status']})",
-        f"  Endgoal: {f['endgoal']}",
+        f"#{f['id']} {name} ({f['status']})",
     ]
+    if f.get("endgoal"):
+        lines.append(f"  Endgoal: {f['endgoal']}")
     if f.get("due_date"):
         lines.append(f"  Due: {f['due_date'][:10]}")
-    days = f.get("days_since_activity")
-    if days is None:
-        lines.append("  Activity: no heartbeats yet")
-    else:
-        lines.append(f"  Last touched: {days}d ago")
+    if f.get("scale"):
+        lines.append(f"  Scale: {f['scale']}")
     return "\n".join(lines)
 
 
