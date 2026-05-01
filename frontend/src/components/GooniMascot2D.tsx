@@ -50,12 +50,11 @@ const WRAPPER_H = 68;
 // back to peek (sidebar-seam fallback when no FAB rect is published).
 const SIDEBAR_SNAP_PX = 40;
 // Snap radius around the FAB center — drop the mascot inside this circle and
-// he returns to docked peek inside the FAB. The FAB button is 80px square but
-// the visible AuraOrb silhouette is roughly half that wide; previously the
-// snap radius matched the bounding box (160px diameter), so drops well outside
-// the visible button still snapped. Tightened to match the orb's halo so the
-// dropzone visually aligns with what the user sees.
-const FAB_SNAP_RADIUS = 48;
+// he returns to docked peek inside the FAB. Tightening past the FAB rect (80px)
+// just made the dropzone unreachable in practice, so we keep the original 80
+// here and rely on the visual indicator (the dashed silhouette overlay above
+// the FAB) to signal where the snap zone is.
+const FAB_SNAP_RADIUS = 80;
 const LANDING_MS = 220;
 const TURN_MS = 200;
 // Smooth scale ramp when picking the mascot up out of the FAB.
@@ -638,7 +637,11 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
       wrapper.style.transformOrigin = "50% 100%";
 
       // Drop zone — overlays the FAB so dropping the mascot back inside reads
-      // as "putting Gooni back home." Sidebar-seam fallback when no FAB rect.
+      // as "putting Gooni back home." When no FAB rect is published (rare —
+      // happens during the first frame after mount or when ChatLauncher is
+      // briefly suppressed), fall back to the bottom-right of the viewport
+      // where the FAB will appear, NOT the left sidebar (the old fallback
+      // landed there and made the dropzone visually disconnect from the FAB).
       if (dropZoneRef.current) {
         const fab = fabRectRef.current;
         if (fab) {
@@ -650,12 +653,15 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
           dropZoneRef.current.style.height = `${fab.height}px`;
           dropZoneRef.current.style.borderRadius = "50%";
         } else {
-          const dzH = 120;
-          dropZoneRef.current.style.left = `${bounds.left + 8}px`;
-          dropZoneRef.current.style.top = `${bounds.top + bounds.height / 2 - dzH / 2}px`;
-          dropZoneRef.current.style.width = "56px";
-          dropZoneRef.current.style.height = `${dzH}px`;
-          dropZoneRef.current.style.borderRadius = "12px";
+          // Bottom-right fallback. Mirrors ChatLauncher's MARGIN=24 + SIZE=80
+          // so the placeholder sits where the FAB will land once it remounts.
+          const fallbackSize = 80;
+          const fallbackMargin = 24;
+          dropZoneRef.current.style.left = `${window.innerWidth - fallbackSize - fallbackMargin}px`;
+          dropZoneRef.current.style.top = `${window.innerHeight - fallbackSize - fallbackMargin}px`;
+          dropZoneRef.current.style.width = `${fallbackSize}px`;
+          dropZoneRef.current.style.height = `${fallbackSize}px`;
+          dropZoneRef.current.style.borderRadius = "50%";
         }
       }
 

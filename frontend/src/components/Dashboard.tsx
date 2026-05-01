@@ -16,6 +16,7 @@ import { DevStreakStat } from "./DevStreakStat";
 import { Skeleton } from "./Skeleton";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+const GREEN = "#4ADE80";
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -54,32 +55,32 @@ function pagerBtnStyle(enabled: boolean): React.CSSProperties {
   };
 }
 
-// Header-row metric: tiny uppercase label on top, big number underneath.
-// Borderless + transparent — sits inside the header beside the brain.
-// `value === undefined` shows a skeleton; numbers can be 0.
-function InlineStat({ label, value, hint }: {
+// Compact card variant of the original right-column stat tile. Used in
+// the header (Notes, Streak) and the side column (Claude). DevStreakStat
+// renders its own card chrome so it doesn't go through this helper.
+function StatCard({ label, value, children, width }: {
   label: string;
-  value: number | undefined;
-  hint?: string;
+  value: React.ReactNode;
+  children?: React.ReactNode;
+  width?: number | string;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", minWidth: 36 }}>
+    <div style={{
+      background: "var(--gooni-card, #fff)",
+      border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+      borderRadius: 10, padding: "10px 14px",
+      display: "flex", flexDirection: "column", alignItems: "flex-start",
+      width: width ?? "auto", flexShrink: 0,
+    }}>
+      <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>{label}</div>
       <div style={{
-        fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
-        letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 600,
-      }}>{label}</div>
-      <div style={{
-        fontSize: 17, fontWeight: 600,
+        fontSize: 20, fontWeight: 600,
         color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1,
         fontVariantNumeric: "tabular-nums",
       }}>
-        {value !== undefined ? value : <Skeleton width={20} height={16} />}
+        {value}
       </div>
-      {hint && (
-        <div style={{ fontSize: 10, color: "var(--gooni-muted, #8E8E93)", marginTop: 1 }}>
-          {hint}
-        </div>
-      )}
+      {children}
     </div>
   );
 }
@@ -241,6 +242,8 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
     onOpenNote();
   }
 
+  const activityPerDay = stats?.activity_per_day ?? [0, 0, 0, 0, 0, 0, 0];
+
   return (
     <div ref={dashRef} style={{ flex: 1, overflowY: "auto", background: palette.main, fontFamily: FONT, position: "relative" }}>
       <style>{`
@@ -300,10 +303,12 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         />
       )}
 
-      {/* Header band — greeting/date on the left, brain + compact inline
-          metrics on the right. No card chrome on the metrics — Daniel asked
-          for borderless minimal stats. The right-column sidebar layout from
-          the previous PR was reverted; main content centers at 720px again. */}
+      {/* Header band — greeting/date on the left, brain + Notes + Streak
+          cards on the right. Centered at the same 720px column as the rest
+          of the dashboard so the title row visually anchors the content
+          width. Notes + Streak are real cards (same chrome as before),
+          NOT the inline borderless variant — Daniel wants them readable
+          as discrete tiles. */}
       <div style={{ background: palette.main }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -318,22 +323,56 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                 {getDateStr()}
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <NeuralBrain size={52} onClick={() => setExploreOpen(true)} />
-              <InlineStat label="notes" value={stats?.notes_this_week} />
-              <InlineStat label="streak" value={stats?.streak} />
-              <DevStreakStat compact />
-              <InlineStat
-                label="claude"
-                value={stats?.mcp_calls_today}
-                hint={stats?.mcp_last_active_at ? formatRelativeShort(stats.mcp_last_active_at) : undefined}
-              />
+              <StatCard
+                label="notes this week"
+                value={stats ? stats.notes_this_week : <Skeleton width={32} height={20} />}
+              >
+                {stats && (() => {
+                  const delta = stats.notes_this_week - stats.notes_last_week;
+                  if (delta === 0 && stats.notes_last_week === 0) return null;
+                  const isUp = delta > 0;
+                  const isFlat = delta === 0;
+                  return (
+                    <div style={{
+                      fontSize: 10.5, color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
+                      marginTop: 2, fontVariantNumeric: "tabular-nums",
+                    }}>
+                      {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
+                    </div>
+                  );
+                })()}
+              </StatCard>
+              <StatCard
+                label="day streak"
+                value={stats ? stats.streak : <Skeleton width={28} height={20} />}
+              >
+                <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
+                  {activityPerDay.map((v, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        width: 6, height: 6, borderRadius: "50%",
+                        background: v > 0 ? GREEN : "rgba(0,0,0,0.08)",
+                      }}
+                    />
+                  ))}
+                </div>
+              </StatCard>
             </div>
           </div>
         </div>
       </div>
 
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
+      {/* Two-col body — main content stays centered at 720px; right side
+          column hosts Dev + Claude stat cards. The aside is sticky with a
+          paddingTop matching the main column so its top edge lines up with
+          the top of the composer (the first content card). Hidden on small
+          viewports — main column already fights for room there. */}
+      <div style={{ display: "flex", alignItems: "flex-start", padding: "0 28px 0 0" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
 
         {/* Note input — embedded NoteEditor quick-input. */}
         <div style={{ marginBottom: 14 }}>
@@ -539,6 +578,44 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
         {/* Unified Activity card — Today + Focuses + Dev Activity. */}
         <ActivityCard />
 
+          </div>
+        </div>
+
+        {/* Right side column — sticky so the cards stay glanceable while
+            you scroll. paddingTop matches the main column's padding (20px)
+            so the top of the Dev card lines up with the top of the
+            composer below the header. Hidden under ~960px viewport so the
+            main column doesn't get crushed. */}
+        <aside
+          style={{
+            width: 200,
+            flexShrink: 0,
+            position: "sticky",
+            top: 20,
+            paddingTop: 20,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+          className="gooni-metrics-col"
+        >
+          <style>{`
+            @media (max-width: 960px) {
+              .gooni-metrics-col { display: none !important; }
+            }
+          `}</style>
+          <DevStreakStat />
+          <StatCard
+            label="claude activity"
+            value={stats ? stats.mcp_calls_today : <Skeleton width={28} height={20} />}
+          >
+            <div style={{ fontSize: 10.5, color: "#AEAEB2", marginTop: 2 }}>
+              {stats?.mcp_last_active_at
+                ? `last ${formatRelativeShort(stats.mcp_last_active_at)}`
+                : "no calls yet"}
+            </div>
+          </StatCard>
+        </aside>
       </div>
 
       {/* Mascot mounts at the route root now (see routes/index.tsx) so it
