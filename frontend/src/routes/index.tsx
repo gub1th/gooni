@@ -71,6 +71,17 @@ function NotesPage() {
     fetchNote(search.note).then((note) => {
       const spaceId = note.space_id == null ? "general" : String(note.space_id);
       selectSpace(spaceId);
+      // Seed the fetched note into the store so NoteEditor finds it on the
+      // very next render. Without this, selectNote sets activeNoteId but the
+      // editor's lookup `notes[spaceId].find(n => n.id === activeNoteId)`
+      // returns undefined until loadNotes(spaceId) resolves — leaving Daniel
+      // staring at an empty "All Notes" screen for the duration of that
+      // fetch, which was the bug from note #155.
+      useNotesContentStore.setState((s) => {
+        const existing = s.notes[spaceId] ?? [];
+        const deduped = existing.filter((n) => n.id !== note.id);
+        return { notes: { ...s.notes, [spaceId]: [note, ...deduped] } };
+      });
       selectNote(note.id);
       loadNotes(spaceId);
       setView("notes");

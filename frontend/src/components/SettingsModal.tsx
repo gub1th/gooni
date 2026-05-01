@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { GOONI_FACES, GOONI_FACE_LABELS, useGooniFaceStore, type GooniFace } from "../stores/useGooniFaceStore";
 import { GOONI_THEMES, GOONI_THEME_LABELS, THEME_PALETTES, useGooniThemeStore, type GooniTheme } from "../stores/useGooniThemeStore";
 import { GooniFacePreview } from "./GooniMascot";
+import { SettingsPanel } from "./SettingsPanel";
 
 interface SettingsModalProps {
   open: boolean;
@@ -45,8 +46,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           border: "0.5px solid rgba(0,0,0,0.1)",
           borderRadius: 14,
           padding: "22px 24px 24px",
-          width: 420,
+          width: 460,
           maxWidth: "calc(100vw - 32px)",
+          maxHeight: "calc(100vh - 80px)",
+          overflowY: "auto",
           position: "relative",
         }}
       >
@@ -187,6 +190,16 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             })}
           </div>
         </section>
+
+        {/* Daily nudge — moved off the dashboard so the home screen stays
+            for actual content. Same component, just rendered here now. */}
+        <div style={{
+          marginTop: 22,
+          paddingTop: 20,
+          borderTop: "0.5px solid rgba(0,0,0,0.08)",
+        }}>
+          <SettingsPanel />
+        </div>
       </div>
     </div>
   );
