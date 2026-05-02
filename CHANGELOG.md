@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.18.1 — 2026-05-02 (patch)
+
+- fix(notes): no-edit PATCH no longer bumps updated_at + lucide toolbar (#91)
+
 ## 0.18.0 — 2026-05-02 (minor)
 
 - feat(stats): dedicated stats view + OpenAI usage + Settings tabs refactor (#90)
