@@ -12,13 +12,9 @@ import { NoteEditor } from "./notes/NoteEditor";
 import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
-import { FlipStat, type FlipFace } from "./FlipStat";
-import { DevExpandedPopover } from "./DevStreakStat";
-import { fetchDevActivity, type DevActivity } from "../services/api";
 import { Skeleton } from "./Skeleton";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
-const GREEN = "#4ADE80";
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -55,86 +51,6 @@ function pagerBtnStyle(enabled: boolean): React.CSSProperties {
     transition: "background 0.1s, border-color 0.1s",
     padding: 0,
   };
-}
-
-// Faces fed into the FlipStat in the header. Order = display order:
-// 1. day streak (default visible)
-// 2. dev streak (commits)
-// 3. claude activity (MCP calls)
-// Each face is a (label, value, hint) tuple. Skeletons during stats load.
-function buildStatFaces(
-  stats: DashboardStats | undefined,
-  dev: DevActivity | null | undefined,
-  activityPerDay: number[],
-  onOpenDevPopover?: () => void,
-): FlipFace[] {
-  const dayHint = (
-    <div style={{ display: "flex", gap: 2.5 }}>
-      {activityPerDay.map((v, i) => (
-        <div
-          key={i}
-          style={{
-            width: 6, height: 6, borderRadius: "50%",
-            background: v > 0 ? GREEN : "rgba(0,0,0,0.10)",
-          }}
-        />
-      ))}
-    </div>
-  );
-
-  const devTodayCommits = dev?.aggregate?.today_commits ?? 0;
-  const devAdds = (dev?.repos ?? []).reduce((s, r) => s + (r.today?.additions ?? 0), 0);
-  const devDels = (dev?.repos ?? []).reduce((s, r) => s + (r.today?.deletions ?? 0), 0);
-  const devHint = devTodayCommits > 0 ? (
-    <span style={{
-      fontSize: 10.5, color: "#6B6B70", fontVariantNumeric: "tabular-nums",
-      display: "inline-flex", gap: 4,
-    }}>
-      <span>{devTodayCommits} today</span>
-      {(devAdds > 0 || devDels > 0) && (
-        <>
-          <span style={{ color: "#30A14E" }}>+{devAdds}</span>
-          <span style={{ color: "#CF222E" }}>−{devDels}</span>
-        </>
-      )}
-    </span>
-  ) : (
-    <span style={{ fontSize: 10.5, color: "#AEAEB2" }}>no commits today</span>
-  );
-
-  const claudeHint = (
-    <div style={{ fontSize: 10.5, color: "#AEAEB2" }}>
-      {stats?.mcp_last_active_at
-        ? `last ${formatRelativeShort(stats.mcp_last_active_at)}`
-        : "no calls yet"}
-    </div>
-  );
-
-  return [
-    {
-      key: "day-streak",
-      label: "day streak",
-      value: stats ? stats.streak : <Skeleton width={28} height={20} />,
-      hint: dayHint,
-    },
-    {
-      key: "dev-streak",
-      label: "dev streak",
-      value: dev ? (dev.aggregate?.streak_days ?? 0) : <Skeleton width={28} height={20} />,
-      hint: devHint,
-      // Click → open the dev activity popover (recent commits per repo +
-      // Gooni's Take). Lives on Dashboard so the popover anchors to the
-      // FlipStat wrapper. Only wired when dev data is loaded; otherwise
-      // we pass undefined so the face stays static.
-      onClick: dev && onOpenDevPopover ? onOpenDevPopover : undefined,
-    },
-    {
-      key: "claude",
-      label: "claude activity",
-      value: stats ? stats.mcp_calls_today : <Skeleton width={28} height={20} />,
-      hint: claudeHint,
-    },
-  ];
 }
 
 // Compact card variant of the original right-column stat tile. Used in
@@ -205,9 +121,10 @@ type InkState = {
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 // The dashboard itself:
 
-export function Dashboard({ onOpenNote, onPlanNote }: {
+export function Dashboard({ onOpenNote, onPlanNote, onOpenStats }: {
   onOpenNote: () => void;
   onPlanNote?: (noteId: number) => void;
+  onOpenStats?: () => void;
 }) {
   const queryClient = useQueryClient();
   // Cached + de-duped via React Query. Navigating back to the dashboard hits
@@ -216,13 +133,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["dashboard-stats"],
     queryFn: fetchDashboardStats,
-  });
-  // Dev activity is fetched separately so DevStreakStat's old internal query
-  // isn't relied on (we render dev streak inside the FlipStat now). Connected
-  // = false / no repos returns null and the dev face just shows "—".
-  const { data: dev } = useQuery<DevActivity | null>({
-    queryKey: ["dev-activity"],
-    queryFn: () => fetchDevActivity().catch(() => null),
   });
   // Helpers so the imperative submit/typing flow can still update + refetch.
   const setStats = (next: DashboardStats) => queryClient.setQueryData<DashboardStats>(["dashboard-stats"], next);
@@ -233,8 +143,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
   const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
   const typingRaf = useRef<number | null>(null);
   const [exploreOpen, setExploreOpen] = useState(false);
-  const [devPopoverOpen, setDevPopoverOpen] = useState(false);
-  const flipStatRef = useRef<HTMLDivElement>(null);
   // Page index for the recent-notes pager. Each page shows 2 cards. Reset to
   // 0 whenever fresh stats arrive so a newly-saved note lands in view (the
   // submit-flow animation also assumes the new card is at index 0).
@@ -435,20 +343,68 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                   );
                 })()}
               </StatCard>
-              <div ref={flipStatRef} style={{ display: "inline-flex" }}>
-                <FlipStat
-                  faces={buildStatFaces(stats, dev, activityPerDay, () => setDevPopoverOpen((v) => !v))}
-                  autoIntervalMs={15000}
-                  width={150}
-                />
-              </div>
+              <StatCard
+                label="day streak"
+                value={stats ? stats.streak : <Skeleton width={28} height={20} />}
+              >
+                <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
+                  {activityPerDay.map((v, i) => (
+                    <div key={i} style={{
+                      width: 6, height: 6, borderRadius: "50%",
+                      background: v > 0 ? "#30A14E" : "rgba(0,0,0,0.10)",
+                    }} />
+                  ))}
+                </div>
+              </StatCard>
+              <StatCard
+                label="claude activity"
+                value={stats ? stats.mcp_calls_today : <Skeleton width={28} height={20} />}
+              >
+                <div style={{ fontSize: 10.5, color: "#AEAEB2", marginTop: 2 }}>
+                  {stats?.mcp_last_active_at
+                    ? `last ${formatRelativeShort(stats.mcp_last_active_at)}`
+                    : "no calls yet"}
+                </div>
+              </StatCard>
+              {/* Thin "Stats →" card. On-theme card chrome but narrow + a
+                  single arrow glyph so it reads as a "go" affordance, not
+                  another data tile. Click → stats view. */}
+              <button
+                onClick={onOpenStats}
+                title="Open stats — usage, dev activity, conversations"
+                style={{
+                  background: "var(--gooni-card, #fff)",
+                  border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+                  borderRadius: 10, padding: "10px 12px",
+                  display: "flex", flexDirection: "column", alignItems: "flex-start",
+                  cursor: "pointer", fontFamily: "'Inter', -apple-system, sans-serif",
+                  textAlign: "left", color: "var(--gooni-text, #1C1C1E)",
+                  transition: "border-color 0.12s, background 0.12s",
+                  minWidth: 56,
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.18)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)"; }}
+              >
+                <div style={{
+                  fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
+                  letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 600,
+                }}>
+                  stats
+                </div>
+                <div style={{
+                  fontSize: 18, fontWeight: 600, marginTop: 2,
+                  color: "var(--gooni-text, #1C1C1E)", lineHeight: 1.1,
+                }}>
+                  →
+                </div>
+              </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Single-column body. Dev + Claude stats moved into the header
-          FlipStat — no more right aside. */}
+      {/* Single-column body. Dev + OpenAI usage live in the dedicated
+          Stats view (sidebar → Stats, or the "Stats →" card above). */}
       <div>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
 
@@ -665,17 +621,6 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
       {/* Semantic graph of all notes — opens as a full-screen modal */}
       <ExploreModal open={exploreOpen} onClose={() => setExploreOpen(false)} />
 
-      {/* Dev activity popover — anchored to the FlipStat. Restored after
-          the right-column DevStreakStat tile was reverted; the FlipStat's
-          dev face routes its click here so commit details are reachable
-          again. */}
-      {devPopoverOpen && dev && flipStatRef.current && (
-        <DevExpandedPopover
-          data={dev}
-          anchor={flipStatRef.current}
-          onClose={() => setDevPopoverOpen(false)}
-        />
-      )}
     </div>
   );
 }

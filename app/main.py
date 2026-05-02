@@ -2370,6 +2370,55 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/dashboard/openai-usage")
+def get_openai_usage(refresh: bool = False):
+    """Month-to-date OpenAI spend + tokens + requests broken down by model.
+    Pulled live from the OpenAI Admin API and cached in-process for 6h.
+    Returns {configured: false} if OPENAI_ADMIN_KEY is not set so the UI
+    can render setup help instead of empty zeros.
+    """
+    from .services import openai_usage
+    return openai_usage.fetch_month_to_date(refresh=refresh)
+
+
+@app.get("/dashboard/stats")
+def get_dashboard_stats(db: Session = Depends(get_db)):
+    """Aggregated counters for the Stats view. Returns a flat dict so the
+    frontend can render each metric without knowing the source query.
+    """
+    from .db.models import Note as _Note, Conversation as _Conv, Message as _Msg, ListItem as _LI
+    from datetime import datetime as _dt, timedelta as _td
+
+    week_ago = _dt.utcnow() - _td(days=7)
+    notes_this_week = db.query(_Note).filter(_Note.created_at >= week_ago).count()
+    notes_total = db.query(_Note).count()
+
+    conversations_total = db.query(_Conv).count()
+    user_messages_total = db.query(_Msg).filter(_Msg.role == "user").count()
+    assistant_messages_total = db.query(_Msg).filter(_Msg.role == "assistant").count()
+    user_messages_this_week = db.query(_Msg).filter(
+        _Msg.role == "user", _Msg.created_at >= week_ago
+    ).count()
+
+    # Focus / todo completion — use ListItem.done so it works for any list type.
+    todos_done_this_week = db.query(_LI).filter(
+        _LI.done == True,  # noqa: E712
+        _LI.completed_at >= week_ago,
+    ).count()
+    todos_open = db.query(_LI).filter(_LI.done == False).count()  # noqa: E712
+
+    return {
+        "notes_this_week": notes_this_week,
+        "notes_total": notes_total,
+        "conversations_total": conversations_total,
+        "user_messages_total": user_messages_total,
+        "assistant_messages_total": assistant_messages_total,
+        "user_messages_this_week": user_messages_this_week,
+        "todos_done_this_week": todos_done_this_week,
+        "todos_open": todos_open,
+    }
+
+
 @app.get("/dashboard/take")
 def get_gooni_take(db: Session = Depends(get_db)):
     """Gooni's Take — ONE tight sentence on Daniel's current focus thread.

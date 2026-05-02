@@ -61,7 +61,7 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 - **`app/llm/client.py`** — OpenAI wrapper (`llm_client`). Default model: `gpt-4o-mini`.
 
 ### Frontend (`frontend/src/`)
-- **`routes/index.tsx`** — Layout: Sidebar | NotesList | NoteEditor | GooniPanel (optional). View state: `"notes" | "dashboard" | "chat" | "lists" | "plan" | "eval"`.
+- **`routes/index.tsx`** — Layout: Sidebar | NotesList | NoteEditor | GooniPanel (optional). View state: `"notes" | "dashboard" | "chat" | "lists" | "plan" | "eval" | "stats"`. Top-right pair of icon buttons (Globe = public profile, Plug = MCP) lives here, fixed-position, visible on every view.
 - **`components/eval/EvalView.tsx`** — Eval tab. Grid of conversation segments (Google Docs-style cards) w/ per-source border + badge (web/telegram/whatsapp/imessage), filters (source, status, has-flag, search), and detail view per segment. Detail view: transcript + per-message trace cards (intent / memory_recall / master_prompt / extracted_signals / memories_applied / tool_call / reply), red-flag popover per step (1/2/3 + comment), overall summary editor, ⓘ tool-legend popup, and a "Dispatch to Claude Code" button that bundles the eval into a `Claude Code` space note plus a backlog list item.
 - **`routes/public.tsx`** — Layout shell for `/public/*` (just renders `<Outlet />`).
 - **`routes/public.index.tsx`** — Public portfolio list: Posts tab (space-filtered) + About tab (bio).
@@ -70,7 +70,9 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 - **`components/notes/NotesList.tsx`** — Notes for selected space (260px).
 - **`components/notes/NoteEditor.tsx`** — Title + TipTap body. Auto-saves after 1.5s. `🌐 Public` toggle pill. Supports image drag/drop + paste (base64 inline). `hasChanges` ref prevents spurious saves on blur.
 - **`components/ChatView.tsx`** — Full chat view when chat section is active. Uses `chat/InputBar` (Gemini-style: + popup → upload image, model selector, mic for Web-Speech-API voice-to-text, send). Image attachments flow as base64 data URL via `image_url` to `/conversations/{id}/messages`.
-- **`components/Dashboard.tsx`** — Stats, Focuses (committed/pending/someday), public bio editor.
+- **`components/Dashboard.tsx`** — Greeting + 3 stat cards (notes-this-week, day streak, claude activity) + thin "Stats →" card linking to the stats view. Focuses (committed/pending/someday). Public bio editor lives on `/public`, not the dashboard.
+- **`components/StatsView.tsx`** — Sidebar entry "Stats". Three sections: OpenAI usage month-to-date (live from Admin API w/ model breakdown), Dev activity (streak + Gooni's Take + per-repo recent commits, all inline; no modal), Activity (notes/messages/conversations/todos counters). Replaces the old click-into-modal popover flow.
+- **`components/SettingsModal.tsx`** — Tabbed modal: Appearance (theme + face), Notifications (daily nudge), Integrations (Google Calendar + GitHub w/ real logos), Deployments (Fly + Vercel health pings). Version always shown in the tab sidebar header. Replaces the separate DevToolsModal.
 - **`components/FocusOverlay.tsx`** — Distraction-free overlay surfaced from the primary focus row's "focus" pill. Blurs the page, shows meditating Gooni, fades chrome on idle, exits via X / Esc.
 - **`components/GooniPanel.tsx`** — Chat panel (300px). Passes active note as context.
 - **`stores/useNotesContentStore.ts`** — Selected space, notes per space, active note, isDirty. Persist key: `gooni-notes-v1`.
@@ -145,6 +147,8 @@ GET  /conversations/{id}/messages
 POST /conversations/{id}/messages → send message + get reply
 
 GET  /dashboard                 → stats + focuses + gooni_take briefing
+GET  /dashboard/stats           → extended counters (notes/messages/conversations/todos this-week + total)
+GET  /dashboard/openai-usage    → live month-to-date OpenAI usage from Admin API (configured? spend, requests, tokens, by-model breakdown). Requires OPENAI_ADMIN_KEY (sk-admin-…).
 POST /focuses                   → create focus { name, commitment, due_date? }
 
 GET  /debug/memories            → inspect stored memories

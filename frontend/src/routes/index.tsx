@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
 import { EvalView } from "../components/eval/EvalView";
+import { StatsView } from "../components/StatsView";
+import { Globe, Plug } from "lucide-react";
 import { GooniLayer } from "../components/GooniLayer";
 import { ListView } from "../components/lists/ListView";
 import { NoteEditor } from "../components/notes/NoteEditor";
@@ -33,6 +35,20 @@ export const Route = createFileRoute("/")({
 // Sidebar auto-collapses below this width
 const SIDEBAR_BREAKPOINT = 768;
 
+const topRightBtn: React.CSSProperties = {
+  width: 30, height: 30, borderRadius: 8,
+  border: "0.5px solid rgba(0,0,0,0.08)",
+  background: "rgba(255,255,255,0.85)",
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
+  cursor: "pointer",
+  display: "flex", alignItems: "center", justifyContent: "center",
+  color: "#3C3C43",
+  padding: 0,
+  transition: "background 0.12s",
+  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+};
+
 function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
   const { selectedSpaceId, selectSpace, loadNotes, createNote, selectNote } = useNotesContentStore();
@@ -43,7 +59,7 @@ function NotesPage() {
   const search = Route.useSearch();
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
-  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "plan" | "eval">(() =>
+  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "plan" | "eval" | "stats">(() =>
     search.audit ? "eval" : search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
   );
   const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
@@ -153,7 +169,7 @@ function NotesPage() {
   }, [selectedSpaceId, view]);
 
   function setViewAndUrl(
-    v: "notes" | "dashboard" | "chat" | "lists" | "plan" | "eval",
+    v: "notes" | "dashboard" | "chat" | "lists" | "plan" | "eval" | "stats",
     noteId?: number,
     convId?: number,
     listId?: number,
@@ -224,6 +240,7 @@ function NotesPage() {
           isChat={view === "chat"}
           isLists={view === "lists"}
           isEval={view === "eval"}
+          isStats={view === "stats"}
           activeListId={view === "lists" ? activeListId : null}
           showCompose={view !== "notes"}
           onLogoClick={() => setViewAndUrl("dashboard")}
@@ -232,6 +249,7 @@ function NotesPage() {
           onNewChat={handleNewChat}
           onSelectList={handleSelectList}
           onOpenEval={() => setViewAndUrl("eval")}
+          onOpenStats={() => setView("stats")}
         />
       )}
 
@@ -240,6 +258,7 @@ function NotesPage() {
           <Dashboard
             onOpenNote={() => setView("notes")}
             onPlanNote={handlePlanNote}
+            onOpenStats={() => setView("stats")}
           />
         ) : view === "chat" ? (
           <ChatView />
@@ -255,12 +274,46 @@ function NotesPage() {
           />
         ) : view === "eval" ? (
           <EvalView />
+        ) : view === "stats" ? (
+          <StatsView />
         ) : (
           <>
             <NotesList />
             <NoteEditor />
           </>
         )}
+      </div>
+
+      {/* Top-right pair: Public profile + Public MCP. Floats above the
+          content so it's reachable from every view without crowding the
+          sidebar. Distinct icons (Globe vs Plug) so a glance tells them
+          apart; "MCP" drops the redundant "Public" prefix. */}
+      <div style={{
+        position: "fixed",
+        top: 12, right: 14,
+        display: "flex", gap: 6,
+        zIndex: 90,
+      }}>
+        <button
+          onClick={() => navigate({ to: "/public" })}
+          title="Public profile (visitors see this)"
+          aria-label="Public profile"
+          style={topRightBtn}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.85)")}
+        >
+          <Globe size={15} strokeWidth={1.7} />
+        </button>
+        <button
+          onClick={() => navigate({ to: "/public/mcp" })}
+          title="MCP — public connector page"
+          aria-label="MCP"
+          style={topRightBtn}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.85)")}
+        >
+          <Plug size={15} strokeWidth={1.7} />
+        </button>
       </div>
 
       {/* FAB + floating panel + mascot all live in GooniLayer so /memories and
