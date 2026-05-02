@@ -6,8 +6,15 @@
       "id": "schedule_tennis",
       "source": "eval#83 msg #548",
       "text": "I need to check my schedule for tennis",
-      "expected": {"tool_call": "check_calendar_busy"},
-      "notes": "Original eval saw Gooni hallucinate 'You're free tomorrow'. Must call the tool first."
+      "expected": {
+        "any_of": [
+          {"tool_call": "check_calendar_busy"},
+          {"refusal_substring": "what day"},
+          {"refusal_substring": "what time"},
+          {"refusal_substring": "when"}
+        ]
+      },
+      "notes": "Original eval saw Gooni hallucinate 'You're free tomorrow' — both hallucinating an answer AND silently inventing tool args (no time anchor) are failures. PASS conditions: (a) call check_calendar_busy with whatever default window the model picks, OR (b) ask a clarifying question about day/time before any tool. gpt-4o-mini did (a); gpt-5.4 does (b). Both safe; only hallucination would fail."
     },
     {
       "id": "am_i_free_tomorrow",

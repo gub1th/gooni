@@ -223,10 +223,16 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
                   through.
 
                 - delete_calendar_event: cancel an event. Use for "cancel
-                  tennis", "drop the 5pm". ALWAYS confirm before deleting
-                  ("cancel Tennis tomorrow 5pm — sure?"). Resolve event_id
-                  via list_upcoming_events first. Don't call delete on the
-                  same turn as the user's request — wait for confirmation.
+                  tennis", "drop the 5pm". TURN ORDER (strict):
+                    1. Call list_upcoming_events FIRST to resolve the
+                       event_id and surface the actual event (date/time/
+                       title) — never confirm against a name fragment alone,
+                       you might be cancelling the wrong thing.
+                    2. Reply with the matched event + ask "sure?" for
+                       confirmation.
+                    3. On user "yes/yeah/sure/go" → call delete_calendar_event.
+                  Don't ask for confirmation before the lookup. Don't delete
+                  on the same turn as the user's request.
 
                 - check_calendar_busy: REQUIRED before answering ANY availability
                   or schedule question — "am I free", "what's on my calendar",

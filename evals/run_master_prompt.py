@@ -15,6 +15,9 @@ Exit code 0 = all pass, 1 = any fail.
 Expected schema per case:
     {"tool_call": "check_calendar_busy"}            → must call this tool
     {"refusal_substring": "don't have"}             → reply text must contain it
+    {"any_of": [<expected>, <expected>, ...]}       → passes if ANY branch matches.
+                                                      Use for cases where multiple
+                                                      reasonable behaviors exist.
 """
 
 from __future__ import annotations
@@ -74,30 +77,51 @@ def run(verbose: bool = False, case_filter: str | None = None) -> int:
 
         finish, tool_names, reply = _run_case(text)
 
+        def _check(exp: dict) -> tuple[bool, list[str]]:
+            """Evaluate a single expectation block. Returns (pass, diagnostics)."""
+            ok = True
+            diag: list[str] = []
+            if "tool_call" in exp:
+                want = exp["tool_call"]
+                if want in tool_names:
+                    if verbose:
+                        diag.append(f"  tool_call: ok — got {tool_names}")
+                else:
+                    ok = False
+                    if tool_names:
+                        diag.append(f"  tool_call: FAIL — wanted {want!r}, got {tool_names}")
+                    else:
+                        diag.append(f"  tool_call: FAIL — wanted {want!r}, no tool called. reply: {reply[:200]!r}")
+            if "refusal_substring" in exp:
+                want = exp["refusal_substring"].lower()
+                if want in reply.lower() and not tool_names:
+                    if verbose:
+                        diag.append(f"  refusal_substring: ok — got {reply[:200]!r}")
+                else:
+                    ok = False
+                    if tool_names:
+                        diag.append(f"  refusal_substring: FAIL — model called tools {tool_names} instead of refusing")
+                    else:
+                        diag.append(f"  refusal_substring: FAIL — wanted {want!r} in reply: {reply[:200]!r}")
+            return ok, diag
+
         case_pass = True
         diagnostics: list[str] = []
-        if "tool_call" in expected:
-            want = expected["tool_call"]
-            if want in tool_names:
+        if "any_of" in expected:
+            branches = expected["any_of"]
+            results = [_check(b) for b in branches]
+            if any(ok for ok, _ in results):
+                case_pass = True
                 if verbose:
-                    diagnostics.append(f"  tool_call: ok — got {tool_names}")
+                    diagnostics.append(f"  any_of: ok — {sum(ok for ok, _ in results)}/{len(branches)} branches matched")
             else:
                 case_pass = False
-                if tool_names:
-                    diagnostics.append(f"  tool_call: FAIL — wanted {want!r}, got {tool_names}")
-                else:
-                    diagnostics.append(f"  tool_call: FAIL — wanted {want!r}, no tool called. reply: {reply[:200]!r}")
-        if "refusal_substring" in expected:
-            want = expected["refusal_substring"].lower()
-            if want in reply.lower() and not tool_names:
-                if verbose:
-                    diagnostics.append(f"  refusal_substring: ok — got {reply[:200]!r}")
-            else:
-                case_pass = False
-                if tool_names:
-                    diagnostics.append(f"  refusal_substring: FAIL — model called tools {tool_names} instead of refusing")
-                else:
-                    diagnostics.append(f"  refusal_substring: FAIL — wanted {want!r} in reply: {reply[:200]!r}")
+                diagnostics.append(f"  any_of: FAIL — no branch matched")
+                for i, (_, d) in enumerate(results):
+                    for line in d:
+                        diagnostics.append(f"    branch[{i}] {line.strip()}")
+        else:
+            case_pass, diagnostics = _check(expected)
 
         mark = "PASS" if case_pass else "FAIL"
         if not case_pass:
