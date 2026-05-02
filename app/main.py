@@ -1736,8 +1736,22 @@ def update_note(
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
+
+    # Track whether title/content ACTUALLY differ from what's on disk. The
+    # frontend's save-on-leave path PATCHes unconditionally to avoid losing
+    # races (see NoteEditor's save-on-leave comment), so plenty of these
+    # PATCHes carry identical values. Bumping updated_at on those would
+    # promote the note to the top of the list every time it's opened —
+    # that's the "no edits, but movement" bug. Only bump when something
+    # actually changed.
+    title_changed = False
+    content_changed = False
+
     if "title" in body:
-        note.title = body["title"]
+        new_title = body["title"]
+        if (new_title or None) != (note.title or None):
+            title_changed = True
+        note.title = new_title
     if "content" in body:
         # Safety net for the empty-overwrite bug class (a frontend race or a
         # silently-failed request could otherwise wipe a populated note). Refuse
@@ -1757,8 +1771,10 @@ def update_note(
                     "content; pass force=true to override"
                 ),
             )
+        if (new_content or None) != (note.content or None):
+            content_changed = True
         note.content = new_content
-    if "title" in body or "content" in body:
+    if title_changed or content_changed:
         note.updated_at = datetime.utcnow()
     if "space_id" in body:
         sid = body["space_id"]
