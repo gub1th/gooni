@@ -129,6 +129,198 @@ class CreateCalendarEventTool(BaseTool):
         return f"Created '{summary}' on {start_iso}. {link}".strip()
 
 
+class ListUpcomingEventsTool(BaseTool):
+    name = "list_upcoming_events"
+    description = (
+        "List events on Daniel's primary Google Calendar in a time window. "
+        "Use this BEFORE update_calendar_event or delete_calendar_event so "
+        "you can resolve a name fragment ('tennis') into the event_id those "
+        "tools require. Also useful for read-back questions like 'what's on "
+        "my calendar tomorrow'. Returns id + summary + start/end per event. "
+        "Pass `q` to filter by title text — Google does a fuzzy match on "
+        "summary/description/location."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "start": {
+                "type": "string",
+                "description": "Window start. RFC3339 or 'YYYY-MM-DD HH:MM'.",
+            },
+            "end": {
+                "type": "string",
+                "description": "Window end, same format. Optional — defaults to start + 14 days.",
+            },
+            "q": {
+                "type": "string",
+                "description": "Optional title/text filter to narrow the list.",
+            },
+        },
+        "required": ["start"],
+    }
+
+    def execute(
+        self, db=None, start: str = "", end: str = "", q: str = "", **kwargs
+    ) -> str:
+        from ..services import google_calendar as gcal
+
+        if db is None:
+            return "list_upcoming_events: no db session"
+        try:
+            start_iso = _coerce_iso(start)
+        except ValueError as e:
+            return f"list_upcoming_events: bad start — {e}"
+        if end:
+            try:
+                end_iso = _coerce_iso(end)
+            except ValueError as e:
+                return f"list_upcoming_events: bad end — {e}"
+        else:
+            dt = datetime.fromisoformat(start_iso)
+            end_iso = (dt + timedelta(days=14)).isoformat()
+        try:
+            items = gcal.list_events(
+                db=db,
+                time_min_iso=start_iso,
+                time_max_iso=end_iso,
+                q=q or None,
+            )
+        except RuntimeError as e:
+            return f"list_upcoming_events: {e}. Tell Daniel to connect calendar in Settings."
+        except Exception as e:
+            return f"list_upcoming_events error: {e}"
+
+        if not items:
+            return "No events in that window."
+        # Each line is what the LLM needs to resolve a follow-up edit/delete:
+        # the event_id (opaque string Google requires) plus enough human
+        # context to confirm "is this the one?".
+        lines = []
+        for ev in items[:25]:
+            ev_id = ev.get("id", "")
+            summary = ev.get("summary") or "(untitled)"
+            start_at = (ev.get("start") or {}).get("dateTime") or (ev.get("start") or {}).get("date") or ""
+            end_at = (ev.get("end") or {}).get("dateTime") or (ev.get("end") or {}).get("date") or ""
+            lines.append(f"  id={ev_id} | {summary} | {start_at} → {end_at}")
+        return f"{len(items)} event(s):\n" + "\n".join(lines)
+
+
+class UpdateCalendarEventTool(BaseTool):
+    name = "update_calendar_event"
+    description = (
+        "Patch an existing primary-calendar event. Use for 'move tennis to "
+        "6pm', 'rename meeting to 1:1 with Maya', 'extend to 7pm'. Resolve "
+        "the event_id via list_upcoming_events first if Daniel only gave a "
+        "name. Pass only the fields that change — omitted fields are left "
+        "untouched. Times follow the same format as create_calendar_event. "
+        "If you patch start without end (or vice versa), Google will reject "
+        "as inconsistent — pass both when shifting the time."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "event_id": {
+                "type": "string",
+                "description": "Google Calendar event id (from list_upcoming_events).",
+            },
+            "summary": {"type": "string", "description": "New title."},
+            "start": {
+                "type": "string",
+                "description": "New start. RFC3339 or 'YYYY-MM-DD HH:MM'.",
+            },
+            "end": {
+                "type": "string",
+                "description": "New end, same format.",
+            },
+            "description": {"type": "string", "description": "New body / notes."},
+        },
+        "required": ["event_id"],
+    }
+
+    def execute(
+        self,
+        db=None,
+        event_id: str = "",
+        summary: str = "",
+        start: str = "",
+        end: str = "",
+        description: str = "",
+        **kwargs,
+    ) -> str:
+        from ..services import google_calendar as gcal
+
+        if db is None:
+            return "update_calendar_event: no db session"
+        event_id = (event_id or "").strip()
+        if not event_id:
+            return "update_calendar_event: event_id required (call list_upcoming_events first)"
+        # Empty strings from the LLM mean "leave alone"; only forward fields
+        # the caller actually populated.
+        kwargs_to_pass: dict = {}
+        if summary:
+            kwargs_to_pass["summary"] = summary
+        if description:
+            kwargs_to_pass["description"] = description
+        if start:
+            try:
+                kwargs_to_pass["start_iso"] = _coerce_iso(start)
+            except ValueError as e:
+                return f"update_calendar_event: bad start — {e}"
+        if end:
+            try:
+                kwargs_to_pass["end_iso"] = _coerce_iso(end)
+            except ValueError as e:
+                return f"update_calendar_event: bad end — {e}"
+        if not kwargs_to_pass:
+            return "update_calendar_event: nothing to change"
+        try:
+            evt = gcal.update_event(db=db, event_id=event_id, **kwargs_to_pass)
+        except RuntimeError as e:
+            return f"update_calendar_event: {e}. Tell Daniel to connect calendar in Settings."
+        except Exception as e:
+            return f"update_calendar_event error: {e}"
+        link = evt.get("htmlLink") or ""
+        title = evt.get("summary") or "(untitled)"
+        return f"Updated '{title}'. {link}".strip()
+
+
+class DeleteCalendarEventTool(BaseTool):
+    name = "delete_calendar_event"
+    description = (
+        "Cancel/delete a primary-calendar event by id. Use for 'cancel "
+        "tennis', 'drop the 5pm'. Resolve the event_id via "
+        "list_upcoming_events first. Irreversible — only call after Daniel "
+        "has confirmed (e.g. 'yes' to 'cancel Tennis at 5pm tomorrow?'). "
+        "Returns silently on already-deleted events so re-issues don't error."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "event_id": {
+                "type": "string",
+                "description": "Google Calendar event id (from list_upcoming_events).",
+            },
+        },
+        "required": ["event_id"],
+    }
+
+    def execute(self, db=None, event_id: str = "", **kwargs) -> str:
+        from ..services import google_calendar as gcal
+
+        if db is None:
+            return "delete_calendar_event: no db session"
+        event_id = (event_id or "").strip()
+        if not event_id:
+            return "delete_calendar_event: event_id required (call list_upcoming_events first)"
+        try:
+            gcal.delete_event(db=db, event_id=event_id)
+        except RuntimeError as e:
+            return f"delete_calendar_event: {e}. Tell Daniel to connect calendar in Settings."
+        except Exception as e:
+            return f"delete_calendar_event error: {e}"
+        return f"Deleted event {event_id}."
+
+
 class CheckCalendarFreeBusyTool(BaseTool):
     name = "check_calendar_busy"
     description = (
