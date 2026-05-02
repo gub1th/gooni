@@ -18,7 +18,7 @@ from .prompts import (
 class LLMClient:
     def __init__(self):
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.chat_model = "gpt-4o-mini"
+        self.chat_model = "gpt-5.4"
         self.embedding_model = "text-embedding-3-small"
 
     def transcribe(self, audio_path: str) -> str:
@@ -74,7 +74,7 @@ class LLMClient:
                     model=active_model,
                     messages=messages,
                     temperature=0.7,
-                    max_tokens=500,
+                    max_completion_tokens=500,
                     tools=tool_schemas,
                 )
                 tracker.add(response.usage)
@@ -136,7 +136,7 @@ class LLMClient:
                     model=vision_model,
                     messages=messages,
                     temperature=0.7,
-                    max_tokens=500,
+                    max_completion_tokens=500,
                     tools=tool_schemas,
                 )
                 tracker.add(response.usage)
@@ -175,7 +175,7 @@ class LLMClient:
                 model=self.chat_model,
                 messages=[{"role": "user", "content": f"{TITLE_GENERATION_PROMPT}{content}"}],
                 temperature=0.5,
-                max_tokens=20,
+                max_completion_tokens=20,
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -195,7 +195,7 @@ class LLMClient:
                 model=self.chat_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_completion_tokens=max_tokens,
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -211,7 +211,7 @@ class LLMClient:
                     {"role": "user", "content": query},
                 ],
                 temperature=0.3,
-                max_tokens=150,
+                max_completion_tokens=150,
             )
             return response.choices[0].message.content.strip()
         except Exception as e:

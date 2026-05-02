@@ -43,7 +43,7 @@ def _run_case(text: str) -> tuple[str, list[str], str]:
             {"role": "user", "content": text},
         ],
         temperature=0.0,
-        max_tokens=300,
+        max_completion_tokens=300,
         tools=schemas,
     )
     c = r.choices[0]
