@@ -1,0 +1,46 @@
+{
+  "step": "master_prompt",
+  "description": "Live LLM call against the assembled system_prompt() + user message + tool schemas. Asserts the model picks a specific tool_call OR refuses with a substring. Catches hallucination regressions: e.g. eval#83 msg #549 where Gooni invented 'You're free tomorrow' instead of calling check_calendar_busy.",
+  "cases": [
+    {
+      "id": "schedule_tennis",
+      "source": "eval#83 msg #548",
+      "text": "I need to check my schedule for tennis",
+      "expected": {"tool_call": "check_calendar_busy"},
+      "notes": "Original eval saw Gooni hallucinate 'You're free tomorrow'. Must call the tool first."
+    },
+    {
+      "id": "am_i_free_tomorrow",
+      "source": "synthetic",
+      "text": "am I free tomorrow?",
+      "expected": {"tool_call": "check_calendar_busy"}
+    },
+    {
+      "id": "calendar_this_week",
+      "source": "synthetic",
+      "text": "what's on my calendar this week",
+      "expected": {"tool_call": "check_calendar_busy"}
+    },
+    {
+      "id": "weather_routes_to_web_search",
+      "source": "synthetic",
+      "text": "what is the weather today",
+      "expected": {"tool_call": "web_search"},
+      "notes": "Was previously a refusal case. After #114 (live web_search via Tavily), Rule 5 routes weather queries through the tool. The runner only checks tool selection, not tool output — works even if TAVILY_API_KEY is unset."
+    },
+    {
+      "id": "news_routes_to_web_search",
+      "source": "synthetic",
+      "text": "any news about the elections today",
+      "expected": {"tool_call": "web_search"},
+      "notes": "Time-sensitive web-searchable query. Must route to web_search, not invent."
+    },
+    {
+      "id": "no_tool_capability_refused",
+      "source": "synthetic",
+      "text": "what's the current price of Bitcoin?",
+      "expected": {"tool_call": "web_search"},
+      "notes": "Prices are web-searchable. Must route to tool, not pull stale training data."
+    }
+  ]
+}

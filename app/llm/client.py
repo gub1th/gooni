@@ -182,13 +182,19 @@ class LLMClient:
             print(f"Title generation error: {e}")
             return content[:40].strip()
 
-    def generate_simple_completion(self, prompt: str, max_tokens: int = 300) -> str:
-        """Single-turn completion. Used for briefings, commentary, and other ad-hoc tasks."""
+    def generate_simple_completion(
+        self,
+        prompt: str,
+        max_tokens: int = 300,
+        temperature: float = 0.7,
+    ) -> str:
+        """Single-turn completion. Used for briefings, commentary, and other ad-hoc tasks.
+        Pass temperature=0.0 for structured extraction calls where determinism matters."""
         try:
             response = self.client.chat.completions.create(
                 model=self.chat_model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
+                temperature=temperature,
                 max_tokens=max_tokens,
             )
             return response.choices[0].message.content.strip()

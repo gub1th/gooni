@@ -218,15 +218,23 @@ Rules per field:
 
 tone_corrections:
 - Critique of the prior assistant reply's tone, style, length, structure, or approach.
+- SPEAKER DIRECTION (read carefully): Daniel must be EXPLICITLY instructing
+  future-Gooni to change its behavior. Casual swearing, trash talk, or rude
+  language aimed AT Gooni is NOT a tone correction on its own. The signal is
+  venting, not feedback. Require an explicit instruction phrase: "don't say
+  X", "stop being X", "stop doing X", "I want you to X", "you should X",
+  "be more X", "be less X". When in doubt, emit []. False positives here
+  pollute the preference store and steer every future reply wrong.
 - BE SPECIFIC. Bland abstractions like "be more concise" are useless — capture
   the actual offense. If Daniel says "stop saying 'great question'", the rule
   is `no flattery openers like "great question"`, NOT `more concise`.
 - `evidence` is mandatory: quote the specific phrase or pattern in the
   PRIOR ASSISTANT REPLY that triggered the correction. If you can't point at
   a specific phrase, the correction is too vague — emit an empty array.
-- `anti_pattern` (optional) is a concrete bad example future-Gooni should
-  recognize and avoid. Use for stylistic patterns (openers, fillers, format
-  habits). Leave as "" when the rule is self-explanatory from `rule` alone.
+- `anti_pattern` is a concrete phrasing future-Gooni must recognize and
+  avoid. It MUST be grounded in `evidence` + `rule` — a phrasing Daniel
+  would actually recognize as the offending pattern. Never invent
+  unrelated example phrases. Leave as "" when nothing grounded fits.
 - Examples (good):
     rule: "no flattery openers like 'great question' or 'of course'"
     evidence: "Sure! Great question." anti_pattern: "Great question! Let's…"
@@ -236,20 +244,64 @@ tone_corrections:
     --
     rule: "drop the 'I'd be happy to help' / 'I'd love to' filler"
     evidence: "I'd be happy to help with that!" anti_pattern: "Happy to dive in!"
-- Examples (BAD — do NOT emit these vague rules):
-    "less directive", "be more concise", "User prefers concise responses",
-    "avoid being too directive or harsh" — these don't teach future-Gooni
-    anything specific. If you'd write one of these, you're under-extracting;
-    look harder at the prior reply for the actual offense.
+- Examples (BAD — do NOT emit these):
+    Vague rules: "less directive", "be more concise", "User prefers
+    concise responses", "avoid being too directive or harsh" — these
+    don't teach future-Gooni anything specific. If you'd write one of
+    these, you're under-extracting; look harder at the prior reply for
+    the actual offense.
+    Speaker-flip false positives:
+      Text "i am doing it dumbass" → emit [], NOT a rule like "avoid
+      condescending language like 'dumbass'". Daniel is venting AT
+      Gooni, not directing Gooni's tone. No instruction phrase = no rule.
+      Text "you're being dumb" or "ur retarded" → emit [] unless followed
+      by an explicit instruction.
+    Hallucinated anti_patterns: never emit a rule whose anti_pattern
+    references a phrase that doesn't appear in the prior reply or doesn't
+    directly mirror the rule. Empty string is the correct fallback.
 - Empty when no prior assistant reply or no critique signal.
 
 feature_requests:
-- Daniel describes a Gooni capability that doesn't exist or is broken.
-- Includes: hallucination call-outs ("you can't actually do that"), missing tools
-  ("you don't have a scheduler"), feature asks ("you need to allow hyperlinks"),
-  capability gaps phrased as commands or wishes.
+
+  *** HARD GATE — APPLY FIRST, BEFORE ANY OTHER REASONING ***
+  If the text is interrogative — ends with "?", or starts with one of:
+    can, could, do, does, did, are, is, will, would, should, may,
+    might, what, how, when, where, why, who
+  — emit [] for feature_requests. NO EXCEPTIONS. Questions are NEVER
+  feature_requests. Even if the question concerns a missing capability,
+  the user is ASKING about it, not REQUESTING it. The reply step will
+  answer the question; this field stays empty.
+
+  Examples that hit the hard gate (all → []):
+    "Can I log focuses?"
+    "Can you add calendar integration?"
+    "Could you set a timer for me?"
+    "Do you have the ability to log focused?"
+    "Do you support markdown?"
+    "Are you able to add to my calendar?"
+    "Is there a way to log focuses?"
+    "Will you ever support hyperlinks?"
+    "What can you do?"
+    "How do I add a calendar event?"
+
+  ONLY exception: same-message follow-up imperative AFTER the question
+  ("Can you X? Just add it." → fires on "Just add it"). The imperative
+  must be a separate sentence; trailing politeness ("please?", "would
+  that work?") doesn't qualify.
+
+- After the hard gate passes (text is NOT a question):
+- INCLUDE feature_requests when Daniel uses imperative or wish form:
+    "add X", "you need X", "I want you to be able to X", "X should work",
+    "you should be able to X", hallucination call-outs ("you can't actually
+    do that — log it as a feature"), explicit missing-tool statements
+    ("you don't have a scheduler"), bug critiques.
 - Title is imperative, terse. Why is one sentence describing the gap.
-- Empty when text isn't asking for or critiquing a Gooni capability.
+- Imperative examples (NO question mark, → fires):
+    "Add calendar integration"          → [{{title:"Add calendar integration", ...}}]
+    "you need to allow hyperlinks"      → [{{title:"Allow hyperlinks", ...}}]
+    "you should be able to set timers"  → [{{title:"Set timers", ...}}]
+    "you don't have a scheduler"        → [{{title:"Add scheduler", ...}}]
+- Empty when text is a question, or isn't asserting a missing capability.
 
 memories:
 - Persistent facts about Daniel — same shape as before.
@@ -348,7 +400,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         text=text[:2000],
     )
     try:
-        raw = llm_client.generate_simple_completion(prompt, max_tokens=700)
+        raw = llm_client.generate_simple_completion(prompt, max_tokens=700, temperature=0.0)
     except Exception as e:
         print(f"extract_signals LLM error: {e}")
         return empty
@@ -395,7 +447,7 @@ def reconcile_candidate(
         cconfidence=candidate.get("confidence", 0.8),
         existing=existing_block,
     )
-    raw = llm_client.generate_simple_completion(prompt, max_tokens=120)
+    raw = llm_client.generate_simple_completion(prompt, max_tokens=120, temperature=0.0)
     parsed = _parse_json_object(raw)
     if not parsed:
         return None

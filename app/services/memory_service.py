@@ -51,6 +51,14 @@ RECONCILE_PREFERENCE_TOP_K = 6
 # Retrieval limits when injecting into the system prompt.
 RETRIEVAL_TOP_K = 5
 
+# Minimum cosine similarity for a memory to ride into the master prompt.
+# Without this, top-K returns the K least-bad matches even when none are
+# actually relevant — junk leaks into every reply. 0.30 is a conservative
+# floor: tuned on the eval#83 corpus where unrelated facts were getting
+# pulled on schedule queries. Bump higher (0.40+) once memory volume grows
+# and recall is consistently noisy.
+RETRIEVAL_SIMILARITY_FLOOR = 0.30
+
 # Cap on feedback-derived preferences (key prefixed with `feedback__`) that
 # get always-injected. Without this, every tone correction Daniel ever wrote
 # accumulates and bloats the system prompt — saw a turn pulling 50+ active
@@ -567,6 +575,7 @@ class MemoryService:
                         query_vec,
                         type_filter=["fact", "goal", "routine", "constraint", "episode"],
                         limit=RETRIEVAL_TOP_K,
+                        floor=RETRIEVAL_SIMILARITY_FLOOR,
                     )
                     for m, _ in scored:
                         if m.type == "episode":
