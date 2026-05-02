@@ -9,11 +9,10 @@ import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
-  PenLine, FileText, Pin, MessageSquare, Bug, Brain, ClipboardList, Globe, Settings as SettingsIcon,
+  PenLine, FileText, Pin, MessageSquare, Brain, ClipboardList, BarChart3, Settings as SettingsIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
-import { DevToolsModal } from "../DevToolsModal";
 import { SpaceIcon, SPACE_ICON_OPTIONS, lucideIconValue } from "./SpaceIcon";
 import { ListIcon } from "./ListIcon";
 
@@ -24,8 +23,7 @@ const ICON_TINT = {
   gooni:    "#A855F7",   // violet
   memories: "#0EA5E9",  // sky
   chatAudit: "#0891B2",  // cyan
-  publicMcp: "#84CC16",  // lime
-  devTools: "#F43F5E",   // rose
+  stats:    "#EC4899",   // pink — distinct from chatAudit so the eye separates them
   settings: "#64748B",   // slate
 } as const;
 
@@ -156,6 +154,7 @@ interface SidebarProps {
   isChat: boolean;
   isLists: boolean;
   isEval?: boolean;
+  isStats?: boolean;
   activeListId: number | null;
   showCompose: boolean;
   onLogoClick: () => void;
@@ -164,9 +163,10 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectList: (id: number) => void;
   onOpenEval?: () => void;
+  onOpenStats?: () => void;
 }
 
-export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList, onOpenEval }: SidebarProps) {
+export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList, onOpenEval, onOpenStats }: SidebarProps) {
   const navigate = useNavigate();
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId, removeSpace } = useNotesContentStore();
   const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
@@ -202,7 +202,6 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
   const [spacesOpen, setSpacesOpen] = useState(true);
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [devToolsOpen, setDevToolsOpen] = useState(false);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
 
@@ -731,69 +730,28 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
             </button>
           </div>
 
-          {/* Public profile — jumps to the public-facing landing page. */}
+          {/* Stats — opens the activity / OpenAI usage / dev surface */}
           <div style={{ padding: "0 6px 2px" }}>
             <button
-              onClick={() => navigate({ to: "/public" })}
-              title="Public profile (visitors see this)"
+              onClick={() => onOpenStats?.()}
+              title="Stats — usage + activity + dev"
               style={{
                 display: "flex", alignItems: "center", gap: 8,
                 width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
-                border: "none", background: "transparent", cursor: "pointer",
+                border: "none",
+                background: isStats ? "rgba(0,0,0,0.09)" : "transparent",
+                cursor: "pointer",
                 textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontSize: 13.5, color: "#3C3C43",
+                fontWeight: isStats ? 600 : 400,
+                fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+              onMouseEnter={(e) => { if (!isStats) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+              onMouseLeave={(e) => { if (!isStats) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
-              <Globe size={14} strokeWidth={1.7} color={ICON_TINT.publicMcp} style={{ flexShrink: 0 }} />
-              Public profile
-            </button>
-          </div>
-
-          {/* Public MCP — opens the public-facing MCP page in same tab. */}
-          <div style={{ padding: "0 6px 2px" }}>
-            <button
-              onClick={() => navigate({ to: "/public/mcp" })}
-              title="Public MCP page"
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
-                border: "none", background: "transparent", cursor: "pointer",
-                textAlign: "left",
-                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontSize: 13.5, color: "#3C3C43",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-            >
-              <Globe size={14} strokeWidth={1.7} color={ICON_TINT.publicMcp} style={{ flexShrink: 0 }} />
-              Public MCP
-            </button>
-          </div>
-
-          {/* Dev tools — sits directly above Settings */}
-          <div style={{ padding: "0 6px 2px" }}>
-            <button
-              onClick={() => setDevToolsOpen(true)}
-              title="Dev tools"
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
-                border: "none", background: "transparent", cursor: "pointer",
-                textAlign: "left",
-                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontSize: 13.5, color: "#3C3C43",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-            >
-              <Bug size={14} strokeWidth={1.7} color={ICON_TINT.devTools} style={{ flexShrink: 0 }} />
-              Dev tools
+              <BarChart3 size={14} strokeWidth={1.7} color={ICON_TINT.stats} style={{ flexShrink: 0 }} />
+              Stats
             </button>
           </div>
 
@@ -822,7 +780,6 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
       </div>
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <DevToolsModal open={devToolsOpen} onClose={() => setDevToolsOpen(false)} />
 
       {popover && (
         <SpacePopover

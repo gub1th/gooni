@@ -783,6 +783,54 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   return res.json() as Promise<DashboardStats>;
 }
 
+export interface ExtendedStats {
+  notes_this_week: number;
+  notes_total: number;
+  conversations_total: number;
+  user_messages_total: number;
+  assistant_messages_total: number;
+  user_messages_this_week: number;
+  todos_done_this_week: number;
+  todos_open: number;
+}
+
+export async function fetchExtendedStats(): Promise<ExtendedStats> {
+  const res = await apiFetch(`${BASE}/dashboard/stats`);
+  if (!res.ok) throw new Error("Failed to fetch extended stats");
+  return res.json() as Promise<ExtendedStats>;
+}
+
+export interface OpenAIUsageModel {
+  model: string;
+  kind: "chat" | "embedding";
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface OpenAIUsage {
+  configured: boolean;
+  error?: string;
+  month_start_unix?: number;
+  spend_usd?: number;
+  requests?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  by_model?: OpenAIUsageModel[];
+  fetched_at?: number;
+}
+
+export async function fetchOpenAIUsage(refresh = false): Promise<OpenAIUsage> {
+  const url = refresh
+    ? `${BASE}/dashboard/openai-usage?refresh=true`
+    : `${BASE}/dashboard/openai-usage`;
+  const res = await apiFetch(url);
+  if (!res.ok) throw new Error("Failed to fetch OpenAI usage");
+  return res.json() as Promise<OpenAIUsage>;
+}
+
 // Gooni's Take — LLM call, cached separately so we don't pay tokens per tab switch.
 // User can force-refresh via the refresh button next to the take.
 const TAKE_CACHE_KEY = "gooni-take";

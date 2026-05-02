@@ -43,12 +43,13 @@ interface Props {
   label: string;
   blurbConfigured: string;
   blurbNotConfigured: string;
+  icon?: ReactNode;              // rendered before the label (e.g. provider logo)
   extras?: ReactNode;            // rendered below the button row when connected
   onStatusChange?: (s: Status) => void;
 }
 
 export function IntegrationSection({
-  provider, label, blurbConfigured, blurbNotConfigured, extras, onStatusChange,
+  provider, label, blurbConfigured, blurbNotConfigured, icon, extras, onStatusChange,
 }: Props) {
   const api = PROVIDERS[provider];
   const [status, setStatus] = useState<Status | null>(null);
@@ -110,11 +111,15 @@ export function IntegrationSection({
       padding: "12px 14px", background: "#FDFCFA",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-        <span style={{
-          width: 8, height: 8, borderRadius: "50%",
-          background: status?.connected ? "#30D158" : (status?.configured ? "#C7C7CC" : "#FF9500"),
-          flexShrink: 0,
-        }} />
+        {icon ? (
+          <span style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>{icon}</span>
+        ) : (
+          <span style={{
+            width: 8, height: 8, borderRadius: "50%",
+            background: status?.connected ? "#30D158" : (status?.configured ? "#C7C7CC" : "#FF9500"),
+            flexShrink: 0,
+          }} />
+        )}
         <span style={{ fontSize: 13.5, fontWeight: 600, color: "#1C1C1E" }}>{label}</span>
         <span style={{ fontSize: 11, color: "#8E8E93", marginLeft: "auto" }}>
           {!status
