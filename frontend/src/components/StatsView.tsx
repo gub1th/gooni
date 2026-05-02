@@ -1,11 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import {
+  fetchClaudeUsage,
   fetchDashboardStats,
   fetchDevActivity,
   fetchExtendedStats,
   fetchOpenAIUsage,
   fetchSnapshotToday,
+  type ClaudeUsage,
   type DashboardStats,
+  type DayBucket,
   type DevActivity,
   type DevActivityRepo,
   type ExtendedStats,
@@ -51,6 +55,7 @@ export function StatsView() {
         </h1>
 
         <OpenAISection />
+        <ClaudeSection />
         <DevSection />
         <ActivitySection />
       </div>
@@ -136,8 +141,96 @@ function OpenAISection() {
             <BigStat label="input tokens" value={fmtInt(data.input_tokens)} />
             <BigStat label="output tokens" value={fmtInt(data.output_tokens)} />
           </div>
+          {data.by_day && data.by_day.length > 0 && (
+            <DailyTokenChart days={data.by_day} title="Daily tokens — month to date" />
+          )}
           {data.by_model && data.by_model.length > 0 && (
             <ModelBreakdown rows={data.by_model} />
+          )}
+        </>
+      )}
+    </SectionShell>
+  );
+}
+
+function ClaudeSection() {
+  const [days, setDays] = useState<7 | 30 | 90 | 0>(30);
+  const { data, isLoading, refetch, isFetching } = useQuery<ClaudeUsage>({
+    queryKey: ["claude-usage", days],
+    queryFn: () => fetchClaudeUsage(days),
+    staleTime: 60 * 60_000,
+  });
+
+  const rangeChips = (
+    <div style={{ display: "flex", gap: 4 }}>
+      {([7, 30, 90, 0] as const).map((d) => (
+        <button
+          key={d}
+          onClick={() => setDays(d)}
+          style={{
+            fontSize: 11, fontFamily: FONT,
+            padding: "2px 8px", borderRadius: 999,
+            border: "0.5px solid rgba(0,0,0,0.10)",
+            background: days === d ? "rgba(0,0,0,0.08)" : "transparent",
+            color: "var(--gooni-text, #1C1C1E)",
+            cursor: "pointer",
+            fontWeight: days === d ? 600 : 400,
+          }}
+        >
+          {d === 0 ? "all" : `${d}d`}
+        </button>
+      ))}
+      <button
+        onClick={() => fetchClaudeUsage(days, true).then(() => refetch())}
+        disabled={isFetching}
+        style={{
+          fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: "2px 6px", fontFamily: FONT,
+          opacity: isFetching ? 0.5 : 1,
+        }}
+      >
+        {isFetching ? "…" : "↻"}
+      </button>
+    </div>
+  );
+
+  return (
+    <SectionShell
+      label="Claude usage — personal (Claude Code)"
+      right={rangeChips}
+    >
+      {isLoading && !data ? (
+        <SkeletonRow />
+      ) : !data?.configured ? (
+        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", lineHeight: 1.5 }}>
+          No <code style={mono}>~/.claude/projects</code> directory found.
+          Override path with <code style={mono}>CLAUDE_PROJECTS_DIR</code> env
+          var if Claude Code stores logs elsewhere.
+        </div>
+      ) : (
+        <>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+            gap: 14,
+          }}>
+            <BigStat label="est. cost" value={`$${(data.est_cost_usd ?? 0).toFixed(2)}`} />
+            <BigStat label="sessions" value={fmtInt(data.sessions)} />
+            <BigStat label="turns" value={fmtInt(data.turns)} />
+            <BigStat label="input" value={fmtInt(data.input_tokens)} />
+            <BigStat label="output" value={fmtInt(data.output_tokens)} />
+            <BigStat label="cache read" value={fmtInt(data.cache_read_tokens)} />
+          </div>
+          {data.by_day && data.by_day.length > 0 && (
+            <DailyTokenChart
+              days={data.by_day}
+              title={`Daily tokens — last ${days === 0 ? "all time" : `${days}d`}`}
+              showCache
+            />
+          )}
+          {data.by_model && data.by_model.length > 0 && (
+            <ClaudeModelBreakdown rows={data.by_model} />
           )}
         </>
       )}
@@ -356,6 +449,203 @@ function ModelRow({ row }: { row: NonNullable<OpenAIUsage["by_model"]>[number] }
       <Cell right>{row.kind === "embedding" ? "—" : fmtInt(row.output_tokens)}</Cell>
       <Cell right>{fmtInt(row.total_tokens)}</Cell>
     </>
+  );
+}
+
+// Inline SVG bar chart. Stacks input + output (+ optional cache_read +
+// cache_creation) per day. No chart lib — keeps the bundle small and
+// the styling fully theme-token aware. ResizeObserver isn't needed
+// since we render a fixed-aspect viewBox + scale to 100% width.
+function DailyTokenChart({
+  days, title, showCache,
+}: { days: DayBucket[]; title: string; showCache?: boolean }) {
+  if (!days.length) return null;
+  const VIEW_W = 800;
+  const VIEW_H = 180;
+  const PAD_L = 44;
+  const PAD_R = 8;
+  const PAD_T = 8;
+  const PAD_B = 24;
+
+  const COLOR_INPUT = "#3B82F6";
+  const COLOR_OUTPUT = "#A855F7";
+  const COLOR_CACHE_READ = "#10B981";
+  const COLOR_CACHE_CREATE = "#F59E0B";
+
+  const totals = days.map((d) =>
+    d.input + d.output + (showCache ? (d.cache_read ?? 0) + (d.cache_creation ?? 0) : 0)
+  );
+  const max = Math.max(1, ...totals);
+  const innerW = VIEW_W - PAD_L - PAD_R;
+  const innerH = VIEW_H - PAD_T - PAD_B;
+  const barW = Math.max(2, innerW / days.length - 2);
+
+  function y(v: number): number {
+    return PAD_T + innerH - (v / max) * innerH;
+  }
+
+  const tickValues = [0, max / 2, max];
+  function fmtAbbr(n: number): string {
+    if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return String(Math.round(n));
+  }
+
+  return (
+    <div style={{ marginTop: 22 }}>
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: 8,
+      }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+          textTransform: "uppercase", color: "#8E8E93",
+        }}>
+          {title}
+        </div>
+        <div style={{ display: "flex", gap: 10, fontSize: 10.5, color: "#6B6B70" }}>
+          <Legend color={COLOR_INPUT} label="input" />
+          <Legend color={COLOR_OUTPUT} label="output" />
+          {showCache && <Legend color={COLOR_CACHE_READ} label="cache read" />}
+          {showCache && <Legend color={COLOR_CACHE_CREATE} label="cache create" />}
+        </div>
+      </div>
+      <svg
+        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+        preserveAspectRatio="none"
+        style={{ width: "100%", height: 180, display: "block" }}
+      >
+        {/* Y-axis ticks */}
+        {tickValues.map((v) => (
+          <g key={v}>
+            <line
+              x1={PAD_L} x2={VIEW_W - PAD_R}
+              y1={y(v)} y2={y(v)}
+              stroke="rgba(0,0,0,0.06)"
+              strokeWidth={1}
+            />
+            <text
+              x={PAD_L - 6} y={y(v) + 3}
+              textAnchor="end"
+              fontSize={9}
+              fill="#8E8E93"
+              fontFamily="'SF Mono', Menlo, monospace"
+            >{fmtAbbr(v)}</text>
+          </g>
+        ))}
+
+        {/* Stacked bars */}
+        {days.map((d, i) => {
+          const x = PAD_L + i * (innerW / days.length) + 1;
+          let stackTopValue = 0;
+          const stack: { color: string; v: number }[] = [
+            { color: COLOR_INPUT, v: d.input },
+            { color: COLOR_OUTPUT, v: d.output },
+          ];
+          if (showCache) {
+            stack.push({ color: COLOR_CACHE_READ, v: d.cache_read ?? 0 });
+            stack.push({ color: COLOR_CACHE_CREATE, v: d.cache_creation ?? 0 });
+          }
+          return (
+            <g key={d.date}>
+              {stack.map((seg, idx) => {
+                if (seg.v <= 0) return null;
+                const yTop = y(stackTopValue + seg.v);
+                const h = y(stackTopValue) - yTop;
+                stackTopValue += seg.v;
+                return (
+                  <rect
+                    key={idx}
+                    x={x} y={yTop}
+                    width={barW} height={Math.max(0.5, h)}
+                    fill={seg.color}
+                    rx={1}
+                  >
+                    <title>{`${d.date} · ${fmtAbbr(seg.v)} ${["input","output","cache read","cache create"][idx]}`}</title>
+                  </rect>
+                );
+              })}
+            </g>
+          );
+        })}
+
+        {/* X-axis: first / mid / last date labels only — keeps it readable
+            even on a 90d window. */}
+        {[0, Math.floor(days.length / 2), days.length - 1]
+          .filter((v, i, a) => a.indexOf(v) === i)
+          .map((idx) => {
+            const d = days[idx];
+            if (!d) return null;
+            const x = PAD_L + idx * (innerW / days.length) + barW / 2 + 1;
+            return (
+              <text
+                key={d.date}
+                x={x} y={VIEW_H - 6}
+                textAnchor="middle"
+                fontSize={9.5}
+                fill="#8E8E93"
+                fontFamily={FONT}
+              >{d.date.slice(5)}</text>
+            );
+          })}
+      </svg>
+    </div>
+  );
+}
+
+function Legend({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <span style={{
+        width: 8, height: 8, borderRadius: 2, background: color,
+        display: "inline-block",
+      }} />
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function ClaudeModelBreakdown({
+  rows,
+}: { rows: NonNullable<ClaudeUsage["by_model"]> }) {
+  return (
+    <div style={{ marginTop: 22 }}>
+      <div style={{
+        fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+        textTransform: "uppercase", color: "#8E8E93", marginBottom: 8,
+      }}>
+        By model
+      </div>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "1.6fr 0.7fr 0.8fr 0.8fr 0.9fr 0.9fr",
+        rowGap: 6, columnGap: 12,
+        fontSize: 12,
+        fontVariantNumeric: "tabular-nums",
+      }}>
+        <Cell head>model</Cell>
+        <Cell head right>turns</Cell>
+        <Cell head right>in</Cell>
+        <Cell head right>out</Cell>
+        <Cell head right>cache rd</Cell>
+        <Cell head right>est. cost</Cell>
+        {rows.map((r) => (
+          <span key={r.model} style={{ display: "contents" }}>
+            <Cell>
+              <span style={{ fontFamily: "'SF Mono', Menlo, monospace", fontSize: 11.5 }}>
+                {r.model}
+              </span>
+            </Cell>
+            <Cell right>{fmtInt(r.turns)}</Cell>
+            <Cell right>{fmtInt(r.input)}</Cell>
+            <Cell right>{fmtInt(r.output)}</Cell>
+            <Cell right>{fmtInt(r.cache_read)}</Cell>
+            <Cell right>${r.est_cost_usd.toFixed(2)}</Cell>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 

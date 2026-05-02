@@ -2381,6 +2381,15 @@ def get_openai_usage(refresh: bool = False):
     return openai_usage.fetch_month_to_date(refresh=refresh)
 
 
+@app.get("/dashboard/claude-usage")
+def get_claude_usage(days: int = 30, refresh: bool = False):
+    """Local Claude Code usage parsed from ~/.claude/projects/**/*.jsonl.
+    `days=0` means all-time. Cached for 6h per window. Personal usage —
+    distinct from /dashboard/openai-usage which is Gooni's spend."""
+    from .services import claude_usage
+    return claude_usage.fetch(days=days, refresh=refresh)
+
+
 @app.get("/dashboard/stats")
 def get_dashboard_stats(db: Session = Depends(get_db)):
     """Aggregated counters for the Stats view. Returns a flat dict so the

@@ -44,7 +44,9 @@ def _month_start_unix() -> int:
 def _fetch_paginated(url: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     """Walk OpenAI's `next_page` cursor until exhausted. Each response is
     `{data: [{start_time, end_time, results: [...]}], next_page: ...}`.
-    Returns the flat list of bucket results across all pages.
+    Returns the flat list of bucket results across all pages, with each
+    result stamped with `_bucket_start` (unix seconds) so daily-grouped
+    aggregators can recover the time bucket without a separate fetch.
     """
     key = _admin_key()
     if not key:
@@ -60,7 +62,11 @@ def _fetch_paginated(url: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         resp.raise_for_status()
         body = resp.json()
         for bucket in body.get("data", []):
-            out.extend(bucket.get("results", []))
+            bucket_start = bucket.get("start_time")
+            for r in bucket.get("results", []):
+                stamped = dict(r)
+                stamped["_bucket_start"] = bucket_start
+                out.append(stamped)
         cursor = body.get("next_page")
         if not cursor:
             break
@@ -191,11 +197,27 @@ def fetch_month_to_date(refresh: bool = False) -> dict[str, Any]:
     total_req = sum(m["requests"] for m in by_model_list)
     spend = _aggregate_costs(costs)
 
+    # Daily series for the chart. Walks the same bucket-stamped rows so
+    # we don't pay a second API round-trip. Embeddings + completions
+    # collapse into the same daily slot — the chart just shows total
+    # input vs output, not by-model.
+    by_day: dict[str, dict[str, int]] = {}
+    for r in completions + embeddings:
+        bs = r.get("_bucket_start")
+        if bs is None:
+            continue
+        day = datetime.fromtimestamp(int(bs), tz=timezone.utc).strftime("%Y-%m-%d")
+        slot = by_day.setdefault(day, {"input": 0, "output": 0})
+        slot["input"] += int(r.get("input_tokens") or 0)
+        slot["output"] += int(r.get("output_tokens") or 0)
+    by_day_list = [{"date": d, **vals} for d, vals in sorted(by_day.items())]
+
     payload = {
         "configured": True,
         "month_start_unix": start,
         "spend_usd": round(spend, 4),
         "requests": total_req,
+        "by_day": by_day_list,
         "input_tokens": total_in,
         "output_tokens": total_out,
         "total_tokens": total_in + total_out,
