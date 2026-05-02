@@ -786,6 +786,33 @@ function ListItemRow({
             <span title="Primary focus" style={{ color: "#F59E0B", fontSize: 14, lineHeight: 1, flexShrink: 0 }}>★</span>
           )}
           <span>{item.text}</span>
+          {/* ID tag — surfaces the row's numeric id so Daniel can paste
+              "#42" into Claude Code instead of reading the substring back.
+              Click copies the id to clipboard. Stops propagation so it
+              doesn't open the detail modal. */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              navigator.clipboard?.writeText(`#${item.id}`).catch(() => {});
+            }}
+            title={`#${item.id} — click to copy`}
+            style={{
+              flexShrink: 0,
+              border: "none",
+              background: "rgba(0,0,0,0.04)",
+              color: "#8E8E93",
+              fontFamily: "'SF Mono', Menlo, monospace",
+              fontSize: 10.5,
+              padding: "1px 6px",
+              borderRadius: 999,
+              cursor: "pointer",
+              lineHeight: 1.4,
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.08)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)"; }}
+          >
+            #{item.id}
+          </button>
         </div>
 
         {item.subtitle && (
