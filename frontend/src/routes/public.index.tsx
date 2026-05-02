@@ -129,6 +129,31 @@ function PublicPage() {
     setTimeout(() => bioEditor?.commands.focus("end"), 0);
   }
 
+  function handleAddLink() {
+    if (!bioEditor) return;
+    const { from, to } = bioEditor.state.selection;
+    const hasSelection = from !== to;
+    const previousHref = bioEditor.getAttributes("link").href as string | undefined;
+    const url = window.prompt("Link URL", previousHref ?? "https://");
+    if (url === null) return;
+    const trimmed = url.trim();
+    if (trimmed === "") {
+      bioEditor.chain().focus().extendMarkRange("link").unsetLink().run();
+      return;
+    }
+    const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    if (hasSelection) {
+      bioEditor.chain().focus().extendMarkRange("link").setLink({ href }).run();
+    } else {
+      // No selection — insert the URL as link text at the cursor.
+      bioEditor.chain().focus().insertContent({
+        type: "text",
+        text: href,
+        marks: [{ type: "link", attrs: { href } }],
+      }).run();
+    }
+  }
+
   // Treat legacy plain-text bios as text; new HTML bios render rich.
   const bioIsHtml = bio !== null && /<[a-z][\s\S]*>/i.test(bio);
 
@@ -189,9 +214,24 @@ function PublicPage() {
           </div>
           {editing ? (
             <div style={{ margin: "14px 0 0" }}>
+              <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                <button
+                  onClick={handleAddLink}
+                  title="Add or edit link"
+                  style={{
+                    padding: "3px 10px", borderRadius: 999,
+                    border: "1px solid rgba(0,0,0,0.12)",
+                    background: "transparent", color: "#555",
+                    fontSize: 12, fontFamily: FONT, cursor: "pointer",
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                  }}
+                >
+                  🔗 Link
+                </button>
+              </div>
               <EditorContent editor={bioEditor} />
               <div style={{ fontSize: 11.5, color: "#999", marginTop: 6, fontFamily: FONT }}>
-                Tip: select text, paste a URL to make it a link.
+                Tip: select text → 🔗 Link, or paste a URL onto selected text.
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
                 <button

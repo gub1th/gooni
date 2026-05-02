@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useListsStore } from "../../stores/useListsStore";
 import type { ApiListItem, ListType } from "../../services/api";
 import { ItemModal } from "./ItemModal";
@@ -50,6 +50,23 @@ function formatDueDate(iso: string): string {
   return due.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+// Age tier for an open item, by days since created_at. Drives the subtle
+// colored dot that flags todos that have been sitting around. Tiers:
+//   <7d   → none (item is fresh, no nudge)
+//   7–14d → gray-amber dot ("aging")
+//   15–29d → amber dot ("stale")
+//   ≥30d  → red dot ("old")
+function ageIndicator(iso: string | null): { color: string; label: string } | null {
+  if (!iso) return null;
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  const d = new Date(hasOffset ? iso : iso + "Z");
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  if (days < 7) return null;
+  if (days < 15) return { color: "#FCD34D", label: `${days}d old — aging` };
+  if (days < 30) return { color: "#F59E0B", label: `${days}d old — stale` };
+  return { color: "#DC2626", label: `${days}d old — sitting too long` };
+}
+
 function relativeTime(iso: string | null): string {
   if (!iso) return "";
   // Backend ISO strings come without trailing Z — treat them as UTC.
@@ -88,6 +105,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [dropBeforeId, setDropBeforeId] = useState<number | null>(null);
   const [modalItemId, setModalItemId] = useState<number | null>(null);
+  const [sortMode, setSortMode] = useState<"manual" | "recent">("manual");
   // Tick every minute so relative timestamps stay fresh without per-row state.
   const [, setNowTick] = useState(0);
   useEffect(() => {
@@ -96,6 +114,8 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
   }, []);
   const composerRef = useRef<HTMLInputElement>(null);
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const autoscrollFrame = useRef<number | null>(null);
 
   useEffect(() => { selectList(listId); }, [listId, selectList]);
 
@@ -113,10 +133,15 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       if (listKindForSplit === "tasks" && it.done) done.push(it);
       else open.push(it);
     }
-    open.sort((a, b) => a.sort_order - b.sort_order);
+    if (sortMode === "recent") {
+      // Newest first by created_at; null timestamps sink to the bottom.
+      open.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+    } else {
+      open.sort((a, b) => a.sort_order - b.sort_order);
+    }
     done.sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || ""));
     return { open, done };
-  }, [items, listKindForSplit]);
+  }, [items, listKindForSplit, sortMode]);
 
   async function handleAdd() {
     const text = composer.trim();
@@ -147,6 +172,47 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       </div>
     );
   }
+
+  // Drag near container edges → autoscroll. Browsers don't natively scroll
+  // an overflow-y:auto container during HTML5 drag, so dragging an item to a
+  // row that's offscreen is impossible. We sample the cursor's Y on each
+  // dragOver and, if it's within EDGE px of the container's top/bottom,
+  // scroll proportionally on a rAF tick.
+  function handleContainerDragOver(e: React.DragEvent<HTMLDivElement>) {
+    if (draggingId == null) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const EDGE = 64;
+    const MAX_STEP = 18;
+    const fromTop = e.clientY - rect.top;
+    const fromBottom = rect.bottom - e.clientY;
+    let delta = 0;
+    if (fromTop < EDGE) delta = -Math.ceil(((EDGE - fromTop) / EDGE) * MAX_STEP);
+    else if (fromBottom < EDGE) delta = Math.ceil(((EDGE - fromBottom) / EDGE) * MAX_STEP);
+    if (delta === 0) {
+      if (autoscrollFrame.current != null) {
+        cancelAnimationFrame(autoscrollFrame.current);
+        autoscrollFrame.current = null;
+      }
+      return;
+    }
+    if (autoscrollFrame.current != null) return;
+    const step = () => {
+      el.scrollBy({ top: delta });
+      autoscrollFrame.current = requestAnimationFrame(step);
+    };
+    autoscrollFrame.current = requestAnimationFrame(step);
+  }
+
+  function stopAutoscroll() {
+    if (autoscrollFrame.current != null) {
+      cancelAnimationFrame(autoscrollFrame.current);
+      autoscrollFrame.current = null;
+    }
+  }
+
+  useEffect(() => stopAutoscroll, []);
 
   function handleDrop(targetId: number | null) {
     if (draggingId == null) return;
@@ -203,6 +269,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
         setDraggingId(null);
         setDropBeforeId(null);
         getPrimaryDragBus().current = null;
+        stopAutoscroll();
       }}
     />
   );
@@ -241,6 +308,10 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
 
   return (
     <div
+      ref={scrollRef}
+      onDragOver={handleContainerDragOver}
+      onDragLeave={stopAutoscroll}
+      onDrop={stopAutoscroll}
       style={{
         flex: 1,
         display: "flex",
@@ -343,6 +414,27 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
               }}
             >
               {isTaskList ? "tasks" : "ideas"}
+            </button>
+            <button
+              onClick={() => setSortMode((m) => (m === "manual" ? "recent" : "manual"))}
+              title={sortMode === "manual"
+                ? "Sort by most recently added"
+                : "Back to manual order (drag to reorder)"}
+              style={{
+                marginLeft: 4,
+                fontSize: 11, fontWeight: 700,
+                color: sortMode === "recent" ? "#1D4ED8" : "#1C1C1E",
+                background: sortMode === "recent" ? "#DBEAFE" : "#E5E5EA",
+                border: "none",
+                padding: "2px 10px",
+                borderRadius: 999,
+                cursor: "pointer",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                fontFamily: FONT,
+              }}
+            >
+              {sortMode === "recent" ? "recent" : "manual"}
             </button>
             {canDeleteList && (
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
@@ -506,7 +598,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                   onDrop={() => handleDrop(it.id)}
                 />
               )}
-              {renderRow(it, { draggable: true })}
+              {renderRow(it, { draggable: sortMode === "manual" })}
               {/* Slot beneath this row points at the next item, or null if
                   this is the last row (drop = send to end). */}
               {draggingId != null && draggingId !== it.id && idx < open.length - 1 && (
@@ -585,15 +677,28 @@ function ListItemRow({
   draggable, isDragging, onDragStart, onDragEnd,
 }: RowProps) {
   const [hover, setHover] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Auto-bail confirm if mouse leaves row.
+  // Close menu on outside click / Escape.
   useEffect(() => {
-    if (!hover && confirmingDelete) {
-      const t = window.setTimeout(() => setConfirmingDelete(false), 600);
-      return () => window.clearTimeout(t);
+    if (!menuOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      setMenuOpen(false);
+      setConfirmingDelete(false);
     }
-  }, [hover, confirmingDelete]);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") { setMenuOpen(false); setConfirmingDelete(false); }
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
 
   return (
     <div
@@ -614,8 +719,16 @@ function ListItemRow({
         gap: 12,
         padding: "10px 8px",
         borderBottom: "1px solid #F2F2F7",
-        opacity: isDragging ? 0.4 : (isTaskList && item.done ? 0.55 : 1),
+        opacity: isDragging ? 0.55 : (isTaskList && item.done ? 0.55 : 1),
         borderRadius: 6,
+        // Lift the dragged row visually: subtle scale-down + tinted background
+        // + dashed outline so the user can clearly track which row is in
+        // flight, even when the OS drag image is muted by the browser.
+        transform: isDragging ? "scale(0.985)" : "none",
+        background: isDragging ? "rgba(59,130,246,0.06)" : "transparent",
+        outline: isDragging ? "1.5px dashed rgba(59,130,246,0.55)" : "none",
+        outlineOffset: isDragging ? -2 : 0,
+        transition: "transform 120ms ease, background 120ms, outline-color 120ms",
         animation: flashing ? "gooni-row-flash 1100ms ease-out" : undefined,
         cursor: draggable && hover ? "grab" : "default",
       }}
@@ -715,117 +828,157 @@ function ListItemRow({
         )}
       </div>
 
-      {/* Right-side meta column: timestamp (always) + hover actions. */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0, minWidth: 90 }}>
+      {/* Right-side meta row: age dot + ⋯ menu + timestamp. Menu always present
+          so the row height never changes on hover; timestamp stays at the far
+          right. The age dot appears only on open task items that have been
+          sitting for ≥7 days, as a subtle nudge. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, minWidth: 90, justifyContent: "flex-end" }}>
+        {isTaskList && !item.done && (() => {
+          const age = ageIndicator(item.created_at);
+          if (!age) return null;
+          return (
+            <span
+              title={age.label}
+              aria-label={age.label}
+              style={{
+                width: 7, height: 7, borderRadius: "50%",
+                background: age.color, flexShrink: 0,
+                boxShadow: `0 0 0 2px ${age.color}22`,
+              }}
+            />
+          );
+        })()}
+        <div ref={menuRef} style={{ position: "relative" }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); setConfirmingDelete(false); }}
+            aria-label="Item actions"
+            title="Item actions"
+            style={{
+              border: "none",
+              background: menuOpen ? "rgba(0,0,0,0.06)" : "transparent",
+              color: "#9CA3AF",
+              cursor: "pointer",
+              padding: "2px 4px",
+              borderRadius: 6,
+              fontSize: 16,
+              lineHeight: 1,
+              opacity: hover || menuOpen ? 1 : 0.55,
+              transition: "opacity 120ms, background 120ms",
+              fontFamily: FONT,
+            }}
+          >
+            ⋯
+          </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                minWidth: 160,
+                background: "#FFFFFF",
+                border: "0.5px solid rgba(0,0,0,0.10)",
+                borderRadius: 8,
+                boxShadow: "0 8px 20px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.04)",
+                padding: 4,
+                zIndex: 30,
+                fontFamily: FONT,
+              }}
+            >
+              {onMakePrimary && !item.is_primary && (
+                <MenuItem
+                  onClick={() => { setMenuOpen(false); onMakePrimary(); }}
+                  color="#B45309"
+                  icon="★"
+                  label="Make primary"
+                />
+              )}
+              {confirmingDelete ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "6px 8px" }}>
+                  <span style={{ fontSize: 12, color: "#6B7280" }}>Delete this item?</span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      onClick={() => { setMenuOpen(false); setConfirmingDelete(false); onDelete(); }}
+                      style={{
+                        flex: 1,
+                        border: "none",
+                        background: "#DC2626",
+                        color: "#FFFFFF",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontFamily: FONT,
+                        padding: "4px 10px",
+                        borderRadius: 6,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Delete
+                    </button>
+                    <button
+                      onClick={() => setConfirmingDelete(false)}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        color: "#6B7280",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontFamily: FONT,
+                        padding: "4px 8px",
+                        borderRadius: 6,
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <MenuItem
+                  onClick={() => setConfirmingDelete(true)}
+                  color="#DC2626"
+                  icon={<TrashIcon />}
+                  label="Delete"
+                />
+              )}
+            </div>
+          )}
+        </div>
         <div style={{ fontSize: 11, color: "#9CA3AF", whiteSpace: "nowrap" }}>
           {isTaskList && item.done && item.completed_at
             ? `done ${relativeTime(item.completed_at)}`
             : relativeTime(item.created_at)}
         </div>
-        {hover && (
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {onMakePrimary && !item.is_primary && !confirmingDelete && (
-              <button
-                onClick={onMakePrimary}
-                title="Make this the primary focus"
-                aria-label="Make primary"
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "#FEF3C7";
-                  (e.currentTarget as HTMLButtonElement).style.color = "#B45309";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                  (e.currentTarget as HTMLButtonElement).style.color = "#6B7280";
-                }}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  color: "#6B7280",
-                  cursor: "pointer",
-                  padding: "3px 7px",
-                  borderRadius: 6,
-                  fontFamily: FONT,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.5,
-                  transition: "background 120ms, color 120ms",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 3,
-                }}
-              >
-                ★ make primary
-              </button>
-            )}
-          {confirmingDelete ? (
-            <>
-              <span style={{ fontSize: 12, color: "#9CA3AF" }}>Delete?</span>
-              <button
-                onClick={onDelete}
-                style={{
-                  border: "none",
-                  background: "#DC2626",
-                  color: "#FFFFFF",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontFamily: FONT,
-                  padding: "3px 10px",
-                  borderRadius: 6,
-                  fontWeight: 600,
-                }}
-              >
-                Delete
-              </button>
-              <button
-                onClick={() => setConfirmingDelete(false)}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  color: "#6B7280",
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontFamily: FONT,
-                  padding: "3px 6px",
-                  borderRadius: 6,
-                }}
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={() => setConfirmingDelete(true)}
-              aria-label="Delete item"
-              title="Delete item"
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "#FEE2E2";
-                (e.currentTarget as HTMLButtonElement).style.color = "#DC2626";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                (e.currentTarget as HTMLButtonElement).style.color = "#6B7280";
-              }}
-              style={{
-                border: "none",
-                background: "transparent",
-                color: "#6B7280",
-                cursor: "pointer",
-                padding: 6,
-                borderRadius: 6,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                transition: "background 120ms, color 120ms",
-              }}
-            >
-              <TrashIcon />
-            </button>
-          )}
-          </div>
-        )}
       </div>
     </div>
+  );
+}
+
+function MenuItem({
+  onClick, color, icon, label,
+}: { onClick: () => void; color: string; icon: ReactNode; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 8,
+        width: "100%",
+        border: "none",
+        background: "transparent",
+        color,
+        cursor: "pointer",
+        fontSize: 13,
+        fontFamily: FONT,
+        padding: "6px 10px",
+        borderRadius: 6,
+        textAlign: "left",
+        transition: "background 100ms",
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+    >
+      <span style={{ width: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{icon}</span>
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -930,21 +1083,39 @@ function DropSlot({
       onDrop={(e) => { e.preventDefault(); onDrop(); }}
       style={{
         position: "relative",
-        height: 6,
+        height: active ? 12 : 8,
         margin: "1px 0",
+        transition: "height 120ms ease",
       }}
     >
       <div
         style={{
           position: "absolute",
           left: 0, right: 0,
-          top: 2,
-          height: 2,
+          top: active ? 4 : 3,
+          height: active ? 3 : 2,
           background: active ? "#3B82F6" : "transparent",
-          borderRadius: 1,
-          transition: "background 100ms",
+          borderRadius: 2,
+          boxShadow: active ? "0 0 0 3px rgba(59,130,246,0.18)" : "none",
+          transition: "background 100ms, height 120ms ease, top 120ms ease, box-shadow 120ms",
         }}
       />
+      {active && (
+        <>
+          <div style={{
+            position: "absolute", left: -4, top: 1,
+            width: 9, height: 9, borderRadius: "50%",
+            background: "#3B82F6",
+            boxShadow: "0 0 0 3px rgba(59,130,246,0.18)",
+          }} />
+          <div style={{
+            position: "absolute", right: -4, top: 1,
+            width: 9, height: 9, borderRadius: "50%",
+            background: "#3B82F6",
+            boxShadow: "0 0 0 3px rgba(59,130,246,0.18)",
+          }} />
+        </>
+      )}
     </div>
   );
 }

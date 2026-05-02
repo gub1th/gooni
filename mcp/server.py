@@ -1176,7 +1176,12 @@ def read_list(list_ref: str = "backlog", limit: int = 50, include_done: bool = F
         primary = " ★" if it.get("is_primary") else ""
         due = f" (due {it['due_date'][:10]})" if it.get("due_date") else ""
         sub = f" — {it['subtitle']}" if it.get("subtitle") else ""
-        lines.append(f"#{it['id']} {mark}{primary} {it['text']}{sub}{due}")
+        # Surface the linked source note so the caller can pull full context
+        # via read_note() without an extra round trip — backlog items often
+        # originate from a note discussion and that note is the richest
+        # available context for "what does this item really mean."
+        note_ref = f" [note #{it['source_note_id']}]" if it.get("source_note_id") else ""
+        lines.append(f"#{it['id']} {mark}{primary} {it['text']}{sub}{due}{note_ref}")
     return "\n".join(lines)
 
 

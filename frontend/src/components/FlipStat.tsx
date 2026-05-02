@@ -21,6 +21,10 @@ export interface FlipFace {
   label: string;
   value: React.ReactNode;
   hint?: React.ReactNode;
+  // Click handler for the face's body (not the chevron). When set, the face
+  // renders as a button so the whole card is clickable. Used by the dev
+  // streak face to reopen its commit-detail popover from inside the FlipStat.
+  onClick?: () => void;
 }
 
 interface FlipStatProps {
@@ -129,23 +133,26 @@ export function FlipStat({ faces, autoIntervalMs = 15000, width = 132 }: FlipSta
 }
 
 function FlipFaceCard({ face, side }: { face: FlipFace; side: "front" | "back" }) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        backfaceVisibility: "hidden",
-        WebkitBackfaceVisibility: "hidden",
-        transform: side === "back" ? "rotateY(180deg)" : "none",
-        background: "var(--gooni-card, #fff)",
-        border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-        borderRadius: 10,
-        padding: "10px 14px",
-        display: "flex", flexDirection: "column", alignItems: "flex-start",
-        fontFamily: FONT,
-        boxSizing: "border-box",
-      }}
-    >
+  const interactive = typeof face.onClick === "function";
+  const baseStyle: React.CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    backfaceVisibility: "hidden",
+    WebkitBackfaceVisibility: "hidden",
+    transform: side === "back" ? "rotateY(180deg)" : "none",
+    background: "var(--gooni-card, #fff)",
+    border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+    borderRadius: 10,
+    padding: "10px 14px",
+    display: "flex", flexDirection: "column", alignItems: "flex-start",
+    fontFamily: FONT,
+    boxSizing: "border-box",
+    textAlign: "left",
+    color: "inherit",
+    cursor: interactive ? "pointer" : "default",
+  };
+  const inner = (
+    <>
       <div style={{
         fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3,
       }}>{face.label}</div>
@@ -161,6 +168,19 @@ function FlipFaceCard({ face, side }: { face: FlipFace; side: "front" | "back" }
           {face.hint}
         </div>
       )}
-    </div>
+    </>
   );
+  if (interactive) {
+    return (
+      <button
+        type="button"
+        onClick={face.onClick}
+        title={`Open ${face.label} details`}
+        style={baseStyle}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return <div style={baseStyle}>{inner}</div>;
 }
