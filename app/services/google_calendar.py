@@ -288,3 +288,97 @@ def free_busy(
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def list_events(
+    db: Session,
+    time_min_iso: str,
+    time_max_iso: str,
+    max_results: int = 25,
+    q: str | None = None,
+) -> list[dict[str, Any]]:
+    """List events on the primary calendar in a time window. Returns the
+    `items` list straight from Google. Used by the planner to resolve
+    "tennis" → event_id before edit/delete.
+
+    `q` does Google's free-text search on the event (summary/description/
+    location) — handy when the LLM only knows a title fragment.
+    """
+    access_token = get_valid_access_token(db)
+    if not access_token:
+        raise RuntimeError("Calendar not connected")
+    params: dict[str, Any] = {
+        "timeMin": time_min_iso,
+        "timeMax": time_max_iso,
+        "singleEvents": "true",
+        "orderBy": "startTime",
+        "maxResults": max_results,
+    }
+    if q:
+        params["q"] = q
+    resp = httpx.get(
+        f"{CALENDAR_API}/calendars/primary/events",
+        headers={"Authorization": f"Bearer {access_token}"},
+        params=params,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json().get("items", [])
+
+
+def update_event(
+    db: Session,
+    event_id: str,
+    summary: str | None = None,
+    start_iso: str | None = None,
+    end_iso: str | None = None,
+    description: str | None = None,
+    time_zone: str | None = None,
+) -> dict[str, Any]:
+    """PATCH an existing event. Pass only the fields you want to change —
+    Google merges with the current event body server-side.
+    """
+    access_token = get_valid_access_token(db)
+    if not access_token:
+        raise RuntimeError("Calendar not connected")
+    body: dict[str, Any] = {}
+    if summary is not None:
+        body["summary"] = summary
+    if description is not None:
+        body["description"] = description
+    if start_iso is not None:
+        body["start"] = {"dateTime": start_iso}
+        if time_zone:
+            body["start"]["timeZone"] = time_zone
+    if end_iso is not None:
+        body["end"] = {"dateTime": end_iso}
+        if time_zone:
+            body["end"]["timeZone"] = time_zone
+    if not body:
+        raise ValueError("update_event called with no fields to update")
+    resp = httpx.patch(
+        f"{CALENDAR_API}/calendars/primary/events/{event_id}",
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+        json=body,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def delete_event(db: Session, event_id: str) -> None:
+    """DELETE an event from the primary calendar. 204 No Content on success;
+    Google returns 410 Gone if the event was already deleted, which we treat
+    as success so the LLM can re-issue without a hard error.
+    """
+    access_token = get_valid_access_token(db)
+    if not access_token:
+        raise RuntimeError("Calendar not connected")
+    resp = httpx.delete(
+        f"{CALENDAR_API}/calendars/primary/events/{event_id}",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=15,
+    )
+    if resp.status_code in (204, 410):
+        return
+    resp.raise_for_status()

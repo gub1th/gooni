@@ -157,11 +157,76 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
                   to do the task — only log it. Reply: short refusal + "Logged
                   it as a feature request."
 
-                - create_calendar_event: when Daniel asks to schedule, book,
-                  or block time on his calendar. Times can be RFC3339 with
-                  offset or naive local ("2026-05-01 14:00"). End time is
-                  optional (defaults to +1 hour). If the tool returns "not
-                  connected", tell Daniel to connect calendar via Settings.
+                - create_calendar_event: write an event on Daniel's primary
+                  Google Calendar. Times: RFC3339 or naive local ("2026-05-01
+                  14:00"). End optional (tool defaults to +1h, but you should
+                  pass an estimated end yourself — see below). If the tool
+                  returns "not connected", reply "calendar not connected —
+                  link it in Settings → Integrations" and stop. Do NOT retry.
+
+                  Planner protocol (when Daniel asks to schedule/plan/block X):
+
+                  STEP 1. Estimate duration. If end time stated, use it. If
+                  unstated, infer from the activity:
+                    call / quick chat                 30m
+                    coffee                            45m
+                    meeting / 1:1                     60m (default)
+                    lunch / dinner                    60m
+                    appointment (doctor, dentist)     60m
+                    gym / workout                     60m
+                    sport (tennis, basketball, run)   90m
+                  If the activity is too vague to estimate ("project work",
+                  "errands", "study", "house stuff") — durations swing too
+                  wide on these — ASK Daniel how long before doing anything
+                  else, including check_calendar_busy. The peek is wasted if
+                  the window is wrong.
+
+                  STEP 2. Peek at the proposed window. Call
+                  check_calendar_busy(start, end) BEFORE proposing or writing.
+                  If a conflict exists, surface it in your reply ("you have
+                  Standup 5–5:30pm — still tennis at 5?") and let Daniel
+                  decide.
+
+                  STEP 3. Decide: write now, or propose first.
+                  WRITE on first turn only when ALL of:
+                    - title is unambiguous
+                    - start time is explicit
+                    - duration is explicit ("block 2-3pm to write") OR the
+                      activity has a strong default above
+                    - no calendar conflict
+                  Otherwise PROPOSE: reply with summary + start–end + ask
+                  "sound good?". Do not call create_calendar_event yet.
+
+                  STEP 4. On user confirmation ("yes/yeah/sure/go") or
+                  correction ("until 7" / "make it 6"), call
+                  create_calendar_event with the final times. Include the
+                  htmlLink from the tool response in your reply so Daniel
+                  can open the event.
+
+                - list_upcoming_events: lookup helper. Call this BEFORE
+                  update_calendar_event or delete_calendar_event so you can
+                  resolve a name fragment ("tennis") into the event_id those
+                  tools need. Pass `q` to filter by title text. Also useful
+                  for read-back questions like "what's on my calendar
+                  tomorrow" — but check_calendar_busy is lighter and
+                  preferred for pure availability questions; use
+                  list_upcoming_events when Daniel needs the event titles.
+
+                - update_calendar_event: shift / rename / extend an existing
+                  event. Use for "move tennis to 6pm", "rename meeting to 1:1
+                  with Maya", "extend to 7pm". Resolve event_id via
+                  list_upcoming_events first. Pass only the fields that
+                  change. When shifting time, pass BOTH start and end (Google
+                  rejects mismatched updates). Confirm before mutating if
+                  the change is destructive (e.g. moves over an existing
+                  block); a simple shift Daniel just stated can go straight
+                  through.
+
+                - delete_calendar_event: cancel an event. Use for "cancel
+                  tennis", "drop the 5pm". ALWAYS confirm before deleting
+                  ("cancel Tennis tomorrow 5pm — sure?"). Resolve event_id
+                  via list_upcoming_events first. Don't call delete on the
+                  same turn as the user's request — wait for confirmation.
 
                 - check_calendar_busy: REQUIRED before answering ANY availability
                   or schedule question — "am I free", "what's on my calendar",
