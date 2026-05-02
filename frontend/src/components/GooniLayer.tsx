@@ -146,10 +146,8 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
     <>
       <style>{`
         @keyframes gooni-bubble-pop {
-          0%   { transform: scale(0.20) translate(20px, 30px); opacity: 0; }
-          60%  { transform: scale(1.04) translate(0, 0);       opacity: 1; }
-          82%  { transform: scale(0.985) translate(0, 0); }
-          100% { transform: scale(1.0) translate(0, 0); }
+          0%   { transform: scale(0.94) translate(6px, 10px); opacity: 0; }
+          100% { transform: scale(1.0) translate(0, 0);       opacity: 1; }
         }
         @keyframes gooni-modal-drag-glow {
           0%   { box-shadow: 0 24px 60px rgba(0,0,0,0.22), 0 0 0 2px rgba(74,222,128,0.55), 0 0 18px 2px rgba(74,222,128,0.40); }
@@ -193,7 +191,7 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
             ? "gooni-modal-drag-glow 1.4s ease-in-out infinite"
             : hasMountedRef.current
               ? "none"
-              : "gooni-bubble-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+              : "gooni-bubble-pop 240ms cubic-bezier(0.22, 1, 0.36, 1)",
           // Transform stays null after drop too — no spring-back.
           transform: dragging ? "scale(1.02) rotate(-0.3deg)" : "none",
           transition: dragging ? "none" : "left 180ms cubic-bezier(0.22,1,0.36,1), top 180ms cubic-bezier(0.22,1,0.36,1)",
