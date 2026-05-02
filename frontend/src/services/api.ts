@@ -809,6 +809,14 @@ export interface OpenAIUsageModel {
   total_tokens: number;
 }
 
+export interface DayBucket {
+  date: string;       // YYYY-MM-DD UTC
+  input: number;
+  output: number;
+  cache_read?: number;
+  cache_creation?: number;
+}
+
 export interface OpenAIUsage {
   configured: boolean;
   error?: string;
@@ -819,6 +827,7 @@ export interface OpenAIUsage {
   output_tokens?: number;
   total_tokens?: number;
   by_model?: OpenAIUsageModel[];
+  by_day?: DayBucket[];
   fetched_at?: number;
 }
 
@@ -829,6 +838,39 @@ export async function fetchOpenAIUsage(refresh = false): Promise<OpenAIUsage> {
   const res = await apiFetch(url);
   if (!res.ok) throw new Error("Failed to fetch OpenAI usage");
   return res.json() as Promise<OpenAIUsage>;
+}
+
+export interface ClaudeUsageModel {
+  model: string;
+  turns: number;
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_creation: number;
+  est_cost_usd: number;
+}
+
+export interface ClaudeUsage {
+  configured: boolean;
+  window_days?: number;
+  sessions?: number;
+  turns?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_tokens?: number;
+  cache_creation_tokens?: number;
+  est_cost_usd?: number;
+  by_day?: DayBucket[];
+  by_model?: ClaudeUsageModel[];
+  fetched_at?: number;
+}
+
+export async function fetchClaudeUsage(days = 30, refresh = false): Promise<ClaudeUsage> {
+  const params = new URLSearchParams({ days: String(days) });
+  if (refresh) params.set("refresh", "true");
+  const res = await apiFetch(`${BASE}/dashboard/claude-usage?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch Claude usage");
+  return res.json() as Promise<ClaudeUsage>;
 }
 
 // Gooni's Take — LLM call, cached separately so we don't pay tokens per tab switch.
