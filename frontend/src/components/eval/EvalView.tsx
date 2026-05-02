@@ -814,6 +814,18 @@ function StepCard({
   const [flagOpen, setFlagOpen] = useState(false);
   const stepKey = (step.key ?? step.type) as string;
 
+  // #98: surface tool name for tool_call rows. Tool name lives at
+  // meta.tool (canonical) or input.name (older traces). Without this,
+  // every tool_call renders identically as "tool_call — Captured tone
+  // correction" and the reviewer can't tell which tool fired.
+  const toolName =
+    stepKey === "tool_call"
+      ? ((step.meta as { tool?: string } | null | undefined)?.tool
+        ?? (step.input as { name?: string } | null | undefined)?.name
+        ?? null)
+      : null;
+  const headerLabel = renderStepHeaderLabel(step, stepKey);
+
   return (
     <div
       style={{
@@ -824,8 +836,10 @@ function StepCard({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93" }}>{stepKey}</span>
-        <span style={{ fontSize: 13 }}>{step.label}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93" }}>
+          {toolName ? `${stepKey}: ${toolName}` : stepKey}
+        </span>
+        <span style={{ fontSize: 13 }}>{headerLabel}</span>
         <button
           onClick={() => setFlagOpen((v) => !v)}
           style={{
@@ -865,18 +879,44 @@ function StepCard({
   );
 }
 
+// #100: distinguish short-circuit replies (no LLM call) from real LLM
+// replies. Orchestrator stamps meta.usage.short_circuit=true when feedback_ack
+// returns directly without hitting the chat model. Today both render as
+// "Replied (Nms)" — reviewer can't tell which one produced the text.
+function renderStepHeaderLabel(step: MessageTraceStep, stepKey: string): string {
+  if (stepKey !== "reply") return step.label;
+  const usage = (step.meta as { usage?: { short_circuit?: boolean } } | null | undefined)?.usage;
+  const elapsed = (step.meta as { elapsed_ms?: number } | null | undefined)?.elapsed_ms;
+  if (usage?.short_circuit) {
+    return `Short-circuited (no LLM call)`;
+  }
+  // Replace generic "Replied (Nms)" with explicit "LLM reply (Nms)".
+  return typeof elapsed === "number" ? `LLM reply (${elapsed}ms)` : "LLM reply";
+}
+
+// Auto-expand threshold — payloads under this many serialized chars open
+// by default so the reviewer sees content without clicking. Master prompts
+// + recall payloads are typically much longer; those stay collapsed so a
+// single segment doesn't render a wall of text.
+const STEP_AUTOEXPAND_MAX_CHARS = 600;
+
 function StepBody({ step }: { step: MessageTraceStep }) {
-  // Render input/output if present; fall back to legacy detail/args. Always
-  // collapsible so step cards stay compact in the timeline.
+  // Render input/output if present; fall back to legacy detail/args.
   const out = step.output ?? step.detail ?? null;
   const inp = step.input ?? step.args ?? null;
   const meta = step.meta ?? null;
   const hasContent = out != null || inp != null || (meta && Object.keys(meta).length > 0);
   if (!hasContent) return null;
+  // #98: auto-expand short payloads so the reviewer doesn't have to click
+  // "details" on every step card. Long payloads (master_prompt, recall) stay
+  // collapsed to avoid a wall of text on every segment open.
+  const totalLen =
+    serializedLength(inp) + serializedLength(out) + serializedLength(meta);
+  const shouldAutoExpand = totalLen <= STEP_AUTOEXPAND_MAX_CHARS;
   return (
-    <details style={{ marginTop: 6 }}>
+    <details style={{ marginTop: 6 }} open={shouldAutoExpand}>
       <summary style={{ fontSize: 11, color: "#8E8E93", cursor: "pointer" }}>
-        details
+        {shouldAutoExpand ? "collapse" : "show details"}
       </summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
         {inp != null && (
@@ -891,6 +931,16 @@ function StepBody({ step }: { step: MessageTraceStep }) {
       </div>
     </details>
   );
+}
+
+function serializedLength(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === "string") return v.length;
+  try {
+    return JSON.stringify(v).length;
+  } catch {
+    return String(v).length;
+  }
 }
 
 function CodeBlock({ label, value }: { label: string; value: unknown }) {
@@ -1217,13 +1267,16 @@ function RatingPicker({
   value: number | null;
   onChange: (v: number | null) => void;
 }) {
+  // #101: button label shows number + emoji + word so the reviewer sees
+  // what 1/2/3 mean without hovering for the title tooltip. Title kept
+  // for accessibility / longer keyboard exploration.
   return (
-    <div style={{ display: "flex", gap: 4 }}>
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
       {RATING_OPTIONS.map((opt) => (
         <button
           key={opt.value}
           onClick={() => onChange(value === opt.value ? null : opt.value)}
-          title={opt.label}
+          title={`${opt.value} = ${opt.label}`}
           style={{
             background: value === opt.value ? "#0A84FF" : "transparent",
             color: value === opt.value ? "#FFFFFF" : "#1C1C1E",
@@ -1231,11 +1284,17 @@ function RatingPicker({
             borderRadius: 6,
             padding: "4px 10px",
             cursor: "pointer",
-            fontSize: 14,
+            fontSize: 13,
             fontFamily: FONT,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontVariantNumeric: "tabular-nums",
           }}
         >
-          {opt.emoji}
+          <span style={{ fontWeight: 600 }}>{opt.value}</span>
+          <span>{opt.emoji}</span>
+          <span style={{ fontSize: 12 }}>{opt.label.toLowerCase()}</span>
         </button>
       ))}
     </div>
