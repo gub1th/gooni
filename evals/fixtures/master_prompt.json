@@ -41,6 +41,41 @@
       "text": "what's the current price of Bitcoin?",
       "expected": {"tool_call": "web_search"},
       "notes": "Prices are web-searchable. Must route to tool, not pull stale training data."
+    },
+    {
+      "id": "schedule_with_time_peeks_busy",
+      "source": "synthetic",
+      "text": "tennis tomorrow at 5pm",
+      "expected": {"tool_call": "check_calendar_busy"},
+      "notes": "Planner protocol STEP 2: peek before propose/write. Even with explicit time + estimable duration (sport=90m), the first tool call must be check_calendar_busy so any conflict is surfaced in the proposal turn (≤2-turn budget)."
+    },
+    {
+      "id": "block_window_peeks_busy",
+      "source": "synthetic",
+      "text": "block 2-3pm tomorrow to write",
+      "expected": {"tool_call": "check_calendar_busy"},
+      "notes": "High-confidence shortcut (title + start + end all explicit) still peeks busy first. Once the peek confirms no conflict, a follow-up turn calls create_calendar_event — but turn 1 must be the peek."
+    },
+    {
+      "id": "vague_duration_asks_first",
+      "source": "synthetic",
+      "text": "plan project work tomorrow at 2pm",
+      "expected": {"refusal_substring": "how long"},
+      "notes": "STEP 1 of planner: if duration can't be estimated from the activity, ASK before any tool. 'project work' has no default — must ask 'how long' (or similar). No tool call expected."
+    },
+    {
+      "id": "move_event_lists_first",
+      "source": "synthetic",
+      "text": "move tennis to 6pm tomorrow",
+      "expected": {"tool_call": "list_upcoming_events"},
+      "notes": "Edit-by-name contract: must resolve event_id via list_upcoming_events before update_calendar_event. LLM cannot synthesize the opaque Google event id."
+    },
+    {
+      "id": "cancel_event_lists_first",
+      "source": "synthetic",
+      "text": "cancel tennis tomorrow",
+      "expected": {"tool_call": "list_upcoming_events"},
+      "notes": "Delete-by-name contract: must resolve event_id via list_upcoming_events before delete_calendar_event. Plus protocol forces an explicit confirm turn before the actual delete fires."
     }
   ]
 }

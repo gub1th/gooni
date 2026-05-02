@@ -175,10 +175,11 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
                     appointment (doctor, dentist)     60m
                     gym / workout                     60m
                     sport (tennis, basketball, run)   90m
-                    project work / deep work          90m
-                  If the activity is too vague to guess (e.g. "plan project
-                  work tomorrow at 2pm" with no clue how long), ASK Daniel
-                  how long before doing anything else.
+                  If the activity is too vague to estimate ("project work",
+                  "errands", "study", "house stuff") — durations swing too
+                  wide on these — ASK Daniel how long before doing anything
+                  else, including check_calendar_busy. The peek is wasted if
+                  the window is wrong.
 
                   STEP 2. Peek at the proposed window. Call
                   check_calendar_busy(start, end) BEFORE proposing or writing.
