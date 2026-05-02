@@ -10,6 +10,7 @@ import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
+  Trash2, FolderInput, Pin as PinIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -833,7 +834,11 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           borderBottom: "1px solid rgba(0,0,0,0.06)",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          // Toolbar sits next to the "Updated …" text instead of being
+          // banished to the far right — Daniel said the action icons feel
+          // far away when they're the only thing on the right edge. Save
+          // status + toolbar both anchor left with a small gap.
+          gap: 12,
           flexShrink: 0,
         }}
       >
@@ -896,7 +901,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   onMouseEnter={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
                   onMouseLeave={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
                 >
-                  ↗
+                  <FolderInput size={15} strokeWidth={1.7} />
                 </button>
               </Tooltip>
               {movePicker && (
@@ -965,7 +970,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   onMouseEnter={(e) => { if (!deleteConfirm) (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.08)"; }}
                   onMouseLeave={(e) => { if (!deleteConfirm) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
                 >
-                  🗑
+                  <Trash2 size={15} strokeWidth={1.7} />
                 </button>
               </Tooltip>
               {deleteConfirm && (
@@ -1020,11 +1025,12 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
               onMouseEnter={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
               onMouseLeave={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
-              <span style={{
-                fontSize: 13, lineHeight: 1,
-                filter: activeNote.is_pinned ? "none" : "grayscale(1) opacity(0.5)",
-                transition: "filter 0.15s",
-              }}>📌</span>
+              <PinIcon
+                size={15}
+                strokeWidth={1.7}
+                color={activeNote.is_pinned ? "#F59E0B" : "#636366"}
+                fill={activeNote.is_pinned ? "#F59E0B" : "none"}
+              />
             </button>
           </Tooltip>
         )}
