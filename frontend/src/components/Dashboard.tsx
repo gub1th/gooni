@@ -13,6 +13,7 @@ import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
 import { FlipStat, type FlipFace } from "./FlipStat";
+import { DevExpandedPopover } from "./DevStreakStat";
 import { fetchDevActivity, type DevActivity } from "../services/api";
 import { Skeleton } from "./Skeleton";
 
@@ -65,6 +66,7 @@ function buildStatFaces(
   stats: DashboardStats | undefined,
   dev: DevActivity | null | undefined,
   activityPerDay: number[],
+  onOpenDevPopover?: () => void,
 ): FlipFace[] {
   const dayHint = (
     <div style={{ display: "flex", gap: 2.5 }}>
@@ -120,6 +122,11 @@ function buildStatFaces(
       label: "dev streak",
       value: dev ? (dev.aggregate?.streak_days ?? 0) : <Skeleton width={28} height={20} />,
       hint: devHint,
+      // Click → open the dev activity popover (recent commits per repo +
+      // Gooni's Take). Lives on Dashboard so the popover anchors to the
+      // FlipStat wrapper. Only wired when dev data is loaded; otherwise
+      // we pass undefined so the face stays static.
+      onClick: dev && onOpenDevPopover ? onOpenDevPopover : undefined,
     },
     {
       key: "claude",
@@ -226,6 +233,8 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
   const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
   const typingRaf = useRef<number | null>(null);
   const [exploreOpen, setExploreOpen] = useState(false);
+  const [devPopoverOpen, setDevPopoverOpen] = useState(false);
+  const flipStatRef = useRef<HTMLDivElement>(null);
   // Page index for the recent-notes pager. Each page shows 2 cards. Reset to
   // 0 whenever fresh stats arrive so a newly-saved note lands in view (the
   // submit-flow animation also assumes the new card is at index 0).
@@ -426,11 +435,13 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                   );
                 })()}
               </StatCard>
-              <FlipStat
-                faces={buildStatFaces(stats, dev, activityPerDay)}
-                autoIntervalMs={15000}
-                width={150}
-              />
+              <div ref={flipStatRef} style={{ display: "inline-flex" }}>
+                <FlipStat
+                  faces={buildStatFaces(stats, dev, activityPerDay, () => setDevPopoverOpen((v) => !v))}
+                  autoIntervalMs={15000}
+                  width={150}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -653,6 +664,18 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
 
       {/* Semantic graph of all notes — opens as a full-screen modal */}
       <ExploreModal open={exploreOpen} onClose={() => setExploreOpen(false)} />
+
+      {/* Dev activity popover — anchored to the FlipStat. Restored after
+          the right-column DevStreakStat tile was reverted; the FlipStat's
+          dev face routes its click here so commit details are reachable
+          again. */}
+      {devPopoverOpen && dev && flipStatRef.current && (
+        <DevExpandedPopover
+          data={dev}
+          anchor={flipStatRef.current}
+          onClose={() => setDevPopoverOpen(false)}
+        />
+      )}
     </div>
   );
 }

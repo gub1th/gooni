@@ -24,12 +24,29 @@ import { useGooniStore } from "../../stores/useGooniStore";
 import { useConversationsStore } from "../../stores/useConversationsStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
-import { GooniLogo } from "../GooniLogo";
 import { Tooltip } from "../Tooltip";
 import { SpaceIcon } from "./SpaceIcon";
 import { displayTitle } from "../../utils/notePreview";
 
 type Variant = "full" | "embedded";
+
+// Block image insertion helper. Always trails the image with an empty
+// paragraph so the cursor has a text-block to land in even when the image
+// is the very first node of an otherwise-empty document. Without the
+// trailing paragraph, TipTap with `inline: false` leaves the doc as a
+// lone block image and a follow-up focus() lands nowhere — surfaced as a
+// console error and a save-status flicker the first time you drop/paste
+// an image into a fresh note.
+function insertImageBlock(editor: Editor, src: string) {
+  editor
+    .chain()
+    .focus()
+    .insertContent([
+      { type: "image", attrs: { src } },
+      { type: "paragraph" },
+    ])
+    .run();
+}
 
 function useEditorStyles() {
   useEffect(() => {
@@ -1043,30 +1060,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           </Tooltip>
         )}
 
-        <button
-          onClick={toggleGooni}
-          title={gooniOpen ? "Close Gooni" : "Open Gooni"}
-          style={{
-            padding: "5px 12px",
-            borderRadius: 16,
-            border: "none",
-            background: gooniOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)",
-            cursor: "pointer",
-            fontSize: 13,
-            color: gooniOpen ? "#1C1C1E" : "#636366",
-            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-            fontWeight: gooniOpen ? 600 : 400,
-            display: "flex",
-            alignItems: "center",
-            gap: 5,
-            transition: "background 0.1s",
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.10)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = gooniOpen ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.05)")}
-        >
-          <GooniLogo size={14} />
-          Chat with Gooni
-        </button>
         </div>
       </div>
       )}
@@ -1104,7 +1097,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   const reader = new FileReader();
                   reader.onload = () => {
                     if (typeof reader.result === "string") {
-                      editor.chain().focus().setImage({ src: reader.result }).run();
+                      insertImageBlock(editor, reader.result);
                       hasChanges.current = true;
                       scheduleSave();
                     }
@@ -1127,7 +1120,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   const reader = new FileReader();
                   reader.onload = () => {
                     if (typeof reader.result === "string") {
-                      editor.chain().focus().setImage({ src: reader.result }).run();
+                      insertImageBlock(editor, reader.result);
                       hasChanges.current = true;
                       scheduleSave();
                     }
@@ -1468,7 +1461,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                       const reader = new FileReader();
                       reader.onload = () => {
                         if (typeof reader.result === "string") {
-                          editor.chain().focus().setImage({ src: reader.result }).run();
+                          insertImageBlock(editor, reader.result);
                           hasChanges.current = true;
                           scheduleSave();
                         }
@@ -1491,7 +1484,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                       const reader = new FileReader();
                       reader.onload = () => {
                         if (typeof reader.result === "string") {
-                          editor.chain().focus().setImage({ src: reader.result }).run();
+                          insertImageBlock(editor, reader.result);
                           hasChanges.current = true;
                           scheduleSave();
                         }

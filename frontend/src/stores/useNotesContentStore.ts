@@ -10,6 +10,20 @@ import {
   fetchSpaceNotes,
 } from "../services/api";
 
+// A note is "empty" when it has no title text and no body content beyond
+// the editor's empty-paragraph scaffold. Used to auto-clean up notes that
+// the user opened but never wrote anything into — see selectNote().
+function isEmptyNote(note: ApiNote): boolean {
+  const title = (note.title ?? "").trim();
+  if (title.length > 0) return false;
+  const raw = (note.content ?? "").trim();
+  if (raw.length === 0) return true;
+  // TipTap saves a fresh editor as `<p></p>` even when the user typed nothing.
+  // Strip tags + non-breaking spaces and check for any visible characters.
+  const stripped = raw.replace(/<[^>]*>/g, "").replace(/&nbsp;| /g, "").trim();
+  return stripped.length === 0;
+}
+
 
 interface NotesContentState {
   // Space selection (replaces notesStore)
@@ -40,7 +54,10 @@ export const useNotesContentStore = create<NotesContentState>()(
       isDirty: false,
 
       selectSpace: (id: string | null) => {
-        set({ selectedSpaceId: id, activeNoteId: null });
+        // Route through selectNote(null) first so the empty-note cleanup runs
+        // when the user navigates spaces with a blank note open.
+        get().selectNote(null);
+        set({ selectedSpaceId: id });
       },
 
       loadNotes: async (spaceId: string) => {
@@ -153,6 +170,27 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
 
       selectNote: (id: number | null) => {
+        const prevId = get().activeNoteId;
+        // When leaving a real (server-persisted) note that the user never
+        // wrote into, drop it instead of leaving an "Untitled" stub on disk.
+        // Skip negative ids (optimistic temp note still being created).
+        if (prevId != null && prevId !== id && prevId > 0) {
+          const state = get();
+          let prev: ApiNote | undefined;
+          let prevSpaceKey: string | null = null;
+          for (const [key, list] of Object.entries(state.notes)) {
+            const found = list.find((n) => n.id === prevId);
+            if (found) { prev = found; prevSpaceKey = key; break; }
+          }
+          if (prev && prevSpaceKey != null && isEmptyNote(prev)) {
+            const spaceKey = prevSpaceKey;
+            apiDeleteNote(prevId).catch(() => {});
+            set((s) => {
+              const list = (s.notes[spaceKey] ?? []).filter((n) => n.id !== prevId);
+              return { notes: { ...s.notes, [spaceKey]: list } };
+            });
+          }
+        }
         set({ activeNoteId: id });
       },
 

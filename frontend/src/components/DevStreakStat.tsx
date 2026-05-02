@@ -140,7 +140,11 @@ export function DevStreakStat({ compact = false }: { compact?: boolean } = {}) {
       </button>
 
       {expanded && buttonRef.current && (
-        <DevExpandedPopover data={dev} anchor={buttonRef.current} />
+        <DevExpandedPopover
+          data={dev}
+          anchor={buttonRef.current}
+          onClose={() => setExpanded(false)}
+        />
       )}
     </>
   );
@@ -149,7 +153,14 @@ export function DevStreakStat({ compact = false }: { compact?: boolean } = {}) {
 // Floating popover anchored to the stat card. Rendered through a portal so
 // the dashboard's flex row layout stays untouched (the in-flow expand was
 // pushing the row to wrap and overlap the greeting).
-function DevExpandedPopover({ data, anchor }: { data: DevActivity; anchor: HTMLElement }) {
+//
+// Exported so the FlipStat header card can reopen the same popover even
+// though it doesn't render the original DevStreakStat tile anymore.
+// `onClose` is called on outside-click / Escape; the parent owns the open
+// flag and decides what to do (re-anchor, log, etc.).
+export function DevExpandedPopover({
+  data, anchor, onClose,
+}: { data: DevActivity; anchor: HTMLElement; onClose: () => void }) {
   // Re-measure on resize / scroll so the panel hugs the anchor.
   const [rect, setRect] = useState(() => anchor.getBoundingClientRect());
   useEffect(() => {
@@ -161,6 +172,25 @@ function DevExpandedPopover({ data, anchor }: { data: DevActivity; anchor: HTMLE
       window.removeEventListener("scroll", update, true);
     };
   }, [anchor]);
+
+  // Outside-click + Escape close. The anchor itself is excluded so the
+  // caller's toggle logic doesn't fight us.
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (anchor.contains(target)) return;
+      if ((target as HTMLElement)?.closest?.("[data-gooni-dev-popover]")) return;
+      onClose();
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [anchor, onClose]);
 
   const PANEL_WIDTH = 420;
   // Default: anchor right edge of panel under right edge of button.
