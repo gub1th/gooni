@@ -1284,7 +1284,7 @@ def items_suggest_focus(db: Session = Depends(get_db)):
             model=llm_client.chat_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.7,
-            max_tokens=180,
+            max_completion_tokens=180,
             response_format={"type": "json_object"},
         )
         raw = resp.choices[0].message.content or "{}"

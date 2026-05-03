@@ -48,7 +48,7 @@ def _llm_opener(overdue_count: int, today_count: int, sample_titles: list[str]) 
             model=llm_client.chat_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.85,
-            max_tokens=40,
+            max_completion_tokens=40,
         )
         line = (resp.choices[0].message.content or "").strip()
         # Strip surrounding quotes the model loves to add.

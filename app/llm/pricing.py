@@ -1,66 +1,56 @@
-# OpenAI API Pricing (as of 2024)
-# Prices are per 1,000 tokens
+# OpenAI API Pricing (per 1,000 tokens).
+# Source-of-truth lives at https://openai.com/api/pricing — keep this table
+# in rough sync but treat the OpenAI Admin /v1/organization/costs endpoint
+# as the authoritative number for billing UI.
 
 MODEL_PRICING = {
+    # GPT-5.x family (premium)
+    "gpt-5.4":                {"input": 0.00125, "output": 0.01},
+    "gpt-5.4-mini":           {"input": 0.00025, "output": 0.002},
+    "gpt-5.4-nano":           {"input": 0.00005, "output": 0.0004},
+    "gpt-5.2":                {"input": 0.00125, "output": 0.01},
+    "gpt-5.1":                {"input": 0.00125, "output": 0.01},
+    "gpt-5.1-codex":          {"input": 0.00125, "output": 0.01},
+    "gpt-5.1-codex-mini":     {"input": 0.00025, "output": 0.002},
+    "gpt-5":                  {"input": 0.00125, "output": 0.01},
+    "gpt-5-codex":            {"input": 0.00125, "output": 0.01},
+    "gpt-5-chat-latest":      {"input": 0.00125, "output": 0.01},
+    "gpt-5-mini":             {"input": 0.00025, "output": 0.002},
+    "gpt-5-nano":             {"input": 0.00005, "output": 0.0004},
+
+    # GPT-4.1 family
+    "gpt-4.1":                {"input": 0.002,   "output": 0.008},
+    "gpt-4.1-mini":           {"input": 0.0004,  "output": 0.0016},
+    "gpt-4.1-nano":           {"input": 0.0001,  "output": 0.0004},
+
+    # Reasoning (o-series)
+    "o1":                     {"input": 0.015,   "output": 0.06},
+    "o1-mini":                {"input": 0.0011,  "output": 0.0044},
+    "o3":                     {"input": 0.002,   "output": 0.008},
+    "o3-mini":                {"input": 0.0011,  "output": 0.0044},
+    "o4-mini":                {"input": 0.0011,  "output": 0.0044},
+    "codex-mini-latest":      {"input": 0.00025, "output": 0.002},
+
     # GPT-4o models
-    "gpt-4o": {
-        "input": 0.005,
-        "output": 0.015
-    },
-    "gpt-4o-2024-08-06": {
-        "input": 0.0025,
-        "output": 0.01
-    },
-    "gpt-4o-mini": {
-        "input": 0.00015,
-        "output": 0.0006
-    },
-    "gpt-4o-mini-2024-07-18": {
-        "input": 0.00015,
-        "output": 0.0006
-    },
+    "gpt-4o":                 {"input": 0.005,   "output": 0.015},
+    "gpt-4o-2024-08-06":      {"input": 0.0025,  "output": 0.01},
+    "gpt-4o-mini":            {"input": 0.00015, "output": 0.0006},
+    "gpt-4o-mini-2024-07-18": {"input": 0.00015, "output": 0.0006},
 
-    # GPT-4 Turbo models
-    "gpt-4-turbo": {
-        "input": 0.01,
-        "output": 0.03
-    },
-    "gpt-4-turbo-2024-04-09": {
-        "input": 0.01,
-        "output": 0.03
-    },
-    "gpt-4-1106-preview": {
-        "input": 0.01,
-        "output": 0.03
-    },
-    "gpt-4-0125-preview": {
-        "input": 0.01,
-        "output": 0.03
-    },
+    # GPT-4 Turbo
+    "gpt-4-turbo":            {"input": 0.01,    "output": 0.03},
+    "gpt-4-turbo-2024-04-09": {"input": 0.01,    "output": 0.03},
+    "gpt-4-1106-preview":     {"input": 0.01,    "output": 0.03},
+    "gpt-4-0125-preview":     {"input": 0.01,    "output": 0.03},
 
-    # GPT-4 models
-    "gpt-4": {
-        "input": 0.03,
-        "output": 0.06
-    },
-    "gpt-4-0613": {
-        "input": 0.03,
-        "output": 0.06
-    },
+    # GPT-4
+    "gpt-4":                  {"input": 0.03,    "output": 0.06},
+    "gpt-4-0613":             {"input": 0.03,    "output": 0.06},
 
-    # GPT-3.5 Turbo models
-    "gpt-3.5-turbo": {
-        "input": 0.0015,
-        "output": 0.002
-    },
-    "gpt-3.5-turbo-0125": {
-        "input": 0.0005,
-        "output": 0.0015
-    },
-    "gpt-3.5-turbo-1106": {
-        "input": 0.001,
-        "output": 0.002
-    }
+    # GPT-3.5 Turbo
+    "gpt-3.5-turbo":          {"input": 0.0015,  "output": 0.002},
+    "gpt-3.5-turbo-0125":     {"input": 0.0005,  "output": 0.0015},
+    "gpt-3.5-turbo-1106":     {"input": 0.001,   "output": 0.002},
 }
 
 # Embedding model pricing
