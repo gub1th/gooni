@@ -69,8 +69,18 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
   },
 
   planNote: async (note) => {
-    const title = (note.title ?? "").trim() || "this";
-    const seed = `Expand on this: ${title}`;
+    // Build a meaningful seed even when the note has no title. Falling back
+    // to the literal word "this" produces "Expand on this: this" + an LLM
+    // reply asking what "this" means — wasted call. Try title → first line
+    // of plaintext content → generic phrasing in that order.
+    const titleClean = (note.title ?? "").trim();
+    const contentClean = (note.content ?? "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const firstLine = contentClean.slice(0, 80);
+    const subject = titleClean || firstLine || "this note";
+    const seed = `Expand on this: ${subject}`;
     set({ activeId: null, messages: [] });
     await get().send(seed, note.content ?? undefined, "plan");
   },
