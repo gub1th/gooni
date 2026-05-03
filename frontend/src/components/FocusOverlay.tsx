@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Volume2, VolumeX } from "lucide-react";
+import { X, Volume2, VolumeX, Timer } from "lucide-react";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const STORAGE_KEY = "gooni-focus-mode";
 const MUTE_KEY = "gooni-focus-mode-muted";
+const POMODORO_KEY = "gooni-focus-mode-pomodoro";
+
+// Classic 25/5 with a 15-min long break every 4 work blocks. Tuned to match
+// the de-facto pomodoro convention so the muscle memory carries over.
+const POMODORO_WORK_MS = 25 * 60 * 1000;
+const POMODORO_SHORT_BREAK_MS = 5 * 60 * 1000;
+const POMODORO_LONG_BREAK_MS = 15 * 60 * 1000;
+const POMODORO_CYCLES_BEFORE_LONG = 4;
 
 // Wii Mii Channel-vibe ambient layer. A quiet sine pad sets the "warm
 // room tone"; over the top a sparse marimba-style pluck sequencer triggers
@@ -228,6 +236,47 @@ export function saveFocusMode(state: FocusModeState) {
 
 export function clearFocusMode() {
   try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  // Pomodoro is session-bound — exiting focus mode wipes it so a fresh
+  // session next time doesn't resume mid-phase.
+  try { localStorage.removeItem(POMODORO_KEY); } catch {}
+}
+
+// Pomodoro state lives separate from focus state so toggling pomo on/off
+// doesn't disturb the wider focus session. Survives reload — phaseStart is
+// epoch ms, so the countdown keeps decrementing from when the phase
+// actually started, not when the page mounted.
+type PomodoroPhase = "work" | "short_break" | "long_break";
+interface PomodoroState {
+  phase: PomodoroPhase;
+  phaseStart: number;     // epoch ms
+  workCyclesDone: number; // increments after each work block ends
+}
+
+function loadPomodoro(): PomodoroState | null {
+  try {
+    const raw = localStorage.getItem(POMODORO_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw);
+    if (typeof p?.phaseStart !== "number" || typeof p?.workCyclesDone !== "number") return null;
+    if (p.phase !== "work" && p.phase !== "short_break" && p.phase !== "long_break") return null;
+    return p as PomodoroState;
+  } catch { return null; }
+}
+function savePomodoro(s: PomodoroState) {
+  try { localStorage.setItem(POMODORO_KEY, JSON.stringify(s)); } catch {}
+}
+function clearPomodoro() {
+  try { localStorage.removeItem(POMODORO_KEY); } catch {}
+}
+function phaseDurationMs(phase: PomodoroPhase) {
+  if (phase === "work") return POMODORO_WORK_MS;
+  if (phase === "long_break") return POMODORO_LONG_BREAK_MS;
+  return POMODORO_SHORT_BREAK_MS;
+}
+function phaseLabel(phase: PomodoroPhase) {
+  if (phase === "work") return "focus";
+  if (phase === "long_break") return "long break";
+  return "break";
 }
 
 interface FocusOverlayProps {
@@ -242,7 +291,15 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
   const [muted, setMuted] = useState(() => {
     try { return localStorage.getItem(MUTE_KEY) === "1"; } catch { return false; }
   });
+  const [pomodoro, setPomodoro] = useState<PomodoroState | null>(() => loadPomodoro());
+  // Tick driver — re-renders the countdown once per second when pomodoro
+  // is active. We don't store the remaining time as state because phaseStart
+  // + Date.now() is the source of truth (survives reload), so we just need
+  // a heartbeat to force re-renders.
+  const [, setNow] = useState(0);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pomodoroRef = useRef<PomodoroState | null>(pomodoro);
+  pomodoroRef.current = pomodoro;
 
   useWiiAmbience(muted);
 
@@ -252,6 +309,59 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
       try { localStorage.setItem(MUTE_KEY, next ? "1" : "0"); } catch {}
       return next;
     });
+  }
+
+  function togglePomodoro() {
+    setPomodoro((prev) => {
+      if (prev) {
+        clearPomodoro();
+        return null;
+      }
+      // Fresh session — start with a work block.
+      const next: PomodoroState = {
+        phase: "work",
+        phaseStart: Date.now(),
+        workCyclesDone: 0,
+      };
+      savePomodoro(next);
+      return next;
+    });
+  }
+
+  // Phase chime — short A5/E5 pluck via standalone AudioContext so it
+  // sidesteps the ambience graph (which can be muted/suspended). One-shot;
+  // teardown happens after the envelope decays.
+  function playPhaseChime(toPhase: PomodoroPhase) {
+    if (muted) return;
+    try {
+      const Ctor = (window as unknown as {
+        AudioContext?: typeof AudioContext;
+        webkitAudioContext?: typeof AudioContext;
+      }).AudioContext || (window as unknown as {
+        webkitAudioContext?: typeof AudioContext;
+      }).webkitAudioContext;
+      if (!Ctor) return;
+      const ctx = new Ctor();
+      // Two-note motif. Work-end (entering break) uses a descending pair so
+      // it reads as "release"; break-end (back to work) ascends so it reads
+      // as "lift back into it".
+      const notes = toPhase === "work" ? [659.25, 880.00] : [880.00, 659.25];
+      const t0 = ctx.currentTime + 0.02;
+      notes.forEach((freq, i) => {
+        const start = t0 + i * 0.16;
+        const osc = ctx.createOscillator();
+        osc.type = "triangle";
+        osc.frequency.value = freq;
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(0, start);
+        env.gain.linearRampToValueAtTime(0.18, start + 0.01);
+        env.gain.exponentialRampToValueAtTime(0.001, start + 0.55);
+        osc.connect(env).connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.6);
+      });
+      setTimeout(() => { try { ctx.close(); } catch {} }, 1200);
+    } catch { /* ignore — chime is best-effort */ }
   }
 
   useEffect(() => {
@@ -264,6 +374,42 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
     const t = setInterval(() => setElapsed(Date.now() - startedAt), 1000);
     return () => clearInterval(t);
   }, [startedAt]);
+
+  // Pomodoro tick + phase advance. Single 1s interval that re-renders for
+  // the countdown AND checks for phase rollover. We read from pomodoroRef
+  // so the closure stays current without the interval needing to restart
+  // every state change.
+  useEffect(() => {
+    if (!pomodoro) return;
+    const t = setInterval(() => {
+      setNow(Date.now());
+      const cur = pomodoroRef.current;
+      if (!cur) return;
+      const elapsedInPhase = Date.now() - cur.phaseStart;
+      if (elapsedInPhase < phaseDurationMs(cur.phase)) return;
+      // Phase complete → advance.
+      let nextPhase: PomodoroPhase;
+      let nextWorkCycles = cur.workCyclesDone;
+      if (cur.phase === "work") {
+        nextWorkCycles = cur.workCyclesDone + 1;
+        nextPhase = nextWorkCycles % POMODORO_CYCLES_BEFORE_LONG === 0
+          ? "long_break"
+          : "short_break";
+      } else {
+        nextPhase = "work";
+      }
+      const next: PomodoroState = {
+        phase: nextPhase,
+        phaseStart: Date.now(),
+        workCyclesDone: nextWorkCycles,
+      };
+      savePomodoro(next);
+      setPomodoro(next);
+      playPhaseChime(nextPhase);
+    }, 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!pomodoro]);
 
   function bump() {
     setChromeVisible(true);
@@ -357,6 +503,13 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
           gap: 8,
         }}>
           <ChromeButton
+            label={pomodoro ? "Stop pomodoro" : "Start pomodoro (25/5)"}
+            onClick={togglePomodoro}
+            active={!!pomodoro}
+          >
+            <Timer size={16} />
+          </ChromeButton>
+          <ChromeButton
             label={muted ? "Unmute" : "Mute"}
             onClick={toggleMuted}
           >
@@ -405,17 +558,62 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
           pointerEvents: chromeVisible ? "auto" : "none",
         }}
       >
-        <div
-          style={{
-            fontVariantNumeric: "tabular-nums",
-            fontSize: 28,
-            fontWeight: 300,
-            color: "rgba(255,255,255,0.85)",
-            letterSpacing: 1.5,
-          }}
-        >
-          {formatElapsed(elapsed)}
-        </div>
+        {pomodoro ? (() => {
+          const total = phaseDurationMs(pomodoro.phase);
+          const remaining = Math.max(0, total - (Date.now() - pomodoro.phaseStart));
+          const isWork = pomodoro.phase === "work";
+          return (
+            <>
+              <div
+                style={{
+                  fontSize: 11,
+                  letterSpacing: 4,
+                  textTransform: "uppercase",
+                  fontWeight: 600,
+                  color: isWork ? "rgba(74,222,128,0.85)" : "rgba(255,255,255,0.55)",
+                  marginBottom: 2,
+                }}
+              >
+                {phaseLabel(pomodoro.phase)} · cycle {pomodoro.workCyclesDone + (isWork ? 1 : 0)}
+              </div>
+              <div
+                style={{
+                  fontVariantNumeric: "tabular-nums",
+                  fontSize: 44,
+                  fontWeight: 200,
+                  color: "rgba(255,255,255,0.95)",
+                  letterSpacing: 2,
+                  lineHeight: 1,
+                }}
+              >
+                {formatCountdown(remaining)}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "rgba(255,255,255,0.32)",
+                  letterSpacing: 1.6,
+                  textTransform: "uppercase",
+                  marginTop: 4,
+                }}
+              >
+                total · {formatElapsed(elapsed)}
+              </div>
+            </>
+          );
+        })() : (
+          <div
+            style={{
+              fontVariantNumeric: "tabular-nums",
+              fontSize: 28,
+              fontWeight: 300,
+              color: "rgba(255,255,255,0.85)",
+              letterSpacing: 1.5,
+            }}
+          >
+            {formatElapsed(elapsed)}
+          </div>
+        )}
         <div
           style={{
             fontSize: 11,
@@ -435,11 +633,18 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
 // green torso + aura ring, hands resting on knees, closed-eye arcs. The
 // ground shadow scale-pulses in counter-rhythm with the float for the
 // "settled in zen" vibe.
-function ChromeButton({ label, onClick, children }: {
+function ChromeButton({ label, onClick, active, children }: {
   label: string;
   onClick: () => void;
+  active?: boolean;
   children: React.ReactNode;
 }) {
+  // Active state uses the Gooni mascot green so the active pomodoro toggle
+  // reads at a glance without taking over the chrome.
+  const baseBg = active ? "rgba(74,222,128,0.22)" : "rgba(255,255,255,0.08)";
+  const hoverBg = active ? "rgba(74,222,128,0.32)" : "rgba(255,255,255,0.16)";
+  const baseColor = active ? "rgba(154,238,184,1)" : "rgba(255,255,255,0.7)";
+  const hoverColor = active ? "rgba(180,245,200,1)" : "rgba(255,255,255,0.95)";
   return (
     <button
       onClick={onClick}
@@ -448,19 +653,19 @@ function ChromeButton({ label, onClick, children }: {
       style={{
         width: 36, height: 36,
         borderRadius: "50%", border: "none",
-        background: "rgba(255,255,255,0.08)",
-        color: "rgba(255,255,255,0.7)",
+        background: baseBg,
+        color: baseColor,
         cursor: "pointer",
         display: "flex", alignItems: "center", justifyContent: "center",
         transition: "background 0.15s, color 0.15s",
       }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.16)";
-        (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.95)";
+        (e.currentTarget as HTMLButtonElement).style.background = hoverBg;
+        (e.currentTarget as HTMLButtonElement).style.color = hoverColor;
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.08)";
-        (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.7)";
+        (e.currentTarget as HTMLButtonElement).style.background = baseBg;
+        (e.currentTarget as HTMLButtonElement).style.color = baseColor;
       }}
     >
       {children}
@@ -540,6 +745,15 @@ function formatElapsed(ms: number): string {
   const s = total % 60;
   if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
   return `${pad(m)}:${pad(s)}`;
+}
+// Pomodoro countdown — always M:SS (no hours, since longest phase is 25m).
+// Round up so it ticks 25:00 → 24:59 immediately, not after a full second.
+function formatCountdown(ms: number): string {
+  if (ms < 0) ms = 0;
+  const total = Math.ceil(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${pad(s)}`;
 }
 function pad(n: number) { return n.toString().padStart(2, "0"); }
 
