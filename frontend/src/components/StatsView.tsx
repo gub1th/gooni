@@ -350,32 +350,89 @@ function ActivitySection() {
     );
   }
 
+  // Group activity stats by domain so the section reads as
+  // [time/streak][notes][chat][lists][claude] not a flat dump of 9 numbers.
+  // Each subsection gets a tiny header so the eye can land on a category.
   return (
     <SectionShell label="Activity">
+      <SubSection label="time">
+        <BigStat label="day streak" value={fmtInt(stats?.streak)} sub="days" />
+      </SubSection>
+      <SubSection label="notes">
+        <BigStat
+          label="this week"
+          value={fmtInt(stats?.notes_this_week)}
+          delta={
+            stats?.notes_this_week != null && stats?.notes_last_week != null
+              ? stats.notes_this_week - stats.notes_last_week
+              : undefined
+          }
+        />
+        <BigStat label="total" value={fmtInt(ext?.notes_total)} />
+      </SubSection>
+      <SubSection label="chat">
+        <BigStat label="messages this week" value={fmtInt(ext?.user_messages_this_week)} />
+        <BigStat label="messages total" value={fmtInt(ext?.user_messages_total)} />
+        <BigStat label="conversations" value={fmtInt(ext?.conversations_total)} />
+      </SubSection>
+      <SubSection label="lists">
+        <BigStat label="checked this week" value={fmtInt(ext?.todos_done_this_week)} />
+        <BigStat label="open" value={fmtInt(ext?.todos_open)} />
+      </SubSection>
+      <SubSection label="claude">
+        <BigStat label="calls today" value={fmtInt(stats?.mcp_calls_today)} />
+      </SubSection>
+    </SectionShell>
+  );
+}
+
+function SubSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{
+        fontSize: 10, fontWeight: 600, letterSpacing: 0.5,
+        textTransform: "uppercase", color: "var(--gooni-muted, #AEAEB2)",
+        marginBottom: 6,
+      }}>
+        {label}
+      </div>
       <div style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
         gap: 14,
       }}>
-        <BigStat label="day streak" value={fmtInt(stats?.streak)} sub="days" />
-        <BigStat label="notes this week" value={fmtInt(stats?.notes_this_week)} />
-        <BigStat label="notes total" value={fmtInt(ext?.notes_total)} />
-        <BigStat label="messages this week" value={fmtInt(ext?.user_messages_this_week)} />
-        <BigStat label="messages total" value={fmtInt(ext?.user_messages_total)} />
-        <BigStat label="conversations" value={fmtInt(ext?.conversations_total)} />
-        <BigStat label="todos done this week" value={fmtInt(ext?.todos_done_this_week)} />
-        <BigStat label="todos open" value={fmtInt(ext?.todos_open)} />
-        <BigStat label="claude calls today" value={fmtInt(stats?.mcp_calls_today)} />
+        {children}
       </div>
-    </SectionShell>
+    </div>
   );
 }
 
 // ── Atoms ─────────────────────────────────────────────────────────────────
 
 function BigStat({
-  label, value, sub,
-}: { label: string; value: React.ReactNode; sub?: string }) {
+  label, value, sub, delta,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: string;
+  // Week-over-week delta. Renders a small "↑ N from last week" / "↓ N" /
+  // "→ flat" line under the value. Hidden when undefined.
+  delta?: number;
+}) {
+  let deltaLine: React.ReactNode = null;
+  if (typeof delta === "number") {
+    const isFlat = delta === 0;
+    const isUp = delta > 0;
+    deltaLine = (
+      <div style={{
+        fontSize: 10.5,
+        color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
+        marginTop: 2, fontVariantNumeric: "tabular-nums",
+      }}>
+        {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
+      </div>
+    );
+  }
   return (
     <div>
       <div style={{
@@ -397,6 +454,7 @@ function BigStat({
           }}>{sub}</span>
         )}
       </div>
+      {deltaLine}
     </div>
   );
 }

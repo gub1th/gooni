@@ -36,15 +36,18 @@ export const Route = createFileRoute("/")({
 const SIDEBAR_BREAKPOINT = 768;
 
 const topRightBtn: React.CSSProperties = {
-  width: 30, height: 30, borderRadius: 8,
+  height: 30, borderRadius: 8,
   border: "0.5px solid rgba(0,0,0,0.08)",
   background: "rgba(255,255,255,0.85)",
   backdropFilter: "blur(6px)",
   WebkitBackdropFilter: "blur(6px)",
   cursor: "pointer",
-  display: "flex", alignItems: "center", justifyContent: "center",
+  display: "inline-flex", alignItems: "center", justifyContent: "center",
   color: "#3C3C43",
-  padding: 0,
+  padding: "0 10px",
+  gap: 6,
+  fontSize: 12,
+  fontWeight: 500,
   transition: "background 0.12s",
   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
 };
@@ -302,7 +305,8 @@ function NotesPage() {
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.85)")}
         >
-          <Globe size={15} strokeWidth={1.7} />
+          <Globe size={14} strokeWidth={1.7} />
+          <span>Public</span>
         </button>
         <button
           onClick={() => navigate({ to: "/public/mcp" })}
@@ -312,7 +316,8 @@ function NotesPage() {
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.85)")}
         >
-          <Plug size={15} strokeWidth={1.7} />
+          <Plug size={14} strokeWidth={1.7} />
+          <span>MCP</span>
         </button>
       </div>
 

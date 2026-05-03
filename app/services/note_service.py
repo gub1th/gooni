@@ -142,6 +142,16 @@ _CLASSIFY_DEDUP_THRESHOLD = 0.92
 # trivial inputs with empty signal arrays.
 _CLASSIFY_MIN_CHARS = 8
 
+# Higher floor for the worth_expanding flag specifically. The Dashboard's
+# Expand pill kicks off PlanView, which immediately tries to plan from the
+# note content. If the note is barely a stub, plan mode lands in "I need
+# more context to expand on 'this.'" — wasted LLM call + bad UX.
+# Gating worth_expanding behind a real content threshold means the pill
+# only surfaces when there's actually something to expand. Notes below the
+# floor can still classify for memories / feature_requests; they just don't
+# advertise as expandable.
+_WORTH_EXPANDING_MIN_CHARS = 60
+
 
 def classify_note(note_id: int) -> None:
     """Background-safe: open own session, classify the note, route signals
@@ -220,11 +230,19 @@ def classify_note(note_id: int) -> None:
         # so the frontend can tell "yes we classified, no signals" apart
         # from "haven't classified yet".
         from datetime import datetime, timezone
+        # Gate worth_expanding behind a hard content-length floor. Below the
+        # floor, the Expand pill on Dashboard would kick PlanView into a
+        # "nothing to work with" state. Floor stops the pill on stubs while
+        # leaving the LLM free to flag the field on real content.
+        worth_expanding = (
+            bool(signals.get("worth_expanding"))
+            and len(plaintext) >= _WORTH_EXPANDING_MIN_CHARS
+        )
         signals_summary = {
             "feature_requests": feature_summaries,
             "memory_count": len(memories_written),
             "memory_types": [m.type for m in memories_written],
-            "worth_expanding": bool(signals.get("worth_expanding")),
+            "worth_expanding": worth_expanding,
             "classified_at": datetime.now(timezone.utc).isoformat(),
         }
         note.last_classify_signals = json.dumps(signals_summary)

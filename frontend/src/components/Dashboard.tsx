@@ -368,19 +368,22 @@ export function Dashboard({ onOpenNote, onPlanNote, onOpenStats }: {
               </StatCard>
               {/* Thin "Stats →" card. On-theme card chrome but narrow + a
                   single arrow glyph so it reads as a "go" affordance, not
-                  another data tile. Click → stats view. */}
+                  another data tile. Click → stats view. minHeight matches
+                  StatCard intrinsic height so the row reads as uniform. */}
               <button
                 onClick={onOpenStats}
                 title="Open stats — usage, dev activity, conversations"
                 style={{
                   background: "var(--gooni-card, #fff)",
                   border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-                  borderRadius: 10, padding: "10px 12px",
-                  display: "flex", flexDirection: "column", alignItems: "flex-start",
+                  borderRadius: 10, padding: "10px 14px",
+                  display: "flex", flexDirection: "column",
+                  alignItems: "flex-start", justifyContent: "space-between",
                   cursor: "pointer", fontFamily: "'Inter', -apple-system, sans-serif",
                   textAlign: "left", color: "var(--gooni-text, #1C1C1E)",
                   transition: "border-color 0.12s, background 0.12s",
-                  minWidth: 56,
+                  minWidth: 64,
+                  minHeight: 66,
                 }}
                 onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.18)"; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)"; }}
