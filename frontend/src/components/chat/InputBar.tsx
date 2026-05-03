@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, X, Mic } from "lucide-react";
 import { ModelSelector } from "../ModelSelector";
+import { SendButton } from "./SendButton";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -208,29 +209,8 @@ export function InputBar({ input, setInput, onSend, sending }: InputBarProps) {
             <Mic size={16} />
           </button>
 
-          <button
-            onClick={handleSend}
-            disabled={!canSend}
-            aria-label="Send"
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: "50%",
-              border: "none",
-              background: canSend ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-disabled, rgba(0,0,0,0.1))",
-              color: canSend ? "var(--gooni-bg, #FFFFFF)" : "var(--gooni-muted, #AEAEB2)",
-              cursor: canSend ? "pointer" : "default",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              transition: "background 0.1s",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-              <path d="M7 12V2M7 2L3 6M7 2L11 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          <SendButton onClick={handleSend} disabled={!canSend} title="Send (Enter)" />
+
         </div>
 
         {menuOpen && (
