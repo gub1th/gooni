@@ -2398,12 +2398,88 @@ def get_openai_usage(refresh: bool = False):
 
 
 @app.get("/dashboard/claude-usage")
-def get_claude_usage(days: int = 30, refresh: bool = False):
-    """Local Claude Code usage parsed from ~/.claude/projects/**/*.jsonl.
-    `days=0` means all-time. Cached for 6h per window. Personal usage —
-    distinct from /dashboard/openai-usage which is Gooni's spend."""
+def get_claude_usage(
+    days: int = 30,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Claude Code usage. Source picked at runtime:
+
+    - dev (laptop): walks ~/.claude/projects/**/*.jsonl (cached 6h)
+    - prod (Fly):   reads claude_usage_turns table (populated by the local
+                    uploader posting to /dashboard/claude-usage/ingest)
+
+    `days=0` means all-time. Personal usage — distinct from
+    /dashboard/openai-usage which is Gooni's spend."""
     from .services import claude_usage
-    return claude_usage.fetch(days=days, refresh=refresh)
+    return claude_usage.fetch(days=days, refresh=refresh, db=db)
+
+
+@app.post("/dashboard/claude-usage/ingest")
+def ingest_claude_usage(
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    """Append Claude Code turns into the claude_usage_turns table.
+
+    Body shape:
+        {"turns": [
+            {
+              "session_id": "...",
+              "ts":          "2026-05-03T14:22:00Z",
+              "model":       "claude-opus-4-7",
+              "input_tokens": 123,
+              "output_tokens": 456,
+              "cache_read_tokens": 789,
+              "cache_creation_tokens": 0
+            },
+            ...
+        ]}
+
+    Idempotent: rows with a duplicate (session_id, ts) are silently
+    dropped via ON CONFLICT DO NOTHING. Uploader can re-post overlapping
+    windows without creating dupes.
+
+    Auth: existing AUTH_PASSWORD bearer (same token as dashboard reads).
+    """
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    from datetime import datetime as _dt
+    from .db.models import ClaudeUsageTurn
+
+    turns = payload.get("turns") or []
+    if not isinstance(turns, list):
+        raise HTTPException(status_code=400, detail="turns must be a list")
+
+    rows = []
+    for t in turns:
+        sid = t.get("session_id")
+        ts_raw = t.get("ts")
+        if not sid or not ts_raw:
+            continue
+        try:
+            ts = _dt.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        rows.append({
+            "session_id": str(sid),
+            "ts": ts,
+            "model": str(t.get("model") or "unknown"),
+            "input_tokens": int(t.get("input_tokens") or 0),
+            "output_tokens": int(t.get("output_tokens") or 0),
+            "cache_read_tokens": int(t.get("cache_read_tokens") or 0),
+            "cache_creation_tokens": int(t.get("cache_creation_tokens") or 0),
+        })
+
+    inserted = 0
+    if rows:
+        stmt = sqlite_insert(ClaudeUsageTurn).values(rows).on_conflict_do_nothing(
+            index_elements=["session_id", "ts"]
+        )
+        result = db.execute(stmt)
+        db.commit()
+        inserted = result.rowcount or 0
+
+    return {"received": len(turns), "inserted": inserted, "skipped": len(turns) - inserted}
 
 
 @app.get("/dashboard/stats")

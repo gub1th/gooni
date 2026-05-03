@@ -1,15 +1,22 @@
-"""Local Claude Code usage parser.
+"""Claude Code usage parser.
 
-Walks ``~/.claude/projects/**/*.jsonl`` (Claude Code's session-log
-directory) and tallies token usage + estimated cost by day and by model.
-Each `type: assistant` line carries a `message.usage` block + a
-`message.model` + an ISO `timestamp` — that's all we need.
+Two data sources, picked at runtime:
 
-Same shape as ``openai_usage.fetch_month_to_date`` so the frontend can
-share a chart component:
+  1. **Local JSONLs** — ``~/.claude/projects/**/*.jsonl`` on the dev
+     machine. Each `type: assistant` line carries a `message.usage` block
+     + `message.model` + ISO `timestamp`. Default when the directory
+     exists.
+
+  2. **DB rows** — ``claude_usage_turns`` table populated by
+     ``scripts/upload_claude_usage.py`` POSTing to ``/dashboard/claude-usage/
+     ingest``. Used on prod (Fly) where there are no JSONLs to walk.
+
+Output shape (same for both sources, so the frontend chart component
+doesn't care):
 
     {
       configured: bool,
+      available:  bool,   # True iff there's data to show (jsonls OR DB rows)
       sessions, turns,
       input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
       est_cost_usd,
@@ -18,8 +25,10 @@ share a chart component:
       window_days: int,
     }
 
-Cached at 6h TTL — JSONL files only grow, and re-walking the whole tree
-on every dashboard load adds up.
+Cached at 6h TTL on the JSONL path — JSONL files only grow, and re-walking
+the whole tree on every dashboard load adds up. DB path bypasses cache
+(Postgres/SQLite read is cheap and ingest writes should be reflected
+immediately).
 """
 
 from __future__ import annotations
@@ -96,23 +105,47 @@ def _walk_jsonls(root: Path):
             continue
 
 
-def fetch(days: int = 30, refresh: bool = False) -> dict[str, Any]:
+def fetch(days: int = 30, refresh: bool = False, db=None) -> dict[str, Any]:
     """Aggregate Claude Code usage over the last `days` days.
 
     `days <= 0` means "all time".
+
+    Source priority: local JSONLs (if dir exists) > DB rows. Prod Fly
+    boxes have no JSONLs so they fall through to the DB-row path.
     """
-    if not is_configured():
-        return {"configured": False, "window_days": days}
+    if is_configured():
+        return _fetch_from_jsonls(days=days, refresh=refresh)
+    if db is not None:
+        return _fetch_from_db(days=days, db=db)
+    # No JSONLs and no DB session passed — surface as not-available so
+    # the frontend hides the section entirely on prod.
+    return {"configured": False, "available": False, "window_days": days}
 
-    cache_key = f"days={days}"
-    now = time.time()
-    if (
-        not refresh
-        and cache_key in _cache
-        and now - _cache[cache_key]["fetched_at"] < _CACHE_TTL_SEC
-    ):
-        return _cache[cache_key]["value"]
 
+def _empty_payload(days: int, available: bool) -> dict[str, Any]:
+    return {
+        "configured": True,
+        "available": available,
+        "window_days": days,
+        "sessions": 0,
+        "turns": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "est_cost_usd": 0.0,
+        "by_day": [],
+        "by_model": [],
+        "fetched_at": time.time(),
+    }
+
+
+def _aggregate(
+    rows: list[tuple[str, datetime, str, int, int, int, int]],
+    days: int,
+) -> dict[str, Any]:
+    """Shared aggregator. `rows` is a list of
+    (session_id, ts, model, in, out, cache_read, cache_creation)."""
     cutoff = (
         datetime.now(timezone.utc) - timedelta(days=days)
         if days > 0 else None
@@ -128,30 +161,15 @@ def fetch(days: int = 30, refresh: bool = False) -> dict[str, Any]:
     total_cc = 0
     total_cost = 0.0
 
-    for entry in _walk_jsonls(_root()):
-        if entry.get("type") != "assistant":
-            continue
-        msg = entry.get("message") or {}
-        usage = msg.get("usage") or {}
-        model = msg.get("model") or "unknown"
-        ts = _parse_iso(entry.get("timestamp") or "")
+    for sid, ts, model, in_tok, out_tok, cr_tok, cc_tok in rows:
         if ts is None:
             continue
         if cutoff and ts < cutoff:
             continue
-
-        in_tok = int(usage.get("input_tokens") or 0)
-        out_tok = int(usage.get("output_tokens") or 0)
-        cr_tok = int(usage.get("cache_read_input_tokens") or 0)
-        cc_tok = int(usage.get("cache_creation_input_tokens") or 0)
-
-        # Skip turns with zero usage entirely (compaction headers etc.)
         if in_tok == 0 and out_tok == 0 and cr_tok == 0 and cc_tok == 0:
             continue
 
         turn_cost = cost_for_turn(model, in_tok, out_tok, cr_tok, cc_tok)
-
-        sid = entry.get("sessionId")
         if sid:
             sessions.add(sid)
         turns += 1
@@ -185,8 +203,9 @@ def fetch(days: int = 30, refresh: bool = False) -> dict[str, Any]:
         for m, vals in sorted(by_model.items(), key=lambda kv: -kv[1]["est_cost_usd"])
     ]
 
-    payload = {
+    return {
         "configured": True,
+        "available": turns > 0,
         "window_days": days,
         "sessions": len(sessions),
         "turns": turns,
@@ -197,7 +216,66 @@ def fetch(days: int = 30, refresh: bool = False) -> dict[str, Any]:
         "est_cost_usd": round(total_cost, 4),
         "by_day": by_day_list,
         "by_model": by_model_list,
-        "fetched_at": now,
+        "fetched_at": time.time(),
     }
+
+
+def _fetch_from_jsonls(days: int, refresh: bool) -> dict[str, Any]:
+    cache_key = f"days={days}"
+    now = time.time()
+    if (
+        not refresh
+        and cache_key in _cache
+        and now - _cache[cache_key]["fetched_at"] < _CACHE_TTL_SEC
+    ):
+        return _cache[cache_key]["value"]
+
+    rows: list[tuple[str, datetime, str, int, int, int, int]] = []
+    for entry in _walk_jsonls(_root()):
+        if entry.get("type") != "assistant":
+            continue
+        msg = entry.get("message") or {}
+        usage = msg.get("usage") or {}
+        rows.append((
+            entry.get("sessionId") or "",
+            _parse_iso(entry.get("timestamp") or ""),
+            msg.get("model") or "unknown",
+            int(usage.get("input_tokens") or 0),
+            int(usage.get("output_tokens") or 0),
+            int(usage.get("cache_read_input_tokens") or 0),
+            int(usage.get("cache_creation_input_tokens") or 0),
+        ))
+
+    payload = _aggregate(rows, days=days)
     _cache[cache_key] = {"value": payload, "fetched_at": now}
     return payload
+
+
+def _fetch_from_db(days: int, db) -> dict[str, Any]:
+    """Read pre-ingested turns out of the claude_usage_turns table.
+    No cache — the table only grows when the uploader posts, and the read
+    is just a column scan with a timestamp filter."""
+    from ..db.models import ClaudeUsageTurn
+
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=days)
+        if days > 0 else None
+    )
+    q = db.query(ClaudeUsageTurn)
+    if cutoff:
+        q = q.filter(ClaudeUsageTurn.ts >= cutoff)
+    db_rows = q.all()
+
+    rows: list[tuple[str, datetime, str, int, int, int, int]] = [
+        (
+            r.session_id,
+            r.ts if r.ts and r.ts.tzinfo else (r.ts.replace(tzinfo=timezone.utc) if r.ts else None),
+            r.model,
+            r.input_tokens,
+            r.output_tokens,
+            r.cache_read_tokens,
+            r.cache_creation_tokens,
+        )
+        for r in db_rows
+    ]
+    return _aggregate(rows, days=days)

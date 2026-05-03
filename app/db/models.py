@@ -413,6 +413,34 @@ class EvalSegment(Base):
     computed_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class ClaudeUsageTurn(Base):
+    """One assistant turn from a Claude Code session.
+
+    Pushed by the local uploader script (scripts/upload_claude_usage.py)
+    walking ~/.claude/projects/**/*.jsonl on Daniel's laptop and POSTing
+    to /dashboard/claude-usage/ingest. Lets prod show stats without
+    needing the JSONL files mounted on Fly.
+
+    Idempotent on (session_id, ts) — re-uploading the same window is
+    safe; UNIQUE constraint drops dupes server-side.
+    """
+
+    __tablename__ = "claude_usage_turns"
+    __table_args__ = (
+        UniqueConstraint("session_id", "ts", name="uq_claude_usage_turn_session_ts"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, nullable=False, index=True)
+    ts = Column(DateTime(timezone=True), nullable=False, index=True)
+    model = Column(String, nullable=False)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    cache_read_tokens = Column(Integer, nullable=False, default=0)
+    cache_creation_tokens = Column(Integer, nullable=False, default=0)
+    ingested_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class EvalStepFeedback(Base):
     """A reviewer's flag on a single trace step inside an assistant message.
     Many feedbacks per message — one per (message_id, step_key, step_index)

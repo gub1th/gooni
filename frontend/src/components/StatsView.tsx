@@ -161,6 +161,14 @@ function ClaudeSection() {
     staleTime: 60 * 60_000,
   });
 
+  // Prod has no JSONLs and (until the uploader runs) no DB rows — hide the
+  // section entirely rather than rendering a "not configured" stub. Only
+  // hide once the fetch has resolved; while loading we still show the
+  // skeleton so dev laptops don't flash empty space on first paint.
+  if (data && !data.available) {
+    return null;
+  }
+
   const rangeChips = (
     <div style={{ display: "flex", gap: 4 }}>
       {([7, 30, 90, 0] as const).map((d) => (

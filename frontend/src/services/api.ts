@@ -852,6 +852,10 @@ export interface ClaudeUsageModel {
 
 export interface ClaudeUsage {
   configured: boolean;
+  // True when the section should render (local jsonls present OR DB has
+  // ingested rows). False on a fresh prod box → frontend hides the section
+  // entirely rather than showing an error stub.
+  available?: boolean;
   window_days?: number;
   sessions?: number;
   turns?: number;
