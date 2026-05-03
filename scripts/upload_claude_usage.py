@@ -29,8 +29,10 @@ Run modes:
     #   }
 
 Required env:
-    GOONI_API_URL    — e.g. https://gooni.fly.dev (no trailing slash)
-    AUTH_PASSWORD    — same bearer token as dashboard reads
+    GOONI_API_URL    — e.g. https://gooni-bot.fly.dev (no trailing slash)
+    AUTH_PASSWORD    — the dashboard password (NOT the bearer token).
+                       The script POSTs /auth to exchange it for the
+                       sha256-hex token the server expects.
 """
 
 from __future__ import annotations
@@ -124,6 +126,24 @@ def _collect_turns(since: datetime | None) -> list[dict[str, Any]]:
     return out
 
 
+def _exchange_password_for_token(api_url: str, password: str) -> str:
+    """POST /auth with the dashboard password; server returns the
+    sha256-hex bearer it expects on subsequent calls. Raises on failure
+    so the script aborts before posting any data."""
+    req = urllib.request.Request(
+        f"{api_url}/auth",
+        data=json.dumps({"password": password}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        body = json.loads(resp.read().decode("utf-8"))
+    token = body.get("token")
+    if not token:
+        raise RuntimeError(f"/auth returned no token: {body!r}")
+    return token
+
+
 def _post_batch(url: str, token: str, turns: list[dict[str, Any]]) -> dict:
     req = urllib.request.Request(
         url,
@@ -146,9 +166,15 @@ def main() -> int:
     args = ap.parse_args()
 
     api_url = os.getenv("GOONI_API_URL", "").rstrip("/")
-    token = os.getenv("AUTH_PASSWORD")
-    if not api_url or not token:
+    password = os.getenv("AUTH_PASSWORD")
+    if not api_url or not password:
         print("error: set GOONI_API_URL and AUTH_PASSWORD", file=sys.stderr)
+        return 2
+
+    try:
+        token = _exchange_password_for_token(api_url, password)
+    except Exception as e:
+        print(f"error: /auth handshake failed: {e}", file=sys.stderr)
         return 2
 
     if args.all:
