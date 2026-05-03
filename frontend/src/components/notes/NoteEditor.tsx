@@ -10,7 +10,7 @@ import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
-  Trash2, FolderInput, Pin as PinIcon,
+  Trash2, FolderInput, Pin as PinIcon, ListPlus, Check,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -296,6 +296,11 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
   const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
+  // Brief "tagged" pulse on the backlog button so the user sees confirmation
+  // without a full toast. Resets after ~1.6s. Keyed by note id so switching
+  // notes doesn't carry the green-checked state across.
+  const [taggedNoteId, setTaggedNoteId] = useState<number | null>(null);
+  const [taggingInFlight, setTaggingInFlight] = useState(false);
   const movePickerRef = useRef<HTMLDivElement>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -1031,6 +1036,67 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                 color={activeNote.is_pinned ? "#F59E0B" : "#636366"}
                 fill={activeNote.is_pinned ? "#F59E0B" : "none"}
               />
+            </button>
+          </Tooltip>
+        )}
+
+        {/* Tag-to-backlog — sends the note (title or first line) into the
+            Gooni Backlog list as a list_item, with source_note_id pointing
+            back here. Same 30×30 visual family as Pin/Public. Pulses green
+            briefly after a successful tag so the user gets confirmation
+            without a full toast modal. Conflict-check on the backend
+            handles dedupe — repeated clicks just surface as duplicates,
+            won't stack rows. */}
+        {activeNote && activeNoteId && activeNoteId > 0 && (
+          <Tooltip label={taggedNoteId === activeNoteId ? "Tagged to backlog" : "Tag to Gooni backlog"}>
+            <button
+              onClick={async () => {
+                if (!activeNoteId || activeNoteId < 0 || taggingInFlight) return;
+                const titleClean = (localTitle ?? activeNote?.title ?? "").trim();
+                const bodyText = bodyRef.current
+                  .replace(/<[^>]+>/g, " ")
+                  .replace(/\s+/g, " ")
+                  .trim();
+                const firstLine = bodyText.slice(0, 120);
+                const text = titleClean || firstLine;
+                if (!text) return; // nothing to tag yet
+                setTaggingInFlight(true);
+                try {
+                  const { useListsStore } = await import("../../stores/useListsStore");
+                  const lists = useListsStore.getState().lists;
+                  const backlog = lists.find((l) => l.type === "backlog");
+                  if (!backlog) return;
+                  const { addListItem } = await import("../../services/api");
+                  await addListItem(backlog.id, text, {
+                    source_note_id: activeNoteId,
+                    subtitle: titleClean && firstLine !== titleClean ? firstLine : null,
+                  });
+                  setTaggedNoteId(activeNoteId);
+                  setTimeout(() => {
+                    setTaggedNoteId((curr) => (curr === activeNoteId ? null : curr));
+                  }, 1600);
+                } catch (e) {
+                  console.error("tag-to-backlog failed", e);
+                } finally {
+                  setTaggingInFlight(false);
+                }
+              }}
+              disabled={taggingInFlight}
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                border: "none",
+                background: taggedNoteId === activeNoteId ? "rgba(52,199,89,0.16)" : "transparent",
+                cursor: taggingInFlight ? "wait" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 0, flexShrink: 0,
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (taggedNoteId !== activeNoteId) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+              onMouseLeave={(e) => { if (taggedNoteId !== activeNoteId) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              {taggedNoteId === activeNoteId
+                ? <Check size={15} strokeWidth={2} color="#16A34A" />
+                : <ListPlus size={15} strokeWidth={1.7} color="#636366" />}
             </button>
           </Tooltip>
         )}
