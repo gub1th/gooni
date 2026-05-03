@@ -135,6 +135,19 @@ function NotesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.conv]);
 
+  // Same pattern for list deep-links. Without this, navigating to
+  // `/?list=N` while already on `/` (e.g. clicking the composer "Routed:
+  // backlog" pill, or the chat-audit/memories sidebars' onSelectList) only
+  // updated the URL — the view stayed wherever it was. Initial mount used
+  // search.list via useState, so refresh worked; subsequent navigations
+  // didn't.
+  useEffect(() => {
+    if (!search.list) return;
+    setActiveListId(search.list);
+    setView("lists");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.list]);
+
   // ?audit=1 lands directly on the Audit tab.
   useEffect(() => {
     if (search.audit) setView("eval");
