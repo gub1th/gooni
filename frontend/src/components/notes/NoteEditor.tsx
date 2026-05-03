@@ -282,6 +282,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   // result. Embedded variant doesn't render the title/disclosure block, so
   // we shadow a small pill underneath the composer. Cleared on next submit.
   const [embeddedToast, setEmbeddedToast] = useState<{ noteId: number; signals: NoteClassifySignals } | null>(null);
+  // Drives the slide-in / slide-out transform on the toast pill. Decoupled
+  // from `embeddedToast` so we can render the pill, animate it in, hold,
+  // animate it out, then unmount — without flashing on initial mount.
+  const [embeddedToastVisible, setEmbeddedToastVisible] = useState(false);
 
   const spaceId = selectedSpaceId ?? "general";
   const activeNote = (notes[spaceId] ?? []).find((n) => n.id === activeNoteId) ?? null;
@@ -635,6 +639,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       // block lives in the full-variant render path. Clear any prior toast
       // and start a poll for the classify_signals payload.
       if (embedded) {
+        // Cancel any in-flight pill before starting a new one.
+        setEmbeddedToastVisible(false);
         setEmbeddedToast(null);
         setTimeout(async () => {
           try {
@@ -642,9 +648,20 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
             const sig = fresh.classify_signals;
             if (sig && (sig.feature_requests?.length || sig.memory_count > 0)) {
               setEmbeddedToast({ noteId: submittedId, signals: sig });
+              // Two ticks before flipping visible so the initial transform="translateY"
+              // has applied — otherwise the slide-in is skipped and the pill
+              // simply pops in. requestAnimationFrame x2 = "after browser has
+              // committed the mount frame".
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => setEmbeddedToastVisible(true));
+              });
+              // Visible window: 6s. Then slide out (320ms transition), then unmount.
               setTimeout(() => {
-                setEmbeddedToast((curr) => (curr?.noteId === submittedId ? null : curr));
-              }, 12000);
+                setEmbeddedToastVisible(false);
+                setTimeout(() => {
+                  setEmbeddedToast((curr) => (curr?.noteId === submittedId ? null : curr));
+                }, 360);
+              }, 6000);
             }
           } catch {
             // note may have been deleted — ignore
@@ -1201,37 +1218,47 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
             navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined , audit: undefined} });
           };
           return (
-            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div
+              style={{
+                marginTop: 8,
+                display: "flex",
+                alignItems: "center",
+                // Slide up from below the composer + fade. Auto-dismiss after
+                // 6s; no manual close affordance per the cleaner aesthetic.
+                opacity: embeddedToastVisible ? 1 : 0,
+                transform: embeddedToastVisible ? "translateY(0)" : "translateY(8px)",
+                transition: "opacity 320ms ease, transform 320ms ease",
+                pointerEvents: embeddedToastVisible ? "auto" : "none",
+              }}
+            >
               <button
                 onClick={fr.length ? openBacklog : openNote}
                 style={{
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                  padding: "4px 10px", borderRadius: 999,
-                  border: "1px solid rgba(22,163,74,0.30)",
-                  background: "rgba(22,163,74,0.08)",
-                  color: "#166534",
+                  display: "inline-flex", alignItems: "center", gap: 7,
+                  padding: "4px 11px", borderRadius: 999,
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  background: "var(--gooni-surface, rgba(0,0,0,0.03))",
+                  color: "var(--gooni-text, #1C1C1E)",
                   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                  fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
+                  fontSize: 11.5, fontWeight: 500, letterSpacing: 0.1,
                   cursor: "pointer",
-                  transition: "background 0.12s",
+                  transition: "background 0.12s, border-color 0.12s",
                 }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.14)")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.08)")}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.12)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "var(--gooni-surface, rgba(0,0,0,0.03))";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)";
+                }}
               >
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A" }} />
-                Routed: {summary}
-                {fr[0] ? ` — ${fr[0].title}` : ""}
-                <span style={{ marginLeft: 2 }}>↗</span>
+                <span style={{ color: "var(--gooni-muted, #8E8E93)" }}>Routed</span>
+                <span>{summary}</span>
+                {fr[0] ? <span style={{ color: "var(--gooni-muted, #8E8E93)" }}>· {fr[0].title}</span> : null}
+                <span style={{ marginLeft: 2, color: "var(--gooni-muted, #8E8E93)" }}>↗</span>
               </button>
-              <button
-                onClick={() => setEmbeddedToast(null)}
-                title="Dismiss"
-                style={{
-                  border: "none", background: "transparent", color: "var(--gooni-muted, #8E8E93)",
-                  cursor: "pointer", fontSize: 14, padding: "0 4px",
-                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                }}
-              >×</button>
             </div>
           );
         })()}
