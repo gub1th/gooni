@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.20.0 — 2026-05-03 (minor)
+
+- feat(llm): default to gpt-5.4 + add new pricing entries (#94)
+
 ## 0.19.0 — 2026-05-02 (minor)
 
 - feat(stats): Claude Code usage (personal) + daily token chart (#93)
