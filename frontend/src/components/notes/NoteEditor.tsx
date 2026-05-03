@@ -17,6 +17,7 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
+import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchRelatedNotes, fetchNoteMemories, patchNote as apiPatchNote, suggestNoteQuestions, extractToChildNote as apiExtractToChildNote, type ApiNote, type ApiMemory, type RelatedNote, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
@@ -1221,46 +1222,19 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
               <EditorContent editor={editor} />
             </div>
 
-            <button
-              ref={submitButtonRef}
-              onClick={handleSubmit}
-              disabled={editorEmpty}
-              title="Submit (Enter)"
-              style={{
-                position: "absolute",
-                bottom: 10,
-                right: 10,
-                width: 30, height: 30, borderRadius: "50%",
-                border: "none",
-                background: editorEmpty ? "rgba(0,0,0,0.06)" : "#1C1C1E",
-                color: editorEmpty ? "#C7C7CC" : "#fff",
-                cursor: editorEmpty ? "default" : "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                padding: 0,
-                transition: "background 0.25s ease, color 0.25s ease, transform 0.2s ease, box-shadow 0.25s ease",
-                transform: editorEmpty ? "scale(0.92)" : "scale(1)",
-                // Active state borrows the goon's green accent for a subtle glow.
-                boxShadow: editorEmpty
-                  ? "none"
-                  : "0 2px 8px rgba(28,28,30,0.28), 0 0 0 1px rgba(74,222,128,0.35)",
-              }}
-              onMouseEnter={(e) => {
-                if (editorEmpty) return;
-                const el = e.currentTarget as HTMLButtonElement;
-                el.style.transform = "scale(1.08)";
-                el.style.boxShadow = "0 3px 14px rgba(74,222,128,0.35), 0 0 0 1px rgba(74,222,128,0.55)";
-              }}
-              onMouseLeave={(e) => {
-                if (editorEmpty) return;
-                const el = e.currentTarget as HTMLButtonElement;
-                el.style.transform = "scale(1)";
-                el.style.boxShadow = "0 2px 8px rgba(28,28,30,0.28), 0 0 0 1px rgba(74,222,128,0.35)";
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <path d="M6.5 10.5 L6.5 3 M3 6.5 L6.5 3 L10 6.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
+            {/* Submit button — uses the shared SendButton so the composer
+                and chat InputBar share one source of truth (#122-124). The
+                anchor wrapper handles the absolute positioning that's
+                specific to the embedded composer card. */}
+            <div style={{ position: "absolute", bottom: 10, right: 10 }}>
+              <SendButton
+                ref={submitButtonRef}
+                onClick={handleSubmit}
+                disabled={editorEmpty}
+                title="Submit (Enter)"
+                ariaLabel="Submit note"
+              />
+            </div>
         </div>
         {embeddedToast && (() => {
           const sig = embeddedToast.signals;
