@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, Wind, Plus, Star } from "lucide-react";
+import { Sparkles, Wind, Star, HelpCircle } from "lucide-react";
 import {
   fetchItemTree, createItem, updateItem, deleteItem, reorderItems, suggestFocus,
   type ApiItemTree, type ApiItemNode, type FocusScale,
@@ -102,7 +102,65 @@ function localToISO(local: string): string {
   return new Date(local).toISOString();
 }
 
+// ── Days-since + primary timer ────────────────────────────────────────────
+
+// "since X" copy. Days for >24h, hours for fresh focuses, "today" for <1h.
+function fmtSince(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const ms = Date.now() - d.getTime();
+  if (ms < 0) return "starts soon";
+  const h = Math.floor(ms / (1000 * 60 * 60));
+  if (h < 1) return "just now";
+  if (h < 24) return `${h}h in`;
+  const days = Math.floor(h / 24);
+  if (days === 1) return "1 day in";
+  return `${days} days in`;
+}
+
+// Primary timer: when the user pins a focus as primary, we stash the
+// timestamp keyed by id in localStorage. No server schema needed for now;
+// upgrading to a `primary_set_at` column is an easy follow-up.
+const PRIMARY_STARTS_KEY = "gooni-primary-starts-v1";
+
+function loadPrimaryStarts(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(PRIMARY_STARTS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+function setPrimaryStart(id: number, ts: number) {
+  try {
+    const map = loadPrimaryStarts();
+    map[String(id)] = ts;
+    localStorage.setItem(PRIMARY_STARTS_KEY, JSON.stringify(map));
+  } catch { /* swallow — non-critical UX */ }
+}
+function clearPrimaryStart(id: number) {
+  try {
+    const map = loadPrimaryStarts();
+    delete map[String(id)];
+    localStorage.setItem(PRIMARY_STARTS_KEY, JSON.stringify(map));
+  } catch { /* swallow */ }
+}
+
+// Subscribe to a re-render every minute so "X days in primary" + "N days in"
+// stay live without forcing a full query refetch.
+function useNowMinute(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
+
+// Drop indicator state — captures which row's edge the cursor is over.
+// `before` = drop above the row; `after` = drop below.
+type DropTarget = { id: number; edge: "before" | "after" } | null;
 
 export function FocusFlow() {
   const queryClient = useQueryClient();
@@ -112,13 +170,21 @@ export function FocusFlow() {
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["item-tree"] });
 
-  const focuses = (tree?.focuses ?? []).filter((f) => !f.done);
+  // Optimistic local override: drag-reorder mutates this immediately so the
+  // visible order matches the cursor; the server reorder + refetch then
+  // catch up. Cleared when tree data changes (new query payload arrives).
+  const [optimistic, setOptimistic] = useState<ApiItemNode[] | null>(null);
+  useEffect(() => { setOptimistic(null); }, [tree]);
+
+  const focuses = (optimistic ?? tree?.focuses ?? []).filter((f) => !f.done);
   const primary = focuses.find((f) => f.is_primary);
   const active = focuses.filter((f) => f.status !== "someday");
   const someday = focuses.filter((f) => f.status === "someday");
-  const quick = active.filter((f) => (f.scale ?? "slow") === "quick")
+  const quick = active
+    .filter((f) => (f.scale ?? "slow") === "quick")
     .sort((a, b) => a.sort_order - b.sort_order);
-  const slow = active.filter((f) => (f.scale ?? "slow") === "slow")
+  const slow = active
+    .filter((f) => (f.scale ?? "slow") === "slow")
     .sort((a, b) => a.sort_order - b.sort_order);
 
   const [showModal, setShowModal] = useState(false);
@@ -126,6 +192,15 @@ export function FocusFlow() {
   const [lockShown, setLockShown] = useState<{ caption: string } | null>(null);
   const [celebration, setCelebration] = useState<{ kind: "primary" | "row"; title: string } | null>(null);
   const [newId, setNewId] = useState<number | null>(null);
+  // Undo toast for any focus completion. Pending completion stays in
+  // server state (we don't fire the mutation until the toast expires) so
+  // an Undo within the window is a pure local revert.
+  const [pendingDone, setPendingDone] = useState<{ node: ApiItemNode } | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Drag state — held at the parent so cross-section drops know what they
+  // started with.
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [drop, setDrop] = useState<DropTarget>(null);
 
   async function handleSuggest() {
     try {
@@ -172,14 +247,31 @@ export function FocusFlow() {
     } catch (e) { console.error(e); }
   }
 
+  // Promote to primary AND auto-move the row to position 0 in its scale
+  // section. Server reorder is best-effort: if it fails we still set the
+  // primary flag so the spotlight reflects the change.
   async function handleSetPrimary(id: number) {
+    const node = focuses.find((f) => f.id === id);
     try {
       await updateItem(id, { is_primary: true });
+      setPrimaryStart(id, Date.now());
+      // Also rewrite sort_order so this row is the first one in its scale
+      // bucket. The reorder endpoint takes the whole list — we send all
+      // active focuses with the promoted one bumped to the front of its
+      // section. Tree refetch normalises the server state afterward.
+      if (node) {
+        const scale = (node.scale ?? "slow") as FocusScale;
+        const peers = active.filter((f) => (f.scale ?? "slow") === scale && f.id !== id);
+        const others = active.filter((f) => (f.scale ?? "slow") !== scale);
+        const order = [node, ...peers, ...others];
+        try { await reorderItems(order.map((f) => f.id)); } catch { /* non-fatal */ }
+      }
       refresh();
     } catch (e) { console.error(e); }
   }
   async function handleClearPrimary(id: number) {
     try {
+      clearPrimaryStart(id);
       await updateItem(id, { is_primary: false });
       refresh();
     } catch (e) { console.error(e); }
@@ -190,17 +282,88 @@ export function FocusFlow() {
       refresh();
     } catch (e) { console.error(e); }
   }
-  async function handleComplete(node: ApiItemNode) {
-    setCelebration({
-      kind: node.is_primary ? "primary" : "row",
-      title: node.text,
-    });
-    try {
-      await updateItem(node.id, { done: true, is_primary: false });
-      refresh();
-    } catch (e) { console.error(e); }
+  // Done flow: optimistic remove (so the row visibly slides away) + queue
+  // a 6s mutation. The Undo button cancels the timer + re-adds the node
+  // locally; server state never changes.
+  function handleComplete(node: ApiItemNode) {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setPendingDone({ node });
+    setCelebration({ kind: node.is_primary ? "primary" : "row", title: node.text });
+    setOptimistic((prev) => (prev ?? tree?.focuses ?? []).filter((f) => f.id !== node.id));
+    if (node.is_primary) clearPrimaryStart(node.id);
     setTimeout(() => setCelebration(null), node.is_primary ? 2200 : 1300);
+    undoTimerRef.current = setTimeout(async () => {
+      try {
+        await updateItem(node.id, { done: true, is_primary: false });
+      } catch (e) { console.error(e); }
+      setPendingDone(null);
+      refresh();
+    }, 6000);
   }
+  function handleUndoDone() {
+    if (!pendingDone) return;
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setOptimistic(null);
+    setPendingDone(null);
+  }
+
+  // ── Drag-reorder ────────────────────────────────────────────────────
+  // We commit the new order on drop, mutating the optimistic array so the
+  // row visibly snaps into the new slot before the server roundtrip. If
+  // the dragged row crosses sections, its scale flips too.
+  const onRowDragStart = useCallback((id: number) => {
+    setDraggingId(id);
+    setDrop(null);
+  }, []);
+  const onRowDragEnd = useCallback(() => {
+    setDraggingId(null);
+    setDrop(null);
+  }, []);
+  const onRowDragOver = useCallback((target: ApiItemNode, edge: "before" | "after") => {
+    if (draggingId == null || draggingId === target.id) return;
+    setDrop({ id: target.id, edge });
+  }, [draggingId]);
+  const handleDrop = useCallback(async () => {
+    if (draggingId == null || !drop) return;
+    const dragged = focuses.find((f) => f.id === draggingId);
+    const target = focuses.find((f) => f.id === drop.id);
+    if (!dragged || !target) return;
+    const targetScale: FocusScale = (target.scale ?? "slow") as FocusScale;
+    const scaleChanged = (dragged.scale ?? "slow") !== targetScale;
+
+    // Build a flat ordered list of all active focuses in their new order:
+    // - keep current quick + slow ordering minus the dragged row
+    // - splice the dragged row in before/after the target
+    const flat: ApiItemNode[] = [];
+    for (const f of [...quick, ...slow]) {
+      if (f.id === draggingId) continue;
+      if (f.id === target.id) {
+        if (drop.edge === "before") {
+          flat.push({ ...dragged, scale: targetScale });
+          flat.push(f);
+        } else {
+          flat.push(f);
+          flat.push({ ...dragged, scale: targetScale });
+        }
+      } else {
+        flat.push(f);
+      }
+    }
+    // Optimistic — slot in the rearranged list (someday items unchanged).
+    setOptimistic([...flat, ...someday]);
+    setDraggingId(null);
+    setDrop(null);
+    try {
+      if (scaleChanged) {
+        await updateItem(dragged.id, { scale: targetScale });
+      }
+      await reorderItems(flat.map((n) => n.id));
+      refresh();
+    } catch (e) {
+      console.error(e);
+      setOptimistic(null);
+    }
+  }, [draggingId, drop, focuses, quick, slow, someday]);
 
   return (
     <div style={{ fontFamily: FONT }}>
@@ -221,9 +384,11 @@ export function FocusFlow() {
         <button className="ff-ghost" onClick={handleSuggest}>
           <Sparkles size={11} /> suggest
         </button>
-        <button className="ff-add" onClick={() => { setSeed(null); setShowModal(true); }}>
-          <span className="ff-plus"><Plus size={12} strokeWidth={2.4} /></span>
-          Add focus
+        <button
+          className="ff-add-link"
+          onClick={() => { setSeed(null); setShowModal(true); }}
+        >
+          + add focus
         </button>
       </div>
 
@@ -235,40 +400,50 @@ export function FocusFlow() {
           {quick.length === 0 ? (
             <div className="ff-empty">Nothing quick on the docket.</div>
           ) : (
-            <ReorderableList
-              items={quick}
-              onChange={refresh}
-              renderRow={(f) => (
+            <div>
+              {quick.map((f) => (
                 <FocusFlowRow
                   key={f.id}
                   node={f}
                   onSetPrimary={handleSetPrimary}
+                  onClearPrimary={handleClearPrimary}
                   onRemove={handleRemove}
                   onComplete={handleComplete}
                   isNew={f.id === newId}
+                  draggingId={draggingId}
+                  drop={drop}
+                  onDragStart={onRowDragStart}
+                  onDragEnd={onRowDragEnd}
+                  onDragOver={onRowDragOver}
+                  onDrop={handleDrop}
                 />
-              )}
-            />
+              ))}
+            </div>
           )}
 
           <SectionLabel label="Slow burn" count={slow.length} />
           {slow.length === 0 ? (
             <div className="ff-empty">No slow-burn focuses yet.</div>
           ) : (
-            <ReorderableList
-              items={slow}
-              onChange={refresh}
-              renderRow={(f) => (
+            <div>
+              {slow.map((f) => (
                 <FocusFlowRow
                   key={f.id}
                   node={f}
                   onSetPrimary={handleSetPrimary}
+                  onClearPrimary={handleClearPrimary}
                   onRemove={handleRemove}
                   onComplete={handleComplete}
                   isNew={f.id === newId}
+                  draggingId={draggingId}
+                  drop={drop}
+                  onDragStart={onRowDragStart}
+                  onDragEnd={onRowDragEnd}
+                  onDragOver={onRowDragOver}
+                  onDrop={handleDrop}
                 />
-              )}
-            />
+              ))}
+            </div>
           )}
 
           {someday.length > 0 && (
@@ -279,9 +454,16 @@ export function FocusFlow() {
                   key={f.id}
                   node={f}
                   onSetPrimary={handleSetPrimary}
+                  onClearPrimary={handleClearPrimary}
                   onRemove={handleRemove}
                   onComplete={handleComplete}
                   isNew={f.id === newId}
+                  draggingId={null}
+                  drop={null}
+                  onDragStart={() => {}}
+                  onDragEnd={() => {}}
+                  onDragOver={() => {}}
+                  onDrop={() => {}}
                 />
               ))}
             </>
@@ -300,6 +482,13 @@ export function FocusFlow() {
 
       {lockShown && <LockOverlay caption={lockShown.caption} />}
       {celebration && <CompletionCelebration kind={celebration.kind} title={celebration.title} />}
+
+      {pendingDone && (
+        <div role="status" aria-live="polite" className="ff-undo-toast">
+          <span>Done — "{pendingDone.node.text}"</span>
+          <button className="ff-undo-btn" onClick={handleUndoDone}>Undo</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -311,6 +500,8 @@ function Spotlight({ f, onClearPrimary, onComplete }: {
   onClearPrimary: (id: number) => void;
   onComplete: (n: ApiItemNode) => void;
 }) {
+  // Re-render every minute so the running primary timer ticks.
+  useNowMinute();
   if (!f) {
     return (
       <div className="ff-spotlight ff-spotlight-empty">
@@ -321,6 +512,12 @@ function Spotlight({ f, onClearPrimary, onComplete }: {
     );
   }
   const color = healthColor(f.health, f.confidence);
+  // Primary timer: prefer the localStorage stamp set when the user
+  // promotes the focus; fall back to start_at if we somehow lost the
+  // stamp (e.g. promoted in a different browser).
+  const starts = loadPrimaryStarts();
+  const primarySinceMs = starts[String(f.id)] ?? (f.start_at ? new Date(f.start_at).getTime() : null);
+  const primarySinceISO = primarySinceMs ? new Date(primarySinceMs).toISOString() : null;
   return (
     <div className="ff-spotlight">
       <div className="ff-spot-row">
@@ -332,47 +529,83 @@ function Spotlight({ f, onClearPrimary, onComplete }: {
       </div>
       <div className="ff-spot-title">{f.text}</div>
       <div className="ff-spot-meta">
-        <span className="ff-spot-health">
-          <span className="ff-dot" style={{ background: color ?? "var(--gooni-border, rgba(0,0,0,0.12))" }} />
-          Health <strong>{color ? f.health : "—"}</strong>/100
-        </span>
+        <HealthGlyph color={color} />
+        <span>Health <strong>{color ? f.health : "—"}</strong>/100</span>
         {color && (
           <span className="ff-health-bar">
             <span style={{ width: `${f.health}%`, background: color }} />
           </span>
         )}
         {f.confidence != null && <span className="ff-spot-conf">conf {f.confidence}%</span>}
-        {(f.start_at || f.end_at) && <span className="ff-spot-conf">· {fmtWindow(f.start_at, f.end_at)}</span>}
+        {primarySinceISO && (
+          <span className="ff-spot-conf">· {fmtSince(primarySinceISO)} as primary</span>
+        )}
       </div>
     </div>
   );
 }
 
+// Health pip — green dot when known, gray question-mark icon when health
+// is null OR confidence is too low. Same footprint either way so the
+// surrounding layout doesn't jump as scores roll in.
+function HealthGlyph({ color }: { color: string | null }) {
+  if (!color) {
+    return (
+      <span
+        className="ff-health-unknown"
+        title="Health unknown — needs more activity to score"
+        aria-label="Health unknown"
+      >
+        <HelpCircle size={11} strokeWidth={1.8} />
+      </span>
+    );
+  }
+  return <span className="ff-dot" style={{ background: color }} />;
+}
+
 // ── Row ────────────────────────────────────────────────────────────────────
 
-function FocusFlowRow({ node, onSetPrimary, onRemove, onComplete, isNew, draggable, onDragStart, onDragEnd }: {
+function FocusFlowRow({
+  node, onSetPrimary, onClearPrimary, onRemove, onComplete, isNew,
+  draggingId, drop,
+  onDragStart, onDragEnd, onDragOver, onDrop,
+}: {
   node: ApiItemNode;
   onSetPrimary: (id: number) => void;
+  onClearPrimary: (id: number) => void;
   onRemove: (id: number) => void;
   onComplete: (n: ApiItemNode) => void;
   isNew?: boolean;
-  draggable?: boolean;
-  onDragStart?: (e: React.DragEvent) => void;
-  onDragEnd?: () => void;
+  draggingId: number | null;
+  drop: DropTarget;
+  onDragStart: (id: number) => void;
+  onDragEnd: () => void;
+  onDragOver: (target: ApiItemNode, edge: "before" | "after") => void;
+  onDrop: () => void;
 }) {
-  const [hover, setHover] = useState(false);
   const [doneAnim, setDoneAnim] = useState(false);
   const color = healthColor(node.health, node.confidence);
-  const isQuick = (node.scale ?? "slow") === "quick";
   const someday = node.status === "someday";
+  // Re-render once a minute so "N days in" stays current.
+  useNowMinute();
 
   function handleCheck(e: React.MouseEvent) {
     e.stopPropagation();
     setDoneAnim(true);
-    // Wait the animation duration before firing the actual mutation; gives
-    // the row time to slide out instead of vanishing instantly.
-    setTimeout(() => onComplete(node), 700);
+    // Slide-out animation duration. We hand off to onComplete which queues
+    // the actual mutation behind the undo toast.
+    setTimeout(() => onComplete(node), 600);
   }
+
+  function handleStarClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (node.is_primary) onClearPrimary(node.id);
+    else onSetPrimary(node.id);
+  }
+
+  const isDragging = draggingId === node.id;
+  const isDropBefore = drop?.id === node.id && drop.edge === "before";
+  const isDropAfter = drop?.id === node.id && drop.edge === "after";
 
   const cls = [
     "ff-row",
@@ -380,55 +613,76 @@ function FocusFlowRow({ node, onSetPrimary, onRemove, onComplete, isNew, draggab
     someday ? "ff-row-someday" : "",
     isNew ? "ff-row-new" : "",
     doneAnim ? "ff-row-done" : "",
+    isDragging ? "ff-row-dragging" : "",
   ].join(" ").trim();
+
+  function handleDragOver(e: React.DragEvent) {
+    if (draggingId == null || draggingId === node.id) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const edge = (e.clientY - rect.top) < rect.height / 2 ? "before" : "after";
+    onDragOver(node, edge);
+  }
 
   return (
     <div
       className={cls}
-      draggable={draggable}
-      onDragStart={onDragStart}
+      draggable={!someday && !doneAnim}
+      onDragStart={(e) => {
+        if (someday || doneAnim) return;
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart(node.id);
+      }}
       onDragEnd={onDragEnd}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onDragOver={handleDragOver}
+      onDrop={(e) => { e.preventDefault(); onDrop(); }}
     >
+      {isDropBefore && <div className="ff-drop-line ff-drop-line-top" />}
       <button
         className={"ff-check-dot " + (doneAnim ? "ff-check-checked" : "")}
         onClick={handleCheck}
         title="Mark done"
         aria-label="Mark done"
       >
-        <span className="ff-dot" style={{ background: color ?? "var(--gooni-border, rgba(0,0,0,0.18))" }} />
-        <span className="ff-check-glyph">✓</span>
+        <HealthGlyph color={color} />
+        {/* Animated checkmark — strokes in on hover/checked, no big black blob. */}
+        <svg className="ff-check-svg" viewBox="0 0 14 14" fill="none">
+          <path d="M3 7.5 L6 10.2 L11 4.5"
+            stroke="currentColor" strokeWidth="2.2"
+            strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
       <div className="ff-row-body">
         <div className="ff-row-title">{node.text}</div>
         <div className="ff-row-meta">
-          {fmtWindow(node.start_at, node.end_at) || (isQuick ? "Today" : "")}
-          {node.confidence != null && node.confidence < 35 && <span> · health unclear</span>}
+          {node.start_at ? fmtSince(node.start_at) : (someday ? "" : "just now")}
+          {node.end_at && <span> · until {fmtWindow(null, node.end_at).replace("— → ", "")}</span>}
         </div>
       </div>
-      <span className={"ff-pill " + (isQuick ? "ff-pill-quick" : "ff-pill-slow")}>
-        {isQuick ? "Quick" : "Slow burn"}
-      </span>
-      <span className="ff-row-health">{color ? node.health : "—"}</span>
       <div className="ff-row-actions">
         {!someday && <FocusModePill node={node} />}
-        {!node.is_primary && (
-          <button
-            className="ff-icon-btn"
-            onClick={() => onSetPrimary(node.id)}
-            title="Make primary"
-            aria-label="Make primary"
-          ><Star size={12} strokeWidth={2} /></button>
-        )}
+        <button
+          className={"ff-star-btn " + (node.is_primary ? "ff-star-active" : "")}
+          onClick={handleStarClick}
+          title={node.is_primary ? "Unset primary" : "Make primary"}
+          aria-label={node.is_primary ? "Unset primary" : "Make primary"}
+          aria-pressed={node.is_primary}
+        >
+          <Star
+            size={13}
+            strokeWidth={1.8}
+            fill={node.is_primary ? "currentColor" : "none"}
+          />
+        </button>
         <button
           className="ff-icon-btn"
-          onClick={() => onRemove(node.id)}
+          onClick={(e) => { e.stopPropagation(); onRemove(node.id); }}
           title="Remove (no celebration)"
           aria-label="Remove"
         >×</button>
       </div>
-      {hover && !doneAnim && <HydrationTimeline />}
+      {isDropAfter && <div className="ff-drop-line ff-drop-line-bottom" />}
     </div>
   );
 }
@@ -476,20 +730,6 @@ function FocusModePill({ node }: { node: ApiItemNode }) {
   );
 }
 
-// ── Hydration timeline (empty until the auto-hydration pipeline ships) ────
-
-function HydrationTimeline() {
-  return (
-    <div className="ff-timeline" onClick={(e) => e.stopPropagation()}>
-      <div className="ff-timeline-h">Hydration</div>
-      <div className="ff-timeline-empty">
-        Dry. No activity yet — mention this focus in chat, WhatsApp,
-        Telegram, or Claude Code to hydrate.
-      </div>
-    </div>
-  );
-}
-
 // ── Section label ─────────────────────────────────────────────────────────
 
 function SectionLabel({ label, count }: { label: string; count: number }) {
@@ -498,79 +738,6 @@ function SectionLabel({ label, count }: { label: string; count: number }) {
       <span>{label}</span>
       <span className="ff-section-line" />
       <span className="ff-section-count">{count}</span>
-    </div>
-  );
-}
-
-// ── Reorder ───────────────────────────────────────────────────────────────
-
-function ReorderableList({ items, onChange, renderRow }: {
-  items: ApiItemNode[];
-  onChange: () => void;
-  renderRow: (item: ApiItemNode) => React.ReactNode;
-}) {
-  const [draggingId, setDraggingId] = useState<number | null>(null);
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-
-  async function commit(targetIdx: number) {
-    if (draggingId == null) return;
-    const fromIdx = items.findIndex((i) => i.id === draggingId);
-    if (fromIdx === -1 || fromIdx === targetIdx || fromIdx + 1 === targetIdx) return;
-    const next = items.slice();
-    const [moved] = next.splice(fromIdx, 1);
-    const insertAt = targetIdx > fromIdx ? targetIdx - 1 : targetIdx;
-    next.splice(insertAt, 0, moved);
-    try {
-      await reorderItems(next.map((n) => n.id));
-      onChange();
-    } catch (e) { console.error(e); }
-  }
-
-  return (
-    <div>
-      {draggingId != null && (
-        <DropSlot active={hoverIdx === 0} onEnter={() => setHoverIdx(0)} onDrop={() => { commit(0); setHoverIdx(null); }} />
-      )}
-      {items.map((f, i) => (
-        <div
-          key={f.id}
-          onDragOver={(e) => e.preventDefault()}
-        >
-          <div
-            draggable
-            onDragStart={(e) => { setDraggingId(f.id); e.dataTransfer.effectAllowed = "move"; }}
-            onDragEnd={() => { setDraggingId(null); setHoverIdx(null); }}
-          >
-            {renderRow(f)}
-          </div>
-          {draggingId != null && (
-            <DropSlot
-              active={draggingId !== f.id && hoverIdx === i + 1}
-              onEnter={() => setHoverIdx(i + 1)}
-              onDrop={() => { commit(i + 1); setHoverIdx(null); }}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function DropSlot({ active, onEnter, onDrop }: {
-  active: boolean; onEnter: () => void; onDrop: () => void;
-}) {
-  return (
-    <div
-      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; onEnter(); }}
-      onDrop={(e) => { e.preventDefault(); onDrop(); }}
-      style={{ position: "relative", height: 8 }}
-    >
-      <div style={{
-        position: "absolute", left: 4, right: 4, top: 3, height: 2,
-        borderRadius: 1,
-        background: active ? "#3B82F6" : "transparent",
-        transition: "background 100ms",
-      }} />
     </div>
   );
 }
@@ -973,16 +1140,16 @@ function FocusFlowStyles() {
       .ff-spot-title {
         position: relative;
         font-weight: 600;
-        font-size: 26px;
-        letter-spacing: -0.02em;
-        line-height: 1.15;
-        margin: 8px 0 6px;
+        font-size: 17px;
+        letter-spacing: -0.01em;
+        line-height: 1.3;
+        margin: 6px 0 6px;
         color: var(--gooni-text, #1C1C1E);
       }
       .ff-spot-title-empty {
         position: relative;
-        font-size: 22px; font-style: italic; color: var(--gooni-muted, #8E8E93);
-        margin: 8px 0 6px;
+        font-size: 16px; font-style: italic; color: var(--gooni-muted, #8E8E93);
+        margin: 6px 0 6px;
       }
       .ff-spot-meta {
         position: relative;
@@ -1024,22 +1191,18 @@ function FocusFlowStyles() {
         font-family: inherit;
       }
       .ff-ghost:hover { color: var(--gooni-text, #1C1C1E); }
-      .ff-add {
-        background: #1C1C1E; color: #FFF; border: none;
-        border-radius: 999px;
-        padding: 9px 16px 9px 12px;
-        display: inline-flex; align-items: center; gap: 8px;
-        font-weight: 500; font-size: 13px;
-        cursor: pointer;
-        box-shadow: 0 1px 0 rgba(0,0,0,0.06), 0 8px 24px -10px rgba(0,0,0,0.35);
-        transition: transform 0.12s ease;
-        font-family: inherit;
+      /* Toolbar "add focus" — restyled from the heavy black pill into a
+         lightweight ghost link to match the existing dashboard rhythm. */
+      .ff-add-link {
+        background: none; border: none;
+        padding: 6px 8px;
+        color: var(--gooni-text, #1C1C1E);
+        font-size: 12px; font-weight: 600;
+        cursor: pointer; font-family: inherit;
+        border-radius: 6px;
       }
-      .ff-add:hover { transform: translateY(-1px); }
-      .ff-plus {
-        width: 20px; height: 20px; border-radius: 50%;
-        background: rgba(255,255,255,0.14);
-        display: inline-flex; align-items: center; justify-content: center;
+      .ff-add-link:hover {
+        background: rgba(0,0,0,0.05);
       }
 
       .ff-section-label {
@@ -1059,55 +1222,37 @@ function FocusFlowStyles() {
       .ff-row {
         position: relative;
         display: grid;
-        grid-template-columns: 14px 1fr auto auto auto;
+        grid-template-columns: 14px 1fr auto;
         align-items: center; gap: 12px;
-        padding: 12px 14px 12px 18px;
+        padding: 10px 14px 10px 18px;
         border-radius: 10px;
         background: var(--gooni-card, #FFFFFF);
         border: 0.5px solid transparent;
-        transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+        transition: border-color 0.15s ease, transform 0.15s ease,
+                    background 0.15s ease, opacity 0.15s ease;
       }
-      .ff-row + .ff-row { margin-top: 4px; }
+      .ff-row + .ff-row { margin-top: 2px; }
       .ff-row:hover { border-color: var(--gooni-border, rgba(0,0,0,0.10)); }
       .ff-row-primary { border-color: rgba(74,222,128,0.45); }
       .ff-row-someday { opacity: 0.55; }
+      .ff-row-dragging { opacity: 0.4; }
       .ff-row-body { min-width: 0; }
       .ff-row-title {
         font-weight: 500; letter-spacing: -0.005em;
         color: var(--gooni-text, #1C1C1E);
+        font-size: 14px;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
       .ff-row-meta {
         color: var(--gooni-muted, #8E8E93);
         font-size: 12px;
       }
-      .ff-row-health {
-        font-size: 12px; color: var(--gooni-muted, #8E8E93);
-        font-variant-numeric: tabular-nums;
-        min-width: 28px; text-align: right;
-      }
       .ff-row-actions {
-        display: flex; gap: 6px; align-items: center;
+        display: flex; gap: 4px; align-items: center;
         opacity: 0; transition: opacity 0.15s;
       }
-      .ff-row:hover .ff-row-actions { opacity: 1; }
-
-      .ff-pill {
-        font-size: 11px; padding: 3px 8px; border-radius: 999px;
-        border: 0.5px solid var(--gooni-border, rgba(0,0,0,0.10));
-        color: var(--gooni-muted, #6E6E68);
-        background: var(--gooni-card, #FFFFFF);
-        white-space: nowrap;
-      }
-      .ff-pill-quick {
-        background: rgba(0,0,0,0.04);
-        color: var(--gooni-text, #1C1C1E);
-      }
-      .ff-pill-slow {
-        background: rgba(74,222,128,0.10);
-        color: var(--gooni-text, #1C1C1E);
-        border-color: rgba(74,222,128,0.30);
-      }
+      .ff-row:hover .ff-row-actions,
+      .ff-row-primary .ff-row-actions { opacity: 1; }
 
       .ff-icon-btn {
         background: none; border: none; cursor: pointer;
@@ -1119,6 +1264,30 @@ function FocusFlowStyles() {
         background: rgba(0,0,0,0.05);
         color: var(--gooni-text, #1C1C1E);
       }
+      /* Star toggles primary. Outlined when not primary, filled green when
+         primary. Always visible on the primary row (parent shows actions
+         even without hover). */
+      .ff-star-btn {
+        background: none; border: none; cursor: pointer;
+        color: var(--gooni-muted, #8E8E93);
+        padding: 2px 6px; border-radius: 6px;
+        display: inline-flex; align-items: center; justify-content: center;
+        transition: color 0.12s ease, background 0.12s ease;
+      }
+      .ff-star-btn:hover { background: rgba(0,0,0,0.05); }
+      .ff-star-active { color: #15803D; }
+      .ff-star-active:hover { color: #15803D; }
+
+      /* Drop-position indicator — a single thin line at the row's edge,
+         not a separate spacer. Cleaner than the standalone "DropSlot"
+         approach since the layout doesn't shift while dragging. */
+      .ff-drop-line {
+        position: absolute; left: 6px; right: 6px; height: 2px;
+        background: #4ade80; border-radius: 1px;
+        pointer-events: none;
+      }
+      .ff-drop-line-top    { top: -1px; }
+      .ff-drop-line-bottom { bottom: -1px; }
 
       .ff-focus-pill {
         display: inline-flex; align-items: center; gap: 4px;
@@ -1136,30 +1305,47 @@ function FocusFlowStyles() {
         display: inline-block;
       }
 
+      /* Health pip + check button — single button. Default = colored
+         dot or gray "?" glyph. On row hover the dot scales out and a
+         green stroke draws a checkmark over it. No big black blob. */
       .ff-check-dot {
         appearance: none; background: none; border: none; padding: 0;
-        width: 18px; height: 18px; border-radius: 50%;
+        width: 16px; height: 16px; border-radius: 50%;
         display: inline-flex; align-items: center; justify-content: center;
         position: relative; cursor: pointer;
+        transition: background 0.18s ease;
       }
-      .ff-check-dot .ff-check-glyph {
-        position: absolute; inset: 0;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 11px; color: #FFF; font-weight: 700;
-        opacity: 0; transition: opacity 0.12s ease; z-index: 1;
+      .ff-check-dot .ff-dot,
+      .ff-check-dot .ff-health-unknown {
+        transition: transform 0.18s ease, opacity 0.18s ease;
       }
-      .ff-row:hover .ff-check-dot::before {
-        content: ""; position: absolute; inset: -2px; border-radius: 50%;
-        background: #1C1C1E; opacity: 0.92;
+      .ff-check-svg {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        color: #15803D;
+        opacity: 0;
+        transform: scale(0.6);
+        transition: opacity 0.18s ease, transform 0.18s ease;
+        pointer-events: none;
       }
-      .ff-row:hover .ff-check-dot .ff-dot { opacity: 0; }
-      .ff-row:hover .ff-check-dot .ff-check-glyph { opacity: 1; }
-      .ff-check-dot.ff-check-checked::before {
-        content: ""; position: absolute; inset: -2px; border-radius: 50%;
-        background: #4ade80;
+      .ff-row:hover .ff-check-dot {
+        background: rgba(74,222,128,0.18);
+        outline: 1.5px solid rgba(74,222,128,0.55);
       }
-      .ff-check-dot.ff-check-checked .ff-dot { opacity: 0; }
-      .ff-check-dot.ff-check-checked .ff-check-glyph { opacity: 1; }
+      .ff-row:hover .ff-check-dot .ff-dot,
+      .ff-row:hover .ff-check-dot .ff-health-unknown {
+        transform: scale(0.4);
+        opacity: 0;
+      }
+      .ff-row:hover .ff-check-svg {
+        opacity: 1; transform: scale(1);
+      }
+      .ff-check-dot.ff-check-checked {
+        background: rgba(74,222,128,0.30);
+        outline: 1.5px solid rgba(74,222,128,0.70);
+      }
+      .ff-check-dot.ff-check-checked .ff-dot,
+      .ff-check-dot.ff-check-checked .ff-health-unknown { opacity: 0; }
+      .ff-check-dot.ff-check-checked .ff-check-svg { opacity: 1; transform: scale(1); }
 
       .ff-row-new { animation: ff-row-enter 0.5s ease both; }
       @keyframes ff-row-enter {
@@ -1180,21 +1366,37 @@ function FocusFlowStyles() {
         }
       }
 
-      .ff-timeline {
-        position: absolute; left: 18px; right: 14px; top: calc(100% + 6px);
-        background: var(--gooni-card, #FFFFFF);
-        border: 0.5px solid var(--gooni-border, rgba(0,0,0,0.10));
-        border-radius: 10px; padding: 12px 14px; z-index: 5;
-        box-shadow: 0 10px 28px -16px rgba(0,0,0,0.25);
+      /* "Health unknown" question-mark glyph — same footprint as the
+         colored dot so layout doesn't jump as scores roll in. */
+      .ff-health-unknown {
+        width: 16px; height: 16px; border-radius: 50%;
+        display: inline-flex; align-items: center; justify-content: center;
+        color: var(--gooni-muted, #8E8E93);
+        background: rgba(0,0,0,0.05);
       }
-      .ff-timeline-h {
-        margin: 0 0 8px; font-size: 11px; letter-spacing: 0.08em;
-        text-transform: uppercase; color: var(--gooni-muted, #8E8E93);
-        font-weight: 600;
+
+      /* Undo toast — bottom-center, dark pill. Owner-only. */
+      .ff-undo-toast {
+        position: fixed;
+        bottom: 24px; left: 50%; transform: translateX(-50%);
+        display: flex; align-items: center; gap: 14px;
+        background: #1C1C1E; color: #FFF;
+        padding: 10px 14px 10px 16px;
+        border-radius: 999px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+        font-size: 13.5px;
+        z-index: 1300;
       }
-      .ff-timeline-empty {
-        color: var(--gooni-muted, #8E8E93); font-size: 12px;
+      .ff-undo-btn {
+        background: transparent;
+        border: 1px solid rgba(255,255,255,0.30);
+        color: #FFF;
+        border-radius: 999px;
+        padding: 4px 12px;
+        font-size: 12px; font-weight: 600;
+        cursor: pointer; font-family: inherit;
       }
+      .ff-undo-btn:hover { background: rgba(255,255,255,0.08); }
 
       .ff-backdrop {
         position: fixed; inset: 0;
