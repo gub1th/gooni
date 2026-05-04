@@ -116,10 +116,22 @@ function NotesPage() {
       // editor's lookup `notes[spaceId].find(n => n.id === activeNoteId)`
       // returns undefined until loadNotes resolves — leaving Daniel staring
       // at an empty "All Notes" screen for the duration of that fetch.
+      //
+      // If the note is already in the list (the common click-from-rail
+      // case), update it in place to preserve sort position. Prepending it
+      // unconditionally caused a visible "jump to top, snap back" on every
+      // click as loadNotes restored the original order milliseconds later.
       useNotesContentStore.setState((s) => {
         const existing = s.notes[targetSpace] ?? [];
-        const deduped = existing.filter((n) => n.id !== note.id);
-        return { notes: { ...s.notes, [targetSpace]: [note, ...deduped] } };
+        const idx = existing.findIndex((n) => n.id === note.id);
+        if (idx >= 0) {
+          const next = existing.slice();
+          next[idx] = note;
+          return { notes: { ...s.notes, [targetSpace]: next } };
+        }
+        // Not in this list yet — prepend so the editor finds it immediately;
+        // loadNotes will reconcile order on its next pass.
+        return { notes: { ...s.notes, [targetSpace]: [note, ...existing] } };
       });
       selectNote(note.id);
       loadNotes(targetSpace);
