@@ -3064,16 +3064,17 @@ def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
     }
 
 
-# Whoop webhook signature: base64(HMAC-SHA256(secret, timestamp + body)).
-# Both `X-WHOOP-Signature` and `X-WHOOP-Signature-Timestamp` headers must
-# be present. We accept clock-skew up to 5 minutes against the server time
-# so a stale-replayed event still verifies, but anything older is rejected
-# as a replay-attack guard.
+# Whoop webhook signature: base64(HMAC-SHA256(timestamp + body, client_secret)).
+# Whoop reuses the OAuth client_secret for webhook signing — no separate
+# webhook secret in their model. Both `X-WHOOP-Signature` and
+# `X-WHOOP-Signature-Timestamp` headers must be present. We accept clock
+# skew up to 5 minutes against the server time so a stale-replayed event
+# still verifies, but anything older is rejected as a replay-attack guard.
 def _verify_whoop_signature(raw_body: bytes, signature: str | None, timestamp: str | None) -> bool:
-    secret = os.getenv("WHOOP_WEBHOOK_SECRET")
+    secret = os.getenv("WHOOP_CLIENT_SECRET")
     if not secret:
         # Defaults to "open in dev" so webhook can be exercised locally
-        # without setting the secret. Production should set the env var.
+        # without setting the secret. Production must set WHOOP_CLIENT_SECRET.
         return True
     if not signature or not timestamp:
         return False
