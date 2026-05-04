@@ -137,7 +137,7 @@ export function BacklogBoard({ listId, onOpenSourceNote }: BacklogBoardProps) {
           Backlog board
         </div>
         <div style={{ fontSize: 12, color: "var(--gooni-muted, #8E8E93)", marginTop: 2 }}>
-          Drag the grip to move items. Click anywhere else on a card to open details.
+          Drag a card to move or reorder. Click to open details.
         </div>
       </div>
 
@@ -284,19 +284,19 @@ function BacklogCard({
   onOpenPr: () => void;
   onOpenSourceNote?: (noteId: number) => void;
 }) {
-  const [hoverHandle, setHoverHandle] = useState(false);
   return (
     <div
-      // The whole card is the drag source — but only triggers when the user
-      // mouses-down on the GripVertical (draggable=true is set there). React
-      // bubbles dragstart up, so we capture it here and the handle's
-      // mousedown gates whether the browser will start a drag.
+      // Whole card is the drag source. Browser naturally suppresses the
+      // click event when a drag occurs, so click → modal and drag →
+      // reorder/move are exclusive without manual gating. Matches the
+      // pattern used by the existing ListView + PrimaryFocusCard.
+      draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onCardDragOver}
       onClick={(e) => {
-        // Defensive: if the click landed on a button inside the card (PR
-        // link, source note link, grip), don't open the modal.
+        // Defensive: clicks on inner action elements (PR pill, source note
+        // link) should not open the modal.
         if ((e.target as HTMLElement).closest("[data-card-action]")) return;
         onClick();
       }}
@@ -306,7 +306,7 @@ function BacklogCard({
         border: "1px solid rgba(0,0,0,0.08)",
         borderRadius: 10,
         padding: "10px 12px 10px 32px",
-        cursor: "pointer",
+        cursor: dragging ? "grabbing" : "pointer",
         opacity: dragging ? 0.5 : 1,
         transition: "opacity 0.12s, border-color 0.12s, box-shadow 0.12s",
         userSelect: "none",
@@ -321,14 +321,12 @@ function BacklogCard({
         (e.currentTarget as HTMLElement).style.boxShadow = "none";
       }}
     >
-      {/* Drag handle. Only this element sets draggable=true so a click on
-          the rest of the card doesn't accidentally pick the card up. */}
+      {/* Drag-affordance grip — purely visual now. Whole card is the
+          drag source (see `draggable` on the wrapper) which matches the
+          existing ListView/PrimaryFocusCard behavior. The grip is a hint
+          to the user that the card can be dragged. */}
       <span
-        data-card-action
-        draggable
-        onMouseEnter={() => setHoverHandle(true)}
-        onMouseLeave={() => setHoverHandle(false)}
-        title="Drag to reorder / move"
+        aria-hidden
         style={{
           position: "absolute",
           left: 8,
@@ -338,11 +336,8 @@ function BacklogCard({
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          color: hoverHandle ? "#3C3C43" : "#B0B0B5",
-          cursor: "grab",
-          borderRadius: 4,
-          transition: "color 0.12s, background 0.12s",
-          background: hoverHandle ? "rgba(0,0,0,0.04)" : "transparent",
+          color: "#B0B0B5",
+          pointerEvents: "none",
         }}
       >
         <GripVertical size={14} strokeWidth={1.7} />
