@@ -261,16 +261,24 @@ class ListItem(Base):
     # The "primary focus" surfaced front-and-center on the dashboard. Service
     # enforces uniqueness.
     is_primary = Column(Boolean, default=False, nullable=False)
-    # Focus engagement state — separate from `committed` so the UI can
-    # distinguish "I'm pursuing this but stalled" (pending) from "actively
-    # making progress" (committed) without drifting onto the stale auto-flag.
-    # NULL on legacy rows; frontend falls back to deriving from `committed`.
-    # Values: 'committed' | 'pending' | 'someday'.
+    # Focus engagement state. Values: 'committed' | 'someday'.
+    # 'pending' was removed in the focus-flow redesign — pre-existing
+    # 'pending' rows are migrated to 'committed' on startup.
     status = Column(String, nullable=True)
-    # Time horizon — purely informational, drives a small badge on the
-    # focuses dashboard. NULL = unspecified. Values: 'long_term' | 'sprint'
-    # | 'medium'.
+    # Pace bucket — drives the Quick / Slow burn split on the focuses
+    # dashboard. Values: 'quick' | 'slow'. Legacy 'long_term' / 'medium'
+    # → 'slow'; 'sprint' → 'quick' (migration in main.py).
     scale = Column(String, nullable=True)
+    # Health 0..100 + reporter confidence 0..100. Both NULL by default —
+    # only populated once a focus accumulates activity (chat / notes /
+    # MCP) that lets Gooni score it. Frontend renders the dot in a neutral
+    # state when either is null OR confidence < 35.
+    health = Column(Integer, nullable=True)
+    confidence = Column(Integer, nullable=True)
+    # Wall-clock window for slow-burn focuses. Quick focuses default to
+    # (now, midnight tonight); they read out of these same fields.
+    start_at = Column(DateTime, nullable=True)
+    end_at = Column(DateTime, nullable=True)
     done = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)

@@ -193,6 +193,11 @@ def _run_column_migrations(engine):
             ("list_items", "is_primary", "INTEGER"),
             ("list_items", "status", "TEXT"),
             ("list_items", "scale", "TEXT"),
+            # Focus-flow redesign — health gauge + window
+            ("list_items", "health", "INTEGER"),
+            ("list_items", "confidence", "INTEGER"),
+            ("list_items", "start_at", "DATETIME"),
+            ("list_items", "end_at", "DATETIME"),
             ("list_items", "embedding", "TEXT"),
             ("lists", "kind", "TEXT"),
         ]:
@@ -243,6 +248,18 @@ def _run_column_migrations(engine):
             conn.execute(text(
                 "UPDATE list_items SET status = 'someday' "
                 "WHERE status IS NULL AND committed = 0"
+            ))
+            # Focus-flow redesign — collapse 'pending' into 'committed' (the
+            # UI no longer distinguishes pursuing-but-stalled from active),
+            # and remap scale buckets to 'quick' / 'slow'.
+            conn.execute(text(
+                "UPDATE list_items SET status = 'committed' WHERE status = 'pending'"
+            ))
+            conn.execute(text(
+                "UPDATE list_items SET scale = 'quick' WHERE scale = 'sprint'"
+            ))
+            conn.execute(text(
+                "UPDATE list_items SET scale = 'slow' WHERE scale IN ('long_term', 'medium')"
             ))
         if "lists" in existing_tables:
             conn.execute(text("UPDATE lists SET kind = 'tasks' WHERE kind IS NULL"))
@@ -1131,8 +1148,35 @@ def _parse_optional_due(raw):
         raise HTTPException(status_code=400, detail="invalid due_date")
 
 
-_VALID_STATUS = {"committed", "pending", "someday"}
-_VALID_SCALE = {"long_term", "sprint", "medium"}
+_VALID_STATUS = {"committed", "someday"}
+_VALID_SCALE = {"quick", "slow"}
+
+
+def _parse_optional_dt(raw):
+    """ISO datetime parser used for start_at / end_at — same shape as
+    _parse_optional_due but explicit so the validation error stays scoped."""
+    from datetime import datetime as _dt
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail="invalid datetime")
+    cleaned = raw[:-1] if raw.endswith("Z") else raw
+    try:
+        return _dt.fromisoformat(cleaned)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid datetime")
+
+
+def _validate_health(raw):
+    if raw is None or raw == "":
+        return None
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="health must be an integer 0..100")
+    if v < 0 or v > 100:
+        raise HTTPException(status_code=400, detail="health must be 0..100")
+    return v
 
 
 def _validate_status(raw):
@@ -1179,6 +1223,10 @@ def items_create(body: dict, db: Session = Depends(get_db)):
     status = _validate_status(body.get("status"))
     scale = _validate_scale(body.get("scale"))
     is_primary = bool(body.get("is_primary", False))
+    health = _validate_health(body.get("health"))
+    confidence = _validate_health(body.get("confidence"))  # same 0..100 shape
+    start_at = _parse_optional_dt(body.get("start_at"))
+    end_at = _parse_optional_dt(body.get("end_at"))
     try:
         item = item_service.create(
             db,
@@ -1190,6 +1238,10 @@ def items_create(body: dict, db: Session = Depends(get_db)):
             source_note_id=body.get("source_note_id"),
             status=status,
             scale=scale,
+            health=health,
+            confidence=confidence,
+            start_at=start_at,
+            end_at=end_at,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1232,6 +1284,14 @@ def items_update(item_id: int, body: dict, db: Session = Depends(get_db)):
         patch["status"] = _validate_status(body["status"])
     if "scale" in body:
         patch["scale"] = _validate_scale(body["scale"])
+    if "health" in body:
+        patch["health"] = _validate_health(body["health"])
+    if "confidence" in body:
+        patch["confidence"] = _validate_health(body["confidence"])
+    if "start_at" in body:
+        patch["start_at"] = _parse_optional_dt(body["start_at"])
+    if "end_at" in body:
+        patch["end_at"] = _parse_optional_dt(body["end_at"])
     item = item_service.update(db, item_id, **patch)
     if not item:
         raise HTTPException(status_code=404, detail="item not found")
@@ -1251,7 +1311,7 @@ def items_suggest_focus(db: Session = Depends(get_db)):
     titles. Frontend pre-fills the inline add form with the suggestion. Pure
     suggestion — caller decides whether to accept it.
 
-    Returns: { text: str, endgoal?: str, scale?: 'long_term'|'sprint'|'medium' }
+    Returns: { text: str, endgoal?: str, scale?: 'quick'|'slow' }
     """
     tree = item_service.list_tree(db)
     active_focuses = [f for f in tree["focuses"] if not f["done"]]
@@ -1273,9 +1333,9 @@ def items_suggest_focus(db: Session = Depends(get_db)):
         "recent note activity. Don't repeat anything from the existing list. "
         "If nothing obvious, return text='' and the rest empty.\n\n"
         "Output strict JSON: {\"text\": str, \"endgoal\": str | null, "
-        "\"scale\": \"long_term\" | \"sprint\" | \"medium\" | null}. "
-        "scale heuristic: long_term = months+, medium = a few weeks, "
-        "sprint = days. text is a short imperative phrase (5-7 words max). "
+        "\"scale\": \"quick\" | \"slow\" | null}. "
+        "scale heuristic: quick = today / one-off, slow = multi-day or "
+        "longer. text is a short imperative phrase (5-7 words max). "
         "endgoal is one sentence describing what 'done' looks like.\n\n"
         f"Existing focuses:\n{chr(10).join(focus_lines) or '  (none)'}\n\n"
         f"Recent note titles:\n{chr(10).join(f'- {t}' for t in note_titles) or '  (none)'}"
@@ -1328,6 +1388,12 @@ def _serialize_item(it: ListItem) -> dict:
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
         "sort_order": it.sort_order,
         "source_note_id": it.source_note_id,
+        "status": it.status,
+        "scale": it.scale,
+        "health": it.health,
+        "confidence": it.confidence,
+        "start_at": it.start_at.isoformat() if it.start_at else None,
+        "end_at": it.end_at.isoformat() if it.end_at else None,
         "created_at": it.created_at.isoformat() if it.created_at else None,
         "updated_at": it.updated_at.isoformat() if it.updated_at else None,
     }
