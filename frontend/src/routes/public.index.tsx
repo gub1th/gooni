@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import LinkExtension from "@tiptap/extension-link";
-import { fetchPublicNotes, fetchPublicProfile, fetchPublicVisitCount, updatePublicProfile, getStoredToken, type PublicNote } from "../services/api";
+import { fetchPublicNotes, fetchPublicProfile, fetchPublicVisitCount, updatePublicProfile, getStoredToken, patchNote, type PublicNote } from "../services/api";
+import { Globe } from "lucide-react";
 import { displayTitle } from "../utils/notePreview";
 import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
@@ -71,6 +72,14 @@ function PublicPage() {
   const isOwner = getStoredToken() !== null;
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Hover state for the per-row "remove from public" affordance — only the
+  // owner ever sees the icon, anonymous visitors get the regular row.
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
+  // Undo state: when the owner unpublishes a note, we keep the row data
+  // around so a one-click "Undo" within the toast window restores it.
+  // null = no toast visible.
+  const [undo, setUndo] = useState<{ note: PublicNote } | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const bioEditor = useEditor({
     extensions: [
@@ -152,6 +161,51 @@ function PublicPage() {
         marks: [{ type: "link", attrs: { href } }],
       }).run();
     }
+  }
+
+  // ── Unpublish + undo flow ───────────────────────────────────────────
+  // Owner clicks the per-row globe → optimistic remove from `notes`,
+  // PATCH is_public=false to the backend, show a toast with an "Undo"
+  // action for ~6s. Undo PATCHes is_public=true and re-inserts the row
+  // at its original position.
+  function handleUnpublish(note: PublicNote) {
+    const idx = notes.findIndex((n) => n.id === note.id);
+    setNotes((prev) => prev.filter((n) => n.id !== note.id));
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndo({ note });
+    patchNote(note.id, { is_public: false }).catch((e) => {
+      // Revert on failure so the UI doesn't lie about server state.
+      console.error("[public] unpublish failed", e);
+      setNotes((prev) => {
+        if (prev.some((n) => n.id === note.id)) return prev;
+        const next = prev.slice();
+        next.splice(Math.max(0, idx), 0, note);
+        return next;
+      });
+      setUndo(null);
+    });
+    undoTimerRef.current = setTimeout(() => setUndo(null), 6000);
+  }
+
+  function handleUndoUnpublish() {
+    if (!undo) return;
+    const { note } = undo;
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndo(null);
+    setNotes((prev) => {
+      if (prev.some((n) => n.id === note.id)) return prev;
+      // Re-insert sorted by updated_at desc — same order the API returns.
+      const next = [...prev, note].sort((a, b) => {
+        const ta = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const tb = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        return tb - ta;
+      });
+      return next;
+    });
+    patchNote(note.id, { is_public: true }).catch((e) => {
+      console.error("[public] undo unpublish failed", e);
+      setNotes((prev) => prev.filter((n) => n.id !== note.id));
+    });
   }
 
   // Treat legacy plain-text bios as text; new HTML bios render rich.
@@ -326,9 +380,11 @@ function PublicPage() {
             {displayed.map((note) => (
               <li
                 key={note.id}
+                onMouseEnter={() => setHoveredId(note.id)}
+                onMouseLeave={() => setHoveredId((cur) => (cur === note.id ? null : cur))}
                 style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, padding: "13px 0", borderBottom: "1px solid rgba(0,0,0,0.07)" }}
               >
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <Link
                     to="/public/$noteId"
                     params={{ noteId: String(note.id) }}
@@ -342,11 +398,51 @@ function PublicPage() {
                     {formatDate(note.updated_at)} · {note.read_time_minutes} min read
                   </span>
                 </div>
-                {note.space_name && (
-                  <span style={{ flexShrink: 0, fontSize: 12, color: "#666", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12, padding: "3px 9px" }}>
-                    {note.space_name}
-                  </span>
-                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  {/* Owner-only: per-row globe → unpublish. Visible on hover
+                      and (for keyboard users) when the row is focused. The
+                      icon is also keyboard-reachable since it's a button. */}
+                  {isOwner && (
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleUnpublish(note);
+                      }}
+                      title="Remove from public"
+                      aria-label={`Remove "${displayTitle({ title: note.title, content: note.excerpt })}" from public`}
+                      style={{
+                        background: "transparent",
+                        border: "1px solid rgba(0,0,0,0.10)",
+                        borderRadius: 999,
+                        width: 26, height: 26,
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        color: "#444",
+                        cursor: "pointer",
+                        opacity: hoveredId === note.id ? 1 : 0,
+                        transition: "opacity 0.15s ease, background 0.15s ease, color 0.15s ease",
+                      }}
+                      onMouseEnter={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = "rgba(220,38,38,0.08)";
+                        el.style.color = "#B91C1C";
+                      }}
+                      onMouseLeave={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = "transparent";
+                        el.style.color = "#444";
+                      }}
+                      onFocus={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
+                    >
+                      <Globe size={13} strokeWidth={1.8} />
+                    </button>
+                  )}
+                  {note.space_name && (
+                    <span style={{ fontSize: 12, color: "#666", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12, padding: "3px 9px" }}>
+                      {note.space_name}
+                    </span>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
@@ -359,6 +455,49 @@ function PublicPage() {
       />
       <GooniMascot dashboardRef={mascotBoundsRef} />
       <PublicChatLauncher />
+
+      {/* Undo toast for unpublish — bottom-center, owner-only. Auto-
+          dismisses after 6s; the button restores the row + its
+          public-state via patchNote. */}
+      {undo && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            background: "#1C1C1E",
+            color: "#FFF",
+            padding: "10px 14px 10px 16px",
+            borderRadius: 999,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+            fontSize: 13.5,
+            fontFamily: FONT,
+            zIndex: 1300,
+          }}
+        >
+          <span>Removed from public — "{displayTitle({ title: undo.note.title, content: undo.note.excerpt })}"</span>
+          <button
+            onClick={handleUndoUnpublish}
+            style={{
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.30)",
+              color: "#FFF",
+              borderRadius: 999,
+              padding: "4px 12px",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: FONT,
+            }}
+          >Undo</button>
+        </div>
+      )}
     </div>
   );
 }

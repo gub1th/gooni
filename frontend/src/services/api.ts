@@ -501,8 +501,11 @@ export async function fetchPublicVisitCount(): Promise<{ unique_visitors: number
 // focus; a leaf item renders as a todo; anything in between renders as a
 // checklist node.
 
-export type FocusStatus = "committed" | "pending" | "someday";
-export type FocusScale = "long_term" | "sprint" | "medium";
+// Status: 'pending' was dropped in the focus-flow redesign — every focus is
+// either committed or someday now.
+export type FocusStatus = "committed" | "someday";
+// Pace bucket — Quick (one-off, today) vs Slow burn (multi-day).
+export type FocusScale = "quick" | "slow";
 
 export interface ApiItem {
   id: number;
@@ -515,11 +518,18 @@ export interface ApiItem {
   actionable: boolean;
   is_primary: boolean;
   done: boolean;
-  // Engagement state — distinct from `committed` so "pending" is user-set,
-  // not just auto-derived from staleness. NULL on legacy rows; UI falls
-  // back to deriving from `committed`.
+  // Engagement: 'committed' = active focus, 'someday' = parked (dimmed in list).
   status: FocusStatus | null;
   scale: FocusScale | null;
+  // Health gauge 0..100. NULL until Gooni has activity to score it.
+  health: number | null;
+  // Reporter confidence in the health score, 0..100. Renders neutral when
+  // either field is null OR confidence < 35.
+  confidence: number | null;
+  // Wall-clock window for the focus. Quick focuses default to (now → midnight
+  // tonight) on create; slow burn focuses pick their own.
+  start_at: string | null;
+  end_at: string | null;
   due_date: string | null;
   completed_at: string | null;
   sort_order: number;
@@ -565,6 +575,10 @@ export async function createItem(body: {
   status?: FocusStatus | null;
   scale?: FocusScale | null;
   is_primary?: boolean;
+  health?: number | null;
+  confidence?: number | null;
+  start_at?: string | null;
+  end_at?: string | null;
 }): Promise<ApiItem> {
   const res = await apiFetch(`${BASE}/items`, {
     method: "POST",
@@ -590,6 +604,10 @@ export async function updateItem(
     parent_id: number | null;
     status: FocusStatus | null;
     scale: FocusScale | null;
+    health: number | null;
+    confidence: number | null;
+    start_at: string | null;
+    end_at: string | null;
   }>,
 ): Promise<ApiItem> {
   const res = await apiFetch(`${BASE}/items/${id}`, {

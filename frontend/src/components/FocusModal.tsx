@@ -238,7 +238,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
           <div>
             <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Status</div>
             <div style={{ display: "inline-flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
-              {(["committed", "pending", "someday"] as FocusStatus[]).map((s) => (
+              {(["committed", "someday"] as FocusStatus[]).map((s) => (
                 <button
                   key={s}
                   onClick={() => setStatus(s)}
@@ -264,9 +264,8 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
               }}
             >
               <option value="">— unspecified —</option>
-              <option value="long_term">long-term</option>
-              <option value="medium">medium</option>
-              <option value="sprint">sprint</option>
+              <option value="quick">quick</option>
+              <option value="slow">slow burn</option>
             </select>
           </div>
         </div>
