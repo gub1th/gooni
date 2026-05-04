@@ -209,6 +209,14 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
   const [popoverAnchor, setPopoverAnchor] = useState({ top: 0, left: 208 });
   const [popoverName, setPopoverName] = useState("");
   const [popoverEmoji, setPopoverEmoji] = useState("");
+  // Inline edit state for spaces — Daniel wanted Apple-Notes-style rename/
+  // emoji edit directly in the row, no modal. The popover above stays for
+  // CREATE only (create-from-row would feel out of place); edits route here.
+  const [inlineEditId, setInlineEditId] = useState<number | null>(null);
+  const [inlineEditName, setInlineEditName] = useState("");
+  const [inlineEditEmoji, setInlineEditEmoji] = useState<string>("");
+  const [inlinePaletteOpen, setInlinePaletteOpen] = useState(false);
+  const inlineNameRef = useRef<HTMLInputElement>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const pinnedVersion = usePinnedVersionStore((s) => s.version);
@@ -283,14 +291,28 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
     onSpaceSelect();
   }
 
-  function openEditPopover(e: React.MouseEvent, id: number, name: string, emoji: string | null) {
+  function startInlineEdit(e: React.MouseEvent, id: number, name: string, emoji: string | null) {
     e.stopPropagation();
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setPopoverAnchor({ top: Math.max(rect.top - 8, 8), left: 208 });
-    setPopoverName(name);
-    setPopoverEmoji(emoji ?? "");
+    setInlineEditId(id);
+    setInlineEditName(name);
+    setInlineEditEmoji(emoji ?? "");
+    setInlinePaletteOpen(false);
     setDeleteConfirmId(null);
-    setPopover({ mode: "edit", id });
+    // Focus the input after state commits + the input has been rendered.
+    requestAnimationFrame(() => inlineNameRef.current?.focus());
+  }
+
+  async function commitInlineEdit() {
+    if (inlineEditId == null) return;
+    const trimmed = inlineEditName.trim() || "Untitled";
+    await updateSpace(inlineEditId, { name: trimmed, emoji: inlineEditEmoji || null });
+    setInlineEditId(null);
+    setInlinePaletteOpen(false);
+  }
+
+  function cancelInlineEdit() {
+    setInlineEditId(null);
+    setInlinePaletteOpen(false);
   }
 
   function openCreatePopover(e: React.MouseEvent) {
@@ -532,28 +554,122 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
                   onMouseLeave={(e) => { if (!isSelected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".space-action").forEach(b => b.style.opacity = "0"); setDeleteConfirmId(null); }}
                   onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; selectSpace(spaceId); loadNotes(spaceId); onSpaceSelect(); }}
                 >
-                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, flexShrink: 0 }}>
-                    <SpaceIcon emoji={space.emoji} size={14} />
-                  </span>
-                  <span style={{ flex: 1, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {space.name}
-                  </span>
-                  {isDelConfirm ? (
-                    <button className="space-action" onClick={(e) => { e.stopPropagation(); confirmDelete(space.id as number); }}
-                      style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-                      sure?
-                    </button>
+                  {inlineEditId === space.id ? (
+                    <>
+                      {/* Emoji button — toggles inline palette below the row */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setInlinePaletteOpen((o) => !o); }}
+                        title="Pick icon"
+                        style={{
+                          width: 18, height: 18, borderRadius: 4,
+                          border: inlinePaletteOpen ? "1px solid rgba(0,0,0,0.2)" : "1px solid transparent",
+                          background: inlinePaletteOpen ? "rgba(0,0,0,0.04)" : "transparent",
+                          padding: 0, flexShrink: 0,
+                          display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <SpaceIcon emoji={inlineEditEmoji || null} size={12} color="#475569" />
+                      </button>
+                      <input
+                        ref={inlineNameRef}
+                        value={inlineEditName}
+                        onChange={(e) => setInlineEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); void commitInlineEdit(); }
+                          if (e.key === "Escape") { e.preventDefault(); cancelInlineEdit(); }
+                        }}
+                        onBlur={(e) => {
+                          // Don't auto-save if focus is moving to the emoji palette below.
+                          const next = e.relatedTarget as HTMLElement | null;
+                          if (next?.closest?.("[data-inline-emoji-palette]")) return;
+                          void commitInlineEdit();
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        placeholder="Space name"
+                        style={{
+                          flex: 1, fontSize: 13, outline: "none", border: "none",
+                          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                          fontWeight: 500, color: "var(--gooni-text, #1C1C1E)",
+                          background: "rgba(0,0,0,0.04)",
+                          borderRadius: 4, padding: "2px 6px",
+                          minWidth: 0,
+                        }}
+                      />
+                    </>
                   ) : (
                     <>
-                      <button className="space-action" onClick={(e) => openEditPopover(e, space.id as number, space.name, space.emoji)}
-                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Rename">✎</button>
-                      <button className="space-action" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(space.id as number); }}
-                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Delete">×</button>
+                      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, flexShrink: 0 }}>
+                        <SpaceIcon emoji={space.emoji} size={14} />
+                      </span>
+                      <span style={{ flex: 1, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {space.name}
+                      </span>
+                      {isDelConfirm ? (
+                        <button className="space-action" onClick={(e) => { e.stopPropagation(); confirmDelete(space.id as number); }}
+                          style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+                          sure?
+                        </button>
+                      ) : (
+                        <>
+                          <button className="space-action" onClick={(e) => startInlineEdit(e, space.id as number, space.name, space.emoji)}
+                            style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Rename">✎</button>
+                          <button className="space-action" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(space.id as number); }}
+                            style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 11, padding: "0 2px", flexShrink: 0 }} title="Delete">×</button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
               );
             })}
+            {/* Inline emoji palette — anchored to whichever space is being
+                edited. Sits in the spaces section flow rather than as a
+                fixed overlay so it pushes other rows down naturally. */}
+            {inlineEditId != null && inlinePaletteOpen && (
+              <div
+                data-inline-emoji-palette
+                onMouseDown={(e) => e.preventDefault()}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(6, 1fr)",
+                  gap: 2,
+                  padding: "6px 8px 8px 30px",
+                }}
+              >
+                {SPACE_ICON_OPTIONS.map(({ name, Icon }) => {
+                  const value = lucideIconValue(name);
+                  const selected = inlineEditEmoji === value;
+                  return (
+                    <button
+                      key={name}
+                      onMouseDown={(e) => {
+                        // Prevent the input's onBlur from firing (which would
+                        // commit + close edit mode before our click lands).
+                        e.preventDefault();
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setInlineEditEmoji(value);
+                        setInlinePaletteOpen(false);
+                        inlineNameRef.current?.focus();
+                      }}
+                      title={name}
+                      style={{
+                        background: selected ? "rgba(15,23,42,0.08)" : "transparent",
+                        border: "none", borderRadius: 6, cursor: "pointer",
+                        height: 24, padding: 0,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        color: selected ? "#0F172A" : "#475569",
+                        transition: "background 0.1s, color 0.1s",
+                      }}
+                    >
+                      <Icon size={13} strokeWidth={1.8} />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Lists — unified todo / backlog / generic. Independent of Spaces. */}
