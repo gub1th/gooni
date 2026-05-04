@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { fetchPublicNote, type PublicNoteDetail } from "../services/api";
+import { useQuery } from "@tanstack/react-query";
 import { sanitizeHtml } from "../utils/sanitize";
 import { displayTitle } from "../utils/notePreview";
+import { NoteLoadingState } from "../components/NoteLoadingState";
+import { publicNoteQueryOptions } from "../utils/publicQueries";
 
 export const Route = createFileRoute("/public/$noteId")({
   component: PublicNotePage,
@@ -36,14 +37,9 @@ function showUpdated(createdAt: string, updatedAt: string): boolean {
 
 function PublicNotePage() {
   const { noteId } = Route.useParams();
-  const [note, setNote] = useState<PublicNoteDetail | null>(null);
-  const [notFound, setNotFound] = useState(false);
-
-  useEffect(() => {
-    fetchPublicNote(Number(noteId))
-      .then(setNote)
-      .catch(() => setNotFound(true));
-  }, [noteId]);
+  const id = Number(noteId);
+  const { data: note, isLoading, isError } = useQuery(publicNoteQueryOptions(id));
+  const notFound = isError;
 
   return (
     <div
@@ -67,8 +63,8 @@ function PublicNotePage() {
 
         {notFound ? (
           <p style={{ color: "#aaa", fontSize: 15 }}>Note not found or not public.</p>
-        ) : !note ? (
-          <p style={{ color: "#ccc", fontSize: 15 }}>Loading…</p>
+        ) : isLoading || !note ? (
+          <NoteLoadingState />
         ) : (
           <>
             {note.space_name && (
