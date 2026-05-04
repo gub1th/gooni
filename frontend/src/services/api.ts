@@ -320,6 +320,48 @@ export async function disconnectGithub(): Promise<void> {
   if (!res.ok) throw new Error("Failed to disconnect GitHub");
 }
 
+// ── Whoop integration ──────────────────────────────────────────────────────
+
+export interface WhoopStatus {
+  configured: boolean;
+  connected: boolean;
+  account_email: string | null;
+}
+export async function fetchWhoopStatus(): Promise<WhoopStatus> {
+  const res = await apiFetch(`${BASE}/auth/whoop/status`);
+  if (!res.ok) throw new Error("Failed to fetch Whoop status");
+  return res.json();
+}
+export async function startWhoopOAuth(): Promise<{ authorize_url: string }> {
+  const res = await apiFetch(`${BASE}/auth/whoop/start`);
+  if (!res.ok) throw new Error("Whoop OAuth not configured on backend");
+  return res.json();
+}
+export async function disconnectWhoop(): Promise<void> {
+  const res = await apiFetch(`${BASE}/auth/whoop`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to disconnect Whoop");
+}
+
+export interface WhoopToday {
+  date: string | null;
+  recovery_score: number | null;
+  hrv_rmssd_ms: number | null;
+  resting_hr: number | null;
+  strain: number | null;
+  sleep_minutes: number | null;
+  sleep_performance_pct: number | null;
+  updated_at: string | null;
+}
+export async function fetchWhoopToday(refresh = false): Promise<WhoopToday> {
+  const url = `${BASE}/whoop/today${refresh ? "?refresh=1" : ""}`;
+  const res = await apiFetch(url);
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Whoop today fetch failed: ${msg || res.status}`);
+  }
+  return res.json();
+}
+
 export interface GithubRepo {
   owner: string;
   name: string;

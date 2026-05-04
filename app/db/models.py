@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -468,6 +469,35 @@ class EvalStepFeedback(Base):
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+
+class WhoopSnapshot(Base):
+    """One row per day. Cached pull from Whoop's `recovery + cycle + sleep`
+    endpoints so the dashboard / daily-nudge surfaces don't hit the Whoop
+    API on every render. Idempotent on `date` — re-fetching just overwrites.
+    """
+
+    __tablename__ = "whoop_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, unique=True, index=True)
+
+    # Recovery (0–100). The headline number Whoop shows in-app.
+    recovery_score = Column(Integer, nullable=True)
+    # Heart rate variability (RMSSD), in milliseconds.
+    hrv_rmssd_ms = Column(Float, nullable=True)
+    # Resting heart rate, beats per minute.
+    resting_hr = Column(Integer, nullable=True)
+
+    # Daily strain (0–21 scale on Whoop).
+    strain = Column(Float, nullable=True)
+
+    # Total sleep in minutes (in-bed time, matches Whoop's `total_in_bed_time`).
+    sleep_minutes = Column(Integer, nullable=True)
+    # Sleep performance percentage (0–100).
+    sleep_performance_pct = Column(Float, nullable=True)
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 
