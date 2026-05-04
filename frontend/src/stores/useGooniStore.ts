@@ -35,8 +35,13 @@ export const useGooniStore = create<GooniState>()(
       setMascotSuppressed: (mascotSuppressed) => set({ mascotSuppressed }),
     }),
     {
-      name: "gooni-v2",
-      partialize: (s) => ({ isOpen: s.isOpen, width: s.width, surface: s.surface }),
+      // v3: dropped `isOpen` from persisted shape. Persisting it meant a
+      // stale "panel open" flag from a prior session could leave the user
+      // with no visible FAB (FAB hides when panel is open) AND no visible
+      // panel (if surface state ever drifted). Keying afresh nukes any
+      // legacy blob so a refresh always boots with the FAB on screen.
+      name: "gooni-v3",
+      partialize: (s) => ({ width: s.width, surface: s.surface }),
     }
   )
 );
