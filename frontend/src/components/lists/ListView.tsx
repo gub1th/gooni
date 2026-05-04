@@ -380,62 +380,18 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                 {list.name}
               </h1>
             )}
-            <span
-              style={{
-                marginLeft: 6,
-                fontSize: 11,
-                color: "#8E8E93",
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                background: "#F2F2F7",
-                padding: "2px 8px",
-                borderRadius: 999,
-              }}
-            >
-              {list.type}
-            </span>
-            <button
-              onClick={() => updateList(list.id, { kind: isTaskList ? "ideas" : "tasks" })}
-              title={isTaskList
-                ? "Switch to ideas list (no checkboxes; done state preserved)"
-                : "Switch to tasks list (checkboxes return)"}
-              style={{
-                marginLeft: 4,
-                fontSize: 11, fontWeight: 700,
-                color: isTaskList ? "#1C1C1E" : "#92400E",
-                background: isTaskList ? "#E5E5EA" : "#FEF3C7",
-                border: "none",
-                padding: "2px 10px",
-                borderRadius: 999,
-                cursor: "pointer",
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                fontFamily: FONT,
-              }}
-            >
-              {isTaskList ? "tasks" : "ideas"}
-            </button>
-            <button
-              onClick={() => setSortMode((m) => (m === "manual" ? "recent" : "manual"))}
-              title={sortMode === "manual"
-                ? "Sort by most recently added"
-                : "Back to manual order (drag to reorder)"}
-              style={{
-                marginLeft: 4,
-                fontSize: 11, fontWeight: 700,
-                color: sortMode === "recent" ? "#1D4ED8" : "#1C1C1E",
-                background: sortMode === "recent" ? "#DBEAFE" : "#E5E5EA",
-                border: "none",
-                padding: "2px 10px",
-                borderRadius: 999,
-                cursor: "pointer",
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                fontFamily: FONT,
-              }}
-            >
-              {sortMode === "recent" ? "recent" : "manual"}
-            </button>
+            {/* Type label + toggles previously rendered as 3 always-visible
+                pills (GENERIC / TASKS / MANUAL). Daniel flagged the visual
+                as ambiguous — the toggles didn't read as interactive. Now
+                folded into a kebab dropdown next to the title; the GENERIC
+                type label is dropped entirely (redundant: sidebar already
+                shows which list this is). */}
+            <ListSettingsMenu
+              isTaskList={isTaskList}
+              sortMode={sortMode}
+              onToggleKind={() => updateList(list.id, { kind: isTaskList ? "ideas" : "tasks" })}
+              onToggleSort={() => setSortMode((m) => (m === "manual" ? "recent" : "manual"))}
+            />
             {canDeleteList && (
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
                 {confirmingListDelete ? (
@@ -1144,5 +1100,132 @@ function DropSlot({
         </>
       )}
     </div>
+  );
+}
+
+// Kebab dropdown holding list-level settings that previously rendered as
+// always-visible pills next to the title. Hidden behind a •••  button so
+// the header reads as "title + actions" instead of "title + cryptic pill
+// row". Each menu row's right-hand chip surfaces the current value so the
+// user can read state at a glance without opening it.
+function ListSettingsMenu({
+  isTaskList,
+  sortMode,
+  onToggleKind,
+  onToggleSort,
+}: {
+  isTaskList: boolean;
+  sortMode: "manual" | "recent";
+  onToggleKind: () => void;
+  onToggleSort: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative", marginLeft: 6 }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="List settings"
+        aria-label="List settings"
+        style={{
+          width: 28, height: 28, borderRadius: 6,
+          border: "none",
+          background: open ? "rgba(0,0,0,0.06)" : "transparent",
+          color: "#6B7280",
+          cursor: "pointer",
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          padding: 0,
+          transition: "background 120ms",
+        }}
+        onMouseEnter={(e) => { if (!open) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+        onMouseLeave={(e) => { if (!open) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="2.5" r="1.2" fill="currentColor" />
+          <circle cx="7" cy="7"   r="1.2" fill="currentColor" />
+          <circle cx="7" cy="11.5" r="1.2" fill="currentColor" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            background: "var(--gooni-card, #FFFFFF)",
+            border: "1px solid rgba(0,0,0,0.08)",
+            borderRadius: 10,
+            boxShadow: "0 12px 32px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06)",
+            minWidth: 220,
+            zIndex: 50,
+            padding: 6,
+            fontFamily: FONT,
+          }}
+        >
+          <MenuRow
+            label="List kind"
+            value={isTaskList ? "Tasks" : "Ideas"}
+            onClick={() => { onToggleKind(); setOpen(false); }}
+            help={isTaskList ? "Items show checkboxes. Click to switch to Ideas (bullet style)." : "Items render as bullets. Click to switch to Tasks (checkboxes)."}
+          />
+          <MenuRow
+            label="Sort"
+            value={sortMode === "manual" ? "Manual (drag)" : "Recent first"}
+            onClick={() => { onToggleSort(); setOpen(false); }}
+            help={sortMode === "manual" ? "Click to sort by most recently added." : "Click to restore manual drag-order."}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuRow({
+  label, value, onClick, help,
+}: { label: string; value: string; onClick: () => void; help?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={help}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        width: "100%", gap: 14,
+        padding: "8px 10px",
+        background: "transparent",
+        border: "none",
+        borderRadius: 6,
+        cursor: "pointer",
+        fontFamily: FONT,
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+    >
+      <span style={{ fontSize: 13, color: "#1C1C1E" }}>{label}</span>
+      <span style={{
+        fontSize: 11.5, color: "#3C3C43",
+        background: "rgba(0,0,0,0.05)",
+        padding: "2px 8px", borderRadius: 999,
+        fontWeight: 500,
+      }}>
+        {value}
+      </span>
+    </button>
   );
 }

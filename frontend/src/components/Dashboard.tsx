@@ -67,8 +67,9 @@ function StatCard({ label, value, children, width }: {
       background: "var(--gooni-card, #fff)",
       border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
       borderRadius: 10, padding: "10px 14px",
-      display: "flex", flexDirection: "column", alignItems: "flex-start",
+      display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "space-between",
       width: width ?? "auto", flexShrink: 0,
+      minHeight: 66,
     }}>
       <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>{label}</div>
       <div style={{
@@ -81,19 +82,6 @@ function StatCard({ label, value, children, width }: {
       {children}
     </div>
   );
-}
-
-// Compact "Nm" / "Nh" / "Nd" relative-time. Used by the claude-activity
-// stat to fit a "last 4m" line under the count.
-function formatRelativeShort(iso: string): string {
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const t = new Date(hasOffset ? iso : iso + "Z").getTime();
-  if (!Number.isFinite(t)) return "—";
-  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (sec < 60) return "just now";
-  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
-  return `${Math.floor(sec / 86400)}d`;
 }
 
 function formatNoteDate(iso: string | null): string {
@@ -121,7 +109,7 @@ type InkState = {
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 // The dashboard itself:
 
-export function Dashboard({ onOpenNote, onPlanNote, onOpenStats }: {
+export function Dashboard({ onOpenNote, onPlanNote }: {
   onOpenNote: () => void;
   onPlanNote?: (noteId: number) => void;
   onOpenStats?: () => void;
@@ -356,51 +344,6 @@ export function Dashboard({ onOpenNote, onPlanNote, onOpenStats }: {
                   ))}
                 </div>
               </StatCard>
-              <StatCard
-                label="claude activity"
-                value={stats ? stats.mcp_calls_today : <Skeleton width={28} height={20} />}
-              >
-                <div style={{ fontSize: 10.5, color: "#AEAEB2", marginTop: 2 }}>
-                  {stats?.mcp_last_active_at
-                    ? `last ${formatRelativeShort(stats.mcp_last_active_at)}`
-                    : "no calls yet"}
-                </div>
-              </StatCard>
-              {/* Thin "Stats →" card. On-theme card chrome but narrow + a
-                  single arrow glyph so it reads as a "go" affordance, not
-                  another data tile. Click → stats view. minHeight matches
-                  StatCard intrinsic height so the row reads as uniform. */}
-              <button
-                onClick={onOpenStats}
-                title="Open stats — usage, dev activity, conversations"
-                style={{
-                  background: "var(--gooni-card, #fff)",
-                  border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-                  borderRadius: 10, padding: "10px 14px",
-                  display: "flex", flexDirection: "column",
-                  alignItems: "flex-start", justifyContent: "space-between",
-                  cursor: "pointer", fontFamily: "'Inter', -apple-system, sans-serif",
-                  textAlign: "left", color: "var(--gooni-text, #1C1C1E)",
-                  transition: "border-color 0.12s, background 0.12s",
-                  minWidth: 64,
-                  minHeight: 66,
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.18)"; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)"; }}
-              >
-                <div style={{
-                  fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
-                  letterSpacing: 0.4, textTransform: "uppercase", fontWeight: 600,
-                }}>
-                  stats
-                </div>
-                <div style={{
-                  fontSize: 18, fontWeight: 600, marginTop: 2,
-                  color: "var(--gooni-text, #1C1C1E)", lineHeight: 1.1,
-                }}>
-                  →
-                </div>
-              </button>
             </div>
           </div>
         </div>

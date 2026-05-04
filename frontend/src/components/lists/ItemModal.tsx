@@ -25,6 +25,9 @@ export interface ItemModalProps {
   // PR link). Hidden for todo / focus / generic lists where they'd just be
   // noise.
   showBoardFields?: boolean;
+  // Called when the user clicks the "from note #N" pill. Navigates to
+  // that note. Only rendered when item.source_note_id is set.
+  onOpenSourceNote?: (noteId: number) => void;
 }
 
 function toDateInputValue(iso: string | null): string {
@@ -45,7 +48,7 @@ function fromDateInputValue(v: string): string | null {
   return new Date(`${v}T00:00:00`).toISOString();
 }
 
-export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoardFields }: ItemModalProps) {
+export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoardFields, onOpenSourceNote }: ItemModalProps) {
   const [text, setText] = useState(item.text);
   const [subtitle, setSubtitle] = useState(item.subtitle ?? "");
   const [actionable, setActionable] = useState(item.actionable);
@@ -192,6 +195,30 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
             textDecoration: actionable && done ? "line-through" : "none",
           }}
         />
+
+        {/* Source note pill — only rendered when this item was created
+            from a note (source_note_id set). Daniel asked that the inline
+            "from note #N" reference be hidden on the card and only show
+            here, where the user can actually navigate to it. */}
+        {item.source_note_id != null && onOpenSourceNote && (
+          <button
+            onClick={() => { onOpenSourceNote(item.source_note_id!); onClose(); }}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "4px 10px", borderRadius: 999,
+              border: "1px solid rgba(0,0,0,0.10)",
+              background: "#F5F5F7", color: "#3C3C43",
+              fontFamily: FONT, fontSize: 11.5, fontWeight: 500,
+              cursor: "pointer",
+              marginBottom: 12,
+              alignSelf: "flex-start",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#EBEBEF"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F5F5F7"; }}
+          >
+            from note #{item.source_note_id} →
+          </button>
+        )}
 
         <textarea
           value={subtitle}
