@@ -276,6 +276,14 @@ function IntegrationsTab() {
           blurbNotConfigured="Set GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET / GITHUB_REDIRECT_URI on the backend to enable."
           extras={<RepoPicker />}
         />
+        <IntegrationSection
+          provider="whoop"
+          label="Whoop"
+          icon={<WhoopLogo />}
+          blurbConfigured="Connect to surface recovery, HRV, and strain on the dashboard. Future: tune daily nudge based on recovery."
+          blurbNotConfigured="Set WHOOP_CLIENT_ID / WHOOP_CLIENT_SECRET / WHOOP_REDIRECT_URI on the backend to enable."
+          extras={<WhoopTodayPanel />}
+        />
       </div>
     </>
   );
@@ -614,5 +622,101 @@ function GithubLogo() {
     <svg width="24" height="24" viewBox="0 0 24 24" fill="#1C1C1E" xmlns="http://www.w3.org/2000/svg" aria-hidden>
       <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.07c-3.2.7-3.87-1.36-3.87-1.36-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.69.08-.69 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.25 3.34.95.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.84 1.18 3.1 0 4.43-2.7 5.41-5.27 5.7.41.36.78 1.07.78 2.16v3.2c0 .31.21.67.8.55C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5Z"/>
     </svg>
+  );
+}
+
+function WhoopLogo() {
+  // Whoop's brand mark is a wordmark — we'd rather not redistribute it
+  // verbatim. Stand-in: a black rounded square with a stylized heart-rate
+  // pulse line in white. Reads as "biometrics" without scraping the logo.
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <rect width="24" height="24" rx="6" fill="#0F0F10" />
+      <path
+        d="M3 13 L7 13 L9 8 L11 17 L13 11 L15 14 L21 14"
+        stroke="#FFFFFF"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+
+interface WhoopTodayPanelProps {
+  // No props; pulls fresh data on mount + a Refresh button.
+}
+
+function WhoopTodayPanel(_: WhoopTodayPanelProps) {
+  const [data, setData] = useState<import("../services/api").WhoopToday | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load(force = false) {
+    setLoading(true);
+    setErr(null);
+    try {
+      const { fetchWhoopToday } = await import("../services/api");
+      const d = await fetchWhoopToday(force);
+      setData(d);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(false); }, []);
+
+  if (loading && !data) return <div style={{ fontSize: 12, color: "#8E8E93" }}>Loading…</div>;
+  if (err) return <div style={{ fontSize: 12, color: "#C44" }}>{err}</div>;
+  if (!data) return null;
+
+  const Stat = ({ label, value }: { label: string; value: string | number | null }) => (
+    <div style={{
+      display: "flex", flexDirection: "column", gap: 2,
+      padding: "6px 10px", borderRadius: 8,
+      background: "rgba(0,0,0,0.04)", flex: 1, minWidth: 0,
+    }}>
+      <span style={{ fontSize: 10, color: "#8E8E93", letterSpacing: 0.4, textTransform: "uppercase" }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontVariantNumeric: "tabular-nums" }}>
+        {value ?? "—"}
+      </span>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Stat label="Recovery" value={data.recovery_score != null ? `${data.recovery_score}%` : null} />
+        <Stat label="HRV (ms)" value={data.hrv_rmssd_ms != null ? data.hrv_rmssd_ms.toFixed(1) : null} />
+        <Stat label="RHR" value={data.resting_hr} />
+        <Stat label="Strain" value={data.strain != null ? data.strain.toFixed(1) : null} />
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <Stat label="Sleep (m)" value={data.sleep_minutes} />
+        <Stat label="Sleep %" value={data.sleep_performance_pct != null ? `${Math.round(data.sleep_performance_pct)}%` : null} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button
+          onClick={() => load(true)}
+          disabled={loading}
+          style={{
+            fontSize: 11.5, padding: "4px 9px", borderRadius: 6,
+            border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
+            cursor: "pointer", color: "#1C1C1E", fontWeight: 500,
+            fontFamily: "'Inter', -apple-system, sans-serif",
+          }}
+        >
+          {loading ? "fetching…" : "refresh"}
+        </button>
+        {data.updated_at && (
+          <span style={{ fontSize: 10.5, color: "#8E8E93" }}>
+            updated {new Date(data.updated_at).toLocaleString()}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }

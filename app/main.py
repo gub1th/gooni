@@ -574,6 +574,7 @@ async def auth_middleware(request: Request, call_next):
         # The code value itself is the auth proof. `state` can carry a CSRF token.
         or path == "/auth/google/callback"
         or path == "/auth/github/callback"
+        or path == "/auth/whoop/callback"
         or path == "/healthz"
         or path.startswith("/assets")
         or path.startswith("/webhooks/")
@@ -2961,6 +2962,103 @@ def auth_google_status(db: Session = Depends(get_db)):
 def auth_google_disconnect(db: Session = Depends(get_db)):
     disconnected = gcal.disconnect(db)
     return {"disconnected": disconnected}
+
+
+# ── Whoop OAuth + recovery snapshot ────────────────────────────────────────
+# Same shape as the Google Calendar block above: start → callback → status →
+# delete. Data fetcher is /whoop/today, served from the cached daily
+# WhoopSnapshot row when fresh, refetched live when stale (>2h old).
+
+from .services import whoop  # noqa: E402
+
+
+@app.get("/auth/whoop/start")
+def auth_whoop_start():
+    if not whoop.is_configured():
+        raise HTTPException(status_code=503, detail="Whoop OAuth env vars not set")
+    return {"authorize_url": whoop.build_authorize_url()}
+
+
+@app.get("/auth/whoop/callback")
+def auth_whoop_callback(code: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
+    from fastapi.responses import HTMLResponse
+    if error:
+        return HTMLResponse(f"<p>Whoop OAuth returned: {error}. You can close this tab.</p>", status_code=400)
+    if not code:
+        return HTMLResponse("<p>Missing code parameter.</p>", status_code=400)
+    try:
+        tokens = whoop.exchange_code_for_tokens(code)
+        # Whoop's basic profile gives us first/last name + email for the
+        # connected-as label.
+        profile = {}
+        try:
+            profile = whoop.fetch_profile(tokens.get("access_token", ""))
+        except Exception:
+            pass
+        whoop.save_tokens_from_exchange(db, tokens, account_email=profile.get("email"))
+    except Exception as e:
+        return HTMLResponse(f"<p>Token exchange failed: {e}. You can close this tab.</p>", status_code=500)
+    return HTMLResponse(
+        """
+        <!doctype html>
+        <meta charset="utf-8">
+        <title>Whoop connected</title>
+        <style>body{font-family:system-ui;padding:40px;color:#1C1C1E;}</style>
+        <p>Whoop connected. You can close this tab.</p>
+        <script>
+          try { window.opener && window.opener.postMessage({type:"gooni-oauth-done"}, "*"); } catch(e){}
+          setTimeout(() => { window.close(); }, 600);
+        </script>
+        """,
+        status_code=200,
+    )
+
+
+@app.get("/auth/whoop/status")
+def auth_whoop_status(db: Session = Depends(get_db)):
+    return whoop.connection_status(db)
+
+
+@app.delete("/auth/whoop")
+def auth_whoop_disconnect(db: Session = Depends(get_db)):
+    return {"disconnected": whoop.disconnect(db)}
+
+
+@app.get("/whoop/today")
+def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
+    """Return today's recovery + strain + sleep snapshot.
+
+    Cached daily in `whoop_snapshots` (one row per date). Pass `?refresh=1`
+    to force a live API hit; otherwise we serve the cached row if it was
+    updated within the last 2 hours, else refetch.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from .db.models import WhoopSnapshot
+    today = _dt.now(_tz.utc).date()
+    row = db.query(WhoopSnapshot).filter(WhoopSnapshot.date == today).first()
+    stale = (
+        row is None
+        or row.updated_at is None
+        or (_dt.utcnow() - row.updated_at) > _td(hours=2)
+    )
+    if refresh or stale:
+        try:
+            payload = whoop.fetch_today_snapshot(db)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Whoop fetch failed: {e}")
+        if payload is None:
+            raise HTTPException(status_code=401, detail="Whoop not connected")
+        row = whoop.upsert_today_snapshot(db, payload)
+    return {
+        "date": row.date.isoformat() if row and row.date else None,
+        "recovery_score": row.recovery_score if row else None,
+        "hrv_rmssd_ms": row.hrv_rmssd_ms if row else None,
+        "resting_hr": row.resting_hr if row else None,
+        "strain": row.strain if row else None,
+        "sleep_minutes": row.sleep_minutes if row else None,
+        "sleep_performance_pct": row.sleep_performance_pct if row else None,
+        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+    }
 
 
 @app.post("/calendar/events")
