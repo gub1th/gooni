@@ -575,6 +575,9 @@ async def auth_middleware(request: Request, call_next):
         or path == "/auth/google/callback"
         or path == "/auth/github/callback"
         or path == "/auth/whoop/callback"
+        # Whoop webhooks carry their own HMAC signature; password gate
+        # would 401 before signature check runs.
+        or path == "/webhooks/whoop"
         or path == "/healthz"
         or path.startswith("/assets")
         or path.startswith("/webhooks/")
@@ -3059,6 +3062,81 @@ def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
         "sleep_performance_pct": row.sleep_performance_pct if row else None,
         "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
     }
+
+
+# Whoop webhook signature: base64(HMAC-SHA256(secret, timestamp + body)).
+# Both `X-WHOOP-Signature` and `X-WHOOP-Signature-Timestamp` headers must
+# be present. We accept clock-skew up to 5 minutes against the server time
+# so a stale-replayed event still verifies, but anything older is rejected
+# as a replay-attack guard.
+def _verify_whoop_signature(raw_body: bytes, signature: str | None, timestamp: str | None) -> bool:
+    secret = os.getenv("WHOOP_WEBHOOK_SECRET")
+    if not secret:
+        # Defaults to "open in dev" so webhook can be exercised locally
+        # without setting the secret. Production should set the env var.
+        return True
+    if not signature or not timestamp:
+        return False
+    try:
+        ts_ms = int(timestamp)
+    except ValueError:
+        return False
+    # Reject events older than 5 minutes (replay guard).
+    now_ms = int(time.time() * 1000)
+    if abs(now_ms - ts_ms) > 5 * 60 * 1000:
+        return False
+    import base64
+    digest = hmac.new(
+        secret.encode(), (timestamp + raw_body.decode("utf-8", errors="replace")).encode(), hashlib.sha256
+    ).digest()
+    expected = base64.b64encode(digest).decode()
+    return hmac.compare_digest(expected, signature)
+
+
+@app.post("/webhooks/whoop")
+async def whoop_webhook(
+    request: Request,
+    x_whoop_signature: str | None = Header(None, alias="X-WHOOP-Signature"),
+    x_whoop_signature_timestamp: str | None = Header(None, alias="X-WHOOP-Signature-Timestamp"),
+    db: Session = Depends(get_db),
+):
+    """Receive a Whoop webhook event.
+
+    Whoop fires on `recovery.updated`, `sleep.updated`, `workout.updated`,
+    `cycle.updated`. Payload carries metadata only (event type + record id)
+    — actual data must be fetched via the API. We don't fetch per-record;
+    we just refresh the daily snapshot once any event lands so the dashboard
+    is always within one webhook of truth.
+
+    Auth: HMAC-SHA256 signature. See `_verify_whoop_signature`.
+    """
+    raw_body = await request.body()
+    if not _verify_whoop_signature(raw_body, x_whoop_signature, x_whoop_signature_timestamp):
+        raise HTTPException(status_code=401, detail="bad whoop signature")
+
+    try:
+        payload = json.loads(raw_body or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="invalid json")
+
+    event_type = payload.get("type") or ""
+    # Only refresh on the events that actually move the snapshot. Workout
+    # events don't change recovery/strain/sleep, so we skip them to avoid
+    # burning the API rate budget for nothing.
+    relevant = event_type.startswith(("recovery.", "sleep.", "cycle."))
+    if not relevant:
+        return {"ok": True, "ignored": event_type}
+
+    try:
+        snapshot = whoop.fetch_today_snapshot(db)
+    except Exception as e:
+        # Don't 500 — Whoop will keep retrying which doesn't help us; log
+        # and move on. Daniel can hit ?refresh=1 manually to recover.
+        print(f"whoop webhook fetch error: {e}")
+        return {"ok": True, "warn": str(e)}
+    if snapshot:
+        whoop.upsert_today_snapshot(db, snapshot)
+    return {"ok": True, "type": event_type}
 
 
 @app.post("/calendar/events")
