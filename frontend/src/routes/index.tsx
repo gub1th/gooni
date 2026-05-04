@@ -6,6 +6,7 @@ import { EvalView } from "../components/eval/EvalView";
 import { StatsView } from "../components/StatsView";
 import { Globe, Plug } from "lucide-react";
 import { GooniLayer } from "../components/GooniLayer";
+import { BacklogBoard } from "../components/lists/BacklogBoard";
 import { ListView } from "../components/lists/ListView";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
@@ -59,6 +60,7 @@ function NotesPage() {
   const windowWidth = useWindowWidth();
   const { fetchConversations, newChat, selectConversation } = useConversationsStore();
   const fetchAllLists = useListsStore((s) => s.fetchAll);
+  const allLists = useListsStore((s) => s.lists);
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
 
@@ -284,12 +286,28 @@ function NotesPage() {
             noteId={planNoteId}
             onExit={() => { setPlanNoteId(null); setView("dashboard"); }}
           />
-        ) : view === "lists" && activeListId != null ? (
-          <ListView
-            listId={activeListId}
-            onOpenSourceNote={(noteId) => setViewAndUrl("notes", noteId)}
-          />
-        ) : view === "eval" ? (
+        ) : view === "lists" && activeListId != null ? (() => {
+          // Backlog gets the Jira-style 3-column board with drag + modal.
+          // Other list types stay on the original flat ListView. Decision
+          // made here (instead of inside ListView) so we don't risk a
+          // conditional-hook order violation by short-circuiting the
+          // ListView render before its useState/useRef declarations.
+          const list = allLists.find((l) => l.id === activeListId);
+          if (list?.type === "backlog") {
+            return (
+              <BacklogBoard
+                listId={activeListId}
+                onOpenSourceNote={(noteId) => setViewAndUrl("notes", noteId)}
+              />
+            );
+          }
+          return (
+            <ListView
+              listId={activeListId}
+              onOpenSourceNote={(noteId) => setViewAndUrl("notes", noteId)}
+            />
+          );
+        })() : view === "eval" ? (
           <EvalView />
         ) : view === "stats" ? (
           <StatsView />

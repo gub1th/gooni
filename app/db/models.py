@@ -284,6 +284,18 @@ class ListItem(Base):
     sort_order = Column(Integer, default=0, nullable=False)
     due_date = Column(DateTime, nullable=True)
     source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+    # Jira-style 3-column board state for backlog items.
+    # Values: 'todo' | 'in_progress' | 'done'. Distinct from the focus
+    # `status` column above (which carries 'committed' | 'someday'); we
+    # use a separate column to avoid overloading.
+    # Truth table for backlog rendering:
+    #   done=True  → Done column, regardless of board_status
+    #   done=False + board_status='in_progress' → In Progress column
+    #   otherwise (board_status null or 'todo') → Todo column
+    board_status = Column(String, nullable=True)
+    # When the work shipped, the PR/commit URL gets pasted here so the
+    # ticket carries a permanent pointer. Free-text — anything resolvable.
+    pr_url = Column(Text, nullable=True)
     # JSON-serialised float list. Generated on insert/edit from `text +
     # subtitle` so add_item can cosine-search existing items in the same list
     # for conflicts (near-duplicates). NULL on legacy rows; backfilled lazily

@@ -674,6 +674,8 @@ export interface ApiList {
   created_at: string | null;
 }
 
+export type BoardStatus = "todo" | "in_progress" | "done";
+
 export interface ApiListItem {
   id: number;
   list_id: number;
@@ -687,6 +689,10 @@ export interface ApiListItem {
   due_date: string | null;
   source_note_id: number | null;
   created_at: string | null;
+  // Backlog Jira-board state. Null on legacy rows; renderers coalesce
+  // to "todo" when null. Kept in sync with `done` server-side.
+  board_status: BoardStatus | null;
+  pr_url: string | null;
 }
 
 export interface ApiListWithItems extends ApiList {
@@ -764,6 +770,8 @@ export async function updateListItem(
     is_primary?: boolean;
     sort_order?: number;
     due_date?: string | null;
+    board_status?: BoardStatus | null;
+    pr_url?: string | null;
   },
 ): Promise<ApiListItem> {
   const res = await apiFetch(`${BASE}/list-items/${itemId}`, {

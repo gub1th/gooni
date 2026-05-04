@@ -40,6 +40,8 @@ interface ListsStore {
       is_primary?: boolean;
       sort_order?: number;
       due_date?: string | null;
+      board_status?: import("../services/api").BoardStatus | null;
+      pr_url?: string | null;
     },
   ) => Promise<void>;
   deleteItem: (itemId: number) => Promise<void>;
