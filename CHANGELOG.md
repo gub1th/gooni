@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.28.1 — 2026-05-04 (patch)
+
+- fix(ui): hide list pills + drop dashboard stats/claude cards + source-note → modal (#116)
+
 ## 0.28.0 — 2026-05-04 (minor)
 
 - feat(backlog): Jira-style 3-col board + drag/click split + Claude rules (#56/#125) (#113)
