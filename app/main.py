@@ -199,6 +199,9 @@ def _run_column_migrations(engine):
             ("list_items", "start_at", "DATETIME"),
             ("list_items", "end_at", "DATETIME"),
             ("list_items", "embedding", "TEXT"),
+            # Backlog board (Jira-style 3-col view)
+            ("list_items", "board_status", "TEXT"),
+            ("list_items", "pr_url", "TEXT"),
             ("lists", "kind", "TEXT"),
         ]:
             if table not in existing_tables:
@@ -909,6 +912,10 @@ def _serialize_list_item(it: ListItem) -> dict:
         "due_date": it.due_date.isoformat() if it.due_date else None,
         "source_note_id": it.source_note_id,
         "created_at": it.created_at.isoformat() if it.created_at else None,
+        # Board fields — None until set. Frontend coalesces missing
+        # board_status to "todo" when rendering the backlog.
+        "board_status": it.board_status,
+        "pr_url": it.pr_url,
     }
 
 
@@ -1109,6 +1116,8 @@ def update_list_item(item_id: int, body: dict, db: Session = Depends(get_db)):
         actionable=body.get("actionable"),
         is_primary=body.get("is_primary"),
         sort_order=body.get("sort_order"),
+        board_status=body.get("board_status"),
+        pr_url=body.get("pr_url"),
         **due_kwarg,
     )
     if item is None:

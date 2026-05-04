@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ApiListItem } from "../../services/api";
+import type { ApiListItem, BoardStatus } from "../../services/api";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -14,11 +14,17 @@ export interface ItemModalProps {
     done?: boolean;
     actionable?: boolean;
     due_date?: string | null;
+    board_status?: BoardStatus | null;
+    pr_url?: string | null;
   }) => Promise<void> | void;
   onDelete?: () => void;
   onClose: () => void;
   // True when this item is the primary focus — surfaces a small badge.
   isPrimary?: boolean;
+  // True for backlog items — surfaces the Jira board fields (status select +
+  // PR link). Hidden for todo / focus / generic lists where they'd just be
+  // noise.
+  showBoardFields?: boolean;
 }
 
 function toDateInputValue(iso: string | null): string {
@@ -39,12 +45,16 @@ function fromDateInputValue(v: string): string | null {
   return new Date(`${v}T00:00:00`).toISOString();
 }
 
-export function ItemModal({ item, onSave, onDelete, onClose, isPrimary }: ItemModalProps) {
+export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoardFields }: ItemModalProps) {
   const [text, setText] = useState(item.text);
   const [subtitle, setSubtitle] = useState(item.subtitle ?? "");
   const [actionable, setActionable] = useState(item.actionable);
   const [done, setDone] = useState(item.done);
   const [dueDate, setDueDate] = useState(toDateInputValue(item.due_date));
+  const [boardStatus, setBoardStatus] = useState<BoardStatus>(
+    (item.board_status as BoardStatus | null) || (item.done ? "done" : "todo")
+  );
+  const [prUrl, setPrUrl] = useState(item.pr_url ?? "");
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -78,6 +88,12 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary }: ItemMo
     const nextDue = fromDateInputValue(dueDate);
     const currentDue = item.due_date;
     if ((nextDue || null) !== (currentDue || null)) patch.due_date = nextDue;
+    if (showBoardFields) {
+      const currentBoard = (item.board_status as BoardStatus | null) || (item.done ? "done" : "todo");
+      if (boardStatus !== currentBoard) patch.board_status = boardStatus;
+      const trimmedPr = prUrl.trim();
+      if ((trimmedPr || null) !== (item.pr_url || null)) patch.pr_url = trimmedPr || null;
+    }
     if (Object.keys(patch).length === 0) {
       onClose();
       return;
@@ -197,13 +213,55 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary }: ItemMo
         />
 
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 18 }}>
-          <ToggleRow
-            label="Task with checkbox"
-            help={actionable ? "Item shows a checkbox and can be marked done." : "Item is a bullet idea — no checkbox."}
-            value={actionable}
-            onChange={setActionable}
-          />
-          {actionable && (
+          {showBoardFields && (
+            <>
+              <div>
+                <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Status</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {(["todo", "in_progress", "done"] as BoardStatus[]).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setBoardStatus(s)}
+                      style={{
+                        padding: "6px 12px", borderRadius: 999,
+                        border: boardStatus === s ? "1px solid #1C1C1E" : "1px solid #E5E7EB",
+                        background: boardStatus === s ? "#1C1C1E" : "#FFFFFF",
+                        color: boardStatus === s ? "#FFFFFF" : "#3C3C43",
+                        fontFamily: FONT, fontSize: 12, fontWeight: 500,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {s === "todo" ? "Todo" : s === "in_progress" ? "In progress" : "Done"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>PR / Reference link</div>
+                <input
+                  type="url"
+                  value={prUrl}
+                  onChange={(e) => setPrUrl(e.target.value)}
+                  placeholder="https://github.com/..."
+                  style={{
+                    width: "100%", boxSizing: "border-box",
+                    fontFamily: FONT, fontSize: 13, padding: "8px 10px",
+                    border: "1px solid #E5E7EB", borderRadius: 8, color: "#1C1C1E",
+                    outline: "none",
+                  }}
+                />
+              </div>
+            </>
+          )}
+          {!showBoardFields && (
+            <ToggleRow
+              label="Task with checkbox"
+              help={actionable ? "Item shows a checkbox and can be marked done." : "Item is a bullet idea — no checkbox."}
+              value={actionable}
+              onChange={setActionable}
+            />
+          )}
+          {!showBoardFields && actionable && (
             <ToggleRow
               label="Marked done"
               help={done ? "Hidden from open list, shown in done section." : "Active item."}

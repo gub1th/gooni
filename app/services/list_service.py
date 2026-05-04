@@ -324,6 +324,8 @@ class ListService:
         is_primary: bool | None = None,
         due_date: datetime | None = None,
         sort_order: int | None = None,
+        board_status: str | None = None,
+        pr_url: str | None = None,
     ) -> ListItem | None:
         item = db.query(ListItem).filter(ListItem.id == item_id).first()
         if item is None:
@@ -352,6 +354,20 @@ class ListService:
             item.due_date = due_date
         if sort_order is not None:
             item.sort_order = sort_order
+        if board_status is not None:
+            # Allow empty string to clear back to "todo" (None internally).
+            normalized = board_status if board_status in ("todo", "in_progress", "done") else None
+            item.board_status = normalized
+            # Keep `done` boolean in sync with the board column. Dragging into
+            # the Done column = same as checking the item; dragging out = uncheck.
+            if normalized == "done" and not item.done:
+                item.done = True
+                item.completed_at = datetime.utcnow()
+            elif normalized in ("todo", "in_progress") and item.done:
+                item.done = False
+                item.completed_at = None
+        if pr_url is not None:
+            item.pr_url = pr_url or None
         # If the searchable text changed, re-embed so future conflict scans
         # match the new content. Skip if neither field was touched.
         if text is not None or subtitle is not None:
