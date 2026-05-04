@@ -236,7 +236,6 @@ export function BacklogBoard({ listId, onOpenSourceNote }: BacklogBoardProps) {
                         onOpenPr={() => {
                           if (item.pr_url) window.open(item.pr_url, "_blank", "noopener,noreferrer");
                         }}
-                        onOpenSourceNote={onOpenSourceNote}
                       />
                     </div>
                   );
@@ -251,6 +250,7 @@ export function BacklogBoard({ listId, onOpenSourceNote }: BacklogBoardProps) {
         <ItemModal
           item={openItem}
           showBoardFields
+          onOpenSourceNote={onOpenSourceNote}
           onClose={() => setOpenItemId(null)}
           onSave={async (patch) => {
             await updateItem(openItem.id, patch);
@@ -273,7 +273,6 @@ function BacklogCard({
   onCardDragOver,
   onClick,
   onOpenPr,
-  onOpenSourceNote,
 }: {
   item: ApiListItem;
   dragging: boolean;
@@ -282,7 +281,6 @@ function BacklogCard({
   onCardDragOver: (e: React.DragEvent) => void;
   onClick: () => void;
   onOpenPr: () => void;
-  onOpenSourceNote?: (noteId: number) => void;
 }) {
   const [hoverHandle, setHoverHandle] = useState(false);
   return (
@@ -358,8 +356,12 @@ function BacklogCard({
           {item.subtitle}
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
-        {item.pr_url && (
+      {/* Inline meta row — only PR pill surfaces here. The "from note #N"
+          ref previously rendered here was visually noisy on every card;
+          it now only shows in the modal (open by clicking the card),
+          where it's clickable to navigate to the source note. */}
+      {item.pr_url && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
           <button
             data-card-action
             onClick={(e) => { e.stopPropagation(); onOpenPr(); }}
@@ -375,20 +377,8 @@ function BacklogCard({
             <ExternalLink size={10} strokeWidth={1.7} />
             PR
           </button>
-        )}
-        {item.source_note_id && onOpenSourceNote && (
-          <button
-            data-card-action
-            onClick={(e) => { e.stopPropagation(); onOpenSourceNote(item.source_note_id!); }}
-            style={{
-              border: "none", background: "transparent", color: "var(--gooni-muted, #8E8E93)",
-              cursor: "pointer", padding: 0, fontSize: 11,
-            }}
-          >
-            note #{item.source_note_id} →
-          </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
