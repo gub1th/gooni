@@ -131,11 +131,15 @@ export async function createNote(
 }
 
 export async function updateNote(id: number, title: string, content: string): Promise<ApiNote> {
+  // `keepalive` would let this request survive a tab close, but the browser
+  // caps keepalive bodies at 64 KiB — a single base64-inlined image blows
+  // past that and `fetch` throws "TypeError: Failed to fetch" before the
+  // request leaves the page. Drop the flag; on tab-close we lose the
+  // in-flight save, but the next edit re-saves the full body anyway.
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title, content }),
-    keepalive: true, // survives tab close
   });
   if (!res.ok) throw new Error("Failed to update note");
   return res.json();
