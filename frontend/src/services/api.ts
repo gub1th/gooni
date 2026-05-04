@@ -111,6 +111,15 @@ export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiN
   return res.json();
 }
 
+// Semantic note search — uses the note embeddings + cosine similarity.
+// Same backend route the MCP server hits via search_notes; surfaced here
+// so the frontend's All-Notes discovery view can reuse it.
+export async function searchNotes(query: string, limit = 12): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/mcp/notes/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to search notes");
+  return res.json();
+}
+
 export async function fetchRecentNotes(limit = 5): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/notes/recent?limit=${limit}`);
   if (!res.ok) throw new Error("Failed to fetch recent notes");

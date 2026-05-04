@@ -7,6 +7,7 @@ import { StatsView } from "../components/StatsView";
 import { Globe, Plug } from "lucide-react";
 import { GooniLayer } from "../components/GooniLayer";
 import { ListView } from "../components/lists/ListView";
+import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { PlanView } from "../components/PlanView";
@@ -292,12 +293,35 @@ function NotesPage() {
           <EvalView />
         ) : view === "stats" ? (
           <StatsView />
-        ) : (
-          <>
-            <NotesList />
-            <NoteEditor />
-          </>
-        )}
+        ) : (() => {
+          // Notes view. When the user is in All Notes (no specific space
+          // chosen) AND has no active note, swap the standard 2-column
+          // (NotesList + NoteEditor empty state) for a Confluence-style
+          // discovery: big search bar + recent notes grid. Picking a card
+          // sets activeNoteId — which flips us back to the standard layout
+          // since `activeNoteId != null` falls through to the else branch.
+          const inAllNotes = selectedSpaceId == null || selectedSpaceId === "general";
+          const showDiscovery = inAllNotes && activeNoteId == null;
+          if (showDiscovery) {
+            return (
+              <AllNotesDiscovery
+                onSelectNote={(id) => {
+                  // Mirror the search.note effect path: seed the note into
+                  // the store + select it. The URL effect on activeNoteId
+                  // keeps `?note=` in sync.
+                  selectNote(id);
+                }}
+                onCompose={handleCompose}
+              />
+            );
+          }
+          return (
+            <>
+              <NotesList />
+              <NoteEditor />
+            </>
+          );
+        })()}
       </div>
 
       {/* Top-right pair: Public profile + Public MCP. Floats above the
