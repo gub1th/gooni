@@ -1,4 +1,4 @@
-import Image from "@tiptap/extension-image";
+import { Figure } from "./FigureExtension";
 import { Table } from "@tiptap/extension-table";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
@@ -44,7 +44,10 @@ function insertImageBlock(editor: Editor, src: string) {
     .chain()
     .focus()
     .insertContent([
-      { type: "image", attrs: { src } },
+      // Figure node owns the new image flow — inherits resize / align /
+      // caption controls. Default attrs (align=center, width=100, no
+      // caption) match what the user sees pre-tweak.
+      { type: "figure", attrs: { src, alt: null, width: 100, align: "center", caption: "" } },
       { type: "paragraph" },
     ])
     .run();
@@ -141,6 +144,14 @@ function useEditorStyles() {
       .gooni-note-editor img.ProseMirror-selectednode {
         outline: 2px solid #007AFF;
       }
+      /* Figure (Image + caption + alignment + width). Floats clear so a
+         non-figure block following a row of side-by-side figures lands
+         on its own line — same shape as the public read page. */
+      .gooni-note-editor .gooni-figure { box-sizing: border-box; padding: 0; }
+      .gooni-note-editor .gooni-figure + p::after,
+      .gooni-note-editor .gooni-figure + h1::after,
+      .gooni-note-editor .gooni-figure + h2::after,
+      .gooni-note-editor .gooni-figure + h3::after { content: ""; display: block; clear: both; }
       .gooni-note-editor ul[data-type="taskList"] {
         list-style: none;
         padding: 0;
@@ -455,7 +466,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     {
       extensions: [
         StarterKit,
-        Image.extend({ selectable: true }).configure({ inline: false, allowBase64: true }),
+        Figure,
         TaskList,
         TaskItem.configure({ nested: true }),
         Table.configure({ resizable: true }),

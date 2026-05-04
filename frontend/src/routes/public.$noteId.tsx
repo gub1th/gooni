@@ -130,6 +130,31 @@ function PublicNotePage() {
                                           border-left: 3px solid rgba(0,0,0,0.12); color: #555; }
               .public-prose img { max-width: 100%; height: auto; border-radius: 8px;
                                   margin: 12px 0; }
+              /* Figure node — keeps the same alignment / width / caption shape
+                 the editor produces. width comes through as a CSS custom
+                 property on the figure (--figure-width), with class-based
+                 alignment + float layout for side-by-side images. */
+              .public-prose .gooni-figure { width: var(--figure-width, 100%);
+                                            box-sizing: border-box; padding: 0; }
+              .public-prose .gooni-figure img { width: 100%; height: auto;
+                                                border-radius: 8px; display: block;
+                                                margin: 0; }
+              .public-prose .gooni-figure-center { float: none; clear: both;
+                                                   margin: 12px auto; }
+              .public-prose .gooni-figure-left   { float: left;  clear: none;
+                                                   margin: 12px 14px 12px 0; }
+              .public-prose .gooni-figure-right  { float: right; clear: none;
+                                                   margin: 12px 0 12px 14px; }
+              .public-prose .gooni-figure figcaption {
+                  margin-top: 6px; font-size: 13px; line-height: 1.4;
+                  color: #6E6E73; text-align: center;
+              }
+              /* Clear floats so the next block-level element sits below
+                 a row of side-by-side figures. */
+              .public-prose .gooni-figure + p::after,
+              .public-prose .gooni-figure + h1::after,
+              .public-prose .gooni-figure + h2::after,
+              .public-prose .gooni-figure + h3::after { content: ""; display: block; clear: both; }
               .public-prose a { color: #2B6CB0; text-decoration: underline;
                                 text-decoration-thickness: 1px; text-underline-offset: 2px; }
               .public-prose a:hover { color: #1A4F8C; }
