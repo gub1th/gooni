@@ -208,18 +208,6 @@ export async function fetchNote(id: number): Promise<ApiNote> {
   return res.json();
 }
 
-export interface RelatedNote extends ApiNote {
-  similarity: number;
-}
-export async function fetchRelatedNotes(id: number): Promise<RelatedNote[]> {
-  try {
-    const res = await apiFetch(`${BASE}/notes/${id}/related?limit=3`);
-    if (!res.ok) return [];
-    return res.json();
-  } catch {
-    return [];
-  }
-}
 
 export async function fetchNoteMemories(id: number): Promise<ApiMemory[]> {
   try {
@@ -791,13 +779,6 @@ export async function fetchConversationGraph(
   const res = await apiFetch(`${BASE}/conversations/${id}/graph`);
   if (!res.ok) throw new Error("Failed to fetch conversation graph");
   return res.json();
-}
-
-export async function suggestNoteQuestions(id: number): Promise<string[]> {
-  const res = await apiFetch(`${BASE}/notes/${id}/suggest-questions`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to suggest questions");
-  const json = await res.json();
-  return json.questions ?? [];
 }
 
 export async function updatePublicProfile(bio: string): Promise<void> {

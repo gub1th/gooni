@@ -1,4 +1,4 @@
-import Image from "@tiptap/extension-image";
+import { Figure } from "./FigureExtension";
 import { Table } from "@tiptap/extension-table";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
@@ -18,17 +18,14 @@ import { useNavigate } from "@tanstack/react-router";
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchRelatedNotes, fetchNoteMemories, patchNote as apiPatchNote, suggestNoteQuestions, extractToChildNote as apiExtractToChildNote, type ApiNote, type ApiMemory, type RelatedNote, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
-import { useGooniStore } from "../../stores/useGooniStore";
-import { useConversationsStore } from "../../stores/useConversationsStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { Tooltip } from "../Tooltip";
 import { SpaceIcon } from "./SpaceIcon";
-import { displayTitle } from "../../utils/notePreview";
 
 type Variant = "full" | "embedded";
 
@@ -44,7 +41,10 @@ function insertImageBlock(editor: Editor, src: string) {
     .chain()
     .focus()
     .insertContent([
-      { type: "image", attrs: { src } },
+      // Figure node owns the new image flow — inherits resize / align /
+      // caption controls. Default attrs (align=center, width=100, no
+      // caption) match what the user sees pre-tweak.
+      { type: "figure", attrs: { src, alt: null, width: 100, align: "center", caption: "" } },
       { type: "paragraph" },
     ])
     .run();
@@ -141,6 +141,14 @@ function useEditorStyles() {
       .gooni-note-editor img.ProseMirror-selectednode {
         outline: 2px solid #007AFF;
       }
+      /* Figure (Image + caption + alignment + width). Floats clear so a
+         non-figure block following a row of side-by-side figures lands
+         on its own line — same shape as the public read page. */
+      .gooni-note-editor .gooni-figure { box-sizing: border-box; padding: 0; }
+      .gooni-note-editor .gooni-figure + p::after,
+      .gooni-note-editor .gooni-figure + h1::after,
+      .gooni-note-editor .gooni-figure + h2::after,
+      .gooni-note-editor .gooni-figure + h3::after { content: ""; display: block; clear: both; }
       .gooni-note-editor ul[data-type="taskList"] {
         list-style: none;
         padding: 0;
@@ -223,18 +231,6 @@ function memoryTint(type: string): { bg: string; fg: string; border: string } {
   }
 }
 
-// Cosine similarity score → yellow (low) → green (high) gradient. Score is
-// clamped 0..1 by the caller; we map to two anchor points and lerp.
-function similarityTint(score: number): { bg: string; fg: string } {
-  // Yellow: hsl(45, 95%, 55%). Green: hsl(140, 60%, 42%).
-  const t = Math.max(0, Math.min(1, score));
-  const hue = 45 + (140 - 45) * t;
-  const sat = 95 - (95 - 60) * t;
-  const lit = 55 - (55 - 42) * t;
-  const bg = `hsl(${hue}, ${sat}%, ${Math.min(92, lit + 38)}%)`;
-  const fg = `hsl(${hue}, ${sat - 15}%, ${Math.max(22, lit - 18)}%)`;
-  return { bg, fg };
-}
 
 function formatNoteDate(iso: string | null): string {
   if (!iso) return "";
@@ -274,8 +270,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   useEditorStyles();
   const embedded = variant === "embedded";
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote } = useNotesContentStore();
-  const { isOpen: gooniOpen, toggle: toggleGooni } = useGooniStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, moveNote, selectNote, deleteNote } = useNotesContentStore();
   const { spaces } = useSpacesStore();
   const navigate = useNavigate();
   const [signalsExpanded, setSignalsExpanded] = useState(false);
@@ -296,9 +291,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   const [editorEmpty, setEditorEmpty] = useState(true);
   const [movePicker, setMovePicker] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [relatedNotes, setRelatedNotes] = useState<RelatedNote[]>([]);
   const [noteMemories, setNoteMemories] = useState<ApiMemory[]>([]);
-  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
   const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
   // Brief "tagged" pulse on the backlog button so the user sees confirmation
@@ -372,24 +365,18 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     setSaveStatus("idle");
     setLastSavedTime(null);
     setSpaceSuggestion(null);
-    setRelatedNotes([]);
     setNoteMemories([]);
     setDeleteConfirm(false);
     setLocalIsPublic(activeNote?.is_public ?? false);
-    setSuggestedQuestions([]);
     hasChanges.current = false;
   }, [activeNoteId]);
 
-  // Load related notes + memories tied to this note after it settles
-  // (quiet, non-blocking). Both feed the post-editor footer block.
+  // Load memories tied to this note after it settles (quiet,
+  // non-blocking). Feeds the post-editor memory pill row.
   useEffect(() => {
     if (!activeNoteId || activeNoteId < 0) return;
     const t = setTimeout(async () => {
-      const [related, mems] = await Promise.all([
-        fetchRelatedNotes(activeNoteId),
-        fetchNoteMemories(activeNoteId),
-      ]);
-      setRelatedNotes(related.filter((n) => n.id !== activeNoteId).slice(0, 2));
+      const mems = await fetchNoteMemories(activeNoteId);
       setNoteMemories(mems);
     }, 1000);
     return () => clearTimeout(t);
@@ -455,7 +442,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     {
       extensions: [
         StarterKit,
-        Image.extend({ selectable: true }).configure({ inline: false, allowBase64: true }),
+        Figure,
         TaskList,
         TaskItem.configure({ nested: true }),
         Table.configure({ resizable: true }),
@@ -756,27 +743,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     // ~3s out so the editor picks up the new `classify_signals` payload and
     // renders the "Routed:" disclosure.
     setTimeout(() => { refetchNote(noteId).catch(() => {}); }, 3000);
-    // Generate probing questions in parallel — only fires LLM call when the
-    // note is substantive enough (server-side gate at ~200 chars plaintext).
-    try {
-      const plain = bodyRef.current.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      if (plain.length >= 200) {
-        const qs = await suggestNoteQuestions(noteId);
-        setSuggestedQuestions(qs);
-      } else {
-        setSuggestedQuestions([]);
-      }
-    } catch {
-      // non-fatal — questions are a nice-to-have, never block the note flow
-    }
-  }
-
-  function askGooni(question: string) {
-    const { newChat, send } = useConversationsStore.getState();
-    newChat();
-    if (!gooniOpen) toggleGooni();
-    // Pass the active note's body as context so Gooni's reply stays grounded.
-    send(question, bodyRef.current).catch(console.error);
   }
 
   function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1600,60 +1566,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   </div>
                 )}
 
-                {relatedNotes.length > 0 && (
-                  <div style={{ marginTop: noteMemories.length > 0 ? 28 : 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>RELATED</p>
-                    {relatedNotes.map((n) => {
-                      const targetSpaceId = n.space_id ? String(n.space_id) : "general";
-                      const sim = Math.max(0, Math.min(1, n.similarity ?? 0));
-                      return (
-                        <button
-                          key={n.id}
-                          onClick={async () => { selectSpace(targetSpaceId); await loadNotes(targetSpaceId); selectNote(n.id); }}
-                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "7px 0", background: "none", border: "none", cursor: "pointer", gap: 12, borderRadius: 6 }}
-                          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)")}
-                          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
-                        >
-                          <span style={{
-                            display: "inline-flex", alignItems: "center", justifyContent: "center",
-                            minWidth: 30, height: 18, borderRadius: 9, padding: "0 6px",
-                            background: similarityTint(sim).bg, color: similarityTint(sim).fg,
-                            fontSize: 10.5, fontWeight: 600, fontVariantNumeric: "tabular-nums",
-                            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                            flexShrink: 0,
-                          }}>
-                            {Math.round(sim * 100)}
-                          </span>
-                          <span style={{ fontSize: 14, color: "var(--gooni-text, #1C1C1E)", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                            {displayTitle(n)}
-                          </span>
-                          <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-                            {formatNoteDate(n.updated_at)}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {suggestedQuestions.length > 0 && (
-                  <div style={{ marginTop: relatedNotes.length > 0 ? 28 : 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-                      QUESTIONS GOONI WOULD ASK
-                    </p>
-                    {suggestedQuestions.map((q, i) => (
-                      <button
-                        key={i}
-                        onClick={() => askGooni(q)}
-                        style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", marginBottom: 6, background: "rgba(0,0,0,0.025)", border: "1px solid rgba(0,0,0,0.05)", borderRadius: 8, cursor: "pointer", fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", lineHeight: 1.5 }}
-                        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-                        onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.025)")}
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 
