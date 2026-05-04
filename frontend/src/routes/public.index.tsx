@@ -1,13 +1,20 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import LinkExtension from "@tiptap/extension-link";
-import { fetchPublicNotes, fetchPublicProfile, fetchPublicVisitCount, updatePublicProfile, getStoredToken, patchNote, type PublicNote } from "../services/api";
+import { updatePublicProfile, getStoredToken, patchNote, type PublicNote } from "../services/api";
 import { Globe } from "lucide-react";
 import { displayTitle } from "../utils/notePreview";
 import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
+import {
+  publicNoteQueryOptions,
+  publicNotesListQueryOptions,
+  publicProfileQueryOptions,
+  publicVisitCountQueryOptions,
+} from "../utils/publicQueries";
 
 export const Route = createFileRoute("/public/")(({
   component: PublicPage,
@@ -62,22 +69,28 @@ function timeAgo(iso: string | null): string {
 }
 
 function PublicPage() {
-  const [notes, setNotes] = useState<PublicNote[]>([]);
-  const [bio, setBio] = useState<string | null>(null);
-  const [noteCount, setNoteCount] = useState<number | null>(null);
-  const [lastActive, setLastActive] = useState<string | null>(null);
-  const [visitors, setVisitors] = useState<number | null>(null);
+  const queryClient = useQueryClient();
+  // List + profile + visits via React Query so back-navigation hits cache
+  // (default staleTime in main.tsx is 30s; gcTime 5min) instead of refetching.
+  const { data: notesData } = useQuery(publicNotesListQueryOptions());
+  const { data: profileData } = useQuery(publicProfileQueryOptions());
+  const { data: visitsData } = useQuery(publicVisitCountQueryOptions());
+
+  // Local override of the list — needed for optimistic unpublish + undo,
+  // since we want the row to disappear immediately without waiting for a
+  // refetch round-trip. null = use the React Query result as-is.
+  const [localNotes, setLocalNotes] = useState<PublicNote[] | null>(null);
+  const notes = localNotes ?? notesData ?? [];
+  const bio = profileData?.bio ?? null;
+  const noteCount = profileData?.note_count ?? null;
+  const lastActive = profileData?.last_active ?? null;
+  const visitors = visitsData?.unique_visitors ?? null;
   const [filter, setFilter] = useState<string | null>(null);
 
   const isOwner = getStoredToken() !== null;
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  // Hover state for the per-row "remove from public" affordance — only the
-  // owner ever sees the icon, anonymous visitors get the regular row.
   const [hoveredId, setHoveredId] = useState<number | null>(null);
-  // Undo state: when the owner unpublishes a note, we keep the row data
-  // around so a one-click "Undo" within the toast window restores it.
-  // null = no toast visible.
   const [undo, setUndo] = useState<{ note: PublicNote } | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -109,15 +122,6 @@ function PublicPage() {
     },
   });
 
-  useEffect(() => {
-    fetchPublicNotes().then(setNotes).catch(() => {});
-    fetchPublicProfile().then((p) => {
-      setBio(p.bio);
-      setNoteCount(p.note_count);
-      setLastActive(p.last_active);
-    }).catch(() => {});
-    fetchPublicVisitCount().then((v) => setVisitors(v.unique_visitors)).catch(() => {});
-  }, []);
 
   async function handleSaveBio() {
     if (!bioEditor) return;
@@ -125,7 +129,11 @@ function PublicPage() {
     setSaving(true);
     try {
       await updatePublicProfile(html);
-      setBio(html);
+      // Patch the cached profile in place so the bio updates without a refetch.
+      queryClient.setQueryData(publicProfileQueryOptions().queryKey, (prev) => {
+        if (!prev) return prev;
+        return { ...prev, bio: html };
+      });
       setEditing(false);
     } finally {
       setSaving(false);
@@ -170,20 +178,28 @@ function PublicPage() {
   // at its original position.
   function handleUnpublish(note: PublicNote) {
     const idx = notes.findIndex((n) => n.id === note.id);
-    setNotes((prev) => prev.filter((n) => n.id !== note.id));
+    const optimistic = notes.filter((n) => n.id !== note.id);
+    setLocalNotes(optimistic);
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     setUndo({ note });
-    patchNote(note.id, { is_public: false }).catch((e) => {
-      // Revert on failure so the UI doesn't lie about server state.
-      console.error("[public] unpublish failed", e);
-      setNotes((prev) => {
-        if (prev.some((n) => n.id === note.id)) return prev;
-        const next = prev.slice();
-        next.splice(Math.max(0, idx), 0, note);
-        return next;
+    patchNote(note.id, { is_public: false })
+      .then(() => {
+        // Sync the React Query cache so leaving + returning shows the same list.
+        queryClient.setQueryData(publicNotesListQueryOptions().queryKey, optimistic);
+        setLocalNotes(null);
+      })
+      .catch((e) => {
+        // Revert on failure so the UI doesn't lie about server state.
+        console.error("[public] unpublish failed", e);
+        setLocalNotes((prev) => {
+          const base = prev ?? notesData ?? [];
+          if (base.some((n) => n.id === note.id)) return base;
+          const next = base.slice();
+          next.splice(Math.max(0, idx), 0, note);
+          return next;
+        });
+        setUndo(null);
       });
-      setUndo(null);
-    });
     undoTimerRef.current = setTimeout(() => setUndo(null), 6000);
   }
 
@@ -192,20 +208,25 @@ function PublicPage() {
     const { note } = undo;
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     setUndo(null);
-    setNotes((prev) => {
-      if (prev.some((n) => n.id === note.id)) return prev;
-      // Re-insert sorted by updated_at desc — same order the API returns.
-      const next = [...prev, note].sort((a, b) => {
+    const restored = (() => {
+      const base = notes;
+      if (base.some((n) => n.id === note.id)) return base;
+      return [...base, note].sort((a, b) => {
         const ta = a.updated_at ? new Date(a.updated_at).getTime() : 0;
         const tb = b.updated_at ? new Date(b.updated_at).getTime() : 0;
         return tb - ta;
       });
-      return next;
-    });
-    patchNote(note.id, { is_public: true }).catch((e) => {
-      console.error("[public] undo unpublish failed", e);
-      setNotes((prev) => prev.filter((n) => n.id !== note.id));
-    });
+    })();
+    setLocalNotes(restored);
+    patchNote(note.id, { is_public: true })
+      .then(() => {
+        queryClient.setQueryData(publicNotesListQueryOptions().queryKey, restored);
+        setLocalNotes(null);
+      })
+      .catch((e) => {
+        console.error("[public] undo unpublish failed", e);
+        setLocalNotes((prev) => (prev ?? notesData ?? []).filter((n) => n.id !== note.id));
+      });
   }
 
   // Treat legacy plain-text bios as text; new HTML bios render rich.
@@ -380,7 +401,13 @@ function PublicPage() {
             {displayed.map((note) => (
               <li
                 key={note.id}
-                onMouseEnter={() => setHoveredId(note.id)}
+                onMouseEnter={() => {
+                  setHoveredId(note.id);
+                  // Warm the detail-page cache so the click feels instant.
+                  // prefetchQuery is a no-op if the data is fresh, so spamming
+                  // hovers across the list is cheap.
+                  queryClient.prefetchQuery(publicNoteQueryOptions(note.id));
+                }}
                 onMouseLeave={() => setHoveredId((cur) => (cur === note.id ? null : cur))}
                 style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, padding: "13px 0", borderBottom: "1px solid rgba(0,0,0,0.07)" }}
               >
@@ -388,6 +415,7 @@ function PublicPage() {
                   <Link
                     to="/public/$noteId"
                     params={{ noteId: String(note.id) }}
+                    onFocus={() => queryClient.prefetchQuery(publicNoteQueryOptions(note.id))}
                     style={{ fontSize: 17, fontWeight: 500, color: "#111", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "none" }}
                     onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "underline")}
                     onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "none")}
