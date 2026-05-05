@@ -717,8 +717,9 @@ async def mcp_logger(request: Request, call_next):
         try:
             db.add(McpCall(path=request.url.path[:500]))
             db.commit()
-        except Exception:
+        except Exception as e:
             db.rollback()
+            print(f"[mcp_logger] failed to log call {request.url.path}: {e}", flush=True)
         finally:
             db.close()
     return response
@@ -2136,6 +2137,33 @@ def touch_note(note_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@app.post("/notes/{note_id}/auto-title")
+async def auto_title_note(note_id: int, db: Session = Depends(get_db)):
+    """Generate + save a short title for a note when Daniel hasn't named it.
+    Uses gpt-4o-mini (`llm_client.generate_title`). Idempotent on the
+    backend — repeat calls overwrite — but the frontend gates on a
+    placeholder title so we don't clobber user-typed titles.
+    Returns the new title or the existing one if the note is too short.
+    """
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    plaintext = note_service._strip_html(note.content or "").strip()
+    # Below ~40 chars there isn't enough signal — return existing title.
+    if len(plaintext) < 40:
+        return {"title": note.title or "", "generated": False}
+
+    title = await llm_client.generate_title(plaintext[:1500])
+    title = (title or "").strip().strip('"').strip("'")
+    if not title:
+        return {"title": note.title or "", "generated": False}
+
+    note.title = title
+    db.commit()
+    return {"title": title, "generated": True}
+
+
 @app.post("/notes/{note_id}/memorize")
 def memorize_note(note_id: int, db: Session = Depends(get_db)):
     """Extract facts from a note when the user leaves it.
@@ -2433,14 +2461,17 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception:
         streak = 0
 
-    # MCP activity — calls today + most recent. Best-effort: missing table
+    # MCP activity — rolling 24h window + most recent. Rolling vs UTC-midnight
+    # cutoff because Fly runs UTC and Daniel's in NYC; "today" by UTC date
+    # silently drops calls from late-evening NYC. Best-effort: missing table
     # (fresh DB) shouldn't break the dashboard, so we wrap and fall back.
     mcp_calls_today = 0
     mcp_last_active_at: str | None = None
     try:
+        cutoff = datetime.utcnow() - timedelta(hours=24)
         mcp_calls_today = (
             db.query(McpCall)
-            .filter(McpCall.called_at >= datetime.combine(today, datetime.min.time()))
+            .filter(McpCall.called_at >= cutoff)
             .count()
         )
         last = (

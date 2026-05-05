@@ -392,7 +392,7 @@ function ActivitySection() {
         <ActivityTile category="lists" categoryColor="#E2A26B"
           label="open" value={fmtInt(ext?.todos_open)} />
         <ActivityTile category="claude" categoryColor="#C76B6B"
-          label="calls today" value={fmtInt(stats?.mcp_calls_today)} />
+          label="calls (24h)" value={fmtInt(stats?.mcp_calls_today)} />
       </div>
     </SectionShell>
   );
