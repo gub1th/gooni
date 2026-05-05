@@ -358,59 +358,111 @@ function ActivitySection() {
     );
   }
 
-  // Group activity stats by domain so the section reads as
-  // [time/streak][notes][chat][lists][claude] not a flat dump of 9 numbers.
-  // Each subsection gets a tiny header so the eye can land on a category.
+  // Unified tile grid — every stat is a same-sized card with a colored
+  // category dot. Earlier layout nested per-category mini-grids, which
+  // produced sparse half-empty rows (e.g. day-streak alone, claude alone).
+  // Keeping category context via the dot + tag is enough to scan by domain
+  // without breaking the visual rhythm.
   return (
     <SectionShell label="Activity">
-      <SubSection label="time">
-        <BigStat label="day streak" value={fmtInt(stats?.streak)} sub="days" />
-      </SubSection>
-      <SubSection label="notes">
-        <BigStat
-          label="this week"
-          value={fmtInt(stats?.notes_this_week)}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+        gap: 10,
+      }}>
+        <ActivityTile category="time" categoryColor="#7B8FE6"
+          label="day streak" value={fmtInt(stats?.streak)} sub="days" />
+        <ActivityTile category="notes" categoryColor="#A879D6"
+          label="this week" value={fmtInt(stats?.notes_this_week)}
           delta={
             stats?.notes_this_week != null && stats?.notes_last_week != null
               ? stats.notes_this_week - stats.notes_last_week
               : undefined
-          }
-        />
-        <BigStat label="total" value={fmtInt(ext?.notes_total)} />
-      </SubSection>
-      <SubSection label="chat">
-        <BigStat label="messages this week" value={fmtInt(ext?.user_messages_this_week)} />
-        <BigStat label="messages total" value={fmtInt(ext?.user_messages_total)} />
-        <BigStat label="conversations" value={fmtInt(ext?.conversations_total)} />
-      </SubSection>
-      <SubSection label="lists">
-        <BigStat label="checked this week" value={fmtInt(ext?.todos_done_this_week)} />
-        <BigStat label="open" value={fmtInt(ext?.todos_open)} />
-      </SubSection>
-      <SubSection label="claude">
-        <BigStat label="calls today" value={fmtInt(stats?.mcp_calls_today)} />
-      </SubSection>
+          } />
+        <ActivityTile category="notes" categoryColor="#A879D6"
+          label="total" value={fmtInt(ext?.notes_total)} />
+        <ActivityTile category="chat" categoryColor="#5DAE8B"
+          label="messages this week" value={fmtInt(ext?.user_messages_this_week)} />
+        <ActivityTile category="chat" categoryColor="#5DAE8B"
+          label="messages total" value={fmtInt(ext?.user_messages_total)} />
+        <ActivityTile category="chat" categoryColor="#5DAE8B"
+          label="conversations" value={fmtInt(ext?.conversations_total)} />
+        <ActivityTile category="lists" categoryColor="#E2A26B"
+          label="checked this week" value={fmtInt(ext?.todos_done_this_week)} />
+        <ActivityTile category="lists" categoryColor="#E2A26B"
+          label="open" value={fmtInt(ext?.todos_open)} />
+        <ActivityTile category="claude" categoryColor="#C76B6B"
+          label="calls today" value={fmtInt(stats?.mcp_calls_today)} />
+      </div>
     </SectionShell>
   );
 }
 
-function SubSection({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginTop: 14 }}>
+function ActivityTile({
+  category, categoryColor, label, value, sub, delta,
+}: {
+  category: string;
+  categoryColor: string;
+  label: string;
+  value: React.ReactNode;
+  sub?: string;
+  delta?: number;
+}) {
+  let deltaLine: React.ReactNode = null;
+  if (typeof delta === "number") {
+    const isFlat = delta === 0;
+    const isUp = delta > 0;
+    deltaLine = (
       <div style={{
-        fontSize: 10, fontWeight: 600, letterSpacing: 0.5,
-        textTransform: "uppercase", color: "var(--gooni-muted, #AEAEB2)",
-        marginBottom: 6,
+        fontSize: 10.5,
+        color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
+        marginTop: 4, fontVariantNumeric: "tabular-nums",
+      }}>
+        {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+      borderRadius: 10,
+      padding: "12px 14px",
+      background: "var(--gooni-card-soft, rgba(0,0,0,0.015))",
+      display: "flex",
+      flexDirection: "column",
+      minHeight: 88,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: "50%",
+          background: categoryColor, flexShrink: 0,
+        }} />
+        <span style={{
+          fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5,
+          textTransform: "uppercase", color: "var(--gooni-muted, #8E8E93)",
+        }}>{category}</span>
+      </div>
+      <div style={{
+        fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)",
+        textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600,
+        marginBottom: 4,
       }}>
         {label}
       </div>
       <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-        gap: 14,
+        fontSize: 24, fontWeight: 600,
+        color: "var(--gooni-text, #1C1C1E)", lineHeight: 1.1,
+        fontVariantNumeric: "tabular-nums",
       }}>
-        {children}
+        {value ?? "—"}
+        {sub && (
+          <span style={{
+            fontSize: 11, fontWeight: 500, color: "var(--gooni-muted, #8E8E93)",
+            marginLeft: 4,
+          }}>{sub}</span>
+        )}
       </div>
+      {deltaLine}
     </div>
   );
 }
