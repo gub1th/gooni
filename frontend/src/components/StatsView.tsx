@@ -7,6 +7,8 @@ import {
   fetchExtendedStats,
   fetchOpenAIUsage,
   fetchSnapshotToday,
+  fetchWhoopStatus,
+  fetchWhoopToday,
   type ClaudeUsage,
   type DashboardStats,
   type DayBucket,
@@ -15,6 +17,8 @@ import {
   type ExtendedStats,
   type GooniSnapshot,
   type OpenAIUsage,
+  type WhoopStatus,
+  type WhoopToday,
 } from "../services/api";
 import { Skeleton } from "./Skeleton";
 
@@ -56,6 +60,7 @@ export function StatsView() {
 
         <OpenAISection />
         <ClaudeSection />
+        <WhoopSection />
         <DevSection />
         <ActivitySection />
       </div>
@@ -243,6 +248,160 @@ function ClaudeSection() {
         </>
       )}
     </SectionShell>
+  );
+}
+
+function WhoopSection() {
+  // Hide whole section unless Whoop is configured AND connected. Avoids
+  // rendering empty stubs for users without the integration.
+  const { data: status } = useQuery<WhoopStatus>({
+    queryKey: ["whoop-status"],
+    queryFn: fetchWhoopStatus,
+    staleTime: 60 * 60_000,
+    retry: false,
+  });
+  const enabled = !!status?.configured && !!status?.connected;
+
+  const { data, isLoading, refetch, isFetching } = useQuery<WhoopToday>({
+    queryKey: ["whoop-today"],
+    queryFn: () => fetchWhoopToday(),
+    enabled,
+    staleTime: 30 * 60_000,
+    retry: false,
+  });
+
+  if (!status) return null;          // status query in flight
+  if (!enabled) return null;          // not configured / not connected
+
+  // Whoop's standard recovery zones: red <34, yellow 34-66, green ≥67.
+  function recoveryColor(score: number | null | undefined): string {
+    if (score == null) return "#AEAEB2";
+    if (score >= 67) return "#30A14E";
+    if (score >= 34) return "#E2A26B";
+    return "#C76B6B";
+  }
+  function fmtSleep(min: number | null | undefined): string {
+    if (min == null) return "—";
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return `${h}h ${m}m`;
+  }
+
+  const refreshButton = (
+    <button
+      onClick={() => fetchWhoopToday(true).then(() => refetch())}
+      disabled={isFetching}
+      style={{
+        fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+        background: "transparent", border: "none", cursor: "pointer",
+        padding: 0, fontFamily: FONT,
+        opacity: isFetching ? 0.5 : 1,
+      }}
+    >
+      {isFetching ? "refreshing…" : "refresh"}
+    </button>
+  );
+
+  const recovery = data?.recovery_score ?? null;
+  const ringColor = recoveryColor(recovery);
+
+  return (
+    <SectionShell label="Whoop — today" right={refreshButton}>
+      {isLoading && !data ? (
+        <SkeletonRow />
+      ) : !data ? (
+        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>
+          No data yet. Hit refresh after Whoop syncs your latest cycle.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {/* Hero row: recovery ring + headline stats */}
+          <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+            <RecoveryRing score={recovery} color={ringColor} />
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+              gap: 14, flex: 1, minWidth: 220,
+            }}>
+              <BigStat label="HRV (ms)" value={data.hrv_rmssd_ms != null ? data.hrv_rmssd_ms.toFixed(1) : "—"} />
+              <BigStat label="Resting HR" value={data.resting_hr ?? "—"} />
+              <BigStat label="Day strain" value={data.strain != null ? data.strain.toFixed(1) : "—"} />
+            </div>
+          </div>
+
+          {/* Sleep block */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+            gap: 14,
+            paddingTop: 14,
+            borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.06))",
+          }}>
+            <BigStat label="Sleep" value={fmtSleep(data.sleep_minutes)} />
+            <BigStat
+              label="Sleep performance"
+              value={data.sleep_performance_pct != null ? `${Math.round(data.sleep_performance_pct)}%` : "—"}
+            />
+          </div>
+
+          {data.updated_at && (
+            <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
+              updated {relTime(data.updated_at)}
+            </div>
+          )}
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+function RecoveryRing({ score, color }: { score: number | null; color: string }) {
+  // 72px svg ring with the score centered. Stroke is the recovery color so
+  // the eye picks up zone at a glance without needing the number.
+  const size = 84;
+  const stroke = 8;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = score != null ? Math.max(0, Math.min(100, score)) : 0;
+  const dash = (pct / 100) * c;
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size}>
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          stroke="var(--gooni-border, rgba(0,0,0,0.08))"
+          strokeWidth={stroke} fill="none"
+        />
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          stroke={color}
+          strokeWidth={stroke}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c - dash}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <div style={{
+        position: "absolute", inset: 0,
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        fontFamily: FONT,
+      }}>
+        <div style={{
+          fontSize: 22, fontWeight: 700, color,
+          fontVariantNumeric: "tabular-nums", lineHeight: 1,
+        }}>
+          {score != null ? score : "—"}
+        </div>
+        <div style={{
+          fontSize: 9, color: "var(--gooni-muted, #8E8E93)",
+          textTransform: "uppercase", letterSpacing: 0.5, marginTop: 3,
+        }}>
+          recovery
+        </div>
+      </div>
+    </div>
   );
 }
 

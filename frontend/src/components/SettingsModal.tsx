@@ -280,9 +280,8 @@ function IntegrationsTab() {
           provider="whoop"
           label="Whoop"
           icon={<WhoopLogo />}
-          blurbConfigured="Connect to surface recovery, HRV, and strain on the dashboard. Future: tune daily nudge based on recovery."
+          blurbConfigured="Connect to surface recovery, HRV, and sleep on the Stats view. Future: tune daily nudge based on recovery."
           blurbNotConfigured="Set WHOOP_CLIENT_ID / WHOOP_CLIENT_SECRET / WHOOP_REDIRECT_URI on the backend to enable."
-          extras={<WhoopTodayPanel />}
         />
       </div>
     </>
@@ -644,79 +643,3 @@ function WhoopLogo() {
   );
 }
 
-interface WhoopTodayPanelProps {
-  // No props; pulls fresh data on mount + a Refresh button.
-}
-
-function WhoopTodayPanel(_: WhoopTodayPanelProps) {
-  const [data, setData] = useState<import("../services/api").WhoopToday | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function load(force = false) {
-    setLoading(true);
-    setErr(null);
-    try {
-      const { fetchWhoopToday } = await import("../services/api");
-      const d = await fetchWhoopToday(force);
-      setData(d);
-    } catch (e) {
-      setErr(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { load(false); }, []);
-
-  if (loading && !data) return <div style={{ fontSize: 12, color: "#8E8E93" }}>Loading…</div>;
-  if (err) return <div style={{ fontSize: 12, color: "#C44" }}>{err}</div>;
-  if (!data) return null;
-
-  const Stat = ({ label, value }: { label: string; value: string | number | null }) => (
-    <div style={{
-      display: "flex", flexDirection: "column", gap: 2,
-      padding: "6px 10px", borderRadius: 8,
-      background: "rgba(0,0,0,0.04)", flex: 1, minWidth: 0,
-    }}>
-      <span style={{ fontSize: 10, color: "#8E8E93", letterSpacing: 0.4, textTransform: "uppercase" }}>{label}</span>
-      <span style={{ fontSize: 14, fontWeight: 600, color: "#1C1C1E", fontVariantNumeric: "tabular-nums" }}>
-        {value ?? "—"}
-      </span>
-    </div>
-  );
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", gap: 6 }}>
-        <Stat label="Recovery" value={data.recovery_score != null ? `${data.recovery_score}%` : null} />
-        <Stat label="HRV (ms)" value={data.hrv_rmssd_ms != null ? data.hrv_rmssd_ms.toFixed(1) : null} />
-        <Stat label="RHR" value={data.resting_hr} />
-        <Stat label="Strain" value={data.strain != null ? data.strain.toFixed(1) : null} />
-      </div>
-      <div style={{ display: "flex", gap: 6 }}>
-        <Stat label="Sleep (m)" value={data.sleep_minutes} />
-        <Stat label="Sleep %" value={data.sleep_performance_pct != null ? `${Math.round(data.sleep_performance_pct)}%` : null} />
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <button
-          onClick={() => load(true)}
-          disabled={loading}
-          style={{
-            fontSize: 11.5, padding: "4px 9px", borderRadius: 6,
-            border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
-            cursor: "pointer", color: "#1C1C1E", fontWeight: 500,
-            fontFamily: "'Inter', -apple-system, sans-serif",
-          }}
-        >
-          {loading ? "fetching…" : "refresh"}
-        </button>
-        {data.updated_at && (
-          <span style={{ fontSize: 10.5, color: "#8E8E93" }}>
-            updated {new Date(data.updated_at).toLocaleString()}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
