@@ -164,6 +164,14 @@ export async function memorizeNote(id: number): Promise<void> {
   await apiFetch(`${BASE}/notes/${id}/memorize`, { method: "POST" });
 }
 
+export async function autoTitleNote(id: number): Promise<{ title: string; generated: boolean }> {
+  // Asks the backend to generate + persist a short title via gpt-4o-mini.
+  // No-op for short notes (returns generated:false).
+  const res = await apiFetch(`${BASE}/notes/${id}/auto-title`, { method: "POST" });
+  if (!res.ok) throw new Error("auto-title failed");
+  return res.json();
+}
+
 export async function extractToChildNote(
   parentId: number,
   selectedHtml: string,

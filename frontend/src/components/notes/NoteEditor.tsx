@@ -18,7 +18,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
@@ -306,6 +306,9 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   const titleRef = useRef<string>(activeNote?.title ?? "");
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Note ids we've already attempted auto-title for in this session. Prevents
+  // re-firing on every save; the user can rename and we won't overwrite.
+  const autoTitledRef = useRef<Set<number>>(new Set());
   const prevActiveNoteId = useRef<number | null>(activeNoteId);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
@@ -718,6 +721,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       setSaveStatus("saved");
       if (savedTimer.current) clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSaveStatus("idle"), 3000);
+      maybeAutoTitle();
     } catch (err) {
       // Surface the failure instead of swallowing it. hasChanges stays true so
       // the next keystroke or scheduleSave() retries automatically — and the
@@ -726,6 +730,35 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       console.error(`[NoteEditor] save failed for note #${activeNoteId}:`, err);
       setSaveStatus("error");
     }
+  }
+
+  function maybeAutoTitle() {
+    const noteId = activeNoteId;
+    if (!noteId || noteId < 0) return;
+    if (autoTitledRef.current.has(noteId)) return;
+    const current = (titleRef.current || "").trim().toLowerCase();
+    // Only auto-title placeholder titles. Any user-typed title wins.
+    if (current && current !== "untitled" && current !== "new note") return;
+    // Strip HTML quickly to gate on plaintext length. Below ~60 chars there's
+    // not enough signal — let the note grow first.
+    const plaintext = (bodyRef.current || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    if (plaintext.length < 60) return;
+    autoTitledRef.current.add(noteId);
+    apiAutoTitleNote(noteId).then((res) => {
+      if (!res.generated || !res.title) return;
+      // Only apply if user hasn't started typing a real title in the meantime.
+      const stillPlaceholder = !titleRef.current.trim() ||
+        titleRef.current.trim().toLowerCase() === "untitled" ||
+        titleRef.current.trim().toLowerCase() === "new note";
+      if (!stillPlaceholder) return;
+      setLocalTitle(res.title);
+      titleRef.current = res.title;
+      // Sync the store so sidebar/list views pick up the new title without a refetch.
+      refetchNote(noteId).catch(() => {});
+    }).catch(() => {
+      // Network / LLM hiccup — let the next save retry by clearing the guard.
+      autoTitledRef.current.delete(noteId);
+    });
   }
 
   async function embedAndCheck(noteId: number | null) {
