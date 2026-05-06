@@ -892,6 +892,7 @@ export interface OpenAIUsage {
   error?: string;
   month_start_unix?: number;
   spend_usd?: number;
+  spend_today_usd?: number;
   requests?: number;
   input_tokens?: number;
   output_tokens?: number;
