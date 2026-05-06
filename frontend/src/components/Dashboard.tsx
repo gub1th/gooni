@@ -152,6 +152,17 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
     if (typingRaf.current != null) cancelAnimationFrame(typingRaf.current);
   }, []);
 
+  // Quick-capture composer (Cmd+E) saves notes outside the dashboard's
+  // own submit flow, so listen for its event and re-pull stats so the
+  // recent-notes row reflects the new note.
+  useEffect(() => {
+    const onCreated = () => {
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    };
+    window.addEventListener("gooni:note-created", onCreated);
+    return () => window.removeEventListener("gooni:note-created", onCreated);
+  }, [queryClient]);
+
   function startTyping(noteId: number, total: number) {
     if (typingRaf.current != null) cancelAnimationFrame(typingRaf.current);
     if (total <= 0) return;
