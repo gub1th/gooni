@@ -5,7 +5,9 @@ import { Dashboard } from "../components/Dashboard";
 import { EvalView } from "../components/eval/EvalView";
 import { StatsView } from "../components/StatsView";
 import { GooniLayer } from "../components/GooniLayer";
+import { BacklogBoard } from "../components/lists/BacklogBoard";
 import { ListView } from "../components/lists/ListView";
+import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { PlanView } from "../components/PlanView";
@@ -40,6 +42,7 @@ function NotesPage() {
   const windowWidth = useWindowWidth();
   const { fetchConversations, newChat, selectConversation } = useConversationsStore();
   const fetchAllLists = useListsStore((s) => s.fetchAll);
+  const allLists = useListsStore((s) => s.lists);
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
 
@@ -95,10 +98,22 @@ function NotesPage() {
       // editor's lookup `notes[spaceId].find(n => n.id === activeNoteId)`
       // returns undefined until loadNotes resolves — leaving Daniel staring
       // at an empty "All Notes" screen for the duration of that fetch.
+      //
+      // If the note is already in the list (the common click-from-rail
+      // case), update it in place to preserve sort position. Prepending it
+      // unconditionally caused a visible "jump to top, snap back" on every
+      // click as loadNotes restored the original order milliseconds later.
       useNotesContentStore.setState((s) => {
         const existing = s.notes[targetSpace] ?? [];
-        const deduped = existing.filter((n) => n.id !== note.id);
-        return { notes: { ...s.notes, [targetSpace]: [note, ...deduped] } };
+        const idx = existing.findIndex((n) => n.id === note.id);
+        if (idx >= 0) {
+          const next = existing.slice();
+          next[idx] = note;
+          return { notes: { ...s.notes, [targetSpace]: next } };
+        }
+        // Not in this list yet — prepend so the editor finds it immediately;
+        // loadNotes will reconcile order on its next pass.
+        return { notes: { ...s.notes, [targetSpace]: [note, ...existing] } };
       });
       selectNote(note.id);
       loadNotes(targetSpace);
@@ -116,6 +131,19 @@ function NotesPage() {
     setView("chat");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.conv]);
+
+  // Same pattern for list deep-links. Without this, navigating to
+  // `/?list=N` while already on `/` (e.g. clicking the composer "Routed:
+  // backlog" pill, or the chat-audit/memories sidebars' onSelectList) only
+  // updated the URL — the view stayed wherever it was. Initial mount used
+  // search.list via useState, so refresh worked; subsequent navigations
+  // didn't.
+  useEffect(() => {
+    if (!search.list) return;
+    setActiveListId(search.list);
+    setView("lists");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.list]);
 
   // ?audit=1 lands directly on the Audit tab.
   useEffect(() => {
@@ -252,21 +280,60 @@ function NotesPage() {
             noteId={planNoteId}
             onExit={() => { setPlanNoteId(null); setView("dashboard"); }}
           />
-        ) : view === "lists" && activeListId != null ? (
-          <ListView
-            listId={activeListId}
-            onOpenSourceNote={(noteId) => setViewAndUrl("notes", noteId)}
-          />
-        ) : view === "eval" ? (
+        ) : view === "lists" && activeListId != null ? (() => {
+          // Backlog gets the Jira-style 3-column board with drag + modal.
+          // Other list types stay on the original flat ListView. Decision
+          // made here (instead of inside ListView) so we don't risk a
+          // conditional-hook order violation by short-circuiting the
+          // ListView render before its useState/useRef declarations.
+          const list = allLists.find((l) => l.id === activeListId);
+          if (list?.type === "backlog") {
+            return (
+              <BacklogBoard
+                listId={activeListId}
+                onOpenSourceNote={(noteId) => setViewAndUrl("notes", noteId)}
+              />
+            );
+          }
+          return (
+            <ListView
+              listId={activeListId}
+              onOpenSourceNote={(noteId) => setViewAndUrl("notes", noteId)}
+            />
+          );
+        })() : view === "eval" ? (
           <EvalView />
         ) : view === "stats" ? (
           <StatsView />
-        ) : (
-          <>
-            <NotesList />
-            <NoteEditor />
-          </>
-        )}
+        ) : (() => {
+          // Notes view. When the user is in All Notes (no specific space
+          // chosen) AND has no active note, swap the standard 2-column
+          // (NotesList + NoteEditor empty state) for a Confluence-style
+          // discovery: big search bar + recent notes grid. Picking a card
+          // sets activeNoteId — which flips us back to the standard layout
+          // since `activeNoteId != null` falls through to the else branch.
+          const inAllNotes = selectedSpaceId == null || selectedSpaceId === "general";
+          const showDiscovery = inAllNotes && activeNoteId == null;
+          if (showDiscovery) {
+            return (
+              <AllNotesDiscovery
+                onSelectNote={(id) => {
+                  // Mirror the search.note effect path: seed the note into
+                  // the store + select it. The URL effect on activeNoteId
+                  // keeps `?note=` in sync.
+                  selectNote(id);
+                }}
+                onCompose={handleCompose}
+              />
+            );
+          }
+          return (
+            <>
+              <NotesList />
+              <NoteEditor />
+            </>
+          );
+        })()}
       </div>
 
       {/* FAB + floating panel + mascot all live in GooniLayer so /memories and

@@ -7,6 +7,8 @@ import {
   fetchExtendedStats,
   fetchOpenAIUsage,
   fetchSnapshotToday,
+  fetchWhoopStatus,
+  fetchWhoopToday,
   type ClaudeUsage,
   type DashboardStats,
   type DayBucket,
@@ -15,6 +17,8 @@ import {
   type ExtendedStats,
   type GooniSnapshot,
   type OpenAIUsage,
+  type WhoopStatus,
+  type WhoopToday,
 } from "../services/api";
 import { Skeleton } from "./Skeleton";
 
@@ -56,6 +60,7 @@ export function StatsView() {
 
         <OpenAISection />
         <ClaudeSection />
+        <WhoopSection />
         <DevSection />
         <ActivitySection />
       </div>
@@ -246,6 +251,160 @@ function ClaudeSection() {
   );
 }
 
+function WhoopSection() {
+  // Hide whole section unless Whoop is configured AND connected. Avoids
+  // rendering empty stubs for users without the integration.
+  const { data: status } = useQuery<WhoopStatus>({
+    queryKey: ["whoop-status"],
+    queryFn: fetchWhoopStatus,
+    staleTime: 60 * 60_000,
+    retry: false,
+  });
+  const enabled = !!status?.configured && !!status?.connected;
+
+  const { data, isLoading, refetch, isFetching } = useQuery<WhoopToday>({
+    queryKey: ["whoop-today"],
+    queryFn: () => fetchWhoopToday(),
+    enabled,
+    staleTime: 30 * 60_000,
+    retry: false,
+  });
+
+  if (!status) return null;          // status query in flight
+  if (!enabled) return null;          // not configured / not connected
+
+  // Whoop's standard recovery zones: red <34, yellow 34-66, green ≥67.
+  function recoveryColor(score: number | null | undefined): string {
+    if (score == null) return "#AEAEB2";
+    if (score >= 67) return "#30A14E";
+    if (score >= 34) return "#E2A26B";
+    return "#C76B6B";
+  }
+  function fmtSleep(min: number | null | undefined): string {
+    if (min == null) return "—";
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return `${h}h ${m}m`;
+  }
+
+  const refreshButton = (
+    <button
+      onClick={() => fetchWhoopToday(true).then(() => refetch())}
+      disabled={isFetching}
+      style={{
+        fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+        background: "transparent", border: "none", cursor: "pointer",
+        padding: 0, fontFamily: FONT,
+        opacity: isFetching ? 0.5 : 1,
+      }}
+    >
+      {isFetching ? "refreshing…" : "refresh"}
+    </button>
+  );
+
+  const recovery = data?.recovery_score ?? null;
+  const ringColor = recoveryColor(recovery);
+
+  return (
+    <SectionShell label="Whoop — today" right={refreshButton}>
+      {isLoading && !data ? (
+        <SkeletonRow />
+      ) : !data ? (
+        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>
+          No data yet. Hit refresh after Whoop syncs your latest cycle.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {/* Hero row: recovery ring + headline stats */}
+          <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+            <RecoveryRing score={recovery} color={ringColor} />
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+              gap: 14, flex: 1, minWidth: 220,
+            }}>
+              <BigStat label="HRV (ms)" value={data.hrv_rmssd_ms != null ? data.hrv_rmssd_ms.toFixed(1) : "—"} />
+              <BigStat label="Resting HR" value={data.resting_hr ?? "—"} />
+              <BigStat label="Day strain" value={data.strain != null ? data.strain.toFixed(1) : "—"} />
+            </div>
+          </div>
+
+          {/* Sleep block */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+            gap: 14,
+            paddingTop: 14,
+            borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.06))",
+          }}>
+            <BigStat label="Sleep" value={fmtSleep(data.sleep_minutes)} />
+            <BigStat
+              label="Sleep performance"
+              value={data.sleep_performance_pct != null ? `${Math.round(data.sleep_performance_pct)}%` : "—"}
+            />
+          </div>
+
+          {data.updated_at && (
+            <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
+              updated {relTime(data.updated_at)}
+            </div>
+          )}
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+function RecoveryRing({ score, color }: { score: number | null; color: string }) {
+  // 72px svg ring with the score centered. Stroke is the recovery color so
+  // the eye picks up zone at a glance without needing the number.
+  const size = 84;
+  const stroke = 8;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = score != null ? Math.max(0, Math.min(100, score)) : 0;
+  const dash = (pct / 100) * c;
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size}>
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          stroke="var(--gooni-border, rgba(0,0,0,0.08))"
+          strokeWidth={stroke} fill="none"
+        />
+        <circle
+          cx={size / 2} cy={size / 2} r={r}
+          stroke={color}
+          strokeWidth={stroke}
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c - dash}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <div style={{
+        position: "absolute", inset: 0,
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        fontFamily: FONT,
+      }}>
+        <div style={{
+          fontSize: 22, fontWeight: 700, color,
+          fontVariantNumeric: "tabular-nums", lineHeight: 1,
+        }}>
+          {score != null ? score : "—"}
+        </div>
+        <div style={{
+          fontSize: 9, color: "var(--gooni-muted, #8E8E93)",
+          textTransform: "uppercase", letterSpacing: 0.5, marginTop: 3,
+        }}>
+          recovery
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DevSection() {
   const { data: dev, isLoading } = useQuery<DevActivity | null>({
     queryKey: ["dev-activity"],
@@ -358,59 +517,111 @@ function ActivitySection() {
     );
   }
 
-  // Group activity stats by domain so the section reads as
-  // [time/streak][notes][chat][lists][claude] not a flat dump of 9 numbers.
-  // Each subsection gets a tiny header so the eye can land on a category.
+  // Unified tile grid — every stat is a same-sized card with a colored
+  // category dot. Earlier layout nested per-category mini-grids, which
+  // produced sparse half-empty rows (e.g. day-streak alone, claude alone).
+  // Keeping category context via the dot + tag is enough to scan by domain
+  // without breaking the visual rhythm.
   return (
     <SectionShell label="Activity">
-      <SubSection label="time">
-        <BigStat label="day streak" value={fmtInt(stats?.streak)} sub="days" />
-      </SubSection>
-      <SubSection label="notes">
-        <BigStat
-          label="this week"
-          value={fmtInt(stats?.notes_this_week)}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+        gap: 10,
+      }}>
+        <ActivityTile category="time" categoryColor="#7B8FE6"
+          label="day streak" value={fmtInt(stats?.streak)} sub="days" />
+        <ActivityTile category="notes" categoryColor="#A879D6"
+          label="this week" value={fmtInt(stats?.notes_this_week)}
           delta={
             stats?.notes_this_week != null && stats?.notes_last_week != null
               ? stats.notes_this_week - stats.notes_last_week
               : undefined
-          }
-        />
-        <BigStat label="total" value={fmtInt(ext?.notes_total)} />
-      </SubSection>
-      <SubSection label="chat">
-        <BigStat label="messages this week" value={fmtInt(ext?.user_messages_this_week)} />
-        <BigStat label="messages total" value={fmtInt(ext?.user_messages_total)} />
-        <BigStat label="conversations" value={fmtInt(ext?.conversations_total)} />
-      </SubSection>
-      <SubSection label="lists">
-        <BigStat label="checked this week" value={fmtInt(ext?.todos_done_this_week)} />
-        <BigStat label="open" value={fmtInt(ext?.todos_open)} />
-      </SubSection>
-      <SubSection label="claude">
-        <BigStat label="calls today" value={fmtInt(stats?.mcp_calls_today)} />
-      </SubSection>
+          } />
+        <ActivityTile category="notes" categoryColor="#A879D6"
+          label="total" value={fmtInt(ext?.notes_total)} />
+        <ActivityTile category="chat" categoryColor="#5DAE8B"
+          label="messages this week" value={fmtInt(ext?.user_messages_this_week)} />
+        <ActivityTile category="chat" categoryColor="#5DAE8B"
+          label="messages total" value={fmtInt(ext?.user_messages_total)} />
+        <ActivityTile category="chat" categoryColor="#5DAE8B"
+          label="conversations" value={fmtInt(ext?.conversations_total)} />
+        <ActivityTile category="lists" categoryColor="#E2A26B"
+          label="checked this week" value={fmtInt(ext?.todos_done_this_week)} />
+        <ActivityTile category="lists" categoryColor="#E2A26B"
+          label="open" value={fmtInt(ext?.todos_open)} />
+        <ActivityTile category="claude" categoryColor="#C76B6B"
+          label="calls (24h)" value={fmtInt(stats?.mcp_calls_today)} />
+      </div>
     </SectionShell>
   );
 }
 
-function SubSection({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ marginTop: 14 }}>
+function ActivityTile({
+  category, categoryColor, label, value, sub, delta,
+}: {
+  category: string;
+  categoryColor: string;
+  label: string;
+  value: React.ReactNode;
+  sub?: string;
+  delta?: number;
+}) {
+  let deltaLine: React.ReactNode = null;
+  if (typeof delta === "number") {
+    const isFlat = delta === 0;
+    const isUp = delta > 0;
+    deltaLine = (
       <div style={{
-        fontSize: 10, fontWeight: 600, letterSpacing: 0.5,
-        textTransform: "uppercase", color: "var(--gooni-muted, #AEAEB2)",
-        marginBottom: 6,
+        fontSize: 10.5,
+        color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
+        marginTop: 4, fontVariantNumeric: "tabular-nums",
+      }}>
+        {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+      borderRadius: 10,
+      padding: "12px 14px",
+      background: "var(--gooni-card-soft, rgba(0,0,0,0.015))",
+      display: "flex",
+      flexDirection: "column",
+      minHeight: 88,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: "50%",
+          background: categoryColor, flexShrink: 0,
+        }} />
+        <span style={{
+          fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5,
+          textTransform: "uppercase", color: "var(--gooni-muted, #8E8E93)",
+        }}>{category}</span>
+      </div>
+      <div style={{
+        fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)",
+        textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600,
+        marginBottom: 4,
       }}>
         {label}
       </div>
       <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-        gap: 14,
+        fontSize: 24, fontWeight: 600,
+        color: "var(--gooni-text, #1C1C1E)", lineHeight: 1.1,
+        fontVariantNumeric: "tabular-nums",
       }}>
-        {children}
+        {value ?? "—"}
+        {sub && (
+          <span style={{
+            fontSize: 11, fontWeight: 500, color: "var(--gooni-muted, #8E8E93)",
+            marginLeft: 4,
+          }}>{sub}</span>
+        )}
       </div>
+      {deltaLine}
     </div>
   );
 }

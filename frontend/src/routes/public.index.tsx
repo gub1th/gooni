@@ -1,12 +1,20 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import LinkExtension from "@tiptap/extension-link";
-import { fetchPublicNotes, fetchPublicProfile, fetchPublicVisitCount, updatePublicProfile, getStoredToken, type PublicNote } from "../services/api";
+import { updatePublicProfile, getStoredToken, patchNote, type PublicNote } from "../services/api";
+import { Globe } from "lucide-react";
 import { displayTitle } from "../utils/notePreview";
 import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
+import {
+  publicNoteQueryOptions,
+  publicNotesListQueryOptions,
+  publicProfileQueryOptions,
+  publicVisitCountQueryOptions,
+} from "../utils/publicQueries";
 
 export const Route = createFileRoute("/public/")(({
   component: PublicPage,
@@ -61,16 +69,30 @@ function timeAgo(iso: string | null): string {
 }
 
 function PublicPage() {
-  const [notes, setNotes] = useState<PublicNote[]>([]);
-  const [bio, setBio] = useState<string | null>(null);
-  const [noteCount, setNoteCount] = useState<number | null>(null);
-  const [lastActive, setLastActive] = useState<string | null>(null);
-  const [visitors, setVisitors] = useState<number | null>(null);
+  const queryClient = useQueryClient();
+  // List + profile + visits via React Query so back-navigation hits cache
+  // (default staleTime in main.tsx is 30s; gcTime 5min) instead of refetching.
+  const { data: notesData } = useQuery(publicNotesListQueryOptions());
+  const { data: profileData } = useQuery(publicProfileQueryOptions());
+  const { data: visitsData } = useQuery(publicVisitCountQueryOptions());
+
+  // Local override of the list — needed for optimistic unpublish + undo,
+  // since we want the row to disappear immediately without waiting for a
+  // refetch round-trip. null = use the React Query result as-is.
+  const [localNotes, setLocalNotes] = useState<PublicNote[] | null>(null);
+  const notes = localNotes ?? notesData ?? [];
+  const bio = profileData?.bio ?? null;
+  const noteCount = profileData?.note_count ?? null;
+  const lastActive = profileData?.last_active ?? null;
+  const visitors = visitsData?.unique_visitors ?? null;
   const [filter, setFilter] = useState<string | null>(null);
 
   const isOwner = getStoredToken() !== null;
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
+  const [undo, setUndo] = useState<{ note: PublicNote } | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const bioEditor = useEditor({
     extensions: [
@@ -100,15 +122,6 @@ function PublicPage() {
     },
   });
 
-  useEffect(() => {
-    fetchPublicNotes().then(setNotes).catch(() => {});
-    fetchPublicProfile().then((p) => {
-      setBio(p.bio);
-      setNoteCount(p.note_count);
-      setLastActive(p.last_active);
-    }).catch(() => {});
-    fetchPublicVisitCount().then((v) => setVisitors(v.unique_visitors)).catch(() => {});
-  }, []);
 
   async function handleSaveBio() {
     if (!bioEditor) return;
@@ -116,7 +129,11 @@ function PublicPage() {
     setSaving(true);
     try {
       await updatePublicProfile(html);
-      setBio(html);
+      // Patch the cached profile in place so the bio updates without a refetch.
+      queryClient.setQueryData(publicProfileQueryOptions().queryKey, (prev) => {
+        if (!prev) return prev;
+        return { ...prev, bio: html };
+      });
       setEditing(false);
     } finally {
       setSaving(false);
@@ -152,6 +169,64 @@ function PublicPage() {
         marks: [{ type: "link", attrs: { href } }],
       }).run();
     }
+  }
+
+  // ── Unpublish + undo flow ───────────────────────────────────────────
+  // Owner clicks the per-row globe → optimistic remove from `notes`,
+  // PATCH is_public=false to the backend, show a toast with an "Undo"
+  // action for ~6s. Undo PATCHes is_public=true and re-inserts the row
+  // at its original position.
+  function handleUnpublish(note: PublicNote) {
+    const idx = notes.findIndex((n) => n.id === note.id);
+    const optimistic = notes.filter((n) => n.id !== note.id);
+    setLocalNotes(optimistic);
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndo({ note });
+    patchNote(note.id, { is_public: false })
+      .then(() => {
+        // Sync the React Query cache so leaving + returning shows the same list.
+        queryClient.setQueryData(publicNotesListQueryOptions().queryKey, optimistic);
+        setLocalNotes(null);
+      })
+      .catch((e) => {
+        // Revert on failure so the UI doesn't lie about server state.
+        console.error("[public] unpublish failed", e);
+        setLocalNotes((prev) => {
+          const base = prev ?? notesData ?? [];
+          if (base.some((n) => n.id === note.id)) return base;
+          const next = base.slice();
+          next.splice(Math.max(0, idx), 0, note);
+          return next;
+        });
+        setUndo(null);
+      });
+    undoTimerRef.current = setTimeout(() => setUndo(null), 6000);
+  }
+
+  function handleUndoUnpublish() {
+    if (!undo) return;
+    const { note } = undo;
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndo(null);
+    const restored = (() => {
+      const base = notes;
+      if (base.some((n) => n.id === note.id)) return base;
+      return [...base, note].sort((a, b) => {
+        const ta = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const tb = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        return tb - ta;
+      });
+    })();
+    setLocalNotes(restored);
+    patchNote(note.id, { is_public: true })
+      .then(() => {
+        queryClient.setQueryData(publicNotesListQueryOptions().queryKey, restored);
+        setLocalNotes(null);
+      })
+      .catch((e) => {
+        console.error("[public] undo unpublish failed", e);
+        setLocalNotes((prev) => (prev ?? notesData ?? []).filter((n) => n.id !== note.id));
+      });
   }
 
   // Treat legacy plain-text bios as text; new HTML bios render rich.
@@ -326,12 +401,21 @@ function PublicPage() {
             {displayed.map((note) => (
               <li
                 key={note.id}
+                onMouseEnter={() => {
+                  setHoveredId(note.id);
+                  // Warm the detail-page cache so the click feels instant.
+                  // prefetchQuery is a no-op if the data is fresh, so spamming
+                  // hovers across the list is cheap.
+                  queryClient.prefetchQuery(publicNoteQueryOptions(note.id));
+                }}
+                onMouseLeave={() => setHoveredId((cur) => (cur === note.id ? null : cur))}
                 style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, padding: "13px 0", borderBottom: "1px solid rgba(0,0,0,0.07)" }}
               >
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <Link
                     to="/public/$noteId"
                     params={{ noteId: String(note.id) }}
+                    onFocus={() => queryClient.prefetchQuery(publicNoteQueryOptions(note.id))}
                     style={{ fontSize: 17, fontWeight: 500, color: "#111", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "none" }}
                     onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "underline")}
                     onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "none")}
@@ -342,11 +426,51 @@ function PublicPage() {
                     {formatDate(note.updated_at)} · {note.read_time_minutes} min read
                   </span>
                 </div>
-                {note.space_name && (
-                  <span style={{ flexShrink: 0, fontSize: 12, color: "#666", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12, padding: "3px 9px" }}>
-                    {note.space_name}
-                  </span>
-                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  {/* Owner-only: per-row globe → unpublish. Visible on hover
+                      and (for keyboard users) when the row is focused. The
+                      icon is also keyboard-reachable since it's a button. */}
+                  {isOwner && (
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleUnpublish(note);
+                      }}
+                      title="Remove from public"
+                      aria-label={`Remove "${displayTitle({ title: note.title, content: note.excerpt })}" from public`}
+                      style={{
+                        background: "transparent",
+                        border: "1px solid rgba(0,0,0,0.10)",
+                        borderRadius: 999,
+                        width: 26, height: 26,
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        color: "#444",
+                        cursor: "pointer",
+                        opacity: hoveredId === note.id ? 1 : 0,
+                        transition: "opacity 0.15s ease, background 0.15s ease, color 0.15s ease",
+                      }}
+                      onMouseEnter={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = "rgba(220,38,38,0.08)";
+                        el.style.color = "#B91C1C";
+                      }}
+                      onMouseLeave={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = "transparent";
+                        el.style.color = "#444";
+                      }}
+                      onFocus={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
+                    >
+                      <Globe size={13} strokeWidth={1.8} />
+                    </button>
+                  )}
+                  {note.space_name && (
+                    <span style={{ fontSize: 12, color: "#666", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12, padding: "3px 9px" }}>
+                      {note.space_name}
+                    </span>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
@@ -359,6 +483,49 @@ function PublicPage() {
       />
       <GooniMascot dashboardRef={mascotBoundsRef} />
       <PublicChatLauncher />
+
+      {/* Undo toast for unpublish — bottom-center, owner-only. Auto-
+          dismisses after 6s; the button restores the row + its
+          public-state via patchNote. */}
+      {undo && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            background: "#1C1C1E",
+            color: "#FFF",
+            padding: "10px 14px 10px 16px",
+            borderRadius: 999,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+            fontSize: 13.5,
+            fontFamily: FONT,
+            zIndex: 1300,
+          }}
+        >
+          <span>Removed from public — "{displayTitle({ title: undo.note.title, content: undo.note.excerpt })}"</span>
+          <button
+            onClick={handleUndoUnpublish}
+            style={{
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.30)",
+              color: "#FFF",
+              borderRadius: 999,
+              padding: "4px 12px",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: FONT,
+            }}
+          >Undo</button>
+        </div>
+      )}
     </div>
   );
 }

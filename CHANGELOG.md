@@ -5,6 +5,66 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.31.0 — 2026-05-05 (minor)
+
+- feat(stats): Whoop today section in StatsView; Settings → connect/disconnect only (#120)
+
+## 0.30.0 — 2026-05-05 (minor)
+
+- feat(notes): auto-titles via gpt-4o-mini + claude-activity 24h window (#119)
+
+## 0.29.1 — 2026-05-05 (patch)
+
+- fix(stats): unified Activity tile grid (#118)
+
+## 0.29.0 — 2026-05-04 (minor)
+
+- feat(public): hover-prefetch + cached list, skeleton + spinner loading (#117)
+
+## 0.28.1 — 2026-05-04 (patch)
+
+- fix(ui): hide list pills + drop dashboard stats/claude cards + source-note → modal (#116)
+
+## 0.28.0 — 2026-05-04 (minor)
+
+- feat(backlog): Jira-style 3-col board + drag/click split + Claude rules (#56/#125) (#113)
+
+## 0.27.1 — 2026-05-04 (patch)
+
+- fix(focus): UX cleanup — animated check, drag-reorder, primary timer (#112)
+
+## 0.27.0 — 2026-05-04 (minor)
+
+- feat(notes): Confluence-style discovery in All Notes empty state (#111)
+
+## 0.26.0 — 2026-05-04 (minor)
+
+- feat: focus-flow redesign + public unpublish-with-undo + FAB visibility fix (#109)
+
+## 0.25.0 — 2026-05-04 (minor)
+
+- feat(notes): Figure node — resize/align/caption + drop RELATED/QUESTIONS panels (#108)
+
+## 0.24.1 — 2026-05-04 (patch)
+
+- fix(notes): drop keepalive on updateNote so image saves don't fail (#107)
+
+## 0.24.0 — 2026-05-04 (minor)
+
+- feat(whoop): OAuth scaffold + daily snapshot endpoint (#75/#150) (#106)
+
+## 0.23.0 — 2026-05-03 (minor)
+
+- feat(ui): unify composer + chat send button (#122-124) (#103)
+
+## 0.22.1 — 2026-05-03 (patch)
+
+- fix(uploader): exchange password via /auth before posting (#102)
+
+## 0.22.0 — 2026-05-03 (minor)
+
+- feat(notes): tag-to-backlog button on note editor (#145) (#101)
+
 ## 0.21.0 — 2026-05-03 (minor)
 
 - feat(claude-usage): prod-sync via ingest endpoint + auto-hide on empty (#97)

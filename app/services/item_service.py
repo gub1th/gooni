@@ -67,6 +67,10 @@ class ItemService:
         source_note_id: int | None = None,
         status: str | None = None,
         scale: str | None = None,
+        health: int | None = None,
+        confidence: int | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
     ) -> ListItem:
         if parent_id is not None:
             parent = self.get(db, parent_id)
@@ -109,6 +113,10 @@ class ItemService:
             sort_order=max_order + 1,
             status=status,
             scale=scale,
+            health=health,
+            confidence=confidence,
+            start_at=start_at,
+            end_at=end_at,
             embedding=json.dumps(embed_vec) if embed_vec else None,
         )
         db.add(item)
@@ -138,6 +146,10 @@ class ItemService:
             "parent_id",
             "status",
             "scale",
+            "health",
+            "confidence",
+            "start_at",
+            "end_at",
         ):
             if key in patch:
                 setattr(item, key, patch[key])
@@ -145,8 +157,10 @@ class ItemService:
             item.completed_at = datetime.utcnow() if patch["done"] else None
         # Keep `committed` and `status` consistent — they're two views of
         # the same engagement axis. Caller patches one, we sync the other.
+        # 'pending' was dropped in the focus-flow redesign; only 'committed'
+        # | 'someday' remain.
         if "status" in patch:
-            item.committed = patch["status"] in ("committed", "pending")
+            item.committed = patch["status"] == "committed"
         elif "committed" in patch and item.status is None:
             item.status = "committed" if patch["committed"] else "someday"
         if patch.get("actionable") is False:
@@ -361,6 +375,10 @@ def _serialize(it: ListItem) -> dict[str, Any]:
         "is_primary": bool(it.is_primary),
         "status": it.status,
         "scale": it.scale,
+        "health": it.health,
+        "confidence": it.confidence,
+        "start_at": it.start_at.isoformat() if it.start_at else None,
+        "end_at": it.end_at.isoformat() if it.end_at else None,
         "due_date": it.due_date.isoformat() if it.due_date else None,
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
         "sort_order": it.sort_order,

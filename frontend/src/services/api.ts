@@ -111,6 +111,15 @@ export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiN
   return res.json();
 }
 
+// Semantic note search — uses the note embeddings + cosine similarity.
+// Same backend route the MCP server hits via search_notes; surfaced here
+// so the frontend's All-Notes discovery view can reuse it.
+export async function searchNotes(query: string, limit = 12): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/mcp/notes/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to search notes");
+  return res.json();
+}
+
 export async function fetchRecentNotes(limit = 5): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/notes/recent?limit=${limit}`);
   if (!res.ok) throw new Error("Failed to fetch recent notes");
@@ -131,11 +140,15 @@ export async function createNote(
 }
 
 export async function updateNote(id: number, title: string, content: string): Promise<ApiNote> {
+  // `keepalive` would let this request survive a tab close, but the browser
+  // caps keepalive bodies at 64 KiB — a single base64-inlined image blows
+  // past that and `fetch` throws "TypeError: Failed to fetch" before the
+  // request leaves the page. Drop the flag; on tab-close we lose the
+  // in-flight save, but the next edit re-saves the full body anyway.
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title, content }),
-    keepalive: true, // survives tab close
   });
   if (!res.ok) throw new Error("Failed to update note");
   return res.json();
@@ -149,6 +162,14 @@ export async function touchNote(id: number): Promise<void> {
 export async function memorizeNote(id: number): Promise<void> {
   // Fire-and-forget — called when leaving a note to extract a memory episode
   await apiFetch(`${BASE}/notes/${id}/memorize`, { method: "POST" });
+}
+
+export async function autoTitleNote(id: number): Promise<{ title: string; generated: boolean }> {
+  // Asks the backend to generate + persist a short title via gpt-4o-mini.
+  // No-op for short notes (returns generated:false).
+  const res = await apiFetch(`${BASE}/notes/${id}/auto-title`, { method: "POST" });
+  if (!res.ok) throw new Error("auto-title failed");
+  return res.json();
 }
 
 export async function extractToChildNote(
@@ -204,18 +225,6 @@ export async function fetchNote(id: number): Promise<ApiNote> {
   return res.json();
 }
 
-export interface RelatedNote extends ApiNote {
-  similarity: number;
-}
-export async function fetchRelatedNotes(id: number): Promise<RelatedNote[]> {
-  try {
-    const res = await apiFetch(`${BASE}/notes/${id}/related?limit=3`);
-    if (!res.ok) return [];
-    return res.json();
-  } catch {
-    return [];
-  }
-}
 
 export async function fetchNoteMemories(id: number): Promise<ApiMemory[]> {
   try {
@@ -318,6 +327,48 @@ export async function startGithubOAuth(): Promise<{ authorize_url: string }> {
 export async function disconnectGithub(): Promise<void> {
   const res = await apiFetch(`${BASE}/auth/github`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to disconnect GitHub");
+}
+
+// ── Whoop integration ──────────────────────────────────────────────────────
+
+export interface WhoopStatus {
+  configured: boolean;
+  connected: boolean;
+  account_email: string | null;
+}
+export async function fetchWhoopStatus(): Promise<WhoopStatus> {
+  const res = await apiFetch(`${BASE}/auth/whoop/status`);
+  if (!res.ok) throw new Error("Failed to fetch Whoop status");
+  return res.json();
+}
+export async function startWhoopOAuth(): Promise<{ authorize_url: string }> {
+  const res = await apiFetch(`${BASE}/auth/whoop/start`);
+  if (!res.ok) throw new Error("Whoop OAuth not configured on backend");
+  return res.json();
+}
+export async function disconnectWhoop(): Promise<void> {
+  const res = await apiFetch(`${BASE}/auth/whoop`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to disconnect Whoop");
+}
+
+export interface WhoopToday {
+  date: string | null;
+  recovery_score: number | null;
+  hrv_rmssd_ms: number | null;
+  resting_hr: number | null;
+  strain: number | null;
+  sleep_minutes: number | null;
+  sleep_performance_pct: number | null;
+  updated_at: string | null;
+}
+export async function fetchWhoopToday(refresh = false): Promise<WhoopToday> {
+  const url = `${BASE}/whoop/today${refresh ? "?refresh=1" : ""}`;
+  const res = await apiFetch(url);
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Whoop today fetch failed: ${msg || res.status}`);
+  }
+  return res.json();
 }
 
 export interface GithubRepo {
@@ -467,8 +518,11 @@ export async function fetchPublicVisitCount(): Promise<{ unique_visitors: number
 // focus; a leaf item renders as a todo; anything in between renders as a
 // checklist node.
 
-export type FocusStatus = "committed" | "pending" | "someday";
-export type FocusScale = "long_term" | "sprint" | "medium";
+// Status: 'pending' was dropped in the focus-flow redesign — every focus is
+// either committed or someday now.
+export type FocusStatus = "committed" | "someday";
+// Pace bucket — Quick (one-off, today) vs Slow burn (multi-day).
+export type FocusScale = "quick" | "slow";
 
 export interface ApiItem {
   id: number;
@@ -481,11 +535,18 @@ export interface ApiItem {
   actionable: boolean;
   is_primary: boolean;
   done: boolean;
-  // Engagement state — distinct from `committed` so "pending" is user-set,
-  // not just auto-derived from staleness. NULL on legacy rows; UI falls
-  // back to deriving from `committed`.
+  // Engagement: 'committed' = active focus, 'someday' = parked (dimmed in list).
   status: FocusStatus | null;
   scale: FocusScale | null;
+  // Health gauge 0..100. NULL until Gooni has activity to score it.
+  health: number | null;
+  // Reporter confidence in the health score, 0..100. Renders neutral when
+  // either field is null OR confidence < 35.
+  confidence: number | null;
+  // Wall-clock window for the focus. Quick focuses default to (now → midnight
+  // tonight) on create; slow burn focuses pick their own.
+  start_at: string | null;
+  end_at: string | null;
   due_date: string | null;
   completed_at: string | null;
   sort_order: number;
@@ -531,6 +592,10 @@ export async function createItem(body: {
   status?: FocusStatus | null;
   scale?: FocusScale | null;
   is_primary?: boolean;
+  health?: number | null;
+  confidence?: number | null;
+  start_at?: string | null;
+  end_at?: string | null;
 }): Promise<ApiItem> {
   const res = await apiFetch(`${BASE}/items`, {
     method: "POST",
@@ -556,6 +621,10 @@ export async function updateItem(
     parent_id: number | null;
     status: FocusStatus | null;
     scale: FocusScale | null;
+    health: number | null;
+    confidence: number | null;
+    start_at: string | null;
+    end_at: string | null;
   }>,
 ): Promise<ApiItem> {
   const res = await apiFetch(`${BASE}/items/${id}`, {
@@ -613,6 +682,8 @@ export interface ApiList {
   created_at: string | null;
 }
 
+export type BoardStatus = "todo" | "in_progress" | "done";
+
 export interface ApiListItem {
   id: number;
   list_id: number;
@@ -626,6 +697,10 @@ export interface ApiListItem {
   due_date: string | null;
   source_note_id: number | null;
   created_at: string | null;
+  // Backlog Jira-board state. Null on legacy rows; renderers coalesce
+  // to "todo" when null. Kept in sync with `done` server-side.
+  board_status: BoardStatus | null;
+  pr_url: string | null;
 }
 
 export interface ApiListWithItems extends ApiList {
@@ -703,6 +778,8 @@ export async function updateListItem(
     is_primary?: boolean;
     sort_order?: number;
     due_date?: string | null;
+    board_status?: BoardStatus | null;
+    pr_url?: string | null;
   },
 ): Promise<ApiListItem> {
   const res = await apiFetch(`${BASE}/list-items/${itemId}`, {
@@ -745,13 +822,6 @@ export async function fetchConversationGraph(
   const res = await apiFetch(`${BASE}/conversations/${id}/graph`);
   if (!res.ok) throw new Error("Failed to fetch conversation graph");
   return res.json();
-}
-
-export async function suggestNoteQuestions(id: number): Promise<string[]> {
-  const res = await apiFetch(`${BASE}/notes/${id}/suggest-questions`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to suggest questions");
-  const json = await res.json();
-  return json.questions ?? [];
 }
 
 export async function updatePublicProfile(bio: string): Promise<void> {

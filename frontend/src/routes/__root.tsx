@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { THEME_PALETTES, useGooniThemeStore } from "../stores/useGooniThemeStore";
+import { QuickNav } from "../components/QuickNav";
 
 // Pushes the current theme's tokens to CSS custom properties on <html>. Components
 // read them via `var(--gooni-text, ...)` etc., with sensible light fallbacks so
@@ -41,6 +42,10 @@ export const Route = createRootRoute({
     <>
       <ThemeVarSync />
       <Outlet />
+      {/* Cmd+K command palette — works on every route, including /public/*
+          where the sidebar isn't mounted. Solves #134: getting from any
+          page to a list (or any other surface) in two keystrokes. */}
+      <QuickNav />
     </>
   ),
 });

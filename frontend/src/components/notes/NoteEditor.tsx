@@ -1,4 +1,4 @@
-import Image from "@tiptap/extension-image";
+import { Figure } from "./FigureExtension";
 import { Table } from "@tiptap/extension-table";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
@@ -10,24 +10,22 @@ import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
-  Trash2, FolderInput, Pin as PinIcon,
+  Trash2, FolderInput, Pin as PinIcon, ListPlus, Check,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchRelatedNotes, fetchNoteMemories, patchNote as apiPatchNote, suggestNoteQuestions, extractToChildNote as apiExtractToChildNote, type ApiNote, type ApiMemory, type RelatedNote, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { SendButton } from "../chat/SendButton";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
-import { useGooniStore } from "../../stores/useGooniStore";
-import { useConversationsStore } from "../../stores/useConversationsStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { Tooltip } from "../Tooltip";
 import { SpaceIcon } from "./SpaceIcon";
-import { displayTitle } from "../../utils/notePreview";
 
 type Variant = "full" | "embedded";
 
@@ -43,7 +41,10 @@ function insertImageBlock(editor: Editor, src: string) {
     .chain()
     .focus()
     .insertContent([
-      { type: "image", attrs: { src } },
+      // Figure node owns the new image flow — inherits resize / align /
+      // caption controls. Default attrs (align=center, width=100, no
+      // caption) match what the user sees pre-tweak.
+      { type: "figure", attrs: { src, alt: null, width: 100, align: "center", caption: "" } },
       { type: "paragraph" },
     ])
     .run();
@@ -140,6 +141,14 @@ function useEditorStyles() {
       .gooni-note-editor img.ProseMirror-selectednode {
         outline: 2px solid #007AFF;
       }
+      /* Figure (Image + caption + alignment + width). Floats clear so a
+         non-figure block following a row of side-by-side figures lands
+         on its own line — same shape as the public read page. */
+      .gooni-note-editor .gooni-figure { box-sizing: border-box; padding: 0; }
+      .gooni-note-editor .gooni-figure + p::after,
+      .gooni-note-editor .gooni-figure + h1::after,
+      .gooni-note-editor .gooni-figure + h2::after,
+      .gooni-note-editor .gooni-figure + h3::after { content: ""; display: block; clear: both; }
       .gooni-note-editor ul[data-type="taskList"] {
         list-style: none;
         padding: 0;
@@ -222,18 +231,6 @@ function memoryTint(type: string): { bg: string; fg: string; border: string } {
   }
 }
 
-// Cosine similarity score → yellow (low) → green (high) gradient. Score is
-// clamped 0..1 by the caller; we map to two anchor points and lerp.
-function similarityTint(score: number): { bg: string; fg: string } {
-  // Yellow: hsl(45, 95%, 55%). Green: hsl(140, 60%, 42%).
-  const t = Math.max(0, Math.min(1, score));
-  const hue = 45 + (140 - 45) * t;
-  const sat = 95 - (95 - 60) * t;
-  const lit = 55 - (55 - 42) * t;
-  const bg = `hsl(${hue}, ${sat}%, ${Math.min(92, lit + 38)}%)`;
-  const fg = `hsl(${hue}, ${sat - 15}%, ${Math.max(22, lit - 18)}%)`;
-  return { bg, fg };
-}
 
 function formatNoteDate(iso: string | null): string {
   if (!iso) return "";
@@ -273,8 +270,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   useEditorStyles();
   const embedded = variant === "embedded";
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, moveNote, selectNote, loadNotes, selectSpace, deleteNote } = useNotesContentStore();
-  const { isOpen: gooniOpen, toggle: toggleGooni } = useGooniStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, moveNote, selectNote, deleteNote } = useNotesContentStore();
   const { spaces } = useSpacesStore();
   const navigate = useNavigate();
   const [signalsExpanded, setSignalsExpanded] = useState(false);
@@ -282,6 +278,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   // result. Embedded variant doesn't render the title/disclosure block, so
   // we shadow a small pill underneath the composer. Cleared on next submit.
   const [embeddedToast, setEmbeddedToast] = useState<{ noteId: number; signals: NoteClassifySignals } | null>(null);
+  // Drives the slide-in / slide-out transform on the toast pill. Decoupled
+  // from `embeddedToast` so we can render the pill, animate it in, hold,
+  // animate it out, then unmount — without flashing on initial mount.
+  const [embeddedToastVisible, setEmbeddedToastVisible] = useState(false);
 
   const spaceId = selectedSpaceId ?? "general";
   const activeNote = (notes[spaceId] ?? []).find((n) => n.id === activeNoteId) ?? null;
@@ -291,11 +291,14 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   const [editorEmpty, setEditorEmpty] = useState(true);
   const [movePicker, setMovePicker] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [relatedNotes, setRelatedNotes] = useState<RelatedNote[]>([]);
   const [noteMemories, setNoteMemories] = useState<ApiMemory[]>([]);
-  const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([]);
   const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
   const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
+  // Brief "tagged" pulse on the backlog button so the user sees confirmation
+  // without a full toast. Resets after ~1.6s. Keyed by note id so switching
+  // notes doesn't carry the green-checked state across.
+  const [taggedNoteId, setTaggedNoteId] = useState<number | null>(null);
+  const [taggingInFlight, setTaggingInFlight] = useState(false);
   const movePickerRef = useRef<HTMLDivElement>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -303,6 +306,9 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   const titleRef = useRef<string>(activeNote?.title ?? "");
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Note ids we've already attempted auto-title for in this session. Prevents
+  // re-firing on every save; the user can rename and we won't overwrite.
+  const autoTitledRef = useRef<Set<number>>(new Set());
   const prevActiveNoteId = useRef<number | null>(activeNoteId);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
@@ -362,24 +368,18 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     setSaveStatus("idle");
     setLastSavedTime(null);
     setSpaceSuggestion(null);
-    setRelatedNotes([]);
     setNoteMemories([]);
     setDeleteConfirm(false);
     setLocalIsPublic(activeNote?.is_public ?? false);
-    setSuggestedQuestions([]);
     hasChanges.current = false;
   }, [activeNoteId]);
 
-  // Load related notes + memories tied to this note after it settles
-  // (quiet, non-blocking). Both feed the post-editor footer block.
+  // Load memories tied to this note after it settles (quiet,
+  // non-blocking). Feeds the post-editor memory pill row.
   useEffect(() => {
     if (!activeNoteId || activeNoteId < 0) return;
     const t = setTimeout(async () => {
-      const [related, mems] = await Promise.all([
-        fetchRelatedNotes(activeNoteId),
-        fetchNoteMemories(activeNoteId),
-      ]);
-      setRelatedNotes(related.filter((n) => n.id !== activeNoteId).slice(0, 2));
+      const mems = await fetchNoteMemories(activeNoteId);
       setNoteMemories(mems);
     }, 1000);
     return () => clearTimeout(t);
@@ -445,7 +445,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     {
       extensions: [
         StarterKit,
-        Image.extend({ selectable: true }).configure({ inline: false, allowBase64: true }),
+        Figure,
         TaskList,
         TaskItem.configure({ nested: true }),
         Table.configure({ resizable: true }),
@@ -635,6 +635,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       // block lives in the full-variant render path. Clear any prior toast
       // and start a poll for the classify_signals payload.
       if (embedded) {
+        // Cancel any in-flight pill before starting a new one.
+        setEmbeddedToastVisible(false);
         setEmbeddedToast(null);
         setTimeout(async () => {
           try {
@@ -642,9 +644,20 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
             const sig = fresh.classify_signals;
             if (sig && (sig.feature_requests?.length || sig.memory_count > 0)) {
               setEmbeddedToast({ noteId: submittedId, signals: sig });
+              // Two ticks before flipping visible so the initial transform="translateY"
+              // has applied — otherwise the slide-in is skipped and the pill
+              // simply pops in. requestAnimationFrame x2 = "after browser has
+              // committed the mount frame".
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => setEmbeddedToastVisible(true));
+              });
+              // Visible window: 6s. Then slide out (320ms transition), then unmount.
               setTimeout(() => {
-                setEmbeddedToast((curr) => (curr?.noteId === submittedId ? null : curr));
-              }, 12000);
+                setEmbeddedToastVisible(false);
+                setTimeout(() => {
+                  setEmbeddedToast((curr) => (curr?.noteId === submittedId ? null : curr));
+                }, 360);
+              }, 6000);
             }
           } catch {
             // note may have been deleted — ignore
@@ -708,6 +721,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       setSaveStatus("saved");
       if (savedTimer.current) clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSaveStatus("idle"), 3000);
+      maybeAutoTitle();
     } catch (err) {
       // Surface the failure instead of swallowing it. hasChanges stays true so
       // the next keystroke or scheduleSave() retries automatically — and the
@@ -716,6 +730,35 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       console.error(`[NoteEditor] save failed for note #${activeNoteId}:`, err);
       setSaveStatus("error");
     }
+  }
+
+  function maybeAutoTitle() {
+    const noteId = activeNoteId;
+    if (!noteId || noteId < 0) return;
+    if (autoTitledRef.current.has(noteId)) return;
+    const current = (titleRef.current || "").trim().toLowerCase();
+    // Only auto-title placeholder titles. Any user-typed title wins.
+    if (current && current !== "untitled" && current !== "new note") return;
+    // Strip HTML quickly to gate on plaintext length. Below ~60 chars there's
+    // not enough signal — let the note grow first.
+    const plaintext = (bodyRef.current || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    if (plaintext.length < 60) return;
+    autoTitledRef.current.add(noteId);
+    apiAutoTitleNote(noteId).then((res) => {
+      if (!res.generated || !res.title) return;
+      // Only apply if user hasn't started typing a real title in the meantime.
+      const stillPlaceholder = !titleRef.current.trim() ||
+        titleRef.current.trim().toLowerCase() === "untitled" ||
+        titleRef.current.trim().toLowerCase() === "new note";
+      if (!stillPlaceholder) return;
+      setLocalTitle(res.title);
+      titleRef.current = res.title;
+      // Sync the store so sidebar/list views pick up the new title without a refetch.
+      refetchNote(noteId).catch(() => {});
+    }).catch(() => {
+      // Network / LLM hiccup — let the next save retry by clearing the guard.
+      autoTitledRef.current.delete(noteId);
+    });
   }
 
   async function embedAndCheck(noteId: number | null) {
@@ -733,27 +776,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     // ~3s out so the editor picks up the new `classify_signals` payload and
     // renders the "Routed:" disclosure.
     setTimeout(() => { refetchNote(noteId).catch(() => {}); }, 3000);
-    // Generate probing questions in parallel — only fires LLM call when the
-    // note is substantive enough (server-side gate at ~200 chars plaintext).
-    try {
-      const plain = bodyRef.current.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-      if (plain.length >= 200) {
-        const qs = await suggestNoteQuestions(noteId);
-        setSuggestedQuestions(qs);
-      } else {
-        setSuggestedQuestions([]);
-      }
-    } catch {
-      // non-fatal — questions are a nice-to-have, never block the note flow
-    }
-  }
-
-  function askGooni(question: string) {
-    const { newChat, send } = useConversationsStore.getState();
-    newChat();
-    if (!gooniOpen) toggleGooni();
-    // Pass the active note's body as context so Gooni's reply stays grounded.
-    send(question, bodyRef.current).catch(console.error);
   }
 
   function handleTitleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1035,6 +1057,67 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           </Tooltip>
         )}
 
+        {/* Tag-to-backlog — sends the note (title or first line) into the
+            Gooni Backlog list as a list_item, with source_note_id pointing
+            back here. Same 30×30 visual family as Pin/Public. Pulses green
+            briefly after a successful tag so the user gets confirmation
+            without a full toast modal. Conflict-check on the backend
+            handles dedupe — repeated clicks just surface as duplicates,
+            won't stack rows. */}
+        {activeNote && activeNoteId && activeNoteId > 0 && (
+          <Tooltip label={taggedNoteId === activeNoteId ? "Tagged to backlog" : "Tag to Gooni backlog"}>
+            <button
+              onClick={async () => {
+                if (!activeNoteId || activeNoteId < 0 || taggingInFlight) return;
+                const titleClean = (localTitle ?? activeNote?.title ?? "").trim();
+                const bodyText = bodyRef.current
+                  .replace(/<[^>]+>/g, " ")
+                  .replace(/\s+/g, " ")
+                  .trim();
+                const firstLine = bodyText.slice(0, 120);
+                const text = titleClean || firstLine;
+                if (!text) return; // nothing to tag yet
+                setTaggingInFlight(true);
+                try {
+                  const { useListsStore } = await import("../../stores/useListsStore");
+                  const lists = useListsStore.getState().lists;
+                  const backlog = lists.find((l) => l.type === "backlog");
+                  if (!backlog) return;
+                  const { addListItem } = await import("../../services/api");
+                  await addListItem(backlog.id, text, {
+                    source_note_id: activeNoteId,
+                    subtitle: titleClean && firstLine !== titleClean ? firstLine : null,
+                  });
+                  setTaggedNoteId(activeNoteId);
+                  setTimeout(() => {
+                    setTaggedNoteId((curr) => (curr === activeNoteId ? null : curr));
+                  }, 1600);
+                } catch (e) {
+                  console.error("tag-to-backlog failed", e);
+                } finally {
+                  setTaggingInFlight(false);
+                }
+              }}
+              disabled={taggingInFlight}
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                border: "none",
+                background: taggedNoteId === activeNoteId ? "rgba(52,199,89,0.16)" : "transparent",
+                cursor: taggingInFlight ? "wait" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 0, flexShrink: 0,
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (taggedNoteId !== activeNoteId) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+              onMouseLeave={(e) => { if (taggedNoteId !== activeNoteId) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              {taggedNoteId === activeNoteId
+                ? <Check size={15} strokeWidth={2} color="#16A34A" />
+                : <ListPlus size={15} strokeWidth={1.7} color="#636366" />}
+            </button>
+          </Tooltip>
+        )}
+
         {/* Public toggle — same visual family as Pin: icon-only with colored background when active */}
         {activeNote && activeNoteId && activeNoteId > 0 && (
           <Tooltip label={localIsPublic ? "Unpublish from portfolio" : "Publish to portfolio"}>
@@ -1138,46 +1221,19 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
               <EditorContent editor={editor} />
             </div>
 
-            <button
-              ref={submitButtonRef}
-              onClick={handleSubmit}
-              disabled={editorEmpty}
-              title="Submit (Enter)"
-              style={{
-                position: "absolute",
-                bottom: 10,
-                right: 10,
-                width: 30, height: 30, borderRadius: "50%",
-                border: "none",
-                background: editorEmpty ? "rgba(0,0,0,0.06)" : "#1C1C1E",
-                color: editorEmpty ? "#C7C7CC" : "#fff",
-                cursor: editorEmpty ? "default" : "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                padding: 0,
-                transition: "background 0.25s ease, color 0.25s ease, transform 0.2s ease, box-shadow 0.25s ease",
-                transform: editorEmpty ? "scale(0.92)" : "scale(1)",
-                // Active state borrows the goon's green accent for a subtle glow.
-                boxShadow: editorEmpty
-                  ? "none"
-                  : "0 2px 8px rgba(28,28,30,0.28), 0 0 0 1px rgba(74,222,128,0.35)",
-              }}
-              onMouseEnter={(e) => {
-                if (editorEmpty) return;
-                const el = e.currentTarget as HTMLButtonElement;
-                el.style.transform = "scale(1.08)";
-                el.style.boxShadow = "0 3px 14px rgba(74,222,128,0.35), 0 0 0 1px rgba(74,222,128,0.55)";
-              }}
-              onMouseLeave={(e) => {
-                if (editorEmpty) return;
-                const el = e.currentTarget as HTMLButtonElement;
-                el.style.transform = "scale(1)";
-                el.style.boxShadow = "0 2px 8px rgba(28,28,30,0.28), 0 0 0 1px rgba(74,222,128,0.35)";
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <path d="M6.5 10.5 L6.5 3 M3 6.5 L6.5 3 L10 6.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
+            {/* Submit button — uses the shared SendButton so the composer
+                and chat InputBar share one source of truth (#122-124). The
+                anchor wrapper handles the absolute positioning that's
+                specific to the embedded composer card. */}
+            <div style={{ position: "absolute", bottom: 10, right: 10 }}>
+              <SendButton
+                ref={submitButtonRef}
+                onClick={handleSubmit}
+                disabled={editorEmpty}
+                title="Submit (Enter)"
+                ariaLabel="Submit note"
+              />
+            </div>
         </div>
         {embeddedToast && (() => {
           const sig = embeddedToast.signals;
@@ -1201,37 +1257,47 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
             navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined , audit: undefined} });
           };
           return (
-            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div
+              style={{
+                marginTop: 8,
+                display: "flex",
+                alignItems: "center",
+                // Slide up from below the composer + fade. Auto-dismiss after
+                // 6s; no manual close affordance per the cleaner aesthetic.
+                opacity: embeddedToastVisible ? 1 : 0,
+                transform: embeddedToastVisible ? "translateY(0)" : "translateY(8px)",
+                transition: "opacity 320ms ease, transform 320ms ease",
+                pointerEvents: embeddedToastVisible ? "auto" : "none",
+              }}
+            >
               <button
                 onClick={fr.length ? openBacklog : openNote}
                 style={{
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                  padding: "4px 10px", borderRadius: 999,
-                  border: "1px solid rgba(22,163,74,0.30)",
-                  background: "rgba(22,163,74,0.08)",
-                  color: "#166534",
+                  display: "inline-flex", alignItems: "center", gap: 7,
+                  padding: "4px 11px", borderRadius: 999,
+                  border: "1px solid rgba(0,0,0,0.08)",
+                  background: "var(--gooni-surface, rgba(0,0,0,0.03))",
+                  color: "var(--gooni-text, #1C1C1E)",
                   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                  fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
+                  fontSize: 11.5, fontWeight: 500, letterSpacing: 0.1,
                   cursor: "pointer",
-                  transition: "background 0.12s",
+                  transition: "background 0.12s, border-color 0.12s",
                 }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.14)")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(22,163,74,0.08)")}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.12)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "var(--gooni-surface, rgba(0,0,0,0.03))";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)";
+                }}
               >
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A" }} />
-                Routed: {summary}
-                {fr[0] ? ` — ${fr[0].title}` : ""}
-                <span style={{ marginLeft: 2 }}>↗</span>
+                <span style={{ color: "var(--gooni-muted, #8E8E93)" }}>Routed</span>
+                <span>{summary}</span>
+                {fr[0] ? <span style={{ color: "var(--gooni-muted, #8E8E93)" }}>· {fr[0].title}</span> : null}
+                <span style={{ marginLeft: 2, color: "var(--gooni-muted, #8E8E93)" }}>↗</span>
               </button>
-              <button
-                onClick={() => setEmbeddedToast(null)}
-                title="Dismiss"
-                style={{
-                  border: "none", background: "transparent", color: "var(--gooni-muted, #8E8E93)",
-                  cursor: "pointer", fontSize: 14, padding: "0 4px",
-                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                }}
-              >×</button>
             </div>
           );
         })()}
@@ -1533,60 +1599,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   </div>
                 )}
 
-                {relatedNotes.length > 0 && (
-                  <div style={{ marginTop: noteMemories.length > 0 ? 28 : 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>RELATED</p>
-                    {relatedNotes.map((n) => {
-                      const targetSpaceId = n.space_id ? String(n.space_id) : "general";
-                      const sim = Math.max(0, Math.min(1, n.similarity ?? 0));
-                      return (
-                        <button
-                          key={n.id}
-                          onClick={async () => { selectSpace(targetSpaceId); await loadNotes(targetSpaceId); selectNote(n.id); }}
-                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "7px 0", background: "none", border: "none", cursor: "pointer", gap: 12, borderRadius: 6 }}
-                          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)")}
-                          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "none")}
-                        >
-                          <span style={{
-                            display: "inline-flex", alignItems: "center", justifyContent: "center",
-                            minWidth: 30, height: 18, borderRadius: 9, padding: "0 6px",
-                            background: similarityTint(sim).bg, color: similarityTint(sim).fg,
-                            fontSize: 10.5, fontWeight: 600, fontVariantNumeric: "tabular-nums",
-                            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                            flexShrink: 0,
-                          }}>
-                            {Math.round(sim * 100)}
-                          </span>
-                          <span style={{ fontSize: 14, color: "var(--gooni-text, #1C1C1E)", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                            {displayTitle(n)}
-                          </span>
-                          <span style={{ fontSize: 12, color: "#AEAEB2", flexShrink: 0, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-                            {formatNoteDate(n.updated_at)}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {suggestedQuestions.length > 0 && (
-                  <div style={{ marginTop: relatedNotes.length > 0 ? 28 : 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-                      QUESTIONS GOONI WOULD ASK
-                    </p>
-                    {suggestedQuestions.map((q, i) => (
-                      <button
-                        key={i}
-                        onClick={() => askGooni(q)}
-                        style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", marginBottom: 6, background: "rgba(0,0,0,0.025)", border: "1px solid rgba(0,0,0,0.05)", borderRadius: 8, cursor: "pointer", fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", lineHeight: 1.5 }}
-                        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-                        onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.025)")}
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 

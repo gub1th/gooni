@@ -276,6 +276,13 @@ function IntegrationsTab() {
           blurbNotConfigured="Set GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET / GITHUB_REDIRECT_URI on the backend to enable."
           extras={<RepoPicker />}
         />
+        <IntegrationSection
+          provider="whoop"
+          label="Whoop"
+          icon={<WhoopLogo />}
+          blurbConfigured="Connect to surface recovery, HRV, and sleep on the Stats view. Future: tune daily nudge based on recovery."
+          blurbNotConfigured="Set WHOOP_CLIENT_ID / WHOOP_CLIENT_SECRET / WHOOP_REDIRECT_URI on the backend to enable."
+        />
       </div>
     </>
   );
@@ -616,3 +623,23 @@ function GithubLogo() {
     </svg>
   );
 }
+
+function WhoopLogo() {
+  // Whoop's brand mark is a wordmark — we'd rather not redistribute it
+  // verbatim. Stand-in: a black rounded square with a stylized heart-rate
+  // pulse line in white. Reads as "biometrics" without scraping the logo.
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+      <rect width="24" height="24" rx="6" fill="#0F0F10" />
+      <path
+        d="M3 13 L7 13 L9 8 L11 17 L13 11 L15 14 L21 14"
+        stroke="#FFFFFF"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </svg>
+  );
+}
+

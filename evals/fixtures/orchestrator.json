@@ -9,7 +9,7 @@
     "history": "optional list of prior turns [{role: 'user'|'assistant', content: '...'}]. Inserted into the eval Conversation before the user_message turn so the orchestrator's recent-window includes them.",
     "seed_memories": "optional list [{type, content, [key], [confidence]}]. Inserted as Memory rows w/ embeddings, retrievable mid-turn, removed on teardown. Type ∈ {preference, fact, routine, constraint, episode} — note: 'goal' was removed; action-shaped aspirations belong in seed_focuses.",
     "seed_prefs": "optional list [{rule, [confidence]}]. Inserted as type='preference' w/ feedback__ key prefix → always-injected by master prompt.",
-    "seed_focuses": "optional list [{text, [endgoal], [is_primary], [status], [scale]}]. Inserted as ListItem rows in the focuses list (always committed=True). Mirrors prod data path for 'what's my current focus?'-shape questions — orchestrator pulls these via item_service.get_active_context, NOT cosine. Status ∈ {committed, pending, someday}. Scale ∈ {long_term, sprint, medium}.",
+    "seed_focuses": "optional list [{text, [endgoal], [is_primary], [status], [scale]}]. Inserted as ListItem rows in the focuses list (always committed=True). Mirrors prod data path for 'what's my current focus?'-shape questions — orchestrator pulls these via item_service.get_active_context, NOT cosine. Status ∈ {committed, someday}. Scale ∈ {quick, slow}.",
     "must_not_include_regex": "optional list of regex patterns the reply MUST NOT match (case-insensitive). Hard assertion; if any hit, judge skipped + case fails.",
     "must_invoke_tool": "optional list of tool names that MUST be called during the turn (verified against the trace, not the reply text). Catches fake-completion failures where reply says 'Logged it' without actually calling the tool.",
     "judge": {
@@ -78,7 +78,7 @@
       "source": "synthetic",
       "user_message": "what's my current focus?",
       "seed_focuses": [
-        {"text": "ship the Gooni eval harness", "endgoal": "orchestrator-level golden tests with LLM-as-judge", "is_primary": true, "status": "committed", "scale": "sprint"}
+        {"text": "ship the Gooni eval harness", "endgoal": "orchestrator-level golden tests with LLM-as-judge", "is_primary": true, "status": "committed", "scale": "quick"}
       ],
       "judge": {
         "rubric": "Reply should reference the eval harness focus. If it says 'I don't know' or invents a different focus, fail.",
@@ -119,7 +119,7 @@
       "source": "synthetic",
       "user_message": "what was the focus I committed to last month?",
       "seed_focuses": [
-        {"text": "ship the Gooni eval harness", "endgoal": "orchestrator-level golden tests with LLM-as-judge", "is_primary": true, "status": "committed", "scale": "sprint"}
+        {"text": "ship the Gooni eval harness", "endgoal": "orchestrator-level golden tests with LLM-as-judge", "is_primary": true, "status": "committed", "scale": "quick"}
       ],
       "must_not_include_regex": [
         "(?i)last month you (committed|focused) on"

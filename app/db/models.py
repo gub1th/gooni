@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -263,21 +264,41 @@ class ListItem(Base):
     # The "primary focus" surfaced front-and-center on the dashboard. Service
     # enforces uniqueness.
     is_primary = Column(Boolean, default=False, nullable=False)
-    # Focus engagement state — separate from `committed` so the UI can
-    # distinguish "I'm pursuing this but stalled" (pending) from "actively
-    # making progress" (committed) without drifting onto the stale auto-flag.
-    # NULL on legacy rows; frontend falls back to deriving from `committed`.
-    # Values: 'committed' | 'pending' | 'someday'.
+    # Focus engagement state. Values: 'committed' | 'someday'.
+    # 'pending' was removed in the focus-flow redesign — pre-existing
+    # 'pending' rows are migrated to 'committed' on startup.
     status = Column(String, nullable=True)
-    # Time horizon — purely informational, drives a small badge on the
-    # focuses dashboard. NULL = unspecified. Values: 'long_term' | 'sprint'
-    # | 'medium'.
+    # Pace bucket — drives the Quick / Slow burn split on the focuses
+    # dashboard. Values: 'quick' | 'slow'. Legacy 'long_term' / 'medium'
+    # → 'slow'; 'sprint' → 'quick' (migration in main.py).
     scale = Column(String, nullable=True)
+    # Health 0..100 + reporter confidence 0..100. Both NULL by default —
+    # only populated once a focus accumulates activity (chat / notes /
+    # MCP) that lets Gooni score it. Frontend renders the dot in a neutral
+    # state when either is null OR confidence < 35.
+    health = Column(Integer, nullable=True)
+    confidence = Column(Integer, nullable=True)
+    # Wall-clock window for slow-burn focuses. Quick focuses default to
+    # (now, midnight tonight); they read out of these same fields.
+    start_at = Column(DateTime, nullable=True)
+    end_at = Column(DateTime, nullable=True)
     done = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
     due_date = Column(DateTime, nullable=True)
     source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+    # Jira-style 3-column board state for backlog items.
+    # Values: 'todo' | 'in_progress' | 'done'. Distinct from the focus
+    # `status` column above (which carries 'committed' | 'someday'); we
+    # use a separate column to avoid overloading.
+    # Truth table for backlog rendering:
+    #   done=True  → Done column, regardless of board_status
+    #   done=False + board_status='in_progress' → In Progress column
+    #   otherwise (board_status null or 'todo') → Todo column
+    board_status = Column(String, nullable=True)
+    # When the work shipped, the PR/commit URL gets pasted here so the
+    # ticket carries a permanent pointer. Free-text — anything resolvable.
+    pr_url = Column(Text, nullable=True)
     # JSON-serialised float list. Generated on insert/edit from `text +
     # subtitle` so add_item can cosine-search existing items in the same list
     # for conflicts (near-duplicates). NULL on legacy rows; backfilled lazily
@@ -471,6 +492,35 @@ class EvalStepFeedback(Base):
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+
+class WhoopSnapshot(Base):
+    """One row per day. Cached pull from Whoop's `recovery + cycle + sleep`
+    endpoints so the dashboard / daily-nudge surfaces don't hit the Whoop
+    API on every render. Idempotent on `date` — re-fetching just overwrites.
+    """
+
+    __tablename__ = "whoop_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, unique=True, index=True)
+
+    # Recovery (0–100). The headline number Whoop shows in-app.
+    recovery_score = Column(Integer, nullable=True)
+    # Heart rate variability (RMSSD), in milliseconds.
+    hrv_rmssd_ms = Column(Float, nullable=True)
+    # Resting heart rate, beats per minute.
+    resting_hr = Column(Integer, nullable=True)
+
+    # Daily strain (0–21 scale on Whoop).
+    strain = Column(Float, nullable=True)
+
+    # Total sleep in minutes (in-bed time, matches Whoop's `total_in_bed_time`).
+    sleep_minutes = Column(Integer, nullable=True)
+    # Sleep performance percentage (0–100).
+    sleep_performance_pct = Column(Float, nullable=True)
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 

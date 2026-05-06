@@ -193,7 +193,15 @@ def _run_column_migrations(engine):
             ("list_items", "is_primary", "INTEGER"),
             ("list_items", "status", "TEXT"),
             ("list_items", "scale", "TEXT"),
+            # Focus-flow redesign — health gauge + window
+            ("list_items", "health", "INTEGER"),
+            ("list_items", "confidence", "INTEGER"),
+            ("list_items", "start_at", "DATETIME"),
+            ("list_items", "end_at", "DATETIME"),
             ("list_items", "embedding", "TEXT"),
+            # Backlog board (Jira-style 3-col view)
+            ("list_items", "board_status", "TEXT"),
+            ("list_items", "pr_url", "TEXT"),
             ("lists", "kind", "TEXT"),
         ]:
             if table not in existing_tables:
@@ -243,6 +251,18 @@ def _run_column_migrations(engine):
             conn.execute(text(
                 "UPDATE list_items SET status = 'someday' "
                 "WHERE status IS NULL AND committed = 0"
+            ))
+            # Focus-flow redesign — collapse 'pending' into 'committed' (the
+            # UI no longer distinguishes pursuing-but-stalled from active),
+            # and remap scale buckets to 'quick' / 'slow'.
+            conn.execute(text(
+                "UPDATE list_items SET status = 'committed' WHERE status = 'pending'"
+            ))
+            conn.execute(text(
+                "UPDATE list_items SET scale = 'quick' WHERE scale = 'sprint'"
+            ))
+            conn.execute(text(
+                "UPDATE list_items SET scale = 'slow' WHERE scale IN ('long_term', 'medium')"
             ))
         # Memory type collapse: 'goal' was deleted — action-shaped aspirations
         # belong in list_items (focuses), identity-shaped values fold into
@@ -585,6 +605,10 @@ async def auth_middleware(request: Request, call_next):
         # The code value itself is the auth proof. `state` can carry a CSRF token.
         or path == "/auth/google/callback"
         or path == "/auth/github/callback"
+        or path == "/auth/whoop/callback"
+        # Whoop webhooks carry their own HMAC signature; password gate
+        # would 401 before signature check runs.
+        or path == "/webhooks/whoop"
         or path == "/healthz"
         or path.startswith("/assets")
         or path.startswith("/webhooks/")
@@ -704,8 +728,9 @@ async def mcp_logger(request: Request, call_next):
         try:
             db.add(McpCall(path=request.url.path[:500]))
             db.commit()
-        except Exception:
+        except Exception as e:
             db.rollback()
+            print(f"[mcp_logger] failed to log call {request.url.path}: {e}", flush=True)
         finally:
             db.close()
     return response
@@ -899,6 +924,10 @@ def _serialize_list_item(it: ListItem) -> dict:
         "due_date": it.due_date.isoformat() if it.due_date else None,
         "source_note_id": it.source_note_id,
         "created_at": it.created_at.isoformat() if it.created_at else None,
+        # Board fields — None until set. Frontend coalesces missing
+        # board_status to "todo" when rendering the backlog.
+        "board_status": it.board_status,
+        "pr_url": it.pr_url,
     }
 
 
@@ -1099,6 +1128,8 @@ def update_list_item(item_id: int, body: dict, db: Session = Depends(get_db)):
         actionable=body.get("actionable"),
         is_primary=body.get("is_primary"),
         sort_order=body.get("sort_order"),
+        board_status=body.get("board_status"),
+        pr_url=body.get("pr_url"),
         **due_kwarg,
     )
     if item is None:
@@ -1141,8 +1172,35 @@ def _parse_optional_due(raw):
         raise HTTPException(status_code=400, detail="invalid due_date")
 
 
-_VALID_STATUS = {"committed", "pending", "someday"}
-_VALID_SCALE = {"long_term", "sprint", "medium"}
+_VALID_STATUS = {"committed", "someday"}
+_VALID_SCALE = {"quick", "slow"}
+
+
+def _parse_optional_dt(raw):
+    """ISO datetime parser used for start_at / end_at — same shape as
+    _parse_optional_due but explicit so the validation error stays scoped."""
+    from datetime import datetime as _dt
+    if raw is None or raw == "":
+        return None
+    if not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail="invalid datetime")
+    cleaned = raw[:-1] if raw.endswith("Z") else raw
+    try:
+        return _dt.fromisoformat(cleaned)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid datetime")
+
+
+def _validate_health(raw):
+    if raw is None or raw == "":
+        return None
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="health must be an integer 0..100")
+    if v < 0 or v > 100:
+        raise HTTPException(status_code=400, detail="health must be 0..100")
+    return v
 
 
 def _validate_status(raw):
@@ -1189,6 +1247,10 @@ def items_create(body: dict, db: Session = Depends(get_db)):
     status = _validate_status(body.get("status"))
     scale = _validate_scale(body.get("scale"))
     is_primary = bool(body.get("is_primary", False))
+    health = _validate_health(body.get("health"))
+    confidence = _validate_health(body.get("confidence"))  # same 0..100 shape
+    start_at = _parse_optional_dt(body.get("start_at"))
+    end_at = _parse_optional_dt(body.get("end_at"))
     try:
         item = item_service.create(
             db,
@@ -1200,6 +1262,10 @@ def items_create(body: dict, db: Session = Depends(get_db)):
             source_note_id=body.get("source_note_id"),
             status=status,
             scale=scale,
+            health=health,
+            confidence=confidence,
+            start_at=start_at,
+            end_at=end_at,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1242,6 +1308,14 @@ def items_update(item_id: int, body: dict, db: Session = Depends(get_db)):
         patch["status"] = _validate_status(body["status"])
     if "scale" in body:
         patch["scale"] = _validate_scale(body["scale"])
+    if "health" in body:
+        patch["health"] = _validate_health(body["health"])
+    if "confidence" in body:
+        patch["confidence"] = _validate_health(body["confidence"])
+    if "start_at" in body:
+        patch["start_at"] = _parse_optional_dt(body["start_at"])
+    if "end_at" in body:
+        patch["end_at"] = _parse_optional_dt(body["end_at"])
     item = item_service.update(db, item_id, **patch)
     if not item:
         raise HTTPException(status_code=404, detail="item not found")
@@ -1261,7 +1335,7 @@ def items_suggest_focus(db: Session = Depends(get_db)):
     titles. Frontend pre-fills the inline add form with the suggestion. Pure
     suggestion — caller decides whether to accept it.
 
-    Returns: { text: str, endgoal?: str, scale?: 'long_term'|'sprint'|'medium' }
+    Returns: { text: str, endgoal?: str, scale?: 'quick'|'slow' }
     """
     tree = item_service.list_tree(db)
     active_focuses = [f for f in tree["focuses"] if not f["done"]]
@@ -1283,9 +1357,9 @@ def items_suggest_focus(db: Session = Depends(get_db)):
         "recent note activity. Don't repeat anything from the existing list. "
         "If nothing obvious, return text='' and the rest empty.\n\n"
         "Output strict JSON: {\"text\": str, \"endgoal\": str | null, "
-        "\"scale\": \"long_term\" | \"sprint\" | \"medium\" | null}. "
-        "scale heuristic: long_term = months+, medium = a few weeks, "
-        "sprint = days. text is a short imperative phrase (5-7 words max). "
+        "\"scale\": \"quick\" | \"slow\" | null}. "
+        "scale heuristic: quick = today / one-off, slow = multi-day or "
+        "longer. text is a short imperative phrase (5-7 words max). "
         "endgoal is one sentence describing what 'done' looks like.\n\n"
         f"Existing focuses:\n{chr(10).join(focus_lines) or '  (none)'}\n\n"
         f"Recent note titles:\n{chr(10).join(f'- {t}' for t in note_titles) or '  (none)'}"
@@ -1338,6 +1412,12 @@ def _serialize_item(it: ListItem) -> dict:
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
         "sort_order": it.sort_order,
         "source_note_id": it.source_note_id,
+        "status": it.status,
+        "scale": it.scale,
+        "health": it.health,
+        "confidence": it.confidence,
+        "start_at": it.start_at.isoformat() if it.start_at else None,
+        "end_at": it.end_at.isoformat() if it.end_at else None,
         "created_at": it.created_at.isoformat() if it.created_at else None,
         "updated_at": it.updated_at.isoformat() if it.updated_at else None,
     }
@@ -2068,6 +2148,33 @@ def touch_note(note_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@app.post("/notes/{note_id}/auto-title")
+async def auto_title_note(note_id: int, db: Session = Depends(get_db)):
+    """Generate + save a short title for a note when Daniel hasn't named it.
+    Uses gpt-4o-mini (`llm_client.generate_title`). Idempotent on the
+    backend — repeat calls overwrite — but the frontend gates on a
+    placeholder title so we don't clobber user-typed titles.
+    Returns the new title or the existing one if the note is too short.
+    """
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    plaintext = note_service._strip_html(note.content or "").strip()
+    # Below ~40 chars there isn't enough signal — return existing title.
+    if len(plaintext) < 40:
+        return {"title": note.title or "", "generated": False}
+
+    title = await llm_client.generate_title(plaintext[:1500])
+    title = (title or "").strip().strip('"').strip("'")
+    if not title:
+        return {"title": note.title or "", "generated": False}
+
+    note.title = title
+    db.commit()
+    return {"title": title, "generated": True}
+
+
 @app.post("/notes/{note_id}/memorize")
 def memorize_note(note_id: int, db: Session = Depends(get_db)):
     """Extract facts from a note when the user leaves it.
@@ -2365,14 +2472,17 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception:
         streak = 0
 
-    # MCP activity — calls today + most recent. Best-effort: missing table
+    # MCP activity — rolling 24h window + most recent. Rolling vs UTC-midnight
+    # cutoff because Fly runs UTC and Daniel's in NYC; "today" by UTC date
+    # silently drops calls from late-evening NYC. Best-effort: missing table
     # (fresh DB) shouldn't break the dashboard, so we wrap and fall back.
     mcp_calls_today = 0
     mcp_last_active_at: str | None = None
     try:
+        cutoff = datetime.utcnow() - timedelta(hours=24)
         mcp_calls_today = (
             db.query(McpCall)
-            .filter(McpCall.called_at >= datetime.combine(today, datetime.min.time()))
+            .filter(McpCall.called_at >= cutoff)
             .count()
         )
         last = (
@@ -2972,6 +3082,179 @@ def auth_google_status(db: Session = Depends(get_db)):
 def auth_google_disconnect(db: Session = Depends(get_db)):
     disconnected = gcal.disconnect(db)
     return {"disconnected": disconnected}
+
+
+# ── Whoop OAuth + recovery snapshot ────────────────────────────────────────
+# Same shape as the Google Calendar block above: start → callback → status →
+# delete. Data fetcher is /whoop/today, served from the cached daily
+# WhoopSnapshot row when fresh, refetched live when stale (>2h old).
+
+from .services import whoop  # noqa: E402
+
+
+@app.get("/auth/whoop/start")
+def auth_whoop_start():
+    if not whoop.is_configured():
+        raise HTTPException(status_code=503, detail="Whoop OAuth env vars not set")
+    return {"authorize_url": whoop.build_authorize_url()}
+
+
+@app.get("/auth/whoop/callback")
+def auth_whoop_callback(code: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
+    from fastapi.responses import HTMLResponse
+    if error:
+        return HTMLResponse(f"<p>Whoop OAuth returned: {error}. You can close this tab.</p>", status_code=400)
+    if not code:
+        return HTMLResponse("<p>Missing code parameter.</p>", status_code=400)
+    try:
+        tokens = whoop.exchange_code_for_tokens(code)
+        # Whoop's basic profile gives us first/last name + email for the
+        # connected-as label.
+        profile = {}
+        try:
+            profile = whoop.fetch_profile(tokens.get("access_token", ""))
+        except Exception:
+            pass
+        whoop.save_tokens_from_exchange(db, tokens, account_email=profile.get("email"))
+    except Exception as e:
+        return HTMLResponse(f"<p>Token exchange failed: {e}. You can close this tab.</p>", status_code=500)
+    return HTMLResponse(
+        """
+        <!doctype html>
+        <meta charset="utf-8">
+        <title>Whoop connected</title>
+        <style>body{font-family:system-ui;padding:40px;color:#1C1C1E;}</style>
+        <p>Whoop connected. You can close this tab.</p>
+        <script>
+          try { window.opener && window.opener.postMessage({type:"gooni-oauth-done"}, "*"); } catch(e){}
+          setTimeout(() => { window.close(); }, 600);
+        </script>
+        """,
+        status_code=200,
+    )
+
+
+@app.get("/auth/whoop/status")
+def auth_whoop_status(db: Session = Depends(get_db)):
+    return whoop.connection_status(db)
+
+
+@app.delete("/auth/whoop")
+def auth_whoop_disconnect(db: Session = Depends(get_db)):
+    return {"disconnected": whoop.disconnect(db)}
+
+
+@app.get("/whoop/today")
+def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
+    """Return today's recovery + strain + sleep snapshot.
+
+    Cached daily in `whoop_snapshots` (one row per date). Pass `?refresh=1`
+    to force a live API hit; otherwise we serve the cached row if it was
+    updated within the last 2 hours, else refetch.
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from .db.models import WhoopSnapshot
+    today = _dt.now(_tz.utc).date()
+    row = db.query(WhoopSnapshot).filter(WhoopSnapshot.date == today).first()
+    stale = (
+        row is None
+        or row.updated_at is None
+        or (_dt.utcnow() - row.updated_at) > _td(hours=2)
+    )
+    if refresh or stale:
+        try:
+            payload = whoop.fetch_today_snapshot(db)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Whoop fetch failed: {e}")
+        if payload is None:
+            raise HTTPException(status_code=401, detail="Whoop not connected")
+        row = whoop.upsert_today_snapshot(db, payload)
+    return {
+        "date": row.date.isoformat() if row and row.date else None,
+        "recovery_score": row.recovery_score if row else None,
+        "hrv_rmssd_ms": row.hrv_rmssd_ms if row else None,
+        "resting_hr": row.resting_hr if row else None,
+        "strain": row.strain if row else None,
+        "sleep_minutes": row.sleep_minutes if row else None,
+        "sleep_performance_pct": row.sleep_performance_pct if row else None,
+        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+    }
+
+
+# Whoop webhook signature: base64(HMAC-SHA256(timestamp + body, client_secret)).
+# Whoop reuses the OAuth client_secret for webhook signing — no separate
+# webhook secret in their model. Both `X-WHOOP-Signature` and
+# `X-WHOOP-Signature-Timestamp` headers must be present. We accept clock
+# skew up to 5 minutes against the server time so a stale-replayed event
+# still verifies, but anything older is rejected as a replay-attack guard.
+def _verify_whoop_signature(raw_body: bytes, signature: str | None, timestamp: str | None) -> bool:
+    secret = os.getenv("WHOOP_CLIENT_SECRET")
+    if not secret:
+        # Defaults to "open in dev" so webhook can be exercised locally
+        # without setting the secret. Production must set WHOOP_CLIENT_SECRET.
+        return True
+    if not signature or not timestamp:
+        return False
+    try:
+        ts_ms = int(timestamp)
+    except ValueError:
+        return False
+    # Reject events older than 5 minutes (replay guard).
+    now_ms = int(time.time() * 1000)
+    if abs(now_ms - ts_ms) > 5 * 60 * 1000:
+        return False
+    import base64
+    digest = hmac.new(
+        secret.encode(), (timestamp + raw_body.decode("utf-8", errors="replace")).encode(), hashlib.sha256
+    ).digest()
+    expected = base64.b64encode(digest).decode()
+    return hmac.compare_digest(expected, signature)
+
+
+@app.post("/webhooks/whoop")
+async def whoop_webhook(
+    request: Request,
+    x_whoop_signature: str | None = Header(None, alias="X-WHOOP-Signature"),
+    x_whoop_signature_timestamp: str | None = Header(None, alias="X-WHOOP-Signature-Timestamp"),
+    db: Session = Depends(get_db),
+):
+    """Receive a Whoop webhook event.
+
+    Whoop fires on `recovery.updated`, `sleep.updated`, `workout.updated`,
+    `cycle.updated`. Payload carries metadata only (event type + record id)
+    — actual data must be fetched via the API. We don't fetch per-record;
+    we just refresh the daily snapshot once any event lands so the dashboard
+    is always within one webhook of truth.
+
+    Auth: HMAC-SHA256 signature. See `_verify_whoop_signature`.
+    """
+    raw_body = await request.body()
+    if not _verify_whoop_signature(raw_body, x_whoop_signature, x_whoop_signature_timestamp):
+        raise HTTPException(status_code=401, detail="bad whoop signature")
+
+    try:
+        payload = json.loads(raw_body or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="invalid json")
+
+    event_type = payload.get("type") or ""
+    # Only refresh on the events that actually move the snapshot. Workout
+    # events don't change recovery/strain/sleep, so we skip them to avoid
+    # burning the API rate budget for nothing.
+    relevant = event_type.startswith(("recovery.", "sleep.", "cycle."))
+    if not relevant:
+        return {"ok": True, "ignored": event_type}
+
+    try:
+        snapshot = whoop.fetch_today_snapshot(db)
+    except Exception as e:
+        # Don't 500 — Whoop will keep retrying which doesn't help us; log
+        # and move on. Daniel can hit ?refresh=1 manually to recover.
+        print(f"whoop webhook fetch error: {e}")
+        return {"ok": True, "warn": str(e)}
+    if snapshot:
+        whoop.upsert_today_snapshot(db, snapshot)
+    return {"ok": True, "type": event_type}
 
 
 @app.post("/calendar/events")
