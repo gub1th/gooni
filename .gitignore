@@ -21,6 +21,7 @@ wheels/
 *.egg
 
 # Virtual Environment
+venv
 venv/
 env/
 ENV/
@@ -72,3 +73,18 @@ app/misc/
 docs/TODO.md
 docs/VISION.md
 docs/memory_export.json
+
+# Vercel CLI — links local dir to Vercel project (projectId/orgId).
+.vercel/
+
+# Eval scorecards — per-run HTML artifacts, accumulate fast. Baselines stay
+# tracked (committed JSON = ground truth across PROMPT_VERSION bumps).
+evals/reports/
+
+# Eval scratch DB — closed-env replay surface, not real data.
+db/gooni-eval.db
+db/gooni-eval.db.*
+
+# Eval per-case cache — sha256 of (case + pipeline_model + prompt_version + judge).
+# Local artifact, regenerates on demand. Don't commit.
+evals/cache/

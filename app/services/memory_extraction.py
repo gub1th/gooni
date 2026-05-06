@@ -22,7 +22,7 @@ from typing import Any
 from ..llm.client import llm_client
 
 
-VALID_TYPES = {"preference", "goal", "fact", "routine", "constraint", "episode"}
+VALID_TYPES = {"preference", "fact", "routine", "constraint", "episode"}
 
 
 _EXTRACTION_PROMPT = """Extract structured user-profile updates from this chat exchange.
@@ -34,7 +34,7 @@ Return ONLY a JSON array. No preamble, no markdown fence.
 
 Schema per item:
 {{
-  "type": "preference" | "goal" | "fact" | "routine" | "constraint" | "episode",
+  "type": "preference" | "fact" | "routine" | "constraint" | "episode",
   "key": "snake_case_key" | null,
   "content": "natural-language description of the memory",
   "context": {{"time": null|str, "location": null|str, "scope": "global"|"contextual"}},
@@ -47,11 +47,15 @@ Rules:
   HIGH BAR: only use this when Daniel is explicitly stating a stable
   taste / style rule. Do NOT use it for chat transcripts, todo lists,
   in-progress thoughts, or summaries of what the assistant just said.
-- "goal" = aspiration, has a desired outcome
-- "fact" = declarative truth about Daniel
+- "fact" = declarative truth about Daniel (includes long-term aspirations
+  expressed as identity, e.g. "Daniel wants to be a thoughtful engineer")
 - "routine" = recurring habit/pattern
 - "constraint" = hard limit (allergies, schedule blockers, dealbreakers)
 - "episode" = a notable moment from the chat itself (no key, just content)
+- DO NOT emit "goal" — action-shaped aspirations belong in the focuses
+  list (list_items), not memory. If Daniel says "I want to ship X this
+  week" / "I'm going to learn Y" with action + timeframe, skip extraction
+  entirely — that's focus material, surfaced separately.
 - key is snake_case (e.g. "ide_theme_preference"); null for episodes
 - scope: "global" = always applies; "contextual" = situation-specific
 - confidence: 0.85+ for explicit statements; 0.6-0.7 for inferences
@@ -204,7 +208,7 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
   ],
   "memories": [
     {{
-      "type": "preference" | "goal" | "fact" | "routine" | "constraint" | "episode",
+      "type": "preference" | "fact" | "routine" | "constraint" | "episode",
       "key":  "snake_case_key" | null,
       "content": "natural-language description of the memory",
       "context": {{"time": null|str, "location": null|str, "scope": "global"|"contextual"}},
@@ -305,8 +309,11 @@ feature_requests:
 
 memories:
 - Persistent facts about Daniel — same shape as before.
-- "preference" = stable like/dislike. "goal" = aspiration. "fact" = declarative truth.
-  "routine" = recurring habit. "constraint" = hard limit. "episode" = notable moment.
+- "preference" = stable like/dislike. "fact" = declarative truth (includes
+  identity-shaped aspirations). "routine" = recurring habit. "constraint"
+  = hard limit. "episode" = notable moment.
+- DO NOT emit "goal" — action-shaped aspirations belong in focuses list
+  (list_items), not memory. Skip extraction; focus pipeline handles them.
 - key is snake_case for typed memories; null for episodes.
 - scope: "global" = always applies; "contextual" = situation-specific.
 - confidence: 0.85+ for explicit; 0.6-0.7 for inferences.

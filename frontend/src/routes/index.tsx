@@ -4,7 +4,6 @@ import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
 import { EvalView } from "../components/eval/EvalView";
 import { StatsView } from "../components/StatsView";
-import { Globe, Plug } from "lucide-react";
 import { GooniLayer } from "../components/GooniLayer";
 import { BacklogBoard } from "../components/lists/BacklogBoard";
 import { ListView } from "../components/lists/ListView";
@@ -36,23 +35,6 @@ export const Route = createFileRoute("/")({
 
 // Sidebar auto-collapses below this width
 const SIDEBAR_BREAKPOINT = 768;
-
-const topRightBtn: React.CSSProperties = {
-  height: 30, borderRadius: 8,
-  border: "0.5px solid rgba(0,0,0,0.08)",
-  background: "rgba(255,255,255,0.85)",
-  backdropFilter: "blur(6px)",
-  WebkitBackdropFilter: "blur(6px)",
-  cursor: "pointer",
-  display: "inline-flex", alignItems: "center", justifyContent: "center",
-  color: "#3C3C43",
-  padding: "0 10px",
-  gap: 6,
-  fontSize: 12,
-  fontWeight: 500,
-  transition: "background 0.12s",
-  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-};
 
 function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
@@ -352,40 +334,6 @@ function NotesPage() {
             </>
           );
         })()}
-      </div>
-
-      {/* Top-right pair: Public profile + Public MCP. Floats above the
-          content so it's reachable from every view without crowding the
-          sidebar. Distinct icons (Globe vs Plug) so a glance tells them
-          apart; "MCP" drops the redundant "Public" prefix. */}
-      <div style={{
-        position: "fixed",
-        top: 12, right: 14,
-        display: "flex", gap: 6,
-        zIndex: 90,
-      }}>
-        <button
-          onClick={() => navigate({ to: "/public" })}
-          title="Public profile (visitors see this)"
-          aria-label="Public profile"
-          style={topRightBtn}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.85)")}
-        >
-          <Globe size={14} strokeWidth={1.7} />
-          <span>Public</span>
-        </button>
-        <button
-          onClick={() => navigate({ to: "/public/mcp" })}
-          title="MCP — public connector page"
-          aria-label="MCP"
-          style={topRightBtn}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.85)")}
-        >
-          <Plug size={14} strokeWidth={1.7} />
-          <span>MCP</span>
-        </button>
       </div>
 
       {/* FAB + floating panel + mascot all live in GooniLayer so /memories and
