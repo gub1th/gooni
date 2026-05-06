@@ -108,6 +108,25 @@ def _aggregate_costs(rows: list[dict[str, Any]]) -> float:
     return total
 
 
+def _aggregate_costs_by_day(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Costs API returns one row per day-bucket when bucket_width=1d. Each row
+    carries _bucket_start (stamped by _fetch_paginated). Sum amount per UTC
+    day so the dashboard can pick today's spend without a second round-trip."""
+    by_day: dict[str, float] = {}
+    for r in rows:
+        bs = r.get("_bucket_start")
+        if bs is None:
+            continue
+        day = datetime.fromtimestamp(int(bs), tz=timezone.utc).strftime("%Y-%m-%d")
+        amount = r.get("amount") or {}
+        try:
+            v = float(amount.get("value") or 0)
+        except (TypeError, ValueError):
+            continue
+        by_day[day] = by_day.get(day, 0.0) + v
+    return by_day
+
+
 def fetch_month_to_date(refresh: bool = False) -> dict[str, Any]:
     """Aggregate month-to-date OpenAI spend + tokens + requests broken down
     by model. Returns:
@@ -196,6 +215,9 @@ def fetch_month_to_date(refresh: bool = False) -> dict[str, Any]:
     total_out = sum(m["output_tokens"] for m in by_model_list)
     total_req = sum(m["requests"] for m in by_model_list)
     spend = _aggregate_costs(costs)
+    spend_by_day = _aggregate_costs_by_day(costs)
+    today_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    spend_today = round(spend_by_day.get(today_key, 0.0), 4)
 
     # Daily series for the chart. Walks the same bucket-stamped rows so
     # we don't pay a second API round-trip. Embeddings + completions
@@ -216,6 +238,7 @@ def fetch_month_to_date(refresh: bool = False) -> dict[str, Any]:
         "configured": True,
         "month_start_unix": start,
         "spend_usd": round(spend, 4),
+        "spend_today_usd": spend_today,
         "requests": total_req,
         "by_day": by_day_list,
         "input_tokens": total_in,
