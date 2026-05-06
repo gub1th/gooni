@@ -165,11 +165,14 @@ class Memory(Base):
 
     Types:
       'preference' — stable likes/dislikes (always injected into prompt)
-      'goal'       — long-running aspirations (linked to focus_id when relevant)
-      'fact'       — declarative facts about Daniel
+      'fact'       — declarative facts about Daniel (incl. identity-shaped
+                     aspirations like "wants to be a thoughtful engineer")
       'routine'    — habits + recurring patterns
       'constraint' — hard limits (allergies, schedule blockers, dealbreakers)
       'episode'    — free-form chat extract; no key, just embedded content
+
+    NOTE: 'goal' was removed — action-shaped aspirations live in list_items
+    (focuses) instead. Identity-shaped values fold into 'fact'.
 
     Updates use a supersede chain: when a fact contradicts an old one, the
     old row gets is_active=False and superseded_by=<new id>. Audit trail
@@ -180,7 +183,7 @@ class Memory(Base):
     __tablename__ = "memories"
 
     id = Column(Integer, primary_key=True, index=True)
-    # 'preference' | 'goal' | 'fact' | 'routine' | 'constraint' | 'episode'
+    # 'preference' | 'fact' | 'routine' | 'constraint' | 'episode'
     type = Column(String, nullable=False, index=True)
     # snake_case slug for typed memories so we can lookup by key. NULL for episodes.
     key = Column(String, nullable=True, index=True)

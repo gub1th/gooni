@@ -244,6 +244,17 @@ def _run_column_migrations(engine):
                 "UPDATE list_items SET status = 'someday' "
                 "WHERE status IS NULL AND committed = 0"
             ))
+        # Memory type collapse: 'goal' was deleted — action-shaped aspirations
+        # belong in list_items (focuses), identity-shaped values fold into
+        # 'fact'. Reclassify legacy goal rows as fact so they remain
+        # cosine-retrievable. Idempotent (UPDATE with WHERE finds 0 rows on
+        # next boot).
+        if "memories" in existing_tables:
+            res = conn.execute(text(
+                "UPDATE memories SET type = 'fact' WHERE type = 'goal'"
+            ))
+            if getattr(res, "rowcount", 0):
+                print(f"Migration: reclassified {res.rowcount} goal memories as fact")
         if "lists" in existing_tables:
             conn.execute(text("UPDATE lists SET kind = 'tasks' WHERE kind IS NULL"))
             # Drop hardcoded emoji defaults so the frontend's lucide ListIcon
@@ -3289,3 +3300,110 @@ def eval_tools_legend():
     from .services import eval_service
 
     return {"tools": eval_service.TOOL_LEGEND}
+
+
+# ── Golden-eval runs / baselines ────────────────────────────────────────────
+# Surfaces the artifacts produced by `python -m evals.run_orchestrator` inside
+# the audit UI so Daniel can browse them without leaving Gooni. Local-only
+# data: reports/ is gitignored so prod has nothing to show until baselines get
+# committed or pushed via API. For now the UI degrades gracefully on empty.
+
+import json as _json
+from pathlib import Path as _Path
+
+_EVAL_REPORTS_DIR = _Path(__file__).parent.parent / "evals" / "reports"
+_EVAL_BASELINES_DIR = _Path(__file__).parent.parent / "evals" / "baselines"
+
+
+def _safe_eval_filename(filename: str, prefix: str, suffix: str) -> bool:
+    """Guard against path traversal. Filenames must start with the expected
+    prefix (report_/baseline_) and end with the expected suffix."""
+    return (
+        "/" not in filename
+        and ".." not in filename
+        and filename.startswith(prefix)
+        and filename.endswith(suffix)
+    )
+
+
+@app.get("/eval/runs")
+def list_eval_runs():
+    """List local eval runs (HTML reports) with metadata extracted from the
+    matching baseline JSON when available. Sorted newest first by mtime."""
+    if not _EVAL_REPORTS_DIR.exists():
+        return {"runs": []}
+    runs: list[dict] = []
+    for report in sorted(
+        _EVAL_REPORTS_DIR.glob("report_*.html"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ):
+        runs.append({
+            "filename": report.name,
+            "size_bytes": report.stat().st_size,
+            "mtime": report.stat().st_mtime,
+        })
+    # Pair with the latest baseline metadata so the UI shows scores w/o
+    # opening each report. Baselines aren't 1:1 with reports (baselines
+    # overwrite per pipeline_version+model; reports keep history) — best we
+    # can do is summarize the most recent baseline per (version, model).
+    baselines_by_key: dict[str, dict] = {}
+    if _EVAL_BASELINES_DIR.exists():
+        for b in _EVAL_BASELINES_DIR.glob("baseline_*.json"):
+            try:
+                data = _json.loads(b.read_text())
+            except (_json.JSONDecodeError, OSError):
+                continue
+            key = f"v{data.get('pipeline_version','?')}_{data.get('pipeline_model','?')}"
+            baselines_by_key[key] = {
+                "composite_score": data.get("composite_score"),
+                "passed": data.get("passed"),
+                "n_cases": data.get("n_cases"),
+                "means": data.get("means"),
+                "pipeline_model": data.get("pipeline_model"),
+                "pipeline_version": data.get("pipeline_version"),
+                "pipeline_source_hash": data.get("pipeline_source_hash"),
+                "timestamp": data.get("timestamp"),
+            }
+    return {"runs": runs, "baselines_by_key": baselines_by_key}
+
+
+@app.get("/eval/runs/{filename}")
+def get_eval_run(filename: str):
+    """Serve the HTML scorecard inline. iframe-friendly."""
+    from fastapi.responses import HTMLResponse
+
+    if not _safe_eval_filename(filename, "report_", ".html"):
+        raise HTTPException(400, "invalid report filename")
+    p = _EVAL_REPORTS_DIR / filename
+    if not p.exists():
+        raise HTTPException(404, "report not found")
+    return HTMLResponse(content=p.read_text())
+
+
+@app.get("/eval/baselines")
+def list_eval_baselines():
+    """List committed baseline JSONs (ground-truth snapshots). These survive
+    deploys; reports/ does not."""
+    if not _EVAL_BASELINES_DIR.exists():
+        return {"baselines": []}
+    out = []
+    for f in sorted(_EVAL_BASELINES_DIR.glob("baseline_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = _json.loads(f.read_text())
+        except (_json.JSONDecodeError, OSError):
+            continue
+        out.append({
+            "filename": f.name,
+            "composite_score": data.get("composite_score"),
+            "passed": data.get("passed"),
+            "failed": data.get("failed"),
+            "n_cases": data.get("n_cases"),
+            "means": data.get("means"),
+            "pipeline_model": data.get("pipeline_model"),
+            "pipeline_version": data.get("pipeline_version"),
+            "pipeline_source_hash": data.get("pipeline_source_hash"),
+            "case_ids": data.get("case_ids"),
+            "timestamp": data.get("timestamp"),
+        })
+    return {"baselines": out}

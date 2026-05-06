@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
@@ -10,6 +10,7 @@ import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeSt
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText, Pin, MessageSquare, Brain, ClipboardList, BarChart3, Settings as SettingsIcon,
+  Globe, Plug,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -26,6 +27,26 @@ const ICON_TINT = {
   stats:    "#EC4899",   // pink — distinct from chatAudit so the eye separates them
   settings: "#64748B",   // slate
 } as const;
+
+const sidebarFooterBtn: React.CSSProperties = {
+  flex: 1,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 5,
+  height: 28,
+  padding: "0 8px",
+  borderRadius: 6,
+  border: "none",
+  background: "transparent",
+  color: "#3C3C43",
+  fontSize: 11,
+  fontWeight: 500,
+  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+  cursor: "pointer",
+  transition: "background 0.12s",
+  outline: "none",
+};
 
 interface SpacePopoverProps {
   anchor: { top: number; left: number };
@@ -776,6 +797,38 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
               Settings
             </button>
           </div>
+        </div>
+
+        {/* Footer — Public profile + MCP connector. Side-by-side pills. Lives
+            outside the scrollable area so they're always visible at sidebar
+            bottom; replaces the floating top-right pair that was crowding
+            the page header. */}
+        <div style={{
+          display: "flex", gap: 6, padding: "8px 8px 10px",
+          borderTop: "1px solid rgba(0,0,0,0.06)", flexShrink: 0,
+        }}>
+          <button
+            onClick={() => navigate({ to: "/public" })}
+            title="Public profile (visitors see this)"
+            aria-label="Public profile"
+            style={sidebarFooterBtn}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+          >
+            <Globe size={13} strokeWidth={1.7} />
+            <span>Public</span>
+          </button>
+          <button
+            onClick={() => navigate({ to: "/public/mcp" })}
+            title="MCP — public connector page"
+            aria-label="MCP"
+            style={sidebarFooterBtn}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+          >
+            <Plug size={13} strokeWidth={1.7} />
+            <span>MCP</span>
+          </button>
         </div>
       </div>
 

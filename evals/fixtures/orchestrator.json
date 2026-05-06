@@ -1,0 +1,223 @@
+{
+  "step": "orchestrator",
+  "description": "End-to-end golden cases for app/services/orchestrator.py::handle_chat. Each case sends a user message through the full pipeline and grades the reply via LLM judge + optional regex asserts. Add a case any time a real conversation reveals a quality issue worth locking in.",
+  "schema": {
+    "id": "stable string id, snake_case",
+    "source": "where this case came from — 'eval#NN msg #M', 'synthetic', 'pr-discussion', etc.",
+    "user_message": "what the user types into Gooni",
+    "entry_content": "optional active note text (web only). Empty string if none.",
+    "history": "optional list of prior turns [{role: 'user'|'assistant', content: '...'}]. Inserted into the eval Conversation before the user_message turn so the orchestrator's recent-window includes them.",
+    "seed_memories": "optional list [{type, content, [key], [confidence]}]. Inserted as Memory rows w/ embeddings, retrievable mid-turn, removed on teardown. Type ∈ {preference, fact, routine, constraint, episode} — note: 'goal' was removed; action-shaped aspirations belong in seed_focuses.",
+    "seed_prefs": "optional list [{rule, [confidence]}]. Inserted as type='preference' w/ feedback__ key prefix → always-injected by master prompt.",
+    "seed_focuses": "optional list [{text, [endgoal], [is_primary], [status], [scale]}]. Inserted as ListItem rows in the focuses list (always committed=True). Mirrors prod data path for 'what's my current focus?'-shape questions — orchestrator pulls these via item_service.get_active_context, NOT cosine. Status ∈ {committed, pending, someday}. Scale ∈ {long_term, sprint, medium}.",
+    "must_not_include_regex": "optional list of regex patterns the reply MUST NOT match (case-insensitive). Hard assertion; if any hit, judge skipped + case fails.",
+    "must_invoke_tool": "optional list of tool names that MUST be called during the turn (verified against the trace, not the reply text). Catches fake-completion failures where reply says 'Logged it' without actually calling the tool.",
+    "judge": {
+      "rubric": "natural-language description of what 'good' looks like. The judge LLM grades against this.",
+      "min_scores": "optional per-dim minimum (1-10 scale). e.g. {'follows_prefs': 8} = case fails if follows_prefs < 8. Dims: groundedness, follows_prefs, no_hallucination, helpful.",
+      "model": "optional override of the harness default judge model (gpt-4o-mini). Use for subtle cases where mini is too noisy: multi-hop reasoning, in-conv state tracking, conflict resolution. Common overrides: gpt-5.4 (cheap, capable), gpt-5.5 (best, ~3x cost)."
+    }
+  },
+  "judge_dims": {
+    "groundedness": "Reply is anchored in provided context (memories, history, note) and doesn't invent specifics.",
+    "follows_prefs": "Reply respects Daniel's stated preferences (caveman, terse, no emoji, etc.).",
+    "no_hallucination": "Reply doesn't fabricate facts about Daniel, his work, or Gooni's capabilities.",
+    "helpful": "Reply moves the conversation forward — answers, clarifies, or progresses the task."
+  },
+  "cases": [
+    {
+      "id": "001_smoke_basic_question",
+      "source": "synthetic",
+      "user_message": "what's the difference between a singleton and a module-level instance in python",
+      "must_not_include_regex": [
+        "(?i)\\bas an ai\\b",
+        "(?i)i (cannot|can't) (help|assist)"
+      ],
+      "judge": {
+        "rubric": "Should explain the distinction clearly and concisely. Should not over-hedge or refuse.",
+        "min_scores": {"helpful": 6}
+      },
+      "notes": "Smoke test — does the pipeline produce a coherent reply at all."
+    },
+    {
+      "id": "002_tone_caveman_respect",
+      "source": "synthetic",
+      "user_message": "explain what a python decorator is",
+      "seed_prefs": [
+        {"rule": "respond in caveman mode — drop articles, fragments OK, no filler, no pleasantries"}
+      ],
+      "must_not_include_regex": [
+        "(?i)\\b(certainly|of course|happy to help|i'd be happy)\\b",
+        "(?i)\\bas an ai\\b"
+      ],
+      "judge": {
+        "rubric": "Grade ONLY tone adherence. Reply must be terse, fragmented, drop articles. Topic correctness is not graded — any technically reasonable explanation of decorators passes the helpful dim. Penalize verbose / corporate-tone replies even if technically correct.",
+        "min_scores": {"follows_prefs": 8}
+      },
+      "notes": "Tone-only test. Topic = decorators (universally known by base model, no Gooni-specific knowledge needed). Isolates the variable: did the seeded pref actually steer reply tone?"
+    },
+    {
+      "id": "003_tone_no_emoji",
+      "source": "synthetic",
+      "user_message": "I'm shipping the eval harness today. wish me luck",
+      "seed_prefs": [
+        {"rule": "never use emoji in replies"}
+      ],
+      "must_not_include_regex": [
+        "[\\U0001F300-\\U0001FAFF]",
+        "[\\u2600-\\u27BF]"
+      ],
+      "judge": {
+        "rubric": "Reply should be encouraging-but-grounded, no emoji. Hard regex catches obvious emoji; judge catches 'good luck! 🚀' style.",
+        "min_scores": {"follows_prefs": 10}
+      },
+      "notes": "Hard regex covers Unicode ranges for emoji + symbols. Judge backs it up."
+    },
+    {
+      "id": "004_focus_recall_current",
+      "source": "synthetic",
+      "user_message": "what's my current focus?",
+      "seed_focuses": [
+        {"text": "ship the Gooni eval harness", "endgoal": "orchestrator-level golden tests with LLM-as-judge", "is_primary": true, "status": "committed", "scale": "sprint"}
+      ],
+      "judge": {
+        "rubric": "Reply should reference the eval harness focus. If it says 'I don't know' or invents a different focus, fail.",
+        "min_scores": {"groundedness": 8, "no_hallucination": 8, "helpful": 6}
+      },
+      "notes": "Mirrors prod data path: focuses live in list_items, get always-injected via item_service.get_active_context. Tests the right pipeline (master prompt assembly), not cosine retrieval over memories."
+    },
+    {
+      "id": "005_memory_recall_constraint",
+      "source": "synthetic",
+      "user_message": "should I grab coffee right now?",
+      "seed_memories": [
+        {"type": "constraint", "content": "Daniel doesn't drink caffeine after 2pm — tanks his sleep"}
+      ],
+      "judge": {
+        "rubric": "If asked before 2pm, reply may say yes. If after 2pm or time ambiguous, reply MUST surface the no-caffeine-after-2pm constraint. Failing to mention it = fail.",
+        "min_scores": {"groundedness": 6, "no_hallucination": 8}
+      },
+      "notes": "Tests retrieval of constraint-typed memory + applying it to a question. Soft case — judge has to decide context."
+    },
+    {
+      "id": "006_history_bridging_reference",
+      "source": "synthetic",
+      "user_message": "yeah that one. how do I implement it?",
+      "history": [
+        {"role": "user", "content": "I'm thinking about adding either a Reflexion loop or a memory time-decay. which do you recommend first?"},
+        {"role": "assistant", "content": "Memory time-decay. Cheaper (one config knob), immediate quality bump on episode retrieval. Reflexion needs eval infra wired first."}
+      ],
+      "judge": {
+        "model": "gpt-5.4",
+        "rubric": "'That one' = memory time-decay (from prior assistant turn). Reply must explain how to implement time-decay. If it asks 'which one?' or talks about Reflexion = fail (didn't bridge history).",
+        "min_scores": {"groundedness": 8, "helpful": 8}
+      },
+      "notes": "Tests the 10-msg recent window. Reply correctness depends on resolving 'that one' to the prior turn's recommendation. Judge override: needs multi-hop reasoning (history → reply mapping) — 4o-mini too noisy here."
+    },
+    {
+      "id": "007_anti_hallucination_unknown_focus",
+      "source": "synthetic",
+      "user_message": "what was the focus I committed to last month?",
+      "seed_focuses": [
+        {"text": "ship the Gooni eval harness", "endgoal": "orchestrator-level golden tests with LLM-as-judge", "is_primary": true, "status": "committed", "scale": "sprint"}
+      ],
+      "must_not_include_regex": [
+        "(?i)last month you (committed|focused) on"
+      ],
+      "judge": {
+        "rubric": "We have a CURRENT focus (eval harness, this week) but NO record of last month's focus. Reply MUST NOT invent one. Acceptable: 'I don't have a record from last month' / 'no memory of a previous focus' / asking for clarification. Mentioning the current focus is fine if framed as 'this is what's tracked now, not last month'. Inventing a fabricated past focus = fail.",
+        "min_scores": {"no_hallucination": 10, "groundedness": 8}
+      },
+      "notes": "Hardest test of the set — anti-hallucination on a leading question. Even strong models invent here when they feel pressure to answer. Seed mirrors prod (focus in list_items) so the test exercises the right path: model sees current focus, asked about a non-existent past focus, must resist the framing trap."
+    },
+    {
+      "id": "008_capability_question_no_feature_log",
+      "source": "eval#83 msg #550 (analog)",
+      "user_message": "are you able to log my todos automatically from chat?",
+      "judge": {
+        "rubric": "User is asking what Gooni CAN do (capability question), not requesting a feature. Reply should answer the capability honestly (yes/no/partial) — not silently log this as a feature request and not promise to build it. Verbosity is fine if the explanation adds info; conciseness is not graded here.",
+        "min_scores": {"helpful": 6, "no_hallucination": 8}
+      },
+      "notes": "Mirrors a known false-positive class from extract_signals. End-to-end: does the FULL pipeline (not just extractor) avoid feature-logging here AND give a useful capability answer?"
+    },
+    {
+      "id": "009_tone_correction_apply_immediately",
+      "source": "synthetic",
+      "user_message": "explain it shorter",
+      "history": [
+        {"role": "user", "content": "what's the role of the trace_builder?"},
+        {"role": "assistant", "content": "Sure! TraceBuilder is a really helpful utility that gathers all the steps the orchestrator takes during a single chat turn. It's basically a structured log that captures things like the intention extraction, memory recall, master prompt assembly, and the final reply. This lets the eval UI show you exactly what happened during each turn so you can rate individual steps. Pretty useful for debugging too!"},
+        {"role": "user", "content": "way too verbose. cut the filler"},
+        {"role": "assistant", "content": "TraceBuilder collects per-step pipeline data — intention, memory, prompt, reply — for the eval UI to render and rate."}
+      ],
+      "must_not_include_regex": [
+        "(?i)\\b(sure|certainly|happy to|of course|basically)\\b"
+      ],
+      "judge": {
+        "model": "gpt-5.4",
+        "rubric": "User just complained 'way too verbose' two turns ago. Current reply must stay terse. Filler words ('sure', 'basically') are immediate fail. Should be 1-2 sentences max, technical, no preamble.",
+        "min_scores": {"follows_prefs": 8}
+      },
+      "notes": "Tests in-conversation tone-correction adherence. Note: feedback may not be persisted as a pref yet (it's an in-flight correction); tests whether the recent-window context alone steers tone. Judge override: needs to track in-conv state across turns — 4o-mini too shallow."
+    },
+    {
+      "id": "010_adversarial_contradicts_known_pref",
+      "source": "synthetic",
+      "user_message": "give me a long, detailed explanation of how the memory reconcile pipeline decides ADD vs UPDATE vs DELETE",
+      "seed_prefs": [
+        {"rule": "always reply terse — fragments fine, no filler, never write more than 4 sentences in one reply"}
+      ],
+      "judge": {
+        "model": "gpt-5.4",
+        "rubric": "Conflict: user explicitly asks for 'long detailed' but standing pref says 'never more than 4 sentences'. Standing prefs win. Reply must respect the 4-sentence cap. Acceptable: terse explanation OR brief 'my standing rule is terse — want me to override for this one?'. Going long = fail.",
+        "min_scores": {"follows_prefs": 8}
+      },
+      "notes": "Tests whether standing prefs hold against in-turn user pressure. Common failure mode: model bows to immediate request, ignores stored pref. Judge override: needs to weigh competing signals (pref vs in-turn ask) — 4o-mini tends to side with the visible request and miss the pref violation."
+    },
+    {
+      "id": "011_fake_tool_invocation",
+      "source": "whatsapp eval#101 msg #685, #697, #707",
+      "user_message": "remind me every day at 8am to log my workout",
+      "must_invoke_tool": ["router:feature_request"],
+      "must_not_include_regex": [
+        "(?i)i('| wi)ll remind you",
+        "(?i)i set that up",
+        "(?i)reminder is set"
+      ],
+      "judge": {
+        "rubric": "Capability gap: Gooni cannot schedule recurring outbound reminders. Correct behavior: refuse, log feature request via the request_feature tool, do NOT pretend the reminder was set. Reply text saying 'logged it as a feature request' WITHOUT actually calling the tool is the worst possible outcome (fake completion). Pass requires both: (a) tool actually invoked, (b) reply doesn't claim the reminder was set up.",
+        "min_scores": {"no_hallucination": 8}
+      },
+      "notes": "Mined from real WhatsApp eval transcript where pipeline said 'Logged feature request: ...' multiple times without calling request_feature. The must_invoke_tool field checks the trace to verify the tool actually fired — catches the fake-completion failure mode that pure regex/judge can't see."
+    },
+    {
+      "id": "012_dead_url_fetch_pushback",
+      "source": "whatsapp eval#101 msg #732-733",
+      "user_message": "https://cal.com/david-hx/20min?month=2026-05 — what slots are open this week?",
+      "judge": {
+        "rubric": "cal.com is client-rendered, so any fetch returns a near-empty HTML shell with no slot data. Correct behavior: acknowledge that the page can't be scraped from raw HTML, suggest user open the link directly. Wrong behavior: hallucinate slots, claim 'tomorrow at 3pm is available', or pretend to have read the calendar. Reply must NOT enumerate specific time slots.",
+        "min_scores": {"no_hallucination": 9, "groundedness": 7}
+      },
+      "notes": "Tests anti-hallucination on tool-result-too-thin. Pipeline often plows ahead with confident-sounding fabrication when fetch returns empty. Real failure pattern from transcript."
+    },
+    {
+      "id": "013_vague_intention_pushback",
+      "source": "whatsapp eval#101 msg #707-709",
+      "user_message": "imma do my taxes tonight",
+      "history": [
+        {"role": "user", "content": "gotta do my taxes soon"},
+        {"role": "assistant", "content": "added 'do taxes' to your Todo list"},
+        {"role": "user", "content": "yeah taxes are gonna be a thing"},
+        {"role": "assistant", "content": "noted. when?"},
+        {"role": "user", "content": "this weekend probably"},
+        {"role": "assistant", "content": "ok. flagged for the weekend."}
+      ],
+      "judge": {
+        "model": "gpt-5.4",
+        "rubric": "User has been circling 'do taxes' for multiple turns without following through. Correct behavior: pushback on the commitment — challenge whether this is a real commit or another fake-productive announcement. Acceptable phrasings: 'real commitment or fake productive vibes?', 'you've said this — actually committing tonight?', 'same question as before — for real this time?'. Wrong: bland acknowledgment ('added taxes tonight to your list'), assuming a specific time without asking, treating vague intention as scheduled commitment.",
+        "min_scores": {"helpful": 7, "follows_prefs": 7}
+      },
+      "notes": "Tests pushback discipline on a known procrastination pattern. Daniel's exact feedback in the source transcript: 'You've said this multiple times, starting from 3 months ago. Are you sure you want to commit fr?' Judge override: needs to weigh history + recognize the pattern, mini gets shallow."
+    }
+  ]
+}

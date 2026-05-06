@@ -573,7 +573,7 @@ class MemoryService:
                     scored = self._cosine_search(
                         sess,
                         query_vec,
-                        type_filter=["fact", "goal", "routine", "constraint", "episode"],
+                        type_filter=["fact", "routine", "constraint", "episode"],
                         limit=RETRIEVAL_TOP_K,
                         floor=RETRIEVAL_SIMILARITY_FLOOR,
                     )

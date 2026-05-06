@@ -46,7 +46,7 @@ const RATING_OPTIONS: { value: 1 | 2 | 3; label: string; emoji: string }[] = [
   { value: 3, label: "Good", emoji: "👍" },
 ];
 
-type Tab = "eval" | "audit";
+type Tab = "eval" | "audit" | "runs";
 
 export function EvalView() {
   const [tab, setTab] = useState<Tab>("eval");
@@ -57,8 +57,22 @@ export function EvalView() {
 
   // Filters live in component state — no URL plumbing yet, can be added later.
   const [sourcesFilter, setSourcesFilter] = useState<string[]>([...SOURCES]);
-  const [statusesFilter, setStatusesFilter] = useState<EvalStatus[]>([...STATUSES]);
+  // Default hides "done" — typical workflow is triaging unrated/in-flight
+  // segments. "done" stays one click away if you want to revisit closed ones.
+  const [statusesFilter, setStatusesFilter] = useState<EvalStatus[]>(["not_yet", "pending"]);
   const [hasFlagOnly, setHasFlagOnly] = useState(false);
+  // Card-grid is browseable; list is dense triage view. Persist user's
+  // pick across sessions — bot users with 80+ segments will live in list.
+  const [viewMode, setViewMode] = useState<"list" | "cards">(() => {
+    if (typeof window === "undefined") return "list";
+    const saved = window.localStorage.getItem("eval-view-mode");
+    return saved === "cards" || saved === "list" ? saved : "list";
+  });
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("eval-view-mode", viewMode);
+    }
+  }, [viewMode]);
   // Min message count: filters out the noise of one-off "asd" / "hi" segments
   // that flood bot conversations. 3 is a low default that still cuts ~half
   // the obviously-trivial segments without hiding short legitimate ones.
@@ -157,6 +171,7 @@ export function EvalView() {
         <div style={{ display: "flex", gap: 0, marginTop: 14 }}>
           <TabButton active={tab === "eval"} onClick={() => setTab("eval")}>Eval</TabButton>
           <TabButton active={tab === "audit"} onClick={() => setTab("audit")}>Chat audit</TabButton>
+          <TabButton active={tab === "runs"} onClick={() => setTab("runs")}>Eval runs</TabButton>
         </div>
       </div>
 
@@ -166,6 +181,8 @@ export function EvalView() {
         <div style={{ flex: 1, overflow: "auto", background: "#FAFAFA" }}>
           <ChatAuditPanel />
         </div>
+      ) : tab === "runs" ? (
+        <EvalRunsPanel />
       ) : (
         <>
           {/* Filter rail */}
@@ -205,15 +222,18 @@ export function EvalView() {
                 </FilterPill>
               ))}
             </FilterGroup>
-            <FilterPill
-              active={hasFlagOnly}
-              accent="#FF3B30"
-              onClick={() => setHasFlagOnly((v) => !v)}
-            >
-              Flagged
-            </FilterPill>
+            <div style={{ display: "inline-flex", padding: 2, background: "#F2F2F7", borderRadius: 7 }}>
+              <FilterPill
+                active={hasFlagOnly}
+                accent="#FF3B30"
+                onClick={() => setHasFlagOnly((v) => !v)}
+              >
+                Flagged
+              </FilterPill>
+            </div>
+            <ViewToggle mode={viewMode} onChange={setViewMode} />
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 6 }}>
-              <span style={{ fontSize: 11, color: "#8E8E93" }}>Min msgs:</span>
+              <span style={{ fontSize: 11, color: "#8E8E93" }}>Min msgs</span>
               <input
                 type="number"
                 min={1}
@@ -221,14 +241,18 @@ export function EvalView() {
                 value={minMessages}
                 onChange={(e) => setMinMessages(Math.max(1, Number(e.target.value) || 1))}
                 style={{
-                  width: 50,
-                  padding: "3px 6px",
-                  border: "1px solid #E5E5EA",
+                  width: 44,
+                  height: 24,
+                  padding: "0 6px",
+                  border: "none",
+                  background: "#F2F2F7",
                   borderRadius: 6,
                   fontSize: 12,
                   fontFamily: FONT,
                   outline: "none",
                   textAlign: "center",
+                  fontWeight: 600,
+                  color: "#1C1C1E",
                 }}
               />
             </div>
@@ -267,6 +291,26 @@ export function EvalView() {
                   ? "No segments match these filters. Try widening source / status, or clear search."
                   : `All ${segments.length} segment${segments.length === 1 ? "" : "s"} have fewer than ${minMessages} messages. Lower "Min msgs" to see them.`}
               </div>
+            ) : viewMode === "list" ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  background: "#FFFFFF",
+                  border: "1px solid #E5E5EA",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                }}
+              >
+                {visible.map((seg, i) => (
+                  <SegmentRow
+                    key={seg.id}
+                    seg={seg}
+                    isFirst={i === 0}
+                    onClick={() => setSelectedSegmentId(seg.id)}
+                  />
+                ))}
+              </div>
             ) : (
               <div
                 style={{
@@ -301,7 +345,7 @@ function SegmentCard({
   onClick: () => void;
 }) {
   const sourceStyle = SOURCE_STYLE[seg.source] ?? SOURCE_STYLE.web;
-  const when = seg.last_message_at ? new Date(seg.last_message_at) : null;
+  const when = seg.last_message_at ? parseUtcIso(seg.last_message_at) : null;
 
   return (
     <button
@@ -372,6 +416,171 @@ function SegmentCard({
         </span>
       </div>
     </button>
+  );
+}
+
+// ── Compact list row ─────────────────────────────────────────────────────────
+
+function SegmentRow({
+  seg,
+  isFirst,
+  onClick,
+}: {
+  seg: EvalSegmentSummary;
+  isFirst: boolean;
+  onClick: () => void;
+}) {
+  const sourceStyle = SOURCE_STYLE[seg.source] ?? SOURCE_STYLE.web;
+  const when = seg.last_message_at ? parseUtcIso(seg.last_message_at) : null;
+  const statusStyle = STATUS_STYLE[seg.eval_status];
+
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        textAlign: "left",
+        padding: "8px 14px",
+        background: "#FFFFFF",
+        border: "none",
+        borderTop: isFirst ? "none" : "1px solid #F2F2F7",
+        cursor: "pointer",
+        fontFamily: FONT,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        minHeight: 36,
+        transition: "background 0.08s",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "#FAFAFA";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "#FFFFFF";
+      }}
+    >
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          fontSize: 11,
+          color: "#3C3C43",
+          width: 64,
+          flexShrink: 0,
+        }}
+      >
+        <Dot color={sourceStyle.accent} />
+        {sourceStyle.label}
+      </span>
+      <span
+        style={{
+          fontSize: 10,
+          color: statusStyle.color,
+          background: statusStyle.bg,
+          padding: "2px 6px",
+          borderRadius: 4,
+          letterSpacing: 0.3,
+          fontWeight: 600,
+          textTransform: "uppercase",
+          width: 56,
+          textAlign: "center",
+          flexShrink: 0,
+        }}
+      >
+        {statusStyle.label}
+      </span>
+      <span
+        style={{
+          flex: 1,
+          fontSize: 13,
+          color: "#1C1C1E",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {seg.preview || (
+          <em style={{ color: "#8E8E93" }}>(no user message)</em>
+        )}
+      </span>
+      {seg.flag_count > 0 && (
+        <span style={{ fontSize: 11, color: "#A1742B", flexShrink: 0 }}>
+          {seg.flag_count} flag{seg.flag_count === 1 ? "" : "s"}
+        </span>
+      )}
+      {seg.dispatched_to_cc_at && (
+        <span style={{ fontSize: 11, color: "#0A84FF", flexShrink: 0 }}>→ CC</span>
+      )}
+      <span
+        style={{
+          fontSize: 11,
+          color: "#8E8E93",
+          width: 56,
+          textAlign: "right",
+          flexShrink: 0,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {seg.message_count} msg
+      </span>
+      <span
+        style={{
+          fontSize: 11,
+          color: "#8E8E93",
+          width: 80,
+          textAlign: "right",
+          flexShrink: 0,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {when ? formatDate(when) : "—"}
+      </span>
+    </button>
+  );
+}
+
+// ── View toggle ──────────────────────────────────────────────────────────────
+
+function ViewToggle({
+  mode,
+  onChange,
+}: {
+  mode: "list" | "cards";
+  onChange: (m: "list" | "cards") => void;
+}) {
+  // Matches FilterGroup's segmented look: gray track, active = white fill +
+  // soft shadow. Keeps the whole toolbar visually consistent.
+  const btn = (active: boolean): React.CSSProperties => ({
+    padding: "3px 10px",
+    fontSize: 12,
+    fontFamily: FONT,
+    background: active ? "#FFFFFF" : "transparent",
+    color: active ? "#1C1C1E" : "#6E6E73",
+    border: "none",
+    borderRadius: 5,
+    cursor: "pointer",
+    lineHeight: 1,
+    boxShadow: active ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+    fontWeight: active ? 600 : 500,
+    transition: "background 0.1s, color 0.1s, box-shadow 0.1s",
+    outline: "none",
+  });
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        padding: 2,
+        background: "#F2F2F7",
+        borderRadius: 7,
+      }}
+    >
+      <button style={btn(mode === "list")} onClick={() => onChange("list")} title="List view">
+        ≡
+      </button>
+      <button style={btn(mode === "cards")} onClick={() => onChange("cards")} title="Card view">
+        ▦
+      </button>
+    </div>
   );
 }
 
@@ -1145,10 +1354,22 @@ function ToolLegendPopup({
 // ── Small UI helpers ─────────────────────────────────────────────────────────
 
 function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  // Segmented-control container — single rounded pill housing all options.
+  // Border lives on the container, not per-button, so the row reads as one
+  // grouped control instead of a noisy cluster of competing pills.
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      <span style={{ fontSize: 11, color: "#8E8E93", marginRight: 4 }}>{label}:</span>
-      {children}
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <span style={{ fontSize: 11, color: "#8E8E93" }}>{label}</span>
+      <div
+        style={{
+          display: "inline-flex",
+          padding: 2,
+          background: "#F2F2F7",
+          borderRadius: 7,
+        }}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -1164,9 +1385,10 @@ function FilterPill({
   onClick: () => void;
   children: React.ReactNode;
 }) {
-  // Apple-Notes-restraint pill: light gray surface, no bright fill on active.
-  // The accent only colors the text (subtly) when active, leaving the grid
-  // visually quiet. Inactive = ghost.
+  // Segment item — no border, no accent inset. Active = white fill on the
+  // group's gray track (iOS segmented-control pattern). Accent stays as the
+  // source dot inside the label, not painted onto the chrome.
+  void accent;
   return (
     <button
       onClick={onClick}
@@ -1174,20 +1396,18 @@ function FilterPill({
         display: "inline-flex",
         alignItems: "center",
         gap: 5,
-        background: active ? "#F2F2F7" : "transparent",
-        color: active ? "#1C1C1E" : "#8E8E93",
-        border: `1px solid ${active ? "#D1D1D6" : "#E5E5EA"}`,
-        borderRadius: 999,
+        background: active ? "#FFFFFF" : "transparent",
+        color: active ? "#1C1C1E" : "#6E6E73",
+        border: "none",
+        borderRadius: 5,
         padding: "3px 10px",
         cursor: "pointer",
         fontSize: 11,
-        fontWeight: active ? 500 : 400,
+        fontWeight: active ? 600 : 500,
         fontFamily: FONT,
-        opacity: active ? 1 : 0.85,
-        // accent shows up as a left-edge bar when active to give a quiet hint
-        // of which pill carries which source/status without filling the pill.
-        boxShadow: active ? `inset 2px 0 0 ${accent}` : "none",
-        transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
+        boxShadow: active ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+        transition: "background 0.1s, color 0.1s, box-shadow 0.1s",
+        outline: "none",
       }}
     >
       {children}
@@ -1306,11 +1526,165 @@ function truncate(s: string, n: number): string {
   return s.slice(0, n - 1) + "…";
 }
 
+// Backend stores last_message_at as naive UTC (SQLite drops tzinfo) and
+// .isoformat() emits no 'Z' suffix. JS `new Date(str)` then parses as local
+// → renders future-shifted by the local offset, producing "-1d ago" for
+// stamps from a few hours back. Append 'Z' so JS parses as UTC.
+function parseUtcIso(iso: string): Date {
+  const hasTz = iso.endsWith("Z") || /[+-]\d\d:?\d\d$/.test(iso);
+  return new Date(hasTz ? iso : iso + "Z");
+}
+
 function formatDate(d: Date): string {
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
   if (sameDay) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000);
+  const diffMs = now.getTime() - d.getTime();
+  // Defensive: future timestamps (clock skew, residual TZ bugs) → render as time-of-day.
+  if (diffMs < 0) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const diffDays = Math.floor(diffMs / 86400000);
   if (diffDays < 7) return `${diffDays}d ago`;
   return d.toLocaleDateString();
+}
+
+// ── Eval runs panel ──────────────────────────────────────────────────────────
+// Lists golden-eval run artifacts (HTML scorecards in evals/reports/) plus
+// the latest baseline metadata, served by /eval/runs. Click a row to open
+// the scorecard in an inline iframe. Reports are gitignored, so this panel
+// only has data on the machine that ran the eval — that's by design.
+
+interface EvalRun {
+  filename: string;
+  size_bytes: number;
+  mtime: number;
+}
+
+interface EvalBaselineMeta {
+  composite_score: number | null;
+  passed: number | null;
+  n_cases: number | null;
+  means: Record<string, number> | null;
+  pipeline_model: string | null;
+  pipeline_version: string | null;
+  pipeline_source_hash: string | null;
+  timestamp: string | null;
+}
+
+function EvalRunsPanel() {
+  const [runs, setRuns] = useState<EvalRun[]>([]);
+  const [baselines, setBaselines] = useState<Record<string, EvalBaselineMeta>>({});
+  const [selected, setSelected] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/eval/runs");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (cancelled) return;
+        setRuns(data.runs || []);
+        setBaselines(data.baselines_by_key || {});
+        if ((data.runs || []).length > 0 && !selected) {
+          setSelected(data.runs[0].filename);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "load failed");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const baselineList = Object.values(baselines);
+
+  return (
+    <div style={{ flex: 1, display: "flex", overflow: "hidden", background: "#FAFAFA" }}>
+      {/* Left rail: run list */}
+      <div style={{ width: 320, borderRight: "1px solid rgba(0,0,0,0.06)", overflowY: "auto", padding: "12px 0", flexShrink: 0 }}>
+        <div style={{ padding: "0 16px 8px", fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Latest baselines
+        </div>
+        {baselineList.length === 0 ? (
+          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93" }}>
+            no baselines yet — run <code>python -m evals.run_orchestrator --baseline</code>
+          </div>
+        ) : (
+          baselineList.map((b, i) => (
+            <div key={i} style={{ padding: "8px 16px", borderBottom: "1px solid rgba(0,0,0,0.04)", fontFamily: FONT, fontSize: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span style={{ fontWeight: 600 }}>{b.pipeline_model}</span>
+                <span style={{ fontSize: 18, fontWeight: 700, color: (b.composite_score ?? 0) >= 75 ? "#0a8a3a" : (b.composite_score ?? 0) >= 60 ? "#9a7a00" : "#b3261e" }}>
+                  {b.composite_score ?? "?"}
+                </span>
+              </div>
+              <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
+                {b.passed}/{b.n_cases} passed · v{b.pipeline_version} · src={b.pipeline_source_hash?.slice(0, 6)}
+              </div>
+            </div>
+          ))
+        )}
+        <div style={{ padding: "16px 16px 8px", fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Reports ({runs.length})
+        </div>
+        {loading ? (
+          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93" }}>loading…</div>
+        ) : error ? (
+          <div style={{ padding: "0 16px", fontSize: 12, color: "#FF3B30" }}>error: {error}</div>
+        ) : runs.length === 0 ? (
+          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93" }}>
+            no reports — local artifact, only on the machine that ran the eval
+          </div>
+        ) : (
+          runs.map((r) => (
+            <button
+              key={r.filename}
+              onClick={() => setSelected(r.filename)}
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                padding: "8px 16px",
+                background: selected === r.filename ? "#E8E8ED" : "transparent",
+                border: "none",
+                borderBottom: "1px solid rgba(0,0,0,0.04)",
+                cursor: "pointer",
+                fontFamily: FONT,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ fontWeight: selected === r.filename ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {r.filename.replace(/^report_/, "").replace(/\.html$/, "")}
+              </div>
+              <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
+                {formatDate(new Date(r.mtime * 1000))} · {Math.round(r.size_bytes / 1024)} KB
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+      {/* Right pane: iframe */}
+      <div style={{ flex: 1, overflow: "hidden", background: "#FFFFFF" }}>
+        {selected ? (
+          <iframe
+            key={selected}
+            src={`/eval/runs/${encodeURIComponent(selected)}`}
+            style={{ width: "100%", height: "100%", border: "none" }}
+            title={selected}
+          />
+        ) : (
+          <div style={{ padding: 24, color: "#8E8E93", fontSize: 13, fontFamily: FONT }}>
+            Select a run on the left.
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
