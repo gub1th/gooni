@@ -90,6 +90,11 @@ class Note(Base):
     embedding = Column(Text, nullable=True)  # JSON-serialised float list
     is_public = Column(Boolean, default=False, nullable=False)
     is_pinned = Column(Boolean, default=False, nullable=False)
+    # User-marked "I intend to publish this" flag. Surfaces in the sidebar's
+    # DRAFTS section so in-progress posts have a fast path back; independent
+    # of is_pinned (a draft can also be pinned). Auto-clears when the note
+    # flips to public — once it ships, it's no longer a draft.
+    is_draft = Column(Boolean, default=False, nullable=False)
     # JSON-encoded list of probing questions Gooni would ask, plus the hash
     # of the content they were generated from. Schema:
     #   {"hash": "<sha1>", "questions": ["...", "..."]}

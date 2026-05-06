@@ -10,7 +10,7 @@ import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
-  Trash2, FolderInput, Pin as PinIcon, ListPlus, Check,
+  Trash2, FolderInput, Pin as PinIcon, ListPlus, Check, Pencil as PencilIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -23,6 +23,7 @@ import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
+import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { Tooltip } from "../Tooltip";
 import { SpaceIcon } from "./SpaceIcon";
@@ -823,6 +824,24 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     }
   }
 
+  async function handleToggleDraft() {
+    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
+    const newDraft = !activeNote.is_draft;
+    try {
+      await apiPatchNote(activeNoteId, { is_draft: newDraft });
+      useNotesContentStore.setState((s) => {
+        const updated: Record<string, ApiNote[]> = {};
+        for (const [k, list] of Object.entries(s.notes)) {
+          updated[k] = list.map((n) => (n.id === activeNoteId ? { ...n, is_draft: newDraft } : n));
+        }
+        return { notes: updated };
+      });
+      useDraftVersionStore.getState().bump();
+    } catch (e) {
+      console.error("draft toggle failed", e);
+    }
+  }
+
   return (
     <div
       style={
@@ -1118,6 +1137,35 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           </Tooltip>
         )}
 
+        {/* Draft toggle — marks the note as "intent to publish, in progress."
+            Surfaces in the sidebar's DRAFTS section. Independent of pin/public:
+            a draft can also be pinned. Auto-clears on the backend the moment
+            the user flips Public on (it shipped → no longer a draft). */}
+        {activeNote && activeNoteId && activeNoteId > 0 && (
+          <Tooltip label={activeNote.is_draft ? "Remove draft mark" : "Mark as draft (intent to publish)"}>
+            <button
+              onClick={handleToggleDraft}
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                border: "none",
+                background: activeNote.is_draft ? "rgba(139,92,246,0.16)" : "transparent",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 0, flexShrink: 0,
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!activeNote.is_draft) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+              onMouseLeave={(e) => { if (!activeNote.is_draft) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              <PencilIcon
+                size={15}
+                strokeWidth={1.7}
+                color={activeNote.is_draft ? "#8B5CF6" : "#636366"}
+              />
+            </button>
+          </Tooltip>
+        )}
+
         {/* Public toggle — same visual family as Pin: icon-only with colored background when active */}
         {activeNote && activeNoteId && activeNoteId > 0 && (
           <Tooltip label={localIsPublic ? "Unpublish from portfolio" : "Publish to portfolio"}>
@@ -1127,6 +1175,20 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                 const next = !localIsPublic;
                 setLocalIsPublic(next);
                 apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
+                // Backend auto-clears is_draft when a note flips public (it
+                // shipped → no longer a draft). Mirror that locally so the
+                // draft pill + sidebar DRAFTS section refresh without a full
+                // page reload.
+                if (next && activeNote?.is_draft) {
+                  useNotesContentStore.setState((s) => {
+                    const updated: Record<string, ApiNote[]> = {};
+                    for (const [k, list] of Object.entries(s.notes)) {
+                      updated[k] = list.map((n) => (n.id === activeNoteId ? { ...n, is_draft: false } : n));
+                    }
+                    return { notes: updated };
+                  });
+                  useDraftVersionStore.getState().bump();
+                }
               }}
               style={{
                 width: 30, height: 30, borderRadius: 8,

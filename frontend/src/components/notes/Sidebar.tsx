@@ -3,14 +3,15 @@ import { useNavigate } from "@tanstack/react-router";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { useListsStore } from "../../stores/useListsStore";
-import { fetchPinnedNotes, patchNote, type ApiNote } from "../../services/api";
+import { fetchPinnedNotes, fetchDraftNotes, fetchRecentNotes, patchNote, type ApiNote } from "../../services/api";
 import { displayTitle } from "../../utils/notePreview";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
+import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText, Pin, MessageSquare, Brain, ClipboardList, BarChart3, Settings as SettingsIcon,
-  Globe, Plug,
+  Globe, Plug, Pencil, Clock,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -20,6 +21,8 @@ import { ListIcon } from "./ListIcon";
 const ICON_TINT = {
   allNotes: "#6366F1",   // indigo
   pinned:   "#F59E0B",   // amber
+  draft:    "#8B5CF6",   // violet — distinct from amber pinned + sky memories
+  recent:   "#94A3B8",   // slate-soft — recent is read-only, muted on purpose
   newChat:  "#10B981",   // emerald
   gooni:    "#A855F7",   // violet
   memories: "#0EA5E9",  // sky
@@ -220,8 +223,12 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
   }
 
   const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
+  const [draftNotes, setDraftNotes] = useState<ApiNote[]>([]);
+  const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
   const [spacesOpen, setSpacesOpen] = useState(true);
   const [pinnedOpen, setPinnedOpen] = useState(true);
+  const [draftsOpen, setDraftsOpen] = useState(true);
+  const [recentOpen, setRecentOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
@@ -241,9 +248,23 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const pinnedVersion = usePinnedVersionStore((s) => s.version);
+  const draftVersion = useDraftVersionStore((s) => s.version);
   useEffect(() => {
     fetchPinnedNotes().then(setPinnedNotes).catch(() => {});
   }, [activeNoteId, pinnedVersion]);
+  useEffect(() => {
+    fetchDraftNotes().then(setDraftNotes).catch(() => {});
+  }, [activeNoteId, draftVersion]);
+  // Recent: refetch on any state change that could shift order — note edits
+  // (activeNoteId proxies opens/edits via the store), pin toggles (pinned
+  // titles can change via inline rename), and draft toggles. We dedupe in
+  // the render path against pinned + draft ids, so the union shown above
+  // never collides with this section.
+  useEffect(() => {
+    // Ask for a few extra rows so dedup against pinned/drafts still leaves
+    // 2 visible even when the top of the list is occupied by pinned items.
+    fetchRecentNotes(8).then(setRecentNotes).catch(() => {});
+  }, [activeNoteId, pinnedVersion, draftVersion]);
 
   // ── Drag-to-reorder (localStorage-backed) ─────────────────────────────
   const spaceOrder = useOrderingStore((s) => s.spaceOrder);
@@ -297,6 +318,22 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
     await patchNote(noteId, { is_pinned: false });
     usePinnedVersionStore.getState().bump();
   }
+
+  async function handleUndraft(noteId: number) {
+    setDraftNotes((prev) => prev.filter((n) => n.id !== noteId)); // optimistic
+    await patchNote(noteId, { is_draft: false });
+    useDraftVersionStore.getState().bump();
+  }
+
+  // Top 2 most-recently-edited notes, excluding any already shown in the
+  // PINNED or DRAFTS sections above so the same note doesn't appear twice
+  // in the sidebar.
+  const recentTop = useMemo(() => {
+    const skip = new Set<number>();
+    pinnedNotes.forEach((n) => skip.add(n.id));
+    draftNotes.forEach((n) => skip.add(n.id));
+    return recentNotes.filter((n) => !skip.has(n.id)).slice(0, 2);
+  }, [recentNotes, pinnedNotes, draftNotes]);
 
   function handleAllNotes() {
     selectSpace("general");
@@ -509,6 +546,110 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
                         title="Unpin"
                         style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
                       >×</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 10px" }} />
+            </>
+          )}
+
+          {/* Section: DRAFTS — notes the user committed to publishing but is
+              still writing. Hidden when empty so it doesn't clutter the
+              sidebar for everyday note-taking. No drag-reorder (kept simple);
+              ✕ on hover to flip is_draft off. */}
+          {draftNotes.length > 0 && (
+            <>
+              <div style={{ padding: "0 6px 4px" }}>
+                <div style={{ display: "flex", alignItems: "center", padding: "6px 6px 2px" }}>
+                  <button
+                    onClick={() => setDraftsOpen((o) => !o)}
+                    style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
+                  >
+                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>DRAFTS</span>
+                    <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{draftsOpen ? "▾" : "▸"}</span>
+                  </button>
+                </div>
+                {draftsOpen && draftNotes.map((note) => {
+                  const selected = activeNoteId === note.id;
+                  return (
+                    <div
+                      key={note.id}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        padding: "0 4px 0 10px", height: 30, borderRadius: 8,
+                        cursor: "pointer",
+                        background: selected ? "rgba(0,0,0,0.09)" : "transparent",
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".draft-action").forEach(b => b.style.opacity = "1"); }}
+                      onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".draft-action").forEach(b => b.style.opacity = "0"); }}
+                      onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; handleSelectNote(note); }}
+                    >
+                      <Pencil size={13} strokeWidth={1.8} color={ICON_TINT.draft} style={{ flexShrink: 0 }} />
+                      <span style={{
+                        flex: 1, fontSize: 13,
+                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                        fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {displayTitle(note)}
+                      </span>
+                      <button
+                        className="draft-action"
+                        onClick={(e) => { e.stopPropagation(); handleUndraft(note.id); }}
+                        title="Remove from drafts"
+                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
+                      >×</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 10px" }} />
+            </>
+          )}
+
+          {/* Section: RECENT — top 2 most-recently-edited notes, deduped
+              against PINNED + DRAFTS above. Read-only quick-jump; no drag,
+              no actions. Sits below PINNED/DRAFTS so the explicitly-marked
+              surfaces win the eye. Hidden when empty (e.g. brand new DB). */}
+          {recentTop.length > 0 && (
+            <>
+              <div style={{ padding: "0 6px 4px" }}>
+                <div style={{ display: "flex", alignItems: "center", padding: "6px 6px 2px" }}>
+                  <button
+                    onClick={() => setRecentOpen((o) => !o)}
+                    style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
+                  >
+                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>RECENT</span>
+                    <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{recentOpen ? "▾" : "▸"}</span>
+                  </button>
+                </div>
+                {recentOpen && recentTop.map((note) => {
+                  const selected = activeNoteId === note.id;
+                  return (
+                    <div
+                      key={note.id}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        padding: "0 4px 0 10px", height: 30, borderRadius: 8,
+                        cursor: "pointer",
+                        background: selected ? "rgba(0,0,0,0.09)" : "transparent",
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
+                      onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+                      onClick={() => handleSelectNote(note)}
+                    >
+                      <Clock size={13} strokeWidth={1.8} color={ICON_TINT.recent} style={{ flexShrink: 0 }} />
+                      <span style={{
+                        flex: 1, fontSize: 13,
+                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                        fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {displayTitle(note)}
+                      </span>
                     </div>
                   );
                 })}

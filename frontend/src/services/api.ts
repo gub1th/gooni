@@ -93,6 +93,7 @@ export interface ApiNote {
   last_opened_at: string | null;
   is_public: boolean;
   is_pinned: boolean;
+  is_draft: boolean;
   // Snapshot of what classify_note routed for this note's most recent save.
   // Mirrors the chat-side `signals` payload — drives the "Routed:" disclosure
   // under the title so Daniel sees memory writes + backlog items as soon as
@@ -239,6 +240,12 @@ export async function fetchNoteMemories(id: number): Promise<ApiMemory[]> {
 export async function fetchPinnedNotes(): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/notes/pinned`);
   if (!res.ok) throw new Error("Failed to fetch pinned notes");
+  return res.json();
+}
+
+export async function fetchDraftNotes(): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/notes/drafts`);
+  if (!res.ok) throw new Error("Failed to fetch draft notes");
   return res.json();
 }
 
@@ -452,7 +459,7 @@ export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: numbe
 
 export async function patchNote(
   id: number,
-  patch: { is_public?: boolean; is_pinned?: boolean; title?: string; content?: string },
+  patch: { is_public?: boolean; is_pinned?: boolean; is_draft?: boolean; title?: string; content?: string },
 ): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
