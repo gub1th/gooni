@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.32.0 — 2026-05-06 (minor)
+
+- feat(stats): UsageCards on dashboard — today + this month, OpenAI/Claude toggle (#122)
+
 ## 0.31.0 — 2026-05-05 (minor)
 
 - feat(stats): Whoop today section in StatsView; Settings → connect/disconnect only (#120)
