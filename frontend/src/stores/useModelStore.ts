@@ -4,11 +4,17 @@ import { persist } from "zustand/middleware";
 // Models are passed straight through to the OpenAI Chat Completions API
 // on the backend (`app/llm/client.py` accepts any string). To add one,
 // just append here — no backend change required.
+//
+// Backend default for bot channels (Telegram, WhatsApp, iMessage) is
+// `gpt-5.4` (see `LLMClient.chat_model` in app/llm/client.py). Web chat
+// uses whatever the user picks here, so the default below is gpt-5.4 too
+// — keeps web vs bot parity.
 export const MODELS = [
-  { id: "gpt-4o-mini",  label: "4o mini",   tagline: "fastest, cheapest — daily driver" },
-  { id: "gpt-4o",       label: "4o",        tagline: "balanced — better reasoning" },
-  { id: "gpt-4-turbo",  label: "4 Turbo",   tagline: "older but reliable on long context" },
-  { id: "o1-mini",      label: "o1 mini",   tagline: "reasoning model — slower, deeper" },
+  { id: "gpt-5.4",      label: "GPT-5.4",      tagline: "flagship — daily driver" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 mini", tagline: "fast & cheap, ~daily-driver quality" },
+  { id: "gpt-5.4-nano", label: "GPT-5.4 nano", tagline: "cheapest — near-instant replies" },
+  { id: "o4-mini",      label: "o4 mini",      tagline: "reasoning — slower, deeper" },
+  { id: "gpt-4o",       label: "GPT-4o",       tagline: "legacy fallback — long context, vision" },
 ] as const;
 
 export type ModelId = (typeof MODELS)[number]["id"];
@@ -18,15 +24,16 @@ interface ModelStore {
   setModel: (m: ModelId) => void;
 }
 
-// Default = mini. Stronger models cost more per turn; opt in deliberately.
-// Persist key bumped (v1 → v2) because the v1 default was gpt-4o; without
-// bumping, anyone with stored state would still be on 4o until they pick.
+// Default = gpt-5.4 — same model bot channels use, so web/bot stay in
+// parity. Persist key bumped (v2 → v3) because the v2 default was
+// gpt-4o-mini (no longer in the picker); without bumping, anyone with
+// stored state would land on a model id that's not in the new list.
 export const useModelStore = create<ModelStore>()(
   persist(
     (set) => ({
-      model: "gpt-4o-mini",
+      model: "gpt-5.4",
       setModel: (model) => set({ model }),
     }),
-    { name: "gooni-model-v2" }
+    { name: "gooni-model-v3" }
   )
 );
