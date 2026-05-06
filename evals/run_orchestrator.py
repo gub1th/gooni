@@ -178,22 +178,34 @@ _PIPELINE_SOURCE_FILES = [
 _REPO_ROOT = Path(__file__).parent.parent
 
 
-def _pipeline_source_hash() -> str:
-    """sha256 of concatenated bytes of every pipeline source file. Cached
-    per process so we don't re-read on every case."""
-    if hasattr(_pipeline_source_hash, "_cached"):
-        return _pipeline_source_hash._cached  # type: ignore
-    h = hashlib.sha256()
+def _pipeline_source_files_map() -> dict[str, str]:
+    """Per-file sha256[:12] of each pipeline source file. Persisted in the
+    baseline JSON so future runs can name which files drifted (vs just
+    knowing the aggregate hash changed)."""
+    if hasattr(_pipeline_source_files_map, "_cached"):
+        return _pipeline_source_files_map._cached  # type: ignore
+    out: dict[str, str] = {}
     for rel in _PIPELINE_SOURCE_FILES:
         path = _REPO_ROOT / rel
         try:
-            h.update(rel.encode())
-            h.update(b"\0")
-            h.update(path.read_bytes())
-            h.update(b"\0\0")
+            out[rel] = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
         except FileNotFoundError:
-            # File got renamed or moved — record that, busts cache.
-            h.update(b"<missing>")
+            out[rel] = "<missing>"
+    _pipeline_source_files_map._cached = out  # type: ignore
+    return out
+
+
+def _pipeline_source_hash() -> str:
+    """Aggregate sha256[:12] over every pipeline source file. Stable across
+    runs as long as no source file changed."""
+    if hasattr(_pipeline_source_hash, "_cached"):
+        return _pipeline_source_hash._cached  # type: ignore
+    h = hashlib.sha256()
+    for rel, file_hash in _pipeline_source_files_map().items():
+        h.update(rel.encode())
+        h.update(b"\0")
+        h.update(file_hash.encode())
+        h.update(b"\0\0")
     digest = h.hexdigest()[:12]
     _pipeline_source_hash._cached = digest  # type: ignore
     return digest
@@ -729,6 +741,7 @@ def run(
             "judge_models": judges_used,
             "case_ids": case_ids,
             "pipeline_source_hash": _pipeline_source_hash(),
+            "pipeline_source_files": _pipeline_source_files_map(),
             "eval_db_url": _EVAL_DB_URL,
             "score_scale": "1-10",
             "timestamp": timestamp,

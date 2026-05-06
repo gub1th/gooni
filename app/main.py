@@ -3612,9 +3612,14 @@ def _safe_eval_filename(filename: str, prefix: str, suffix: str) -> bool:
 @app.get("/eval/runs")
 def list_eval_runs():
     """List local eval runs (HTML reports) with metadata extracted from the
-    matching baseline JSON when available. Sorted newest first by mtime."""
+    matching baseline JSON when available. Sorted newest first by mtime.
+
+    Also computes a staleness diff: which pipeline source files have changed
+    since the latest baseline ran. The UI surfaces this as a banner so
+    Daniel notices when his baseline is out of date and reruns.
+    """
     if not _EVAL_REPORTS_DIR.exists():
-        return {"runs": []}
+        return {"runs": [], "baselines_by_key": {}, "staleness": None}
     runs: list[dict] = []
     for report in sorted(
         _EVAL_REPORTS_DIR.glob("report_*.html"),
@@ -3631,6 +3636,8 @@ def list_eval_runs():
     # overwrite per pipeline_version+model; reports keep history) — best we
     # can do is summarize the most recent baseline per (version, model).
     baselines_by_key: dict[str, dict] = {}
+    latest_baseline: dict | None = None
+    latest_baseline_mtime = 0.0
     if _EVAL_BASELINES_DIR.exists():
         for b in _EVAL_BASELINES_DIR.glob("baseline_*.json"):
             try:
@@ -3646,9 +3653,75 @@ def list_eval_runs():
                 "pipeline_model": data.get("pipeline_model"),
                 "pipeline_version": data.get("pipeline_version"),
                 "pipeline_source_hash": data.get("pipeline_source_hash"),
+                "pipeline_source_files": data.get("pipeline_source_files"),
                 "timestamp": data.get("timestamp"),
             }
-    return {"runs": runs, "baselines_by_key": baselines_by_key}
+            mtime = b.stat().st_mtime
+            if mtime > latest_baseline_mtime:
+                latest_baseline_mtime = mtime
+                latest_baseline = data
+    return {
+        "runs": runs,
+        "baselines_by_key": baselines_by_key,
+        "staleness": _compute_staleness(latest_baseline),
+    }
+
+
+def _compute_staleness(latest_baseline: dict | None) -> dict | None:
+    """Compare current pipeline source-file hashes to the latest baseline's
+    snapshot. Returns {is_stale, changed_files: [{path, was, now}]} so the UI
+    can flag rerunning + name what drifted.
+
+    Returns None if no baseline exists (nothing to compare against) — UI
+    treats that as "first baseline pending."
+    """
+    if not latest_baseline:
+        return None
+
+    # Re-hash live files instead of importing run_orchestrator (avoids
+    # pulling the eval-only dotenv override into the FastAPI process).
+    live_files: dict[str, str] = {}
+    pipeline_files = [
+        "app/services/orchestrator.py",
+        "app/services/conversation_service.py",
+        "app/services/memory_service.py",
+        "app/services/memory_extraction.py",
+        "app/services/item_service.py",
+        "app/services/feedback_detector.py",
+        "app/services/trace_builder.py",
+        "app/llm/prompts.py",
+        "app/llm/client.py",
+    ]
+    repo_root = _Path(__file__).parent.parent
+    for rel in pipeline_files:
+        p = repo_root / rel
+        try:
+            live_files[rel] = hashlib.sha256(p.read_bytes()).hexdigest()[:12]
+        except FileNotFoundError:
+            live_files[rel] = "<missing>"
+
+    baseline_files = latest_baseline.get("pipeline_source_files") or {}
+    changed: list[dict] = []
+    # Files that exist now AND in baseline but differ
+    for rel, live_hash in live_files.items():
+        was = baseline_files.get(rel)
+        if was is None:
+            # File wasn't tracked in that baseline — new file added to
+            # _PIPELINE_SOURCE_FILES list since baseline ran.
+            changed.append({"path": rel, "was": None, "now": live_hash})
+        elif was != live_hash:
+            changed.append({"path": rel, "was": was, "now": live_hash})
+    # Files that were tracked in baseline but no longer exist
+    for rel, was_hash in baseline_files.items():
+        if rel not in live_files:
+            changed.append({"path": rel, "was": was_hash, "now": "<dropped>"})
+
+    return {
+        "is_stale": bool(changed),
+        "changed_files": changed,
+        "baseline_pipeline_source_hash": latest_baseline.get("pipeline_source_hash"),
+        "baseline_timestamp": latest_baseline.get("timestamp"),
+    }
 
 
 @app.get("/eval/runs/{filename}")

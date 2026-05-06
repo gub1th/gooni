@@ -1570,9 +1570,17 @@ interface EvalBaselineMeta {
   timestamp: string | null;
 }
 
+interface EvalStaleness {
+  is_stale: boolean;
+  changed_files: { path: string; was: string | null; now: string }[];
+  baseline_pipeline_source_hash: string | null;
+  baseline_timestamp: string | null;
+}
+
 function EvalRunsPanel() {
   const [runs, setRuns] = useState<EvalRun[]>([]);
   const [baselines, setBaselines] = useState<Record<string, EvalBaselineMeta>>({});
+  const [staleness, setStaleness] = useState<EvalStaleness | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1589,6 +1597,7 @@ function EvalRunsPanel() {
         if (cancelled) return;
         setRuns(data.runs || []);
         setBaselines(data.baselines_by_key || {});
+        setStaleness(data.staleness || null);
         if ((data.runs || []).length > 0 && !selected) {
           setSelected(data.runs[0].filename);
         }
@@ -1606,9 +1615,13 @@ function EvalRunsPanel() {
   const baselineList = Object.values(baselines);
 
   return (
-    <div style={{ flex: 1, display: "flex", overflow: "hidden", background: "#FAFAFA" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "#FAFAFA" }}>
+      {staleness?.is_stale && (
+        <StalenessBanner staleness={staleness} />
+      )}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
       {/* Left rail: run list */}
-      <div style={{ width: 320, borderRight: "1px solid rgba(0,0,0,0.06)", overflowY: "auto", padding: "12px 0", flexShrink: 0 }}>
+      <div style={{ width: 320, borderRight: "1px solid rgba(0,0,0,0.06)", overflowY: "auto", padding: "12px 0", flexShrink: 0, background: "#FAFAFA" }}>
         <div style={{ padding: "0 16px 8px", fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
           Latest baselines
         </div>
@@ -1685,6 +1698,57 @@ function EvalRunsPanel() {
           </div>
         )}
       </div>
+      </div>
+    </div>
+  );
+}
+
+function StalenessBanner({ staleness }: { staleness: EvalStaleness }) {
+  const [expanded, setExpanded] = useState(false);
+  const n = staleness.changed_files.length;
+  return (
+    <div
+      style={{
+        padding: "10px 16px",
+        background: "#FFF8E6",
+        borderBottom: "1px solid #F4E1A1",
+        fontFamily: FONT,
+        fontSize: 12,
+        color: "#5C4500",
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>
+          <b>Pipeline drift</b> · {n} pipeline source file{n === 1 ? "" : "s"} changed since latest baseline. Rerun{" "}
+          <code style={{ background: "rgba(0,0,0,0.05)", padding: "1px 5px", borderRadius: 3, fontSize: 11 }}>
+            python -m evals.run_orchestrator --baseline
+          </code>{" "}
+          to refresh scores.
+        </span>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            background: "transparent", border: "none", cursor: "pointer",
+            color: "#5C4500", fontSize: 11, fontFamily: FONT, fontWeight: 600,
+            padding: "2px 8px",
+          }}
+        >
+          {expanded ? "hide" : "details"}
+        </button>
+      </div>
+      {expanded && (
+        <ul style={{ margin: "8px 0 0", padding: "0 0 0 18px", fontSize: 11, lineHeight: 1.6 }}>
+          {staleness.changed_files.map((f) => (
+            <li key={f.path}>
+              <code style={{ fontSize: 11 }}>{f.path}</code>{" "}
+              <span style={{ color: "#8C7000" }}>
+                ({f.was ?? "<new>"} → {f.now})
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

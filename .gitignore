@@ -85,6 +85,10 @@ evals/reports/
 db/gooni-eval.db
 db/gooni-eval.db.*
 
-# Eval per-case cache — sha256 of (case + pipeline_model + prompt_version + judge).
-# Local artifact, regenerates on demand. Don't commit.
+# Eval per-case cache. Each file caches one case's full result (reply,
+# scores, judge notes, fails, tool calls, etc.) keyed by sha256 of every
+# input that would change the result: case body, pipeline_model, judge
+# default, PROMPT_VERSION, pipeline_source_hash, eval DB URL. Same inputs
+# on next run → cache hit, skip pipeline + judge calls. Local artifact,
+# regenerates on demand. Don't commit.
 evals/cache/
