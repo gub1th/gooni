@@ -310,19 +310,50 @@ def _run_column_migrations(engine):
         conn.commit()
 
 
-# 1. Create spaces table first (so FK references are valid)
-Base.metadata.create_all(bind=engine, tables=[Space.__table__])
-# 2. Add space_id to any existing tables that predate this change. Also drops
-#    the legacy focuses / todo_items / todo_notes tables (unified-item refactor)
-#    and the older focus_activities table.
-_run_column_migrations(engine)
-# 3. Reshape the legacy memories table — drop + stash old rows so create_all
-#    can make the new schema.
-_migrate_memories_legacy_schema(engine)
-# 4. Create remaining tables (they already have space_id in their model definition)
-Base.metadata.create_all(bind=engine)
-# 5. Restore legacy memory rows onto the new schema (no-op if no migration ran)
-_backfill_memories(engine)
+def _alembic_upgrade(engine):
+    """Apply Alembic migrations on boot.
+
+    Three startup paths:
+      1. Fresh DB (no tables, no alembic_version):
+           alembic upgrade head — baseline migration creates everything.
+      2. Already-managed DB (alembic_version present):
+           alembic upgrade head — runs any new migrations.
+      3. Legacy DB (tables present, no alembic_version) — ONE-SHOT cutover:
+           run the historical migrators (the now-deprecated
+           _run_column_migrations / _migrate_memories_legacy_schema /
+           _backfill_memories) to bring schema up to model state, then
+           stamp at baseline so all future changes flow through alembic.
+
+    After every environment has been booted once, path 3 is dead code —
+    delete the legacy migrators in a follow-up cleanup PR.
+    """
+    from pathlib import Path
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect
+
+    cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
+
+    insp = inspect(engine)
+    has_alembic = insp.has_table("alembic_version")
+    has_legacy_tables = insp.has_table("notes")
+
+    if not has_alembic and has_legacy_tables:
+        print("Alembic: legacy DB detected, running one-shot cutover")
+        Base.metadata.create_all(bind=engine, tables=[Space.__table__])
+        _run_column_migrations(engine)
+        _migrate_memories_legacy_schema(engine)
+        Base.metadata.create_all(bind=engine)
+        _backfill_memories(engine)
+        # Stamp at BASELINE (not head) so post-baseline migrations actually
+        # run during the upgrade below. Stamping at head would mark them as
+        # already-applied without executing them.
+        command.stamp(cfg, "ebbf04b84ba5")
+        print("Alembic: legacy DB stamped at baseline, applying any later migrations")
+    command.upgrade(cfg, "head")
+
+
+_alembic_upgrade(engine)
 
 
 def _dedupe_singleton_lists(engine):
