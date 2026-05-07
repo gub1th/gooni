@@ -83,10 +83,13 @@ interface NoteRowProps {
 
 function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDragEnd, onContextMenu, onTogglePin }: NoteRowProps) {
   // Derive title from content when the note has no real title — so the list
-  // never shows a row of repeated "New Note" placeholders.
-  const plain = note.content ? stripHtml(note.content) : "";
+  // never shows a row of repeated "New Note" placeholders. Prefer the
+  // server-supplied `excerpt`/`thumb_src` (list endpoints don't ship full
+  // body anymore — see ApiNote.content comment) and fall back to the local
+  // strippers only when the legacy full-body shape is still in hand.
+  const plain = note.excerpt ?? (note.content ? stripHtml(note.content) : "");
   const trimmedTitle = note.title?.trim() ?? "";
-  const thumbSrc = note.content ? extractFirstImage(note.content) : null;
+  const thumbSrc = note.thumb_src ?? (note.content ? extractFirstImage(note.content) : null);
   const hasBody = plain.length > 0;
   const title = trimmedTitle
     ? trimmedTitle
@@ -245,12 +248,14 @@ export function NotesList() {
   // in the space it was typed in.
   useEffect(() => { setSearch(""); }, [spaceId]);
 
-  // Client-side title+content search. Case-insensitive substring match.
+  // Client-side title+excerpt search. Case-insensitive substring match.
+  // List rows only carry `excerpt` (no full body) — full-content search
+  // lives behind the semantic `/mcp/notes/search` route used by AllNotes.
   const searchTrimmed = search.trim().toLowerCase();
   const noteList = !searchTrimmed ? allNotes : allNotes.filter((n) => {
     const title = (n.title ?? "").toLowerCase();
     if (title.includes(searchTrimmed)) return true;
-    const plain = n.content ? stripHtml(n.content).toLowerCase() : "";
+    const plain = (n.excerpt ?? (n.content ? stripHtml(n.content) : "")).toLowerCase();
     return plain.includes(searchTrimmed);
   });
 

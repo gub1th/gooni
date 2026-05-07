@@ -58,7 +58,7 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 
 ### Backend (`app/`)
 - **`app/main.py`** — All FastAPI routes + startup migrations. CORS allows `localhost:5173`.
-- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note` (carries `is_pinned` + `is_draft` + `is_public`), `Conversation`, `Message`, `Memory`, `List`, `ListItem` (carries `board_status` + `pr_url` for the Jira-style backlog board), `FocusTodoLink` (M2M between focus list_items and todo list_items — one todo can serve multiple focuses), `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`)
+- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note` (carries `is_pinned` + `is_draft` + `is_public` + `excerpt` (cached plain-text preview, stripped of HTML/`<img>`, capped at 240 chars — populated on every save, lazy-backfilled at startup so list endpoints don't ship full bodies)), `Conversation`, `Message`, `Memory`, `List`, `ListItem` (carries `board_status` + `pr_url` for the Jira-style backlog board), `FocusTodoLink` (M2M between focus list_items and todo list_items — one todo can serve multiple focuses), `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`)
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
 - **`app/services/memory_service.py`** — Local SQL-backed memory store (the `memories` table). Per chat exchange: `extract_candidates` (LLM) → cosine-search similar active memories → `reconcile_candidate` (LLM, ADD/UPDATE/DELETE/NONE) → apply. Retrieval injects always-included preferences plus top-5 facts/episodes by cosine similarity. Replaced the old Mem0 hosted service; legacy callers still see `{id, memory, ...}` dict shape via `_serialize`.
 - **`app/services/orchestrator.py`** — Unified chat handler across all surfaces (web, telegram, whatsapp, imessage). `Orchestrator` singleton. Source defaults to `"web"`; bot channels share a single persistent conversation per source (no gap-based sessioning). Each turn builds a structured trace via `TraceBuilder` and stamps it on `Message.trace`.
@@ -67,6 +67,7 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 - **`app/services/feedback_detector.py`** — Natural-language feedback detector (regex pre-filter + gpt-4o-mini classifier). Used by the orchestrator + eval surfaces to identify follow-up messages that critique a prior assistant reply.
 - **`app/services/messaging/`** — `MessagingChannel` ABC + `dispatch_inbound` pipeline. Per-channel impls: `telegram.py`, `whatsapp.py`, `imessage.py`. Each owns its outbound formatter (markdown → channel-native), allowlist, and send client. Webhook routes in `app/main.py` call `dispatch_inbound(channel, sender, text, db)` → orchestrator → channel-specific reply.
 - **`app/services/note_service.py`** — Embedding + space suggestion + related notes (OpenAI embeddings, cosine similarity).
+- **`app/services/image_storage.py`** — Cloudflare R2 (S3-compatible) image uploader. Used by `POST /uploads/image` for pasted/dropped images so notes carry URLs instead of multi-MB base64 data: URLs (PR #134 OOM postmortem). Returns `R2NotConfigured` when env is missing — route translates to 503 and the frontend falls back to inline base64.
 - **`app/llm/client.py`** — OpenAI wrapper (`llm_client`). Default model: `gpt-4o-mini`.
 
 ### Frontend (`frontend/src/`)
@@ -138,7 +139,7 @@ GET  /spaces                    → list spaces
 POST /spaces                    → create space { name, emoji? }
 PATCH /spaces/{id}              → update space { name?, emoji? }
 DELETE /spaces/{id}             → delete space + its notes
-GET  /spaces/{id}/notes         → notes for space (use "general" for all)
+GET  /spaces/{id}/notes         → notes for space (use "general" for all). Returns list-shape rows: `content` is null, `excerpt` (≤240 char preview) + `thumb_src` (external image URL only) populated server-side. Same shape served by /notes/recent, /notes/pinned, /notes/drafts, /notes/{id}/related, /notes/{id}/children, dashboard.recent_notes — full body lives behind GET /notes/{id} only.
 POST /spaces/{id}/notes         → create note
 PATCH /notes/{id}               → update note { title?, content?, space_id?, is_public? }
 DELETE /notes/{id}              → delete note
@@ -146,6 +147,8 @@ POST /notes/{id}/embed          → generate embedding + suggest space
 POST /notes/{id}/touch          → update last_opened_at
 POST /notes/{id}/memorize       → extract facts → memory store
 GET  /notes/{id}/related        → similar notes by embedding
+
+POST /uploads/image             → multipart image upload → Cloudflare R2; returns { url, key }. Used by NoteEditor paste/drop. Returns 503 when R2 env unset → frontend falls back to inline base64 (legacy path). 10 MB per upload, image/* content-types only.
 
 GET  /public/notes              → public notes list { id, title, space_name, excerpt, updated_at }
 GET  /public/notes/{id}         → full public note (404 if not public)

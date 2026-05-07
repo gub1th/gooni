@@ -83,6 +83,11 @@ class Note(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(Text, nullable=True)
     content = Column(Text, nullable=True)
+    # Plain-text preview computed from `content` on every save (HTML stripped,
+    # <img> tags dropped, capped at 240 chars). Cached so list endpoints can
+    # ship a row without re-running the regex on every request and without
+    # exposing inline base64 image bodies. Backfilled lazily at startup.
+    excerpt = Column(Text, nullable=True)
     space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)

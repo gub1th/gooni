@@ -86,7 +86,17 @@ export interface NoteClassifySignals {
 export interface ApiNote {
   id: number;
   title: string | null;
+  // Null on list-view responses (`/spaces/:id/notes`, `/notes/recent`,
+  // `/notes/pinned`, `/notes/drafts`, dashboard.recent_notes,
+  // `/notes/:id/related`, `/notes/:id/children`). The editor calls
+  // `GET /notes/:id` to fetch the full body on demand.
   content: string | null;
+  // Plain-text excerpt (≤240 chars, <img> stripped) populated on list
+  // responses so NotesList rows can render previews without the full body.
+  excerpt?: string | null;
+  // First external <img src="https://..."/> from the note body. Inline
+  // base64 images are excluded — list endpoints never ship those.
+  thumb_src?: string | null;
   space_id: number | null;
   created_at: string;
   updated_at: string;
@@ -1423,4 +1433,35 @@ export async function fetchEvalToolsLegend(): Promise<{ tools: EvalToolLegendEnt
   const res = await apiFetch(`${BASE}/eval/tools-legend`);
   if (!res.ok) throw new Error("Failed to fetch tools legend");
   return res.json();
+}
+
+// ── Image uploads ─────────────────────────────────────────────────────────────
+
+export type ImageUploadResult =
+  | { kind: "url"; url: string; key: string }
+  // Returned when the backend reports R2 isn't configured (503). Caller is
+  // expected to fall back to inline base64 so dev/un-provisioned envs still
+  // work; once R2 is wired in prod, this branch should never fire there.
+  | { kind: "fallback"; reason: string }
+  | { kind: "error"; status: number; message: string };
+
+export async function uploadImage(file: File): Promise<ImageUploadResult> {
+  const form = new FormData();
+  form.append("file", file, file.name || "image");
+  const res = await apiFetch(`${BASE}/uploads/image`, { method: "POST", body: form });
+  if (res.ok) {
+    const data = await res.json();
+    return { kind: "url", url: data.url, key: data.key };
+  }
+  if (res.status === 503) {
+    return { kind: "fallback", reason: "R2 not configured" };
+  }
+  let message = res.statusText || "upload failed";
+  try {
+    const body = await res.json();
+    if (body?.detail) message = String(body.detail);
+  } catch {
+    // body wasn't JSON — keep status text
+  }
+  return { kind: "error", status: res.status, message };
 }

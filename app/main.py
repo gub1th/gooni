@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session, aliased
@@ -184,6 +184,7 @@ def _run_column_migrations(engine):
             ("notes", "last_classify_signals", "TEXT"),
             ("notes", "parent_note_id", "INTEGER"),
             ("notes", "excerpt_anchor", "TEXT"),
+            ("notes", "excerpt", "TEXT"),
             ("memories", "source_note_id", "INTEGER"),
             ("memories", "retrieval_count", "INTEGER"),
             ("memories", "last_retrieved_at", "DATETIME"),
@@ -207,6 +208,7 @@ def _run_column_migrations(engine):
             ("list_items", "pr_url", "TEXT"),
             ("lists", "kind", "TEXT"),
             ("settings", "nudge_prompt", "TEXT"),
+            ("settings", "nudge_last_digests", "TEXT"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -235,11 +237,14 @@ def _run_column_migrations(engine):
             if "is_draft" in cols_now:
                 conn.execute(text("UPDATE notes SET is_draft = 0 WHERE is_draft IS NULL"))
         if "settings" in existing_tables:
-            # nudge_prompt column may have just been added — backfill empty
-            # string so SQLAlchemy's NOT NULL doesn't trip on existing rows.
+            # nudge_prompt + nudge_last_digests both have NOT NULL on the model
+            # with non-null defaults, but ALTER TABLE ADD COLUMN seeds NULL —
+            # so existing rows trip SQLAlchemy on read. Backfill defaults here.
             cols_now = [r[1] for r in conn.execute(text("PRAGMA table_info(settings)"))]
             if "nudge_prompt" in cols_now:
                 conn.execute(text("UPDATE settings SET nudge_prompt = '' WHERE nudge_prompt IS NULL"))
+            if "nudge_last_digests" in cols_now:
+                conn.execute(text("UPDATE settings SET nudge_last_digests = '{}' WHERE nudge_last_digests IS NULL"))
         # Unified-item refactor: drop the legacy focuses / todo_items / todo_notes
         # tables (and the older focus_activities table). Existing data is wiped
         # per design — see plan focuses-todos-unified.md. Memory.focus_id rows
@@ -561,14 +566,49 @@ async def _backfill_list_item_embeddings_loop():
         await asyncio.sleep(2)
 
 
+async def _backfill_note_excerpts_loop():
+    """One-shot lazy backfill of the new `notes.excerpt` column. Old rows
+    have NULL excerpt, so list endpoints would render blank previews until
+    the user re-saves each one. Walk the table in small batches at startup
+    until none remain. Pure regex (no LLM / network), so this can run hot."""
+    await asyncio.sleep(3)  # let HTTP server bind first
+    while True:
+        db = SessionLocal()
+        wrote = 0
+        try:
+            rows = (
+                db.query(Note)
+                .filter(Note.excerpt.is_(None))
+                .filter(Note.content.isnot(None))
+                .limit(50)
+                .all()
+            )
+            if not rows:
+                return
+            for n in rows:
+                n.excerpt = _excerpt_from_html(n.content)
+                wrote += 1
+            db.commit()
+        except Exception as e:
+            print(f"Note excerpt backfill error: {e}")
+            db.rollback()
+            return
+        finally:
+            db.close()
+        if wrote:
+            print(f"Note excerpt backfill: stamped {wrote} row(s)")
+        await asyncio.sleep(0.5)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     nudge_task = asyncio.create_task(_nudge_loop())
     backfill_task = asyncio.create_task(_backfill_list_item_embeddings_loop())
+    excerpt_task = asyncio.create_task(_backfill_note_excerpts_loop())
     try:
         yield
     finally:
-        for t in (nudge_task, backfill_task):
+        for t in (nudge_task, backfill_task, excerpt_task):
             t.cancel()
             try:
                 await t
@@ -1902,6 +1942,55 @@ def delete_space(space_id: int, db: Session = Depends(get_db)):
 # ── Notes ─────────────────────────────────────────────────────────────────────
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_IMG_TAG_RE = re.compile(r"<img[^>]*>", re.IGNORECASE)
+_WHITESPACE_RE = re.compile(r"\s+")
+_EXTERNAL_IMG_SRC_RE = re.compile(
+    r'<img[^>]+src=["\'](https?://[^"\']+)["\']', re.IGNORECASE
+)
+
+
+def _excerpt_from_html(html: str | None, limit: int = 240) -> str | None:
+    """Cheap plain-text excerpt for list-view rendering. Drops <img> entirely
+    so inline base64 image bodies never leave the server."""
+    if not html:
+        return None
+    no_img = _IMG_TAG_RE.sub("", html)
+    no_tags = _TAG_RE.sub(" ", no_img)
+    text = _WHITESPACE_RE.sub(" ", no_tags).strip()
+    if not text:
+        return None
+    text = (
+        text.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+        .replace("&#39;", "'")
+    )
+    return text[:limit]
+
+
+def _external_thumb_from_html(html: str | None) -> str | None:
+    """Return the first <img src="..."> only when it points to an http(s)
+    URL. Inline data: URLs are dropped — those are exactly the bytes we're
+    trying to keep out of list payloads (see PR #134 OOM postmortem)."""
+    if not html:
+        return None
+    m = _EXTERNAL_IMG_SRC_RE.search(html)
+    return m.group(1) if m else None
+
+
+def _note_excerpt(n: Note) -> str | None:
+    """Return cached `Note.excerpt` if present, else compute on the fly.
+    Pre-backfill rows have NULL excerpt — fall back so list endpoints don't
+    return blank previews until the async backfill catches up."""
+    cached = getattr(n, "excerpt", None)
+    if cached is not None:
+        return cached
+    return _excerpt_from_html(n.content)
+
+
 def _serialize_note(n: Note) -> dict:
     # Parse the JSON signals snapshot so the frontend gets a structured
     # object, not a string blob. None when classify_note hasn't run yet.
@@ -1915,6 +2004,7 @@ def _serialize_note(n: Note) -> dict:
         "id": n.id,
         "title": n.title,
         "content": n.content,
+        "excerpt": _note_excerpt(n),
         "space_id": n.space_id,
         "created_at": n.created_at,
         "updated_at": n.updated_at,
@@ -1927,6 +2017,31 @@ def _serialize_note(n: Note) -> dict:
         # as the chat bubble so Daniel sees memory writes + backlog items
         # as soon as the async classifier finishes.
         "classify_signals": signals,
+        "parent_note_id": n.parent_note_id,
+        "excerpt_anchor": n.excerpt_anchor,
+    }
+
+
+def _serialize_note_lite(n: Note) -> dict:
+    """List-view shape — no full body. Drops `content` to keep notes-list
+    payloads bounded (PR #134 shipped inline base64 images through every
+    list endpoint and OOM'd Fly). Editor still pulls the full body via
+    GET /notes/{id} on click. `excerpt` is the cached preview column;
+    `thumb_src` is non-null only for external image URLs (post-R2)."""
+    return {
+        "id": n.id,
+        "title": n.title,
+        "content": None,
+        "excerpt": _note_excerpt(n),
+        "thumb_src": _external_thumb_from_html(n.content),
+        "space_id": n.space_id,
+        "created_at": n.created_at,
+        "updated_at": n.updated_at,
+        "last_opened_at": n.last_opened_at,
+        "is_public": bool(n.is_public),
+        "is_pinned": bool(n.is_pinned),
+        "is_draft": bool(getattr(n, "is_draft", False)),
+        "classify_signals": None,
         "parent_note_id": n.parent_note_id,
         "excerpt_anchor": n.excerpt_anchor,
     }
@@ -1949,7 +2064,7 @@ def get_space_notes(space_id: str, db: Session = Depends(get_db)):
             .order_by(_notes_order())
             .all()
         )
-    return [_serialize_note(n) for n in notes]
+    return [_serialize_note_lite(n) for n in notes]
 
 
 @app.get("/notes/recent")
@@ -1960,7 +2075,7 @@ def get_recent_notes(limit: int = 5, db: Session = Depends(get_db)):
         .limit(limit)
         .all()
     )
-    return [_serialize_note(n) for n in notes]
+    return [_serialize_note_lite(n) for n in notes]
 
 
 @app.post("/spaces/{space_id}/notes")
@@ -1968,9 +2083,11 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
     from datetime import datetime
 
     numeric_id = None if space_id == "general" else int(space_id)
+    initial_content = body.get("content") or ""
     note = Note(
         title=body.get("title") or "",
-        content=body.get("content") or "",
+        content=initial_content,
+        excerpt=_excerpt_from_html(initial_content),
         space_id=numeric_id,
         is_draft=bool(body.get("is_draft", False)),
         is_pinned=bool(body.get("is_pinned", False)),
@@ -2032,6 +2149,9 @@ def update_note(
         if (new_content or None) != (note.content or None):
             content_changed = True
         note.content = new_content
+        # Refresh cached excerpt alongside content so list endpoints stay
+        # in sync without a round-trip through the regex stripper.
+        note.excerpt = _excerpt_from_html(new_content)
     if title_changed or content_changed:
         note.updated_at = datetime.utcnow()
     if "space_id" in body:
@@ -2081,6 +2201,7 @@ def extract_to_child_note(note_id: int, body: dict, db: Session = Depends(get_db
     child = Note(
         title=title,
         content=selected_html,
+        excerpt=_excerpt_from_html(selected_html),
         space_id=parent.space_id,
         parent_note_id=parent.id,
         excerpt_anchor=anchor,
@@ -2103,7 +2224,7 @@ def get_note_children(note_id: int, db: Session = Depends(get_db)):
         .order_by(_notes_order())
         .all()
     )
-    return [_serialize_note(n) for n in children]
+    return [_serialize_note_lite(n) for n in children]
 
 
 @app.get("/notes/pinned")
@@ -2114,7 +2235,7 @@ def get_pinned_notes(db: Session = Depends(get_db)):
         .order_by(_notes_order())
         .all()
     )
-    return [_serialize_note(n) for n in notes]
+    return [_serialize_note_lite(n) for n in notes]
 
 
 @app.get("/notes/drafts")
@@ -2125,7 +2246,7 @@ def get_draft_notes(db: Session = Depends(get_db)):
         .order_by(_notes_order())
         .all()
     )
-    return [_serialize_note(n) for n in notes]
+    return [_serialize_note_lite(n) for n in notes]
 
 
 @app.get("/notes/graph")
@@ -2398,7 +2519,7 @@ def get_related_notes(note_id: int, limit: int = 5, db: Session = Depends(get_db
     """Return notes similar to the given note plus their cosine score (0..1)
     so the editor can render a similarity pill."""
     return [
-        {**_serialize_note(n), "similarity": round(sim, 3)}
+        {**_serialize_note_lite(n), "similarity": round(sim, 3)}
         for n, sim in note_service.get_related(note_id, limit, db)
     ]
 
@@ -2416,6 +2537,64 @@ def get_note_memories(note_id: int, limit: int = 6, db: Session = Depends(get_db
         .all()
     )
     return [_memory_to_dashboard(m) for m in rows]
+
+
+# ── Image uploads (Cloudflare R2) ──────────────────────────────────────────────
+
+
+# 10 MB per upload. TipTap pastes single images so we don't need bigger;
+# a hard cap protects the FastAPI worker (UploadFile reads into memory)
+# from someone pasting a screenshot of a screenshot of a screenshot.
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+_ALLOWED_IMAGE_PREFIX = "image/"
+
+
+@app.post("/uploads/image")
+async def upload_image_route(file: UploadFile = File(...)):
+    """Upload a pasted/dropped image to Cloudflare R2 and return its public
+    URL. Frontend rewrites <img src="data:..."> to this URL so note bodies
+    stay tiny (see PR #134 OOM postmortem).
+
+    Returns 503 when R2 isn't configured — frontend falls back to inline
+    base64, so dev / un-provisioned envs still work, just with the old
+    storage cost.
+    """
+    from .services import image_storage
+
+    # Validate cheap things (type, size) before checking R2 config — keeps
+    # 415/413 responses honest even in dev environments where the route is
+    # always going to 503 anyway. Route the misuse signal correctly.
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith(_ALLOWED_IMAGE_PREFIX):
+        raise HTTPException(status_code=415, detail=f"unsupported content-type: {content_type}")
+
+    data = await file.read()
+    if len(data) == 0:
+        raise HTTPException(status_code=400, detail="empty upload")
+    if len(data) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"image too large: {len(data)} bytes (max {_MAX_UPLOAD_BYTES})",
+        )
+
+    if not image_storage.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="R2 image storage not configured (R2_ACCOUNT_ID etc unset)",
+        )
+
+    try:
+        result = image_storage.upload_image(data, content_type, file.filename)
+    except image_storage.R2NotConfigured as e:
+        # Race between is_configured() and upload (env yanked mid-call).
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        # Surface a generic 502 — the underlying boto error message can leak
+        # bucket / endpoint specifics. Logged separately for inspection.
+        print(f"R2 upload failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="upload failed")
+
+    return result
 
 
 # ── Serializers ────────────────────────────────────────────────────────────────
@@ -2685,7 +2864,7 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     return {
         "notes_this_week": notes_this_week,
         "notes_last_week": notes_last_week,
-        "recent_notes": [_serialize_note(n) for n in recent_notes],
+        "recent_notes": [_serialize_note_lite(n) for n in recent_notes],
         "streak": streak,
         "notes_per_day": notes_per_day,
         "activity_per_day": activity_per_day,
