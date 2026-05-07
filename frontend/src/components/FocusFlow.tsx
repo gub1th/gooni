@@ -507,9 +507,12 @@ function Spotlight({ f, onClearPrimary, onComplete }: {
   if (!f) {
     return (
       <div className="ff-spotlight ff-spotlight-empty">
-        <div className="ff-spot-lab"><span className="ff-pulse" /> Primary focus</div>
+        <div className="ff-spot-lab">
+          <Crown size={12} strokeWidth={1.8} className="ff-spot-crown ff-spot-crown-empty" />
+          Primary focus
+        </div>
         <div className="ff-spot-title-empty">No primary set.</div>
-        <div className="ff-spot-meta">Pick a focus from the list and ★ it.</div>
+        <div className="ff-spot-meta">Pick a focus from the list and crown it.</div>
       </div>
     );
   }
@@ -523,7 +526,10 @@ function Spotlight({ f, onClearPrimary, onComplete }: {
   return (
     <div className="ff-spotlight">
       <div className="ff-spot-row">
-        <div className="ff-spot-lab"><span className="ff-pulse" /> Primary focus</div>
+        <div className="ff-spot-lab">
+          <Crown size={13} strokeWidth={1.8} fill="currentColor" className="ff-spot-crown" />
+          Primary focus
+        </div>
         <span style={{ flex: 1 }} />
         <FocusModePill node={f} />
         <button className="ff-spot-btn" onClick={() => onComplete(f)}>✓ Mark done</button>
@@ -1227,6 +1233,11 @@ function FocusFlowStyles() {
         70%  { box-shadow: 0 0 0 12px rgba(74,222,128,0); }
         100% { box-shadow: 0 0 0 0   rgba(74,222,128,0); }
       }
+      /* Gold crown — same hue as the row-level crown (.ff-crown-active) so
+         the spotlight + the row indicator read as the same signal. Muted
+         variant for the empty state where no primary is set. */
+      .ff-spot-crown { color: #EAB308; }
+      .ff-spot-crown-empty { color: var(--gooni-muted, #C7C7CC); }
       .ff-spot-title {
         position: relative;
         font-weight: 600;
