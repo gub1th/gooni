@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.37.1 — 2026-05-07 (patch)
+
+- fix(dashboard): recent notes cards equal width regardless of title length (#130)
+
 ## 0.37.0 — 2026-05-07 (minor)
 
 - feat(digest+todos): user-prompt digest, focus↔todo M2M, theme settings (#129)
