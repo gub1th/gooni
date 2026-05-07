@@ -133,6 +133,26 @@ cd frontend && npx tsc --noEmit          # zero errors required
 source venv/bin/activate && python -c "from app.main import app; print('OK')"
 ```
 
+## Schema changes (Alembic)
+
+```bash
+# After editing app/db/models.py:
+source venv/bin/activate
+alembic revision --autogenerate -m "what you changed"
+# Review the generated file in alembic/versions/. SQLite quirks to
+# watch: Boolean stored as INTEGER (cosmetic), DateTime stored as
+# TEXT (cosmetic), missing FK constraints (SQLite doesn't enforce).
+# compare_type=True is on, so type drifts surface.
+alembic upgrade head                     # apply locally
+# Commit the new revision file alongside your model change.
+```
+
+`alembic upgrade head` runs automatically on uvicorn boot via
+`_alembic_upgrade()` in `app/main.py`, so prod picks up new migrations
+on next deploy. Don't hand-edit the DB or `_run_column_migrations` —
+that legacy migrator only runs for one-shot cutover on pre-Alembic DBs
+and is scheduled for deletion.
+
 ## Key API Endpoints
 
 ```
@@ -242,7 +262,7 @@ the Todo list). Endpoints:
 - **Zustand persist**: if you change a store's shape, bump the persist key to avoid stale state (e.g. `v1` → `v2`)
 - **Singleton services**: each `app/services/*.py` creates one instance at the bottom — whole app shares it
 - **FastAPI `db: Session = Depends(get_db)`** — session created/closed per request automatically
-- **Startup migrations**: `_run_column_migrations()` in `main.py` runs ALTER TABLE for new columns on existing DBs
+- **Schema changes via Alembic**: every schema mutation goes through `alembic revision --autogenerate -m "msg"` then `alembic upgrade head`. Migrations live in `alembic/versions/`. `app/main.py:_alembic_upgrade` runs `upgrade head` on every boot. The legacy `_run_column_migrations` / `_migrate_memories_legacy_schema` / `_backfill_memories` functions are kept ONLY as a one-shot cutover for DBs predating Alembic — gated by "no `alembic_version` table + has tables" — and become unreachable after first boot. Delete them in a follow-up PR after prod is confirmed stamped.
 - **Optimistic UI**: `createNote` adds a temp note instantly, replaces with real API response
 - **React StrictMode**: kept intentionally — double-fires effects in dev to expose bugs; never remove it
 - **hasChanges ref**: NoteEditor only calls save() if user actually typed — prevents updated_at being touched on blur
