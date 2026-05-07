@@ -22,6 +22,7 @@ Scopes requested:
 from __future__ import annotations
 
 import os
+import secrets
 import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -62,9 +63,16 @@ def is_configured() -> bool:
 
 
 def build_authorize_url(state: str = "") -> str:
+    """Build the Whoop authorize URL. Whoop's OAuth provider rejects state
+    values shorter than 8 chars (they want enough entropy for CSRF protection),
+    so we auto-generate a 16-byte URL-safe token if the caller didn't pass one.
+    Single-user app — we don't currently round-trip-verify the state on
+    callback, but Whoop still requires it server-side."""
     cid, _, redirect = _env()
     if not cid or not redirect:
         raise RuntimeError("Whoop OAuth env vars not set")
+    if not state:
+        state = secrets.token_urlsafe(16)
     params = {
         "client_id": cid,
         "redirect_uri": redirect,
