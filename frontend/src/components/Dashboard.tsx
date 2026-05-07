@@ -439,7 +439,12 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
                 </div>
               )}
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {/* minmax(0, 1fr) — without the explicit 0 min, CSS Grid defaults
+                each track to min-content. A long nowrap title in one card then
+                pushes that column wider than the other, breaking the equal-
+                width grid. The `0` lets the column shrink below its content
+                min-width so the title can ellipsis-truncate as intended. */}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
               {visible.map((note, idx) => {
                 const fullTitle = displayTitle(note);
                 const fullExcerpt = stripHtmlForExcerpt(note.content ?? "");
