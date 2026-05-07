@@ -19,6 +19,7 @@ import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
 import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { MemoryBrain } from "./MemoryBrain";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
@@ -217,21 +218,6 @@ function useEditorStyles() {
     `;
   }, []);
 }
-
-// Subtle tint per memory type so the pill row reads like a legend without
-// needing an actual key. Pulls from the same palette as the /memories page.
-function memoryTint(type: string): { bg: string; fg: string; border: string } {
-  switch (type) {
-    case "preference": return { bg: "#FFF7ED", fg: "#9A3412", border: "rgba(154,52,18,0.20)" };
-    case "goal":       return { bg: "#EEF2FF", fg: "#3730A3", border: "rgba(55,48,163,0.20)" };
-    case "fact":       return { bg: "#F1F5F9", fg: "#334155", border: "rgba(51,65,85,0.18)" };
-    case "routine":    return { bg: "#ECFDF5", fg: "#065F46", border: "rgba(6,95,70,0.20)" };
-    case "constraint": return { bg: "#FEF2F2", fg: "#991B1B", border: "rgba(153,27,27,0.20)" };
-    case "episode":    return { bg: "#FAF5FF", fg: "#6B21A8", border: "rgba(107,33,168,0.20)" };
-    default:           return { bg: "#F4F4F5", fg: "#52525B", border: "rgba(82,82,91,0.18)" };
-  }
-}
-
 
 function formatNoteDate(iso: string | null): string {
   if (!iso) return "";
@@ -1741,36 +1727,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   <EditorContent editor={editor} />
                 </div>
 
-                {noteMemories.length > 0 && (
-                  <div style={{ marginTop: 48, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6, margin: "0 0 10px", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>MEMORIES FROM THIS NOTE</p>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {noteMemories.map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => navigate({ to: "/memories" })}
-                          title={m.content}
-                          style={{
-                            display: "inline-flex", alignItems: "center", gap: 6,
-                            padding: "4px 10px", borderRadius: 999,
-                            border: `0.5px solid ${memoryTint(m.type).border}`,
-                            background: memoryTint(m.type).bg,
-                            color: memoryTint(m.type).fg,
-                            fontSize: 11.5, fontWeight: 500,
-                            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                            cursor: "pointer", maxWidth: 260,
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}
-                        >
-                          <span style={{ fontSize: 9.5, opacity: 0.7, textTransform: "uppercase", letterSpacing: 0.4 }}>{m.type}</span>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {m.content.length > 60 ? m.content.slice(0, 60) + "…" : m.content}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <MemoryBrain memories={noteMemories} />
 
               </div>
             )}

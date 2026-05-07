@@ -1,0 +1,292 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import type { ApiMemory } from "../../services/api";
+import { NeuralBrain } from "../animations/NeuralBrain";
+
+const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+
+interface MemoryBrainProps {
+  memories: ApiMemory[];
+  // Section header. Defaults to the per-note framing; override on the
+  // /memories route where the brain shows everything Gooni remembers.
+  title?: string;
+  subtitle?: string;
+}
+
+interface BubblePos {
+  // Polar coordinates from the brain center, then resolved to (x,y) on layout.
+  // Each memory gets a stable angle + radius so the layout doesn't reshuffle
+  // on re-render. Float offset is animation-only — applied via CSS variable.
+  angle: number;
+  radius: number;
+  driftPhase: number;  // seconds offset so bubbles don't all bob in sync
+}
+
+const PALETTE: Record<string, { bg: string; fg: string; border: string; accent: string }> = {
+  preference: { bg: "#FFF7ED", fg: "#9A3412", border: "rgba(154,52,18,0.30)",  accent: "#EA580C" },
+  goal:       { bg: "#EEF2FF", fg: "#3730A3", border: "rgba(55,48,163,0.30)",  accent: "#4F46E5" },
+  fact:       { bg: "#F1F5F9", fg: "#334155", border: "rgba(51,65,85,0.28)",   accent: "#475569" },
+  routine:    { bg: "#ECFDF5", fg: "#065F46", border: "rgba(6,95,70,0.30)",    accent: "#10B981" },
+  constraint: { bg: "#FEF2F2", fg: "#991B1B", border: "rgba(153,27,27,0.30)",  accent: "#DC2626" },
+  episode:    { bg: "#FAF5FF", fg: "#6B21A8", border: "rgba(107,33,168,0.30)", accent: "#9333EA" },
+  default:    { bg: "#F4F4F5", fg: "#52525B", border: "rgba(82,82,91,0.28)",   accent: "#71717A" },
+};
+
+function paletteFor(type: string) {
+  return PALETTE[type] ?? PALETTE.default;
+}
+
+// Place bubbles on a half-fan above the brain. Even angle spread, alternating
+// radius so adjacent bubbles don't overlap. Stable per memory id (no shuffle
+// across renders).
+function computeLayout(memories: ApiMemory[]): Map<number, BubblePos> {
+  const map = new Map<number, BubblePos>();
+  const count = memories.length;
+  if (count === 0) return map;
+  // Spread across the upper half-circle: -150° to -30° (top arc).
+  const startDeg = -150;
+  const endDeg = -30;
+  memories.forEach((m, i) => {
+    const t = count === 1 ? 0.5 : i / (count - 1);
+    const angleDeg = startDeg + (endDeg - startDeg) * t;
+    const angle = (angleDeg * Math.PI) / 180;
+    // Alternate radius for staggered look — odd-indexed bubbles slightly farther.
+    const radius = i % 2 === 0 ? 110 : 138;
+    const driftPhase = (i * 0.7) % 4;
+    map.set(m.id, { angle, radius, driftPhase });
+  });
+  return map;
+}
+
+export function MemoryBrain({
+  memories,
+  title = "memories from this note",
+  subtitle = 'Click a bubble to peek. Click "view memory" to jump to the memory page.',
+}: MemoryBrainProps) {
+  const navigate = useNavigate();
+  const [selected, setSelected] = useState<ApiMemory | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const layout = useMemo(() => computeLayout(memories), [memories]);
+
+  // Close the popover on outside click + Escape
+  useEffect(() => {
+    if (!selected) return;
+    function onDoc(e: MouseEvent) {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) setSelected(null);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setSelected(null);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [selected]);
+
+  if (memories.length === 0) return null;
+
+  const BRAIN_SIZE = 56;
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        marginTop: 48, paddingTop: 20,
+        borderTop: "1px solid rgba(0,0,0,0.06)",
+        position: "relative",
+      }}
+    >
+      <style>{`
+        @keyframes memory-bubble-drift {
+          0%, 100% { transform: translate(-50%, -50%) translateY(0px); }
+          50%      { transform: translate(-50%, -50%) translateY(-4px); }
+        }
+        @keyframes memory-line-pulse {
+          0%, 100% { opacity: 0.30; }
+          50%      { opacity: 0.55; }
+        }
+      `}</style>
+
+      <p style={{
+        fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6,
+        margin: "0 0 6px", fontFamily: FONT, textTransform: "uppercase",
+      }}>
+        {title}
+      </p>
+      <p style={{
+        fontSize: 11.5, color: "#9CA3AF", margin: "0 0 14px",
+        fontFamily: FONT,
+      }}>
+        {subtitle}
+      </p>
+
+      {/* Stage: 200px tall, brain centered horizontally toward the bottom,
+          bubbles float in the upper arc. Width caps at 720 to match editor. */}
+      <div style={{ position: "relative", height: 240, maxWidth: 720, margin: "0 auto", overflow: "hidden" }}>
+        {/* SVG layer for the brain → bubble lines. Full-bleed; lines drawn
+            in client coords relative to the SVG. */}
+        <svg
+          width="100%" height="100%"
+          viewBox="0 0 720 240"
+          preserveAspectRatio="xMidYMid meet"
+          style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+        >
+          {memories.map((m, i) => {
+            const pos = layout.get(m.id);
+            if (!pos) return null;
+            const cx = 360;
+            const cy = 200;
+            const tx = cx + Math.cos(pos.angle) * pos.radius;
+            const ty = cy + Math.sin(pos.angle) * pos.radius;
+            const accent = paletteFor(m.type).accent;
+            return (
+              <line
+                key={m.id}
+                x1={cx}
+                y1={cy}
+                x2={tx}
+                y2={ty}
+                stroke={accent}
+                strokeWidth={1}
+                strokeDasharray="3 3"
+                style={{
+                  animation: `memory-line-pulse 3.2s ease-in-out infinite ${i * 0.25}s`,
+                }}
+              />
+            );
+          })}
+        </svg>
+
+        {/* Brain anchored bottom-center */}
+        <div style={{
+          position: "absolute",
+          left: "50%",
+          bottom: 12,
+          transform: "translateX(-50%)",
+          width: BRAIN_SIZE, height: BRAIN_SIZE,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <NeuralBrain size={BRAIN_SIZE} />
+        </div>
+
+        {/* Bubbles. Positioned absolute relative to the 720x240 stage, mapped
+            from the same polar layout the SVG used. */}
+        {memories.map((m) => {
+          const pos = layout.get(m.id);
+          if (!pos) return null;
+          const cx = 360;
+          const cy = 200;
+          const tx = cx + Math.cos(pos.angle) * pos.radius;
+          const ty = cy + Math.sin(pos.angle) * pos.radius;
+          const palette = paletteFor(m.type);
+          const isSelected = selected?.id === m.id;
+          return (
+            <button
+              key={m.id}
+              onClick={() => setSelected(isSelected ? null : m)}
+              style={{
+                position: "absolute",
+                left: `${(tx / 720) * 100}%`,
+                top: ty,
+                transform: "translate(-50%, -50%)",
+                animation: `memory-bubble-drift 3.6s ease-in-out infinite ${pos.driftPhase}s`,
+                padding: "5px 11px",
+                borderRadius: 999,
+                background: palette.bg,
+                color: palette.fg,
+                border: `1px solid ${isSelected ? palette.accent : palette.border}`,
+                boxShadow: isSelected ? `0 0 0 3px ${palette.accent}33` : "0 1px 3px rgba(0,0,0,0.06)",
+                fontFamily: FONT, fontSize: 11.5, fontWeight: 500,
+                cursor: "pointer",
+                maxWidth: 220,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                display: "inline-flex", alignItems: "center", gap: 5,
+                transition: "box-shadow 0.15s, border-color 0.15s",
+              }}
+              title={m.content}
+            >
+              <span style={{ fontSize: 9.5, opacity: 0.7, textTransform: "uppercase", letterSpacing: 0.4 }}>{m.type}</span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {m.content.length > 38 ? m.content.slice(0, 38) + "…" : m.content}
+              </span>
+            </button>
+          );
+        })}
+
+        {/* Popover — positioned just above the brain, centered. Compact card
+            with full content + a CTA to deep-link into /memories with that
+            row's detail modal opened (handled by ?focus= query param). */}
+        {selected && (
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              bottom: BRAIN_SIZE + 24,
+              transform: "translateX(-50%)",
+              width: 320, maxWidth: "90%",
+              background: "#fff",
+              borderRadius: 12,
+              border: "1px solid rgba(0,0,0,0.10)",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.06)",
+              padding: "12px 14px",
+              fontFamily: FONT,
+              zIndex: 5,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                fontSize: 10, fontWeight: 600,
+                color: paletteFor(selected.type).fg,
+                background: paletteFor(selected.type).bg,
+                border: `1px solid ${paletteFor(selected.type).border}`,
+                padding: "2px 8px", borderRadius: 999,
+                textTransform: "uppercase", letterSpacing: 0.4,
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: paletteFor(selected.type).accent }} />
+                {selected.type}
+              </span>
+              <button
+                onClick={() => setSelected(null)}
+                style={{
+                  marginLeft: "auto", background: "none", border: "none",
+                  cursor: "pointer", color: "#9CA3AF", fontSize: 16, lineHeight: 1,
+                  padding: 2,
+                }}
+                aria-label="Close"
+              >×</button>
+            </div>
+            <div style={{ fontSize: 13, color: "#1C1C1E", lineHeight: 1.5, marginBottom: 10 }}>
+              {selected.content}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <div style={{ fontSize: 10.5, color: "#9CA3AF" }}>
+                conf {Math.round(selected.confidence * 100)}%
+              </div>
+              <button
+                onClick={() => {
+                  setSelected(null);
+                  // Memories page reads ?focus= and opens the detail modal.
+                  navigate({ to: "/memories", search: { focus: selected.id } });
+                }}
+                style={{
+                  fontSize: 11.5, fontWeight: 600, fontFamily: FONT,
+                  padding: "5px 12px", borderRadius: 999,
+                  background: "#1C1C1E", color: "#fff",
+                  border: "none", cursor: "pointer",
+                }}
+              >
+                view memory →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

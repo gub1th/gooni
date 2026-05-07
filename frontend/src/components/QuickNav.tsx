@@ -70,7 +70,7 @@ export function QuickNav() {
         label: "Memories",
         hint: "/memories",
         icon: <Brain size={14} strokeWidth={1.7} />,
-        onSelect: () => navigate({ to: "/memories" }),
+        onSelect: () => navigate({ to: "/memories", search: { focus: undefined } }),
       },
       {
         key: "audit",
