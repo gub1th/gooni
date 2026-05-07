@@ -10,6 +10,19 @@ import {
   fetchSpaceNotes,
 } from "../services/api";
 
+// One-shot cleanup of the v2 persist key. v2 persisted full note bodies
+// (PR #134) and overflowed the ~5MB localStorage quota for any user with
+// image-heavy notes — the row would still be sitting there occupying space
+// even after we ship v3. Safe to drop on every load: the only consumer was
+// this store, which has already moved to v3.
+if (typeof window !== "undefined") {
+  try {
+    window.localStorage.removeItem("gooni-notes-v2");
+  } catch {
+    // private mode / quota errors — ignore, nothing we can do here
+  }
+}
+
 // A note is "empty" when it has no title text and no body content beyond
 // the editor's empty-paragraph scaffold. Used to auto-clean up notes that
 // the user opened but never wrote anything into — see selectNote().
@@ -260,13 +273,15 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
     }),
     {
-      // v1 → v2: persist `notes` alongside selectedSpaceId so reloads paint
-      // instantly from localStorage instead of waiting on the API. lastLoaded
-      // is intentionally NOT persisted — see its declaration for why.
-      name: "gooni-notes-v2",
+      // v2 → v3: stop persisting `notes` — TipTap inlines images as base64
+      // data URLs, so a note bigger than ~5MB blew the localStorage quota
+      // and hard-stopped reloads (PR #134 → 2026-05-07 incident). The TTL
+      // cache stays in-memory only; we eat the first-paint API round-trip
+      // until list endpoints get cheap enough to fetch every reload.
+      // Bumping the key clears stale `gooni-notes-v2` entries on reload.
+      name: "gooni-notes-v3",
       partialize: (s) => ({
         selectedSpaceId: s.selectedSpaceId,
-        notes: s.notes,
       }),
     }
   )

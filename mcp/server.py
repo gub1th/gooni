@@ -10,6 +10,9 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 BASE_URL = os.getenv("GOONI_URL", "http://localhost:8000")
+# Frontend host for deep-link URLs surfaced back to Claude after writes.
+# Defaults to the local Vite dev server; override via env for prod links.
+FRONTEND_URL = os.getenv("GOONI_FRONTEND_URL", "http://localhost:5173").rstrip("/")
 
 # Prod has password-gated auth (see app/main.py auth_middleware). Compute the
 # stable bearer token from the password locally — no need to hit /auth — and
@@ -241,7 +244,8 @@ def add_note(title: str, content: str, space_name: str = "Claude Code") -> str:
     )
     resp.raise_for_status()
     n = resp.json()
-    return f"Created note #{n['id']} in {space_name}: {n['title']}"
+    url = f"{FRONTEND_URL}/?note={n['id']}"
+    return f"Created note #{n['id']} in {space_name}: {n['title']} ({url})"
 
 
 @mcp.tool()

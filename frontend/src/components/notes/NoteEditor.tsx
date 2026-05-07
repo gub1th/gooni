@@ -18,7 +18,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { MemoryBrain } from "./MemoryBrain";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
@@ -50,6 +50,53 @@ function insertImageBlock(editor: Editor, src: string) {
       { type: "paragraph" },
     ])
     .run();
+}
+
+// Push a pasted/dropped image up to R2 and insert the resulting URL into
+// the editor. Falls back to the legacy base64 data: URL path when the
+// backend reports R2 isn't configured (dev / un-provisioned envs) or any
+// other error — losing an upload is worse UX than carrying a heavy image.
+//
+// `notify` lets callers surface errors; passing `undefined` swallows them.
+async function uploadAndInsertImage(
+  editor: Editor,
+  file: File,
+  notify?: (msg: string) => void,
+): Promise<void> {
+  let result;
+  try {
+    result = await apiUploadImage(file);
+  } catch (e) {
+    console.error("[NoteEditor] image upload network error:", e);
+    result = { kind: "error" as const, status: 0, message: "network error" };
+  }
+
+  if (result.kind === "url") {
+    insertImageBlock(editor, result.url);
+    return;
+  }
+
+  if (result.kind === "error") {
+    console.warn(
+      `[NoteEditor] image upload failed (${result.status}): ${result.message} — falling back to inline base64`,
+    );
+    notify?.(`Image upload failed (${result.status || "network"}): inlined as base64 instead`);
+  }
+
+  // Fallback path — read the file as a data URL and insert inline. This
+  // matches the pre-R2 behavior so any environment without R2 wired up
+  // still works end-to-end.
+  await new Promise<void>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        insertImageBlock(editor, reader.result);
+      }
+      resolve();
+    };
+    reader.onerror = () => resolve();
+    reader.readAsDataURL(file);
+  });
 }
 
 function useEditorStyles() {
@@ -1297,46 +1344,34 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
         >
             <div
               style={{ position: "relative", zIndex: 1 }}
-              onDrop={(e) => {
+              onDrop={async (e) => {
                 const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
                   f.type.startsWith("image/")
                 );
                 if (!files.length || !editor) return;
                 e.preventDefault();
-                files.forEach((file) => {
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    if (typeof reader.result === "string") {
-                      insertImageBlock(editor, reader.result);
-                      hasChanges.current = true;
-                      scheduleSave();
-                    }
-                  };
-                  reader.readAsDataURL(file);
-                });
+                for (const file of files) {
+                  await uploadAndInsertImage(editor, file);
+                  hasChanges.current = true;
+                  scheduleSave();
+                }
               }}
               onDragOver={(e) => {
                 if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
                   e.preventDefault();
                 }
               }}
-              onPaste={(e) => {
+              onPaste={async (e) => {
                 const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
                   f.type.startsWith("image/")
                 );
                 if (!files.length || !editor) return;
                 e.preventDefault();
-                files.forEach((file) => {
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    if (typeof reader.result === "string") {
-                      insertImageBlock(editor, reader.result);
-                      hasChanges.current = true;
-                      scheduleSave();
-                    }
-                  };
-                  reader.readAsDataURL(file);
-                });
+                for (const file of files) {
+                  await uploadAndInsertImage(editor, file);
+                  hasChanges.current = true;
+                  scheduleSave();
+                }
               }}
             >
               <EditorContent editor={editor} />
@@ -1611,6 +1646,14 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                 {editor && (
                   <BubbleMenu
                     editor={editor}
+                    // Hide the text-format menu when a node-style block owns
+                    // its own controls — figure nodes (images) bring their
+                    // own resize/align/caption widget, so the formatting bar
+                    // stacking on top is just visual noise.
+                    shouldShow={({ editor, from, to }) => {
+                      if (editor.isActive("figure") || editor.isActive("image")) return false;
+                      return from !== to;
+                    }}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -1682,46 +1725,34 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                 )}
 
                 <div
-                  onDrop={(e) => {
+                  onDrop={async (e) => {
                     const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
                       f.type.startsWith("image/")
                     );
                     if (!files.length || !editor) return;
                     e.preventDefault();
-                    files.forEach((file) => {
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        if (typeof reader.result === "string") {
-                          insertImageBlock(editor, reader.result);
-                          hasChanges.current = true;
-                          scheduleSave();
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                    });
+                    for (const file of files) {
+                      await uploadAndInsertImage(editor, file);
+                      hasChanges.current = true;
+                      scheduleSave();
+                    }
                   }}
                   onDragOver={(e) => {
                     if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
                       e.preventDefault();
                     }
                   }}
-                  onPaste={(e) => {
+                  onPaste={async (e) => {
                     const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
                       f.type.startsWith("image/")
                     );
                     if (!files.length || !editor) return;
                     e.preventDefault();
-                    files.forEach((file) => {
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        if (typeof reader.result === "string") {
-                          insertImageBlock(editor, reader.result);
-                          hasChanges.current = true;
-                          scheduleSave();
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                    });
+                    for (const file of files) {
+                      await uploadAndInsertImage(editor, file);
+                      hasChanges.current = true;
+                      scheduleSave();
+                    }
                   }}
                 >
                   <EditorContent editor={editor} />
