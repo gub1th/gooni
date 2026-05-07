@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.43.0 — 2026-05-07 (minor)
+
+- feat(takes): persist Gooni's Take + new Dev Take, daily, in DB (#141)
+
 ## 0.42.0 — 2026-05-07 (minor)
 
 - feat(notes): R2 image uploads + lite list payloads (PR #134 OOM fix) (#139)
