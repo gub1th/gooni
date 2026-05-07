@@ -575,7 +575,8 @@ TOOL_LEGEND: list[dict] = [
         "description": (
             "Cosine-similarity search over fact / goal / routine / constraint / "
             "episode memories using the user's query. Always-include preferences "
-            "are added separately. Top-K configurable via RETRIEVAL_TOP_K."
+            "are added separately. Per-type top-K + floor configured in "
+            "RETRIEVAL_PER_TYPE (memory_service.py)."
         ),
     },
     {
