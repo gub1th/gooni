@@ -556,4 +556,81 @@ class WhoopSnapshot(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class FocusSession(Base):
+    """One row per focus-cam tracked work session. Aggregate metrics are
+    populated when the session ends (STOP click, Ctrl+C, or process exit).
+    Written by the standalone focus_cam.py process via raw sqlite3 — these
+    SQLAlchemy declarations exist so Gooni's create_all() recognises the
+    tables and so backend code can read sessions through the ORM.
+    Sister tables: FocusSessionBucket (1Hz telemetry), FocusSessionEvent
+    (discrete h2m/phone/stand/away events).
+    """
+
+    __tablename__ = "focus_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    started_at = Column(DateTime, nullable=False, index=True)
+    ended_at = Column(DateTime, nullable=True)
+    duration_sec = Column(Integer, nullable=True)
+    # Per-sample aggregates (sample interval ~2s):
+    presence_pct = Column(Float, nullable=True)
+    eyes_on_pct = Column(Float, nullable=True)
+    # Bucket-derived (1Hz):
+    active_pct = Column(Float, nullable=True)
+    engaged_pct = Column(Float, nullable=True)
+    # Only populated when the user passed --focused-apps:
+    app_focus_pct = Column(Float, nullable=True)
+    focused_apps_input = Column(Text, nullable=True)  # raw CSV
+    samples_total = Column(Integer, nullable=True)
+    samples_focused = Column(Integer, nullable=True)
+    hand_to_mouth_count = Column(Integer, nullable=True)
+    phone_in_hand_count = Column(Integer, nullable=True)
+    stand_count = Column(Integer, nullable=True)
+    away_count = Column(Integer, nullable=True)
+    note = Column(Text, nullable=True)  # optional freeform user note
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class FocusSessionBucket(Base):
+    """1Hz telemetry buckets for a FocusSession. One row per session-second.
+    Captures the frontmost app at that second + raw keyboard / mouse event
+    counts. Granular enough to reconstruct the session timeline; coarse
+    enough that 24/7 use stays under ~7MB/day."""
+
+    __tablename__ = "focus_session_buckets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(
+        Integer,
+        ForeignKey("focus_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ts = Column(DateTime, nullable=False)
+    app = Column(Text, nullable=True)        # macOS frontmost app name
+    keys = Column(Integer, nullable=False, default=0)
+    mouse = Column(Integer, nullable=False, default=0)
+
+
+class FocusSessionEvent(Base):
+    """Discrete events fired during a session. `kind` is a small enum:
+    'hand_to_mouth' | 'phone_in_hand' | 'stand' | 'away'. Inserted at the
+    moment the event completes — stand/away are emitted on face-back-in-frame,
+    h2m/phone are emitted when the hold ends and exceeded the min duration."""
+
+    __tablename__ = "focus_session_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(
+        Integer,
+        ForeignKey("focus_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kind = Column(String, nullable=False, index=True)
+    started_at = Column(DateTime, nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+    duration_sec = Column(Integer, nullable=True)
+
+
 
