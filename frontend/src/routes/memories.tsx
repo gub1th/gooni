@@ -11,6 +11,16 @@ import { MemoryBrain } from "../components/notes/MemoryBrain";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 
 export const Route = createFileRoute("/memories")({
+  // ?focus=<id> deep-links into a specific memory row — fired by the
+  // MemoryBrain "view memory →" CTA and any other component that wants
+  // to surface a particular memory. Component scrolls + flashes the row.
+  validateSearch: (s: Record<string, unknown>) => ({
+    focus: typeof s.focus === "number"
+      ? s.focus
+      : typeof s.focus === "string" && s.focus.length > 0
+        ? Number(s.focus) || undefined
+        : undefined,
+  }),
   component: MemoriesPage,
 });
 
@@ -51,11 +61,16 @@ const SIDEBAR_BREAKPOINT = 768;
 
 function MemoriesPage() {
   const navigate = useNavigate();
+  const urlSearch = Route.useSearch();
   const windowWidth = useWindowWidth();
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
   useEffect(() => {
     setSidebarOpen(windowWidth >= SIDEBAR_BREAKPOINT);
   }, [windowWidth >= SIDEBAR_BREAKPOINT]);
+
+  // Brief highlight on the row deep-linked via ?focus=<id>. Cleared 2.4s
+  // after the scroll lands so the flash doesn't linger.
+  const [flashId, setFlashId] = useState<number | null>(null);
 
   const [filter, setFilter] = useState<MemoryType | "all">("all");
   const [search, setSearch] = useState("");
@@ -106,6 +121,25 @@ function MemoriesPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter, debouncedSearch, includeInactive]);
+
+  // ?focus=<id> deep-link: scroll the matching row into view + flash it
+  // briefly so the user can spot what was linked. Fires whenever the URL
+  // param changes or memories list refreshes (filter switch, edit). The
+  // 50ms delay is to let the DOM settle after a load — without it the
+  // getElementById call can race ahead of React's render.
+  useEffect(() => {
+    const focus = urlSearch.focus;
+    if (!focus || memories.length === 0) return;
+    const target = memories.find((m) => m.id === focus);
+    if (!target) return;
+    const t = setTimeout(() => {
+      const el = document.getElementById(`mem-row-${focus}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setFlashId(focus);
+    }, 50);
+    const clearT = setTimeout(() => setFlashId(null), 2450);
+    return () => { clearTimeout(t); clearTimeout(clearT); };
+  }, [urlSearch.focus, memories]);
 
   async function handleDelete(m: ApiMemory) {
     if (!confirm(`Forget this memory?\n\n"${m.content.slice(0, 120)}${m.content.length > 120 ? "…" : ""}"`)) return;
@@ -311,9 +345,11 @@ function MemoriesPage() {
                   const c = TYPE_COLORS[m.type];
                   const isEditing = editingId === m.id;
                   const isInactive = !m.is_active;
+                  const isFlashing = flashId === m.id;
                   return (
                     <div
                       key={m.id}
+                      id={`mem-row-${m.id}`}
                       style={{
                         display: "grid",
                         gridTemplateColumns: "110px 110px 1fr 90px 110px",
@@ -323,7 +359,11 @@ function MemoriesPage() {
                         borderBottom: "1px solid rgba(0,0,0,0.05)",
                         alignItems: "center",
                         opacity: isInactive ? 0.55 : 1,
-                        background: isInactive ? "rgba(0,0,0,0.015)" : "transparent",
+                        background: isFlashing
+                          ? "rgba(255, 230, 100, 0.35)"
+                          : isInactive ? "rgba(0,0,0,0.015)" : "transparent",
+                        boxShadow: isFlashing ? "inset 0 0 0 2px rgba(234,179,8,0.55)" : "none",
+                        transition: "background 0.5s ease, box-shadow 0.5s ease",
                       }}
                     >
                       <div style={{ color: "#8E8E93", fontSize: 12 }}>

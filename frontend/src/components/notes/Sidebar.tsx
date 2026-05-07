@@ -950,7 +950,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
               it reads as a top-level surface (not a debug affordance). */}
           <div style={{ padding: "0 6px 2px" }}>
             <button
-              onClick={() => navigate({ to: "/memories" })}
+              onClick={() => navigate({ to: "/memories", search: { focus: undefined } })}
               title="Memory dashboard"
               style={{
                 display: "flex", alignItems: "center", gap: 8,
