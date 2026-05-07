@@ -59,23 +59,25 @@ RETRIEVAL_TOP_K = 5
 # one type displaced stronger rows from another by accident.
 #
 # Empirical row counts (2026-05-06): fact 110, episode 143, preference 17,
-# routine 1, goal 0, constraint 0.
-# - 'goal' dropped — replaced by focuses (live in list_items, injected via
-#   item_service.get_active_context in orchestrator.py — not memory's job).
-#   See backlog #213 for full type deprecation.
-# - 'constraint' kept despite 0 rows — extractor should produce them but
-#   doesn't today (see backlog: investigate why constraint extraction never
-#   fires). Tiny cost when empty.
-# - 'routine' kept at 1 row — extractor occasionally produces.
+# routine 1, goal 0, constraint 0. Several types sit at 0 today because the
+# extractor doesn't surface them in practice — but they're kept here so that
+# *if* extraction starts producing them (after prompt nudges or model bumps),
+# retrieval picks them up automatically without another refactor. Empty
+# buckets cost one near-instant cosine no-op per turn.
 #
-# Per-type tuning:
-# - fact: lower floor since facts are short + paraphrased less
-# - episode: stricter floor since they're verbose and over-pull on weak overlap
-# - routine: middle floor, low K (single-digit pool today)
+# Type-by-type:
+# - 'fact': dense, short content, paraphrased less → lower floor
+# - 'episode': verbose, over-pulls on weak overlap → stricter floor
+# - 'routine' / 'constraint' / 'goal': underpopulated today; modest K + floor.
+#   'goal' overlaps semantically with focuses (list_items injected via
+#   item_service.get_active_context) but kept here for unrealized aspirations
+#   that haven't graduated to a focus row. See #213 (type deprecation pending
+#   Model D decision) and #215 (constraint extraction never fires).
 RETRIEVAL_PER_TYPE: dict[str, dict[str, float | int]] = {
     "fact":       {"top_k": 3, "floor": 0.25},
     "routine":    {"top_k": 2, "floor": 0.30},
     "constraint": {"top_k": 2, "floor": 0.30},
+    "goal":       {"top_k": 2, "floor": 0.30},
     "episode":    {"top_k": 3, "floor": 0.35},
 }
 
