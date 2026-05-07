@@ -638,4 +638,43 @@ class FocusSessionEvent(Base):
     duration_sec = Column(Integer, nullable=True)
 
 
+class GooniTake(Base):
+    """Daily LLM-generated takes on Daniel's state — one row per (day, kind).
+
+    Two flavors today:
+      - kind="focus" — one tight sentence on what Daniel is focused on RIGHT
+        NOW. Inputs: recent notes + active focuses. Powers the dashboard pill.
+      - kind="dev"   — one short paragraph on what Daniel shipped on Gooni
+        today, derived from commits + PR titles across tracked repos. Powers
+        the StatsView Dev-activity card.
+
+    Idempotent on (day, kind): the daily endpoint upserts in place rather
+    than appending so history stays one-row-per-day. Force-refresh
+    regenerates and overwrites the same row. `created_at` records first
+    generation; `updated_at` records last regeneration.
+
+    `sources` is a free-form JSON blob holding whichever input ids the
+    generator used (note ids, focus ids, commit shas, PR urls). Keeping it
+    schemaless lets future kinds add new source types without a migration.
+
+    `prompt_version` bumps when the prompt template or input set changes
+    so future history UIs can filter rows from different prompt eras.
+    """
+
+    __tablename__ = "gooni_takes"
+    __table_args__ = (
+        UniqueConstraint("day", "kind", name="uq_gooni_takes_day_kind"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    day = Column(Date, nullable=False, index=True)
+    kind = Column(String, nullable=False, index=True)
+    take_text = Column(Text, nullable=False)
+    model = Column(String, nullable=False)
+    prompt_version = Column(String, nullable=False, default="v1")
+    sources = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 

@@ -21,6 +21,7 @@ from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
     FocusTodoLink,
+    GooniTake,
     McpCall,
     Memory,
     Message,
@@ -3008,61 +3009,44 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
 
 
 @app.get("/dashboard/take")
-def get_gooni_take(db: Session = Depends(get_db)):
+def get_gooni_take(force: bool = False, db: Session = Depends(get_db)):
     """Gooni's Take — ONE tight sentence on Daniel's current focus thread.
-    Recency-weighted: most-recent note marked, active focuses pulled in for
-    long-arc context. Cached client-side; refresh button forces a fresh call.
+
+    Persisted in `gooni_takes` (kind="focus") — one row per UTC day. Re-fetching
+    the same day returns the stored row; ?force=1 regenerates and overwrites.
     """
-    from sqlalchemy import func as sqlfunc
+    from .services.take_service import get_or_generate
 
-    recent_notes = (
-        db.query(Note)
-        .order_by(sqlfunc.coalesce(Note.updated_at, Note.created_at).desc())
-        .limit(8)
-        .all()
-    )
-    top_notes = [n for n in recent_notes if (n.title and n.title.strip()) or (n.content and n.content.strip())][:5]
+    return get_or_generate(db, "focus", force=force)
 
-    def _plain(html: str | None) -> str:
-        if not html:
-            return ""
-        t = re.sub(r"<[^>]+>", " ", html)
-        t = re.sub(r"\s+", " ", t).strip()
-        return t
 
-    note_lines = []
-    for i, n in enumerate(top_notes):
-        title = (n.title or "").strip() or "Untitled"
-        body = _plain(n.content)[:240]
-        marker = "(MOST RECENT)" if i == 0 else ""
-        note_lines.append(f"- {title} {marker}: {body}" if body else f"- {title} {marker}")
-    note_block = "\n".join(note_lines) if note_lines else "(no notes yet)"
+@app.get("/dashboard/dev-take")
+def get_dev_take(force: bool = False, db: Session = Depends(get_db)):
+    """Dev Take — short paragraph on what Daniel shipped on Gooni today,
+    derived from commits + PR titles across all tracked repos (last 24h).
 
-    focus_block = item_service.get_active_context(db) or "(no active focuses)"
+    Persisted in `gooni_takes` (kind="dev") — one row per UTC day. ?force=1
+    regenerates. Returns an empty take when no tracked repos / no commits;
+    no row is written in that case.
+    """
+    from .services.take_service import get_or_generate
 
-    if not top_notes and focus_block.startswith("("):
-        return {"take": ""}
+    return get_or_generate(db, "dev", force=force)
 
-    prompt = (
-        "You are Gooni — Daniel's AI notebook companion.\n\n"
-        "Write ONE sentence (max 25 words) describing what Daniel is focused on RIGHT NOW. "
-        "Recent notes carry more weight than older ones. Find the dominant thread.\n\n"
-        "Format options (pick what fits):\n"
-        '  "Focus is on X."\n'
-        '  "Split between X and Y."\n'
-        '  "Mostly X, with some Y on the side."\n'
-        '  "Heads-down on X this week."\n\n'
-        "No preamble, no sign-off, no filler. Just the sentence.\n\n"
-        f"Active focuses:\n{focus_block}\n\n"
-        f"Recent notes (newest first):\n{note_block}\n\n"
-        "Your one-sentence take:"
-    )
-    try:
-        take = llm_client.generate_simple_completion(prompt, max_tokens=80)
-        take = take.strip().strip('"').strip("'")
-    except Exception:
-        take = ""
-    return {"take": take}
+
+@app.get("/dashboard/takes/history")
+def list_takes_history(
+    kind: str = "focus",
+    limit: int = 30,
+    db: Session = Depends(get_db),
+):
+    """Reverse-chronological list of stored takes for `kind`. Future
+    history surfaces (e.g. "how my focus has drifted") read this."""
+    from .services.take_service import list_history
+
+    if kind not in {"focus", "dev"}:
+        raise HTTPException(status_code=400, detail="kind must be focus|dev")
+    return list_history(db, kind, limit=limit)
 
 
 # ── MCP endpoints ─────────────────────────────────────────────────────────────
