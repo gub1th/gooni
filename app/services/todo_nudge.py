@@ -1,19 +1,16 @@
-"""Daily morning digest: overdue + due-today todos.
+"""Daily morning digest — user-prompt-driven LLM message.
 
-Used by the FastAPI lifespan scheduler (app/main.py) to fan out the digest to
-every enabled messaging channel each morning. Telegram + WhatsApp share the
-same payload — only the indexed list + reply hint are deterministic; a 1-2
-sentence opener is LLM-rewritten so the message doesn't read like cron output.
+Daniel writes the instruction for what the daily digest should say (stored on
+Settings.nudge_prompt). This module gathers today's data (overdue todos,
+due-today todos, top focuses) and asks the LLM to produce ONE conversational
+chat message following his prompt. No indexed list, no `done <n>` reply
+commands — the message reads like a normal text from Gooni.
 
-Reply commands (`done <n>`, `tom <n>`, `kill <n>`) are stashed per-recipient
-in `Settings.nudge_last_digests` (JSON) and resolved by `resolve_digest_reply()`.
-DB-backed instead of in-memory because the FastAPI process (sender) and the
-Telegram bot polling script (reply receiver) run as separate processes per
-start.sh — they can't share a Python dict.
+Used by the FastAPI lifespan scheduler in app/main.py.
 """
 
-import json
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -22,62 +19,34 @@ from app.llm.client import llm_client
 from app.services.list_service import list_service
 
 
+# Default prompt — used when Settings.nudge_prompt is empty. Surfaced to the
+# UI via /settings/nudge-prompt-default so the "Use default" button can drop
+# this exact text into Daniel's textarea.
+DEFAULT_PROMPT = (
+    "You are Gooni, Daniel's personal AI assistant. Send him a short "
+    "good-morning message (2-4 sentences max) that references what he's "
+    "actually working on today: any overdue todos, what's due today, and his "
+    "top focuses. Be conversational, not corporate. No emoji. No bullet "
+    "lists. No greetings like 'Good morning!'. Reference 1-2 specific items "
+    "by name when it adds color, but don't list everything — pick what "
+    "matters most. If nothing is overdue or due today, mention his focuses "
+    "instead and keep it light."
+)
+
+
 def _today_bounds() -> tuple[datetime, datetime]:
     now = datetime.now()
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return today, today + timedelta(days=1)
 
 
-def _llm_opener(overdue_count: int, today_count: int, sample_titles: list[str]) -> str:
-    """One short, friendly opener line. Falls back to a static string if the
-    LLM call fails — never let a flaky completion block the nudge.
-    """
-    titles = ", ".join(t for t in sample_titles[:3] if t) or "your list"
-    prompt = (
-        "You are Gooni, Daniel's personal AI assistant, sending him a quick "
-        "good-morning Telegram message. Write ONE line (max 14 words) that "
-        "feels human — not corporate, not chipper. Reference the count and "
-        "maybe one task name if it adds color. No emojis. No greetings like "
-        "'good morning'. No 'Daniel,'. Just the line.\n\n"
-        f"overdue: {overdue_count}\n"
-        f"due today: {today_count}\n"
-        f"sample tasks: {titles}\n"
-    )
-    try:
-        resp = llm_client.client.chat.completions.create(
-            model=llm_client.chat_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.85,
-            max_completion_tokens=40,
-        )
-        line = (resp.choices[0].message.content or "").strip()
-        # Strip surrounding quotes the model loves to add.
-        if len(line) >= 2 and line[0] in "\"'" and line[-1] in "\"'":
-            line = line[1:-1]
-        return line or _fallback_opener(overdue_count, today_count)
-    except Exception as e:
-        print(f"[nudge] LLM opener failed, using fallback: {e}")
-        return _fallback_opener(overdue_count, today_count)
+def gather_context(db: Session) -> dict[str, Any]:
+    """Pull the data the LLM needs to render a personalized digest.
 
-
-def _fallback_opener(overdue: int, today: int) -> str:
-    if overdue and today:
-        return f"{overdue} overdue, {today} on deck for today."
-    if overdue:
-        return f"{overdue} thing{'s' if overdue != 1 else ''} slipped past — quick triage?"
-    return f"{today} thing{'s' if today != 1 else ''} due today."
-
-
-def build_nudge_message(db: Session) -> tuple[str, list[int]] | None:
-    """Compose the digest plus the ordered list of todo IDs it references.
-
-    Returns None when there's nothing to nudge about so the caller can skip
-    the send entirely (no-news = no message).
-
-    The returned id-list is parallel to the 1-based indices printed in the
-    message — the caller stashes it so reply-back commands like `done 2`
-    can resolve to a real todo without re-querying.
-    """
+    Returns a dict with overdue/today todos and active focuses. All lists
+    use plain text titles — the LLM doesn't need the full ListItem object.
+    Caller is responsible for deciding whether the context is empty enough
+    to skip the send entirely (see compose_message)."""
     today, tomorrow = _today_bounds()
     todo_list = list_service.get_or_create_todo_list(db)
 
@@ -105,110 +74,104 @@ def build_nudge_message(db: Session) -> tuple[str, list[int]] | None:
         .all()
     )
 
-    if not overdue and not due_today:
+    # Top-level focuses (committed, non-someday) — endgoal set + no parent.
+    focuses = (
+        db.query(ListItem)
+        .filter(
+            ListItem.parent_id.is_(None),
+            ListItem.endgoal.is_not(None),
+            ListItem.committed.is_(True),
+            ListItem.done.is_(False),
+        )
+        .order_by(ListItem.is_primary.desc(), ListItem.sort_order.asc())
+        .all()
+    )
+
+    return {
+        "overdue": [{"text": t.text, "days_late": (today - t.due_date.replace(hour=0, minute=0, second=0, microsecond=0)).days} for t in overdue],
+        "today": [{"text": t.text} for t in due_today],
+        "focuses": [{"text": f.text, "is_primary": bool(f.is_primary)} for f in focuses],
+    }
+
+
+def _has_anything(ctx: dict) -> bool:
+    return bool(ctx["overdue"] or ctx["today"] or ctx["focuses"])
+
+
+def _format_context_block(ctx: dict) -> str:
+    """Render the context dict into a plain-text block for the LLM. Same shape
+    every fire so Daniel's prompt can rely on the structure."""
+    lines: list[str] = []
+    if ctx["overdue"]:
+        lines.append("OVERDUE:")
+        for t in ctx["overdue"]:
+            tail = f" ({t['days_late']}d late)" if t["days_late"] > 0 else ""
+            lines.append(f"  - {t['text']}{tail}")
+    if ctx["today"]:
+        lines.append("DUE TODAY:")
+        for t in ctx["today"]:
+            lines.append(f"  - {t['text']}")
+    if ctx["focuses"]:
+        lines.append("ACTIVE FOCUSES:")
+        for f in ctx["focuses"]:
+            star = " (primary)" if f["is_primary"] else ""
+            lines.append(f"  - {f['text']}{star}")
+    if not lines:
+        lines.append("(nothing scheduled, no active focuses)")
+    return "\n".join(lines)
+
+
+def compose_message(db: Session) -> str | None:
+    """Compose the daily digest message using Daniel's prompt + today's data.
+
+    Returns None when there's truly nothing to nudge about (no todos, no
+    focuses) so the caller can skip the send entirely.
+    """
+    ctx = gather_context(db)
+    if not _has_anything(ctx):
         return None
 
-    sample_titles = [t.text for t in overdue[:2] + due_today[:2]]
-    opener = _llm_opener(len(overdue), len(due_today), sample_titles)
-
-    lines: list[str] = [opener, ""]
-
-    n = 0
-    if overdue:
-        lines.append("OVERDUE")
-        for t in overdue:
-            n += 1
-            due_day = t.due_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            days_late = (today - due_day).days
-            tail = f"  ({days_late}d late)" if days_late > 0 else ""
-            lines.append(f"  {n}. {t.text}{tail}")
-        lines.append("")
-
-    if due_today:
-        lines.append("TODAY")
-        for t in due_today:
-            n += 1
-            lines.append(f"  {n}. {t.text}")
-        lines.append("")
-
-    lines.append("reply: done <n> · tom <n> · kill <n>")
-
-    ordered_ids = [t.id for t in (list(overdue) + list(due_today))]
-    return "\n".join(lines).rstrip(), ordered_ids
-
-
-def _get_settings(db: Session) -> Settings:
-    """Singleton accessor — creates row id=1 with defaults if missing.
-    Hot path on every nudge fire and reply, so we keep it terse.
-    """
     s = db.query(Settings).filter(Settings.id == 1).first()
-    if s is None:
-        s = Settings(id=1)
-        db.add(s)
-        db.commit()
-        db.refresh(s)
-    return s
+    user_prompt = (s.nudge_prompt or "").strip() if s else ""
+    instruction = user_prompt or DEFAULT_PROMPT
 
+    context_block = _format_context_block(ctx)
+    full_prompt = (
+        f"{instruction}\n\n"
+        "Use only the data below. Do not invent items.\n\n"
+        f"{context_block}"
+    )
 
-def remember_digest(channel: str, recipient: str, ordered_ids: list[int], db: Session) -> None:
-    """Persist the (channel, recipient) → ordered_ids mapping in Settings JSON.
-    Caller commits — we mutate and return.
-    """
-    s = _get_settings(db)
     try:
-        bag = json.loads(s.nudge_last_digests or "{}")
-    except json.JSONDecodeError:
-        bag = {}
-    bag.setdefault(channel, {})[recipient] = ordered_ids
-    s.nudge_last_digests = json.dumps(bag)
-    db.commit()
-
-
-def resolve_digest_reply(
-    channel: str,
-    recipient: str,
-    cmd: str,
-    indices: list[int],
-    db: Session,
-) -> str:
-    """Run a digest reply command. Returns the human-readable result string
-    (also persists the changes via `db.commit()`).
-    """
-    s = _get_settings(db)
-    try:
-        bag = json.loads(s.nudge_last_digests or "{}")
-    except json.JSONDecodeError:
-        bag = {}
-    ordered_ids = bag.get(channel, {}).get(recipient, [])
-    if not ordered_ids:
-        return (
-            "no recent digest to act on — wait for tomorrow's ping (or fire a "
-            "test from Settings)."
+        resp = llm_client.client.chat.completions.create(
+            model=llm_client.chat_model,
+            messages=[{"role": "user", "content": full_prompt}],
+            temperature=0.8,
+            max_completion_tokens=200,
         )
+        msg = (resp.choices[0].message.content or "").strip()
+        # Strip surrounding quotes the model loves to add when given a
+        # one-message instruction.
+        if len(msg) >= 2 and msg[0] in "\"'" and msg[-1] in "\"'":
+            msg = msg[1:-1]
+        return msg or _fallback(ctx)
+    except Exception as e:
+        print(f"[nudge] LLM compose failed, using fallback: {e}")
+        return _fallback(ctx)
 
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    tomorrow = today + timedelta(days=1)
 
-    results: list[str] = []
-    for idx in indices:
-        if idx < 1 or idx > len(ordered_ids):
-            results.append(f"#{idx} out of range")
-            continue
-        tid = ordered_ids[idx - 1]
-        t = db.query(ListItem).filter(ListItem.id == tid).first()
-        if not t:
-            results.append(f"#{idx} not found (deleted?)")
-            continue
-        if cmd == "done":
-            if not t.done:
-                t.done = True
-                t.completed_at = datetime.utcnow()
-            results.append(f"✓ {t.text}")
-        elif cmd == "tom":
-            t.due_date = tomorrow
-            results.append(f"→ tomorrow: {t.text}")
-        elif cmd == "kill":
-            results.append(f"× {t.text}")
-            db.delete(t)
-    db.commit()
-    return "\n".join(results) if results else "(no-op)"
+def _fallback(ctx: dict) -> str:
+    """Static fallback — never as good as the LLM, but always sends."""
+    parts: list[str] = []
+    if ctx["overdue"]:
+        n = len(ctx["overdue"])
+        parts.append(f"{n} thing{'s' if n != 1 else ''} slipped past")
+    if ctx["today"]:
+        n = len(ctx["today"])
+        parts.append(f"{n} due today")
+    if not parts and ctx["focuses"]:
+        primary = next((f["text"] for f in ctx["focuses"] if f["is_primary"]), None)
+        if primary:
+            return f"Quiet day on the docket — keep moving on {primary}."
+        return "Quiet day on the docket."
+    return ", ".join(parts).capitalize() + "."

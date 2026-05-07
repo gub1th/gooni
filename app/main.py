@@ -20,6 +20,7 @@ from .db.database import SessionLocal
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
+    FocusTodoLink,
     McpCall,
     Memory,
     Message,
@@ -45,9 +46,8 @@ from .services.messaging import (
 from .services.note_service import note_service
 from .services.orchestrator import Orchestrator
 from .services.todo_nudge import (
-    build_nudge_message,
-    remember_digest,
-    resolve_digest_reply,
+    DEFAULT_PROMPT as NUDGE_DEFAULT_PROMPT,
+    compose_message as compose_nudge_message,
 )
 
 
@@ -204,6 +204,7 @@ def _run_column_migrations(engine):
             ("list_items", "board_status", "TEXT"),
             ("list_items", "pr_url", "TEXT"),
             ("lists", "kind", "TEXT"),
+            ("settings", "nudge_prompt", "TEXT"),
         ]:
             if table not in existing_tables:
                 continue  # fresh DB: create_all will add the column via model definition
@@ -231,6 +232,12 @@ def _run_column_migrations(engine):
             cols_now = [r[1] for r in conn.execute(text("PRAGMA table_info(notes)"))]
             if "is_draft" in cols_now:
                 conn.execute(text("UPDATE notes SET is_draft = 0 WHERE is_draft IS NULL"))
+        if "settings" in existing_tables:
+            # nudge_prompt column may have just been added — backfill empty
+            # string so SQLAlchemy's NOT NULL doesn't trip on existing rows.
+            cols_now = [r[1] for r in conn.execute(text("PRAGMA table_info(settings)"))]
+            if "nudge_prompt" in cols_now:
+                conn.execute(text("UPDATE settings SET nudge_prompt = '' WHERE nudge_prompt IS NULL"))
         # Unified-item refactor: drop the legacy focuses / todo_items / todo_notes
         # tables (and the older focus_activities table). Existing data is wiped
         # per design — see plan focuses-todos-unified.md. Memory.focus_id rows
@@ -379,11 +386,6 @@ except ImportError:  # pragma: no cover — Fly runs 3.11
     ZoneInfo = None  # type: ignore
 
 
-# Same shape as the Telegram bot's regex — kept in sync so reply commands
-# behave identically across surfaces.
-_DIGEST_REPLY_RE = re.compile(r"^\s*(done|tom|kill)((?:\s+\d+)+)\s*$", re.IGNORECASE)
-
-
 def _settings_row(db: Session) -> Settings:
     """Singleton accessor. Mirrors todo_nudge._get_settings but local copy
     avoids a cross-module import cycle for the lifespan task."""
@@ -427,16 +429,15 @@ async def _fire_nudge_once(force: bool = False) -> dict:
         if not force and s.nudge_last_sent_day == today_str:
             return {"sent": False, "reason": "already sent today"}
 
-        result = build_nudge_message(db)
-        if result is None:
+        msg = compose_nudge_message(db)
+        if msg is None:
             # No-news day — still stamp last_sent_day so we don't re-check
             # every minute (the loop sleeps to next-fire after this returns).
             if not force:
                 s.nudge_last_sent_day = today_str
                 db.commit()
-            return {"sent": False, "reason": "no overdue or due-today todos"}
+            return {"sent": False, "reason": "no todos or focuses to mention"}
 
-        msg, ordered_ids = result
         try:
             channels = json.loads(s.nudge_channels or '["telegram"]')
         except json.JSONDecodeError:
@@ -450,7 +451,6 @@ async def _fire_nudge_once(force: bool = False) -> dict:
                 try:
                     formatted = telegram_channel.format_outbound(msg)
                     telegram_channel.send(str(chat_id), formatted)
-                    remember_digest("telegram", str(chat_id), ordered_ids, db)
                     sent_to.append(f"telegram:{chat_id}")
                 except Exception as e:
                     print(f"[nudge] telegram send failed for {chat_id}: {e}")
@@ -479,7 +479,6 @@ async def _fire_nudge_once(force: bool = False) -> dict:
                 try:
                     formatted = whatsapp_channel.format_outbound(msg)
                     whatsapp_channel.send(handle, formatted)
-                    remember_digest("whatsapp", handle, ordered_ids, db)
                     sent_to.append(f"whatsapp:{handle}")
                 except Exception as e:
                     print(f"[nudge] whatsapp send failed for {handle}: {e}")
@@ -1402,6 +1401,157 @@ def items_reorder(body: dict, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+# ── Focus ↔ Todo links ─────────────────────────────────────────────────
+# Many-to-many: a todo can belong to multiple focuses, a focus can have many
+# todos. Stored in `focus_todo_links`. Endpoints below cover the three flows
+# the UI needs: derive (create + link in one shot), inspect a todo's focuses,
+# and sever a single link.
+
+
+def _is_focus(item: ListItem) -> bool:
+    return item.parent_id is None and bool(item.endgoal)
+
+
+@app.get("/items/{todo_id}/focuses")
+def items_get_focuses_for_todo(todo_id: int, db: Session = Depends(get_db)):
+    """Return the focuses linked to a given todo. Used by the TodoRow chip."""
+    links = db.query(FocusTodoLink).filter(FocusTodoLink.todo_item_id == todo_id).all()
+    if not links:
+        return []
+    focus_ids = [l.focus_item_id for l in links]
+    focuses = db.query(ListItem).filter(ListItem.id.in_(focus_ids)).all()
+    return [{"id": f.id, "text": f.text, "is_primary": bool(f.is_primary)} for f in focuses]
+
+
+@app.get("/items/{focus_id}/todos")
+def items_get_todos_for_focus(focus_id: int, db: Session = Depends(get_db)):
+    """Return the todos linked to a given focus. Used by the focus row's
+    derived-todos disclosure."""
+    links = db.query(FocusTodoLink).filter(FocusTodoLink.focus_item_id == focus_id).all()
+    if not links:
+        return []
+    todo_ids = [l.todo_item_id for l in links]
+    todos = db.query(ListItem).filter(ListItem.id.in_(todo_ids)).all()
+    return [_serialize_item(t) for t in todos]
+
+
+@app.post("/items/{focus_id}/derive-todo")
+def items_derive_todo(focus_id: int, body: dict, db: Session = Depends(get_db)):
+    """Create a leaf todo in the Todo list and link it to this focus.
+
+    Body: {"text": str, "due_date"?: iso8601 | "today" | "tomorrow"}.
+    Returns {"todo": serialized_item, "link_id": int}.
+    """
+    focus = db.query(ListItem).filter(ListItem.id == focus_id).first()
+    if not focus:
+        raise HTTPException(status_code=404, detail="focus not found")
+    if not _is_focus(focus):
+        raise HTTPException(status_code=400, detail="item is not a focus (no endgoal or has parent)")
+
+    text_val = (body.get("text") or "").strip()
+    if not text_val:
+        raise HTTPException(status_code=400, detail="text required")
+    due_date = _parse_optional_due(body.get("due_date"))
+
+    todo_list = list_service.get_or_create_todo_list(db)
+    todo = list_service.add_item(
+        list_id=todo_list.id,
+        text=text_val,
+        db=db,
+        due_date=due_date,
+    )
+    link = FocusTodoLink(focus_item_id=focus.id, todo_item_id=todo.id)
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return {"todo": _serialize_item(todo), "link_id": link.id}
+
+
+@app.post("/items/{focus_id}/link-todo/{todo_id}")
+def items_link_existing_todo(focus_id: int, todo_id: int, db: Session = Depends(get_db)):
+    """Attach an existing todo to a focus. Idempotent — returns the existing
+    link if the pair is already linked."""
+    focus = db.query(ListItem).filter(ListItem.id == focus_id).first()
+    todo = db.query(ListItem).filter(ListItem.id == todo_id).first()
+    if not focus or not todo:
+        raise HTTPException(status_code=404, detail="focus or todo not found")
+    if not _is_focus(focus):
+        raise HTTPException(status_code=400, detail="item is not a focus")
+    existing = (
+        db.query(FocusTodoLink)
+        .filter(
+            FocusTodoLink.focus_item_id == focus_id,
+            FocusTodoLink.todo_item_id == todo_id,
+        )
+        .first()
+    )
+    if existing:
+        return {"link_id": existing.id, "created": False}
+    link = FocusTodoLink(focus_item_id=focus_id, todo_item_id=todo_id)
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return {"link_id": link.id, "created": True}
+
+
+@app.delete("/focus-todo-links/{link_id}")
+def items_unlink_focus_todo(link_id: int, db: Session = Depends(get_db)):
+    link = db.query(FocusTodoLink).filter(FocusTodoLink.id == link_id).first()
+    if not link:
+        raise HTTPException(status_code=404, detail="link not found")
+    db.delete(link)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/items/today-todos")
+def items_today_todos(db: Session = Depends(get_db)):
+    """Open todos in the Todo list with due_date == today (used by the
+    dashboard's 'Today's todos' section that replaced the Quick focuses
+    column). Each row carries its linked focuses for the chip pill."""
+    from datetime import datetime as _dt2, timedelta as _td2
+
+    todo_list = list_service.get_or_create_todo_list(db)
+    today = _dt2.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = today + _td2(days=1)
+    todos = (
+        db.query(ListItem)
+        .filter(
+            ListItem.list_id == todo_list.id,
+            ListItem.done.is_(False),
+            ListItem.due_date.is_not(None),
+            ListItem.due_date >= today,
+            ListItem.due_date < tomorrow,
+        )
+        .order_by(ListItem.sort_order.asc())
+        .all()
+    )
+    if not todos:
+        return []
+    todo_ids = [t.id for t in todos]
+    links = (
+        db.query(FocusTodoLink)
+        .filter(FocusTodoLink.todo_item_id.in_(todo_ids))
+        .all()
+    )
+    focus_ids = list({l.focus_item_id for l in links})
+    focus_rows = (
+        db.query(ListItem).filter(ListItem.id.in_(focus_ids)).all() if focus_ids else []
+    )
+    focus_by_id = {f.id: f for f in focus_rows}
+    by_todo: dict[int, list[dict]] = {}
+    for l in links:
+        f = focus_by_id.get(l.focus_item_id)
+        if not f:
+            continue
+        by_todo.setdefault(l.todo_item_id, []).append(
+            {"id": f.id, "text": f.text, "is_primary": bool(f.is_primary)}
+        )
+    return [
+        {**_serialize_item(t), "focuses": by_todo.get(t.id, [])} for t in todos
+    ]
+
+
 def _serialize_item(it: ListItem) -> dict:
     return {
         "id": it.id,
@@ -1596,17 +1746,6 @@ async def whatsapp_webhook(
                 body = (msg.get("text") or {}).get("body") or ""
                 if not sender or not body:
                     continue
-                # Digest-reply intercept (`done 1 3`, `tom 2`, `kill 4`) —
-                # mirror the Telegram path. Must run before dispatch_inbound
-                # so the orchestrator doesn't try to LLM-respond to it.
-                m = _DIGEST_REPLY_RE.match(body.strip())
-                if m and whatsapp_channel.is_allowed(sender):
-                    cmd = m.group(1).lower()
-                    indices = [int(p) for p in m.group(2).split()]
-                    reply = resolve_digest_reply("whatsapp", sender, cmd, indices, db)
-                    whatsapp_channel.send(sender, whatsapp_channel.format_outbound(reply))
-                    handled_any = True
-                    continue
                 result = dispatch_inbound(whatsapp_channel, sender, body, db)
                 if result is None:
                     continue  # not allowlisted; silent drop
@@ -1631,6 +1770,7 @@ def _serialize_settings(s: Settings) -> dict:
         "nudge_tz": s.nudge_tz or "America/Los_Angeles",
         "nudge_channels": channels,
         "nudge_last_sent_day": s.nudge_last_sent_day,
+        "nudge_prompt": s.nudge_prompt or "",
     }
 
 
@@ -1672,9 +1812,20 @@ def patch_settings(body: dict, db: Session = Depends(get_db)):
         if bad:
             raise HTTPException(status_code=400, detail=f"unknown channel(s): {bad}")
         s.nudge_channels = json.dumps(chans)
+    if "nudge_prompt" in body:
+        # No length cap server-side — Daniel writes whatever instruction he
+        # wants and the LLM cost scales with it. Empty string == use default.
+        s.nudge_prompt = (body["nudge_prompt"] or "").strip()
     db.commit()
     db.refresh(s)
     return _serialize_settings(s)
+
+
+@app.get("/settings/nudge-prompt-default")
+def get_nudge_prompt_default():
+    """Returns the bundled default digest prompt so the UI's "Use default"
+    button doesn't have to mirror the string client-side."""
+    return {"prompt": NUDGE_DEFAULT_PROMPT}
 
 
 @app.post("/settings/test-nudge")

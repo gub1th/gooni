@@ -3,8 +3,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sparkles, Wind, Crown, HelpCircle } from "lucide-react";
 import {
   fetchItemTree, createItem, updateItem, deleteItem, reorderItems, suggestFocus,
+  fetchTodayTodos, deriveTodoFromFocus,
   type ApiItemTree, type ApiItemNode, type FocusScale,
+  type TodayTodo, type FocusChip,
 } from "../services/api";
+import { ListPlus } from "lucide-react";
 import { FocusOverlay, loadFocusMode, saveFocusMode, clearFocusMode } from "./FocusOverlay";
 
 // Focus Flow — primary spotlight + Quick/Slow sections + add-focus modal +
@@ -282,6 +285,22 @@ export function FocusFlow() {
       refresh();
     } catch (e) { console.error(e); }
   }
+
+  // Derive a leaf todo from a focus — opens a tiny prompt for the title,
+  // creates the todo + link in one shot, then refreshes the Today's-todos
+  // list so the new row shows up immediately when due_date is today.
+  async function handleDeriveTodo(focusId: number) {
+    // eslint-disable-next-line no-alert
+    const raw = window.prompt("Todo (one line):");
+    const text = (raw ?? "").trim();
+    if (!text) return;
+    try {
+      await deriveTodoFromFocus(focusId, text, "today");
+      queryClient.invalidateQueries({ queryKey: ["today-todos"] });
+    } catch (e) {
+      console.error("derive-todo failed", e);
+    }
+  }
   // Done flow: optimistic remove (so the row visibly slides away) + queue
   // a 6s mutation. The Undo button cancels the timer + re-adds the node
   // locally; server state never changes.
@@ -396,30 +415,11 @@ export function FocusFlow() {
         <div className="ff-empty">Loading…</div>
       ) : (
         <>
-          <SectionLabel label="Quick · today" count={quick.length} />
-          {quick.length === 0 ? (
-            <div className="ff-empty">Nothing quick on the docket.</div>
-          ) : (
-            <div>
-              {quick.map((f) => (
-                <FocusFlowRow
-                  key={f.id}
-                  node={f}
-                  onSetPrimary={handleSetPrimary}
-                  onClearPrimary={handleClearPrimary}
-                  onRemove={handleRemove}
-                  onComplete={handleComplete}
-                  isNew={f.id === newId}
-                  draggingId={draggingId}
-                  drop={drop}
-                  onDragStart={onRowDragStart}
-                  onDragEnd={onRowDragEnd}
-                  onDragOver={onRowDragOver}
-                  onDrop={handleDrop}
-                />
-              ))}
-            </div>
-          )}
+          {/* Today's todos — replaces the old "Quick · today" section. Pulls
+              from the Todo list filtered to due_date == today. Each row shows
+              the focuses it's linked to as small chips. Quick-scale focuses
+              (legacy) no longer render on the dashboard. */}
+          <TodayTodos />
 
           <SectionLabel label="Slow burn" count={slow.length} />
           {slow.length === 0 ? (
@@ -434,6 +434,7 @@ export function FocusFlow() {
                   onClearPrimary={handleClearPrimary}
                   onRemove={handleRemove}
                   onComplete={handleComplete}
+                  onDeriveTodo={handleDeriveTodo}
                   isNew={f.id === newId}
                   draggingId={draggingId}
                   drop={drop}
@@ -457,6 +458,7 @@ export function FocusFlow() {
                   onClearPrimary={handleClearPrimary}
                   onRemove={handleRemove}
                   onComplete={handleComplete}
+                  onDeriveTodo={handleDeriveTodo}
                   isNew={f.id === newId}
                   draggingId={null}
                   drop={null}
@@ -566,7 +568,7 @@ function HealthGlyph({ color }: { color: string | null }) {
 // ── Row ────────────────────────────────────────────────────────────────────
 
 function FocusFlowRow({
-  node, onSetPrimary, onClearPrimary, onRemove, onComplete, isNew,
+  node, onSetPrimary, onClearPrimary, onRemove, onComplete, onDeriveTodo, isNew,
   draggingId, drop,
   onDragStart, onDragEnd, onDragOver, onDrop,
 }: {
@@ -575,6 +577,7 @@ function FocusFlowRow({
   onClearPrimary: (id: number) => void;
   onRemove: (id: number) => void;
   onComplete: (n: ApiItemNode) => void;
+  onDeriveTodo?: (focusId: number) => void;
   isNew?: boolean;
   draggingId: number | null;
   drop: DropTarget;
@@ -628,6 +631,7 @@ function FocusFlowRow({
   return (
     <div
       className={cls}
+      data-focus-id={node.id}
       draggable={!someday && !doneAnim}
       onDragStart={(e) => {
         if (someday || doneAnim) return;
@@ -662,6 +666,16 @@ function FocusFlowRow({
       </div>
       <div className="ff-row-actions">
         {!someday && <FocusModePill node={node} />}
+        {!someday && onDeriveTodo && (
+          <button
+            className="ff-icon-btn"
+            onClick={(e) => { e.stopPropagation(); onDeriveTodo(node.id); }}
+            title="Derive a todo from this focus"
+            aria-label="Derive todo"
+          >
+            <ListPlus size={13} strokeWidth={1.8} />
+          </button>
+        )}
         <button
           className={"ff-crown-btn " + (node.is_primary ? "ff-crown-active" : "")}
           onClick={handleStarClick}
@@ -684,6 +698,82 @@ function FocusFlowRow({
       </div>
       {isDropAfter && <div className="ff-drop-line ff-drop-line-bottom" />}
     </div>
+  );
+}
+
+// ── Today's todos ──────────────────────────────────────────────────────────
+// Replaces the old "Quick · today" focus column on the dashboard. Pulls from
+// the Todo list (due_date == today) and shows linked focuses as chips so
+// the conceptual link from "what I'm working on" → "what serves it" is
+// visible on the dashboard at a glance.
+function TodayTodos() {
+  const queryClient = useQueryClient();
+  const { data: todos = [], isLoading } = useQuery<TodayTodo[]>({
+    queryKey: ["today-todos"],
+    queryFn: fetchTodayTodos,
+  });
+
+  async function handleToggle(t: TodayTodo) {
+    try {
+      await updateItem(t.id, { done: !t.done });
+      queryClient.invalidateQueries({ queryKey: ["today-todos"] });
+    } catch (e) { console.error("toggle todo failed", e); }
+  }
+
+  function handleChipClick(focusId: number) {
+    // Best-effort smooth scroll to the focus row. The row id is set on
+    // FocusFlowRow's data-focus-id attribute below.
+    const el = document.querySelector<HTMLElement>(`[data-focus-id="${focusId}"]`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  return (
+    <>
+      <SectionLabel label="Today's todos" count={todos.length} />
+      {isLoading ? (
+        <div className="ff-empty">Loading…</div>
+      ) : todos.length === 0 ? (
+        <div className="ff-empty">No todos due today. Derive one from a focus →</div>
+      ) : (
+        <div>
+          {todos.map((t) => (
+            <div key={t.id} className={"ff-row ff-todo-row " + (t.done ? "ff-row-done-static" : "")}>
+              <button
+                className={"ff-check-dot " + (t.done ? "ff-check-checked" : "")}
+                onClick={() => handleToggle(t)}
+                title={t.done ? "Mark not done" : "Mark done"}
+                aria-label={t.done ? "Mark not done" : "Mark done"}
+              >
+                <span className="ff-todo-checkmark">
+                  <svg className="ff-check-svg" viewBox="0 0 14 14" fill="none">
+                    <path d="M3 7.5 L6 10.2 L11 4.5"
+                      stroke="currentColor" strokeWidth="2.2"
+                      strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+              </button>
+              <div className="ff-row-body">
+                <div className={"ff-row-title " + (t.done ? "ff-todo-strike" : "")}>{t.text}</div>
+                {t.focuses.length > 0 && (
+                  <div className="ff-todo-chips">
+                    {t.focuses.map((f: FocusChip) => (
+                      <button
+                        key={f.id}
+                        onClick={() => handleChipClick(f.id)}
+                        className={"ff-todo-chip " + (f.is_primary ? "ff-todo-chip-primary" : "")}
+                        title={`Linked focus — ${f.text}`}
+                      >
+                        {f.text}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1236,6 +1326,43 @@ function FocusFlowStyles() {
       .ff-row-primary { border-color: rgba(74,222,128,0.45); }
       .ff-row-someday { opacity: 0.55; }
       .ff-row-dragging { opacity: 0.4; }
+      .ff-row-done-static { opacity: 0.55; }
+
+      /* Today-todo row variant — same shell as a focus row but no health
+         glyph, no drag, no crown. Chips below the title show linked focuses. */
+      .ff-todo-row { cursor: default; }
+      .ff-todo-strike { text-decoration: line-through; color: var(--gooni-muted, #8E8E93); }
+      .ff-todo-checkmark { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--gooni-border, rgba(0,0,0,0.20)); }
+      .ff-check-checked .ff-todo-checkmark { background: #16A34A; color: #fff; border-color: #16A34A; }
+      .ff-todo-chips {
+        display: flex; flex-wrap: wrap; gap: 4px;
+        margin-top: 4px;
+      }
+      .ff-todo-chip {
+        background: rgba(74,222,128,0.10);
+        color: #16803C;
+        border: 0.5px solid rgba(22,128,60,0.25);
+        border-radius: 999px;
+        font-size: 11px; line-height: 1.4;
+        padding: 1px 8px;
+        cursor: pointer;
+        font-family: inherit;
+        max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        transition: background 0.12s, border-color 0.12s;
+      }
+      .ff-todo-chip:hover {
+        background: rgba(74,222,128,0.18);
+        border-color: rgba(22,128,60,0.45);
+      }
+      .ff-todo-chip-primary {
+        background: rgba(234,179,8,0.14);
+        color: #92400E;
+        border-color: rgba(234,179,8,0.35);
+      }
+      .ff-todo-chip-primary:hover {
+        background: rgba(234,179,8,0.22);
+        border-color: rgba(234,179,8,0.55);
+      }
       .ff-row-body { min-width: 0; }
       .ff-row-title {
         font-weight: 500; letter-spacing: -0.005em;
