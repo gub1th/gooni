@@ -25,7 +25,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 _DEAD = {
-    "notes": ["outcome", "excerpt", "log_date", "goal_id", "meta", "pinned_sort_order", "note_type"],
+    # NOTE: "excerpt" was originally in this list but is a LIVE cached
+    # preview column added by PR #139. Removed here on 2026-05-07; the
+    # restore migration 6c79702a950e adds it back on envs that already
+    # ran this cleanup with the old list.
+    "notes": ["outcome", "log_date", "goal_id", "meta", "pinned_sort_order", "note_type"],
     "spaces": ["sort_order"],
 }
 
