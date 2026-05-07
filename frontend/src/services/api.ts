@@ -932,6 +932,26 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   return res.json() as Promise<DashboardStats>;
 }
 
+// Time spent on the gooni repo today + this week, estimated by clustering
+// commit timestamps from GitHub (server hits the GitHub API). All-zero
+// payload when GitHub OAuth isn't connected.
+export interface TimeOnGooni {
+  configured: boolean;
+  today_minutes: number;
+  week_minutes: number;
+  today_sessions: number;
+  week_sessions: number;
+  owner?: string;
+  name?: string;
+  error?: string;
+}
+
+export async function fetchTimeOnGooni(): Promise<TimeOnGooni> {
+  const res = await apiFetch(`${BASE}/dashboard/time-on-gooni`);
+  if (!res.ok) throw new Error("Failed to fetch time-on-gooni");
+  return res.json() as Promise<TimeOnGooni>;
+}
+
 export interface ExtendedStats {
   notes_this_week: number;
   notes_total: number;

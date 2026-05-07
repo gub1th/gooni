@@ -3898,6 +3898,111 @@ def dashboard_dev_activity(db: Session = Depends(get_db)):
     return das.dev_activity_service.build(db)
 
 
+@app.get("/dashboard/time-on-gooni")
+def dashboard_time_on_gooni(
+    owner: str = "gub1th",
+    name: str = "gooni",
+    gap_minutes: int = 15,
+    headstart_minutes: int = 5,
+    db: Session = Depends(get_db),
+):
+    """Estimate time spent on a repo by clustering commit timestamps.
+    Default = gub1th/gooni. Two commits within `gap_minutes` count as the
+    same work session; each session credits `headstart_minutes` of pre-
+    first-commit work (you didn't start coding the moment you committed).
+
+    Returns rough minutes for today (rolling 24h) and the last 7 days.
+    Caveat: GitHub commits only — silent reading / WIP without commits is
+    invisible. So this is a *floor* on time spent, not the truth.
+    """
+    from datetime import datetime, timedelta, timezone
+    if not gh.is_configured() or gh.get_valid_access_token(db) is None:
+        return {
+            "configured": False,
+            "today_minutes": 0,
+            "week_minutes": 0,
+            "today_sessions": 0,
+            "week_sessions": 0,
+        }
+
+    since_iso = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    try:
+        commits = gh.list_recent_commits(
+            db, owner, name, since_iso=since_iso, per_page=100
+        )
+    except Exception as e:
+        return {
+            "configured": True,
+            "error": str(e)[:200],
+            "today_minutes": 0,
+            "week_minutes": 0,
+            "today_sessions": 0,
+            "week_sessions": 0,
+        }
+
+    # Pull author timestamps; tolerate either author or committer.
+    timestamps: list[datetime] = []
+    for c in commits:
+        commit = c.get("commit") or {}
+        ts = (commit.get("author") or {}).get("date") or (
+            commit.get("committer") or {}
+        ).get("date")
+        if not ts:
+            continue
+        try:
+            timestamps.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
+        except ValueError:
+            continue
+
+    timestamps.sort()
+    if not timestamps:
+        return {
+            "configured": True,
+            "today_minutes": 0,
+            "week_minutes": 0,
+            "today_sessions": 0,
+            "week_sessions": 0,
+        }
+
+    # Cluster by gap. Each session: [first, last]. Credit headstart_minutes
+    # before the first commit so a single-commit session isn't 0 minutes.
+    sessions: list[list[datetime]] = [[timestamps[0], timestamps[0]]]
+    gap = timedelta(minutes=gap_minutes)
+    for t in timestamps[1:]:
+        if t - sessions[-1][1] <= gap:
+            sessions[-1][1] = t
+        else:
+            sessions.append([t, t])
+
+    now = datetime.now(timezone.utc)
+    cutoff_24h = now - timedelta(hours=24)
+    cutoff_7d = now - timedelta(days=7)
+    headstart = timedelta(minutes=headstart_minutes)
+
+    today_minutes = 0.0
+    week_minutes = 0.0
+    today_sessions = 0
+    week_sessions = 0
+    for first, last in sessions:
+        duration = (last - first + headstart).total_seconds() / 60
+        if last >= cutoff_7d:
+            week_minutes += duration
+            week_sessions += 1
+        if last >= cutoff_24h:
+            today_minutes += duration
+            today_sessions += 1
+
+    return {
+        "configured": True,
+        "today_minutes": round(today_minutes, 1),
+        "week_minutes": round(week_minutes, 1),
+        "today_sessions": today_sessions,
+        "week_sessions": week_sessions,
+        "owner": owner,
+        "name": name,
+    }
+
+
 @app.get("/snapshot/today")
 def snapshot_today(db: Session = Depends(get_db)):
     """Gooni's Take — daily reflection on the codebase + Daniel's activity.
