@@ -2964,6 +2964,20 @@ def _read_time_min(html: str) -> int:
     return max(1, -(-len(text) // 1000))
 
 
+def _unique_viewers_for_note(db: Session, note_id: int) -> int:
+    """Count distinct ip_hash values that hit /public/notes/{note_id}.
+    Path-scoped — if a note is unpublished + republished, the historical
+    visit rows still count toward the total. Daniel said "idc if data is
+    erased if i pull a note out" so we keep it simple + cumulative."""
+    from sqlalchemy import func as sqlfunc
+    return int(
+        db.query(sqlfunc.count(sqlfunc.distinct(Visit.ip_hash)))
+        .filter(Visit.path == f"/public/notes/{note_id}")
+        .scalar()
+        or 0
+    )
+
+
 @app.get("/public/notes")
 def get_public_notes(db: Session = Depends(get_db)):
     """Return all public notes with their space name, newest first. No auth."""
@@ -3002,16 +3016,20 @@ def get_public_note(note_id: int, db: Session = Depends(get_db)):
         "space_name": space.name if space else None,
         "created_at": note.created_at,
         "updated_at": note.updated_at,
+        "unique_viewers": _unique_viewers_for_note(db, note.id),
     }
 
 
 @app.get("/notes/{note_id}")
 def get_note(note_id: int, db: Session = Depends(get_db)):
-    """Return a single note by ID."""
+    """Return a single note by ID. Tacks on `unique_viewers` so the editor
+    can show the count next to the Public toggle without a second round-trip."""
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-    return _serialize_note(note)
+    payload = _serialize_note(note)
+    payload["unique_viewers"] = _unique_viewers_for_note(db, note.id)
+    return payload
 
 
 @app.get("/public/profile")

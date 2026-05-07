@@ -98,6 +98,13 @@ function PublicNotePage() {
                   <span>Updated {formatPublicDate(note.updated_at)}</span>
                 </>
               )}
+              <span style={{ color: "#D1D1D6" }}>·</span>
+              {/* Eye icon — currentColor matches the rest of the meta line. */}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+              <span>{note.unique_viewers.toLocaleString()} {note.unique_viewers === 1 ? "viewer" : "viewers"}</span>
             </p>
             {/* Scoped prose styles — override browser defaults so injected H1/H2/H3
                 in note content never out-shout the title. See sanitizeHtml for the

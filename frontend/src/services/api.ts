@@ -104,6 +104,11 @@ export interface ApiNote {
   // place of the selection; `excerpt_anchor` is the chip label.
   parent_note_id?: number | null;
   excerpt_anchor?: string | null;
+  // Distinct visitors that hit /public/notes/{id}. Only present on the
+  // single-note GET (`/notes/{id}`), not on space-list responses — the
+  // count requires a per-note Visit query that isn't worth running for
+  // every list row.
+  unique_viewers?: number;
 }
 
 export async function fetchSpaceNotes(spaceId: number | "general"): Promise<ApiNote[]> {
@@ -493,6 +498,7 @@ export interface PublicNoteDetail {
   space_name: string | null;
   created_at: string;
   updated_at: string;
+  unique_viewers: number;
 }
 
 export async function fetchPublicNote(id: number): Promise<PublicNoteDetail> {

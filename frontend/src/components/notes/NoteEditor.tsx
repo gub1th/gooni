@@ -300,6 +300,11 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   // notes doesn't carry the green-checked state across.
   const [taggedNoteId, setTaggedNoteId] = useState<number | null>(null);
   const [taggingInFlight, setTaggingInFlight] = useState(false);
+  // Parent note title cache — populated when the active note has a
+  // parent_note_id so the back-pill can render the actual title instead
+  // of "↑ from #42". Keyed by parent id so switching notes doesn't show
+  // stale title flicker. `null` when no parent or fetch is in flight.
+  const [parentLink, setParentLink] = useState<{ id: number; title: string } | null>(null);
   const movePickerRef = useRef<HTMLDivElement>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -385,6 +390,39 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     }, 1000);
     return () => clearTimeout(t);
   }, [activeNoteId]);
+
+  // Fetch the parent note's title when this note was extracted from one,
+  // so the "↑ from <parent>" pill above the title shows the real title
+  // (not "↑ from #42"). Cleared when navigating to a non-extracted note.
+  useEffect(() => {
+    const parentId = activeNote?.parent_note_id ?? null;
+    if (!parentId) {
+      setParentLink(null);
+      return;
+    }
+    if (parentLink?.id === parentId) return; // already cached
+    let cancelled = false;
+    apiFetchNote(parentId)
+      .then((p) => {
+        if (cancelled) return;
+        const t = (p.title ?? "").trim() || "Untitled";
+        setParentLink({ id: parentId, title: t });
+      })
+      .catch(() => { if (!cancelled) setParentLink({ id: parentId, title: "note" }); });
+    return () => { cancelled = true; };
+  }, [activeNote?.parent_note_id, parentLink?.id]);
+
+  // Refresh the active note when it becomes public so unique_viewers is
+  // populated. The list-fetch path (fetchSpaceNotes) intentionally omits the
+  // count to avoid N per-note Visit queries on every load — only the single
+  // note GET carries it. Without this, the editor's viewer pill stays empty
+  // until the next manual refetch.
+  useEffect(() => {
+    if (!activeNoteId || activeNoteId < 0) return;
+    if (!activeNote?.is_public) return;
+    if (typeof activeNote.unique_viewers === "number") return; // already hydrated
+    refetchNote(activeNoteId).catch(() => {});
+  }, [activeNoteId, activeNote?.is_public, activeNote?.unique_viewers, refetchNote]);
 
   // Memorize previous note on leave; touch new note on enter — catches ALL navigation paths
   useEffect(() => {
@@ -554,10 +592,16 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
    * NoteLink chip. POSTing the selected HTML before mutating the parent
    * editor avoids a race where the user keeps typing during the network
    * round-trip and the autosave clobbers the chip insert.
+   *
+   * After the chip is in, we save the parent synchronously and jump the
+   * editor to the new child — Daniel's mental model is "extract = pop a
+   * draft out into its own note and continue writing there." Leaving the
+   * user on the parent with just a chip felt like it half-shipped.
    */
   async function handleExtractToChildNote() {
     if (!editor || editor.isDestroyed) return;
     if (!activeNoteId || activeNoteId <= 0) return;
+    const parentId = activeNoteId;
     const { from, to } = editor.state.selection;
     if (from === to) return;
     const slice = editor.state.doc.slice(from, to);
@@ -568,7 +612,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     if (!selectedHtml) return;
     let child: ApiNote | null = null;
     try {
-      child = await apiExtractToChildNote(activeNoteId, selectedHtml);
+      child = await apiExtractToChildNote(parentId, selectedHtml);
     } catch {
       return; // silent — selection stays intact
     }
@@ -583,7 +627,16 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       .run();
     bodyRef.current = editor.getHTML();
     hasChanges.current = true;
-    scheduleSave();
+    // Persist parent's chip insertion BEFORE swapping notes — otherwise the
+    // pending debounced save fires after activeNoteId flips and writes the
+    // parent's content to the wrong row. await save() here is the only way
+    // to guarantee the chip lands on the parent row.
+    await save();
+    // Make sure the freshly-created child is in the store before selectNote
+    // reaches for it (otherwise the editor briefly renders an empty note).
+    await refetchNote(child.id).catch(() => {});
+    selectNote(child.id);
+    navigate({ to: "/", search: { note: child.id, conv: undefined, list: undefined, audit: undefined } });
   }
 
   async function handleSubmit() {
@@ -1211,6 +1264,26 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           </Tooltip>
         )}
 
+        {/* Viewer count — only when published. Optimistic-render falls back
+            to "—" while unique_viewers hydrates from the single-note GET. */}
+        {activeNote && activeNoteId && activeNoteId > 0 && localIsPublic && (
+          <Tooltip label="Unique visitors who hit the public page">
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              padding: "0 8px", height: 30, borderRadius: 8,
+              fontSize: 12, color: "#6E6E73",
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+              userSelect: "none",
+            }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+              <span>{typeof activeNote.unique_viewers === "number" ? activeNote.unique_viewers.toLocaleString() : "—"}</span>
+            </div>
+          </Tooltip>
+        )}
+
         </div>
       </div>
       )}
@@ -1387,6 +1460,44 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
             )}
             {activeNote && (
               <div style={{ minHeight: "75vh" }}>
+                {/* Parent backlink — only when this note was extracted from
+                    another. Click jumps back to the parent (which still has
+                    the NoteLink chip pointing here, so navigation round-trips
+                    naturally). */}
+                {parentLink && (
+                  <button
+                    onClick={async () => {
+                      await save();
+                      selectNote(parentLink.id);
+                      navigate({ to: "/", search: { note: parentLink.id, conv: undefined, list: undefined, audit: undefined } });
+                    }}
+                    title={`Back to "${parentLink.title}"`}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 5,
+                      padding: "2px 10px 2px 8px", marginBottom: 12,
+                      background: "rgba(74,222,128,0.10)",
+                      color: "#16803C",
+                      border: "0.5px solid rgba(22,128,60,0.25)",
+                      borderRadius: 12,
+                      fontSize: 12.5,
+                      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                      cursor: "pointer",
+                      maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      transition: "background 0.12s, border-color 0.12s",
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(74,222,128,0.18)";
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(22,128,60,0.45)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(74,222,128,0.10)";
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(22,128,60,0.25)";
+                    }}
+                  >
+                    <span aria-hidden="true">↖</span>
+                    <span>from “{parentLink.title}”</span>
+                  </button>
+                )}
                 <input
                   ref={titleInputRef}
                   value={localTitle}
