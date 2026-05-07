@@ -172,6 +172,7 @@ def _run_column_migrations(engine):
             ("notes", "embedding", "TEXT"),
             ("notes", "is_public", "INTEGER"),
             ("notes", "is_pinned", "INTEGER"),
+            ("notes", "is_draft", "INTEGER"),
             ("notes", "suggested_questions", "TEXT"),
             ("conversations", "topic_graph", "TEXT"),
             ("conversations", "summary", "TEXT"),
@@ -214,7 +215,7 @@ def _run_column_migrations(engine):
                 print(f"Migration: added {table}.{col}")
                 # Backfill NULLs to 0 for boolean-like columns so filters
                 # on `column == False` still match existing rows.
-                if table == "notes" and col in ("is_public", "is_pinned"):
+                if table == "notes" and col in ("is_public", "is_pinned", "is_draft"):
                     conn.execute(text(f"UPDATE {table} SET {col} = 0 WHERE {col} IS NULL"))
                 if table == "messages" and col == "is_feedback":
                     conn.execute(text(f"UPDATE {table} SET {col} = 0 WHERE {col} IS NULL"))
@@ -225,6 +226,11 @@ def _run_column_migrations(engine):
         if "notes" in existing_tables:
             conn.execute(text("UPDATE notes SET is_pinned = 0 WHERE is_pinned IS NULL"))
             conn.execute(text("UPDATE notes SET is_public = 0 WHERE is_public IS NULL"))
+            # is_draft column may not exist yet on this connection (older DBs);
+            # the loop above adds it. Guard the backfill in case the table predates it.
+            cols_now = [r[1] for r in conn.execute(text("PRAGMA table_info(notes)"))]
+            if "is_draft" in cols_now:
+                conn.execute(text("UPDATE notes SET is_draft = 0 WHERE is_draft IS NULL"))
         # Unified-item refactor: drop the legacy focuses / todo_items / todo_notes
         # tables (and the older focus_activities table). Existing data is wiped
         # per design — see plan focuses-todos-unified.md. Memory.focus_id rows
@@ -1757,6 +1763,7 @@ def _serialize_note(n: Note) -> dict:
         "last_opened_at": n.last_opened_at,
         "is_public": bool(n.is_public),
         "is_pinned": bool(n.is_pinned),
+        "is_draft": bool(getattr(n, "is_draft", False)),
         # Snapshot of what classify_note routed for this note's most recent
         # save. Drives the "Routed:" disclosure under the title — same shape
         # as the chat bubble so Daniel sees memory writes + backlog items
@@ -1871,9 +1878,17 @@ def update_note(
         sid = body["space_id"]
         note.space_id = None if (sid is None or sid == "general") else int(sid)
     if "is_public" in body:
-        note.is_public = bool(body["is_public"])
+        new_public = bool(body["is_public"])
+        note.is_public = new_public
+        # Publishing graduates the note out of draft state — once it ships,
+        # the "intent to publish" flag is satisfied. User can re-mark it draft
+        # explicitly if they pull it back for edits.
+        if new_public:
+            note.is_draft = False
     if "is_pinned" in body:
         note.is_pinned = bool(body["is_pinned"])
+    if "is_draft" in body:
+        note.is_draft = bool(body["is_draft"])
     db.commit()
     db.refresh(note)
     return _serialize_note(note)
@@ -1936,6 +1951,17 @@ def get_pinned_notes(db: Session = Depends(get_db)):
     notes = (
         db.query(Note)
         .filter(Note.is_pinned == True)  # noqa: E712
+        .order_by(_notes_order())
+        .all()
+    )
+    return [_serialize_note(n) for n in notes]
+
+
+@app.get("/notes/drafts")
+def get_draft_notes(db: Session = Depends(get_db)):
+    notes = (
+        db.query(Note)
+        .filter(Note.is_draft == True)  # noqa: E712
         .order_by(_notes_order())
         .all()
     )
