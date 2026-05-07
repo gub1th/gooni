@@ -1,4 +1,3 @@
-import { cachedFetch } from "./cache";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -1028,22 +1027,42 @@ export async function fetchClaudeUsage(days = 30, refresh = false): Promise<Clau
   return res.json() as Promise<ClaudeUsage>;
 }
 
-// Gooni's Take — LLM call, cached separately so we don't pay tokens per tab switch.
-// User can force-refresh via the refresh button next to the take.
-const TAKE_CACHE_KEY = "gooni-take";
-const TAKE_TTL_MS = 30 * 60 * 1000;
+// Gooni's Takes — persisted server-side in `gooni_takes`, one row per UTC
+// day per kind. Re-fetching a same-day take is a cheap DB read; force=true
+// regenerates and overwrites the day's row.
+export interface GooniTakePayload {
+  id?: number;
+  day: string;          // YYYY-MM-DD
+  kind: "focus" | "dev";
+  take: string;
+  model?: string;
+  prompt_version?: string;
+  sources?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
 
-export async function fetchGooniTake(opts: { force?: boolean } = {}): Promise<{ take: string }> {
-  return cachedFetch(
-    TAKE_CACHE_KEY,
-    TAKE_TTL_MS,
-    async () => {
-      const res = await apiFetch(`${BASE}/dashboard/take`);
-      if (!res.ok) throw new Error("Failed to fetch Gooni's Take");
-      return res.json() as Promise<{ take: string }>;
-    },
-    opts,
-  );
+export async function fetchGooniTake(opts: { force?: boolean } = {}): Promise<GooniTakePayload> {
+  const qs = opts.force ? "?force=1" : "";
+  const res = await apiFetch(`${BASE}/dashboard/take${qs}`);
+  if (!res.ok) throw new Error("Failed to fetch Gooni's Take");
+  return res.json() as Promise<GooniTakePayload>;
+}
+
+export async function fetchDevTake(opts: { force?: boolean } = {}): Promise<GooniTakePayload> {
+  const qs = opts.force ? "?force=1" : "";
+  const res = await apiFetch(`${BASE}/dashboard/dev-take${qs}`);
+  if (!res.ok) throw new Error("Failed to fetch dev take");
+  return res.json() as Promise<GooniTakePayload>;
+}
+
+export async function fetchTakesHistory(
+  kind: "focus" | "dev",
+  limit = 30,
+): Promise<GooniTakePayload[]> {
+  const res = await apiFetch(`${BASE}/dashboard/takes/history?kind=${kind}&limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch takes history");
+  return res.json() as Promise<GooniTakePayload[]>;
 }
 
 // ── Conversations ──────────────────────────────────────────────────────────────

@@ -4,9 +4,9 @@ import {
   fetchClaudeUsage,
   fetchDashboardStats,
   fetchDevActivity,
+  fetchDevTake,
   fetchExtendedStats,
   fetchOpenAIUsage,
-  fetchSnapshotToday,
   fetchWhoopStatus,
   fetchWhoopToday,
   type ClaudeUsage,
@@ -15,7 +15,7 @@ import {
   type DevActivity,
   type DevActivityRepo,
   type ExtendedStats,
-  type GooniSnapshot,
+  type GooniTakePayload,
   type OpenAIUsage,
   type WhoopStatus,
   type WhoopToday,
@@ -410,10 +410,10 @@ function DevSection() {
     queryKey: ["dev-activity"],
     queryFn: () => fetchDevActivity().catch(() => null),
   });
-  const { data: snap } = useQuery<GooniSnapshot>({
-    queryKey: ["snapshot-today"],
-    queryFn: fetchSnapshotToday,
-    staleTime: 60 * 60_000,
+  const { data: devTake } = useQuery<GooniTakePayload>({
+    queryKey: ["dev-take"],
+    queryFn: () => fetchDevTake(),
+    staleTime: 30 * 60_000,
   });
 
   if (isLoading && !dev) {
@@ -459,7 +459,7 @@ function DevSection() {
         />
       </div>
 
-      {snap?.digest && (
+      {devTake?.take && (
         <div style={{
           marginTop: 18,
           background: "linear-gradient(180deg, #FAFBFC, #F4F6F8)",
@@ -471,13 +471,13 @@ function DevSection() {
             textTransform: "uppercase", color: "#8E8E93",
             marginBottom: 6,
           }}>
-            Gooni's take · {snap.day}
+            Gooni's dev take · {devTake.day}
           </div>
           <div style={{
             fontSize: 13, color: "#3A3A3C", lineHeight: 1.55,
             whiteSpace: "pre-wrap",
           }}>
-            {snap.digest}
+            {devTake.take}
           </div>
         </div>
       )}

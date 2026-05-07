@@ -3,7 +3,8 @@ import { Sparkles, ChevronLeft, ChevronRight } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchDashboardStats,
-  type ApiNote, type DashboardStats,
+  fetchGooniTake,
+  type ApiNote, type DashboardStats, type GooniTakePayload,
 } from "../services/api";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
@@ -122,6 +123,14 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["dashboard-stats"],
     queryFn: fetchDashboardStats,
+  });
+  // Today's focus take. Persisted server-side (one row per UTC day in
+  // gooni_takes), so re-mounting the dashboard during the day is a cheap
+  // DB read; first request after midnight regenerates and writes a new row.
+  const { data: focusTake } = useQuery<GooniTakePayload>({
+    queryKey: ["focus-take"],
+    queryFn: () => fetchGooniTake(),
+    staleTime: 30 * 60_000,
   });
   // Helpers so the imperative submit/typing flow can still update + refetch.
   const setStats = (next: DashboardStats) => queryClient.setQueryData<DashboardStats>(["dashboard-stats"], next);
@@ -365,6 +374,30 @@ export function Dashboard({ onOpenNote, onPlanNote }: {
           Stats view (sidebar → Stats, or the "Stats →" card above). */}
       <div>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
+
+        {/* Gooni's Take — persisted in `gooni_takes` (kind="focus"), one row
+            per UTC day. Renders when a take exists for today; silent when
+            there's nothing meaningful to say (no notes + no focuses). */}
+        {focusTake?.take && (
+          <div style={{
+            marginBottom: 16,
+            padding: "10px 14px",
+            background: "var(--gooni-card, #FFFFFF)",
+            border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+            borderRadius: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}>
+            <Sparkles size={14} color="var(--gooni-muted, #8E8E93)" strokeWidth={1.7} />
+            <div style={{
+              fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+              lineHeight: 1.5, fontFamily: FONT,
+            }}>
+              {focusTake.take}
+            </div>
+          </div>
+        )}
 
         {/* Note input — embedded NoteEditor quick-input. */}
         <div style={{ marginBottom: 14 }}>
