@@ -301,7 +301,9 @@ export function NotesList() {
   async function handleTogglePin(note: ApiNote) {
     const updated = await patchNote(note.id, { is_pinned: !note.is_pinned });
     usePinnedVersionStore.getState().bump();
-    loadNotes(spaceId);
+    // Force-bypass the cache TTL — pinning shifts list order on the server,
+    // and the user expects to see the change immediately.
+    loadNotes(spaceId, { force: true });
     return updated;
   }
 
@@ -312,7 +314,9 @@ export function NotesList() {
     }
     setCleanConfirm(false);
     const { deleted } = await cleanupEmptyNotes();
-    if (deleted > 0) loadNotes(spaceId);
+    // Always force after cleanup — if 0 deleted, no-op refetch is fine and
+    // it surfaces any external deletes that happened since the last fetch.
+    if (deleted > 0) loadNotes(spaceId, { force: true });
   }
 
   // Skip date grouping while searching — a flat, recency-ordered list reads better.

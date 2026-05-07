@@ -2200,9 +2200,10 @@ def notes_graph(db: Session = Depends(get_db)):
 
 @app.post("/notes/cleanup")
 def cleanup_empty_notes(db: Session = Depends(get_db)):
-    """Delete notes whose plaintext content is < 6 chars and title is empty.
-    Used by the 'Clean Inbox' button — these are typically accidental creates.
-    Pinned notes are always preserved.
+    """Delete notes whose body plaintext is < 6 chars (covers fully-empty AND
+    title-only notes — Daniel's call: if the body never got written, the
+    note isn't pulling its weight).
+    Pinned and draft notes are always preserved (explicit user intent).
     """
     import re
 
@@ -2214,16 +2215,16 @@ def cleanup_empty_notes(db: Session = Depends(get_db)):
         text_only = re.sub(r"\s+", " ", text_only).strip()
         return len(text_only)
 
-    # Treat NULL is_pinned as not-pinned (happens on freshly-migrated rows).
+    # Treat NULL is_pinned/is_draft as false (fresh-migration rows).
     candidates = (
         db.query(Note)
         .filter((Note.is_pinned == False) | (Note.is_pinned.is_(None)))  # noqa: E712
+        .filter((Note.is_draft == False) | (Note.is_draft.is_(None)))    # noqa: E712
         .all()
     )
     deleted_ids = []
     for n in candidates:
-        title_empty = not (n.title or "").strip()
-        if title_empty and _plaintext_len(n.content) < 6:
+        if _plaintext_len(n.content) < 6:
             deleted_ids.append(n.id)
             db.delete(n)
     db.commit()

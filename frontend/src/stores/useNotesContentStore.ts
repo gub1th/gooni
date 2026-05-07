@@ -25,6 +25,14 @@ function isEmptyNote(note: ApiNote): boolean {
 }
 
 
+// Notes are considered fresh for this many ms after the last fetch. Inside
+// the window, loadNotes is a no-op (the in-memory cache renders instantly).
+// Outside, it refetches in the background — UI still shows the cached copy
+// until the new payload lands. 60s is long enough that rapid space-switching
+// feels free, short enough that an external write (MCP, bot, etc.) shows up
+// within a minute. Callers that need fresh-on-demand pass `{ force: true }`.
+const NOTES_TTL_MS = 60_000;
+
 interface NotesContentState {
   // Space selection (replaces notesStore)
   selectedSpaceId: string | null;
@@ -32,9 +40,14 @@ interface NotesContentState {
 
   // Notes per space
   notes: Record<string, ApiNote[]>;       // keyed by spaceId string
+  // Per-space wall-clock ms of the last successful fetch. Used to gate
+  // loadNotes against the TTL so we don't slam the API on every space
+  // switch. NOT persisted — restoring with stale timestamps would let a
+  // ten-minute-old reload skip the next refetch.
+  lastLoaded: Record<string, number>;
   activeNoteId: number | null;
   isDirty: boolean;                        // true if active note has unsaved/unmemorized changes
-  loadNotes: (spaceId: string) => Promise<void>;
+  loadNotes: (spaceId: string, opts?: { force?: boolean }) => Promise<void>;
   createNote: (spaceId: string) => Promise<ApiNote | null>;
   updateNote: (id: number, title: string, content: string) => Promise<void>;
   refetchNote: (id: number) => Promise<void>;
@@ -50,6 +63,7 @@ export const useNotesContentStore = create<NotesContentState>()(
     (set, get) => ({
       selectedSpaceId: null,
       notes: {},
+      lastLoaded: {},
       activeNoteId: null,
       isDirty: false,
 
@@ -60,12 +74,23 @@ export const useNotesContentStore = create<NotesContentState>()(
         set({ selectedSpaceId: id });
       },
 
-      loadNotes: async (spaceId: string) => {
+      loadNotes: async (spaceId: string, opts?: { force?: boolean }) => {
+        const state = get();
+        const cached = state.notes[spaceId];
+        const stamp = state.lastLoaded[spaceId];
+        const fresh = stamp != null && Date.now() - stamp < NOTES_TTL_MS;
+        // Cache hit AND not stale AND caller didn't force a refresh —
+        // skip the round-trip entirely. The persisted cache makes this
+        // win across reloads too (notes show up before any fetch fires).
+        if (cached && fresh && !opts?.force) return;
         try {
           const fetched = await fetchSpaceNotes(
             spaceId === "general" ? "general" : parseInt(spaceId)
           );
-          set((s) => ({ notes: { ...s.notes, [spaceId]: fetched } }));
+          set((s) => ({
+            notes: { ...s.notes, [spaceId]: fetched },
+            lastLoaded: { ...s.lastLoaded, [spaceId]: Date.now() },
+          }));
         } catch (e) {
           console.error("loadNotes error:", e);
         }
@@ -235,8 +260,14 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
     }),
     {
-      name: "gooni-notes-v1",
-      partialize: (s) => ({ selectedSpaceId: s.selectedSpaceId }),
+      // v1 → v2: persist `notes` alongside selectedSpaceId so reloads paint
+      // instantly from localStorage instead of waiting on the API. lastLoaded
+      // is intentionally NOT persisted — see its declaration for why.
+      name: "gooni-notes-v2",
+      partialize: (s) => ({
+        selectedSpaceId: s.selectedSpaceId,
+        notes: s.notes,
+      }),
     }
   )
 );
