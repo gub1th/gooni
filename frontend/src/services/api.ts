@@ -1140,6 +1140,8 @@ export interface ApiMemory {
   is_active: boolean;
   superseded_by: number | null;
   focus_id: number | null;
+  retrieval_count: number;
+  last_retrieved_at: string | null;
   created_at: string | null;
   updated_at: string | null;
 }

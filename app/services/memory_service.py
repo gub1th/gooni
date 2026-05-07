@@ -15,6 +15,7 @@ context.
 import json
 from datetime import datetime
 
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from ..db.database import SessionLocal
@@ -630,6 +631,24 @@ class MemoryService:
                     "similarity": sim_lookup.get(m.id),
                     "always_inject": False,
                 })
+            # Bump retrieval tracking on cosine-pulled rows only. Always-inject
+            # prefs are excluded — their count would equal turn count and tell
+            # us nothing about which memories actually earn their slot.
+            cosine_ids = [m.id for m in facts + episodes]
+            if cosine_ids:
+                try:
+                    sess.execute(
+                        sa_update(Memory)
+                        .where(Memory.id.in_(cosine_ids))
+                        .values(
+                            retrieval_count=Memory.retrieval_count + 1,
+                            last_retrieved_at=datetime.utcnow(),
+                        )
+                    )
+                    sess.commit()
+                except Exception as e:
+                    print(f"memory retrieval bump error: {e}")
+                    sess.rollback()
             return self._format_block(prefs, facts, episodes), debug
         finally:
             if owns:

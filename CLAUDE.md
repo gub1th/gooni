@@ -101,9 +101,9 @@ Exposes Gooni to Claude Code via stdio. Tools:
 - `search_memories(query, limit)` — search memories
 - `edit_memory(id, content)` — update a memory
 - `forget_memory(id)` — delete a memory
-- `add_note(title, content)` — create a note in General space
+- `add_note(title, content, space_name?, is_draft?, is_pinned?)` — create a note (defaults to "Claude Code" space). `is_draft=True` surfaces it in the Drafts sidebar; `is_pinned=True` pins it.
 - `search_notes(query, limit)` — semantic note search
-- `edit_note(note_id, title?, content?)` — update an existing note
+- `edit_note(note_id, title?, content?, is_draft?, is_pinned?)` — update an existing note. `is_draft` / `is_pinned` are tri-state (None=unchanged, True/False sets the flag).
 - `find_note(match, limit)` — substring scan over recent notes; returns id + title preview
 - `delete_note(note_id)` — irreversible; pre-fetches title for audit
 - `list_spaces()` — list all spaces

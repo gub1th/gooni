@@ -186,6 +186,8 @@ def _run_column_migrations(engine):
             ("notes", "excerpt_anchor", "TEXT"),
             ("notes", "excerpt", "TEXT"),
             ("memories", "source_note_id", "INTEGER"),
+            ("memories", "retrieval_count", "INTEGER"),
+            ("memories", "last_retrieved_at", "DATETIME"),
             # ListItem unified-item refactor — adds focus/todo fields
             ("list_items", "parent_id", "INTEGER"),
             ("list_items", "endgoal", "TEXT"),
@@ -254,6 +256,11 @@ def _run_column_migrations(engine):
                 print(f"Migration: dropped legacy table {legacy}")
         if "memories" in existing_tables:
             conn.execute(text("UPDATE memories SET focus_id = NULL"))
+            # retrieval_count is NOT NULL in the model — backfill 0 on rows
+            # that predate the column.
+            cols_now = [r[1] for r in conn.execute(text("PRAGMA table_info(memories)"))]
+            if "retrieval_count" in cols_now:
+                conn.execute(text("UPDATE memories SET retrieval_count = 0 WHERE retrieval_count IS NULL"))
         # Backfill committed=0 on list_items so existing rows aren't NULL.
         if "list_items" in existing_tables:
             conn.execute(text("UPDATE list_items SET committed = 0 WHERE committed IS NULL"))
@@ -2082,6 +2089,8 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
         content=initial_content,
         excerpt=_excerpt_from_html(initial_content),
         space_id=numeric_id,
+        is_draft=bool(body.get("is_draft", False)),
+        is_pinned=bool(body.get("is_pinned", False)),
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -3130,6 +3139,8 @@ def _memory_to_dashboard(m) -> dict:
         "is_active": bool(m.is_active),
         "superseded_by": m.superseded_by,
         "focus_id": m.focus_id,
+        "retrieval_count": m.retrieval_count,
+        "last_retrieved_at": m.last_retrieved_at.isoformat() if m.last_retrieved_at else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "updated_at": m.updated_at.isoformat() if m.updated_at else None,
     }
