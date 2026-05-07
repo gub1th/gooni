@@ -48,16 +48,38 @@ RECONCILE_TOP_K = 3
 # rows rank higher.
 RECONCILE_PREFERENCE_TOP_K = 6
 
-# Retrieval limits when injecting into the system prompt.
+# Default top-K for cosine search callers that don't pass one (e.g. /search).
+# Per-type retrieval used by build_memory_context_with_debug lives in
+# RETRIEVAL_PER_TYPE below — this constant no longer governs the master prompt.
 RETRIEVAL_TOP_K = 5
 
-# Minimum cosine similarity for a memory to ride into the master prompt.
-# Without this, top-K returns the K least-bad matches even when none are
-# actually relevant — junk leaks into every reply. 0.30 is a conservative
-# floor: tuned on the eval#83 corpus where unrelated facts were getting
-# pulled on schedule queries. Bump higher (0.40+) once memory volume grows
-# and recall is consistently noisy.
-RETRIEVAL_SIMILARITY_FLOOR = 0.30
+# Per-type retrieval config for the master prompt. Categories used to share
+# one cosine bucket (top-5, floor 0.30) which wasted the type signal — a recall
+# query and a planning query got identical pulls, and weak-cosine rows from
+# one type displaced stronger rows from another by accident.
+#
+# Empirical row counts (2026-05-06): fact 110, episode 143, preference 17,
+# routine 1, goal 0, constraint 0. Several types sit at 0 today because the
+# extractor doesn't surface them in practice — but they're kept here so that
+# *if* extraction starts producing them (after prompt nudges or model bumps),
+# retrieval picks them up automatically without another refactor. Empty
+# buckets cost one near-instant cosine no-op per turn.
+#
+# Type-by-type:
+# - 'fact': dense, short content, paraphrased less → lower floor
+# - 'episode': verbose, over-pulls on weak overlap → stricter floor
+# - 'routine' / 'constraint' / 'goal': underpopulated today; modest K + floor.
+#   'goal' overlaps semantically with focuses (list_items injected via
+#   item_service.get_active_context) but kept here for unrealized aspirations
+#   that haven't graduated to a focus row. See #213 (type deprecation pending
+#   Model D decision) and #215 (constraint extraction never fires).
+RETRIEVAL_PER_TYPE: dict[str, dict[str, float | int]] = {
+    "fact":       {"top_k": 3, "floor": 0.25},
+    "routine":    {"top_k": 2, "floor": 0.30},
+    "constraint": {"top_k": 2, "floor": 0.30},
+    "goal":       {"top_k": 2, "floor": 0.30},
+    "episode":    {"top_k": 3, "floor": 0.35},
+}
 
 # Cap on feedback-derived preferences (key prefixed with `feedback__`) that
 # get always-injected. Without this, every tone correction Daniel ever wrote
@@ -570,18 +592,25 @@ class MemoryService:
             if query and len(query.strip()) >= MIN_EXCHANGE_LEN:
                 query_vec = self._embed(query)
                 if query_vec:
-                    scored = self._cosine_search(
-                        sess,
-                        query_vec,
-                        type_filter=["fact", "routine", "constraint", "episode"],
-                        limit=RETRIEVAL_TOP_K,
-                        floor=RETRIEVAL_SIMILARITY_FLOOR,
-                    )
-                    for m, _ in scored:
-                        if m.type == "episode":
-                            episodes.append(m)
-                        else:
-                            facts.append(m)
+                    for mem_type, cfg in RETRIEVAL_PER_TYPE.items():
+                        hits = self._cosine_search(
+                            sess,
+                            query_vec,
+                            type_filter=[mem_type],
+                            limit=int(cfg["top_k"]),
+                            floor=float(cfg["floor"]),
+                        )
+                        scored.extend(hits)
+                        for m, _ in hits:
+                            if m.type == "episode":
+                                episodes.append(m)
+                            else:
+                                facts.append(m)
+                    # Within-section sort by similarity desc, so stronger matches
+                    # render first under each header in the prompt.
+                    sim_map = {m.id: s for m, s in scored}
+                    facts.sort(key=lambda m: sim_map.get(m.id, 0.0), reverse=True)
+                    episodes.sort(key=lambda m: sim_map.get(m.id, 0.0), reverse=True)
 
             sim_lookup = {m.id: s for m, s in scored}
             debug: list[dict] = []
