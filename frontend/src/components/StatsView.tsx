@@ -552,6 +552,16 @@ function ActivitySection() {
           label="open" value={fmtInt(ext?.todos_open)} />
         <ActivityTile category="claude" categoryColor="#C76B6B"
           label="calls (24h)" value={fmtInt(stats?.mcp_calls_today)} />
+        <ActivityTile category="focus-cam" categoryColor="#5B8BC4"
+          label="sessions total"
+          value={fmtInt(stats?.focus_cam_sessions_total)} />
+        <ActivityTile category="focus-cam" categoryColor="#5B8BC4"
+          label="7-day avg score"
+          value={
+            stats?.focus_cam_7d_avg_score == null
+              ? "—"
+              : stats.focus_cam_7d_avg_score.toFixed(0)
+          } />
       </div>
     </SectionShell>
   );
