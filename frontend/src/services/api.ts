@@ -913,6 +913,17 @@ export interface DashboardStats {
   activity_per_day: number[];
   mcp_calls_today: number;
   mcp_last_active_at: string | null;
+  // focus-cam (https://github.com/gub1th/focus-cam) writes finalized
+  // sessions to the same SQLite DB. Fields stay 0 / null / [] when no
+  // sessions exist (fresh DB or focus-cam never run).
+  focus_cam_sessions_total: number;
+  focus_cam_7d: Array<{
+    date: string;          // YYYY-MM-DD
+    sessions: number;
+    score: number | null;  // null if all sessions in that day had no score
+    duration_sec: number;
+  }>;
+  focus_cam_7d_avg_score: number | null;
 }
 
 // Stats are cheap SQL — fetched fresh every time so recent-notes previews stay current.

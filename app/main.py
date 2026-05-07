@@ -2861,6 +2861,61 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
     except Exception:
         pass
 
+    # focus-cam stats. Reads sessions written by the standalone focus_cam.py
+    # tracker (separate repo). Same best-effort pattern as MCP — table may
+    # not exist on a fresh DB. Returns:
+    #   focus_cam_sessions_total — lifetime count of finalized sessions
+    #   focus_cam_7d             — list[{date, sessions, score, duration_sec}]
+    #                              one entry per day in last 7 days that had
+    #                              at least one session; sorted by date asc
+    #   focus_cam_7d_avg_score   — avg focus_score across those sessions
+    focus_cam_sessions_total = 0
+    focus_cam_7d: list[dict] = []
+    focus_cam_7d_avg_score: float | None = None
+    try:
+        focus_cam_sessions_total = (
+            db.execute(
+                text(
+                    "SELECT COUNT(*) FROM focus_sessions WHERE ended_at IS NOT NULL"
+                )
+            )
+            .scalar()
+            or 0
+        )
+        rows = db.execute(
+            text(
+                """SELECT date(started_at) AS d,
+                          COUNT(*) AS sessions,
+                          AVG(focus_score) AS score,
+                          SUM(duration_sec) AS dur
+                   FROM focus_sessions
+                   WHERE ended_at IS NOT NULL
+                     AND started_at >= datetime('now', '-7 days')
+                   GROUP BY d
+                   ORDER BY d ASC"""
+            )
+        ).fetchall()
+        focus_cam_7d = [
+            {
+                "date": r[0],
+                "sessions": int(r[1] or 0),
+                "score": round(float(r[2]), 1) if r[2] is not None else None,
+                "duration_sec": int(r[3] or 0),
+            }
+            for r in rows
+        ]
+        avg_row = db.execute(
+            text(
+                """SELECT AVG(focus_score) FROM focus_sessions
+                   WHERE focus_score IS NOT NULL
+                     AND started_at >= datetime('now', '-7 days')"""
+            )
+        ).fetchone()
+        if avg_row and avg_row[0] is not None:
+            focus_cam_7d_avg_score = round(float(avg_row[0]), 1)
+    except Exception:
+        pass
+
     return {
         "notes_this_week": notes_this_week,
         "notes_last_week": notes_last_week,
@@ -2870,6 +2925,9 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         "activity_per_day": activity_per_day,
         "mcp_calls_today": mcp_calls_today,
         "mcp_last_active_at": mcp_last_active_at,
+        "focus_cam_sessions_total": focus_cam_sessions_total,
+        "focus_cam_7d": focus_cam_7d,
+        "focus_cam_7d_avg_score": focus_cam_7d_avg_score,
     }
 
 
