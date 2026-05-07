@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.37.0 — 2026-05-07 (minor)
+
+- feat(digest+todos): user-prompt digest, focus↔todo M2M, theme settings (#129)
+
 ## 0.36.2 — 2026-05-07 (patch)
 
 - fix(whoop): auto-generate OAuth state so Whoop accepts the redirect (#128)
