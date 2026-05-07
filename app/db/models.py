@@ -383,9 +383,31 @@ class Settings(Base):
     # of in-memory because FastAPI (sender) and the bot polling script
     # (reply-handler) run as separate processes.
     nudge_last_digests = Column(Text, nullable=False, default="{}")
+    # User-editable instruction Daniel writes for the daily digest. The LLM
+    # gets this verbatim plus today's todos/focuses data and produces the
+    # outgoing chat message. Empty string = use the bundled default.
+    nudge_prompt = Column(Text, nullable=False, default="")
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
+
+
+class FocusTodoLink(Base):
+    """Many-to-many: a todo can serve multiple focuses, a focus can have many
+    todos. Both ends point at `list_items.id` — focuses and todos live in the
+    same unified table, distinguished by their fields (focuses have endgoal +
+    no parent; todos are leaves in the Todo list).
+    """
+
+    __tablename__ = "focus_todo_links"
+    __table_args__ = (
+        UniqueConstraint("focus_item_id", "todo_item_id", name="uq_focus_todo_link"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    focus_item_id = Column(Integer, ForeignKey("list_items.id"), nullable=False, index=True)
+    todo_item_id = Column(Integer, ForeignKey("list_items.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class TrackedRepo(Base):

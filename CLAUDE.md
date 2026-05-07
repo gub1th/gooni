@@ -58,7 +58,7 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 
 ### Backend (`app/`)
 - **`app/main.py`** — All FastAPI routes + startup migrations. CORS allows `localhost:5173`.
-- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note`, `Conversation`, `Message`, `Memory`, `List`, `ListItem` (carries `board_status` + `pr_url` for the Jira-style backlog board), `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`)
+- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note` (carries `is_pinned` + `is_draft` + `is_public`), `Conversation`, `Message`, `Memory`, `List`, `ListItem` (carries `board_status` + `pr_url` for the Jira-style backlog board), `FocusTodoLink` (M2M between focus list_items and todo list_items — one todo can serve multiple focuses), `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`)
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
 - **`app/services/memory_service.py`** — Local SQL-backed memory store (the `memories` table). Per chat exchange: `extract_candidates` (LLM) → cosine-search similar active memories → `reconcile_candidate` (LLM, ADD/UPDATE/DELETE/NONE) → apply. Retrieval injects always-included preferences plus top-5 facts/episodes by cosine similarity. Replaced the old Mem0 hosted service; legacy callers still see `{id, memory, ...}` dict shape via `_serialize`.
 - **`app/services/orchestrator.py`** — Unified chat handler across all surfaces (web, telegram, whatsapp, imessage). `Orchestrator` singleton. Source defaults to `"web"`; bot channels share a single persistent conversation per source (no gap-based sessioning). Each turn builds a structured trace via `TraceBuilder` and stamps it on `Message.trace`.
@@ -169,9 +169,10 @@ POST /webhooks/whatsapp         → Meta Cloud API webhook (HMAC-verified)
 GET  /webhooks/whatsapp         → Meta verify-token handshake
 POST /webhooks/imessage         → BlueBubbles bridge webhook (X-Secret header)
 
-GET  /settings                  → daily nudge config (hour/min/tz/channels/enabled)
-PATCH /settings                 → update any subset of nudge_* fields
-POST /settings/test-nudge       → fire the digest immediately (bypasses idempotency)
+GET  /settings                       → daily digest config (hour/min/tz/channels/enabled + nudge_prompt)
+PATCH /settings                      → update any subset of nudge_* fields, including nudge_prompt
+GET  /settings/nudge-prompt-default  → bundled default LLM instruction (used by the "Use default" button)
+POST /settings/test-nudge            → fire the digest immediately (bypasses idempotency)
 
 GET  /items                     → focus + inbox tree (now includes status, scale per node)
 POST /items                     → create item; accepts status, scale, is_primary in body
@@ -189,21 +190,45 @@ POST /lists/{id}/similar        → cosine-search a list { text, threshold?, lim
 - `scale: 'long_term' | 'sprint' | 'medium' | null` — informational time horizon, drives a small badge.
 - `is_primary` (existing) — singleton; only one item across the whole `list_items` table can be `True`. The dashboard's focuses list pulls primary to the top with a green left rail + tint + pulsing dot.
 
-### Daily nudge
+### Daily digest
 
-Morning digest of overdue + due-today todos lives in `app/services/todo_nudge.py`.
-The scheduler runs in the FastAPI **lifespan** (not the Telegram bot script) so
-config + idempotency can be DB-backed and survive bot restarts. zoneinfo-aware
-fire time per `Settings.nudge_tz`. `Settings.nudge_last_sent_day` is the
-idempotency token — kills double-send if Fly scales to 2 machines.
+Daily digest message lives in `app/services/todo_nudge.py`. Single-call
+shape: `compose_message(db) -> str | None`. Daniel writes the LLM
+instruction in `Settings.nudge_prompt` (Settings → Notifications → Prompt
+textarea) and the service injects a structured block of today's overdue +
+due-today todos + active focuses after his prompt before calling the LLM.
+Empty `nudge_prompt` falls back to `todo_nudge.DEFAULT_PROMPT`.
 
-WhatsApp fan-out respects Meta's 24h customer-window: if no inbound WA message
-in the last 24h, nudge skips that channel for the day. Telegram has no such
-constraint and fires regardless.
+The scheduler runs in the FastAPI **lifespan** (not the Telegram bot script)
+so config + idempotency can be DB-backed and survive bot restarts. Fire time
+is zoneinfo-aware via `Settings.nudge_tz`; `Settings.nudge_last_sent_day` is
+the YYYY-MM-DD idempotency token that kills double-send if Fly scales to 2.
 
-Reply commands (`done <n>`, `tom <n>`, `kill <n>`) are persisted in
-`Settings.nudge_last_digests` (JSON) so the Telegram bot polling process can
-resolve replies that were sent by the FastAPI process.
+WhatsApp fan-out respects Meta's 24h customer-window: if no inbound WA
+message in the last 24h, nudge skips that channel for the day. Telegram has
+no such constraint and fires regardless.
+
+The old indexed-list format + `done <n>` / `tom <n>` / `kill <n>` reply
+commands were removed — message arrives as a single conversational chat
+message and Daniel just talks back to Gooni normally if he wants to act on it.
+
+### Focus ↔ Todo links
+
+`focus_todo_links` is a many-to-many between focuses and leaf todos, both
+stored in `list_items` (focus = parent_id null + endgoal set; todo = leaf in
+the Todo list). Endpoints:
+
+- `POST /items/{focus_id}/derive-todo` — create a leaf todo + link in one
+  shot. Body `{text, due_date?}`. Returns `{todo, link_id}`.
+- `POST /items/{focus_id}/link-todo/{todo_id}` — attach an existing todo to
+  a focus. Idempotent.
+- `GET  /items/{focus_id}/todos` — todos linked to a focus.
+- `GET  /items/{todo_id}/focuses` — focuses linked to a todo.
+- `GET  /items/today-todos` — open todos due today, each row includes a
+  `focuses: [{id, text, is_primary}]` chip array. Powers the dashboard's
+  "Today's todos" section that replaced the legacy "Quick · today" focus
+  column in `FocusFlow`.
+- `DELETE /focus-todo-links/{link_id}` — sever a single link.
 
 ## Code Patterns
 

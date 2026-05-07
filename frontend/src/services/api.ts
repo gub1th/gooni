@@ -675,6 +675,52 @@ export async function reorderItems(ids: number[]): Promise<void> {
   if (!res.ok) throw new Error("Failed to reorder items");
 }
 
+// Focus ↔ Todo links — many-to-many. The same todo can appear under
+// multiple focuses; the chip on a todo row shows where it's linked.
+export interface FocusChip {
+  id: number;
+  text: string;
+  is_primary: boolean;
+}
+
+export interface TodayTodo extends ApiItem {
+  focuses: FocusChip[];
+}
+
+export async function fetchTodayTodos(): Promise<TodayTodo[]> {
+  const res = await apiFetch(`${BASE}/items/today-todos`);
+  if (!res.ok) throw new Error("Failed to fetch today's todos");
+  return res.json();
+}
+
+export async function fetchFocusesForTodo(todoId: number): Promise<FocusChip[]> {
+  const res = await apiFetch(`${BASE}/items/${todoId}/focuses`);
+  if (!res.ok) throw new Error("Failed to fetch focuses for todo");
+  return res.json();
+}
+
+export async function deriveTodoFromFocus(
+  focusId: number,
+  text: string,
+  due_date?: string | null,
+): Promise<{ todo: ApiItem; link_id: number }> {
+  const res = await apiFetch(`${BASE}/items/${focusId}/derive-todo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, due_date: due_date ?? null }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || "derive todo failed");
+  }
+  return res.json();
+}
+
+export async function deleteFocusTodoLink(linkId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/focus-todo-links/${linkId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to unlink");
+}
+
 // ── Lists (unified) ─────────────────────────────────────────────────────────
 //
 // Backed by the List + ListItem tables. Replaces the old "Lists" feature
@@ -1181,6 +1227,14 @@ export interface AppSettings {
   nudge_tz: string;          // IANA, e.g. "America/Los_Angeles"
   nudge_channels: NudgeChannel[];
   nudge_last_sent_day: string | null;
+  nudge_prompt: string;      // user-editable instruction for the daily digest LLM
+}
+
+export async function fetchNudgePromptDefault(): Promise<string> {
+  const res = await apiFetch(`${BASE}/settings/nudge-prompt-default`);
+  if (!res.ok) throw new Error("Failed to fetch default prompt");
+  const j = await res.json();
+  return j.prompt || "";
 }
 
 export async function fetchSettings(): Promise<AppSettings> {
