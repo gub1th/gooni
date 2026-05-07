@@ -7,6 +7,7 @@ import {
 import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
 import { GooniLayer } from "../components/GooniLayer";
+import { MemoryBrain } from "../components/notes/MemoryBrain";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 
 export const Route = createFileRoute("/memories")({
@@ -247,8 +248,18 @@ function MemoriesPage() {
               })}
             </div>
 
+            {/* Brain section — top N of the current filter as floating bubbles
+                around the neural-brain animation. Cap at 12 so the half-fan
+                layout doesn't get crowded. Hides on empty filter results
+                (the component itself returns null when memories.length === 0). */}
+            <MemoryBrain
+              memories={memories.filter((m) => m.is_active).slice(0, 12)}
+              title={filter === "all" ? "what gooni remembers" : `${filter} memories`}
+              subtitle="Click a bubble to peek. Same content as the table below — surfaced visually so the shape of your memory is at-a-glance."
+            />
+
             {/* Search */}
-            <div style={{ marginBottom: 14 }}>
+            <div style={{ marginBottom: 14, marginTop: 18 }}>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
