@@ -1972,6 +1972,8 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
         title=body.get("title") or "",
         content=body.get("content") or "",
         space_id=numeric_id,
+        is_draft=bool(body.get("is_draft", False)),
+        is_pinned=bool(body.get("is_pinned", False)),
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
