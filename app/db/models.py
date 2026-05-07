@@ -209,6 +209,12 @@ class Memory(Base):
     source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
     is_active = Column(Boolean, nullable=False, default=True)
     superseded_by = Column(Integer, ForeignKey("memories.id"), nullable=True)
+    # Retrieval tracking — bumped per turn for memories that survive cosine
+    # gating (facts + episodes). Always-inject prefs are NOT counted: their
+    # count would equal turn-count and carry no signal. Lets us answer
+    # "which memories actually earn their slot" without mining traces.
+    retrieval_count = Column(Integer, nullable=False, default=0)
+    last_retrieved_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
