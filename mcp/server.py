@@ -218,7 +218,13 @@ def _resolve_space_id(space_name: str, emoji: str | None = None) -> int | str:
 
 
 @mcp.tool()
-def add_note(title: str, content: str, space_name: str = "Claude Code") -> str:
+def add_note(
+    title: str,
+    content: str,
+    space_name: str = "Claude Code",
+    is_draft: bool = False,
+    is_pinned: bool = False,
+) -> str:
     """Create a new note in Gooni.
 
     Defaults to the "Claude Code" space — anything Claude Code logs about
@@ -232,16 +238,30 @@ def add_note(title: str, content: str, space_name: str = "Claude Code") -> str:
         title: short note title
         content: note body (plain text or HTML)
         space_name: target space (defaults to "Claude Code")
+        is_draft: surface in the Drafts sidebar (default False). Use when
+            you're seeding a half-written note Daniel should finish.
+        is_pinned: pin the note (default False).
     """
     space_id = _resolve_space_id(space_name, emoji="🤖" if space_name == "Claude Code" else None)
+    payload: dict = {"title": title, "content": content}
+    if is_draft:
+        payload["is_draft"] = True
+    if is_pinned:
+        payload["is_pinned"] = True
     resp = _session.post(
         f"{BASE_URL}/spaces/{space_id}/notes",
-        json={"title": title, "content": content},
+        json=payload,
         timeout=10,
     )
     resp.raise_for_status()
     n = resp.json()
-    return f"Created note #{n['id']} in {space_name}: {n['title']}"
+    flags = []
+    if is_draft:
+        flags.append("draft")
+    if is_pinned:
+        flags.append("pinned")
+    suffix = f" [{', '.join(flags)}]" if flags else ""
+    return f"Created note #{n['id']} in {space_name}: {n['title']}{suffix}"
 
 
 @mcp.tool()
@@ -607,25 +627,47 @@ def release_task(match: str, note_id: int = None) -> str:
 
 
 @mcp.tool()
-def edit_note(note_id: int, title: str = None, content: str = None) -> str:
-    """Edit an existing note in Gooni. Use this to update progress notes or evolving docs.
+def edit_note(
+    note_id: int,
+    title: str = None,
+    content: str = None,
+    is_draft: bool = None,
+    is_pinned: bool = None,
+) -> str:
+    """Edit an existing note in Gooni. Use this to update progress notes or
+    evolving docs, or to flip the draft/pinned flags on an existing note.
 
     Args:
         note_id: the numeric ID of the note to edit
         title: new title (optional — omit to keep current)
         content: new body text (optional — omit to keep current)
+        is_draft: set/clear the Drafts-sidebar flag (optional — omit to leave
+            unchanged). Pass True after seeding a half-written note that
+            wasn't initially marked draft.
+        is_pinned: set/clear the pinned flag (optional — omit to leave
+            unchanged).
     """
     patch: dict = {}
     if title is not None:
         patch["title"] = title
     if content is not None:
         patch["content"] = content
+    if is_draft is not None:
+        patch["is_draft"] = bool(is_draft)
+    if is_pinned is not None:
+        patch["is_pinned"] = bool(is_pinned)
     if not patch:
         return "Nothing to update."
     resp = _session.patch(f"{BASE_URL}/notes/{note_id}", json=patch, timeout=10)
     resp.raise_for_status()
     n = resp.json()
-    return f"Updated note #{n['id']}: {n['title']}"
+    flags = []
+    if is_draft is not None:
+        flags.append(f"draft={bool(is_draft)}")
+    if is_pinned is not None:
+        flags.append(f"pinned={bool(is_pinned)}")
+    suffix = f" [{', '.join(flags)}]" if flags else ""
+    return f"Updated note #{n['id']}: {n['title']}{suffix}"
 
 
 @mcp.tool()
