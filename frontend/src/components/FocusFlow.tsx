@@ -3,11 +3,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sparkles, Wind, Crown, HelpCircle } from "lucide-react";
 import {
   fetchItemTree, createItem, updateItem, deleteItem, reorderItems, suggestFocus,
-  fetchTodayTodos, deriveTodoFromFocus,
+  fetchTodayTodos,
   type ApiItemTree, type ApiItemNode, type FocusScale,
   type TodayTodo, type FocusChip,
 } from "../services/api";
 import { ListPlus } from "lucide-react";
+import { DeriveTodoModal } from "./DeriveTodoModal";
 import { FocusOverlay, loadFocusMode, saveFocusMode, clearFocusMode } from "./FocusOverlay";
 
 // Focus Flow — primary spotlight + Quick/Slow sections + add-focus modal +
@@ -286,20 +287,13 @@ export function FocusFlow() {
     } catch (e) { console.error(e); }
   }
 
-  // Derive a leaf todo from a focus — opens a tiny prompt for the title,
-  // creates the todo + link in one shot, then refreshes the Today's-todos
-  // list so the new row shows up immediately when due_date is today.
-  async function handleDeriveTodo(focusId: number) {
-    // eslint-disable-next-line no-alert
-    const raw = window.prompt("Todo (one line):");
-    const text = (raw ?? "").trim();
-    if (!text) return;
-    try {
-      await deriveTodoFromFocus(focusId, text, "today");
-      queryClient.invalidateQueries({ queryKey: ["today-todos"] });
-    } catch (e) {
-      console.error("derive-todo failed", e);
-    }
+  // Derive-todo modal state — focusId !== null means modal is open. The
+  // network call lives inside the modal; we just refresh the Today's-todos
+  // list when it succeeds so the new row appears immediately.
+  const [deriveFor, setDeriveFor] = useState<{ id: number; title: string } | null>(null);
+  function handleDeriveTodo(focusId: number) {
+    const node = focuses.find((f) => f.id === focusId);
+    setDeriveFor({ id: focusId, title: node?.text ?? "" });
   }
   // Done flow: optimistic remove (so the row visibly slides away) + queue
   // a 6s mutation. The Undo button cancels the timer + re-adds the node
@@ -491,6 +485,14 @@ export function FocusFlow() {
           <button className="ff-undo-btn" onClick={handleUndoDone}>Undo</button>
         </div>
       )}
+
+      <DeriveTodoModal
+        open={deriveFor != null}
+        focusId={deriveFor?.id ?? null}
+        focusTitle={deriveFor?.title}
+        onClose={() => setDeriveFor(null)}
+        onCreated={() => queryClient.invalidateQueries({ queryKey: ["today-todos"] })}
+      />
     </div>
   );
 }
