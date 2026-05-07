@@ -7,6 +7,7 @@ import {
   fetchDevTake,
   fetchExtendedStats,
   fetchOpenAIUsage,
+  fetchTimeOnGooni,
   fetchWhoopStatus,
   fetchWhoopToday,
   type ClaudeUsage,
@@ -17,6 +18,7 @@ import {
   type ExtendedStats,
   type GooniTakePayload,
   type OpenAIUsage,
+  type TimeOnGooni,
   type WhoopStatus,
   type WhoopToday,
 } from "../services/api";
@@ -508,6 +510,13 @@ function ActivitySection() {
     queryKey: ["dashboard-stats-ext"],
     queryFn: fetchExtendedStats,
   });
+  // Fetched separately because the GitHub API call adds ~200ms; we don't
+  // want to block the dashboard render on it.
+  const { data: timeOnGooni } = useQuery<TimeOnGooni>({
+    queryKey: ["dashboard-time-on-gooni"],
+    queryFn: fetchTimeOnGooni,
+    staleTime: 5 * 60 * 1000,  // 5 min — GitHub data doesn't change often
+  });
 
   if (isLoading && !stats) {
     return (
@@ -562,9 +571,33 @@ function ActivitySection() {
               ? "—"
               : stats.focus_cam_7d_avg_score.toFixed(0)
           } />
+        <ActivityTile category="gooni" categoryColor="#A879D6"
+          label="time today (commits)"
+          value={fmtMinutes(timeOnGooni?.today_minutes)}
+          sub={
+            timeOnGooni?.today_sessions
+              ? `${timeOnGooni.today_sessions} session${timeOnGooni.today_sessions === 1 ? "" : "s"}`
+              : undefined
+          } />
+        <ActivityTile category="gooni" categoryColor="#A879D6"
+          label="time this week"
+          value={fmtMinutes(timeOnGooni?.week_minutes)}
+          sub={
+            timeOnGooni?.week_sessions
+              ? `${timeOnGooni.week_sessions} sessions`
+              : undefined
+          } />
       </div>
     </SectionShell>
   );
+}
+
+function fmtMinutes(m: number | undefined): string {
+  if (m == null || m === 0) return "—";
+  if (m < 60) return `${Math.round(m)}m`;
+  const h = Math.floor(m / 60);
+  const rem = Math.round(m - h * 60);
+  return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
 }
 
 function ActivityTile({
