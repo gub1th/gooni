@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, Wind, Star, HelpCircle } from "lucide-react";
+import { Sparkles, Wind, Crown, HelpCircle } from "lucide-react";
 import {
   fetchItemTree, createItem, updateItem, deleteItem, reorderItems, suggestFocus,
   type ApiItemTree, type ApiItemNode, type FocusScale,
@@ -663,14 +663,14 @@ function FocusFlowRow({
       <div className="ff-row-actions">
         {!someday && <FocusModePill node={node} />}
         <button
-          className={"ff-star-btn " + (node.is_primary ? "ff-star-active" : "")}
+          className={"ff-crown-btn " + (node.is_primary ? "ff-crown-active" : "")}
           onClick={handleStarClick}
           title={node.is_primary ? "Unset primary" : "Make primary"}
           aria-label={node.is_primary ? "Unset primary" : "Make primary"}
           aria-pressed={node.is_primary}
         >
-          <Star
-            size={13}
+          <Crown
+            size={14}
             strokeWidth={1.8}
             fill={node.is_primary ? "currentColor" : "none"}
           />
@@ -1264,19 +1264,19 @@ function FocusFlowStyles() {
         background: rgba(0,0,0,0.05);
         color: var(--gooni-text, #1C1C1E);
       }
-      /* Star toggles primary. Outlined when not primary, filled green when
-         primary. Always visible on the primary row (parent shows actions
-         even without hover). */
-      .ff-star-btn {
+      /* Crown toggles primary. Outlined when not primary, filled gold-yellow
+         when primary — reads as "the one ruling all the others." Always
+         visible on the primary row (parent shows actions even without hover). */
+      .ff-crown-btn {
         background: none; border: none; cursor: pointer;
         color: var(--gooni-muted, #8E8E93);
         padding: 2px 6px; border-radius: 6px;
         display: inline-flex; align-items: center; justify-content: center;
         transition: color 0.12s ease, background 0.12s ease;
       }
-      .ff-star-btn:hover { background: rgba(0,0,0,0.05); }
-      .ff-star-active { color: #15803D; }
-      .ff-star-active:hover { color: #15803D; }
+      .ff-crown-btn:hover { background: rgba(0,0,0,0.05); }
+      .ff-crown-active { color: #EAB308; }
+      .ff-crown-active:hover { color: #EAB308; }
 
       /* Drop-position indicator — a single thin line at the row's edge,
          not a separate spacer. Cleaner than the standalone "DropSlot"
