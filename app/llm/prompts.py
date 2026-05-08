@@ -247,8 +247,6 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
     if is_first_time:
         prompt += "\n\nYou're meeting this user for the first time. Introduce yourself briefly and ask for their name."
 
-    print("SYSTEM PROMPT:")
-    print(prompt)
     return prompt
 
 

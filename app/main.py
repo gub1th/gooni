@@ -636,15 +636,45 @@ async def _backfill_note_excerpts_loop():
         await asyncio.sleep(0.5)
 
 
+async def _memory_watchdog_loop():
+    """Periodically log RSS + run gc.collect(). Two jobs:
+    1. Diagnostic — prints `[mem] rss=NNNkB` every 5 min so we can see
+       slow growth in fly logs without attaching a profiler.
+    2. Band-aid — explicit gc.collect() forces release of cyclic refs
+       that CPython otherwise only sweeps at gen-2 thresholds, which
+       are tuned for desktop heaps and are too slow for a 512MB box.
+    Cheap (one syscall + one collect every 5 min). Removable once the
+    real leak is identified."""
+    import gc as _gc
+    while True:
+        await asyncio.sleep(300)
+        try:
+            collected = _gc.collect()
+            try:
+                with open("/proc/self/status") as f:
+                    rss = next(
+                        (int(ln.split()[1]) for ln in f if ln.startswith("VmRSS:")),
+                        -1,
+                    )
+            except Exception:
+                rss = -1
+            print(f"[mem] rss={rss}kB gc_collected={collected}")
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[mem] watchdog error: {e}")
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     nudge_task = asyncio.create_task(_nudge_loop())
     backfill_task = asyncio.create_task(_backfill_list_item_embeddings_loop())
     excerpt_task = asyncio.create_task(_backfill_note_excerpts_loop())
+    mem_task = asyncio.create_task(_memory_watchdog_loop())
     try:
         yield
     finally:
-        for t in (nudge_task, backfill_task, excerpt_task):
+        for t in (nudge_task, backfill_task, excerpt_task, mem_task):
             t.cancel()
             try:
                 await t
