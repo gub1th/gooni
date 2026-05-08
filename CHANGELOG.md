@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.44.3 — 2026-05-08 (patch)
+
+- fix(prod): strip print(prompt) debug + add memory watchdog (#148)
+
 ## 0.44.2 — 2026-05-08 (patch)
 
 - fix(db): halt notes.excerpt backfill hot-loop driving Fly OOM (#146)
