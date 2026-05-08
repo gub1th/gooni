@@ -302,7 +302,7 @@ function NotesPage() {
             />
           );
         })() : view === "eval" ? (
-          <EvalView />
+          <EvalView onOpenNote={(noteId) => setViewAndUrl("notes", noteId)} />
         ) : view === "stats" ? (
           <StatsView />
         ) : (() => {

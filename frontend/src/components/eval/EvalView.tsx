@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChatAuditPanel } from "./ChatAuditPanel";
 import {
+  deleteMessageRating,
   dispatchEvalToCc,
   fetchEvalSegmentFull,
   fetchEvalToolsLegend,
   listEvalSegments,
   patchEvalSummary,
   postEvalFeedback,
+  putMessageRating,
   type EvalMessage,
   type EvalSegmentFull,
   type EvalSegmentSummary,
@@ -48,7 +50,7 @@ const RATING_OPTIONS: { value: 1 | 2 | 3; label: string; emoji: string }[] = [
 
 type Tab = "eval" | "audit" | "runs";
 
-export function EvalView() {
+export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void } = {}) {
   const [tab, setTab] = useState<Tab>("eval");
   const [segments, setSegments] = useState<EvalSegmentSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -77,6 +79,20 @@ export function EvalView() {
   // that flood bot conversations. 3 is a low default that still cuts ~half
   // the obviously-trivial segments without hiding short legitimate ones.
   const [minMessages, setMinMessages] = useState(3);
+  // Inbox-zero default: hide segments where overall_rating is set. Closing
+  // the loop on triage shrinks the visible list as you rate, which is the
+  // psychological win — review feels like clearing an inbox, not staring
+  // at a long flat scroll. Persisted across sessions.
+  const [hideRated, setHideRated] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const saved = window.localStorage.getItem("eval-hide-rated");
+    return saved == null ? true : saved === "true";
+  });
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("eval-hide-rated", String(hideRated));
+    }
+  }, [hideRated]);
   const [search, setSearch] = useState("");
 
   const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(null);
@@ -122,9 +138,102 @@ export function EvalView() {
   // MUST be declared before any conditional return — React hooks have to
   // run in the same order every render.
   const visible = useMemo(
-    () => segments.filter((s) => s.message_count >= minMessages),
-    [segments, minMessages]
+    () =>
+      segments.filter(
+        (s) =>
+          s.message_count >= minMessages &&
+          (!hideRated || s.overall_rating == null)
+      ),
+    [segments, minMessages, hideRated]
   );
+
+  // Keyboard cursor for one-key triage. j/k move; 1/2/3 rate the focused
+  // segment and advance; n jumps to next unrated; Enter opens detail; Esc
+  // clears the cursor. Skipped while a segment detail view is open or any
+  // input is focused (so typing in search isn't hijacked).
+  const [cursor, setCursor] = useState<number>(-1);
+  useEffect(() => {
+    // Reset cursor when filtered list shrinks/reshapes.
+    if (cursor >= visible.length) setCursor(visible.length - 1);
+  }, [visible.length, cursor]);
+  // Triage in flight — guards against double-rating when key repeat fires
+  // before the network round-trips.
+  const triagingRef = useRef(false);
+
+  async function triageRate(rating: 1 | 2 | 3) {
+    if (cursor < 0 || cursor >= visible.length) return;
+    if (triagingRef.current) return;
+    triagingRef.current = true;
+    const seg = visible[cursor];
+    try {
+      await patchEvalSummary(seg.id, {
+        overall_rating: rating,
+        eval_status: "done",
+      });
+      // Advance: when hideRated is on the rated card disappears, so the
+      // same cursor index naturally points to the next card. Otherwise
+      // bump cursor forward.
+      if (!hideRated) setCursor((c) => Math.min(c + 1, visible.length - 1));
+      await loadSegments();
+    } finally {
+      triagingRef.current = false;
+    }
+  }
+
+  function jumpToNextUnrated() {
+    const start = cursor + 1;
+    for (let i = start; i < visible.length; i++) {
+      if (visible[i].overall_rating == null) {
+        setCursor(i);
+        return;
+      }
+    }
+    // Wrap to start if nothing found below.
+    for (let i = 0; i <= cursor && i < visible.length; i++) {
+      if (visible[i].overall_rating == null) {
+        setCursor(i);
+        return;
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (selectedSegmentId != null) return;
+    function handler(e: KeyboardEvent) {
+      // Skip when any text input is focused — search bar, comment fields, etc.
+      const ae = document.activeElement;
+      if (
+        ae &&
+        (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || (ae as HTMLElement).isContentEditable)
+      ) {
+        return;
+      }
+      if (visible.length === 0) return;
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault();
+        setCursor((c) => Math.min(Math.max(c, -1) + 1, visible.length - 1));
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setCursor((c) => Math.max(c - 1, 0));
+      } else if (e.key === "1" || e.key === "2" || e.key === "3") {
+        e.preventDefault();
+        void triageRate(Number(e.key) as 1 | 2 | 3);
+      } else if (e.key === "n") {
+        e.preventDefault();
+        jumpToNextUnrated();
+      } else if (e.key === "Enter") {
+        if (cursor >= 0 && cursor < visible.length) {
+          e.preventDefault();
+          setSelectedSegmentId(visible[cursor].id);
+        }
+      } else if (e.key === "Escape") {
+        setCursor(-1);
+      }
+    }
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSegmentId, visible, cursor, hideRated]);
 
   if (selectedSegmentId != null) {
     return (
@@ -134,6 +243,7 @@ export function EvalView() {
           setSelectedSegmentId(null);
           loadSegments();
         }}
+        onOpenNote={onOpenNote}
       />
     );
   }
@@ -162,10 +272,18 @@ export function EvalView() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "#1C1C1E" }}>Audit</h1>
           {tab === "eval" && (
-            <span style={{ fontSize: 12, color: "#8E8E93" }}>
-              {visible.length}
-              {visible.length !== total ? ` of ${total}` : ""} segments
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span
+                style={{ fontSize: 11, color: "#8E8E93" }}
+                title="j/k or ↑/↓ navigate · 1/2/3 rate · n next unrated · Enter open · Esc clear"
+              >
+                ⌨ j/k · 1/2/3 · n · ⏎
+              </span>
+              <span style={{ fontSize: 12, color: "#8E8E93" }}>
+                {visible.length}
+                {visible.length !== total ? ` of ${total}` : ""} segments
+              </span>
+            </div>
           )}
         </div>
         <div style={{ display: "flex", gap: 0, marginTop: 14 }}>
@@ -229,6 +347,15 @@ export function EvalView() {
                 onClick={() => setHasFlagOnly((v) => !v)}
               >
                 Flagged
+              </FilterPill>
+            </div>
+            <div style={{ display: "inline-flex", padding: 2, background: "#F2F2F7", borderRadius: 7 }}>
+              <FilterPill
+                active={hideRated}
+                accent="#0A84FF"
+                onClick={() => setHideRated((v) => !v)}
+              >
+                {hideRated ? "Inbox: unrated" : "Show all"}
               </FilterPill>
             </div>
             <ViewToggle mode={viewMode} onChange={setViewMode} />
@@ -307,7 +434,11 @@ export function EvalView() {
                     key={seg.id}
                     seg={seg}
                     isFirst={i === 0}
-                    onClick={() => setSelectedSegmentId(seg.id)}
+                    focused={i === cursor}
+                    onClick={() => {
+                      setCursor(i);
+                      setSelectedSegmentId(seg.id);
+                    }}
                   />
                 ))}
               </div>
@@ -319,11 +450,15 @@ export function EvalView() {
                   gap: 14,
                 }}
               >
-                {visible.map((seg) => (
+                {visible.map((seg, i) => (
                   <SegmentCard
                     key={seg.id}
                     seg={seg}
-                    onClick={() => setSelectedSegmentId(seg.id)}
+                    focused={i === cursor}
+                    onClick={() => {
+                      setCursor(i);
+                      setSelectedSegmentId(seg.id);
+                    }}
                   />
                 ))}
               </div>
@@ -340,22 +475,32 @@ export function EvalView() {
 function SegmentCard({
   seg,
   onClick,
+  focused = false,
 }: {
   seg: EvalSegmentSummary;
   onClick: () => void;
+  focused?: boolean;
 }) {
   const sourceStyle = SOURCE_STYLE[seg.source] ?? SOURCE_STYLE.web;
   const when = seg.last_message_at ? parseUtcIso(seg.last_message_at) : null;
+  const ref = useRef<HTMLButtonElement>(null);
+  // Auto-scroll the focused card into view so j/k feels like cursor nav,
+  // not "you've now lost where you are." Block: nearest avoids unnecessary
+  // jumping when the card is already visible.
+  useEffect(() => {
+    if (focused) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [focused]);
 
   return (
     <button
+      ref={ref}
       onClick={onClick}
       style={{
         textAlign: "left",
         padding: 14,
         borderRadius: 10,
-        background: "#FFFFFF",
-        border: "1px solid #E5E5EA",
+        background: focused ? "#EAF3FF" : "#FFFFFF",
+        border: focused ? "1px solid #0A84FF" : "1px solid #E5E5EA",
         cursor: "pointer",
         fontFamily: FONT,
         display: "flex",
@@ -363,12 +508,15 @@ function SegmentCard({
         gap: 8,
         minHeight: 130,
         transition: "background 0.12s, border-color 0.12s",
+        outline: "none",
       }}
       onMouseEnter={(e) => {
+        if (focused) return;
         e.currentTarget.style.background = "#FAFAFA";
         e.currentTarget.style.borderColor = "#D1D1D6";
       }}
       onMouseLeave={(e) => {
+        if (focused) return;
         e.currentTarget.style.background = "#FFFFFF";
         e.currentTarget.style.borderColor = "#E5E5EA";
       }}
@@ -425,24 +573,32 @@ function SegmentRow({
   seg,
   isFirst,
   onClick,
+  focused = false,
 }: {
   seg: EvalSegmentSummary;
   isFirst: boolean;
   onClick: () => void;
+  focused?: boolean;
 }) {
   const sourceStyle = SOURCE_STYLE[seg.source] ?? SOURCE_STYLE.web;
   const when = seg.last_message_at ? parseUtcIso(seg.last_message_at) : null;
   const statusStyle = STATUS_STYLE[seg.eval_status];
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (focused) ref.current?.scrollIntoView({ block: "nearest" });
+  }, [focused]);
 
   return (
     <button
+      ref={ref}
       onClick={onClick}
       style={{
         textAlign: "left",
         padding: "8px 14px",
-        background: "#FFFFFF",
+        background: focused ? "#EAF3FF" : "#FFFFFF",
         border: "none",
         borderTop: isFirst ? "none" : "1px solid #F2F2F7",
+        borderLeft: focused ? "3px solid #0A84FF" : "3px solid transparent",
         cursor: "pointer",
         fontFamily: FONT,
         display: "flex",
@@ -452,9 +608,11 @@ function SegmentRow({
         transition: "background 0.08s",
       }}
       onMouseEnter={(e) => {
+        if (focused) return;
         e.currentTarget.style.background = "#FAFAFA";
       }}
       onMouseLeave={(e) => {
+        if (focused) return;
         e.currentTarget.style.background = "#FFFFFF";
       }}
     >
@@ -586,13 +744,31 @@ function ViewToggle({
 
 // ── Detail view ──────────────────────────────────────────────────────────────
 
-function EvalDetailView({ segmentId, onClose }: { segmentId: number; onClose: () => void }) {
+function EvalDetailView({
+  segmentId,
+  onClose,
+  onOpenNote,
+}: {
+  segmentId: number;
+  onClose: () => void;
+  onOpenNote?: (noteId: number) => void;
+}) {
   const [data, setData] = useState<EvalSegmentFull | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [legend, setLegend] = useState<EvalToolLegendEntry[]>([]);
   const [legendOpen, setLegendOpen] = useState(false);
   const [dispatching, setDispatching] = useState(false);
+  // Dispatch modal: 'confirm' opens before send, 'success' after, with the
+  // note id we navigate to via onOpenNote. 'error' shows the failure reason
+  // inline instead of a browser alert().
+  const [dispatchModal, setDispatchModal] = useState<
+    | { state: "closed" }
+    | { state: "confirm" }
+    | { state: "running" }
+    | { state: "success"; noteId: number; rewrote: boolean }
+    | { state: "error"; message: string }
+  >({ state: "closed" });
 
   async function reload() {
     try {
@@ -614,15 +790,28 @@ function EvalDetailView({ segmentId, onClose }: { segmentId: number; onClose: ()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segmentId]);
 
-  async function handleDispatch() {
+  function handleDispatch() {
     if (!data) return;
-    if (!confirm("Dispatch this eval to Claude Code as a note + backlog item?")) return;
+    setDispatchModal({ state: "confirm" });
+  }
+
+  async function runDispatch() {
     setDispatching(true);
+    setDispatchModal({ state: "running" });
+    const wasDispatched = !!data?.segment.dispatched_to_cc_at;
     try {
-      await dispatchEvalToCc(segmentId);
+      const res = await dispatchEvalToCc(segmentId);
       await reload();
+      setDispatchModal({
+        state: "success",
+        noteId: res.note_id,
+        rewrote: wasDispatched,
+      });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Dispatch failed");
+      setDispatchModal({
+        state: "error",
+        message: err instanceof Error ? err.message : "Dispatch failed",
+      });
     } finally {
       setDispatching(false);
     }
@@ -750,7 +939,159 @@ function EvalDetailView({ segmentId, onClose }: { segmentId: number; onClose: ()
       </div>
 
       {legendOpen && <ToolLegendPopup entries={legend} onClose={() => setLegendOpen(false)} />}
+
+      {dispatchModal.state !== "closed" && (
+        <DispatchModal
+          modal={dispatchModal}
+          alreadyDispatched={!!data?.segment.dispatched_to_cc_at}
+          onConfirm={runDispatch}
+          onClose={() => setDispatchModal({ state: "closed" })}
+          onOpenNote={onOpenNote}
+        />
+      )}
     </div>
+  );
+}
+
+// ── Dispatch modal ───────────────────────────────────────────────────────────
+
+type DispatchModalState =
+  | { state: "closed" }
+  | { state: "confirm" }
+  | { state: "running" }
+  | { state: "success"; noteId: number; rewrote: boolean }
+  | { state: "error"; message: string };
+
+function DispatchModal({
+  modal,
+  alreadyDispatched,
+  onConfirm,
+  onClose,
+  onOpenNote,
+}: {
+  modal: DispatchModalState;
+  alreadyDispatched: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+  onOpenNote?: (noteId: number) => void;
+}) {
+  if (modal.state === "closed") return null;
+
+  return (
+    <div
+      onClick={modal.state === "running" ? undefined : onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.32)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+        fontFamily: FONT,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#FFFFFF",
+          borderRadius: 12,
+          padding: "20px 22px",
+          width: 420,
+          maxWidth: "92vw",
+          boxShadow: "0 20px 50px rgba(0,0,0,0.18)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        {modal.state === "confirm" && (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1C1C1E" }}>
+              {alreadyDispatched ? "Re-dispatch this eval?" : "Dispatch this eval to Claude Code?"}
+            </div>
+            <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.5 }}>
+              {alreadyDispatched
+                ? "Overwrites the existing Claude Code note with the latest transcript + flags. Backlog item stays."
+                : "Creates a note in the Claude Code space and a backlog item linking back to this segment."}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              <ModalButton onClick={onClose} variant="ghost">Cancel</ModalButton>
+              <ModalButton onClick={onConfirm} variant="primary">
+                {alreadyDispatched ? "Re-dispatch" : "Dispatch"}
+              </ModalButton>
+            </div>
+          </>
+        )}
+        {modal.state === "running" && (
+          <div style={{ fontSize: 14, color: "#3C3C43" }}>Dispatching…</div>
+        )}
+        {modal.state === "success" && (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1C1C1E" }}>
+              {modal.rewrote ? "Note overwritten" : "Note created"}
+            </div>
+            <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.5 }}>
+              Eval bundled into note <strong>#{modal.noteId}</strong> in the Claude Code space.
+              Backlog item added.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              <ModalButton onClick={onClose} variant="ghost">Close</ModalButton>
+              {onOpenNote && (
+                <ModalButton
+                  onClick={() => {
+                    onOpenNote(modal.noteId);
+                    onClose();
+                  }}
+                  variant="primary"
+                >
+                  Open note →
+                </ModalButton>
+              )}
+            </div>
+          </>
+        )}
+        {modal.state === "error" && (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#FF3B30" }}>Dispatch failed</div>
+            <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.5 }}>{modal.message}</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              <ModalButton onClick={onClose} variant="ghost">Close</ModalButton>
+              <ModalButton onClick={onConfirm} variant="primary">Retry</ModalButton>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ModalButton({
+  children,
+  onClick,
+  variant,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  variant: "primary" | "ghost";
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: variant === "primary" ? "#0A84FF" : "transparent",
+        color: variant === "primary" ? "#FFFFFF" : "#0A84FF",
+        border: variant === "primary" ? "none" : "1px solid #E5E5EA",
+        borderRadius: 6,
+        padding: "6px 14px",
+        fontSize: 13,
+        fontWeight: 600,
+        fontFamily: FONT,
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -870,10 +1211,12 @@ function MessageCard({
   msg: EvalMessage;
   onFeedbackChanged: () => void;
 }) {
-  // Trace defaults to expanded for assistant turns — that's the whole point
-  // of the eval view. User can still collapse if they want a clean transcript.
+  // Trace defaults to collapsed — flipped from the previous "expanded for
+  // assistant" default because the wall-of-JSON was the #1 friction source
+  // when reviewing a long segment. The reviewer opens trace only when the
+  // reply itself looks suspect.
   const isAssistant = msg.role === "assistant";
-  const [traceOpen, setTraceOpen] = useState(isAssistant);
+  const [traceOpen, setTraceOpen] = useState(false);
   const trace = msg.trace ?? [];
 
   // Index step feedback by (step_key, step_index) so each step card knows
@@ -944,6 +1287,15 @@ function MessageCard({
       </div>
 
       {isAssistant && (
+        <MessageRatingRow
+          segmentId={segmentId}
+          messageId={msg.id}
+          existing={msg.rating}
+          onChanged={onFeedbackChanged}
+        />
+      )}
+
+      {isAssistant && (
         <div style={{ marginTop: 12 }}>
           <button
             onClick={() => setTraceOpen((v) => !v)}
@@ -997,6 +1349,173 @@ function MessageCard({
               })}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Per-message rating row (👎/😐/👍 + optional comment) ─────────────────────
+
+function MessageRatingRow({
+  segmentId,
+  messageId,
+  existing,
+  onChanged,
+}: {
+  segmentId: number;
+  messageId: number;
+  existing: EvalMessage["rating"];
+  onChanged: () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const [editingComment, setEditingComment] = useState(false);
+  const [comment, setComment] = useState(existing?.comment ?? "");
+
+  // Sync local comment buffer when the row remounts onto a different msg
+  // or the server returns updated state.
+  useEffect(() => {
+    setComment(existing?.comment ?? "");
+  }, [existing?.comment, messageId]);
+
+  async function setRating(rating: 1 | 2 | 3) {
+    setPending(true);
+    try {
+      // If clicking the already-active rating, clear it instead.
+      if (existing?.rating === rating && !editingComment) {
+        await deleteMessageRating(messageId);
+      } else {
+        await putMessageRating(segmentId, messageId, {
+          rating,
+          comment: existing?.comment ?? null,
+        });
+      }
+      onChanged();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function saveComment() {
+    if (!existing) return;
+    setPending(true);
+    try {
+      await putMessageRating(segmentId, messageId, {
+        rating: existing.rating,
+        comment: comment.trim() || null,
+      });
+      setEditingComment(false);
+      onChanged();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        paddingTop: 10,
+        borderTop: "1px dashed rgba(0,0,0,0.06)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: 11, color: "#8E8E93", marginRight: 4 }}>Reply</span>
+        {RATING_OPTIONS.map((opt) => {
+          const active = existing?.rating === opt.value;
+          return (
+            <button
+              key={opt.value}
+              onClick={() => setRating(opt.value)}
+              disabled={pending}
+              title={opt.label}
+              style={{
+                background: active ? "#0A84FF" : "transparent",
+                color: active ? "#FFFFFF" : "#3C3C43",
+                border: active ? "none" : "1px solid #E5E5EA",
+                borderRadius: 6,
+                padding: "3px 8px",
+                cursor: pending ? "wait" : "pointer",
+                fontSize: 13,
+                fontFamily: FONT,
+                lineHeight: 1.2,
+              }}
+            >
+              {opt.emoji}
+            </button>
+          );
+        })}
+        {existing && (
+          <button
+            onClick={() => setEditingComment((v) => !v)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#0A84FF",
+              fontSize: 11,
+              fontFamily: FONT,
+              cursor: "pointer",
+              marginLeft: 4,
+            }}
+          >
+            {editingComment ? "Cancel" : existing.comment ? "Edit comment" : "+ comment"}
+          </button>
+        )}
+        {existing?.comment && !editingComment && (
+          <span
+            style={{
+              fontSize: 11,
+              color: "#3C3C43",
+              fontStyle: "italic",
+              marginLeft: 4,
+              maxWidth: 360,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={existing.comment}
+          >
+            "{existing.comment}"
+          </span>
+        )}
+      </div>
+      {editingComment && (
+        <div style={{ display: "flex", gap: 6 }}>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Why this rating? (optional)"
+            rows={2}
+            style={{
+              flex: 1,
+              fontSize: 12,
+              fontFamily: FONT,
+              padding: 6,
+              border: "1px solid #E5E5EA",
+              borderRadius: 6,
+              resize: "vertical",
+            }}
+          />
+          <button
+            onClick={saveComment}
+            disabled={pending}
+            style={{
+              background: "#0A84FF",
+              color: "#FFFFFF",
+              border: "none",
+              borderRadius: 6,
+              padding: "0 12px",
+              fontSize: 12,
+              fontWeight: 600,
+              fontFamily: FONT,
+              cursor: pending ? "wait" : "pointer",
+            }}
+          >
+            Save
+          </button>
         </div>
       )}
     </div>

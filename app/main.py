@@ -2395,36 +2395,54 @@ def notes_graph(db: Session = Depends(get_db)):
 
 
 @app.post("/notes/cleanup")
-def cleanup_empty_notes(db: Session = Depends(get_db)):
+def cleanup_empty_notes(dry_run: bool = False, db: Session = Depends(get_db)):
     """Delete notes whose body plaintext is < 6 chars (covers fully-empty AND
     title-only notes — Daniel's call: if the body never got written, the
-    note isn't pulling its weight).
-    Pinned and draft notes are always preserved (explicit user intent).
+    note isn't pulling its weight). Pinned notes are always preserved
+    (explicit user intent — pin = "keep this here forever"). Empty drafts
+    are NOT preserved: a draft with no body is abandoned, not in-progress;
+    drafts seeded by the seed-draft skill always carry body content so the
+    <6-char rule keeps them safe.
+    Pass dry_run=true to preview deletions without committing.
+    Response also reports `preserved_pinned_empty` so the caller sees what
+    the pin filter is protecting.
     """
     import re
 
     def _plaintext_len(html: str | None) -> int:
         if not html:
             return 0
-        # strip tags, collapse whitespace
         text_only = re.sub(r"<[^>]+>", " ", html)
         text_only = re.sub(r"\s+", " ", text_only).strip()
         return len(text_only)
 
-    # Treat NULL is_pinned/is_draft as false (fresh-migration rows).
-    candidates = (
+    # Treat NULL is_pinned as false (fresh-migration rows). Drafts are no
+    # longer filtered out at the query layer — body content is the gate.
+    non_pinned = (
         db.query(Note)
         .filter((Note.is_pinned == False) | (Note.is_pinned.is_(None)))  # noqa: E712
-        .filter((Note.is_draft == False) | (Note.is_draft.is_(None)))    # noqa: E712
+        .all()
+    )
+    pinned_empty = (
+        db.query(Note)
+        .filter(Note.is_pinned == True)  # noqa: E712
         .all()
     )
     deleted_ids = []
-    for n in candidates:
+    for n in non_pinned:
         if _plaintext_len(n.content) < 6:
             deleted_ids.append(n.id)
-            db.delete(n)
-    db.commit()
-    return {"deleted": len(deleted_ids), "ids": deleted_ids}
+            if not dry_run:
+                db.delete(n)
+    preserved_pinned_empty = sum(1 for n in pinned_empty if _plaintext_len(n.content) < 6)
+    if not dry_run:
+        db.commit()
+    return {
+        "deleted": len(deleted_ids),
+        "ids": deleted_ids,
+        "preserved_pinned_empty": preserved_pinned_empty,
+        "dry_run": dry_run,
+    }
 
 
 @app.post("/notes/{note_id}/embed")
@@ -4132,6 +4150,49 @@ def eval_delete_feedback(feedback_id: int, db: Session = Depends(get_db)):
 
     if not eval_service.delete_feedback(db, feedback_id):
         raise HTTPException(status_code=404, detail="feedback not found")
+    return {"ok": True}
+
+
+@app.put("/eval/segments/{segment_id}/messages/{message_id}/rating")
+def eval_put_message_rating(
+    segment_id: int,
+    message_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    """Per-message thumbs (1=bad, 2=meh, 3=good). One rating per message
+    (unique constraint on message_id) so PUT semantics: re-submit overwrites.
+    """
+    from .services import eval_service
+
+    rating = body.get("rating")
+    if rating not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="rating must be 1, 2, or 3")
+    try:
+        row = eval_service.upsert_message_rating(
+            db,
+            segment_id=segment_id,
+            message_id=message_id,
+            rating=rating,
+            comment=body.get("comment"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "id": row.id,
+        "message_id": row.message_id,
+        "rating": row.rating,
+        "comment": row.comment,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@app.delete("/eval/messages/{message_id}/rating")
+def eval_delete_message_rating(message_id: int, db: Session = Depends(get_db)):
+    from .services import eval_service
+
+    if not eval_service.delete_message_rating(db, message_id=message_id):
+        raise HTTPException(status_code=404, detail="rating not found")
     return {"ok": True}
 
 

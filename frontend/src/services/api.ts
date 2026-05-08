@@ -1388,6 +1388,13 @@ export interface EvalStepFeedback {
   created_at: string | null;
 }
 
+export interface EvalMessageRating {
+  id: number;
+  rating: 1 | 2 | 3;
+  comment: string | null;
+  updated_at: string | null;
+}
+
 export interface EvalMessage {
   id: number;
   role: "user" | "assistant";
@@ -1397,6 +1404,7 @@ export interface EvalMessage {
   feedback_for_message_id: number | null;
   trace: MessageTraceStep[] | null;
   step_feedback: EvalStepFeedback[];
+  rating: EvalMessageRating | null;
 }
 
 export interface EvalSegmentFull {
@@ -1456,6 +1464,30 @@ export async function postEvalFeedback(payload: {
 export async function deleteEvalFeedback(id: number): Promise<void> {
   const res = await apiFetch(`${BASE}/eval/feedback/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete eval feedback");
+}
+
+export async function putMessageRating(
+  segmentId: number,
+  messageId: number,
+  payload: { rating: 1 | 2 | 3; comment?: string | null }
+): Promise<EvalMessageRating & { message_id: number }> {
+  const res = await apiFetch(
+    `${BASE}/eval/segments/${segmentId}/messages/${messageId}/rating`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error("Failed to save message rating");
+  return res.json();
+}
+
+export async function deleteMessageRating(messageId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/eval/messages/${messageId}/rating`, {
+    method: "DELETE",
+  });
+  if (!res.ok && res.status !== 404) throw new Error("Failed to delete rating");
 }
 
 export async function patchEvalSummary(
