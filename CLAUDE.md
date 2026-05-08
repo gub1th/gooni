@@ -58,7 +58,7 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 
 ### Backend (`app/`)
 - **`app/main.py`** — All FastAPI routes + startup migrations. CORS allows `localhost:5173`.
-- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note` (carries `is_pinned` + `is_draft` + `is_public` + `excerpt` (cached plain-text preview, stripped of HTML/`<img>`, capped at 240 chars — populated on every save, lazy-backfilled at startup so list endpoints don't ship full bodies)), `Conversation`, `Message`, `Memory`, `List`, `ListItem` (carries `board_status` + `pr_url` for the Jira-style backlog board), `FocusTodoLink` (M2M between focus list_items and todo list_items — one todo can serve multiple focuses), `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `EvalMessageRating` (per-assistant-message thumbs — 1=bad/2=meh/3=good with optional comment, UNIQUE on `message_id`; complements step-level feedback + segment overall rating), `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`), `GooniTake` (daily LLM-generated takes — kind="focus" one-sentence on what Daniel's focused on, kind="dev" short paragraph on what Daniel shipped today; UNIQUE on (`day`, `kind`); upserted by `take_service.get_or_generate`)
+- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note` (carries `is_pinned` + `is_draft` + `is_public` + `excerpt` (cached plain-text preview, stripped of HTML/`<img>`, capped at 240 chars — populated on every save, lazy-backfilled at startup so list endpoints don't ship full bodies)), `Conversation`, `Message`, `Memory`, `List`, `ListItem` (carries `board_status` + `pr_url` for the Jira-style backlog board), `FocusTodoLink` (M2M between focus list_items and todo list_items — one todo can serve multiple focuses), `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `EvalMessageRating` (per-assistant-message thumbs — 1=bad/2=meh/3=good with optional comment, UNIQUE on `message_id`; complements step-level feedback + segment overall rating), `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`), `GooniTake` (daily LLM-generated takes — kind="focus" one-sentence on what Daniel's focused on, kind="dev" short paragraph on what Daniel shipped today; UNIQUE on (`day`, `kind`); upserted by `take_service.get_or_generate`), `NoteComment` (Confluence-style flat comment thread under each note; CASCADE-deletes with the note; `author` is a free-text label like "daniel"/"gooni"/"claude")
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
 - **`app/services/memory_service.py`** — Local SQL-backed memory store (the `memories` table). Per chat exchange: `extract_candidates` (LLM) → cosine-search similar active memories → `reconcile_candidate` (LLM, ADD/UPDATE/DELETE/NONE) → apply. Retrieval injects always-included preferences plus top-5 facts/episodes by cosine similarity. Replaced the old Mem0 hosted service; legacy callers still see `{id, memory, ...}` dict shape via `_serialize`.
 - **`app/services/orchestrator.py`** — Unified chat handler across all surfaces (web, telegram, whatsapp, imessage). `Orchestrator` singleton. Source defaults to `"web"`; bot channels share a single persistent conversation per source (no gap-based sessioning). Each turn builds a structured trace via `TraceBuilder` and stamps it on `Message.trace`.
@@ -107,6 +107,8 @@ Exposes Gooni to Claude Code via stdio. Tools:
 - `edit_note(note_id, title?, content?, is_draft?, is_pinned?)` — update an existing note. `is_draft` / `is_pinned` are tri-state (None=unchanged, True/False sets the flag).
 - `find_note(match, limit)` — substring scan over recent notes; returns id + title preview
 - `delete_note(note_id)` — irreversible; pre-fetches title for audit
+- `add_comment(note_id, content, author?)` — append a Confluence-style comment to a note's thread. `author` defaults to "claude" — pass "gooni" when calling from the orchestrator instead.
+- `list_comments(note_id)` — read all comments on a note, oldest first.
 - `list_spaces()` — list all spaces
 - `list_notes(space_id, limit)` — browse notes in a space
 - `read_list(list_ref="backlog", limit, include_done)` — read items from any list. Resolves by type ("backlog"/"todo"/"focus") → name → numeric id, so callers don't hard-code shifting ids.
@@ -168,6 +170,10 @@ POST /notes/{id}/embed          → generate embedding + suggest space
 POST /notes/{id}/touch          → update last_opened_at
 POST /notes/{id}/memorize       → extract facts → memory store
 GET  /notes/{id}/related        → similar notes by embedding
+
+GET  /notes/{id}/comments       → list comments on a note (oldest first)
+POST /notes/{id}/comments       → append comment { content, author? }
+DELETE /comments/{id}           → delete a comment by id
 
 POST /uploads/image             → multipart image upload → Cloudflare R2; returns { url, key }. Used by NoteEditor paste/drop. Returns 503 when R2 env unset → frontend falls back to inline base64 (legacy path). 10 MB per upload, image/* content-types only.
 

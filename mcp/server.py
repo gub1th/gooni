@@ -1429,5 +1429,62 @@ def delete_note(note_id: int) -> str:
     return f"deleted note #{note_id}: {title}"
 
 
+@mcp.tool()
+def add_comment(note_id: int, content: str, author: str = "claude") -> str:
+    """Add a Confluence-style comment to a note's thread.
+
+    Use when reviewing or reacting to a note Daniel wrote — feedback,
+    questions, follow-up thoughts that should hang off the note rather
+    than spawn a new note. The bubble shows up under the editor body.
+
+    Args:
+        note_id: numeric id of the target note (get from find_note,
+            list_recent_notes, search_notes, etc.)
+        content: comment body (plain text or short HTML)
+        author: label shown on the bubble (default "claude" — set to
+            "gooni" if calling from the chat orchestrator instead)
+    """
+    if not isinstance(note_id, int) or note_id <= 0:
+        return "(note_id must be a positive integer)"
+    body = (content or "").strip()
+    if not body:
+        return "(content required)"
+    resp = _session.post(
+        f"{BASE_URL}/notes/{note_id}/comments",
+        json={"content": body, "author": author},
+        timeout=10,
+    )
+    if resp.status_code == 404:
+        return f"(note #{note_id} not found)"
+    resp.raise_for_status()
+    c = resp.json()
+    url = f"{FRONTEND_URL}/?note={note_id}"
+    return f"posted comment #{c['id']} on note #{note_id} ({url})"
+
+
+@mcp.tool()
+def list_comments(note_id: int) -> str:
+    """List comments on a note, oldest first.
+
+    Args:
+        note_id: numeric id of the note to read comments from
+    """
+    if not isinstance(note_id, int) or note_id <= 0:
+        return "(note_id must be a positive integer)"
+    resp = _session.get(f"{BASE_URL}/notes/{note_id}/comments", timeout=10)
+    if resp.status_code == 404:
+        return f"(note #{note_id} not found)"
+    resp.raise_for_status()
+    rows = resp.json()
+    if not rows:
+        return f"(no comments on note #{note_id})"
+    lines = []
+    for c in rows:
+        ts = (c.get("created_at") or "")[:16].replace("T", " ")
+        snippet = (c.get("content") or "")[:200].replace("\n", " ")
+        lines.append(f"#{c['id']} [{c['author']} {ts}] {snippet}")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
