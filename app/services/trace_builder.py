@@ -113,14 +113,20 @@ class TraceBuilder:
         a list of {id, type, content, similarity, always_inject}. Stored
         verbatim so the eval UI can render similarity bars + flag preferences
         distinctly from cosine hits.
+
+        Label splits prefs (always-injected) from cosine hits so the count
+        is meaningful — "Recalled 70" used to imply 70 relevant memories
+        when 60 were just always-on prefs and only ~10 actually earned
+        their slot via similarity this turn.
         """
-        n = len(recalled)
+        prefs = sum(1 for m in recalled if m.get("always_inject"))
+        cosine = len(recalled) - prefs
         self.step(
             "memory_recall",
-            f"Recalled {n} memor{'y' if n == 1 else 'ies'}",
+            f"Prefs: {prefs} (always) · Cosine: {cosine}",
             input={"query": query},
             output={"recalled": recalled},
-            meta={"count": n},
+            meta={"count": len(recalled), "prefs": prefs, "cosine": cosine},
         )
 
     def master_prompt(self, system_prompt: str, recent_history: list[dict]) -> None:

@@ -532,6 +532,26 @@ class EvalStepFeedback(Base):
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
 
 
+class EvalMessageRating(Base):
+    """Reviewer thumbs on a single assistant reply. One row per message.
+    Step-level EvalStepFeedback is too narrow (a step can look fine while
+    the reply is wrong) and segment overall is too coarse — per-message
+    is the granularity that actually maps to "was this reply good?".
+    """
+
+    __tablename__ = "eval_message_ratings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    segment_id = Column(Integer, ForeignKey("eval_segments.id"), nullable=False, index=True)
+    message_id = Column(Integer, ForeignKey("messages.id"), nullable=False, unique=True, index=True)
+    # 1 = bad, 2 = meh, 3 = good. Mirrors EvalStepFeedback so eval surfaces
+    # can render the same picker shape regardless of layer.
+    rating = Column(Integer, nullable=False)
+    comment = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
+
+
 class WhoopSnapshot(Base):
     """One row per day. Cached pull from Whoop's `recovery + cycle + sleep`
     endpoints so the dashboard / daily-nudge surfaces don't hit the Whoop

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..db.models import (
     Conversation,
+    EvalMessageRating,
     EvalSegment,
     EvalStepFeedback,
     Message,
@@ -248,6 +249,7 @@ def get_segment_full(db: Session, segment_id: int) -> dict | None:
         .all()
     )
     feedbacks_by_msg = _feedbacks_by_message(db, segment_id, [m.id for m in msgs])
+    ratings_by_msg = _message_ratings_by_id(db, [m.id for m in msgs])
     return {
         "segment": _serialize_segment(seg, conv, None),
         "messages": [
@@ -260,6 +262,7 @@ def get_segment_full(db: Session, segment_id: int) -> dict | None:
                 "feedback_for_message_id": m.feedback_for_message_id,
                 "trace": _decode_trace(m.trace),
                 "step_feedback": feedbacks_by_msg.get(m.id, []),
+                "rating": ratings_by_msg.get(m.id),
             }
             for m in msgs
         ],
@@ -273,6 +276,88 @@ def _decode_trace(raw: str | None) -> list[dict] | None:
         return json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         return None
+
+
+def _message_ratings_by_id(
+    db: Session, message_ids: list[int]
+) -> dict[int, dict]:
+    """Lookup of per-message thumbs ratings keyed by message_id."""
+    if not message_ids:
+        return {}
+    rows = (
+        db.query(EvalMessageRating)
+        .filter(EvalMessageRating.message_id.in_(message_ids))
+        .all()
+    )
+    return {
+        r.message_id: {
+            "id": r.id,
+            "rating": r.rating,
+            "comment": r.comment,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+        for r in rows
+    }
+
+
+def upsert_message_rating(
+    db: Session,
+    *,
+    segment_id: int,
+    message_id: int,
+    rating: int,
+    comment: str | None,
+) -> EvalMessageRating:
+    """Insert or update the single rating row for an assistant message.
+    Validates message belongs to the segment so a stray PUT can't pin a
+    rating onto an unrelated thread.
+    """
+    if rating not in (1, 2, 3):
+        raise ValueError("rating must be 1, 2, or 3")
+    seg = db.query(EvalSegment).filter(EvalSegment.id == segment_id).first()
+    if not seg:
+        raise ValueError(f"segment {segment_id} not found")
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if not msg:
+        raise ValueError(f"message {message_id} not found")
+    if not (
+        msg.conversation_id == seg.conversation_id
+        and seg.start_message_id <= msg.id <= seg.end_message_id
+    ):
+        raise ValueError("message not in segment range")
+    existing = (
+        db.query(EvalMessageRating)
+        .filter(EvalMessageRating.message_id == message_id)
+        .first()
+    )
+    if existing is None:
+        existing = EvalMessageRating(
+            segment_id=segment_id,
+            message_id=message_id,
+            rating=rating,
+            comment=comment,
+        )
+        db.add(existing)
+    else:
+        existing.rating = rating
+        existing.comment = comment
+        existing.segment_id = segment_id
+    db.commit()
+    db.refresh(existing)
+    return existing
+
+
+def delete_message_rating(db: Session, *, message_id: int) -> bool:
+    row = (
+        db.query(EvalMessageRating)
+        .filter(EvalMessageRating.message_id == message_id)
+        .first()
+    )
+    if not row:
+        return False
+    db.delete(row)
+    db.commit()
+    return True
 
 
 def _feedbacks_by_message(
@@ -414,6 +499,12 @@ def dispatch_to_cc(db: Session, segment_id: int) -> dict:
     body = _format_dispatch_body(full)
     title = _format_dispatch_title(full)
     space = _get_or_create_claude_code_space(db)
+    # Excerpt stamped alongside content so the dispatched note shows a
+    # preview in the notes-list endpoint immediately. Without this the
+    # row rendered blank until the lazy backfill job ran (PR #134) and
+    # made the dispatched note look empty in the sidebar.
+    from app.main import _excerpt_from_html
+    excerpt = _excerpt_from_html(body)
     note: Note
     if seg.dispatched_note_id:
         note = db.query(Note).filter(Note.id == seg.dispatched_note_id).first()
@@ -423,6 +514,7 @@ def dispatch_to_cc(db: Session, segment_id: int) -> dict:
         note = Note(
             title=title,
             content=body,
+            excerpt=excerpt,
             space_id=space.id,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
@@ -432,6 +524,7 @@ def dispatch_to_cc(db: Session, segment_id: int) -> dict:
     else:
         note.title = title
         note.content = body
+        note.excerpt = excerpt
         note.updated_at = datetime.utcnow()
 
     backlog = list_service.get_or_create_list("Backlog", "backlog", emoji=None, db=db)
@@ -484,17 +577,23 @@ def _format_dispatch_body(full: dict) -> str:
         lines.append(f"<h3>Reviewer summary</h3><blockquote>{_escape(seg['overall_comment'])}</blockquote>")
 
     lines.append("<h3>Transcript + trace + flags</h3>")
+    if not full["messages"]:
+        lines.append("<p><em>(no messages in segment range)</em></p>")
     for m in full["messages"]:
         role = (m["role"] or "").upper()
         lines.append(f"<h4>[{role}] msg #{m['id']}</h4>")
         lines.append(f"<p>{_escape((m['content'] or '')[:1500])}</p>")
+        # `<details><summary>` aren't in TipTap StarterKit so the editor
+        # silently dropped them on render — that's why dispatched notes
+        # looked half-empty. Use a plain heading + list so traces stay
+        # visible (collapsing is the editor view's problem, not ours).
         if m["role"] == "assistant" and m.get("trace"):
-            lines.append("<details><summary>Trace</summary><ul>")
+            lines.append("<h5>Trace</h5><ul>")
             for step in m["trace"]:
                 key = step.get("key") or step.get("type") or "?"
                 label = step.get("label") or ""
                 lines.append(f"<li><strong>{key}</strong> — {_escape(label)}</li>")
-            lines.append("</ul></details>")
+            lines.append("</ul>")
         if m.get("step_feedback"):
             lines.append("<ul>")
             for fb in m["step_feedback"]:

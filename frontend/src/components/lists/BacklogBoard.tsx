@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GripVertical, ExternalLink } from "lucide-react";
 import type { ApiListItem, BoardStatus } from "../../services/api";
 import { useListsStore } from "../../stores/useListsStore";
@@ -43,9 +43,16 @@ function statusOf(item: ApiListItem): BoardStatus {
 
 export function BacklogBoard({ listId, onOpenSourceNote }: BacklogBoardProps) {
   const items = useListsStore((s) => s.itemsByListId[listId] || []);
+  const selectList = useListsStore((s) => s.selectList);
   const updateItem = useListsStore((s) => s.updateItem);
   const reorder = useListsStore((s) => s.reorder);
   const deleteItem = useListsStore((s) => s.deleteItem);
+
+  // ListView's mount effect fetches items; the route picks BacklogBoard
+  // instead for type=backlog so we mirror the fetch here. Without this the
+  // store's itemsByListId[listId] stays unset on a fresh load and the
+  // board renders empty until something else seeds the cache.
+  useEffect(() => { selectList(listId); }, [listId, selectList]);
 
   const [dragId, setDragId] = useState<number | null>(null);
   const [hoverColumn, setHoverColumn] = useState<BoardStatus | null>(null);
