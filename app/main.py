@@ -636,33 +636,94 @@ async def _backfill_note_excerpts_loop():
         await asyncio.sleep(0.5)
 
 
+def _read_meminfo_kb(key: str) -> int:
+    """Read a single field from /proc/meminfo as kB. Returns -1 on miss."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith(f"{key}:"):
+                    return int(line.split()[1])
+    except Exception:
+        pass
+    return -1
+
+
+def _scan_python_processes() -> list[tuple[str, int, int]]:
+    """Walk /proc and return (label, pid, rss_kb) for every process whose
+    cmdline mentions python or uvicorn. Used by the watchdog so we can see
+    the Telegram bot's RSS without standing up a second watchdog inside
+    that process. Quietly skips procs we can't read."""
+    import glob as _glob
+    out: list[tuple[str, int, int]] = []
+    for d in _glob.glob("/proc/[0-9]*"):
+        try:
+            with open(d + "/cmdline") as f:
+                cmd = f.read().replace("\x00", " ").strip()
+            if not cmd:
+                continue
+            if "python" not in cmd and "uvicorn" not in cmd:
+                continue
+            pid = int(d.rsplit("/", 1)[-1])
+            with open(d + "/status") as f:
+                rss = -1
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        rss = int(line.split()[1])
+                        break
+            # Short label so log lines stay scannable.
+            if "uvicorn" in cmd:
+                label = "uvicorn"
+            elif "telegram_bot" in cmd:
+                label = "tgbot"
+            else:
+                label = "py"
+            out.append((label, pid, rss))
+        except Exception:
+            continue
+    out.sort(key=lambda r: -r[2])
+    return out
+
+
 async def _memory_watchdog_loop():
-    """Periodically log RSS + run gc.collect(). Two jobs:
-    1. Diagnostic — prints `[mem] rss=NNNkB` every 5 min so we can see
-       slow growth in fly logs without attaching a profiler.
-    2. Band-aid — explicit gc.collect() forces release of cyclic refs
-       that CPython otherwise only sweeps at gen-2 thresholds, which
-       are tuned for desktop heaps and are too slow for a 512MB box.
-    Cheap (one syscall + one collect every 5 min). Removable once the
-    real leak is identified."""
+    """Periodically log RSS + run gc.collect(). Three jobs:
+    1. Diagnostic for uvicorn — gen-2 collect + own RSS, every 5 min.
+    2. System-wide visibility — log MemAvailable + per-process RSS for
+       every python/uvicorn process so we can see who's actually growing.
+       Without this the bot at ~95MB was invisible to us; the only signal
+       was "machine OOM'd, but uvicorn was flat."
+    3. Band-aid — gc.collect() inside uvicorn forces gen-2 collection
+       sooner than CPython's default thresholds, which are tuned for
+       desktop heaps and let cyclic refs sit on a small server until
+       kernel-OOM forces them out.
+    Cheap (a few /proc reads + one collect every 5 min)."""
     import gc as _gc
     while True:
         await asyncio.sleep(300)
         try:
             collected = _gc.collect()
+            self_rss = -1
             try:
                 with open("/proc/self/status") as f:
-                    rss = next(
+                    self_rss = next(
                         (int(ln.split()[1]) for ln in f if ln.startswith("VmRSS:")),
                         -1,
                     )
             except Exception:
-                rss = -1
-            print(f"[mem] rss={rss}kB gc_collected={collected}", flush=True)
+                pass
+            mem_available = _read_meminfo_kb("MemAvailable")
+            mem_total = _read_meminfo_kb("MemTotal")
+            procs = _scan_python_processes()
+            proc_str = " ".join(f"{label}({pid})={rss}" for label, pid, rss in procs)
+            print(
+                f"[mem] rss={self_rss}kB gc_collected={collected} "
+                f"mem_available={mem_available}kB mem_total={mem_total}kB "
+                f"procs[{proc_str}]",
+                flush=True,
+            )
         except asyncio.CancelledError:
             return
         except Exception as e:
-            print(f"[mem] watchdog error: {e}")
+            print(f"[mem] watchdog error: {e}", flush=True)
 
 
 @asynccontextmanager

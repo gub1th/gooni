@@ -18,7 +18,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { MemoryBrain } from "./MemoryBrain";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
@@ -396,6 +396,16 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       const currentTitle = titleRef.current;
       updateNote(prevId, currentTitle, currentBody).catch((err) => {
         console.error(`[NoteEditor] save-on-leave failed for note #${prevId}:`, err);
+        // The user just navigated away — there's nowhere to retry from.
+        // Stash the unsaved snapshot so the next time this note loads we can
+        // detect leftover work, restore it, and retry the PATCH. Covers the
+        // OOM-mid-navigation case where Fly returned 502 and the editor's
+        // edits would otherwise vanish.
+        try {
+          saveLocalNoteDraft(prevId, currentTitle, currentBody);
+        } catch {
+          // best-effort; no UI signal needed for the fallback's fallback
+        }
       });
     }
 
@@ -776,17 +786,49 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   useEffect(() => {
     if (!editor || !activeNote) return;
     if (hydratedNoteId.current !== activeNoteId) {
-      const desired = activeNote.content ?? "";
+      // Check for a leftover unsaved draft in localStorage from a prior
+      // failed save (e.g. fly OOM mid-PATCH on the previous session). If
+      // it's newer than the server copy, prefer the local draft — the
+      // server copy is by definition stale relative to the unsaved edits.
+      // Falls back to server content when no draft exists or the server
+      // copy is fresher.
+      const serverContent = activeNote.content ?? "";
+      const serverUpdatedMs = activeNote.updated_at
+        ? new Date(activeNote.updated_at).getTime()
+        : 0;
+      const local = activeNoteId && activeNoteId > 0
+        ? readLocalNoteDraft(activeNoteId)
+        : null;
+      let desired = serverContent;
+      let desiredTitle = activeNote.title ?? "";
+      let restoredFromLocal = false;
+      if (local && local.savedAt > serverUpdatedMs) {
+        desired = local.content;
+        desiredTitle = local.title;
+        restoredFromLocal = true;
+      }
       if (editor.getHTML() !== desired) {
         editor.commands.setContent(desired);
         bodyRef.current = desired;
       }
+      titleRef.current = desiredTitle;
       hydratedNoteId.current = activeNoteId;
+      if (restoredFromLocal && activeNoteId && activeNoteId > 0) {
+        // Mark dirty so the next debounce tick re-PATCHes the recovered
+        // content to the server. On success, save() clears the stash.
+        hasChanges.current = true;
+        scheduleSave();
+        console.info(
+          `[NoteEditor] restored unsaved draft for note #${activeNoteId} from localStorage`,
+        );
+      }
     }
     const title = activeNote.title ?? "";
-    if (titleRef.current !== title) {
+    if (titleRef.current !== title && hydratedNoteId.current !== activeNoteId) {
       setLocalTitle(title);
       titleRef.current = title;
+    } else if (hydratedNoteId.current === activeNoteId && titleRef.current && localTitle !== titleRef.current) {
+      setLocalTitle(titleRef.current);
     }
     setLocalIsPublic(activeNote.is_public ?? false);
   }, [activeNoteId, editor, activeNote?.content, activeNote?.title, activeNote?.is_public]);
@@ -803,6 +845,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     try {
       await updateNote(activeNoteId, titleRef.current, bodyRef.current);
       hasChanges.current = false;
+      // Server has the canonical copy now — drop any stash that was waiting
+      // for retry. Done eagerly so a stale stash from a prior outage doesn't
+      // resurrect outdated content on next mount.
+      try { clearLocalNoteDraft(activeNoteId); } catch {}
       const time = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
       setLastSavedTime(time);
       setSaveStatus("saved");
@@ -816,6 +862,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       // image-too-large / 409-empty-overwrite / network-blip cases debuggable.
       console.error(`[NoteEditor] save failed for note #${activeNoteId}:`, err);
       setSaveStatus("error");
+      // Belt-and-braces: also stash the in-progress content. The retry-on-
+      // next-keystroke path normally covers this, but if the user closes
+      // the tab between failed save and next keystroke, the localStorage
+      // copy is the only path back to their edits.
+      try {
+        saveLocalNoteDraft(activeNoteId, titleRef.current, bodyRef.current);
+      } catch {}
     }
   }
 

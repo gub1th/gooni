@@ -1527,6 +1527,53 @@ export type ImageUploadResult =
   | { kind: "fallback"; reason: string }
   | { kind: "error"; status: number; message: string };
 
+// ── Local draft cache (offline / OOM fallback) ───────────────────────────────
+//
+// When a save PATCH fails (network error, server 502 mid-OOM, etc) we still
+// have the editor's current title+content client-side. Stash it under this
+// localStorage key so the next load of the same note can detect leftover
+// unsaved work, hydrate the editor with it, and retry the save.
+
+const NOTE_DRAFT_PREFIX = "gooni_note_draft_v1:";
+
+export interface LocalNoteDraft {
+  noteId: number;
+  title: string;
+  content: string;
+  savedAt: number; // epoch ms
+}
+
+export function saveLocalNoteDraft(noteId: number, title: string, content: string) {
+  try {
+    const payload: LocalNoteDraft = { noteId, title, content, savedAt: Date.now() };
+    localStorage.setItem(NOTE_DRAFT_PREFIX + noteId, JSON.stringify(payload));
+  } catch {
+    // localStorage full / private mode / disabled — best-effort.
+  }
+}
+
+export function readLocalNoteDraft(noteId: number): LocalNoteDraft | null {
+  try {
+    const raw = localStorage.getItem(NOTE_DRAFT_PREFIX + noteId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LocalNoteDraft;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.noteId !== noteId) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearLocalNoteDraft(noteId: number) {
+  try {
+    localStorage.removeItem(NOTE_DRAFT_PREFIX + noteId);
+  } catch {
+    // ignore
+  }
+}
+
+
 export async function uploadImage(file: File): Promise<ImageUploadResult> {
   const form = new FormData();
   form.append("file", file, file.name || "image");
