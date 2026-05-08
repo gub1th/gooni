@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.44.1 — 2026-05-07 (patch)
+
+- fix(db): re-add notes.excerpt dropped by 40c7d78ffa45 (#144)
+
 ## 0.44.0 — 2026-05-07 (minor)
 
 - feat(db): adopt Alembic for schema migrations on SQLite (#142)

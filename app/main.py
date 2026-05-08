@@ -618,7 +618,11 @@ async def _backfill_note_excerpts_loop():
             if not rows:
                 return
             for n in rows:
-                n.excerpt = _excerpt_from_html(n.content)
+                # Stamp "" when extraction yields None (e.g. <p></p> or
+                # image-only bodies). Otherwise the IS NULL filter re-selects
+                # the same rows forever, hot-spinning the loop and slowly
+                # exhausting the 512MB Fly machine until OOM.
+                n.excerpt = _excerpt_from_html(n.content) or ""
                 wrote += 1
             db.commit()
         except Exception as e:
