@@ -658,7 +658,7 @@ async def _memory_watchdog_loop():
                     )
             except Exception:
                 rss = -1
-            print(f"[mem] rss={rss}kB gc_collected={collected}")
+            print(f"[mem] rss={rss}kB gc_collected={collected}", flush=True)
         except asyncio.CancelledError:
             return
         except Exception as e:
