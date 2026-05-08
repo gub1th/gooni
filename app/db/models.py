@@ -697,4 +697,25 @@ class GooniTake(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class NoteComment(Base):
+    """Confluence-style comment thread under a note. One row per comment;
+    no nesting/replies for now (kept flat to keep the UI a simple list).
+    `author` is a free-text label ("daniel", "gooni", "claude") rather than
+    a FK because Gooni is a single-user app — adding a User table just for
+    this would be ceremony without payoff.
+    """
+
+    __tablename__ = "note_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    note_id = Column(
+        Integer,
+        ForeignKey("notes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    author = Column(String, nullable=False, default="daniel")
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
 

@@ -20,6 +20,7 @@ import { NoteLink } from "./NoteLinkExtension";
 import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { MemoryBrain } from "./MemoryBrain";
+import { NoteComments } from "./NoteComments";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
@@ -1759,6 +1760,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                 </div>
 
                 <MemoryBrain memories={noteMemories} />
+
+                {activeNote?.id && activeNote.id > 0 ? (
+                  <NoteComments noteId={activeNote.id} />
+                ) : null}
 
               </div>
             )}

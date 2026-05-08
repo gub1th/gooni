@@ -257,6 +257,43 @@ export async function fetchPinnedNotes(): Promise<ApiNote[]> {
   return res.json();
 }
 
+export interface ApiNoteComment {
+  id: number;
+  note_id: number;
+  author: string;
+  content: string;
+  created_at: string | null;
+}
+
+export async function fetchNoteComments(noteId: number): Promise<ApiNoteComment[]> {
+  try {
+    const res = await apiFetch(`${BASE}/notes/${noteId}/comments`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function createNoteComment(
+  noteId: number,
+  content: string,
+  author = "daniel",
+): Promise<ApiNoteComment> {
+  const res = await apiFetch(`${BASE}/notes/${noteId}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, author }),
+  });
+  if (!res.ok) throw new Error("Failed to post comment");
+  return res.json();
+}
+
+export async function deleteNoteComment(commentId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/comments/${commentId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete comment");
+}
+
 export async function fetchDraftNotes(): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/notes/drafts`);
   if (!res.ok) throw new Error("Failed to fetch draft notes");
