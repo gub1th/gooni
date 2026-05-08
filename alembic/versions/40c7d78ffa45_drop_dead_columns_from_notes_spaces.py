@@ -25,7 +25,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 _DEAD = {
-    "notes": ["outcome", "excerpt", "log_date", "goal_id", "meta", "pinned_sort_order", "note_type"],
+    # `excerpt` was incorrectly classified as dead in the original snapshot —
+    # the model snapshot used to author this migration predated PR #139 which
+    # introduced it. Already-deployed prod DBs lost the column when this
+    # upgrade ran; the follow-up migration re-adds it. Removed here so any
+    # un-migrated environment doesn't repeat the loss.
+    "notes": ["outcome", "log_date", "goal_id", "meta", "pinned_sort_order", "note_type"],
     "spaces": ["sort_order"],
 }
 
