@@ -3538,6 +3538,24 @@ def get_public_note(note_id: int, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/public/notes/{note_id}/comments")
+def get_public_note_comments(note_id: int, db: Session = Depends(get_db)):
+    """Read-only comment thread for a public note. 404 if the note isn't
+    public; thread itself has no per-comment visibility flag — if the note
+    is public, all its comments are visible. Auth-bypassed by middleware
+    (path matches /public/* GET)."""
+    note = db.query(Note).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
+    if not note:
+        raise HTTPException(status_code=404, detail="Not found")
+    rows = (
+        db.query(NoteComment)
+        .filter(NoteComment.note_id == note_id)
+        .order_by(NoteComment.created_at.asc(), NoteComment.id.asc())
+        .all()
+    )
+    return [_serialize_comment(c) for c in rows]
+
+
 @app.get("/notes/{note_id}")
 def get_note(note_id: int, db: Session = Depends(get_db)):
     """Return a single note by ID. Tacks on `unique_viewers` so the editor

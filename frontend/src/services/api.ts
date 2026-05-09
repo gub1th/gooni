@@ -553,6 +553,12 @@ export async function fetchPublicNote(id: number): Promise<PublicNoteDetail> {
   return res.json();
 }
 
+export async function fetchPublicNoteComments(id: number): Promise<ApiNoteComment[]> {
+  const res = await apiFetch(`${BASE}/public/notes/${id}/comments`);
+  if (!res.ok) throw new Error("Not found");
+  return res.json();
+}
+
 export async function fetchPublicNotes(): Promise<PublicNote[]> {
   const res = await apiFetch(`${BASE}/public/notes`);
   if (!res.ok) throw new Error("Failed to fetch public notes");
