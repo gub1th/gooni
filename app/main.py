@@ -2448,28 +2448,30 @@ def notes_graph(db: Session = Depends(get_db)):
 
 @app.post("/notes/cleanup")
 def cleanup_empty_notes(dry_run: bool = False, db: Session = Depends(get_db)):
-    """Delete notes whose body plaintext is < 6 chars (covers fully-empty AND
-    title-only notes — Daniel's call: if the body never got written, the
-    note isn't pulling its weight). Pinned notes are always preserved
-    (explicit user intent — pin = "keep this here forever"). Empty drafts
-    are NOT preserved: a draft with no body is abandoned, not in-progress;
-    drafts seeded by the seed-draft skill always carry body content so the
-    <6-char rule keeps them safe.
-    Pass dry_run=true to preview deletions without committing.
-    Response also reports `preserved_pinned_empty` so the caller sees what
-    the pin filter is protecting.
+    """Delete notes with no real content. "Real content" = any plaintext
+    >= 6 chars after stripping HTML, OR any embedded media (img/video/iframe).
+    Pinned notes are always preserved (explicit user intent). Empty drafts
+    are NOT preserved.
+
+    The image carve-out matters because a note that's just a pasted
+    screenshot strips down to "" plaintext under the old rule and would
+    have been swept. Media tags count as content even though they don't
+    contribute characters.
     """
     import re
 
-    def _plaintext_len(html: str | None) -> int:
-        if not html:
-            return 0
-        text_only = re.sub(r"<[^>]+>", " ", html)
-        text_only = re.sub(r"\s+", " ", text_only).strip()
-        return len(text_only)
+    media_re = re.compile(r"<(img|video|iframe|figure)\b", re.IGNORECASE)
+    tag_strip_re = re.compile(r"<[^>]+>")
+    ws_re = re.compile(r"\s+")
 
-    # Treat NULL is_pinned as false (fresh-migration rows). Drafts are no
-    # longer filtered out at the query layer — body content is the gate.
+    def _has_real_content(html: str | None) -> bool:
+        if not html:
+            return False
+        if media_re.search(html):
+            return True
+        text_only = ws_re.sub(" ", tag_strip_re.sub(" ", html)).strip()
+        return len(text_only) >= 6
+
     non_pinned = (
         db.query(Note)
         .filter((Note.is_pinned == False) | (Note.is_pinned.is_(None)))  # noqa: E712
@@ -2482,11 +2484,13 @@ def cleanup_empty_notes(dry_run: bool = False, db: Session = Depends(get_db)):
     )
     deleted_ids = []
     for n in non_pinned:
-        if _plaintext_len(n.content) < 6:
+        if not _has_real_content(n.content):
             deleted_ids.append(n.id)
             if not dry_run:
                 db.delete(n)
-    preserved_pinned_empty = sum(1 for n in pinned_empty if _plaintext_len(n.content) < 6)
+    preserved_pinned_empty = sum(
+        1 for n in pinned_empty if not _has_real_content(n.content)
+    )
     if not dry_run:
         db.commit()
     return {
