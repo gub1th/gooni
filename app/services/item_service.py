@@ -132,20 +132,48 @@ class ItemService:
 
     # ── Tree + derived views ────────────────────────────────────────────
 
-    def list_tree(self, db: Session) -> dict[str, Any]:
+    def list_tree(
+        self,
+        db: Session,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
         """Return focuses + inbox-style todos in the shape FocusFlow expects.
 
         Children-of-focus are gone post-extraction; the linked todos
         (focus_todo_links) take their place but render in the dashboard's
         Today's todos section, not as nested rows under each focus.
+
+        Pagination is at the *root* level — top N focuses + top N todos
+        (no children to slice now). `limit` clamped to [1, 200] to prevent
+        runaway requests; `offset` clamped to >= 0.
+
+        Shape:
+          {
+            "focuses":       [...up to limit roots],
+            "inbox":         [...up to limit roots],
+            "total_focuses": int,
+            "total_inbox":   int,
+            "limit":         int,
+            "offset":        int,
+          }
         """
+        limit = max(1, min(200, limit))
+        offset = max(0, offset)
+
         focuses = focus_service.list_active(db)
         todos = todo_service.list_open(db)
         return {
-            "focuses": [_focus_tree_node(db, f) for f in focuses],
-            # All non-done todos are "inbox" now — focuses don't have
-            # checklist children anymore.
-            "inbox": [_todo_tree_node(t) for t in todos],
+            "focuses": [
+                _focus_tree_node(db, f) for f in focuses[offset : offset + limit]
+            ],
+            "inbox": [
+                _todo_tree_node(t) for t in todos[offset : offset + limit]
+            ],
+            "total_focuses": len(focuses),
+            "total_inbox": len(todos),
+            "limit": limit,
+            "offset": offset,
         }
 
     def today(self, db: Session) -> list[dict[str, Any]]:
