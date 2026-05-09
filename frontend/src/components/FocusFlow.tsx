@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, Wind, Crown, HelpCircle } from "lucide-react";
+import { Wind, Crown, HelpCircle, Plus, ListPlus } from "lucide-react";
 import {
-  fetchItemTree, createItem, updateItem, deleteItem, reorderItems, suggestFocus,
+  fetchItemTree, createItem, updateItem, deleteItem, reorderItems,
   fetchTodayTodos,
   type ApiItemTree, type ApiItemNode, type FocusScale,
   type TodayTodo, type FocusChip,
 } from "../services/api";
-import { ListPlus } from "lucide-react";
 import { DeriveTodoModal } from "./DeriveTodoModal";
 import { FocusOverlay, loadFocusMode, saveFocusMode, clearFocusMode } from "./FocusOverlay";
 
@@ -206,16 +205,6 @@ export function FocusFlow() {
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [drop, setDrop] = useState<DropTarget>(null);
 
-  async function handleSuggest() {
-    try {
-      const s = await suggestFocus();
-      if (s.text) {
-        setSeed({ text: s.text, endgoal: s.endgoal, scale: s.scale });
-        setShowModal(true);
-      }
-    } catch (e) { console.error(e); }
-  }
-
   async function handleCreate(payload: {
     title: string;
     type: FocusScale;
@@ -384,8 +373,11 @@ export function FocusFlow() {
 
       <Spotlight
         f={primary}
+        existing={focuses}
         onClearPrimary={handleClearPrimary}
         onComplete={handleComplete}
+        onCreate={() => { setSeed(null); setShowModal(true); }}
+        onPickExisting={handleSetPrimary}
       />
 
       <div className="ff-toolbar">
@@ -394,9 +386,6 @@ export function FocusFlow() {
           {active.length} active{someday.length > 0 ? ` · ${someday.length} someday` : ""}
         </span>
         <span style={{ flex: 1 }} />
-        <button className="ff-ghost" onClick={handleSuggest}>
-          <Sparkles size={11} /> suggest
-        </button>
         <button
           className="ff-add-link"
           onClick={() => { setSeed(null); setShowModal(true); }}
@@ -499,22 +488,72 @@ export function FocusFlow() {
 
 // ── Spotlight ──────────────────────────────────────────────────────────────
 
-function Spotlight({ f, onClearPrimary, onComplete }: {
+function Spotlight({ f, existing, onClearPrimary, onComplete, onCreate, onPickExisting }: {
   f: ApiItemNode | undefined;
+  existing: ApiItemNode[];
   onClearPrimary: (id: number) => void;
   onComplete: (n: ApiItemNode) => void;
+  onCreate: () => void;
+  onPickExisting: (id: number) => void;
 }) {
   // Re-render every minute so the running primary timer ticks.
   useNowMinute();
+  const [pickerOpen, setPickerOpen] = useState(false);
   if (!f) {
+    const candidates = existing.filter((c) => c.status !== "someday");
     return (
       <div className="ff-spotlight ff-spotlight-empty">
-        <div className="ff-spot-lab">
-          <Crown size={12} strokeWidth={1.8} className="ff-spot-crown ff-spot-crown-empty" />
-          Primary focus
+        <div className="ff-spot-empty-row">
+          <div className="ff-spot-lab">
+            <Crown size={12} strokeWidth={1.8} className="ff-spot-crown ff-spot-crown-empty" />
+            Primary focus
+          </div>
+          <span style={{ flex: 1 }} />
+          <button
+            className="ff-spot-cta ff-spot-cta-primary"
+            onClick={onCreate}
+            type="button"
+          >
+            <Plus size={12} strokeWidth={2} /> Create new
+          </button>
+          {candidates.length > 0 && (
+            <div style={{ position: "relative" }}>
+              <button
+                className="ff-spot-cta"
+                onClick={() => setPickerOpen((o) => !o)}
+                type="button"
+                aria-expanded={pickerOpen}
+              >
+                <ListPlus size={12} strokeWidth={2} /> Pick existing
+              </button>
+              {pickerOpen && (
+                <>
+                  <div
+                    style={{ position: "fixed", inset: 0, zIndex: 49 }}
+                    onClick={() => setPickerOpen(false)}
+                  />
+                  <div className="ff-spot-picker">
+                    {candidates.map((c) => (
+                      <button
+                        key={c.id}
+                        className="ff-spot-picker-row"
+                        onClick={() => { setPickerOpen(false); onPickExisting(c.id); }}
+                        type="button"
+                      >
+                        <Crown size={11} strokeWidth={1.8} className="ff-spot-picker-crown" />
+                        <span className="ff-spot-picker-text">{c.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
-        <div className="ff-spot-title-empty">No primary set.</div>
-        <div className="ff-spot-meta">Pick a focus from the list and crown it.</div>
+        <div className="ff-spot-empty-helper">
+          Crown a focus to anchor your day. The primary gets the spotlight,
+          a running timer, and a one-tap focus mode.
+        </div>
       </div>
     );
   }
@@ -1218,6 +1257,48 @@ function FocusFlowStyles() {
       }
       .ff-spotlight-empty { background: var(--gooni-card, #FFFFFF); }
       .ff-spotlight-empty::before { display: none; }
+      .ff-spot-empty-row { position: relative; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .ff-spot-empty-helper {
+        position: relative;
+        margin-top: 10px; font-size: 12.5px; line-height: 1.5;
+        color: var(--gooni-muted, #6E6E68);
+      }
+      .ff-spot-cta {
+        display: inline-flex; align-items: center; gap: 5px;
+        font-family: inherit; font-size: 12px; font-weight: 500;
+        padding: 5px 11px; border-radius: 999px;
+        border: 0.5px solid var(--gooni-border, rgba(0,0,0,0.12));
+        background: var(--gooni-card, #FFFFFF);
+        color: var(--gooni-text, #1C1C1E);
+        cursor: pointer;
+      }
+      .ff-spot-cta:hover { background: rgba(0,0,0,0.04); }
+      .ff-spot-cta-primary {
+        background: #1C1C1E; color: #fff; border-color: #1C1C1E;
+      }
+      .ff-spot-cta-primary:hover { background: #2A2A2C; }
+      .ff-spot-picker {
+        position: absolute; top: calc(100% + 4px); right: 0; z-index: 50;
+        min-width: 220px; max-width: 320px; max-height: 280px; overflow-y: auto;
+        background: var(--gooni-card, #FFFFFF);
+        border: 0.5px solid rgba(0,0,0,0.12);
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.06);
+        padding: 4px;
+      }
+      .ff-spot-picker-row {
+        display: flex; align-items: center; gap: 8px;
+        width: 100%; padding: 7px 10px; border-radius: 6px;
+        background: transparent; border: none; cursor: pointer;
+        font-family: inherit; font-size: 13px; text-align: left;
+        color: var(--gooni-text, #1C1C1E);
+      }
+      .ff-spot-picker-row:hover { background: rgba(0,0,0,0.05); }
+      .ff-spot-picker-crown { color: var(--gooni-muted, #C7C7CC); flex-shrink: 0; }
+      .ff-spot-picker-row:hover .ff-spot-picker-crown { color: #EAB308; }
+      .ff-spot-picker-text {
+        flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
       .ff-spot-row { position: relative; display: flex; align-items: center; gap: 8px; }
       .ff-spot-lab {
         position: relative;
@@ -1248,11 +1329,6 @@ function FocusFlowStyles() {
         line-height: 1.3;
         margin: 6px 0 6px;
         color: var(--gooni-text, #1C1C1E);
-      }
-      .ff-spot-title-empty {
-        position: relative;
-        font-size: 16px; font-style: italic; color: var(--gooni-muted, #8E8E93);
-        margin: 6px 0 6px;
       }
       .ff-spot-meta {
         position: relative;
@@ -1287,13 +1363,6 @@ function FocusFlowStyles() {
         color: var(--gooni-muted, #8E8E93); font-weight: 600;
       }
       .ff-toolbar-count { color: var(--gooni-muted, #8E8E93); font-size: 12px; }
-      .ff-ghost {
-        background: none; border: none; padding: 6px 8px;
-        color: var(--gooni-muted, #6E6E68); font-size: 12px;
-        cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
-        font-family: inherit;
-      }
-      .ff-ghost:hover { color: var(--gooni-text, #1C1C1E); }
       /* Toolbar "add focus" — restyled from the heavy black pill into a
          lightweight ghost link to match the existing dashboard rhythm. */
       .ff-add-link {
