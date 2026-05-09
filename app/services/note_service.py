@@ -47,49 +47,35 @@ class NoteService:
         finally:
             db.close()
 
-    def get_related(self, note_id: int, limit: int, db: Session) -> list[tuple[Note, float]]:
-        """Return (note, cosine_similarity) tuples ordered by similarity desc."""
-        note = db.query(Note).filter(Note.id == note_id).first()
-        if not note or not note.embedding:
-            return []
-        query_vec = json.loads(note.embedding)
-        candidates = (
-            db.query(Note)
-            .filter(Note.id != note_id, Note.embedding.isnot(None))
-            .all()
-        )
-        scored = []
-        for n in candidates:
-            try:
-                sim = _cosine_similarity(query_vec, json.loads(n.embedding))
-                scored.append((n, sim))
-            except Exception:
-                pass
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return scored[:limit]
-
     def suggest_space(self, note_id: int, db: Session) -> dict:
         """Return best-matching space for a note based on embedding similarity.
         Only suggests when the note is in General (space_id is None).
         """
-        note = db.query(Note).filter(Note.id == note_id).first()
-        if not note or not note.embedding or note.space_id is not None:
+        # Tuple query — skips ORM hydration of all the other columns we
+        # don't need (content, title, classify_signals, etc) and only the
+        # deferred embedding actually loads. Saves ~MB per call when the
+        # note body is fat or there are many candidates.
+        row = (
+            db.query(Note.embedding, Note.space_id)
+            .filter(Note.id == note_id)
+            .first()
+        )
+        if not row or not row[0] or row[1] is not None:
             return {"suggested_space_id": None, "suggested_space_name": None, "suggested_space_emoji": None}
-
-        note_vec = json.loads(note.embedding)
+        note_vec = json.loads(row[0])
         spaces = db.query(Space).all()
         best_space = None
         best_sim = 0.60  # minimum threshold to suggest
 
         for space in spaces:
             space_notes = (
-                db.query(Note)
+                db.query(Note.embedding)
                 .filter(Note.space_id == space.id, Note.id != note_id, Note.embedding.isnot(None))
                 .all()
             )
             if not space_notes:
                 continue
-            vecs = [json.loads(n.embedding) for n in space_notes]
+            vecs = [json.loads(emb) for (emb,) in space_notes]
             centroid = [sum(v[i] for v in vecs) / len(vecs) for i in range(len(vecs[0]))]
             sim = _cosine_similarity(note_vec, centroid)
             if sim > best_sim:
@@ -109,16 +95,29 @@ class NoteService:
         query_embedding, _ = llm_client.generate_embedding(query)
         if not query_embedding:
             return []
-        candidates = db.query(Note).filter(Note.embedding.isnot(None)).all()
-        scored = []
-        for n in candidates:
+        # Two-pass: first score every candidate with a tiny tuple query
+        # (id, embedding) — skips materializing full Note ORM objects with
+        # their fat content columns. Then load only the top-K full rows.
+        candidates = (
+            db.query(Note.id, Note.embedding)
+            .filter(Note.embedding.isnot(None))
+            .all()
+        )
+        scored: list[tuple[int, float]] = []
+        for nid, emb in candidates:
             try:
-                sim = _cosine_similarity(query_embedding, json.loads(n.embedding))
-                scored.append((n, sim))
+                sim = _cosine_similarity(query_embedding, json.loads(emb))
+                scored.append((nid, sim))
             except Exception:
                 pass
         scored.sort(key=lambda x: x[1], reverse=True)
-        return [n for n, _ in scored[:limit]]
+        top_ids = [nid for nid, _ in scored[:limit]]
+        if not top_ids:
+            return []
+        rows = db.query(Note).filter(Note.id.in_(top_ids)).all()
+        # Restore the cosine ordering.
+        by_id = {n.id: n for n in rows}
+        return [by_id[nid] for nid in top_ids if nid in by_id]
 
 
 note_service = NoteService()

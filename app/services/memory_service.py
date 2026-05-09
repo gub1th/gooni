@@ -176,24 +176,33 @@ class MemoryService:
     ) -> list[tuple[Memory, float]]:
         """Cosine-score active memories. Returns sorted (memory, similarity)
         list above the floor, capped at limit."""
-        q = db.query(Memory).filter(
+        # Tuple-query the (id, embedding) pair for scoring so the deferred
+        # `embedding` column is the only fat data pulled — full Memory ORM
+        # objects (with content, context blobs) only get loaded for the
+        # top-K rows the caller actually wants.
+        q = db.query(Memory.id, Memory.embedding).filter(
             Memory.is_active == True,
             Memory.embedding.isnot(None),
         )
         if type_filter:
             q = q.filter(Memory.type.in_(type_filter))
         rows = q.all()
-        scored: list[tuple[Memory, float]] = []
-        for m in rows:
+        scored_ids: list[tuple[int, float]] = []
+        for mid, emb in rows:
             try:
-                vec = json.loads(m.embedding)
-                sim = _cosine_similarity(query_vec, vec)
+                sim = _cosine_similarity(query_vec, json.loads(emb))
                 if sim >= floor:
-                    scored.append((m, sim))
+                    scored_ids.append((mid, sim))
             except Exception:
                 continue
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return scored[:limit]
+        scored_ids.sort(key=lambda x: x[1], reverse=True)
+        top = scored_ids[:limit]
+        if not top:
+            return []
+        ids = [mid for mid, _ in top]
+        full = db.query(Memory).filter(Memory.id.in_(ids)).all()
+        by_id = {m.id: m for m in full}
+        return [(by_id[mid], sim) for mid, sim in top if mid in by_id]
 
     # ── reconcile/apply ─────────────────────────────────────────────────────
 

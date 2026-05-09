@@ -175,7 +175,6 @@ def _run_column_migrations(engine):
             ("notes", "is_public", "INTEGER"),
             ("notes", "is_pinned", "INTEGER"),
             ("notes", "is_draft", "INTEGER"),
-            ("notes", "suggested_questions", "TEXT"),
             ("conversations", "topic_graph", "TEXT"),
             ("conversations", "summary", "TEXT"),
             ("messages", "feedback_for_message_id", "INTEGER"),
@@ -2404,8 +2403,12 @@ def notes_graph(db: Session = Depends(get_db)):
     import math
     import re as _re
 
+    # Tuple query — only the columns the graph builder needs, so we don't
+    # hydrate the deferred classified_embedding or any other Note columns
+    # (and we still get content for word_count). 6MB notes (cf. PR-#134
+    # postmortem) make this materially cheaper than .query(Note).all().
     notes = (
-        db.query(Note)
+        db.query(Note.id, Note.title, Note.content, Note.embedding, Note.space_id)
         .filter(Note.embedding.isnot(None))
         .all()
     )
@@ -2413,24 +2416,24 @@ def notes_graph(db: Session = Depends(get_db)):
     # Parse embeddings + build node metadata.
     vectors: list[list[float]] = []
     nodes: list[dict] = []
-    for n in notes:
+    for nid, ntitle, ncontent, nemb, nspace in notes:
         try:
-            v = json.loads(n.embedding)
+            v = json.loads(nemb)
             if not isinstance(v, list) or not v:
                 continue
         except (ValueError, TypeError):
             continue
         # Word count for node size — strip HTML first.
-        raw = (n.title or "") + " " + (n.content or "")
+        raw = (ntitle or "") + " " + (ncontent or "")
         raw = _re.sub(r"<[^>]+>", " ", raw)
         words = [w for w in raw.split() if w.strip()]
         word_count = len(words)
         vectors.append(v)
         nodes.append({
-            "id": n.id,
-            "title": (n.title or "").strip() or "(untitled)",
+            "id": nid,
+            "title": (ntitle or "").strip() or "(untitled)",
             "size": round(math.log2(word_count + 2), 3),
-            "space_id": n.space_id,
+            "space_id": nspace,
         })
 
     if len(vectors) < 2:
@@ -2548,57 +2551,6 @@ def embed_note(note_id: int, db: Session = Depends(get_db)):
     return {"ok": True, **suggestion}
 
 
-@app.post("/notes/{note_id}/suggest-questions")
-def suggest_note_questions(note_id: int, db: Session = Depends(get_db)):
-    """Generate 3-5 probing questions Gooni would ask about this note. Cached
-    on the note row keyed by content hash — so re-opening the editor doesn't
-    re-fire the LLM call. Bails empty for short or empty notes.
-    """
-    note = db.query(Note).filter(Note.id == note_id).first()
-    if not note:
-        raise HTTPException(status_code=404, detail="Note not found")
-
-    plaintext = note_service._strip_html(note.content or "")
-    title = (note.title or "").strip()
-    raw = (title + "\n" + plaintext).strip()
-    # Below ~200 chars there isn't enough surface for sharp questions.
-    if len(plaintext) < 200:
-        return {"questions": []}
-
-    content_hash = hashlib.sha1(raw.encode("utf-8")).hexdigest()
-    if note.suggested_questions:
-        try:
-            cached = json.loads(note.suggested_questions)
-            if cached.get("hash") == content_hash:
-                return {"questions": cached.get("questions") or []}
-        except json.JSONDecodeError:
-            pass  # corrupt cache → regenerate
-
-    prompt = (
-        "Daniel just wrote this note. Generate 3-5 probing questions a sharp "
-        "friend would ask to push his thinking — questions that surface "
-        "assumptions, force tradeoffs, or reveal what's missing. One per "
-        "line. No numbering, no preamble, no quotes around questions.\n\n"
-        f"Title: {title}\n\nContent: {plaintext[:3000]}"
-    )
-    try:
-        raw_out = llm_client.generate_simple_completion(prompt, max_tokens=300)
-    except Exception as e:
-        print(f"suggest-questions LLM error: {e}")
-        return {"questions": []}
-
-    questions = [
-        line.strip().lstrip("-•0123456789. ").strip()
-        for line in (raw_out or "").splitlines()
-        if line.strip()
-    ]
-    questions = [q for q in questions if len(q) > 10][:5]
-
-    note.suggested_questions = json.dumps({"hash": content_hash, "questions": questions})
-    db.commit()
-    return {"questions": questions}
-
-
 @app.post("/notes/{note_id}/touch")
 def touch_note(note_id: int, db: Session = Depends(get_db)):
     """Update last_opened_at. Called whenever a note is selected."""
@@ -2668,16 +2620,6 @@ def delete_note(note_id: int, db: Session = Depends(get_db)):
     db.delete(note)
     db.commit()
     return {"ok": True}
-
-
-@app.get("/notes/{note_id}/related")
-def get_related_notes(note_id: int, limit: int = 5, db: Session = Depends(get_db)):
-    """Return notes similar to the given note plus their cosine score (0..1)
-    so the editor can render a similarity pill."""
-    return [
-        {**_serialize_note_lite(n), "similarity": round(sim, 3)}
-        for n, sim in note_service.get_related(note_id, limit, db)
-    ]
 
 
 @app.get("/notes/{note_id}/memories")
