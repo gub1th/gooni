@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { renderMarkdown } from "../utils/markdown";
 import { extractOptions, extractPlanBlock, planMarkdownToHtml } from "../utils/planMarkdown";
-import { fetchNote, updateNote } from "../services/api";
+import { fetchNote, updateNote, createNote as apiCreateNote } from "../services/api";
 import { displayTitle } from "../utils/notePreview";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useGooniModalCornerStore } from "../stores/useGooniModalCornerStore";
@@ -9,6 +9,25 @@ import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { ModelSelector } from "./ModelSelector";
 import { ThinkingIndicator } from "./chat/ThinkingIndicator";
+
+// Plain text → TipTap-friendly HTML. Escapes the string and wraps each
+// non-empty line in <p>; double-newlines become paragraph breaks. Keeps
+// quick-saved notes parsable by the editor without leaking raw markup.
+function plainTextToNoteHtml(text: string): string {
+  const escape = (s: string) =>
+    s.replace(/&/g, "&amp;")
+     .replace(/</g, "&lt;")
+     .replace(/>/g, "&gt;")
+     .replace(/"/g, "&quot;");
+  const paragraphs = text
+    .split(/\n{2,}/)
+    .map((para) => {
+      const lines = para.split("\n").map(escape).join("<br/>");
+      return lines.trim() ? `<p>${lines}</p>` : "";
+    })
+    .filter(Boolean);
+  return paragraphs.join("") || `<p>${escape(text)}</p>`;
+}
 
 interface GooniPanelProps {
   fullscreen?: boolean;
@@ -34,10 +53,18 @@ interface GooniPanelProps {
 
 export function GooniPanel({ fullscreen = false, floating = false, planContext, dockedWidth }: GooniPanelProps) {
   const { width: storedWidth, setWidth } = useGooniStore();
+  const composerMode = useGooniStore((s) => s.composerMode);
+  const setComposerMode = useGooniStore((s) => s.setComposerMode);
+  // Plan-mode panels lock to chat — note capture inside a plan session
+  // would derail the plan flow (no save target, no entry context).
+  const mode: "chat" | "note" = planContext ? "chat" : composerMode;
+  const isNoteMode = mode === "note";
   const width = dockedWidth ?? storedWidth;
   const { messages, sending, send } = useConversationsStore();
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
   const [input, setInput] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteSavedFlash, setNoteSavedFlash] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
   const [savedPlanIds, setSavedPlanIds] = useState<Set<number>>(new Set());
   // Per-message map of "which option(s) the user picked" so chips can
@@ -155,7 +182,23 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
 
   async function handleSend() {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sending || savingNote) return;
+    if (isNoteMode) {
+      setSavingNote(true);
+      try {
+        const html = plainTextToNoteHtml(text);
+        await apiCreateNote("general", { content: html });
+        window.dispatchEvent(new CustomEvent("gooni:note-created"));
+        setInput("");
+        setNoteSavedFlash(true);
+        setTimeout(() => setNoteSavedFlash(false), 1400);
+      } catch (e) {
+        console.error("[GooniPanel] note save failed:", e);
+      } finally {
+        setSavingNote(false);
+      }
+      return;
+    }
     setInput("");
     if (planContext) {
       await send(text, planContext.noteContent, "plan");
@@ -219,8 +262,17 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // Enter sends, Shift+Enter inserts a newline (standard chat UX).
-    // Cmd+Enter still sends as a backup for muscle memory.
+    // Note mode → Cmd/Ctrl+Enter saves (matches QuickComposer); plain Enter
+    // inserts a newline so notes can have structure. Chat mode keeps the
+    // standard Enter-to-send shortcut.
+    const meta = e.metaKey || e.ctrlKey;
+    if (isNoteMode) {
+      if (meta && e.key === "Enter") {
+        e.preventDefault();
+        handleSend();
+      }
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -251,38 +303,46 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
     window.addEventListener("mouseup", onMouseUp);
   }, [fullscreen, dockedWidth, storedWidth, setWidth]);
 
+  // Subtle yellow wash in note mode so the surface reads "different mode"
+  // without screaming. Transition keeps the swap smooth.
+  const surfaceBg = isNoteMode
+    ? "linear-gradient(180deg, rgba(250,204,21,0.06) 0%, rgba(250,204,21,0.02) 100%), var(--gooni-card, #FFFFFF)"
+    : "var(--gooni-card, #FFFFFF)";
   const containerStyle: React.CSSProperties = floating
     ? {
         flex: 1,
         width: "100%",
         height: "100%",
-        background: "var(--gooni-card, #FFFFFF)",
+        background: surfaceBg,
         display: "flex",
         flexDirection: "column",
         boxSizing: "border-box",
         position: "relative",
+        transition: "background 0.25s ease",
       }
     : fullscreen
     ? {
         flex: 1,
         height: "100vh",
-        background: "var(--gooni-card, #FFFFFF)",
+        background: surfaceBg,
         borderLeft: "1px solid rgba(0,0,0,0.08)",
         display: "flex",
         flexDirection: "column",
         boxSizing: "border-box",
         position: "relative",
+        transition: "background 0.25s ease",
       }
     : {
         width,
         minWidth: width,
         height: "100vh",
-        background: "var(--gooni-card, #FFFFFF)",
+        background: surfaceBg,
         borderLeft: "1px solid rgba(0,0,0,0.08)",
         display: "flex",
         flexDirection: "column",
         boxSizing: "border-box",
         position: "relative",
+        transition: "background 0.25s ease",
       };
 
   return (
@@ -314,7 +374,10 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
           toggles + reset-position) + close. Skipped for fullscreen, which
           has its own header. */}
       {!fullscreen && (
-        <ChatHeader />
+        <ChatHeader
+          mode={mode}
+          onToggleMode={planContext ? undefined : () => setComposerMode(isNoteMode ? "chat" : "note")}
+        />
       )}
 
       {/* Messages */}
@@ -343,53 +406,57 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
           >
             <div style={{ marginBottom: 16 }}>
               <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
-                <circle cx="32" cy="32" r="28" fill="#4ADE80" opacity="0.12" />
+                <circle cx="32" cy="32" r="28" fill={isNoteMode ? "#FACC15" : "#4ADE80"} opacity="0.12" style={{ transition: "fill 0.25s" }} />
                 <circle cx="32" cy="30" r="14" fill="#1a1a1a" />
                 <circle cx="32" cy="30" r="10" fill="#f2f2f2" />
                 <circle cx="28" cy="28" r="2" fill="#1a1a1a" />
                 <circle cx="36" cy="28" r="2" fill="#1a1a1a" />
                 <path d="M28 33 Q32 35 36 33" stroke="#1a1a1a" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-                <rect x="24" y="42" width="16" height="12" rx="4" fill="#4ADE80" />
+                <rect x="24" y="42" width="16" height="12" rx="4" fill={isNoteMode ? "#FACC15" : "#4ADE80"} style={{ transition: "fill 0.25s" }} />
               </svg>
             </div>
             <div style={{ fontSize: 15, fontWeight: 500, color: "#1C1C1E", marginBottom: 6 }}>
-              Ask me anything
+              {isNoteMode ? "Capture a quick note" : "Ask me anything"}
             </div>
             <div style={{ fontSize: 13, color: "#8E8E93", lineHeight: 1.5, marginBottom: 20, maxWidth: 280 }}>
-              {activeNote
+              {isNoteMode
+                ? "Saves to your General space. Toggle back to chat in the header anytime."
+                : activeNote
                 ? "Your active note is shared as context. I can help you expand, clarify, or plan."
                 : "I'll use whatever note you open as context. Or just chat."}
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 320 }}>
-              {STARTER_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => setInput(prompt)}
-                  style={{
-                    padding: "10px 14px",
-                    border: "0.5px solid rgba(0,0,0,0.10)",
-                    borderRadius: 8,
-                    background: "rgba(0,0,0,0.025)",
-                    textAlign: "left",
-                    fontSize: 13,
-                    color: "#3C3C43",
-                    cursor: "pointer",
-                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                    transition: "background 0.15s, border-color 0.15s",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = "#4ADE80";
-                    (e.currentTarget as HTMLButtonElement).style.background = "rgba(74,222,128,0.06)";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.10)";
-                    (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.025)";
-                  }}
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
+            {!isNoteMode && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 320 }}>
+                {STARTER_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    onClick={() => setInput(prompt)}
+                    style={{
+                      padding: "10px 14px",
+                      border: "0.5px solid rgba(0,0,0,0.10)",
+                      borderRadius: 8,
+                      background: "rgba(0,0,0,0.025)",
+                      textAlign: "left",
+                      fontSize: 13,
+                      color: "#3C3C43",
+                      cursor: "pointer",
+                      fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                      transition: "background 0.15s, border-color 0.15s",
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = "#4ADE80";
+                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(74,222,128,0.06)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.10)";
+                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.025)";
+                    }}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {messages.map((m) => {
@@ -529,16 +596,24 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
             background: "#FFFFFF",
             borderRadius: 14,
             padding: "10px 12px",
-            border: "0.5px solid rgba(0,0,0,0.12)",
-            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+            border: isNoteMode
+              ? "0.5px solid rgba(250,204,21,0.55)"
+              : "0.5px solid rgba(0,0,0,0.12)",
+            boxShadow: isNoteMode
+              ? "0 1px 2px rgba(234,179,8,0.10)"
+              : "0 1px 2px rgba(0,0,0,0.04)",
+            transition: "border-color 0.2s ease, box-shadow 0.2s ease, min-height 0.25s ease",
+            // In note mode the empty-state starters vacate ~140px of vertical
+            // space — let the composer expand into it for a roomier draft.
+            minHeight: isNoteMode && messages.length === 0 ? 220 : undefined,
           }}
         >
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message Gooni…"
-            rows={2}
+            placeholder={isNoteMode ? "Quick note…" : "Message Gooni…"}
+            rows={isNoteMode ? 6 : 2}
             style={{
               width: "100%",
               resize: "none",
@@ -550,6 +625,8 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
               background: "transparent",
               color: "var(--gooni-text, #1C1C1E)",
               lineHeight: 1.45,
+              flex: isNoteMode ? 1 : undefined,
+              transition: "min-height 0.25s ease",
             }}
           />
           {/* Composer footer — model selector flush left of the action button.
@@ -558,33 +635,72 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
               Web Speech API drives the mic; while listening, the icon turns
               red + the button click stops capture. */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            <ModelSelector />
+            {/* ModelSelector only matters when an LLM is on the other end —
+                hide it in note mode (no model is called when saving a note). */}
+            {isNoteMode ? (
+              <span style={{
+                fontSize: 11.5, color: "var(--gooni-muted, #8E8E93)",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                letterSpacing: 0.2,
+              }}>
+                {noteSavedFlash ? "✓ saved to General" : "→ General space"}
+              </span>
+            ) : (
+              <ModelSelector />
+            )}
             {hasInput ? (
               <button
                 onClick={handleSend}
-                disabled={sending}
-                title="Send (⌘↵)"
-                aria-label="Send message"
+                disabled={sending || savingNote}
+                title={isNoteMode ? "Save note (⌘↵)" : "Send (⌘↵)"}
+                aria-label={isNoteMode ? "Save note" : "Send message"}
                 style={{
                   width: 30, height: 30,
                   borderRadius: 8,
                   border: "none",
-                  background: sending ? "rgba(0,0,0,0.10)" : "#D26B3F",
+                  background: (sending || savingNote)
+                    ? "rgba(0,0,0,0.10)"
+                    : isNoteMode ? "#EAB308" : "#22C55E",
                   color: "#FFFFFF",
-                  cursor: sending ? "default" : "pointer",
+                  cursor: (sending || savingNote) ? "default" : "pointer",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   flexShrink: 0,
-                  boxShadow: sending ? "none" : "0 1px 3px rgba(210,107,63,0.35)",
-                  transition: "background 0.15s, box-shadow 0.15s, transform 0.12s",
+                  boxShadow: (sending || savingNote)
+                    ? "none"
+                    : isNoteMode
+                      ? "0 1px 3px rgba(234,179,8,0.40)"
+                      : "0 1px 3px rgba(34,197,94,0.35)",
+                  transition: "background 0.18s, box-shadow 0.18s, transform 0.12s",
                 }}
-                onMouseEnter={(e) => { if (!sending) (e.currentTarget as HTMLButtonElement).style.background = "#B95B33"; }}
-                onMouseLeave={(e) => { if (!sending) (e.currentTarget as HTMLButtonElement).style.background = "#D26B3F"; }}
+                onMouseEnter={(e) => {
+                  if (sending || savingNote) return;
+                  (e.currentTarget as HTMLButtonElement).style.background = isNoteMode ? "#CA9A07" : "#16A34A";
+                }}
+                onMouseLeave={(e) => {
+                  if (sending || savingNote) return;
+                  (e.currentTarget as HTMLButtonElement).style.background = isNoteMode ? "#EAB308" : "#22C55E";
+                }}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M8 13V3" />
-                  <path d="M3.5 7.5L8 3l4.5 4.5" />
-                </svg>
+                {isNoteMode ? (
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 3h7l3 3v7H3z" />
+                    <path d="M5 3v4h5V3" />
+                    <path d="M5 13v-4h6v4" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M8 13V3" />
+                    <path d="M3.5 7.5L8 3l4.5 4.5" />
+                  </svg>
+                )}
               </button>
+            ) : isNoteMode ? (
+              <span style={{
+                fontSize: 11, color: "var(--gooni-muted, #C7C7CC)",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+              }}>
+                ⌘↵ save
+              </span>
             ) : (
               <button
                 onClick={listening ? stopListening : startListening}
@@ -646,10 +762,19 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
 // an overflow menu for surface (modal/sidebar) + reset-position. Pulled
 // out of the inline pill toggle into a kebab popup so the bar stays clean
 // even when both modes + reset are available.
-function ChatHeader() {
+function ChatHeader({
+  mode,
+  onToggleMode,
+}: {
+  mode: "chat" | "note";
+  onToggleMode?: () => void;
+}) {
   const surface = useGooniStore((s) => s.surface);
   const setSurface = useGooniStore((s) => s.setSurface);
   const toggle = useGooniStore((s) => s.toggle);
+  const isNote = mode === "note";
+  const accent = isNote ? "#FACC15" : "#4ADE80";
+  const accentGlow = isNote ? "rgba(250,204,21,0.22)" : "rgba(74,222,128,0.18)";
   const pos = useGooniModalCornerStore((s) => s.pos);
   const resetPos = useGooniModalCornerStore((s) => s.reset);
   const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -729,16 +854,48 @@ function ChatHeader() {
           aria-hidden
           style={{
             width: 8, height: 8, borderRadius: "50%",
-            background: "#4ADE80",
-            boxShadow: "0 0 0 3px rgba(74,222,128,0.18)",
+            background: accent,
+            boxShadow: `0 0 0 3px ${accentGlow}`,
             flexShrink: 0,
+            transition: "background 0.2s, box-shadow 0.2s",
           }}
         />
         <span style={{ fontSize: 14, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)" }}>
-          Chat with Gooni
+          {isNote ? "Capture a note" : "Chat with Gooni"}
         </span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        {onToggleMode && (
+          <button
+            onClick={onToggleMode}
+            title={isNote ? "Switch to chat" : "Switch to note"}
+            aria-label={isNote ? "Switch to chat mode" : "Switch to note mode"}
+            style={{
+              height: 26, padding: "0 8px",
+              borderRadius: 6,
+              border: "none",
+              background: "transparent",
+              color: "var(--gooni-muted, #8E8E93)", cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 4,
+              fontSize: 12, fontFamily: FONT, fontWeight: 500,
+              transition: "background 0.1s",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+          >
+            {isNote ? (
+              <>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4h12v8H4l-2 2V4z" /></svg>
+                <span>Chat</span>
+              </>
+            ) : (
+              <>
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2h7l3 3v9H3z" /><path d="M10 2v3h3" /></svg>
+                <span>Note</span>
+              </>
+            )}
+          </button>
+        )}
         <div ref={menuRef} style={{ position: "relative" }}>
           <button
             onClick={() => setMenuOpen((v) => !v)}
