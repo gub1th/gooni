@@ -35,21 +35,6 @@ function copyForType(type: ListType): { composer: string; doneLabel: string; emp
   }
 }
 
-function formatDueDate(iso: string): string {
-  const due = new Date(iso);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const dueDay = new Date(due);
-  dueDay.setHours(0, 0, 0, 0);
-  const diff = Math.round((dueDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  if (diff === 0) return "Today";
-  if (diff === 1) return "Tomorrow";
-  if (diff === -1) return "Yesterday";
-  if (diff > 0 && diff <= 7) return `In ${diff} days`;
-  if (diff < 0) return `${Math.abs(diff)}d late`;
-  return due.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
 // Age tier for an open item, by days since created_at. Drives the subtle
 // colored dot that flags todos that have been sitting around. Tiers:
 //   <7d   → none (item is fresh, no nudge)
@@ -247,10 +232,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       onDelete={() => deleteItem(it.id)}
       onOpenSourceNote={onOpenSourceNote}
       onOpenDetail={() => setModalItemId(it.id)}
-      onMakePrimary={(list?.type as string) === "focus" ? () => {
-        updateItem(it.id, { is_primary: true });
-        window.dispatchEvent(new CustomEvent("gooni-primary-changed"));
-      } : undefined}
+      onMakePrimary={undefined}
       doneLabel={copy.doneLabel}
       flashing={flashId === it.id}
       registerRef={(el) => {
@@ -466,19 +448,9 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
           </div>
         </div>
 
-        {(list.type as string) === "focus" && (
-          <PrimaryFocusDropStrip
-            items={items}
-            onPromote={(id) => {
-              updateItem(id, { is_primary: true });
-              window.dispatchEvent(new CustomEvent("gooni-primary-changed"));
-            }}
-            onUnset={(id) => {
-              updateItem(id, { is_primary: false });
-              window.dispatchEvent(new CustomEvent("gooni-primary-changed"));
-            }}
-          />
-        )}
+        {/* Primary focus drop strip lived here for focus-type lists; focus
+            rows live in their own table now (see focus_service / FocusFlow).
+            Generic lists never get this affordance. */}
 
         <div style={{ padding: "12px 0 4px" }}>
           <div
@@ -601,7 +573,6 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       {modalItem && (
         <ItemModal
           item={modalItem}
-          isPrimary={modalItem.is_primary}
           onClose={() => setModalItemId(null)}
           onSave={(patch) => updateItem(modalItem.id, patch)}
           onDelete={() => deleteItem(modalItem.id)}
@@ -629,7 +600,7 @@ interface RowProps {
 }
 
 function ListItemRow({
-  item, isTaskList, onToggle, onDelete, onOpenSourceNote, onOpenDetail, onMakePrimary, flashing, registerRef,
+  item, isTaskList, onToggle, onDelete, onOpenSourceNote, onOpenDetail, onMakePrimary: _onMakePrimary, flashing, registerRef,
   draggable, isDragging, onDragStart, onDragEnd,
 }: RowProps) {
   const [hover, setHover] = useState(false);
@@ -738,9 +709,6 @@ function ListItemRow({
             wordBreak: "break-word",
           }}
         >
-          {item.is_primary && (
-            <span title="Primary focus" style={{ color: "#F59E0B", fontSize: 14, lineHeight: 1, flexShrink: 0 }}>★</span>
-          )}
           <span>{item.text}</span>
           {/* ID tag — surfaces the row's numeric id so Daniel can paste
               "#42" into Claude Code instead of reading the substring back.
@@ -777,21 +745,8 @@ function ListItemRow({
           </div>
         )}
 
-        {(item.due_date || item.source_note_id) && (
+        {item.source_note_id && (
           <div style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            {item.due_date && (
-              <span
-                style={{
-                  fontSize: 11,
-                  color: "#636366",
-                  background: "#F2F2F7",
-                  padding: "2px 8px",
-                  borderRadius: 999,
-                }}
-              >
-                {formatDueDate(item.due_date)}
-              </span>
-            )}
             {item.source_note_id && (
               <button
                 onClick={() => onOpenSourceNote?.(item.source_note_id!)}
@@ -869,14 +824,9 @@ function ListItemRow({
                 fontFamily: FONT,
               }}
             >
-              {onMakePrimary && !item.is_primary && (
-                <MenuItem
-                  onClick={() => { setMenuOpen(false); onMakePrimary(); }}
-                  color="#B45309"
-                  icon="★"
-                  label="Make primary"
-                />
-              )}
+              {/* "Make primary" was a focus-only action; primary lives on
+                  Focus rows now (extracted from list_items). Generic list
+                  rows can't be primary. */}
               {confirmingDelete ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "6px 8px" }}>
                   <span style={{ fontSize: 12, color: "#6B7280" }}>Delete this item?</span>
@@ -974,82 +924,6 @@ function TrashIcon() {
       <path d="M6.5 7v5" />
       <path d="M9.5 7v5" />
     </svg>
-  );
-}
-
-// Inline drop strip for the focus ListView. Lets a user drag a focus row
-// onto it to set as primary — needed because the dashboard's PrimaryFocusCard
-// isn't visible while the list view is open (mutually exclusive layouts).
-function PrimaryFocusDropStrip({
-  items, onPromote, onUnset,
-}: {
-  items: ApiListItem[];
-  onPromote: (id: number) => void;
-  onUnset: (id: number) => void;
-}) {
-  const [hover, setHover] = useState(false);
-  const primary = items.find((it) => it.is_primary) || null;
-  return (
-    <div
-      onDragOver={(e) => {
-        const bus = getPrimaryDragBus();
-        if (bus.current) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          setHover(true);
-        }
-      }}
-      onDragLeave={() => setHover(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setHover(false);
-        const bus = getPrimaryDragBus();
-        const src = bus.current;
-        bus.current = null;
-        if (src) onPromote(src.id);
-      }}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        margin: "12px 0 4px",
-        padding: "10px 14px",
-        borderRadius: 10,
-        border: hover
-          ? "2px dashed #F59E0B"
-          : primary
-          ? "1px solid #FCD34D"
-          : "1px dashed rgba(0,0,0,0.18)",
-        background: primary ? "#FFFBEB" : "transparent",
-        transition: "border-color 160ms, background 160ms",
-      }}
-    >
-      <span style={{ fontSize: 16, color: "#F59E0B", flexShrink: 0 }}>★</span>
-      <span style={{
-        fontSize: 11, color: primary ? "#92400E" : "#8E8E93",
-        letterSpacing: 0.5, textTransform: "uppercase", fontWeight: 700,
-        flexShrink: 0,
-      }}>
-        Primary
-      </span>
-      <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: primary ? "#1C1C1E" : "#9CA3AF", fontWeight: primary ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {primary ? primary.text : "Drag a focus here to set as primary"}
-      </span>
-      {primary && (
-        <button
-          onClick={() => onUnset(primary.id)}
-          style={{
-            border: "none", background: "transparent", color: "#92400E",
-            fontFamily: FONT, fontSize: 11, fontWeight: 600, cursor: "pointer",
-            padding: "3px 8px", borderRadius: 6, flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(146,64,14,0.08)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-        >
-          Unset
-        </button>
-      )}
-    </div>
   );
 }
 

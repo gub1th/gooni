@@ -863,36 +863,27 @@ def delete_todo(match: str) -> str:
 
 
 def _find_backlog_item(match: str, only_open: bool = True) -> tuple[dict | None, str | None]:
-    """Locate a ListItem inside the user's backlog list (type='backlog').
-    Returns (item, error_or_None). Substring match on text or subtitle —
-    backlog rows often store the user-visible title in `text` and an
-    auto-generated `from note #N` blurb in `subtitle`. Backend's lists
-    field is `type`; an earlier version filtered on the wrong key (`kind`)
-    and silently returned no matches."""
+    """Locate a backlog ticket by substring match. Backlog tickets now
+    live in their own `backlog_tickets` table (extracted out of
+    list_items); the MCP tool hits the dedicated /backlog/tickets routes.
+    Substring match on text or subtitle — auto-routed tickets often have
+    a `from note #N` blurb in `subtitle`.
+    """
     match_l = match.lower().strip()
     if not match_l:
         return None, "(empty match string)"
 
-    lists = _session.get(f"{BASE_URL}/lists", timeout=10)
-    lists.raise_for_status()
-    backlogs = [
-        l for l in lists.json()
-        if (l.get("type") or l.get("kind") or "") == "backlog"
-    ]
-    if not backlogs:
-        return None, "(no backlog list)"
-
+    resp = _session.get(f"{BASE_URL}/backlog/tickets", timeout=10)
+    resp.raise_for_status()
+    tickets = resp.json() or []
     candidates: list[dict] = []
-    for bl in backlogs:
-        detail = _session.get(f"{BASE_URL}/lists/{bl['id']}", timeout=10)
-        detail.raise_for_status()
-        for it in detail.json().get("items") or []:
-            if only_open and it.get("done"):
-                continue
-            text = (it.get("text") or "").lower()
-            sub = (it.get("subtitle") or "").lower()
-            if match_l in text or match_l in sub:
-                candidates.append(it)
+    for t in tickets:
+        if only_open and t.get("done"):
+            continue
+        text = (t.get("text") or "").lower()
+        sub = (t.get("subtitle") or "").lower()
+        if match_l in text or match_l in sub:
+            candidates.append(t)
 
     if not candidates:
         return None, f"(no backlog item matching '{match}')"
@@ -902,11 +893,12 @@ def _find_backlog_item(match: str, only_open: bool = True) -> tuple[dict | None,
 
 @mcp.tool()
 def complete_backlog_item(match: str) -> str:
-    """Mark an item in the Gooni Backlog list as done by text match.
+    """Mark a backlog ticket as done by text match.
 
-    Backlog items live in a List with kind='backlog' (separate from
-    /items dashboard todos). They're typically auto-routed from notes via
-    feature_request_tool, with `subtitle` like "from note #157".
+    Backlog tickets now live in their own `backlog_tickets` table — they
+    were extracted out of list_items in the focus/todo/backlog refactor.
+    Auto-routed via feature_request_tool, with `subtitle` like
+    "from note #157".
 
     Args:
         match: text contained in the backlog item (matches text OR subtitle)
@@ -915,7 +907,7 @@ def complete_backlog_item(match: str) -> str:
     if err:
         return err
     resp = _session.patch(
-        f"{BASE_URL}/list-items/{item['id']}",
+        f"{BASE_URL}/backlog/tickets/{item['id']}",
         json={"done": True},
         timeout=10,
     )

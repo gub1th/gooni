@@ -1154,6 +1154,10 @@ def _serialize_list(lst: ListModel) -> dict:
 
 
 def _serialize_list_item(it: ListItem) -> dict:
+    """Generic list item shape — focus / todo / backlog fields all moved
+    to dedicated tables. See serialize_focus / serialize_todo /
+    serialize_ticket in their respective services for those payloads.
+    """
     return {
         "id": it.id,
         "list_id": it.list_id,
@@ -1161,16 +1165,10 @@ def _serialize_list_item(it: ListItem) -> dict:
         "subtitle": it.subtitle,
         "done": bool(it.done),
         "actionable": bool(it.actionable),
-        "is_primary": bool(it.is_primary),
         "completed_at": it.completed_at.isoformat() if it.completed_at else None,
         "sort_order": it.sort_order,
-        "due_date": it.due_date.isoformat() if it.due_date else None,
         "source_note_id": it.source_note_id,
         "created_at": it.created_at.isoformat() if it.created_at else None,
-        # Board fields — None until set. Frontend coalesces missing
-        # board_status to "todo" when rendering the backlog.
-        "board_status": it.board_status,
-        "pr_url": it.pr_url,
     }
 
 
@@ -1348,20 +1346,12 @@ def find_similar_list_items(list_id: int, body: dict, db: Session = Depends(get_
 
 @app.patch("/list-items/{item_id}")
 def update_list_item(item_id: int, body: dict, db: Session = Depends(get_db)):
-    from datetime import datetime
+    """Update a generic list_items row. After the focus/todo/backlog
+    extraction, fields like is_primary / board_status / pr_url / due_date
+    no longer live here — patch them via /focuses/{id}, /todos/{id}, or
+    /backlog/tickets/{id} instead.
+    """
     from .services.list_service import list_service
-
-    due_kwarg: dict = {}
-    if "due_date" in body:
-        raw = body["due_date"]
-        if raw is None or raw == "":
-            due_kwarg["due_date"] = None  # type: ignore[assignment]
-        else:
-            try:
-                cleaned = raw[:-1] if isinstance(raw, str) and raw.endswith("Z") else raw
-                due_kwarg["due_date"] = datetime.fromisoformat(cleaned)
-            except (ValueError, TypeError):
-                raise HTTPException(status_code=400, detail="invalid due_date")
 
     item = list_service.update_item(
         item_id, db,
@@ -1369,11 +1359,7 @@ def update_list_item(item_id: int, body: dict, db: Session = Depends(get_db)):
         subtitle=body.get("subtitle"),
         done=body.get("done"),
         actionable=body.get("actionable"),
-        is_primary=body.get("is_primary"),
         sort_order=body.get("sort_order"),
-        board_status=body.get("board_status"),
-        pr_url=body.get("pr_url"),
-        **due_kwarg,
     )
     if item is None:
         raise HTTPException(status_code=404, detail="item not found")
@@ -1396,6 +1382,53 @@ def reorder_list_items(body: dict, db: Session = Depends(get_db)):
     if not isinstance(ids, list):
         raise HTTPException(status_code=400, detail="ids must be a list")
     list_service.reorder_items([int(i) for i in ids], db)
+    return {"ok": True}
+
+
+# ── Backlog tickets — extracted from list_items into their own table ───────
+
+
+@app.get("/backlog/tickets")
+def backlog_list(include_done: bool = True, db: Session = Depends(get_db)):
+    from .services.backlog_service import backlog_service, serialize_ticket
+    rows = backlog_service.list_all(db, include_done=include_done)
+    return [serialize_ticket(t) for t in rows]
+
+
+@app.post("/backlog/tickets")
+def backlog_create(body: dict, db: Session = Depends(get_db)):
+    from .services.backlog_service import backlog_service, serialize_ticket
+    text_val = (body.get("text") or "").strip()
+    if not text_val:
+        raise HTTPException(status_code=400, detail="text required")
+    ticket = backlog_service.create(
+        db,
+        text=text_val,
+        subtitle=body.get("subtitle"),
+        source_note_id=body.get("source_note_id"),
+        board_status=body.get("board_status"),
+    )
+    return serialize_ticket(ticket)
+
+
+@app.patch("/backlog/tickets/{ticket_id}")
+def backlog_update(ticket_id: int, body: dict, db: Session = Depends(get_db)):
+    from .services.backlog_service import backlog_service, serialize_ticket
+    patch: dict = {}
+    for key in ("text", "subtitle", "board_status", "pr_url", "done", "sort_order"):
+        if key in body:
+            patch[key] = body[key]
+    ticket = backlog_service.update(db, ticket_id, **patch)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    return serialize_ticket(ticket)
+
+
+@app.delete("/backlog/tickets/{ticket_id}")
+def backlog_delete(ticket_id: int, db: Session = Depends(get_db)):
+    from .services.backlog_service import backlog_service
+    if not backlog_service.delete(db, ticket_id):
+        raise HTTPException(status_code=404, detail="ticket not found")
     return {"ok": True}
 
 
@@ -1602,86 +1635,72 @@ def items_reorder(body: dict, db: Session = Depends(get_db)):
 # and sever a single link.
 
 
-def _is_focus(item: ListItem) -> bool:
-    return item.parent_id is None and bool(item.endgoal)
-
-
 @app.get("/items/{todo_id}/focuses")
 def items_get_focuses_for_todo(todo_id: int, db: Session = Depends(get_db)):
     """Return the focuses linked to a given todo. Used by the TodoRow chip."""
-    links = db.query(FocusTodoLink).filter(FocusTodoLink.todo_item_id == todo_id).all()
-    if not links:
-        return []
-    focus_ids = [l.focus_item_id for l in links]
-    focuses = db.query(ListItem).filter(ListItem.id.in_(focus_ids)).all()
+    from .services.todo_service import todo_service
+    focuses = todo_service.linked_focuses(db, todo_id)
     return [{"id": f.id, "text": f.text, "is_primary": bool(f.is_primary)} for f in focuses]
 
 
 @app.get("/items/{focus_id}/todos")
 def items_get_todos_for_focus(focus_id: int, db: Session = Depends(get_db)):
-    """Return the todos linked to a given focus. Used by the focus row's
-    derived-todos disclosure."""
-    links = db.query(FocusTodoLink).filter(FocusTodoLink.focus_item_id == focus_id).all()
-    if not links:
-        return []
-    todo_ids = [l.todo_item_id for l in links]
-    todos = db.query(ListItem).filter(ListItem.id.in_(todo_ids)).all()
-    return [_serialize_item(t) for t in todos]
+    """Return the todos linked to a given focus."""
+    from .services.focus_service import focus_service
+    from .services.todo_service import serialize_todo
+    todos = focus_service.linked_todos(db, focus_id)
+    return [serialize_todo(t) for t in todos]
 
 
 @app.post("/items/{focus_id}/derive-todo")
 def items_derive_todo(focus_id: int, body: dict, db: Session = Depends(get_db)):
-    """Create a leaf todo in the Todo list and link it to this focus.
+    """Create a leaf todo and link it to this focus.
 
     Body: {"text": str, "due_date"?: iso8601 | "today" | "tomorrow"}.
-    Returns {"todo": serialized_item, "link_id": int}.
+    Returns {"todo": serialized_todo, "link_id": int}.
     """
-    focus = db.query(ListItem).filter(ListItem.id == focus_id).first()
+    from .services.focus_service import focus_service
+    from .services.todo_service import todo_service, serialize_todo
+
+    focus = focus_service.get(db, focus_id)
     if not focus:
         raise HTTPException(status_code=404, detail="focus not found")
-    if not _is_focus(focus):
-        raise HTTPException(status_code=400, detail="item is not a focus (no endgoal or has parent)")
 
     text_val = (body.get("text") or "").strip()
     if not text_val:
         raise HTTPException(status_code=400, detail="text required")
     due_date = _parse_optional_due(body.get("due_date"))
 
-    todo_list = list_service.get_or_create_todo_list(db)
-    todo = list_service.add_item(
-        list_id=todo_list.id,
-        text=text_val,
-        db=db,
-        due_date=due_date,
-    )
-    link = FocusTodoLink(focus_item_id=focus.id, todo_item_id=todo.id)
+    todo = todo_service.create(db, text=text_val, due_date=due_date)
+    link = FocusTodoLink(focus_id=focus.id, todo_id=todo.id)
     db.add(link)
     db.commit()
     db.refresh(link)
-    return {"todo": _serialize_item(todo), "link_id": link.id}
+    return {"todo": serialize_todo(todo), "link_id": link.id}
 
 
 @app.post("/items/{focus_id}/link-todo/{todo_id}")
 def items_link_existing_todo(focus_id: int, todo_id: int, db: Session = Depends(get_db)):
     """Attach an existing todo to a focus. Idempotent — returns the existing
     link if the pair is already linked."""
-    focus = db.query(ListItem).filter(ListItem.id == focus_id).first()
-    todo = db.query(ListItem).filter(ListItem.id == todo_id).first()
+    from .services.focus_service import focus_service
+    from .services.todo_service import todo_service
+
+    focus = focus_service.get(db, focus_id)
+    todo = todo_service.get(db, todo_id)
     if not focus or not todo:
         raise HTTPException(status_code=404, detail="focus or todo not found")
-    if not _is_focus(focus):
-        raise HTTPException(status_code=400, detail="item is not a focus")
     existing = (
         db.query(FocusTodoLink)
         .filter(
-            FocusTodoLink.focus_item_id == focus_id,
-            FocusTodoLink.todo_item_id == todo_id,
+            FocusTodoLink.focus_id == focus_id,
+            FocusTodoLink.todo_id == todo_id,
         )
         .first()
     )
     if existing:
         return {"link_id": existing.id, "created": False}
-    link = FocusTodoLink(focus_item_id=focus_id, todo_item_id=todo_id)
+    link = FocusTodoLink(focus_id=focus_id, todo_id=todo_id)
     db.add(link)
     db.commit()
     db.refresh(link)
@@ -1700,81 +1719,25 @@ def items_unlink_focus_todo(link_id: int, db: Session = Depends(get_db)):
 
 @app.get("/items/today-todos")
 def items_today_todos(db: Session = Depends(get_db)):
-    """Open todos in the Todo list with due_date == today (used by the
-    dashboard's 'Today's todos' section that replaced the Quick focuses
-    column). Each row carries its linked focuses for the chip pill."""
-    from datetime import datetime as _dt2, timedelta as _td2
-    # Local import — the rest of the /items + /lists handlers all do the
-    # same. Forgetting this in PR #151 was the source of every
-    # `today-todos` 500 since this endpoint shipped.
-    from .services.list_service import list_service
-
-    todo_list = list_service.get_or_create_todo_list(db)
-    today = _dt2.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    tomorrow = today + _td2(days=1)
-    todos = (
-        db.query(ListItem)
-        .filter(
-            ListItem.list_id == todo_list.id,
-            ListItem.done.is_(False),
-            ListItem.due_date.is_not(None),
-            ListItem.due_date >= today,
-            ListItem.due_date < tomorrow,
-        )
-        .order_by(ListItem.sort_order.asc())
-        .all()
-    )
-    if not todos:
-        return []
-    todo_ids = [t.id for t in todos]
-    links = (
-        db.query(FocusTodoLink)
-        .filter(FocusTodoLink.todo_item_id.in_(todo_ids))
-        .all()
-    )
-    focus_ids = list({l.focus_item_id for l in links})
-    focus_rows = (
-        db.query(ListItem).filter(ListItem.id.in_(focus_ids)).all() if focus_ids else []
-    )
-    focus_by_id = {f.id: f for f in focus_rows}
-    by_todo: dict[int, list[dict]] = {}
-    for l in links:
-        f = focus_by_id.get(l.focus_item_id)
-        if not f:
-            continue
-        by_todo.setdefault(l.todo_item_id, []).append(
-            {"id": f.id, "text": f.text, "is_primary": bool(f.is_primary)}
-        )
-    return [
-        {**_serialize_item(t), "focuses": by_todo.get(t.id, [])} for t in todos
-    ]
+    """Open todos due today + their linked-focus chips. Powers the
+    dashboard's Today's todos section."""
+    from .services.todo_service import todo_service
+    return todo_service.today(db)
 
 
-def _serialize_item(it: ListItem) -> dict:
-    return {
-        "id": it.id,
-        "list_id": it.list_id,
-        "parent_id": it.parent_id,
-        "text": it.text,
-        "subtitle": it.subtitle,
-        "endgoal": it.endgoal,
-        "committed": bool(it.committed),
-        "actionable": bool(it.actionable),
-        "is_primary": bool(it.is_primary),
-        "done": bool(it.done),
-        "due_date": it.due_date.isoformat() if it.due_date else None,
-        "completed_at": it.completed_at.isoformat() if it.completed_at else None,
-        "sort_order": it.sort_order,
-        "source_note_id": it.source_note_id,
-        "status": it.status,
-        "scale": it.scale,
-        "health": it.health,
-        "confidence": it.confidence,
-        "start_at": it.start_at.isoformat() if it.start_at else None,
-        "end_at": it.end_at.isoformat() if it.end_at else None,
-        "created_at": it.created_at.isoformat() if it.created_at else None,
-        "updated_at": it.updated_at.isoformat() if it.updated_at else None,
-    }
+def _serialize_item(it) -> dict:
+    """Polymorphic serializer used by the legacy /items routes that still
+    accept "item id can be focus OR todo." Routes through the dedicated
+    serializers in focus_service / todo_service.
+    """
+    from .services.focus_service import serialize_focus
+    from .services.todo_service import serialize_todo
+    from .db.models import Focus, Todo
+    if isinstance(it, Focus):
+        return serialize_focus(it)
+    if isinstance(it, Todo):
+        return serialize_todo(it)
+    raise TypeError(f"_serialize_item: unexpected type {type(it).__name__}")
 
 
 @app.post("/auth")

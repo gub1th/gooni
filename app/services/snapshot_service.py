@@ -25,7 +25,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..db.models import (
-    Conversation, GooniSnapshot, Memory, Message, Note, TrackedRepo, ListItem,
+    BacklogTicket, Conversation, Focus, GooniSnapshot, Memory, Message, Note,
+    TrackedRepo, ListItem, Todo,
 )
 from ..llm.client import llm_client
 from . import github as gh
@@ -148,7 +149,9 @@ class SnapshotService:
             "conversations": db.query(Conversation).count(),
             "messages": db.query(Message).count(),
             "memories": db.query(Memory).count(),
-            "focuses": db.query(ListItem).filter(ListItem.endgoal.isnot(None)).count(),
+            "focuses": db.query(Focus).count(),
+            "todos": db.query(Todo).count(),
+            "backlog_tickets": db.query(BacklogTicket).count(),
             "items_total": db.query(ListItem).count(),
         }
 

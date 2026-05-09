@@ -1,13 +1,29 @@
 import { useEffect, useRef, useState } from "react";
-import type { ApiListItem, BoardStatus } from "../../services/api";
+import type { BoardStatus } from "../../services/api";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
+// Structural shape — accepts either ApiListItem (generic) or
+// ApiBacklogTicket (board fields filled). Both flows pipe through here so
+// the form chrome stays uniform; the parent decides which patch to apply
+// via its own store.
+export interface ItemModalItem {
+  id: number;
+  text: string;
+  subtitle: string | null;
+  done: boolean;
+  actionable?: boolean;
+  due_date?: string | null;
+  board_status?: BoardStatus | null;
+  pr_url?: string | null;
+  source_note_id: number | null;
+}
+
 export interface ItemModalProps {
-  item: ApiListItem;
+  item: ItemModalItem;
   // Callers patch fields they own. The modal itself never persists — it just
   // surfaces the diff so the parent can hit the right endpoint (list-items
-  // vs unified items) and update its store.
+  // vs backlog-tickets) and update its store.
   onSave: (patch: {
     text?: string;
     subtitle?: string | null;
@@ -51,9 +67,9 @@ function fromDateInputValue(v: string): string | null {
 export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoardFields, onOpenSourceNote }: ItemModalProps) {
   const [text, setText] = useState(item.text);
   const [subtitle, setSubtitle] = useState(item.subtitle ?? "");
-  const [actionable, setActionable] = useState(item.actionable);
+  const [actionable, setActionable] = useState(item.actionable ?? true);
   const [done, setDone] = useState(item.done);
-  const [dueDate, setDueDate] = useState(toDateInputValue(item.due_date));
+  const [dueDate, setDueDate] = useState(toDateInputValue(item.due_date ?? null));
   const [boardStatus, setBoardStatus] = useState<BoardStatus>(
     (item.board_status as BoardStatus | null) || (item.done ? "done" : "todo")
   );
@@ -86,10 +102,10 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
     const trimmedSub = subtitle.trim();
     const currentSub = item.subtitle ?? "";
     if (trimmedSub !== currentSub) patch.subtitle = trimmedSub || null;
-    if (actionable !== item.actionable) patch.actionable = actionable;
+    if (item.actionable !== undefined && actionable !== item.actionable) patch.actionable = actionable;
     if (actionable && done !== item.done) patch.done = done;
     const nextDue = fromDateInputValue(dueDate);
-    const currentDue = item.due_date;
+    const currentDue = item.due_date ?? null;
     if ((nextDue || null) !== (currentDue || null)) patch.due_date = nextDue;
     if (showBoardFields) {
       const currentBoard = (item.board_status as BoardStatus | null) || (item.done ? "done" : "todo");
@@ -296,30 +312,32 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
               onChange={setDone}
             />
           )}
-          <div>
-            <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Due date</div>
-            <input
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              style={{
-                fontFamily: FONT, fontSize: 13, padding: "6px 10px",
-                border: "1px solid #E5E7EB", borderRadius: 8, color: "#1C1C1E",
-                outline: "none",
-              }}
-            />
-            {dueDate && (
-              <button
-                onClick={() => setDueDate("")}
+          {!showBoardFields && (
+            <div>
+              <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Due date</div>
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
                 style={{
-                  marginLeft: 8, border: "none", background: "transparent",
-                  color: "#9CA3AF", cursor: "pointer", fontSize: 12, fontFamily: FONT,
+                  fontFamily: FONT, fontSize: 13, padding: "6px 10px",
+                  border: "1px solid #E5E7EB", borderRadius: 8, color: "#1C1C1E",
+                  outline: "none",
                 }}
-              >
-                Clear
-              </button>
-            )}
-          </div>
+              />
+              {dueDate && (
+                <button
+                  onClick={() => setDueDate("")}
+                  style={{
+                    marginLeft: 8, border: "none", background: "transparent",
+                    color: "#9CA3AF", cursor: "pointer", fontSize: 12, fontFamily: FONT,
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

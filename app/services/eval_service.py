@@ -527,15 +527,14 @@ def dispatch_to_cc(db: Session, segment_id: int) -> dict:
         note.excerpt = excerpt
         note.updated_at = datetime.utcnow()
 
-    backlog = list_service.get_or_create_list("Backlog", "backlog", emoji=None, db=db)
+    from .backlog_service import backlog_service
     one_liner = (
         f"Eval segment #{seg.id} ({full['segment'].get('source')}): "
         f"{full['segment'].get('overall_comment') or full['segment'].get('preview') or 'review needed'}"
     )[:240]
-    list_service.add_item(
-        backlog.id,
-        one_liner,
+    backlog_service.create(
         db,
+        text=one_liner,
         subtitle=f"See note #{note.id}",
         source_note_id=note.id,
     )
@@ -548,7 +547,6 @@ def dispatch_to_cc(db: Session, segment_id: int) -> dict:
     return {
         "ok": True,
         "note_id": note.id,
-        "backlog_list_id": backlog.id,
         "dispatched_to_cc_at": seg.dispatched_to_cc_at.isoformat() if seg.dispatched_to_cc_at else None,
     }
 

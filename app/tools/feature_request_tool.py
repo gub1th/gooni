@@ -49,7 +49,7 @@ class RequestFeatureTool(BaseTool):
         source_note_id: int | None = None,
         **kwargs,
     ) -> str:
-        from ..services.list_service import list_service
+        from ..services.backlog_service import backlog_service
 
         title = (title or "").strip()
         why = (why or "").strip()
@@ -58,15 +58,13 @@ class RequestFeatureTool(BaseTool):
         if db is None:
             return "request_feature: no db session"
 
-        backlog = list_service.get_or_create_backlog_list(db)
-        item = list_service.add_item(
-            backlog.id,
+        ticket = backlog_service.create(
+            db,
             text=title[:120],
-            db=db,
             subtitle=why or None,
             source_note_id=source_note_id,
         )
-        return f"Logged feature request #{item.id}: {title}"
+        return f"Logged feature request #{ticket.id}: {title}"
 
 
 feature_request_tool = RequestFeatureTool()
