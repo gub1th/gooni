@@ -5,7 +5,9 @@ import {
   deleteNoteComment,
   type ApiNoteComment,
 } from "../../services/api";
-import { GooniLogo } from "../GooniLogo";
+import { renderMarkdown } from "../../utils/markdown";
+import { useProfileStore } from "../../stores/useProfileStore";
+import { CommentAvatar, identityFor, type Identity } from "./CommentAvatar";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -13,10 +15,20 @@ interface NoteCommentsProps {
   noteId: number;
 }
 
+// Server stores naive UTC datetimes (datetime.utcnow). JS's Date constructor
+// reads a naive ISO string as LOCAL time, which gave us the "10am instead
+// of 3am" bug. Append "Z" when there's no timezone marker so it's parsed
+// as UTC and rendered in the user's locale tz.
+function parseServerIso(iso: string | null): Date | null {
+  if (!iso) return null;
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  const d = new Date(hasOffset ? iso : iso + "Z");
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function formatTime(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
+  const d = parseServerIso(iso);
+  if (!d) return "";
   const now = new Date();
   const sameDay =
     d.getFullYear() === now.getFullYear() &&
@@ -28,121 +40,15 @@ function formatTime(iso: string | null): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-// Map a free-text author label to a normalized identity. Display name +
-// avatar visual are derived from this. "claude"/"claude code"/"claude-code"
-// all collapse to the Claude Code identity; "gooni" maps to the mascot;
-// everything else falls through to the per-name gradient avatar.
-type Identity =
-  | { kind: "claude"; display: string }
-  | { kind: "gooni"; display: string }
-  | { kind: "user"; display: string };
-
-function identityFor(rawAuthor: string): Identity {
-  const a = (rawAuthor || "").trim().toLowerCase();
-  if (a === "claude" || a === "claude code" || a === "claude-code" || a === "claudecode") {
-    return { kind: "claude", display: "Claude Code" };
-  }
-  if (a === "gooni") {
-    return { kind: "gooni", display: "Gooni" };
-  }
-  // Capitalize first letter for display ("daniel" → "Daniel"). Multi-word
-  // labels are left as-typed.
-  const display = rawAuthor
-    .split(/\s+/)
-    .map((w) => (w.length ? w[0].toUpperCase() + w.slice(1) : w))
-    .join(" ");
-  return { kind: "user", display: display || "Anonymous" };
-}
-
-// Deterministic gradient pair from a name. Two complementary HSL hues
-// derived from the string hash so the same name always renders the same
-// avatar across reloads / surfaces. Used for "user"-kind identities only —
-// Claude + Gooni get fixed brand visuals.
-function gradientFor(name: string): { from: string; to: string; ring: string } {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) {
-    h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  }
-  const hue = h % 360;
-  const altHue = (hue + 38) % 360;
-  return {
-    from: `hsl(${hue} 70% 56%)`,
-    to: `hsl(${altHue} 72% 44%)`,
-    ring: `hsl(${hue} 70% 56% / 0.18)`,
-  };
-}
-
-// Anthropic-style "burst" mark for Claude. Rendered on a warm-orange disc
-// so it reads as the Claude brand even when shrunk to comment-avatar size.
-function ClaudeMark({ size = 36 }: { size?: number }) {
-  return (
-    <div
-      style={{
-        width: size, height: size, borderRadius: "50%",
-        background: "linear-gradient(135deg, #FFB78A 0%, #D97757 100%)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        boxShadow: "0 1px 3px rgba(217,119,87,0.30), inset 0 0 0 1px rgba(255,255,255,0.18)",
-        flex: "none",
-      }}
-      aria-label="Claude Code"
-    >
-      <svg width={Math.round(size * 0.55)} height={Math.round(size * 0.55)} viewBox="0 0 24 24" fill="none">
-        {/* Stylized 4-point burst — evokes the Anthropic glyph without copying it pixel-for-pixel. */}
-        <path
-          d="M12 2 C12 7 13 9 18 10.5 C13 12 12 13.5 12 22 C12 13.5 11 12 6 10.5 C11 9 12 7 12 2 Z"
-          fill="#FFFFFF"
-        />
-      </svg>
-    </div>
-  );
-}
-
-function InitialAvatar({ name, size = 36 }: { name: string; size?: number }) {
-  const grad = gradientFor(name.toLowerCase());
-  const initial = (name.trim().charAt(0) || "?").toUpperCase();
-  return (
-    <div
-      style={{
-        width: size, height: size, borderRadius: "50%",
-        background: `linear-gradient(135deg, ${grad.from} 0%, ${grad.to} 100%)`,
-        color: "#FFFFFF",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: Math.round(size * 0.42), fontWeight: 600,
-        fontFamily: FONT, letterSpacing: 0.2,
-        boxShadow: `0 1px 3px ${grad.ring}, inset 0 0 0 1px rgba(255,255,255,0.16)`,
-        flex: "none",
-      }}
-      aria-label={name}
-    >
-      {initial}
-    </div>
-  );
-}
-
-function Avatar({ identity, size = 36 }: { identity: Identity; size?: number }) {
-  if (identity.kind === "claude") return <ClaudeMark size={size} />;
-  if (identity.kind === "gooni") {
-    return (
-      <div style={{
-        width: size, height: size, borderRadius: "50%",
-        overflow: "hidden",
-        background: "#0F0F0F",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        boxShadow: "0 1px 3px rgba(15,15,15,0.30)",
-        flex: "none",
-      }}>
-        <GooniLogo size={Math.round(size * 0.92)} />
-      </div>
-    );
-  }
-  return <InitialAvatar name={identity.display} size={size} />;
-}
-
 export function NoteComments({ noteId }: NoteCommentsProps) {
   const [comments, setComments] = useState<ApiNoteComment[]>([]);
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
+  const avatarUrl = useProfileStore((s) => s.avatarUrl);
+  const fetchProfileOnce = useProfileStore((s) => s.fetchOnce);
+
+  useEffect(() => { void fetchProfileOnce(); }, [fetchProfileOnce]);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,9 +83,18 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
     }
   }
 
-  // Composer identity is fixed to "daniel" (the only authenticated user) so
-  // the avatar in the composer row matches what'll show after submit.
+  // Composer fixed to "daniel" — only authenticated identity. Avatar comes
+  // from the profile store (uploaded image) and falls back to the goofy
+  // emoji default in CommentAvatar.
   const myIdentity = identityFor("daniel");
+
+  // Map an identity to the right avatar URL. Only "user"-kind authors
+  // honour the uploaded avatar; claude + gooni keep their brand visuals.
+  function avatarFor(identity: Identity, author: string): string | null {
+    if (identity.kind !== "user") return null;
+    if (author.trim().toLowerCase() === "daniel") return avatarUrl;
+    return null;
+  }
 
   return (
     <div
@@ -190,6 +105,37 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
         fontFamily: FONT,
       }}
     >
+      <style>{`
+        .gooni-comment-body p { margin: 0 0 8px; }
+        .gooni-comment-body p:last-child { margin-bottom: 0; }
+        .gooni-comment-body ul, .gooni-comment-body ol { margin: 4px 0 8px; padding-left: 20px; }
+        .gooni-comment-body code {
+          background: rgba(15,23,42,0.06);
+          padding: 1px 5px;
+          border-radius: 4px;
+          font-size: 0.9em;
+        }
+        .gooni-comment-body pre {
+          background: #0F172A;
+          color: #F1F5F9;
+          padding: 10px 12px;
+          border-radius: 8px;
+          margin: 8px 0;
+          overflow-x: auto;
+          font-size: 12.5px;
+        }
+        .gooni-comment-body pre code { background: transparent; padding: 0; color: inherit; }
+        .gooni-comment-body strong { font-weight: 600; }
+        .gooni-comment-body em { font-style: italic; }
+        .gooni-comment-body a { color: #2563EB; text-decoration: underline; }
+        .gooni-comment-body blockquote {
+          border-left: 3px solid rgba(15,23,42,0.20);
+          padding-left: 10px;
+          margin: 6px 0;
+          color: #475569;
+        }
+      `}</style>
+
       <div
         style={{
           fontSize: 12,
@@ -223,7 +169,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
                 alignItems: "flex-start",
               }}
             >
-              <Avatar identity={identity} size={36} />
+              <CommentAvatar identity={identity} avatarUrl={avatarFor(identity, c.author)} size={36} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
@@ -272,15 +218,15 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
                   </button>
                 </div>
                 <div
+                  className="gooni-comment-body"
                   style={{
                     fontSize: 14,
                     lineHeight: 1.55,
                     color: "#1E293B",
-                    whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
                   }}
                 >
-                  {c.content}
+                  {renderMarkdown(c.content)}
                 </div>
               </div>
             </div>
@@ -292,7 +238,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
           the right with the textarea + an action row that surfaces only
           when there's a draft (or the field is focused). */}
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-        <Avatar identity={myIdentity} size={36} />
+        <CommentAvatar identity={myIdentity} avatarUrl={avatarUrl} size={36} />
         <div
           style={{
             flex: 1,
@@ -319,7 +265,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
                 handleSubmit();
               }
             }}
-            placeholder="Add a comment…"
+            placeholder="Add a comment… (markdown supported)"
             rows={composerFocused || draft ? 3 : 1}
             style={{
               width: "100%",
@@ -345,7 +291,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
                 gap: 8,
               }}
             >
-              <span style={{ fontSize: 11, color: "#94A3B8" }}>⌘↵ to post</span>
+              <span style={{ fontSize: 11, color: "#94A3B8" }}>⌘↵ to post · markdown ok</span>
               <div style={{ display: "flex", gap: 6 }}>
                 {draft && (
                   <button

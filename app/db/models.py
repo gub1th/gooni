@@ -143,6 +143,9 @@ class PublicProfile(Base):
 
     id = Column(Integer, primary_key=True)
     bio = Column(Text, nullable=True)  # raw text/markdown, user-written
+    # URL to a user-uploaded avatar (Cloudflare R2 image). NULL falls back to
+    # the per-name "goofy emoji" default in the comments avatar renderer.
+    avatar_url = Column(String, nullable=True)
 
 
 class Visit(Base):

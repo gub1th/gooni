@@ -559,7 +559,14 @@ export async function fetchPublicNotes(): Promise<PublicNote[]> {
   return res.json();
 }
 
-export async function fetchPublicProfile(): Promise<{ bio: string | null; note_count: number; last_active: string | null }> {
+export interface PublicProfilePayload {
+  bio: string | null;
+  avatar_url: string | null;
+  note_count: number;
+  last_active: string | null;
+}
+
+export async function fetchPublicProfile(): Promise<PublicProfilePayload> {
   const res = await apiFetch(`${BASE}/public/profile`);
   if (!res.ok) throw new Error("Failed to fetch public profile");
   return res.json();
@@ -997,6 +1004,25 @@ export async function updatePublicProfile(bio: string): Promise<void> {
     body: JSON.stringify({ bio }),
   });
   if (!res.ok) throw new Error("Failed to update public profile");
+}
+
+// PATCH the avatar URL only. Pass null to clear (resets to the goofy default
+// in the comments avatar renderer).
+export async function updatePublicAvatar(avatarUrl: string | null): Promise<void> {
+  const res = await apiFetch(`${BASE}/public/profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ avatar_url: avatarUrl }),
+  });
+  if (!res.ok) throw new Error("Failed to update profile avatar");
+}
+
+export async function uploadAvatarImage(file: File): Promise<{ url: string; key: string }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await apiFetch(`${BASE}/uploads/image`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`Avatar upload failed (${res.status})`);
+  return res.json();
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────

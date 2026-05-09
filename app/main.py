@@ -3552,13 +3552,14 @@ def get_note(note_id: int, db: Session = Depends(get_db)):
 
 @app.get("/public/profile")
 def get_public_profile(db: Session = Depends(get_db)):
-    """Return the public bio + stats."""
+    """Return the public bio + avatar + stats."""
     from sqlalchemy import func as sqlfunc
     profile = db.query(PublicProfile).first()
     note_count = db.query(Note).count()
     last_active = db.query(sqlfunc.max(Note.updated_at)).scalar()
     return {
         "bio": profile.bio if profile else None,
+        "avatar_url": profile.avatar_url if profile else None,
         "note_count": note_count,
         "last_active": last_active.isoformat() if last_active else None,
     }
@@ -3566,14 +3567,19 @@ def get_public_profile(db: Session = Depends(get_db)):
 
 @app.patch("/public/profile")
 def update_public_profile(body: dict, db: Session = Depends(get_db)):
-    """Save the public bio."""
-    bio = body.get("bio", "")
+    """Save bio and/or avatar_url. Either field is optional in the body —
+    PATCH semantics: only the keys present overwrite. Pass `avatar_url: null`
+    to clear the avatar back to the goofy default.
+    """
     profile = db.query(PublicProfile).first()
-    if profile:
-        profile.bio = bio
-    else:
-        profile = PublicProfile(bio=bio)
+    if not profile:
+        profile = PublicProfile()
         db.add(profile)
+    if "bio" in body:
+        profile.bio = body.get("bio") or ""
+    if "avatar_url" in body:
+        v = body.get("avatar_url")
+        profile.avatar_url = v if isinstance(v, str) and v.strip() else None
     db.commit()
     return {"ok": True}
 
