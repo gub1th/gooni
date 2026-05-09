@@ -212,16 +212,39 @@ class ItemService:
 
     # ── Tree + derived views ────────────────────────────────────────────
 
-    def list_tree(self, db: Session) -> dict[str, Any]:
-        """Return all items grouped into focus / inbox top-levels with
-        children nested. Shape:
-          { "focuses": [ItemTree...], "inbox": [ItemTree...] }
+    def list_tree(
+        self,
+        db: Session,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return items grouped into focus / inbox top-levels with children
+        nested. Pagination is at the *root* level — the top N focuses + top
+        N todos. Each surviving root keeps its full subtree (children of a
+        paginated root aren't truncated, since rendering a half-tree is
+        worse UX than just paging the parents).
+
+        Shape:
+          {
+            "focuses": [ItemTree...up to limit roots],
+            "inbox":   [ItemTree...up to limit roots],
+            "total_focuses": int,  # total root focuses, before slicing
+            "total_inbox":   int,
+            "limit": int,
+            "offset": int,
+          }
         ItemTree adds: progress {done, total}, stale (bool), children.
+
+        `limit` is clamped to [1, 200] to prevent runaway requests.
         """
         focus_list = self.get_focus_list(db)
         todo_list = self.get_todo_list(db)
+        limit = max(1, min(200, limit))
+        offset = max(0, offset)
 
-        # One scan, build by list_id.
+        # One scan to load every row in either list. Fine because the
+        # response slices roots — children of a kept root still need the
+        # full descendant set for progress / stale calculations.
         items_by_list: dict[int, list[ListItem]] = {focus_list.id: [], todo_list.id: []}
         for it in (
             db.query(ListItem)
@@ -231,13 +254,30 @@ class ItemService:
         ):
             items_by_list.setdefault(it.list_id, []).append(it)
 
+        focus_items = items_by_list[focus_list.id]
+        inbox_items = items_by_list[todo_list.id]
+        total_focuses = sum(1 for it in focus_items if it.parent_id is None)
+        total_inbox = sum(1 for it in inbox_items if it.parent_id is None)
+
         return {
-            "focuses": self._build_subtree(items_by_list[focus_list.id], parent_id=None),
-            "inbox": self._build_subtree(items_by_list[todo_list.id], parent_id=None),
+            "focuses": self._build_subtree(
+                focus_items, parent_id=None, root_limit=limit, root_offset=offset
+            ),
+            "inbox": self._build_subtree(
+                inbox_items, parent_id=None, root_limit=limit, root_offset=offset
+            ),
+            "total_focuses": total_focuses,
+            "total_inbox": total_inbox,
+            "limit": limit,
+            "offset": offset,
         }
 
     def _build_subtree(
-        self, items: list[ListItem], parent_id: int | None
+        self,
+        items: list[ListItem],
+        parent_id: int | None,
+        root_limit: int | None = None,
+        root_offset: int = 0,
     ) -> list[dict[str, Any]]:
         # Group by parent_id once, then recurse.
         by_parent: dict[int | None, list[ListItem]] = {}
@@ -264,6 +304,9 @@ class ItemService:
         roots = sorted(
             by_parent.get(parent_id, []), key=lambda x: (x.sort_order, x.id)
         )
+        # Slice at root level only — subtrees of kept roots stay whole.
+        if root_limit is not None:
+            roots = roots[root_offset : root_offset + root_limit]
         return [render(r) for r in roots]
 
     def today(self, db: Session) -> list[dict[str, Any]]:

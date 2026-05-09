@@ -623,6 +623,12 @@ export interface ApiItemNode extends ApiItem {
 export interface ApiItemTree {
   focuses: ApiItemNode[];
   inbox: ApiItemNode[];
+  // Totals before pagination — drives the "Load more" affordance.
+  // Optional so older client builds talking to the new server still parse.
+  total_focuses?: number;
+  total_inbox?: number;
+  limit?: number;
+  offset?: number;
 }
 
 export interface ApiTodayItem extends ApiItem {
@@ -630,7 +636,19 @@ export interface ApiTodayItem extends ApiItem {
 }
 
 export async function fetchItemTree(): Promise<ApiItemTree> {
+  // No-arg signature kept stable so react-query's QueryFunction context
+  // (which passes a context object) doesn't conflict. For paginated
+  // fetches, use `fetchItemTreePage` with explicit limit/offset.
   const res = await apiFetch(`${BASE}/items`);
+  if (!res.ok) throw new Error("Failed to fetch items");
+  return res.json();
+}
+
+export async function fetchItemTreePage(
+  limit: number,
+  offset = 0,
+): Promise<ApiItemTree> {
+  const res = await apiFetch(`${BASE}/items?limit=${limit}&offset=${offset}`);
   if (!res.ok) throw new Error("Failed to fetch items");
   return res.json();
 }
