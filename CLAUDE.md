@@ -206,7 +206,7 @@ PATCH /settings                      → update any subset of nudge_* fields, in
 GET  /settings/nudge-prompt-default  → bundled default LLM instruction (used by the "Use default" button)
 POST /settings/test-nudge            → fire the digest immediately (bypasses idempotency)
 
-GET  /items                     → focus + inbox tree (now includes status, scale per node)
+GET  /items?limit=50&offset=0   → focus + inbox tree (status, scale per node). Root-level pagination — server caps at 50 top-level items per tree by default; clamped to [1,200]. Each surviving root keeps its full subtree. Response carries `total_focuses` / `total_inbox` for "load more" UI.
 POST /items                     → create item; accepts status, scale, is_primary in body
 PATCH /items/{id}               → patches now accept status + scale; status syncs `committed`
 

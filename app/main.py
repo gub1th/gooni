@@ -1463,11 +1463,25 @@ def _validate_scale(raw):
 
 
 @app.get("/items")
-def items_tree(db: Session = Depends(get_db)):
-    """Full tree: focuses (top-level w/ endgoal) + inbox (top-level todos),
-    each with nested children + per-node progress + stale flag.
+def items_tree(
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """Tree: focuses (top-level w/ endgoal) + inbox (top-level todos), each
+    with nested children + per-node progress + stale flag.
+
+    Pagination is at the *root* level. `limit` (clamped to [1, 200], default
+    50) caps how many top-level focuses + how many top-level todos are
+    returned. Each surviving root keeps its full subtree intact, so
+    rendering progress + stale flags stays accurate.
+
+    Response carries `total_focuses` / `total_inbox` so the frontend can
+    decide whether to show a "Load more" affordance. Default limit (50)
+    is well above the typical user's count today; this is mostly a guard
+    against the response payload growing without bound as the data scales.
     """
-    return item_service.list_tree(db)
+    return item_service.list_tree(db, limit=limit, offset=offset)
 
 
 @app.get("/items/today")
