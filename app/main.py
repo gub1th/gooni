@@ -1685,6 +1685,10 @@ def items_today_todos(db: Session = Depends(get_db)):
     dashboard's 'Today's todos' section that replaced the Quick focuses
     column). Each row carries its linked focuses for the chip pill."""
     from datetime import datetime as _dt2, timedelta as _td2
+    # Local import — the rest of the /items + /lists handlers all do the
+    # same. Forgetting this in PR #151 was the source of every
+    # `today-todos` 500 since this endpoint shipped.
+    from .services.list_service import list_service
 
     todo_list = list_service.get_or_create_todo_list(db)
     today = _dt2.now().replace(hour=0, minute=0, second=0, microsecond=0)
