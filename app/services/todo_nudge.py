@@ -14,9 +14,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import ListItem, Settings
+from app.db.models import Focus, Settings, Todo
 from app.llm.client import llm_client
-from app.services.list_service import list_service
 
 
 # Default prompt — used when Settings.nudge_prompt is empty. Surfaced to the
@@ -48,42 +47,37 @@ def gather_context(db: Session) -> dict[str, Any]:
     Caller is responsible for deciding whether the context is empty enough
     to skip the send entirely (see compose_message)."""
     today, tomorrow = _today_bounds()
-    todo_list = list_service.get_or_create_todo_list(db)
 
     overdue = (
-        db.query(ListItem)
+        db.query(Todo)
         .filter(
-            ListItem.list_id == todo_list.id,
-            ListItem.done.is_(False),
-            ListItem.due_date.is_not(None),
-            ListItem.due_date < today,
+            Todo.done.is_(False),
+            Todo.due_date.is_not(None),
+            Todo.due_date < today,
         )
-        .order_by(ListItem.due_date.asc(), ListItem.sort_order.asc())
+        .order_by(Todo.due_date.asc(), Todo.sort_order.asc())
         .all()
     )
     due_today = (
-        db.query(ListItem)
+        db.query(Todo)
         .filter(
-            ListItem.list_id == todo_list.id,
-            ListItem.done.is_(False),
-            ListItem.due_date.is_not(None),
-            ListItem.due_date >= today,
-            ListItem.due_date < tomorrow,
+            Todo.done.is_(False),
+            Todo.due_date.is_not(None),
+            Todo.due_date >= today,
+            Todo.due_date < tomorrow,
         )
-        .order_by(ListItem.sort_order.asc())
+        .order_by(Todo.sort_order.asc())
         .all()
     )
 
-    # Top-level focuses (committed, non-someday) — endgoal set + no parent.
+    # Active committed focuses (non-someday).
     focuses = (
-        db.query(ListItem)
+        db.query(Focus)
         .filter(
-            ListItem.parent_id.is_(None),
-            ListItem.endgoal.is_not(None),
-            ListItem.committed.is_(True),
-            ListItem.done.is_(False),
+            Focus.committed.is_(True),
+            Focus.done.is_(False),
         )
-        .order_by(ListItem.is_primary.desc(), ListItem.sort_order.asc())
+        .order_by(Focus.is_primary.desc(), Focus.sort_order.asc())
         .all()
     )
 

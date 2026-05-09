@@ -337,12 +337,12 @@ class ListService:
         subtitle: str | None = None,
         done: bool | None = None,
         actionable: bool | None = None,
-        is_primary: bool | None = None,
-        due_date: datetime | None = None,
         sort_order: int | None = None,
-        board_status: str | None = None,
-        pr_url: str | None = None,
     ) -> ListItem | None:
+        # Focus / todo / backlog field-handling moved out — those live in
+        # focuses / todos / backlog_tickets tables now (see focus_service /
+        # todo_service / backlog_service). list_items keeps only generic
+        # text + subtitle + done + actionable + sort_order.
         item = db.query(ListItem).filter(ListItem.id == item_id).first()
         if item is None:
             return None
@@ -355,35 +355,11 @@ class ListService:
             item.completed_at = datetime.utcnow() if done else None
         if actionable is not None:
             item.actionable = bool(actionable)
-            # Idea rows can't be "done" — clear stale state when flipping to idea.
             if not actionable:
                 item.done = False
                 item.completed_at = None
-        if is_primary is not None:
-            if is_primary:
-                # Singleton: clear any existing primary before setting this one.
-                db.query(ListItem).filter(
-                    ListItem.is_primary.is_(True), ListItem.id != item_id
-                ).update({"is_primary": False}, synchronize_session=False)
-            item.is_primary = bool(is_primary)
-        if due_date is not None:
-            item.due_date = due_date
         if sort_order is not None:
             item.sort_order = sort_order
-        if board_status is not None:
-            # Allow empty string to clear back to "todo" (None internally).
-            normalized = board_status if board_status in ("todo", "in_progress", "done") else None
-            item.board_status = normalized
-            # Keep `done` boolean in sync with the board column. Dragging into
-            # the Done column = same as checking the item; dragging out = uncheck.
-            if normalized == "done" and not item.done:
-                item.done = True
-                item.completed_at = datetime.utcnow()
-            elif normalized in ("todo", "in_progress") and item.done:
-                item.done = False
-                item.completed_at = None
-        if pr_url is not None:
-            item.pr_url = pr_url or None
         # If the searchable text changed, re-embed so future conflict scans
         # match the new content. Skip if neither field was touched.
         if text is not None or subtitle is not None:

@@ -58,7 +58,7 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 
 ### Backend (`app/`)
 - **`app/main.py`** — All FastAPI routes + startup migrations. CORS allows `localhost:5173`.
-- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note` (carries `is_pinned` + `is_draft` + `is_public` + `excerpt` (cached plain-text preview, stripped of HTML/`<img>`, capped at 240 chars — populated on every save, lazy-backfilled at startup so list endpoints don't ship full bodies)), `Conversation`, `Message`, `Memory`, `List`, `ListItem` (carries `board_status` + `pr_url` for the Jira-style backlog board), `FocusTodoLink` (M2M between focus list_items and todo list_items — one todo can serve multiple focuses), `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `EvalMessageRating` (per-assistant-message thumbs — 1=bad/2=meh/3=good with optional comment, UNIQUE on `message_id`; complements step-level feedback + segment overall rating), `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`), `GooniTake` (daily LLM-generated takes — kind="focus" one-sentence on what Daniel's focused on, kind="dev" short paragraph on what Daniel shipped today; UNIQUE on (`day`, `kind`); upserted by `take_service.get_or_generate`), `NoteComment` (Confluence-style flat comment thread under each note; CASCADE-deletes with the note; `author` is a free-text label like "daniel"/"gooni"/"claude")
+- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note` (carries `is_pinned` + `is_draft` + `is_public` + `excerpt` (cached plain-text preview, stripped of HTML/`<img>`, capped at 240 chars — populated on every save, lazy-backfilled at startup so list endpoints don't ship full bodies)), `Conversation`, `Message`, `Memory`, `List`, `ListItem` (generic list rows only — text/subtitle/done/sort_order; focus / todo / backlog fields all moved to dedicated tables in the focus/todo/backlog extraction), `Focus` (long-running commitments — endgoal/health/confidence/scale/is_primary/status/start_at/end_at/committed; extracted from list_items), `Todo` (actionable item with optional due_date; extracted from list_items), `BacklogTicket` (engineering backlog ticket with board_status + pr_url; extracted from list_items), `FocusTodoLink` (M2M between Focus and Todo — one todo can serve multiple focuses), `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `EvalMessageRating` (per-assistant-message thumbs — 1=bad/2=meh/3=good with optional comment, UNIQUE on `message_id`; complements step-level feedback + segment overall rating), `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`), `GooniTake` (daily LLM-generated takes — kind="focus" one-sentence on what Daniel's focused on, kind="dev" short paragraph on what Daniel shipped today; UNIQUE on (`day`, `kind`); upserted by `take_service.get_or_generate`), `NoteComment` (Confluence-style flat comment thread under each note; CASCADE-deletes with the note; `author` is a free-text label like "daniel"/"gooni"/"claude")
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
 - **`app/services/memory_service.py`** — Local SQL-backed memory store (the `memories` table). Per chat exchange: `extract_candidates` (LLM) → cosine-search similar active memories → `reconcile_candidate` (LLM, ADD/UPDATE/DELETE/NONE) → apply. Retrieval injects always-included preferences plus top-5 facts/episodes by cosine similarity. Replaced the old Mem0 hosted service; legacy callers still see `{id, memory, ...}` dict shape via `_serialize`.
 - **`app/services/orchestrator.py`** — Unified chat handler across all surfaces (web, telegram, whatsapp, imessage). `Orchestrator` singleton. Source defaults to `"web"`; bot channels share a single persistent conversation per source (no gap-based sessioning). Each turn builds a structured trace via `TraceBuilder` and stamps it on `Message.trace`.
@@ -214,12 +214,31 @@ POST /lists/{id}/items          → add item; response includes `conflicts: [{id
 POST /lists/{id}/similar        → cosine-search a list { text, threshold?, limit?, include_done?, exclude_item_id? } → { matches: [{id, text, similarity}] }. Read-only.
 ```
 
-### Focus model fields
+### Focus / Todo / Backlog tables (extracted from list_items)
 
-`list_items` rows representing focuses now carry:
-- `status: 'committed' | 'pending' | 'someday' | null` — engagement state. NULL on legacy rows; UI derives from `committed`. `committed`/`pending` both keep `committed=True`; `someday` flips it false.
-- `scale: 'long_term' | 'sprint' | 'medium' | null` — informational time horizon, drives a small badge.
-- `is_primary` (existing) — singleton; only one item across the whole `list_items` table can be `True`. The dashboard's focuses list pulls primary to the top with a green left rail + tint + pulsing dot.
+After the focus/todo/backlog extraction, `list_items` is back to its
+original purpose: arbitrary user-defined lists. Three dedicated tables
+own the previously-overloaded fields:
+
+- **`focuses`** (`Focus` model, `app/services/focus_service.py`):
+  long-running commitments. Carries `endgoal`, `committed`, `is_primary`
+  (singleton — only one Focus row across the whole table can be primary),
+  `status` ('committed' | 'someday'), `scale` ('quick' | 'slow'),
+  `health` (0..100), `confidence` (0..100), `start_at`, `end_at`. Routes
+  via `/items/*` (item_service facade) — focus-shaped patches land here.
+- **`todos`** (`Todo` model, `app/services/todo_service.py`): actionable
+  items with optional `due_date`. Linked to focuses via
+  `focus_todo_links`. Routes via `/items/*` and `/items/today-todos`.
+- **`backlog_tickets`** (`BacklogTicket` model,
+  `app/services/backlog_service.py`): engineering backlog tickets with
+  `board_status` ('todo' | 'in_progress' | 'done') + `pr_url`. Routes
+  via `/backlog/tickets`. Auto-routed from notes via
+  `feature_request_tool` when the classifier flags a feature_request
+  signal.
+
+`item_service` is now a thin facade over focus_service + todo_service —
+existing `/items/*` routes still work unchanged. `_serialize_item` is
+polymorphic (Focus → serialize_focus, Todo → serialize_todo).
 
 ### Daily digest
 
@@ -245,9 +264,9 @@ message and Daniel just talks back to Gooni normally if he wants to act on it.
 
 ### Focus ↔ Todo links
 
-`focus_todo_links` is a many-to-many between focuses and leaf todos, both
-stored in `list_items` (focus = parent_id null + endgoal set; todo = leaf in
-the Todo list). Endpoints:
+`focus_todo_links` is a many-to-many between `focuses.id` and `todos.id`
+(retargeted from list_items.id during the focus/todo/backlog extraction).
+Endpoints:
 
 - `POST /items/{focus_id}/derive-todo` — create a leaf todo + link in one
   shot. Body `{text, due_date?}`. Returns `{todo, link_id}`.

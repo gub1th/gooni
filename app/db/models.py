@@ -211,10 +211,10 @@ class Memory(Base):
     # for retrieval, so the ORM doesn't hydrate ~31KB per row on every
     # Memory load (e.g. dashboard.recent_memories, /memories list).
     embedding = deferred(Column(Text, nullable=True))
-    # Optional link to a top-level ListItem (focus) when the memory is
-    # goal/aspiration-shaped. Re-pointed from the legacy `focuses` table
-    # to `list_items` after the unified-item refactor.
-    focus_id = Column(Integer, ForeignKey("list_items.id"), nullable=True)
+    # Optional link to a Focus when the memory is goal/aspiration-shaped.
+    # Re-pointed from list_items.id back to focuses.id after the focus /
+    # todo / backlog extraction.
+    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=True)
     # Origin tracking — set when this memory was extracted from a note's
     # classify_note run. Lets the editor surface "this note created N
     # memories" disclosure. NULL for memories from chat or other paths.
@@ -261,14 +261,12 @@ class List(Base):
 
 
 class ListItem(Base):
-    """A single item — the unified "thing to do" record. With:
-      - `endgoal` set + no parent → renders as a focus (long-running goal)
-      - `parent_id` set           → renders as a child step under its parent
-      - both null                 → leaf todo
-    `committed` is the boolean replacement for the old Focus.status enum:
-    True = actively pursuing, False = parked.
-    `subtitle` carries the "why" for backlog items.
-    `source_note_id` links back to the Note that spawned this item.
+    """Generic list row — text + done + sort_order, nothing more.
+
+    After the focus / todo / backlog extraction, `list_items` is back to
+    its original purpose: arbitrary user-defined lists (shopping, notes
+    bullets, etc.). Focus-shaped fields live in `focuses`, todo-shaped
+    fields in `todos`, backlog-shaped fields in `backlog_tickets`.
     """
 
     __tablename__ = "list_items"
@@ -278,56 +276,117 @@ class ListItem(Base):
     parent_id = Column(Integer, ForeignKey("list_items.id"), nullable=True, index=True)
     text = Column(Text, nullable=False)
     subtitle = Column(Text, nullable=True)
-    endgoal = Column(Text, nullable=True)
-    committed = Column(Boolean, default=False, nullable=False)
     # actionable=True → renders with checkbox (a thing to do).
     # actionable=False → renders as a bullet/idea (no toggle, no completion state).
     actionable = Column(Boolean, default=True, nullable=False)
-    # Singleton: only one ListItem in the whole table can be is_primary=True.
-    # The "primary focus" surfaced front-and-center on the dashboard. Service
-    # enforces uniqueness.
+    done = Column(Boolean, default=False, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+    # JSON-serialised float list. Generated on insert/edit from `text +
+    # subtitle` so add_item can cosine-search existing items in the same
+    # list for conflicts. Deferred — ~31KB per row, never read by tree
+    # or list-render paths.
+    embedding = deferred(Column(Text, nullable=True))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class Focus(Base):
+    """Long-running commitment. Carries health/confidence/scale/primary —
+    everything that used to bloat list_items.
+
+    A focus has many todos (via focus_todo_links). The old "child step"
+    pattern (focus with parent_id-pointing children) is gone — child steps
+    are now todos linked to the focus.
+    """
+
+    __tablename__ = "focuses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    text = Column(Text, nullable=False)
+    subtitle = Column(Text, nullable=True)
+    endgoal = Column(Text, nullable=True)
+    committed = Column(Boolean, default=False, nullable=False)
+    # Singleton: only one Focus row can have is_primary=True. Enforced
+    # in focus_service.update().
     is_primary = Column(Boolean, default=False, nullable=False)
-    # Focus engagement state. Values: 'committed' | 'someday'.
-    # 'pending' was removed in the focus-flow redesign — pre-existing
-    # 'pending' rows are migrated to 'committed' on startup.
+    # Engagement state: 'committed' | 'someday'. Mirrors `committed` —
+    # kept for richer UI labelling.
     status = Column(String, nullable=True)
-    # Pace bucket — drives the Quick / Slow burn split on the focuses
-    # dashboard. Values: 'quick' | 'slow'. Legacy 'long_term' / 'medium'
-    # → 'slow'; 'sprint' → 'quick' (migration in main.py).
+    # Pace bucket: 'quick' | 'slow' (legacy data may have NULL).
     scale = Column(String, nullable=True)
-    # Health 0..100 + reporter confidence 0..100. Both NULL by default —
-    # only populated once a focus accumulates activity (chat / notes /
-    # MCP) that lets Gooni score it. Frontend renders the dot in a neutral
-    # state when either is null OR confidence < 35.
+    # Health 0..100 + reporter confidence 0..100, both nullable. UI shows
+    # neutral dot when either is null OR confidence < 35.
     health = Column(Integer, nullable=True)
     confidence = Column(Integer, nullable=True)
-    # Wall-clock window for slow-burn focuses. Quick focuses default to
-    # (now, midnight tonight); they read out of these same fields.
+    # Wall-clock window. Quick focuses default to (now, midnight tonight).
     start_at = Column(DateTime, nullable=True)
     end_at = Column(DateTime, nullable=True)
     done = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
-    due_date = Column(DateTime, nullable=True)
     source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
-    # Jira-style 3-column board state for backlog items.
-    # Values: 'todo' | 'in_progress' | 'done'. Distinct from the focus
-    # `status` column above (which carries 'committed' | 'someday'); we
-    # use a separate column to avoid overloading.
-    # Truth table for backlog rendering:
-    #   done=True  → Done column, regardless of board_status
-    #   done=False + board_status='in_progress' → In Progress column
-    #   otherwise (board_status null or 'todo') → Todo column
+    # JSON-serialised embedding for cosine similarity (conflict detection
+    # when adding focuses). Deferred — ~31KB per row.
+    embedding = deferred(Column(Text, nullable=True))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class Todo(Base):
+    """Actionable item with optional due_date. Lives independently of
+    `list_items` — todos are their own primitive now.
+
+    Linked to focuses via focus_todo_links (one todo can serve many
+    focuses). Sourced from notes via source_note_id.
+    """
+
+    __tablename__ = "todos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    text = Column(Text, nullable=False)
+    subtitle = Column(Text, nullable=True)
+    due_date = Column(DateTime, nullable=True, index=True)
+    done = Column(Boolean, default=False, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
+    embedding = deferred(Column(Text, nullable=True))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class BacklogTicket(Base):
+    """Engineering backlog ticket — Jira-style board state + PR pointer.
+
+    Was a polymorphic ListItem in a `type='backlog'` list; now its own
+    table with the two fields that actually matter for backlog
+    (board_status + pr_url) instead of dragging through unused focus /
+    todo fields.
+    """
+
+    __tablename__ = "backlog_tickets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    text = Column(Text, nullable=False)
+    subtitle = Column(Text, nullable=True)
+    # 'todo' | 'in_progress' | 'done'. Truth table for board column:
+    #   done=True → Done column (regardless of board_status)
+    #   done=False + board_status='in_progress' → In Progress
+    #   otherwise → Todo column
     board_status = Column(String, nullable=True)
-    # When the work shipped, the PR/commit URL gets pasted here so the
-    # ticket carries a permanent pointer. Free-text — anything resolvable.
     pr_url = Column(Text, nullable=True)
-    # JSON-serialised float list. Generated on insert/edit from `text +
-    # subtitle` so add_item can cosine-search existing items in the same list
-    # for conflicts (near-duplicates). NULL on legacy rows; backfilled lazily
-    # by a startup worker. Deferred — ~31KB per row, never read by /items
-    # tree or any list-render path. Similarity callers query
-    # `(ListItem.id, ListItem.embedding)` as a tuple to skip ORM hydration.
+    done = Column(Boolean, default=False, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
     embedding = deferred(Column(Text, nullable=True))
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
@@ -414,19 +473,18 @@ class Settings(Base):
 
 class FocusTodoLink(Base):
     """Many-to-many: a todo can serve multiple focuses, a focus can have many
-    todos. Both ends point at `list_items.id` — focuses and todos live in the
-    same unified table, distinguished by their fields (focuses have endgoal +
-    no parent; todos are leaves in the Todo list).
+    todos. After the focus / todo extraction, FKs point at the dedicated
+    `focuses` and `todos` tables (was both pointing at `list_items.id`).
     """
 
     __tablename__ = "focus_todo_links"
     __table_args__ = (
-        UniqueConstraint("focus_item_id", "todo_item_id", name="uq_focus_todo_link"),
+        UniqueConstraint("focus_id", "todo_id", name="uq_focus_todo_link"),
     )
 
     id = Column(Integer, primary_key=True)
-    focus_item_id = Column(Integer, ForeignKey("list_items.id"), nullable=False, index=True)
-    todo_item_id = Column(Integer, ForeignKey("list_items.id"), nullable=False, index=True)
+    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=False, index=True)
+    todo_id = Column(Integer, ForeignKey("todos.id"), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
