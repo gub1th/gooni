@@ -777,6 +777,9 @@ export interface ApiList {
 
 export type BoardStatus = "todo" | "in_progress" | "done";
 
+// Generic list row — focus / todo / backlog fields all moved to dedicated
+// tables in the focus/todo/backlog extraction. ApiListItem now mirrors
+// the slim list_items shape; backlog tickets use ApiBacklogTicket.
 export interface ApiListItem {
   id: number;
   list_id: number;
@@ -784,16 +787,26 @@ export interface ApiListItem {
   subtitle: string | null;
   done: boolean;
   actionable: boolean;
-  is_primary: boolean;
   completed_at: string | null;
   sort_order: number;
-  due_date: string | null;
   source_note_id: number | null;
   created_at: string | null;
-  // Backlog Jira-board state. Null on legacy rows; renderers coalesce
-  // to "todo" when null. Kept in sync with `done` server-side.
+}
+
+// Backlog ticket — engineering board state. Lives in `backlog_tickets`
+// table (not list_items) since the focus/todo/backlog extraction.
+export interface ApiBacklogTicket {
+  id: number;
+  text: string;
+  subtitle: string | null;
   board_status: BoardStatus | null;
   pr_url: string | null;
+  done: boolean;
+  completed_at: string | null;
+  sort_order: number;
+  source_note_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface ApiListWithItems extends ApiList {
@@ -868,11 +881,7 @@ export async function updateListItem(
     subtitle?: string | null;
     done?: boolean;
     actionable?: boolean;
-    is_primary?: boolean;
     sort_order?: number;
-    due_date?: string | null;
-    board_status?: BoardStatus | null;
-    pr_url?: string | null;
   },
 ): Promise<ApiListItem> {
   const res = await apiFetch(`${BASE}/list-items/${itemId}`, {
@@ -882,6 +891,52 @@ export async function updateListItem(
   });
   if (!res.ok) throw new Error("Failed to update list item");
   return res.json();
+}
+
+// ── Backlog tickets — extracted from list_items into their own table ──
+
+export async function fetchBacklogTickets(includeDone = true): Promise<ApiBacklogTicket[]> {
+  const res = await apiFetch(`${BASE}/backlog/tickets?include_done=${includeDone}`);
+  if (!res.ok) throw new Error("Failed to fetch backlog tickets");
+  return res.json();
+}
+
+export async function createBacklogTicket(
+  text: string,
+  opts: { subtitle?: string | null; source_note_id?: number | null; board_status?: BoardStatus | null } = {},
+): Promise<ApiBacklogTicket> {
+  const res = await apiFetch(`${BASE}/backlog/tickets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, ...opts }),
+  });
+  if (!res.ok) throw new Error("Failed to create backlog ticket");
+  return res.json();
+}
+
+export async function updateBacklogTicket(
+  ticketId: number,
+  patch: {
+    text?: string;
+    subtitle?: string | null;
+    board_status?: BoardStatus | null;
+    pr_url?: string | null;
+    done?: boolean;
+    sort_order?: number;
+  },
+): Promise<ApiBacklogTicket> {
+  const res = await apiFetch(`${BASE}/backlog/tickets/${ticketId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update backlog ticket");
+  return res.json();
+}
+
+export async function deleteBacklogTicket(ticketId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/backlog/tickets/${ticketId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete backlog ticket");
 }
 
 export async function deleteListItem(itemId: number): Promise<void> {

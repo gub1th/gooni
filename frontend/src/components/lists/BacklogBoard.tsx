@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { GripVertical, ExternalLink } from "lucide-react";
-import type { ApiListItem, BoardStatus } from "../../services/api";
-import { useListsStore } from "../../stores/useListsStore";
+import type { ApiBacklogTicket, BoardStatus } from "../../services/api";
+import { useBacklogStore } from "../../stores/useBacklogStore";
 import { ItemModal } from "./ItemModal";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface BacklogBoardProps {
-  listId: number;
+  // listId kept on the props for backward compatibility w/ the route caller
+  // — backlog tickets aren't list-bound anymore (own table), but the route
+  // still resolves a "Backlog" list to anchor the sidebar entry.
+  listId?: number;
   onOpenSourceNote?: (noteId: number) => void;
 }
 
@@ -27,12 +30,12 @@ const COLUMNS: Column[] = [
   { status: "done",        label: "Done",        hint: "Shipped or closed",   tint: "#16A34A" },
 ];
 
-// Map a stored item → which column it lands in. `done=true` always wins
+// Map a stored ticket → which column it lands in. `done=true` always wins
 // over board_status so checking-off via the existing flow doesn't desync
-// from the board. Server keeps the two in sync on update_item.
-function statusOf(item: ApiListItem): BoardStatus {
-  if (item.done) return "done";
-  if (item.board_status === "in_progress") return "in_progress";
+// from the board. Server keeps the two in sync on update.
+function statusOf(t: ApiBacklogTicket): BoardStatus {
+  if (t.done) return "done";
+  if (t.board_status === "in_progress") return "in_progress";
   return "todo";
 }
 
@@ -41,18 +44,14 @@ function statusOf(item: ApiListItem): BoardStatus {
 // handles the lift; we only set/read the dragging item via local state +
 // ondragstart payload (item id as string).
 
-export function BacklogBoard({ listId, onOpenSourceNote }: BacklogBoardProps) {
-  const items = useListsStore((s) => s.itemsByListId[listId] || []);
-  const selectList = useListsStore((s) => s.selectList);
-  const updateItem = useListsStore((s) => s.updateItem);
-  const reorder = useListsStore((s) => s.reorder);
-  const deleteItem = useListsStore((s) => s.deleteItem);
+export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
+  const tickets = useBacklogStore((s) => s.tickets);
+  const refresh = useBacklogStore((s) => s.refresh);
+  const updateTicket = useBacklogStore((s) => s.updateTicket);
+  const reorder = useBacklogStore((s) => s.reorder);
+  const deleteTicket = useBacklogStore((s) => s.deleteTicket);
 
-  // ListView's mount effect fetches items; the route picks BacklogBoard
-  // instead for type=backlog so we mirror the fetch here. Without this the
-  // store's itemsByListId[listId] stays unset on a fresh load and the
-  // board renders empty until something else seeds the cache.
-  useEffect(() => { selectList(listId); }, [listId, selectList]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
   const [dragId, setDragId] = useState<number | null>(null);
   const [hoverColumn, setHoverColumn] = useState<BoardStatus | null>(null);
@@ -63,16 +62,16 @@ export function BacklogBoard({ listId, onOpenSourceNote }: BacklogBoardProps) {
   const [openItemId, setOpenItemId] = useState<number | null>(null);
 
   const grouped = useMemo(() => {
-    const m: Record<BoardStatus, ApiListItem[]> = { todo: [], in_progress: [], done: [] };
-    for (const it of items) m[statusOf(it)].push(it);
+    const m: Record<BoardStatus, ApiBacklogTicket[]> = { todo: [], in_progress: [], done: [] };
+    for (const t of tickets) m[statusOf(t)].push(t);
     // Within column, sort by sort_order asc (server-managed).
     for (const k of Object.keys(m) as BoardStatus[]) {
       m[k].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     }
     return m;
-  }, [items]);
+  }, [tickets]);
 
-  const openItem = openItemId == null ? null : items.find((i) => i.id === openItemId) ?? null;
+  const openItem = openItemId == null ? null : tickets.find((i) => i.id === openItemId) ?? null;
 
   function handleDragStart(e: React.DragEvent, itemId: number) {
     setDragId(itemId);
@@ -94,7 +93,7 @@ export function BacklogBoard({ listId, onOpenSourceNote }: BacklogBoardProps) {
     setHoverColumn(null);
     setHoverIndex(null);
     if (movingId == null) return;
-    const moving = items.find((i) => i.id === movingId);
+    const moving = tickets.find((i) => i.id === movingId);
     if (!moving) return;
 
     const sourceStatus = statusOf(moving);
@@ -108,16 +107,18 @@ export function BacklogBoard({ listId, onOpenSourceNote }: BacklogBoardProps) {
     const newColIds: number[] = [...beforeIds, movingId, ...afterIds];
 
     if (statusChanged) {
-      // Status flip first, then reorder. Two patches keeps each request
-      // payload lean + the reorder endpoint only owns sort_order.
-      await updateItem(movingId, { board_status: targetStatus });
+      // Patch board_status first, then sort_order on each column. If the
+      // target was "done" we also need to flip done=true so checked rows
+      // stay coherent w/ the column they live in.
+      const patch: { board_status: BoardStatus; done?: boolean } = { board_status: targetStatus };
+      if (targetStatus === "done") patch.done = true;
+      else if (moving.done) patch.done = false;
+      await updateTicket(movingId, patch);
     }
-    // Persist new order for the target column (and the source column if it
-    // was different, since removing the item reshuffles its sort_order).
-    await reorder(listId, newColIds);
+    await reorder(newColIds);
     if (statusChanged) {
       const sourceIds = grouped[sourceStatus].filter((i) => i.id !== movingId).map((i) => i.id);
-      if (sourceIds.length) await reorder(listId, sourceIds);
+      if (sourceIds.length) await reorder(sourceIds);
     }
   }
 
@@ -260,10 +261,19 @@ export function BacklogBoard({ listId, onOpenSourceNote }: BacklogBoardProps) {
           onOpenSourceNote={onOpenSourceNote}
           onClose={() => setOpenItemId(null)}
           onSave={async (patch) => {
-            await updateItem(openItem.id, patch);
+            // ItemModal exposes a wider patch shape than backlog tickets
+            // accept (it's shared w/ ListView); pluck only the relevant
+            // fields. due_date / actionable are silently dropped here.
+            await updateTicket(openItem.id, {
+              text: patch.text,
+              subtitle: patch.subtitle,
+              done: patch.done,
+              board_status: patch.board_status,
+              pr_url: patch.pr_url,
+            });
           }}
           onDelete={() => {
-            void deleteItem(openItem.id);
+            void deleteTicket(openItem.id);
             setOpenItemId(null);
           }}
         />
@@ -281,7 +291,7 @@ function BacklogCard({
   onClick,
   onOpenPr,
 }: {
-  item: ApiListItem;
+  item: ApiBacklogTicket;
   dragging: boolean;
   onDragStart: (e: React.DragEvent) => void;
   onDragEnd: () => void;

@@ -37,11 +37,7 @@ interface ListsStore {
       subtitle?: string | null;
       done?: boolean;
       actionable?: boolean;
-      is_primary?: boolean;
       sort_order?: number;
-      due_date?: string | null;
-      board_status?: import("../services/api").BoardStatus | null;
-      pr_url?: string | null;
     },
   ) => Promise<void>;
   deleteItem: (itemId: number) => Promise<void>;
@@ -119,14 +115,8 @@ export const useListsStore = create<ListsStore>((set, get) => ({
     const updated = await apiUpdateItem(itemId, patch);
     set((s) => {
       const next = { ...s.itemsByListId };
-      // Mirror backend singleton: setting one item primary clears every other.
-      const promotingPrimary = patch.is_primary === true;
       for (const lid of Object.keys(next).map(Number)) {
-        next[lid] = next[lid].map((it) => {
-          if (it.id === itemId) return updated;
-          if (promotingPrimary && it.is_primary) return { ...it, is_primary: false };
-          return it;
-        });
+        next[lid] = next[lid].map((it) => (it.id === itemId ? updated : it));
       }
       return { itemsByListId: next };
     });
