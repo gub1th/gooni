@@ -7,6 +7,9 @@ import {
   deleteNoteComment,
   type ApiNoteComment,
 } from "../../services/api";
+import { renderMarkdown } from "../../utils/markdown";
+import { useProfileStore } from "../../stores/useProfileStore";
+import { CommentAvatar, identityFor, type Identity } from "./CommentAvatar";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -14,26 +17,20 @@ interface NoteCommentsProps {
   noteId: number;
 }
 
-// Render a comment body for innerHTML. If the content already contains an
-// HTML tag (MCP-authored comments use h3/ul/strong/code/etc), pass through
-// untouched. If it's plain text from the textarea composer, escape special
-// chars and convert newlines to <br> so user-typed line breaks survive.
-const HTML_TAG_RE = /<[a-z][^>]*>/i;
-function renderCommentHtml(raw: string): string {
-  if (HTML_TAG_RE.test(raw)) return raw;
-  const escaped = raw
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-  return escaped.replace(/\n/g, "<br>");
+// Server stores naive UTC datetimes (datetime.utcnow). JS's Date constructor
+// reads a naive ISO string as LOCAL time, which gave us the "10am instead
+// of 3am" bug. Append "Z" when there's no timezone marker so it's parsed
+// as UTC and rendered in the user's locale tz.
+function parseServerIso(iso: string | null): Date | null {
+  if (!iso) return null;
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  const d = new Date(hasOffset ? iso : iso + "Z");
+  return isNaN(d.getTime()) ? null : d;
 }
 
 function formatTime(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
+  const d = parseServerIso(iso);
+  if (!d) return "";
   const now = new Date();
   const sameDay =
     d.getFullYear() === now.getFullYear() &&
@@ -45,16 +42,16 @@ function formatTime(iso: string | null): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function authorAccent(author: string): string {
-  const a = author.toLowerCase();
-  if (a === "claude") return "#A855F7";
-  if (a === "gooni") return "#10B981";
-  return "#475569";
-}
+// MCP-authored comments arrive as full HTML (<h3>/<ul>/<strong>/<code>).
+// User-authored comments arrive as the TipTap composer's HTML output too,
+// since the composer round-trips through ProseMirror. Detect HTML by tag
+// presence and render via dangerouslySetInnerHTML; fall back to the
+// markdown renderer for legacy plain-text rows.
+const HTML_TAG_RE = /<[a-z][^>]*>/i;
 
-// Detect "empty editor" — TipTap's `<p></p>` round-trip leaves an empty
-// paragraph; only treat the editor as having content when there's actual
-// text after stripping tags.
+// Detect "empty editor" — TipTap leaves <p></p> on a blank instance, so
+// `editor.isEmpty` lies after a clear/replace cycle. Strip tags and check
+// for actual text content as the only honest emptiness signal.
 function isHtmlEmpty(html: string): boolean {
   return html.replace(/<[^>]+>/g, "").trim().length === 0;
 }
@@ -63,10 +60,15 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
   const [comments, setComments] = useState<ApiNoteComment[]>([]);
   const [posting, setPosting] = useState(false);
   const [hasContent, setHasContent] = useState(false);
+  const avatarUrl = useProfileStore((s) => s.avatarUrl);
+  const fetchProfileOnce = useProfileStore((s) => s.fetchOnce);
+
+  useEffect(() => { void fetchProfileOnce(); }, [fetchProfileOnce]);
 
   // TipTap composer — same StarterKit baseline as the main NoteEditor so
-  // formatting (bold/italic/lists/code/headings via slash menu) feels
-  // consistent. No image extension here: comment threads stay scannable.
+  // formatting (markdown shortcuts: **bold**, ## heading, - list, etc)
+  // feels consistent. No image extension here: comment threads stay
+  // scannable. Cmd+Enter submits.
   const editor = useEditor({
     extensions: [StarterKit],
     content: "",
@@ -75,12 +77,11 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
         class: "gooni-comment-composer",
         style: [
           "font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-          "font-size: 13px",
-          "line-height: 1.5",
+          "font-size: 14px",
+          "line-height: 1.55",
           "color: #1E293B",
           "outline: none",
-          "min-height: 60px",
-          "padding: 10px 12px",
+          "min-height: 24px",
         ].join("; "),
       },
       handleKeyDown: (_view, event) => {
@@ -127,10 +128,22 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
     try {
       await deleteNoteComment(id);
     } catch {
-      // re-fetch on failure so optimistic delete doesn't lie
       const rows = await fetchNoteComments(noteId);
       setComments(rows);
     }
+  }
+
+  // Composer fixed to "daniel" — only authenticated identity. Avatar comes
+  // from the profile store (uploaded image) and falls back to the goofy
+  // emoji default in CommentAvatar.
+  const myIdentity = identityFor("daniel");
+
+  // Map an identity to the right avatar URL. Only "user"-kind authors
+  // honour the uploaded avatar; claude + gooni keep their brand visuals.
+  function avatarFor(identity: Identity, author: string): string | null {
+    if (identity.kind !== "user") return null;
+    if (author.trim().toLowerCase() === "daniel") return avatarUrl;
+    return null;
   }
 
   return (
@@ -142,6 +155,57 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
         fontFamily: FONT,
       }}
     >
+      <style>{`
+        .gooni-comment-body p { margin: 0 0 8px; }
+        .gooni-comment-body p:last-child { margin-bottom: 0; }
+        .gooni-comment-body ul, .gooni-comment-body ol { margin: 4px 0 8px; padding-left: 20px; }
+        .gooni-comment-body h2 { font-size: 16px; font-weight: 700; margin: 10px 0 6px; }
+        .gooni-comment-body h3 { font-size: 14px; font-weight: 700; margin: 8px 0 4px; }
+        .gooni-comment-body code {
+          background: rgba(15,23,42,0.06);
+          padding: 1px 5px;
+          border-radius: 4px;
+          font-size: 0.9em;
+          font-family: 'SF Mono', Menlo, monospace;
+        }
+        .gooni-comment-body pre {
+          background: #0F172A;
+          color: #F1F5F9;
+          padding: 10px 12px;
+          border-radius: 8px;
+          margin: 8px 0;
+          overflow-x: auto;
+          font-size: 12.5px;
+          font-family: 'SF Mono', Menlo, monospace;
+        }
+        .gooni-comment-body pre code { background: transparent; padding: 0; color: inherit; }
+        .gooni-comment-body strong { font-weight: 600; }
+        .gooni-comment-body em { font-style: italic; }
+        .gooni-comment-body a { color: #2563EB; text-decoration: underline; }
+        .gooni-comment-body blockquote {
+          border-left: 3px solid rgba(15,23,42,0.20);
+          padding-left: 10px;
+          margin: 6px 0;
+          color: #475569;
+        }
+
+        /* Composer mirrors the body styles but trimmed for inline use. */
+        .gooni-comment-composer p { margin: 0 0 4px; }
+        .gooni-comment-composer p:last-child { margin-bottom: 0; }
+        .gooni-comment-composer ul, .gooni-comment-composer ol { margin: 4px 0; padding-left: 20px; }
+        .gooni-comment-composer code {
+          font-family: 'SF Mono', Menlo, monospace; font-size: 12.5px;
+          background: rgba(15,23,42,0.06); padding: 1px 4px; border-radius: 3px;
+        }
+        .gooni-comment-composer pre {
+          background: rgba(15,23,42,0.06); padding: 8px 10px; border-radius: 6px;
+          font-family: 'SF Mono', Menlo, monospace; font-size: 12.5px;
+          margin: 6px 0;
+        }
+        .gooni-comment-composer h2 { font-size: 16px; font-weight: 700; margin: 4px 0; }
+        .gooni-comment-composer h3 { font-size: 14px; font-weight: 700; margin: 4px 0; }
+      `}</style>
+
       <div
         style={{
           fontSize: 12,
@@ -156,163 +220,183 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
       </div>
 
       {comments.length === 0 && (
-        <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 14 }}>
+        <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 18 }}>
           No comments yet. Add the first one below — Claude can also drop comments here via MCP.
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
-        {comments.map((c) => (
-          <div
-            key={c.id}
-            style={{
-              display: "flex",
-              gap: 10,
-              padding: "10px 12px",
-              borderRadius: 10,
-              background: "rgba(241,245,249,0.55)",
-              border: "1px solid rgba(0,0,0,0.05)",
-            }}
-          >
+      {/* Comment list — Confluence row layout: avatar on the left, header
+          (name + timestamp) on top of body in the right column. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 18, marginBottom: 22 }}>
+        {comments.map((c) => {
+          const identity = identityFor(c.author);
+          const isHtml = HTML_TAG_RE.test(c.content);
+          return (
             <div
+              key={c.id}
               style={{
-                width: 28,
-                height: 28,
-                borderRadius: "50%",
-                flex: "none",
-                background: authorAccent(c.author),
-                color: "white",
                 display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 11,
-                fontWeight: 600,
-                textTransform: "uppercase",
+                gap: 12,
+                alignItems: "flex-start",
               }}
-              title={c.author}
             >
-              {c.author.slice(0, 1)}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  gap: 8,
-                  marginBottom: 4,
-                }}
-              >
+              <CommentAvatar identity={identity} avatarUrl={avatarFor(identity, c.author)} size={36} />
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: "#0F172A",
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: 8,
+                    marginBottom: 4,
                   }}
                 >
-                  {c.author}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 11, color: "#94A3B8" }}>
+                  <span
+                    style={{
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      color: "#0F172A",
+                    }}
+                  >
+                    {identity.display}
+                  </span>
+                  <span style={{ fontSize: 11.5, color: "#94A3B8" }}>
                     {formatTime(c.created_at)}
                   </span>
                   <button
                     onClick={() => handleDelete(c.id)}
                     style={{
+                      marginLeft: "auto",
                       border: "none",
                       background: "transparent",
-                      color: "#94A3B8",
-                      fontSize: 11,
+                      color: "#CBD5E1",
+                      fontSize: 13,
                       cursor: "pointer",
-                      padding: "2px 4px",
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      transition: "color 0.12s, background 0.12s",
                     }}
                     title="Delete comment"
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.color = "#EF4444";
+                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.06)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.color = "#CBD5E1";
+                      (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                    }}
                   >
                     ×
                   </button>
                 </div>
+                {/* Two render paths: HTML-shaped content (TipTap composer
+                    output + MCP add_comment HTML) goes through
+                    dangerouslySetInnerHTML; legacy plain-text rows still
+                    work via the markdown renderer. Trusted source: single-
+                    user app, MCP auth-gated, no foreign authors. */}
+                {isHtml ? (
+                  <div
+                    className="gooni-comment-body"
+                    style={{
+                      fontSize: 14,
+                      lineHeight: 1.55,
+                      color: "#1E293B",
+                      wordBreak: "break-word",
+                    }}
+                    dangerouslySetInnerHTML={{ __html: c.content }}
+                  />
+                ) : (
+                  <div
+                    className="gooni-comment-body"
+                    style={{
+                      fontSize: 14,
+                      lineHeight: 1.55,
+                      color: "#1E293B",
+                      wordBreak: "break-word",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {renderMarkdown(c.content)}
+                  </div>
+                )}
               </div>
-              {/* Comment bodies arrive as plain text or short HTML
-                  (MCP add_comment + the editor textarea both write raw
-                  strings). Render via dangerouslySetInnerHTML so HTML
-                  tags from MCP-authored comments (h3 / ul / strong /
-                  code) become real elements. Trusted source: single-user
-                  app, MCP auth-gated, no foreign authors. Plain-text
-                  comments still render correctly because raw text
-                  without tags is just text — newlines collapse though,
-                  so user-typed multi-line comments need <br> via the
-                  composer (textarea -> innerHTML helper below). */}
-              <div
-                className="gooni-note-comment-body"
-                style={{
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                  color: "#1E293B",
-                  wordBreak: "break-word",
-                }}
-                dangerouslySetInnerHTML={{ __html: renderCommentHtml(c.content) }}
-              />
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      <style>{`
-        .gooni-comment-composer p { margin: 0 0 4px; }
-        .gooni-comment-composer p:last-child { margin-bottom: 0; }
-        .gooni-comment-composer ul, .gooni-comment-composer ol { margin: 4px 0; padding-left: 20px; }
-        .gooni-comment-composer code {
-          font-family: 'SF Mono', Menlo, monospace; font-size: 12px;
-          background: rgba(15,23,42,0.06); padding: 1px 4px; border-radius: 3px;
-        }
-        .gooni-comment-composer pre {
-          background: rgba(15,23,42,0.06); padding: 8px 10px; border-radius: 6px;
-          font-family: 'SF Mono', Menlo, monospace; font-size: 12px;
-          margin: 6px 0;
-        }
-      `}</style>
-      <div
-        style={{
-          fontSize: 11,
-          color: "#94A3B8",
-          marginBottom: 6,
-        }}
-      >
-        Add a comment — markdown shortcuts (**bold**, ## heading, - list) work. Cmd+Enter to send.
-      </div>
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          alignItems: "stretch",
-          border: "1px solid rgba(0,0,0,0.10)",
-          borderRadius: 10,
-          background: "white",
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <EditorContent editor={editor} />
-        </div>
-        <button
-          onClick={submitFromEditor}
-          disabled={!hasContent || posting}
+      {/* Composer — Confluence shape: avatar on the left, TipTap editor
+          card on the right with a Cmd+Enter helper line + Comment button. */}
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+        <CommentAvatar identity={myIdentity} avatarUrl={avatarUrl} size={36} />
+        <div
           style={{
-            margin: 6,
-            padding: "0 16px",
-            borderRadius: 8,
-            border: "none",
-            background: !hasContent || posting ? "#CBD5E1" : "#0F172A",
-            color: "white",
-            fontFamily: FONT,
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: !hasContent || posting ? "default" : "pointer",
-            alignSelf: "flex-end",
-            height: 36,
+            flex: 1,
+            background: "var(--gooni-card, #FFFFFF)",
+            border: hasContent
+              ? "1px solid rgba(15,23,42,0.20)"
+              : "1px solid rgba(15,23,42,0.10)",
+            borderRadius: 10,
+            padding: "10px 14px 10px",
+            transition: "border-color 0.15s, box-shadow 0.15s",
+            boxShadow: hasContent ? "0 1px 3px rgba(15,23,42,0.06)" : "none",
           }}
         >
-          {posting ? "..." : "Comment"}
-        </button>
+          <EditorContent editor={editor} />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginTop: 10,
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 11, color: "#94A3B8" }}>
+              ⌘↵ to post · markdown shortcuts work (**bold**, ## heading, - list, ` code `)
+            </span>
+            <div style={{ display: "flex", gap: 6 }}>
+              {hasContent && (
+                <button
+                  onClick={() => {
+                    editor?.commands.clearContent();
+                    setHasContent(false);
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: "transparent",
+                    color: "#64748B",
+                    fontFamily: FONT,
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={submitFromEditor}
+                disabled={!hasContent || posting}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: !hasContent || posting ? "#CBD5E1" : "#0F172A",
+                  color: "white",
+                  fontFamily: FONT,
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: !hasContent || posting ? "default" : "pointer",
+                  transition: "background 0.12s",
+                }}
+              >
+                {posting ? "Posting…" : "Comment"}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

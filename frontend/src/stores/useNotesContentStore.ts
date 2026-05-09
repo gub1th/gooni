@@ -186,16 +186,29 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
 
       deleteNote: async (id: number, spaceId: string) => {
+        // Snapshot for rollback. Optimistic: clear from EVERY cached space
+        // (a note deleted from All Notes also belongs to its real space's
+        // cache, and vice versa — leaving it in either causes ghost rows).
+        const snapshot = get().notes;
+        const prevActive = get().activeNoteId;
+        set((s) => {
+          const next: Record<string, ApiNote[]> = {};
+          for (const [key, list] of Object.entries(s.notes)) {
+            next[key] = list.filter((n) => n.id !== id);
+          }
+          const activeNoteId = s.activeNoteId === id ? null : s.activeNoteId;
+          return { notes: next, activeNoteId };
+        });
         try {
           await apiDeleteNote(id);
-          set((s) => {
-            const list = (s.notes[spaceId] ?? []).filter((n) => n.id !== id);
-            const activeNoteId = s.activeNoteId === id ? null : s.activeNoteId;
-            return { notes: { ...s.notes, [spaceId]: list }, activeNoteId };
-          });
         } catch (e) {
           console.error("deleteNote error:", e);
+          // Roll back so the user sees the row reappear instead of pretending
+          // success. Active note also restored if we cleared it.
+          set({ notes: snapshot, activeNoteId: prevActive });
+          throw e;
         }
+        void spaceId; // kept on signature for callers; cache scrub is global now
       },
 
       removeSpace: (spaceId: string) => {

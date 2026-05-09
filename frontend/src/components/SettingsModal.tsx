@@ -1,22 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
 import { GOONI_FACES, GOONI_FACE_LABELS, useGooniFaceStore, type GooniFace } from "../stores/useGooniFaceStore";
 import { GOONI_THEMES, GOONI_THEME_LABELS, THEME_PALETTES, useGooniThemeStore, type GooniTheme } from "../stores/useGooniThemeStore";
+import { useProfileStore } from "../stores/useProfileStore";
+import { uploadAvatarImage, updatePublicAvatar } from "../services/api";
 import { GooniFacePreview } from "./GooniMascot";
 import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
 import { RepoPicker } from "./RepoPicker";
+import { CommentAvatar, goofyEmojiFor } from "./notes/CommentAvatar";
 
 interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
 }
 
-type Tab = "appearance" | "notifications" | "integrations" | "deployments";
+type Tab = "profile" | "appearance" | "notifications" | "integrations" | "deployments";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: "profile", label: "Profile" },
   { id: "appearance", label: "Appearance" },
   { id: "notifications", label: "Notifications" },
   { id: "integrations", label: "Integrations" },
@@ -28,7 +32,7 @@ const TABS: { id: Tab; label: string }[] = [
 // tabs. Version sits in the header on every tab so Daniel never has to dig
 // for "what version of Gooni am I running."
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
-  const [tab, setTab] = useState<Tab>("appearance");
+  const [tab, setTab] = useState<Tab>("profile");
 
   useEffect(() => {
     if (!open) return;
@@ -143,6 +147,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             }}
           >×</button>
 
+          {tab === "profile" && <ProfileTab />}
           {tab === "appearance" && <AppearanceTab />}
           {tab === "notifications" && <SettingsPanel />}
           {tab === "integrations" && <IntegrationsTab />}
@@ -246,6 +251,134 @@ function AppearanceTab() {
               </button>
             );
           })}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function ProfileTab() {
+  const avatarUrl = useProfileStore((s) => s.avatarUrl);
+  const fetchOnce = useProfileStore((s) => s.fetchOnce);
+  const setAvatarUrl = useProfileStore((s) => s.setAvatarUrl);
+  const refresh = useProfileStore((s) => s.refresh);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  useEffect(() => { void fetchOnce(); }, [fetchOnce]);
+
+  async function handleUpload(file: File) {
+    setError(null);
+    setUploading(true);
+    try {
+      const { url } = await uploadAvatarImage(file);
+      await updatePublicAvatar(url);
+      setAvatarUrl(url);
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1400);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "upload failed";
+      setError(msg);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleClear() {
+    setError(null);
+    try {
+      await updatePublicAvatar(null);
+      setAvatarUrl(null);
+      // Re-fetch to confirm server state, in case anything else races.
+      void refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "reset failed");
+    }
+  }
+
+  // Default preview = the deterministic goofy emoji avatar (same renderer
+  // the comments use), so the user sees their fallback identity before
+  // they upload.
+  const goofy = goofyEmojiFor("daniel");
+
+  return (
+    <>
+      <h2 style={{
+        fontSize: 16, fontWeight: 600,
+        color: "var(--gooni-text, #1C1C1E)",
+        margin: 0, marginBottom: 18,
+      }}>Profile</h2>
+
+      <section style={{ marginBottom: 22 }}>
+        <SectionLabel>avatar</SectionLabel>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* Preview = uploaded URL if present, else the goofy emoji shape
+              that NoteComments will render as the fallback. */}
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt="profile"
+              style={{
+                width: 72, height: 72, borderRadius: "50%",
+                objectFit: "cover", flex: "none",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.10), inset 0 0 0 1px rgba(0,0,0,0.06)",
+              }}
+            />
+          ) : (
+            <CommentAvatar identity={{ kind: "user", display: "Daniel" }} avatarUrl={null} size={72} />
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                style={{
+                  ...btn,
+                  background: "#1C1C1E", color: "#fff",
+                  cursor: uploading ? "default" : "pointer",
+                  opacity: uploading ? 0.7 : 1,
+                }}
+              >
+                {uploading ? "Uploading…" : avatarUrl ? "Replace photo" : "Upload photo"}
+              </button>
+              {avatarUrl && (
+                <button
+                  onClick={handleClear}
+                  style={{
+                    ...btn,
+                    background: "transparent",
+                    color: "#64748B",
+                    border: "1px solid rgba(0,0,0,0.10)",
+                  }}
+                >
+                  Reset to default
+                </button>
+              )}
+            </div>
+            <span style={{ fontSize: 11.5, color: "#94A3B8", fontFamily: FONT }}>
+              {avatarUrl
+                ? (savedFlash ? "✓ saved" : "PNG / JPG, up to 10 MB")
+                : `Default avatar: ${goofy} (deterministic per name)`}
+            </span>
+            {error && (
+              <span style={{ fontSize: 11.5, color: "#DC2626", fontFamily: FONT }}>
+                {error}
+              </span>
+            )}
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleUpload(f);
+              e.target.value = "";
+            }}
+            style={{ display: "none" }}
+          />
         </div>
       </section>
     </>
