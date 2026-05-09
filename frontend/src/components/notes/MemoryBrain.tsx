@@ -51,7 +51,9 @@ function computeLayout(memories: ApiMemory[]): Map<number, BubblePos> {
     const angleDeg = startDeg + (endDeg - startDeg) * t;
     const angle = (angleDeg * Math.PI) / 180;
     // Alternate radius for staggered look — odd-indexed bubbles slightly farther.
-    const radius = i % 2 === 0 ? 110 : 138;
+    // Tightened (was 110/138) so the bubble cluster sits closer to the brain
+    // and the section header doesn't have a giant air-gap above the animation.
+    const radius = i % 2 === 0 ? 78 : 100;
     const driftPhase = (i * 0.7) % 4;
     map.set(m.id, { angle, radius, driftPhase });
   });
@@ -95,7 +97,7 @@ export function MemoryBrain({
     <div
       ref={containerRef}
       style={{
-        marginTop: 48, paddingTop: 20,
+        marginTop: 24, paddingTop: 14,
         borderTop: "1px solid rgba(0,0,0,0.06)",
         position: "relative",
       }}
@@ -118,20 +120,22 @@ export function MemoryBrain({
         {title}
       </p>
       <p style={{
-        fontSize: 11.5, color: "#9CA3AF", margin: "0 0 14px",
+        fontSize: 11.5, color: "#9CA3AF", margin: "0 0 6px",
         fontFamily: FONT,
       }}>
         {subtitle}
       </p>
 
-      {/* Stage: 200px tall, brain centered horizontally toward the bottom,
-          bubbles float in the upper arc. Width caps at 720 to match editor. */}
-      <div style={{ position: "relative", height: 240, maxWidth: 720, margin: "0 auto", overflow: "hidden" }}>
+      {/* Stage: brain anchored bottom-center, bubbles float in a tight half-
+          arc above. Stage height + cy tightened (was 240px stage / cy=200)
+          so the cluster lives close to the section header instead of leaving
+          a wall of empty space above the brain. */}
+      <div style={{ position: "relative", height: 170, maxWidth: 720, margin: "0 auto", overflow: "hidden" }}>
         {/* SVG layer for the brain → bubble lines. Full-bleed; lines drawn
             in client coords relative to the SVG. */}
         <svg
           width="100%" height="100%"
-          viewBox="0 0 720 240"
+          viewBox="0 0 720 170"
           preserveAspectRatio="xMidYMid meet"
           style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
         >
@@ -139,7 +143,7 @@ export function MemoryBrain({
             const pos = layout.get(m.id);
             if (!pos) return null;
             const cx = 360;
-            const cy = 200;
+            const cy = 132;
             const tx = cx + Math.cos(pos.angle) * pos.radius;
             const ty = cy + Math.sin(pos.angle) * pos.radius;
             const accent = paletteFor(m.type).accent;
@@ -165,7 +169,7 @@ export function MemoryBrain({
         <div style={{
           position: "absolute",
           left: "50%",
-          bottom: 12,
+          bottom: 6,
           transform: "translateX(-50%)",
           width: BRAIN_SIZE, height: BRAIN_SIZE,
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -173,13 +177,13 @@ export function MemoryBrain({
           <NeuralBrain size={BRAIN_SIZE} />
         </div>
 
-        {/* Bubbles. Positioned absolute relative to the 720x240 stage, mapped
+        {/* Bubbles. Positioned absolute relative to the 720x170 stage, mapped
             from the same polar layout the SVG used. */}
         {memories.map((m) => {
           const pos = layout.get(m.id);
           if (!pos) return null;
           const cx = 360;
-          const cy = 200;
+          const cy = 132;
           const tx = cx + Math.cos(pos.angle) * pos.radius;
           const ty = cy + Math.sin(pos.angle) * pos.radius;
           const palette = paletteFor(m.type);

@@ -374,34 +374,23 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     // Flush any unsaved changes (e.g. a dropped image, an in-flight image
     // replace) before leaving the previous note.
     //
-    // Three weak points in the original gate were causing notes to silently
-    // lose their last-edit-before-switch:
-    //   1. `hasChanges.current` could be racily false — if an autosave just
-    //      succeeded one tick before the switch, hasChanges flipped back to
-    //      false and this whole branch was skipped.
-    //   2. `bodyRef.current` could be stale — TipTap's setImage/setContent
-    //      transactions commit synchronously but onUpdate (which writes
-    //      bodyRef) fires after; if the user switched notes in the same JS
-    //      task as an image insert, bodyRef hadn't caught up.
-    //   3. `.catch(() => {})` swallowed all PATCH failures (oversize body,
-    //      network blip, 4xx/5xx) — no console log, no UI signal.
-    //
-    // Fix: always read from the editor directly, drop the hasChanges gate,
-    // and surface failures to the console at minimum. Cost is one extra PATCH
-    // per note switch even when nothing changed — backend's empty-overwrite
-    // guard makes that safe, and the updated_at bump is cheap.
+    // Save-on-leave is gated on real edits since the gateless version was
+    // bumping updated_at on every open via TipTap's serializer-roundtrip
+    // (PR fix-note-open-delete): the editor re-emits HTML in a slightly
+    // different shape than what the server stored (attribute order, self-
+    // closing tags), so an unconditional PATCH made the server detect a
+    // content change and bump updated_at — which then made notes jump to
+    // the top of "Today" the moment they were opened. The trade is a
+    // narrow image-insert race (setImage commits synchronously but
+    // onUpdate fires next tick) — covered by the editor's onBlur save
+    // and the localStorage stash fallback below.
     const prevId = prevActiveNoteId.current;
-    if (prevId && prevId > 0 && prevId !== activeNoteId) {
+    if (prevId && prevId > 0 && prevId !== activeNoteId && hasChanges.current) {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       const currentBody = editorRef.current?.getHTML() ?? bodyRef.current;
       const currentTitle = titleRef.current;
       updateNote(prevId, currentTitle, currentBody).catch((err) => {
         console.error(`[NoteEditor] save-on-leave failed for note #${prevId}:`, err);
-        // The user just navigated away — there's nowhere to retry from.
-        // Stash the unsaved snapshot so the next time this note loads we can
-        // detect leftover work, restore it, and retry the PATCH. Covers the
-        // OOM-mid-navigation case where Fly returned 502 and the editor's
-        // edits would otherwise vanish.
         try {
           saveLocalNoteDraft(prevId, currentTitle, currentBody);
         } catch {
@@ -468,15 +457,20 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     refetchNote(activeNoteId).catch(() => {});
   }, [activeNoteId, activeNote?.is_public, activeNote?.unique_viewers, refetchNote]);
 
-  // Memorize previous note on leave; touch new note on enter — catches ALL navigation paths
+  // Memorize previous note on leave; touch new note on enter — catches ALL
+  // navigation paths. Embed + memorize are gated on isDirty so a pure open
+  // (click → look → close) doesn't burn an OpenAI call or bump updated_at.
+  // Touch is unconditional because last_opened_at is the whole point of the
+  // open event and doesn't affect list ordering.
   useEffect(() => {
     const prev = prevActiveNoteId.current;
     prevActiveNoteId.current = activeNoteId;
     if (prev === activeNoteId) return; // initial mount, no change
 
     if (prev && prev > 0) {
-      embedAndCheck(prev);
-      if (useNotesContentStore.getState().isDirty) {
+      const wasDirty = useNotesContentStore.getState().isDirty;
+      if (wasDirty) {
+        embedAndCheck(prev);
         apiMemorizeNote(prev).catch(() => {});
       }
       useNotesContentStore.setState({ isDirty: false });
@@ -1167,8 +1161,30 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   </div>
                   <button
                     onClick={async () => {
-                      await deleteNote(activeNote.id, selectedSpaceId ?? "general");
+                      // Pick the neighbor BEFORE delete so the route doesn't
+                      // briefly fall back to All Notes. Prefer the next note
+                      // in the same space's list; if the deleted note was
+                      // last, fall back to the previous one. If the space is
+                      // empty after the delete, activeNoteId will go null
+                      // and the editor will show the empty state — same as
+                      // before.
+                      const space = selectedSpaceId ?? "general";
+                      const list = useNotesContentStore.getState().notes[space] ?? [];
+                      const idx = list.findIndex((n) => n.id === activeNote.id);
+                      const neighbor = idx >= 0
+                        ? (list[idx + 1] ?? list[idx - 1] ?? null)
+                        : null;
+                      // Suppress save-on-leave for the about-to-be-deleted
+                      // note — it would 404 (or worse, recreate state on the
+                      // server). Clearing hasChanges makes the leave-effect's
+                      // gate skip the PATCH.
+                      hasChanges.current = false;
+                      await deleteNote(activeNote.id, space);
                       setDeleteConfirm(false);
+                      if (neighbor) {
+                        selectNote(neighbor.id);
+                        navigate({ to: "/", search: { note: neighbor.id, conv: undefined, list: undefined, audit: undefined } });
+                      }
                     }}
                     style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#FF3B30", textAlign: "left" }}
                     onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.08)")}
