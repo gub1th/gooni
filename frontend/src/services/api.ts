@@ -700,18 +700,6 @@ export async function deleteItem(id: number): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete item");
 }
 
-export interface FocusSuggestion {
-  text: string;
-  endgoal: string | null;
-  scale: FocusScale | null;
-}
-
-export async function suggestFocus(): Promise<FocusSuggestion> {
-  const res = await apiFetch(`${BASE}/items/suggest-focus`);
-  if (!res.ok) throw new Error("suggest failed");
-  return res.json();
-}
-
 export async function reorderItems(ids: number[]): Promise<void> {
   const res = await apiFetch(`${BASE}/items/reorder`, {
     method: "POST",
