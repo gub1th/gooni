@@ -765,6 +765,70 @@ def _expected_token() -> str:
     return hashlib.sha256(_AUTH_PASSWORD.encode()).hexdigest()
 
 
+def _self_rss_kb() -> int:
+    """Read VmRSS from /proc/self/status. Returns -1 on non-Linux or read
+    failure (dev macOS). Cheap: a single fopen + linear scan of ~50 lines."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1])
+    except Exception:
+        pass
+    return -1
+
+
+# Threshold knobs for the per-request memory trace below. Picked from
+# observed OOM behavior: the kill happened at ~318MB anon-rss starting from
+# a 183MB sample, so the offending request was ~135MB. We want to flag
+# anything that allocates >20MB in a single request — anything below that
+# is normal request churn. Absolute floor at 250MB so a steady-state climb
+# to "near the cliff" surfaces even if no individual request crosses the
+# delta threshold.
+_REQ_RSS_DELTA_FLAG_KB = 20 * 1024  # 20 MB
+_REQ_RSS_ABS_FLAG_KB = 250 * 1024   # 250 MB
+_REQ_TRACE_LOGGED = False  # set true once we've logged at least one [req]
+
+
+@app.middleware("http")
+async def memory_trace_middleware(request: Request, call_next):
+    """Snapshot RSS before/after each request and log the ones that move
+    the needle. Goal: attribute the next OOM spike to a specific endpoint
+    instead of guessing.
+
+    A request is "interesting" when EITHER the delta (rss_after - rss_before)
+    exceeds _REQ_RSS_DELTA_FLAG_KB, OR rss_after exceeds _REQ_RSS_ABS_FLAG_KB.
+    Everything else stays out of logs to keep the signal-to-noise sane.
+
+    No /proc on macOS dev — rss_before/_after come back -1 and the filter
+    falls through to "always log" mode for the first request after boot
+    (so we know the trace is wired). Cheap: one /proc read on entry,
+    one on exit. ~50 µs each."""
+    rss_before = _self_rss_kb()
+    t0 = _dt.now()
+    response = await call_next(request)
+    rss_after = _self_rss_kb()
+    elapsed_ms = int((_dt.now() - t0).total_seconds() * 1000)
+
+    delta = rss_after - rss_before if (rss_before > 0 and rss_after > 0) else 0
+    interesting = (
+        delta >= _REQ_RSS_DELTA_FLAG_KB
+        or rss_after >= _REQ_RSS_ABS_FLAG_KB
+    )
+    global _REQ_TRACE_LOGGED
+    if interesting or not _REQ_TRACE_LOGGED:
+        _REQ_TRACE_LOGGED = True
+        path = request.url.path[:120]
+        method = request.method
+        status = getattr(response, "status_code", "?")
+        print(
+            f"[req] {method} {path} status={status} dur={elapsed_ms}ms "
+            f"rss_before={rss_before}kB rss_after={rss_after}kB delta={delta}kB",
+            flush=True,
+        )
+    return response
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Block non-public routes when AUTH_PASSWORD is set."""
