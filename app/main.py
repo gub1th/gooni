@@ -1573,64 +1573,6 @@ def items_delete(item_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-@app.get("/items/suggest-focus")
-def items_suggest_focus(db: Session = Depends(get_db)):
-    """Propose one new focus based on the user's current focuses + recent note
-    titles. Frontend pre-fills the inline add form with the suggestion. Pure
-    suggestion — caller decides whether to accept it.
-
-    Returns: { text: str, endgoal?: str, scale?: 'quick'|'slow' }
-    """
-    tree = item_service.list_tree(db)
-    active_focuses = [f for f in tree["focuses"] if not f["done"]]
-    focus_lines = [
-        f"- {f['text']}" + (f" (goal: {f['endgoal']})" if f.get("endgoal") else "")
-        for f in active_focuses[:8]
-    ]
-    recent_notes = (
-        db.query(Note)
-        .order_by(Note.updated_at.desc())
-        .limit(10)
-        .all()
-    )
-    note_titles = [n.title for n in recent_notes if n.title]
-
-    prompt = (
-        "You are Gooni — Daniel's personal AI notebook. Propose ONE new focus "
-        "Daniel might want to commit to, based on his existing focuses and "
-        "recent note activity. Don't repeat anything from the existing list. "
-        "If nothing obvious, return text='' and the rest empty.\n\n"
-        "Output strict JSON: {\"text\": str, \"endgoal\": str | null, "
-        "\"scale\": \"quick\" | \"slow\" | null}. "
-        "scale heuristic: quick = today / one-off, slow = multi-day or "
-        "longer. text is a short imperative phrase (5-7 words max). "
-        "endgoal is one sentence describing what 'done' looks like.\n\n"
-        f"Existing focuses:\n{chr(10).join(focus_lines) or '  (none)'}\n\n"
-        f"Recent note titles:\n{chr(10).join(f'- {t}' for t in note_titles) or '  (none)'}"
-    )
-    try:
-        resp = llm_client.client.chat.completions.create(
-            model=llm_client.chat_model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_completion_tokens=180,
-            response_format={"type": "json_object"},
-        )
-        raw = resp.choices[0].message.content or "{}"
-        parsed = json.loads(raw)
-        text_val = (parsed.get("text") or "").strip()
-        if not text_val:
-            return {"text": "", "endgoal": None, "scale": None}
-        return {
-            "text": text_val,
-            "endgoal": (parsed.get("endgoal") or None),
-            "scale": parsed.get("scale") if parsed.get("scale") in _VALID_SCALE else None,
-        }
-    except Exception as e:
-        print(f"[suggest-focus] {e}")
-        return {"text": "", "endgoal": None, "scale": None}
-
-
 @app.post("/items/reorder")
 def items_reorder(body: dict, db: Session = Depends(get_db)):
     ids = body.get("ids")

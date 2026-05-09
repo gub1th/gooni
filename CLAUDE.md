@@ -210,7 +210,6 @@ POST /settings/test-nudge            → fire the digest immediately (bypasses i
 GET  /items                     → focus + inbox tree (now includes status, scale per node)
 POST /items                     → create item; accepts status, scale, is_primary in body
 PATCH /items/{id}               → patches now accept status + scale; status syncs `committed`
-GET  /items/suggest-focus       → LLM proposes one new focus { text, endgoal?, scale? }
 
 POST /lists/{id}/items          → add item; response includes `conflicts: [{id, text, similarity, severity}]` for near-duplicates already in the list. Pass `skip_conflict_check: true` to bypass the embed scan.
 POST /lists/{id}/similar        → cosine-search a list { text, threshold?, limit?, include_done?, exclude_item_id? } → { matches: [{id, text, similarity}] }. Read-only.

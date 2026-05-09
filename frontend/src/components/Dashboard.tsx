@@ -12,7 +12,6 @@ import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
 import { ActivityCard } from "./ActivityCard";
 import { Skeleton } from "./Skeleton";
-import { UsageCards } from "./UsageCards";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -155,7 +154,7 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <NeuralBrain size={52} onClick={() => setExploreOpen(true)} />
+              <NeuralBrain size={66} onClick={() => setExploreOpen(true)} />
               <StatCard
                 label="notes this week"
                 value={stats ? stats.notes_this_week : <Skeleton width={32} height={20} />}
@@ -228,9 +227,6 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
         <div style={{ marginBottom: 14 }}>
           <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
         </div>
-
-        {/* Daily + monthly usage. OpenAI by default; toggle flips to Claude. */}
-        <UsageCards />
 
         {/* Primary focus treatment now lives inline in ActivityCard's focus
             list (green left rail + tint + pulsing dot). The old heading-style
