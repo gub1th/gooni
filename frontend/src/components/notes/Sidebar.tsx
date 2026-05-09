@@ -11,7 +11,7 @@ import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeSt
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText, Pin, MessageSquare, Brain, ClipboardList, BarChart3, Settings as SettingsIcon,
-  Globe, Plug, Pencil, Clock,
+  Globe, Plug, Pencil, Clock, ListChecks, Inbox,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -29,6 +29,10 @@ const ICON_TINT = {
   chatAudit: "#0891B2",  // cyan
   stats:    "#EC4899",   // pink — distinct from chatAudit so the eye separates them
   settings: "#64748B",   // slate
+  // Match the per-list-type tints used by ListIcon so the top shortcuts read
+  // as the same surface as the Todo/Backlog rows under LISTS.
+  todos:    "#15803D",   // green-700
+  backlog:  "#4338CA",   // indigo-700
 } as const;
 
 const sidebarFooterBtn: React.CSSProperties = {
@@ -610,6 +614,56 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
 
         {/* Scrollable content */}
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}>
+          {/* Top-level shortcuts: Todos + Backlog. Resolves to the canonical
+              first list of each type (multiple todo/backlog lists are rare —
+              the rest are reachable via the LISTS section below). Hidden when
+              the lists haven't loaded yet or no list of that type exists. */}
+          {(() => {
+            const todoList = lists.find((l) => l.type === "todo");
+            const backlogList = lists.find((l) => l.type === "backlog");
+            if (!todoList && !backlogList) return null;
+            const rowStyle = (isSelected: boolean): React.CSSProperties => ({
+              display: "flex", alignItems: "center", gap: 8,
+              width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+              border: "none", textAlign: "left",
+              background: isSelected ? "rgba(0,0,0,0.09)" : "transparent",
+              cursor: "pointer",
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+              fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+              fontWeight: isSelected ? 600 : 400,
+              transition: "background 0.12s",
+            });
+            return (
+              <div style={{ padding: "4px 6px 4px" }}>
+                {todoList && (
+                  <button
+                    onClick={() => onSelectList(todoList.id)}
+                    title="Todos"
+                    style={rowStyle(isLists && activeListId === todoList.id)}
+                    onMouseEnter={(e) => { if (!(isLists && activeListId === todoList.id)) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+                    onMouseLeave={(e) => { if (!(isLists && activeListId === todoList.id)) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                  >
+                    <ListChecks size={15} strokeWidth={1.7} color={ICON_TINT.todos} style={{ flexShrink: 0 }} />
+                    <span>Todos</span>
+                  </button>
+                )}
+                {backlogList && (
+                  <button
+                    onClick={() => onSelectList(backlogList.id)}
+                    title="Backlog"
+                    style={rowStyle(isLists && activeListId === backlogList.id)}
+                    onMouseEnter={(e) => { if (!(isLists && activeListId === backlogList.id)) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+                    onMouseLeave={(e) => { if (!(isLists && activeListId === backlogList.id)) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                  >
+                    <Inbox size={15} strokeWidth={1.7} color={ICON_TINT.backlog} style={{ flexShrink: 0 }} />
+                    <span>Backlog</span>
+                  </button>
+                )}
+                <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "8px 4px 0" }} />
+              </div>
+            );
+          })()}
+
           {/* Section: NOTES */}
           <div style={{ padding: "8px 12px 4px" }}>
             <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
