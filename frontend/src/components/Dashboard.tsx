@@ -154,7 +154,7 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <NeuralBrain size={52} onClick={() => setExploreOpen(true)} />
+              <NeuralBrain size={66} onClick={() => setExploreOpen(true)} />
               <StatCard
                 label="notes this week"
                 value={stats ? stats.notes_this_week : <Skeleton width={32} height={20} />}

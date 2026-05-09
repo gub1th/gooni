@@ -235,6 +235,16 @@ export function FocusFlow() {
         });
         setTimeout(() => setLockShown(null), 1500);
       }
+      // Auto-promote to primary when the user creates a focus and there's
+      // no current primary set. Removes the otherwise-confusing flow where
+      // "+ Create new" from the empty Spotlight succeeds but leaves the
+      // spotlight empty + the new row sitting in Slow burn / Quick.
+      if (!primary && payload.status === "committed") {
+        try {
+          await updateItem(created.id, { is_primary: true });
+          setPrimaryStart(created.id, Date.now());
+        } catch (e) { console.error("auto-promote failed", e); }
+      }
       setTimeout(() => setNewId(null), 1200);
       refresh();
     } catch (e) { console.error(e); }
