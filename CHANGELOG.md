@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.45.1 — 2026-05-09 (patch)
+
+- fix(items): import list_service in /items/today-todos handler (#155)
+
 ## 0.45.0 — 2026-05-08 (minor)
 
 - feat(notes): Confluence-style comment threads on notes (#152)
