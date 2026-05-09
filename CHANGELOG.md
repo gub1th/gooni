@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.47.0 — 2026-05-09 (minor)
+
+- feat(prod): per-request memory trace middleware to attribute OOM spikes (#157)
+
 ## 0.46.0 — 2026-05-09 (minor)
 
 - feat(sidebar): move recent-notes + ink/typing animations to Sidebar (5 rows) (#156)
