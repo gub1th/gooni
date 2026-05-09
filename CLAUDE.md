@@ -169,7 +169,6 @@ DELETE /notes/{id}              → delete note
 POST /notes/{id}/embed          → generate embedding + suggest space
 POST /notes/{id}/touch          → update last_opened_at
 POST /notes/{id}/memorize       → extract facts → memory store
-GET  /notes/{id}/related        → similar notes by embedding
 
 GET  /notes/{id}/comments       → list comments on a note (oldest first)
 POST /notes/{id}/comments       → append comment { content, author? }
@@ -274,5 +273,6 @@ the Todo list). Endpoints:
 - **hasChanges ref**: NoteEditor only calls save() if user actually typed — prevents updated_at being touched on blur
 - **Public routes**: `/public` and `/public/$noteId` are standalone pages (no sidebar, no auth)
 - **Images in notes**: base64 data URLs stored inline in note content via TipTap Image extension
+- **Deferred embedding columns**: `Note.embedding`, `Note.classified_embedding`, `ListItem.embedding`, `Memory.embedding` are wrapped in `deferred()`. ORM hydration skips them — list/read endpoints don't pay the ~31KB-per-row cost. Similarity callers must opt back in via tuple queries (`db.query(Note.id, Note.embedding).all()`) instead of `.query(Note).all()` to avoid an N+1 lazy-load storm. Pattern lives in `note_service.search_by_query`, `list_service.find_similar`, `memory_service` retrieval.
 
 ## Known Issues

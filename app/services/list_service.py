@@ -193,24 +193,33 @@ class ListService:
         query_vec = self._embed_item_text(raw)
         if not query_vec:
             return []
+        # Score with a (id, embedding) tuple query so the deferred embedding
+        # column is the only thing pulled — no full-row hydration. Then load
+        # only the top-K full ListItems by id for the caller.
         q = (
-            db.query(ListItem)
+            db.query(ListItem.id, ListItem.embedding)
             .filter(ListItem.list_id == list_id, ListItem.embedding.isnot(None))
         )
         if exclude_item_id is not None:
             q = q.filter(ListItem.id != exclude_item_id)
         if not include_done:
             q = q.filter(ListItem.done.is_(False))
-        scored: list[tuple[ListItem, float]] = []
-        for it in q.all():
+        scored: list[tuple[int, float]] = []
+        for iid, emb in q.all():
             try:
-                sim = _cosine(query_vec, json.loads(it.embedding))
+                sim = _cosine(query_vec, json.loads(emb))
             except Exception:
                 continue
             if sim >= threshold:
-                scored.append((it, sim))
+                scored.append((iid, sim))
         scored.sort(key=lambda x: x[1], reverse=True)
-        return scored[:limit]
+        top = scored[:limit]
+        if not top:
+            return []
+        ids = [iid for iid, _ in top]
+        rows = db.query(ListItem).filter(ListItem.id.in_(ids)).all()
+        by_id = {r.id: r for r in rows}
+        return [(by_id[iid], sim) for iid, sim in top if iid in by_id]
 
     def add_item_with_conflict_check(
         self,
@@ -232,8 +241,9 @@ class ListService:
         query_vec = self._embed_item_text(raw)
         conflicts: list[tuple[ListItem, float]] = []
         if query_vec:
+            scored: list[tuple[int, float]] = []
             existing = (
-                db.query(ListItem)
+                db.query(ListItem.id, ListItem.embedding)
                 .filter(
                     ListItem.list_id == list_id,
                     ListItem.embedding.isnot(None),
@@ -241,14 +251,20 @@ class ListService:
                 )
                 .all()
             )
-            for it in existing:
+            for iid, emb in existing:
                 try:
-                    sim = _cosine(query_vec, json.loads(it.embedding))
+                    sim = _cosine(query_vec, json.loads(emb))
                 except Exception:
                     continue
                 if sim >= threshold:
-                    conflicts.append((it, sim))
-            conflicts.sort(key=lambda x: x[1], reverse=True)
+                    scored.append((iid, sim))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            top = scored[:5]
+            if top:
+                ids = [iid for iid, _ in top]
+                rows = db.query(ListItem).filter(ListItem.id.in_(ids)).all()
+                by_id = {r.id: r for r in rows}
+                conflicts = [(by_id[iid], sim) for iid, sim in top if iid in by_id]
         item = self.add_item(
             list_id,
             text,

@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.orm import deferred
 from sqlalchemy.sql import func
 
 from .database import Base
@@ -92,7 +93,14 @@ class Note(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
     last_opened_at = Column(DateTime, nullable=True)
-    embedding = Column(Text, nullable=True)  # JSON-serialised float list
+    # JSON-serialised float list (~31KB per row for 1536-dim
+    # text-embedding-3-small). Deferred so the column isn't hydrated by
+    # default — every Note row would otherwise carry 31KB of vector data
+    # through ORM materialisation just to be discarded by the response
+    # serializer. Similarity paths (note_service, memory recall, classify
+    # dedup) opt back in via tuple queries `db.query(Note.id, Note.embedding)`
+    # or `options(undefer(Note.embedding))`.
+    embedding = deferred(Column(Text, nullable=True))
     is_public = Column(Boolean, default=False, nullable=False)
     is_pinned = Column(Boolean, default=False, nullable=False)
     # User-marked "I intend to publish this" flag. Surfaces in the sidebar's
@@ -100,16 +108,12 @@ class Note(Base):
     # of is_pinned (a draft can also be pinned). Auto-clears when the note
     # flips to public — once it ships, it's no longer a draft.
     is_draft = Column(Boolean, default=False, nullable=False)
-    # JSON-encoded list of probing questions Gooni would ask, plus the hash
-    # of the content they were generated from. Schema:
-    #   {"hash": "<sha1>", "questions": ["...", "..."]}
-    # Cached so opening the note doesn't re-fire the LLM call.
-    suggested_questions = Column(Text, nullable=True)
     # Snapshot of the note's embedding at the moment the unified extractor
     # last classified its content. Used as the dedup gate for re-running
     # the classifier — if the live embedding has cosine ≥ ~0.92 vs this
     # snapshot, the meaning hasn't shifted enough to warrant another pass.
-    classified_embedding = Column(Text, nullable=True)
+    # Deferred — only ever read inside `classify_note`'s dedup check.
+    classified_embedding = deferred(Column(Text, nullable=True))
     # FK back to a Note in the "Gooni Backlog" space when this note's
     # content triggered a feature_request. Drives the editor chip so
     # Daniel sees that the note actually fed the self-improvement loop.
@@ -202,8 +206,11 @@ class Memory(Base):
     # JSON: {"time": str?, "location": str?, "scope": "global"|"contextual"}
     context = Column(Text, nullable=True)
     confidence = Column(Float, nullable=False, default=0.8)
-    # JSON-serialized embedding vector for cosine search.
-    embedding = Column(Text, nullable=True)
+    # JSON-serialized embedding vector for cosine search. Deferred —
+    # memory_service queries `(Memory.id, Memory.embedding)` as a tuple
+    # for retrieval, so the ORM doesn't hydrate ~31KB per row on every
+    # Memory load (e.g. dashboard.recent_memories, /memories list).
+    embedding = deferred(Column(Text, nullable=True))
     # Optional link to a top-level ListItem (focus) when the memory is
     # goal/aspiration-shaped. Re-pointed from the legacy `focuses` table
     # to `list_items` after the unified-item refactor.
@@ -318,8 +325,10 @@ class ListItem(Base):
     # JSON-serialised float list. Generated on insert/edit from `text +
     # subtitle` so add_item can cosine-search existing items in the same list
     # for conflicts (near-duplicates). NULL on legacy rows; backfilled lazily
-    # by a startup worker.
-    embedding = Column(Text, nullable=True)
+    # by a startup worker. Deferred — ~31KB per row, never read by /items
+    # tree or any list-render path. Similarity callers query
+    # `(ListItem.id, ListItem.embedding)` as a tuple to skip ORM hydration.
+    embedding = deferred(Column(Text, nullable=True))
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
