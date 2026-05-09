@@ -4,7 +4,7 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { useListsStore } from "../../stores/useListsStore";
 import { fetchPinnedNotes, fetchDraftNotes, fetchRecentNotes, patchNote, type ApiNote } from "../../services/api";
-import { displayTitle } from "../../utils/notePreview";
+import { displayTitle, stripHtmlForExcerpt } from "../../utils/notePreview";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
@@ -260,10 +260,19 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
   // titles can change via inline rename), and draft toggles. We dedupe in
   // the render path against pinned + draft ids, so the union shown above
   // never collides with this section.
+  async function refreshRecents() {
+    try {
+      const r = await fetchRecentNotes(15);
+      setRecentNotes(r);
+      return r;
+    } catch {
+      return [] as ApiNote[];
+    }
+  }
   useEffect(() => {
-    // Ask for a few extra rows so dedup against pinned/drafts still leaves
-    // 2 visible even when the top of the list is occupied by pinned items.
-    fetchRecentNotes(8).then(setRecentNotes).catch(() => {});
+    // Ask for extra rows so dedup against pinned/drafts still leaves 5
+    // visible even when the top of the list is occupied by pinned items.
+    void refreshRecents();
   }, [activeNoteId, pinnedVersion, draftVersion]);
 
   // ── Drag-to-reorder (localStorage-backed) ─────────────────────────────
@@ -325,15 +334,113 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
     useDraftVersionStore.getState().bump();
   }
 
-  // Top 2 most-recently-edited notes, excluding any already shown in the
+  // Top 5 most-recently-edited notes, excluding any already shown in the
   // PINNED or DRAFTS sections above so the same note doesn't appear twice
   // in the sidebar.
   const recentTop = useMemo(() => {
     const skip = new Set<number>();
     pinnedNotes.forEach((n) => skip.add(n.id));
     draftNotes.forEach((n) => skip.add(n.id));
-    return recentNotes.filter((n) => !skip.has(n.id)).slice(0, 2);
+    return recentNotes.filter((n) => !skip.has(n.id)).slice(0, 5);
   }, [recentNotes, pinnedNotes, draftNotes]);
+
+  // ── Submit-ink + typing animation (migrated from Dashboard) ───────────────
+  // When the dashboard composer fires a note save, it dispatches
+  // `gooni:note-submitted` with the submit-button rect. We refetch recents,
+  // then animate an ink dot from the button → the first recent row, and
+  // typewriter-reveal that row's title + excerpt.
+  type InkPhase = "init" | "travel" | "absorb";
+  type InkState = {
+    id: number;
+    fromX: number; fromY: number;
+    toX: number; toY: number;
+    angle: number;
+    phase: InkPhase;
+  };
+  const [ink, setInk] = useState<InkState | null>(null);
+  const [pulseId, setPulseId] = useState<number | null>(null);
+  const [typing, setTyping] = useState<{ noteId: number; revealed: number; total: number } | null>(null);
+  const typingRaf = useRef<number | null>(null);
+  const recentRowRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  function startTyping(noteId: number, total: number) {
+    if (typingRaf.current != null) cancelAnimationFrame(typingRaf.current);
+    if (total <= 0) return;
+    setTyping({ noteId, revealed: 0, total });
+    const duration = Math.min(1400, 350 + total * 6);
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const revealed = Math.floor(eased * total);
+      setTyping((s) => (s && s.noteId === noteId ? { ...s, revealed } : s));
+      if (t < 1) {
+        typingRaf.current = requestAnimationFrame(tick);
+      } else {
+        typingRaf.current = null;
+        setTyping(null);
+      }
+    };
+    typingRaf.current = requestAnimationFrame(tick);
+  }
+
+  useEffect(() => () => {
+    if (typingRaf.current != null) cancelAnimationFrame(typingRaf.current);
+  }, []);
+
+  useEffect(() => {
+    function onSubmitted(e: Event) {
+      const detail = (e as CustomEvent<{ buttonRect: DOMRect | null }>).detail;
+      const buttonRect = detail?.buttonRect ?? null;
+      const inkId = Date.now();
+
+      // Refetch first so the new note shows up at index 0; then orchestrate
+      // the ink → pulse → typing sequence against that row's rect.
+      refreshRecents().then((fresh) => {
+        // Recompute the visible top after dedup. The just-saved note is
+        // unlikely to be pinned/draft, so it should land at index 0.
+        const skip = new Set<number>();
+        pinnedNotes.forEach((n) => skip.add(n.id));
+        draftNotes.forEach((n) => skip.add(n.id));
+        const visible = fresh.filter((n) => !skip.has(n.id)).slice(0, 5);
+        const first = visible[0];
+        if (!first || !buttonRect) return;
+
+        // The row may not have its ref attached yet on the same frame as the
+        // state update — defer one rAF so React commits the new row, then
+        // measure.
+        requestAnimationFrame(() => {
+          const rowEl = recentRowRefs.current.get(first.id);
+          if (!rowEl) return;
+          const target = rowEl.getBoundingClientRect();
+          const fromX = buttonRect.left + buttonRect.width / 2;
+          const fromY = buttonRect.top + buttonRect.height / 2;
+          const toX = target.left + target.width / 2;
+          const toY = target.top + target.height / 2;
+          const angle = (Math.atan2(toY - fromY, toX - fromX) * 180) / Math.PI;
+          setInk({ id: inkId, fromX, fromY, toX, toY, angle, phase: "init" });
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              setInk((s) => (s && s.id === inkId ? { ...s, phase: "travel" } : s));
+            });
+          });
+          setTimeout(() => {
+            setInk((s) => (s && s.id === inkId ? { ...s, phase: "absorb" } : s));
+            setPulseId(first.id);
+            const t = displayTitle(first);
+            const ex = stripHtmlForExcerpt(first.content ?? "");
+            startTyping(first.id, t.length + ex.length);
+          }, 640);
+          setTimeout(() => {
+            setInk((s) => (s && s.id === inkId ? null : s));
+            setPulseId((p) => (p === first.id ? null : p));
+          }, 1280);
+        });
+      });
+    }
+    window.addEventListener("gooni:note-submitted", onSubmitted as EventListener);
+    return () => window.removeEventListener("gooni:note-submitted", onSubmitted as EventListener);
+  }, [pinnedNotes, draftNotes]);
 
   function handleAllNotes() {
     selectSpace("general");
@@ -402,6 +509,61 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
 
   return (
     <>
+      <style>{`
+        @keyframes gooni-sidebar-row-pulse {
+          0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(28,28,30,0.0); }
+          22%  { transform: scale(1.04); box-shadow: 0 0 0 4px rgba(28,28,30,0.07); }
+          60%  { transform: scale(1);    box-shadow: 0 0 0 2px rgba(28,28,30,0.03); }
+          100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(28,28,30,0.0); }
+        }
+        @keyframes gooni-sidebar-caret-blink {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0; }
+        }
+        .gooni-sidebar-caret {
+          display: inline-block;
+          color: #1C1C1E;
+          animation: gooni-sidebar-caret-blink 0.7s step-end infinite;
+          margin-left: 1px;
+          font-weight: 400;
+        }
+      `}</style>
+
+      {/* Ink dot — flies from the dashboard composer's submit button to the
+          first recent row when a note is saved. Fixed-position so it can
+          render anywhere inside the sidebar tree without layout impact. */}
+      {ink && (
+        <div
+          style={{
+            position: "fixed",
+            left: ink.fromX,
+            top: ink.fromY,
+            width: 14,
+            height: 14,
+            marginLeft: -7,
+            marginTop: -7,
+            borderRadius: "50%",
+            background: "radial-gradient(circle at 35% 35%, #3A3A3C 0%, #1C1C1E 60%, #0A0A0B 100%)",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.28), 0 0 2px rgba(0,0,0,0.35)",
+            filter: "blur(0.3px)",
+            pointerEvents: "none",
+            zIndex: 9999,
+            willChange: "transform, opacity",
+            transform:
+              ink.phase === "init"
+                ? `translate(0px, 0px) rotate(${ink.angle}deg) scale(0.5, 0.5)`
+                : ink.phase === "travel"
+                ? `translate(${ink.toX - ink.fromX}px, ${ink.toY - ink.fromY}px) rotate(${ink.angle}deg) scale(1.55, 0.6)`
+                : `translate(${ink.toX - ink.fromX}px, ${ink.toY - ink.fromY}px) rotate(0deg) scale(2.1, 2.1)`,
+            opacity: ink.phase === "init" ? 0.55 : ink.phase === "absorb" ? 0 : 0.92,
+            transition:
+              ink.phase === "absorb"
+                ? "transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s ease-out"
+                : "transform 0.6s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease-in",
+          }}
+        />
+      )}
+
       <div
         style={{
           width: 200, minWidth: 200, height: "100vh",
@@ -609,10 +771,12 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
             </>
           )}
 
-          {/* Section: RECENT — top 2 most-recently-edited notes, deduped
+          {/* Section: RECENT — top 5 most-recently-edited notes, deduped
               against PINNED + DRAFTS above. Read-only quick-jump; no drag,
               no actions. Sits below PINNED/DRAFTS so the explicitly-marked
-              surfaces win the eye. Hidden when empty (e.g. brand new DB). */}
+              surfaces win the eye. Hidden when empty (e.g. brand new DB).
+              Owns the post-submit ink + typewriter animation that used to
+              live on the dashboard's recent-notes grid. */}
           {recentTop.length > 0 && (
             <>
               <div style={{ padding: "0 6px 4px" }}>
@@ -627,15 +791,28 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
                 </div>
                 {recentOpen && recentTop.map((note) => {
                   const selected = activeNoteId === note.id;
+                  const fullTitle = displayTitle(note);
+                  const isTyping = typing !== null && typing.noteId === note.id;
+                  const revealed = isTyping ? typing!.revealed : Infinity;
+                  const shownTitle = isTyping
+                    ? fullTitle.slice(0, Math.min(revealed, fullTitle.length))
+                    : fullTitle;
+                  const showCaret = isTyping && revealed <= fullTitle.length;
+                  const isPulsing = pulseId === note.id;
                   return (
                     <div
                       key={note.id}
+                      ref={(el) => {
+                        if (el) recentRowRefs.current.set(note.id, el);
+                        else recentRowRefs.current.delete(note.id);
+                      }}
                       style={{
                         display: "flex", alignItems: "center", gap: 4,
                         padding: "0 4px 0 10px", height: 30, borderRadius: 8,
                         cursor: "pointer",
                         background: selected ? "rgba(0,0,0,0.09)" : "transparent",
                         transition: "background 0.12s",
+                        animation: isPulsing ? "gooni-sidebar-row-pulse 0.6s cubic-bezier(0.22,1,0.36,1)" : undefined,
                       }}
                       onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
                       onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
@@ -648,7 +825,8 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
                         fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                       }}>
-                        {displayTitle(note)}
+                        {shownTitle || (isTyping ? " " : fullTitle || "Untitled")}
+                        {showCaret && <span className="gooni-sidebar-caret">▍</span>}
                       </span>
                     </div>
                   );

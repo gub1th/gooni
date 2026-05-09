@@ -209,16 +209,6 @@ function NotesPage() {
     setViewAndUrl("chat");
   }
 
-  function handlePlanNote(noteId: number) {
-    // Reset chat state — PlanView's effect will fire planNote() on mount
-    // with the resolved note content (PlanView fetches the note itself
-    // so we don't need to plumb the entry text through here).
-    newChat();
-    setPlanNoteId(noteId);
-    setView("plan");
-    navigate({ search: { note: undefined, conv: undefined, list: undefined , audit: undefined}, replace: true });
-  }
-
   function handleCompose() {
     const spaceId = selectedSpaceId ?? "general";
     setView("notes");
@@ -270,7 +260,6 @@ function NotesPage() {
         {view === "dashboard" ? (
           <Dashboard
             onOpenNote={() => setView("notes")}
-            onPlanNote={handlePlanNote}
             onOpenStats={() => setView("stats")}
           />
         ) : view === "chat" ? (
