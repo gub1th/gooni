@@ -17,20 +17,9 @@ import { useGooniModalCornerStore } from "../stores/useGooniModalCornerStore";
 export function GooniLayer() {
   const isOpen = useGooniStore((s) => s.isOpen);
   const surface = useGooniStore((s) => s.surface);
-  const mascotSuppressed = useGooniStore((s) => s.mascotSuppressed);
-  const setMascotSuppressed = useGooniStore((s) => s.setMascotSuppressed);
   const windowWidth = useWindowWidth();
   const isSmall = windowWidth < 1100;
   const boundsRef = useRef<HTMLDivElement>(null);
-
-  // Defensive: PlanView sets mascotSuppressed=true on mount and back to
-  // false on unmount. If a hot-reload, hard-refresh, or crashed render
-  // skips the cleanup, the flag can stick true and the FAB silently
-  // disappears on every other view too. Reset on each GooniLayer mount —
-  // PlanView's effect fires after this and re-sets it as needed.
-  useEffect(() => {
-    setMascotSuppressed(false);
-  }, [setMascotSuppressed]);
 
   return (
     <>
@@ -45,10 +34,9 @@ export function GooniLayer() {
         aria-hidden
       />
 
-      {/* Hide the walking mascot whenever:
-            (1) a sidebar Gooni is open (they share screen real-estate); or
-            (2) a chrome-heavy view sets `mascotSuppressed` (e.g. PlanView). */}
-      {!mascotSuppressed && !(isOpen && surface === "sidebar") && (
+      {/* Hide the walking mascot when a sidebar Gooni is open
+          (they share screen real-estate). */}
+      {!(isOpen && surface === "sidebar") && (
         <GooniMascot dashboardRef={boundsRef} />
       )}
 
@@ -78,11 +66,7 @@ export function GooniLayer() {
         </div>
       )}
 
-      {/* PlanView already hosts a docked Gooni panel on the right, so the
-          floating FAB would just stack on top of an existing chat. Reusing
-          mascotSuppressed since it already gates the same "chrome-heavy
-          view" cases. */}
-      {!mascotSuppressed && <ChatLauncher />}
+      <ChatLauncher />
     </>
   );
 }

@@ -8,6 +8,3 @@ class ChatRequest(BaseModel):
     image_url: Optional[str] = None
     entry_content: Optional[str] = ""
     model: Optional[str] = None
-    # "plan" switches Gooni into the structured planning behavior
-    # (see PLAN_MODE_PROMPT). Anything else / absent = normal chat.
-    mode: Optional[str] = None

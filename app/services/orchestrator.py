@@ -11,7 +11,6 @@ from .memory_extraction import extract_signals
 from .memory_service import memory_service
 from .list_service import list_service
 from .trace_builder import TraceBuilder
-from ..llm.prompts import PLAN_MODE_PROMPT
 from ..tools.feature_request_tool import feature_request_tool
 
 
@@ -56,7 +55,6 @@ class Orchestrator:
         source: str = "web",
         entry_content: str = "",
         model: str = None,
-        mode: str | None = None,
     ) -> tuple[str, dict | None]:
         """Unified chat handler for all sources.
 
@@ -64,7 +62,6 @@ class Orchestrator:
         - conversation_id=<id>  → use that conversation directly (note threads)
         - source                → 'web' | 'telegram' | 'imessage' | ...
         - entry_content         → original note text injected as context (web only)
-        - mode                  → "plan" engages PLAN_MODE_PROMPT; None = chat
         """
         stripped = message.strip()
         command = stripped.lower()
@@ -109,14 +106,7 @@ class Orchestrator:
         memory_candidates: list[dict] = []
         skip_normal_reply = False
 
-        # Plan-mode skips signal extraction entirely. Plan replies are
-        # conversational answers about a topic, not feedback to Gooni —
-        # running the tone-correction detector here mis-flags things like
-        # "I don't care about that" as a tone rule. The plan prompt has
-        # its own discipline; the orchestrator stays out of the way.
-        if mode == "plan":
-            pass
-        elif not image_url and saved_message.strip():
+        if not image_url and saved_message.strip():
             if _UNDO_FEEDBACK_RE.search(saved_message):
                 # Explicit undo command — runs before extraction so it always wins.
                 removed = memory_service.deactivate_last_feedback_preference(db=db)
@@ -296,9 +286,7 @@ class Orchestrator:
             f"Daniel's current intent: {intention_context}"
             if intention_context else ""
         )
-        plan_mode_block = PLAN_MODE_PROMPT if mode == "plan" else ""
         full_context = "\n\n".join(filter(None, [
-            plan_mode_block,
             intention_block,
             memory_context,
             entry_context,

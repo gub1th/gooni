@@ -57,7 +57,7 @@ export function ChatView() {
     if (!text && !imageUrl) return;
     if (sending) return;
     setInput("");
-    await send(text, undefined, undefined, imageUrl);
+    await send(text, undefined, imageUrl);
   }
 
   return (

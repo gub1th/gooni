@@ -1600,17 +1600,6 @@ def items_link_existing_todo(focus_id: int, todo_id: int, db: Session = Depends(
     return {"linked": True, "created": True}
 
 
-@app.delete("/focus-todo-links/{link_id}")
-def items_unlink_focus_todo(link_id: int, db: Session = Depends(get_db)):
-    """Legacy unlink endpoint — focus_todo_links is gone. The frontend
-    should hit PATCH /todos/{id} {focus_id: null} instead. We keep the
-    URL alive for one release returning 410 so old clients learn."""
-    raise HTTPException(
-        status_code=410,
-        detail="focus_todo_links removed; PATCH /todos/{id} {focus_id: null} instead",
-    )
-
-
 @app.get("/items/today-todos")
 def items_today_todos(db: Session = Depends(get_db)):
     """Open todos due today + their linked-focus chips. Powers the
@@ -1674,7 +1663,6 @@ async def chat(body: ChatRequest, db: Session = Depends(get_db)):
         source="web",
         entry_content=body.entry_content or "",
         model=body.model,
-        mode=body.mode,
     )
     return {"content": content, "usage": usage, "intention": usage.get("intention") or ""}
 
@@ -2769,7 +2757,6 @@ def send_conversation_message(
         raise HTTPException(status_code=400, detail="content or image_url is required")
     entry_content = body.get("entry_content", "")
     model = body.get("model") or None
-    mode = body.get("mode") or None
     try:
         _, usage = Orchestrator.handle_chat(
             user_content,
@@ -2777,7 +2764,6 @@ def send_conversation_message(
             conversation_id=conversation_id,
             entry_content=entry_content,
             model=model,
-            mode=mode,
             image_url=image_url,
         )
     except ValueError as e:

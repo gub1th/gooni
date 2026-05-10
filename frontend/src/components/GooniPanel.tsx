@@ -1,7 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { renderMarkdown } from "../utils/markdown";
-import { extractOptions, extractPlanBlock, planMarkdownToHtml } from "../utils/planMarkdown";
-import { fetchNote, updateNote, createNote as apiCreateNote } from "../services/api";
+import { createNote as apiCreateNote } from "../services/api";
 import { displayTitle } from "../utils/notePreview";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useGooniModalCornerStore } from "../stores/useGooniModalCornerStore";
@@ -34,47 +33,20 @@ interface GooniPanelProps {
   // New: panel rendered inside the floating shell anchored to the FAB.
   // Skips the drag-to-resize handle and uses 100% width/height of its parent.
   floating?: boolean;
-  // When set, this panel is hosting a plan-mode session: every send uses
-  // mode="plan" and entry_content=noteContent so the orchestrator engages
-  // PLAN_MODE_PROMPT every turn (entry context isn't persisted in the
-  // conversation, so it has to be re-injected on each call). Assistant
-  // messages get parsed for `[ ] option` chips and `<plan>...</plan>`
-  // finalize blocks; the latter renders a Save-to-note card.
-  planContext?: {
-    noteId: number;
-    noteContent: string;
-    onSaved?: () => void;
-  };
-  // Override the persisted sidebar width — pass a fixed number (px) or a
-  // CSS string. When set, the drag-to-resize handle is also disabled
-  // (plan view locks the proportion so the note isn't crushed).
-  dockedWidth?: number | string;
 }
 
-export function GooniPanel({ fullscreen = false, floating = false, planContext, dockedWidth }: GooniPanelProps) {
+export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelProps) {
   const { width: storedWidth, setWidth } = useGooniStore();
   const composerMode = useGooniStore((s) => s.composerMode);
   const setComposerMode = useGooniStore((s) => s.setComposerMode);
-  // Plan-mode panels lock to chat — note capture inside a plan session
-  // would derail the plan flow (no save target, no entry context).
-  const mode: "chat" | "note" = planContext ? "chat" : composerMode;
+  const mode: "chat" | "note" = composerMode;
   const isNoteMode = mode === "note";
-  const width = dockedWidth ?? storedWidth;
+  const width = storedWidth;
   const { messages, sending, send } = useConversationsStore();
   const { notes, activeNoteId, selectedSpaceId } = useNotesContentStore();
   const [input, setInput] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [noteSavedFlash, setNoteSavedFlash] = useState(false);
-  const [savingPlan, setSavingPlan] = useState(false);
-  const [savedPlanIds, setSavedPlanIds] = useState<Set<number>>(new Set());
-  // Per-message map of "which option(s) the user picked" so chips can
-  // render in a "selected" state (highlighted bg + border) instead of
-  // disappearing or echoing the choice as a separate user bubble.
-  const [pickedByMessage, setPickedByMessage] = useState<Record<number, string[]>>({});
-  // Inline free-text editor for the "Other" chip — keyed by assistant
-  // message id so multiple turns don't share state.
-  const [otherEditingFor, setOtherEditingFor] = useState<number | null>(null);
-  const [otherDraft, setOtherDraft] = useState("");
 
   const [expandedIntentions, setExpandedIntentions] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -200,65 +172,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
       return;
     }
     setInput("");
-    if (planContext) {
-      await send(text, planContext.noteContent, "plan");
-    } else {
-      await send(text, activeNote?.content ?? undefined);
-    }
-  }
-
-  // Click handler for option chips inside an assistant plan-mode message.
-  // Records the pick so the chip renders selected, then sends the answer.
-  // The "PLAN_PICK::" prefix lets the bubble renderer suppress this user
-  // turn visually — the selected chip already shows the choice; an extra
-  // "Daniel chose: X" bubble would be noise.
-  async function handleOptionPick(messageId: number, option: string) {
-    if (sending || !planContext) return;
-    setPickedByMessage((prev) => ({
-      ...prev,
-      [messageId]: [...(prev[messageId] ?? []), option],
-    }));
-    await send(`PLAN_PICK::${option}`, planContext.noteContent, "plan");
-  }
-
-  // "Other" chip → inline text input; submits as a regular user message
-  // so Gooni gets free-form context. Suppression prefix not used here —
-  // we want Daniel's words visible since they aren't a chip label.
-  function handleOtherStart(messageId: number) {
-    setOtherEditingFor(messageId);
-    setOtherDraft("");
-  }
-  async function handleOtherSubmit() {
-    if (!planContext || !otherDraft.trim() || sending) return;
-    const text = otherDraft.trim();
-    setOtherEditingFor(null);
-    setOtherDraft("");
-    await send(text, planContext.noteContent, "plan");
-  }
-
-  // "Save to note" — appends the plan markdown (converted to TipTap HTML)
-  // to the source note below an <hr/>, preserving the original body. We
-  // refetch the note to avoid clobbering anything Daniel might have edited
-  // in another tab while planning.
-  async function handleSavePlan(messageId: number, planMd: string) {
-    if (!planContext || savingPlan) return;
-    setSavingPlan(true);
-    try {
-      const fresh = await fetchNote(planContext.noteId);
-      const planHtml = planMarkdownToHtml(planMd);
-      const merged = `${fresh.content ?? ""}<hr/>${planHtml}`.trim();
-      await updateNote(planContext.noteId, fresh.title ?? "", merged);
-      setSavedPlanIds((prev) => {
-        const next = new Set(prev);
-        next.add(messageId);
-        return next;
-      });
-      planContext.onSaved?.();
-    } catch (e) {
-      console.error("save plan failed:", e);
-    } finally {
-      setSavingPlan(false);
-    }
+    await send(text, activeNote?.content ?? undefined);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -279,11 +193,9 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
     }
   }
 
-  // Drag-to-resize (only in sidebar mode, and only when width isn't
-  // externally locked via dockedWidth — plan view, for example, fixes
-  // the proportion so the note can't get crushed).
+  // Drag-to-resize (only in sidebar mode).
   const onDragMouseDown = useCallback((e: React.MouseEvent) => {
-    if (fullscreen || dockedWidth != null) return;
+    if (fullscreen) return;
     e.preventDefault();
     isDragging.current = true;
     dragStartX.current = e.clientX;
@@ -301,7 +213,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
     }
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
-  }, [fullscreen, dockedWidth, storedWidth, setWidth]);
+  }, [fullscreen, storedWidth, setWidth]);
 
   // Subtle yellow wash in note mode so the surface reads "different mode"
   // without screaming. Transition keeps the swap smooth.
@@ -347,9 +259,8 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
 
   return (
     <div style={containerStyle}>
-      {/* Drag handle — left edge, sidebar only (not in floating + not fullscreen
-          and not when width is externally locked via dockedWidth). */}
-      {!fullscreen && !floating && dockedWidth == null && (
+      {/* Drag handle — left edge, sidebar only (not in floating + not fullscreen). */}
+      {!fullscreen && !floating && (
         <div
           onMouseDown={onDragMouseDown}
           style={{
@@ -376,7 +287,7 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
       {!fullscreen && (
         <ChatHeader
           mode={mode}
-          onToggleMode={planContext ? undefined : () => setComposerMode(isNoteMode ? "chat" : "note")}
+          onToggleMode={() => setComposerMode(isNoteMode ? "chat" : "note")}
         />
       )}
 
@@ -460,9 +371,6 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
           </div>
         )}
         {messages.map((m) => {
-          // Synthetic chip-pick user turn — render nothing at all (no
-          // wrapper either, otherwise we leak an empty flex item).
-          if (m.role === "user" && m.content.startsWith("PLAN_PICK::")) return null;
           return (
           <div
             key={m.id}
@@ -522,18 +430,6 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
             <AssistantOrUserBubble
               message={m}
               fullscreen={fullscreen}
-              isPlanMode={Boolean(planContext)}
-              isSavingPlan={savingPlan}
-              isPlanSaved={savedPlanIds.has(m.id)}
-              pickedOptions={pickedByMessage[m.id] ?? []}
-              isOtherEditing={otherEditingFor === m.id}
-              otherDraft={otherDraft}
-              onOptionPick={handleOptionPick}
-              onOtherStart={handleOtherStart}
-              onOtherChange={setOtherDraft}
-              onOtherSubmit={handleOtherSubmit}
-              onOtherCancel={() => { setOtherEditingFor(null); setOtherDraft(""); }}
-              onSavePlan={handleSavePlan}
             />
           </div>
           );
@@ -745,18 +641,6 @@ export function GooniPanel({ fullscreen = false, floating = false, planContext, 
   );
 }
 
-
-// ── Message bubble with plan-mode awareness ─────────────────────────────────
-//
-// Default: render the bubble exactly as before (markdown body in a chat
-// bubble). Plan mode adds two parsers on top of assistant messages:
-//   1. `<plan>...</plan>` blocks → render as a "finalized plan" card with
-//      a Save-to-note button next to a Keep-editing dismissal.
-//   2. `[ ] option text` lines → render below the body as clickable chips
-//      that auto-send "Daniel chose: <opt>" so the conversation continues
-//      without typing.
-// Both parsers are pure-text: if the patterns don't appear, the message
-// renders identically to a normal chat turn.
 
 // Top-bar header — character icon + "Chat with Gooni" title, close X, and
 // an overflow menu for surface (modal/sidebar) + reset-position. Pulled
@@ -986,33 +870,9 @@ interface BubbleMsg {
 function AssistantOrUserBubble({
   message: m,
   fullscreen,
-  isPlanMode,
-  isSavingPlan,
-  isPlanSaved,
-  pickedOptions,
-  isOtherEditing,
-  otherDraft,
-  onOptionPick,
-  onOtherStart,
-  onOtherChange,
-  onOtherSubmit,
-  onOtherCancel,
-  onSavePlan,
 }: {
   message: BubbleMsg;
   fullscreen: boolean;
-  isPlanMode: boolean;
-  isSavingPlan: boolean;
-  isPlanSaved: boolean;
-  pickedOptions: string[];
-  isOtherEditing: boolean;
-  otherDraft: string;
-  onOptionPick: (messageId: number, option: string) => void;
-  onOtherStart: (messageId: number) => void;
-  onOtherChange: (text: string) => void;
-  onOtherSubmit: () => void;
-  onOtherCancel: () => void;
-  onSavePlan: (messageId: number, planMd: string) => void;
 }) {
   const baseStyle: React.CSSProperties = {
     maxWidth: fullscreen ? 640 : "88%",
@@ -1027,180 +887,5 @@ function AssistantOrUserBubble({
     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
   };
 
-  // Hide synthetic chip-pick user turns: the selected chip already shows
-  // the choice, an extra "you said: X" bubble is just noise.
-  if (m.role === "user" && m.content.startsWith("PLAN_PICK::")) {
-    return null;
-  }
-
-  if (m.role === "user" || !isPlanMode) {
-    return <div style={baseStyle}>{renderMarkdown(m.content)}</div>;
-  }
-
-  // Plan-mode assistant: pull out finalize block first, then options.
-  const { before, plan, after } = extractPlanBlock(m.content);
-
-  // For the non-plan portion, extract option chips out of body lines.
-  const headerText = plan ? before : m.content;
-  const { body: parsedBody, options } = extractOptions(headerText);
-  const trailingText = plan ? after : "";
-  const hasPick = pickedOptions.length > 0;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8, maxWidth: fullscreen ? 640 : "88%" }}>
-      {parsedBody && (
-        <div style={baseStyle}>{renderMarkdown(parsedBody)}</div>
-      )}
-      {options.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {options.map((opt, i) => {
-            const picked = pickedOptions.includes(opt);
-            return (
-              <button
-                key={`${m.id}-opt-${i}`}
-                onClick={() => onOptionPick(m.id, opt)}
-                disabled={hasPick}
-                style={{
-                  fontSize: 12, fontFamily: baseStyle.fontFamily,
-                  color: picked ? "#fff" : "#1C1C1E",
-                  background: picked ? "#30A14E" : "rgba(74,222,128,0.10)",
-                  border: picked
-                    ? "0.5px solid #30A14E"
-                    : "0.5px solid rgba(74,222,128,0.45)",
-                  borderRadius: 999, padding: "4px 12px",
-                  cursor: hasPick ? "default" : "pointer",
-                  opacity: hasPick && !picked ? 0.45 : 1,
-                  transition: "background 0.15s, color 0.15s, opacity 0.15s",
-                }}
-              >
-                {picked ? `✓ ${opt}` : opt}
-              </button>
-            );
-          })}
-          {/* "Other" chip — opens an inline text input so Daniel can answer
-              freely when none of the options fit. Only offered before any
-              chip pick on this message; once picked, the panel is locked. */}
-          {!hasPick && !isOtherEditing && (
-            <button
-              onClick={() => onOtherStart(m.id)}
-              style={{
-                fontSize: 12, fontFamily: baseStyle.fontFamily,
-                color: "#6B6B70",
-                background: "transparent",
-                border: "0.5px dashed rgba(0,0,0,0.20)",
-                borderRadius: 999, padding: "4px 12px",
-                cursor: "pointer",
-              }}
-            >Other…</button>
-          )}
-        </div>
-      )}
-      {isOtherEditing && (
-        <div style={{ display: "flex", gap: 6, width: "100%" }}>
-          <input
-            autoFocus
-            value={otherDraft}
-            onChange={(e) => onOtherChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); onOtherSubmit(); }
-              if (e.key === "Escape") onOtherCancel();
-            }}
-            placeholder="type your answer…"
-            style={{
-              flex: 1, fontSize: 12, fontFamily: baseStyle.fontFamily,
-              padding: "6px 10px", borderRadius: 999,
-              border: "0.5px solid rgba(0,0,0,0.20)", background: "var(--gooni-card, #fff)",
-              color: "var(--gooni-text, #1C1C1E)",
-            }}
-          />
-          <button
-            onClick={onOtherSubmit}
-            style={{
-              fontSize: 12, fontFamily: baseStyle.fontFamily,
-              color: "#fff", background: "#1C1C1E",
-              border: "none", borderRadius: 999, padding: "6px 14px",
-              cursor: "pointer",
-            }}
-          >Send</button>
-        </div>
-      )}
-      {plan && (
-        <PlanFinalizeCard
-          planMd={plan}
-          isSaving={isSavingPlan}
-          isSaved={isPlanSaved}
-          onSave={() => onSavePlan(m.id, plan)}
-        />
-      )}
-      {trailingText && (
-        <div style={baseStyle}>{renderMarkdown(trailingText)}</div>
-      )}
-    </div>
-  );
-}
-
-function PlanFinalizeCard({
-  planMd, isSaving, isSaved, onSave,
-}: {
-  planMd: string;
-  isSaving: boolean;
-  isSaved: boolean;
-  onSave: () => void;
-}) {
-  return (
-    <div
-      style={{
-        background: "#FDFCFA",
-        border: "1px solid rgba(74,222,128,0.45)",
-        borderRadius: 12,
-        padding: "12px 14px",
-        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-        display: "flex", flexDirection: "column", gap: 10,
-        width: "100%",
-      }}
-    >
-      <div style={{
-        display: "flex", alignItems: "center", gap: 6,
-        fontSize: 11, color: "#3A8C3F", letterSpacing: 0.5,
-        textTransform: "uppercase", fontWeight: 600,
-      }}>
-        <span>📋</span><span>Plan ready</span>
-      </div>
-      <div
-        style={{
-          fontSize: 13, color: "var(--gooni-text, #1C1C1E)", lineHeight: 1.5,
-          whiteSpace: "pre-wrap",
-        }}
-      >
-        {renderMarkdown(planMd)}
-      </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {isSaved ? (
-          <span style={{
-            fontSize: 12, color: "#3A8C3F", fontWeight: 500,
-          }}>✓ Saved to note</span>
-        ) : (
-          <>
-            <button
-              onClick={onSave}
-              disabled={isSaving}
-              style={{
-                fontSize: 12, fontWeight: 500,
-                color: "#fff", background: "#1C1C1E",
-                border: "none", borderRadius: 8,
-                padding: "6px 12px",
-                cursor: isSaving ? "default" : "pointer",
-                opacity: isSaving ? 0.6 : 1,
-              }}
-            >
-              {isSaving ? "Saving…" : "Save to note"}
-            </button>
-            <span style={{ fontSize: 11.5, color: "var(--gooni-muted, #8E8E93)" }}>
-              or keep editing — ask Gooni to revise
-            </span>
-          </>
-        )}
-      </div>
-    </div>
-  );
+  return <div style={baseStyle}>{renderMarkdown(m.content)}</div>;
 }
