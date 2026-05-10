@@ -615,10 +615,22 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       const id = Number(chip.getAttribute("data-note-id") || "");
       if (!id) return;
       // Persist any pending edits before yanking the active note out from
-      // under us — same pattern handleSubmit uses on quick-note submit.
-      void save();
-      selectNote(id);
-      navigate({ to: "/", search: { note: id, conv: undefined, list: undefined, audit: undefined } });
+      // under us — same pattern handleExtractToChildNote uses (line 672).
+      // The prior `void save()` was fire-and-forget: if the user typed
+      // something into this note and then clicked a chip, the navigate
+      // raced the PATCH and the error pill (if save failed) would land
+      // on the destination note's editor instead of this one.
+      void (async () => {
+        try {
+          await save();
+        } catch {
+          // save() doesn't throw — it sets saveStatus("error") and
+          // localStorage-stashes the body. Catch defensively in case
+          // that ever changes.
+        }
+        selectNote(id);
+        navigate({ to: "/", search: { note: id, conv: undefined, list: undefined, audit: undefined } });
+      })();
     };
     dom.addEventListener("click", onClick);
     return () => dom.removeEventListener("click", onClick);
