@@ -297,12 +297,14 @@ class Orchestrator:
 
         if image_url:
             response, usage = llm_client.generate_response_with_image(
-                message, image_url, full_context, recent_history, db=db
+                message, image_url, full_context, recent_history,
+                db=db, conversation_id=conv.id,
             )
         else:
             response, usage = llm_client.generate_chat_response_with_memory(
                 message, full_context, recent_history,
                 is_first_time=is_first_time, db=db, model=model,
+                conversation_id=conv.id,
             )
 
         # Mixed turn (feedback + new question): prepend the ack so Daniel
@@ -312,10 +314,25 @@ class Orchestrator:
 
         tb.reply(response, usage=usage)
         full_trace = tb.build()
-        conversation_service.add_message(
+        assistant_msg = conversation_service.add_message(
             conv.id, "assistant", response, db,
             trace=json.dumps(full_trace) if full_trace else None,
         )
+
+        # Backfill message_id on the ToolCall rows that the LLM client
+        # wrote during this turn. They were inserted with message_id=NULL
+        # because the assistant Message didn't exist yet; now stitch them
+        # to the row that "claims" their work. See app/db/models.py::ToolCall.
+        tool_call_ids = usage.get("tool_call_ids") or []
+        if tool_call_ids and assistant_msg is not None:
+            try:
+                from ..db.models import ToolCall
+                db.query(ToolCall).filter(ToolCall.id.in_(tool_call_ids)).update(
+                    {"message_id": assistant_msg.id}, synchronize_session=False,
+                )
+                db.commit()
+            except Exception as e:
+                print(f"[tool_call audit] message_id backfill failed: {e}")
 
         # Reconcile memory candidates that the unified extractor already
         # surfaced. Avoids the second LLM call the legacy add_exchange path

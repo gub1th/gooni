@@ -78,6 +78,42 @@ class Message(Base):
     trace = Column(Text, nullable=True)
 
 
+class ToolCall(Base):
+    """Audit row for every chat tool invocation. Substrate for the anti-
+    hallucination layer: an assistant claim "I added X to your list" only
+    holds water if a matching ToolCall row exists with status=done. Also
+    powers future ReAct loops by giving the orchestrator a queryable record
+    of what already ran across turns.
+
+    Lifecycle: row inserted just before tool.execute() with status='running'
+    + started_at; updated after execute with status='done'/'failed',
+    result_json, error, finished_at. message_id is backfilled by the
+    orchestrator once the assistant Message row is created (NULL briefly
+    during the LLM tool-use loop). conversation_id is set on insert so
+    cross-turn queries can find in-flight rows before the message exists.
+    """
+
+    __tablename__ = "tool_calls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(
+        Integer, ForeignKey("conversations.id"), nullable=True, index=True
+    )
+    message_id = Column(
+        Integer, ForeignKey("messages.id"), nullable=True, index=True
+    )
+    tool_name = Column(String, nullable=False, index=True)
+    args_json = Column(Text, nullable=True)
+    # 'running' | 'done' | 'failed'. No 'pending' for v1 because we don't
+    # have async tools yet — every call goes running → done|failed in the
+    # same orchestrator turn. Reserve 'pending' for the future async path.
+    status = Column(String, nullable=False, default="running", index=True)
+    result_json = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+
+
 class Note(Base):
     __tablename__ = "notes"
 
