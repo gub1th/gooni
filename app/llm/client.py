@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 from typing import List, Dict
 
 from openai import OpenAI
@@ -13,6 +14,70 @@ from .prompts import (
     system_prompt,
     vision_prompt,
 )
+
+
+def _execute_with_audit(
+    tool,
+    tool_name: str,
+    tool_args: dict,
+    db,
+    conversation_id: int | None,
+) -> tuple[str, int | None]:
+    """Run a tool, persist a ToolCall audit row, return (result, row_id).
+
+    Row inserted with status='running' before execute, updated to
+    'done'/'failed' after. message_id stays NULL — orchestrator backfills
+    it once the assistant Message is created. conversation_id is set on
+    insert so cross-turn queries can find in-flight rows.
+
+    `tool` may be None (unknown tool name from the model) — we still log a
+    failed row so the audit captures the hallucinated call.
+    """
+    from ..db.models import ToolCall
+
+    tc = None
+    if db is not None:
+        try:
+            tc = ToolCall(
+                conversation_id=conversation_id,
+                tool_name=tool_name,
+                args_json=json.dumps(tool_args, default=str)[:4000],
+                status="running",
+                started_at=datetime.utcnow(),
+            )
+            db.add(tc)
+            db.commit()
+            db.refresh(tc)
+        except Exception as e:
+            # Auditing must never break the chat path. Log and continue.
+            print(f"[tool_call audit] insert failed: {e}")
+            tc = None
+
+    if tool is None:
+        result = f"Unknown tool: {tool_name}"
+        status = "failed"
+        error = "unknown_tool"
+    else:
+        try:
+            result = tool.execute(db=db, **tool_args)
+            status = "done"
+            error = None
+        except Exception as e:
+            result = f"Tool {tool_name} errored: {e}"
+            status = "failed"
+            error = str(e)[:1000]
+
+    if tc is not None and db is not None:
+        try:
+            tc.status = status
+            tc.result_json = (result or "")[:4000]
+            tc.error = error
+            tc.finished_at = datetime.utcnow()
+            db.commit()
+        except Exception as e:
+            print(f"[tool_call audit] update failed: {e}")
+
+    return result, (tc.id if tc is not None else None)
 
 
 class LLMClient:
@@ -56,6 +121,7 @@ class LLMClient:
         is_first_time: bool = False,
         db=None,
         model: str = None,
+        conversation_id: int | None = None,
     ) -> tuple[str, dict]:
         """Generate response with memory context and tool use."""
         messages = [{"role": "system", "content": system_prompt(memory_context, is_first_time)}]
@@ -67,6 +133,7 @@ class LLMClient:
         tool_schemas = [t.to_openai_schema() for t in tools]
         tracker = UsageTracker(active_model)
         tools_used = []
+        tool_call_ids: list[int] = []
 
         try:
             for _ in range(5):
@@ -86,25 +153,31 @@ class LLMClient:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
                         tool = tool_map.get(tool_name)
-                        result = (
-                            tool.execute(db=db, **tool_args)
-                            if tool
-                            else f"Unknown tool: {tool_name}"
+                        result, tc_id = _execute_with_audit(
+                            tool, tool_name, tool_args, db, conversation_id
                         )
                         tools_used.append(tool_name)
+                        if tc_id is not None:
+                            tool_call_ids.append(tc_id)
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "content": result,
                         })
                 else:
-                    return choice.message.content, tracker.finalize(tools_used)
+                    usage = tracker.finalize(tools_used)
+                    usage["tool_call_ids"] = tool_call_ids
+                    return choice.message.content, usage
 
-            return "I got stuck processing tool results.", tracker.finalize(tools_used)
+            usage = tracker.finalize(tools_used)
+            usage["tool_call_ids"] = tool_call_ids
+            return "I got stuck processing tool results.", usage
 
         except Exception as e:
             print(f"LLM Error: {e}")
-            return "I'm having trouble generating a response right now.", tracker.finalize(tools_used)
+            usage = tracker.finalize(tools_used)
+            usage["tool_call_ids"] = tool_call_ids
+            return "I'm having trouble generating a response right now.", usage
 
     def generate_response_with_image(
         self,
@@ -113,6 +186,7 @@ class LLMClient:
         memory_context: str = "",
         history: list = None,
         db=None,
+        conversation_id: int | None = None,
     ) -> tuple[str, dict]:
         """Generate a response that includes an image. Uses gpt-4o for vision."""
         vision_model = "gpt-4o"
@@ -129,6 +203,7 @@ class LLMClient:
         tool_schemas = [t.to_openai_schema() for t in tools]
         tracker = UsageTracker(vision_model)
         tools_used = []
+        tool_call_ids: list[int] = []
 
         try:
             for _ in range(5):
@@ -148,24 +223,30 @@ class LLMClient:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
                         tool = tool_map.get(tool_name)
-                        result = (
-                            tool.execute(db=db, **tool_args)
-                            if tool
-                            else f"Unknown tool: {tool_name}"
+                        result, tc_id = _execute_with_audit(
+                            tool, tool_name, tool_args, db, conversation_id
                         )
                         tools_used.append(tool_name)
+                        if tc_id is not None:
+                            tool_call_ids.append(tc_id)
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
                             "content": result,
                         })
                 else:
-                    return choice.message.content, tracker.finalize(tools_used)
+                    usage = tracker.finalize(tools_used)
+                    usage["tool_call_ids"] = tool_call_ids
+                    return choice.message.content, usage
 
-            return "I got stuck processing tool results.", tracker.finalize(tools_used)
+            usage = tracker.finalize(tools_used)
+            usage["tool_call_ids"] = tool_call_ids
+            return "I got stuck processing tool results.", usage
         except Exception as e:
             print(f"LLM Vision Error: {e}")
-            return "I couldn't analyze that image right now.", tracker.finalize(tools_used)
+            usage = tracker.finalize(tools_used)
+            usage["tool_call_ids"] = tool_call_ids
+            return "I couldn't analyze that image right now.", usage
 
 
     async def generate_title(self, content: str) -> str:
