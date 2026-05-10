@@ -214,8 +214,7 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "context": {{"time": null|str, "location": null|str, "scope": "global"|"contextual"}},
       "confidence": 0.0-1.0
     }}
-  ],
-  "worth_expanding": true | false
+  ]
 }}
 
 Rules per field:
@@ -358,17 +357,7 @@ memories:
   store; missing a relationship or self-pattern signal is more expensive
   than emitting a near-duplicate (the reconcile step will dedupe).
 
-worth_expanding (bool):
-- TRUE if the text names a topic, idea, concept, project, or open question that
-  Daniel would benefit from thinking through with a planning partner.
-- TRUE for short topic-noun phrases that imply work to do: "cursor for content
-  creators", "ambient device for the kitchen", "why is auth eating my afternoon".
-- FALSE for journals ("lunch was good"), completed tasks ("taxes done"),
-  one-off facts ("meeting at 3pm"), feedback for Gooni, pure emotional venting,
-  or memories already covered by the memories array.
-- When unsure, lean FALSE — false positives waste Daniel's attention.
-
-If no signals across all fields, return all-empty arrays and worth_expanding=false.
+If no signals across all fields, return all-empty arrays.
 
 JSON:"""
 
@@ -424,10 +413,9 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "tone_corrections": [{"rule": str}],
         "feature_requests": [{"title": str, "why": str}],
         "memories":         [memory candidate dicts],
-        "worth_expanding":  bool,
       }
 
-    All-empty / False on parse failure or no signal — never raises.
+    All-empty on parse failure or no signal — never raises.
     Pass prev_assistant when this text is a chat reply (helps tone detection);
     leave None for note saves (tone usually empty for those).
     """
@@ -435,7 +423,6 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "tone_corrections": [],
         "feature_requests": [],
         "memories": [],
-        "worth_expanding": False,
     }
     if not text or not text.strip():
         return empty
@@ -465,7 +452,6 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "tone_corrections": _normalize_tone(parsed.get("tone_corrections")),
         "feature_requests": _normalize_features(parsed.get("feature_requests")),
         "memories":         _normalize_memories(parsed.get("memories")),
-        "worth_expanding":  bool(parsed.get("worth_expanding")),
     }
 
 

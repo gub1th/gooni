@@ -7,8 +7,7 @@ import { routeTree } from "./routeTree.gen";
 const router = createRouter({ routeTree });
 
 // One client for the whole app. staleTime keeps fresh-fetched data trusted
-// for 30s before background refetch — matches the "navigate back from
-// PlanView and the dashboard is already there" feel Daniel wanted.
+// for 30s before background refetch.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

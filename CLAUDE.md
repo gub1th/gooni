@@ -72,7 +72,7 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 - **`app/llm/client.py`** — OpenAI wrapper (`llm_client`). Default model: `gpt-4o-mini`.
 
 ### Frontend (`frontend/src/`)
-- **`routes/index.tsx`** — Layout: Sidebar | NotesList | NoteEditor | GooniPanel (optional). View state: `"notes" | "dashboard" | "chat" | "lists" | "plan" | "eval" | "stats"`. Top-right pair of icon buttons (Globe = public profile, Plug = MCP) lives here, fixed-position, visible on every view.
+- **`routes/index.tsx`** — Layout: Sidebar | NotesList | NoteEditor | GooniPanel (optional). View state: `"notes" | "dashboard" | "chat" | "lists" | "eval" | "stats"`. Top-right pair of icon buttons (Globe = public profile, Plug = MCP) lives here, fixed-position, visible on every view.
 - **`components/eval/EvalView.tsx`** — Eval tab. Grid of conversation segments (Google Docs-style cards) w/ per-source border + badge (web/telegram/whatsapp/imessage), filters (source, status, has-flag, search), and detail view per segment. Detail view: transcript + per-message trace cards (intent / memory_recall / master_prompt / extracted_signals / memories_applied / tool_call / reply), red-flag popover per step (1/2/3 + comment), overall summary editor, ⓘ tool-legend popup, and a "Dispatch to Claude Code" button that bundles the eval into a `Claude Code` space note plus a backlog list item.
 - **`routes/public.tsx`** — Layout shell for `/public/*` (just renders `<Outlet />`).
 - **`routes/public.index.tsx`** — Public portfolio list: Posts tab (space-filtered) + About tab (bio).
@@ -86,13 +86,13 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 - **`components/dashboard/FocusCardsRow.tsx`** — Pulls `/focuses`. Horizontal scrollable row, card per active focus w/ color left-rail + dot, X/Y progress bar of linked todos sourced from `_focus_tree_node`.
 - **`components/dashboard/WhoopStrip.tsx`** — 3 slim cards (Recovery/Sleep/Strain) gated on Whoop status; uses cached `/whoop/today` payload.
 - **`utils/focusColors.ts`** — Mirror of backend `_COLOR_PALETTE` (10 colors). `resolveFocusColor(color, id)` falls back to id-derived palette index when stored color is null (legacy rows).
-- **`components/FocusFlow.tsx`** — Legacy focus-flow editor (committed/pending/someday + spotlight + Quick/Slow). No longer mounted on the dashboard after the revamp; still reachable via the Plan view.
+- **`components/FocusFlow.tsx`** — Legacy focus-flow editor (committed/pending/someday + spotlight + Quick/Slow). Mounted via `ActivityCard` in the Dashboard's Done section toggle.
 - **`components/StatsView.tsx`** — Sidebar entry "Stats". Sections: OpenAI usage (live month-to-date from Admin API), Claude Code usage, **Whoop today** (recovery ring + HRV/RHR/strain + sleep block; only renders when Whoop is connected), **LeetCode** (streak + today/past-7d submissions + 53×7 GitHub-style heatmap; reads from cached `/leetcode/today`, configurable via `LEETCODE_USERNAME` env, defaults to `gubith1`), Dev activity (streak + Gooni's Dev Take + per-repo recent commits — Dev Take is kind="dev" from `gooni_takes`, derived from commits/PRs across tracked repos), Activity (notes/messages/conversations/todos counters).
 - **`components/SettingsModal.tsx`** — Tabbed modal: Appearance (theme + face), Notifications (daily nudge), Integrations (Google Calendar + GitHub + Whoop w/ real logos — connect/disconnect only, live data lives in StatsView), Deployments (Fly + Vercel health pings). Version always shown in the tab sidebar header.
 - **`components/FocusOverlay.tsx`** — Distraction-free overlay surfaced from the primary focus row's "focus" pill. Blurs the page, shows meditating Gooni, fades chrome on idle, exits via X / Esc.
 - **`components/QuickNav.tsx`** — Cmd+K command palette mounted in `__root.tsx`. Jumps to home / lists / memories / audit / stats / public / mcp from any view.
 - **`components/QuickComposer.tsx`** — Cmd+E quick-capture composer mounted in `__root.tsx`. Body-only TipTap modal (StarterKit + Image), saves to General via `apiCreateNote`, dispatches `gooni:note-created` window event so any mounted Dashboard re-pulls stats. Submit on Cmd+↵, newline on ⇧↵, esc / click-outside to close.
-- **`components/GooniPanel.tsx`** — Chat panel (300px). Passes active note as context. Composer has a chat ↔ note mode toggle in the header (state in `useGooniStore.composerMode`, persisted): note mode hides starter prompts, swaps mascot/header dot/composer accents to yellow, expands the textarea, and saves the body to General via `apiCreateNote` (Cmd+↵) — same fire-and-forget shape as QuickComposer, no LLM round-trip. Plan-mode sessions force `chat`.
+- **`components/GooniPanel.tsx`** — Chat panel (300px). Passes active note as context. Composer has a chat ↔ note mode toggle in the header (state in `useGooniStore.composerMode`, persisted): note mode hides starter prompts, swaps mascot/header dot/composer accents to yellow, expands the textarea, and saves the body to General via `apiCreateNote` (Cmd+↵) — same fire-and-forget shape as QuickComposer, no LLM round-trip.
 - **`stores/useNotesContentStore.ts`** — Selected space, notes per space, active note, isDirty. Persist key: `gooni-notes-v1`.
 - **`stores/useSpacesStore.ts`** — Space list from backend (includes General).
 - **`stores/useConversationsStore.ts`** — Conversations list + active conversation. `send()` accepts `imageUrl` for chat-input image attachments.
@@ -315,8 +315,7 @@ returns a 0-or-1-element list now.
 - `GET  /items/{todo_id}/focuses` — 0-or-1-element list (the parent focus).
 - `GET  /items/today-todos` — open todos due today; each row carries a
   `focuses: [chip]` array (always 0 or 1 element under the new FK model).
-- `DELETE /focus-todo-links/{link_id}` — returns 410 Gone (M2M dropped).
-  Use `PATCH /todos/{id}` with `focus_id: null` to sever instead.
+- To sever a focus↔todo link: `PATCH /todos/{id}` with `focus_id: null`.
 
 ## Code Patterns
 

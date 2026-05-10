@@ -78,7 +78,6 @@ export interface NoteClassifySignals {
   feature_requests: { title: string; list_item_id: number }[];
   memory_count: number;
   memory_types: string[];
-  worth_expanding?: boolean;
   classified_at: string;
 }
 
@@ -963,11 +962,6 @@ export async function deriveTodoFromFocus(
   return res.json();
 }
 
-export async function deleteFocusTodoLink(linkId: number): Promise<void> {
-  const res = await apiFetch(`${BASE}/focus-todo-links/${linkId}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to unlink");
-}
-
 // ── Lists (unified) ─────────────────────────────────────────────────────────
 //
 // Backed by the List + ListItem tables. Replaces the old "Lists" feature
@@ -1479,13 +1473,12 @@ export async function sendConversationMessage(
   content: string,
   noteContent?: string,
   model?: string,
-  mode?: "plan" | "chat",
   imageUrl?: string,
 ): Promise<{ messages: ApiMessage[]; intention: string; tools_used: string[]; signals?: RouterSignals }> {
   const res = await apiFetch(`${BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", content, entry_content: noteContent, model, mode, image_url: imageUrl }),
+    body: JSON.stringify({ role: "user", content, entry_content: noteContent, model, image_url: imageUrl }),
   });
   if (!res.ok) throw new Error("Failed to send message");
   return res.json();

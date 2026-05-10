@@ -10,7 +10,6 @@ import { ListView } from "../components/lists/ListView";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
-import { PlanView } from "../components/PlanView";
 import { Sidebar } from "../components/notes/Sidebar";
 import { PasswordGate } from "../components/PasswordGate";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -47,14 +46,10 @@ function NotesPage() {
   const search = Route.useSearch();
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
-  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "plan" | "eval" | "stats">(() =>
+  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "eval" | "stats">(() =>
     search.audit ? "eval" : search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
   );
   const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
-  // Note currently being planned (set by Dashboard's "💬 Plan this" pill).
-  // Lives in route state so the Plan view can mount/unmount cleanly without
-  // polluting the conversations store with a "current planning target" field.
-  const [planNoteId, setPlanNoteId] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
 
   useEffect(() => {
@@ -182,7 +177,7 @@ function NotesPage() {
   }, [selectedSpaceId, view]);
 
   function setViewAndUrl(
-    v: "notes" | "dashboard" | "chat" | "lists" | "plan" | "eval" | "stats",
+    v: "notes" | "dashboard" | "chat" | "lists" | "eval" | "stats",
     noteId?: number,
     convId?: number,
     listId?: number,
@@ -264,11 +259,6 @@ function NotesPage() {
           />
         ) : view === "chat" ? (
           <ChatView />
-        ) : view === "plan" && planNoteId != null ? (
-          <PlanView
-            noteId={planNoteId}
-            onExit={() => { setPlanNoteId(null); setView("dashboard"); }}
-          />
         ) : view === "lists" && activeListId != null ? (() => {
           // Backlog gets the Jira-style 3-column board with drag + modal.
           // Other list types stay on the original flat ListView. Decision
