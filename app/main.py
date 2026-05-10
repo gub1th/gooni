@@ -2267,6 +2267,36 @@ def _excerpt_from_html(html: str | None, limit: int = 240) -> str | None:
     return text[:limit]
 
 
+def _strip_html_to_visible_text(html: str | None) -> str:
+    """Visual-emptiness probe used by the empty-overwrite guard.
+
+    Returns the visible text content of `html` after dropping tags +
+    common entities. Crucially, an `<img>` tag counts as visible (it
+    paints pixels even with no surrounding text) — we substitute a
+    sentinel so an image-only note isn't classified as empty by the
+    PATCH guard. TipTap's empty-doc string `<p></p>` strips to ""
+    here, which is the whole point — that string is what was bypassing
+    the prior `.strip()`-only check.
+    """
+    if not html:
+        return ""
+    # Treat any <img> as a visible token before stripping all tags. Same
+    # spirit as `_excerpt_from_html` dropping inline base64 — but here we
+    # need to know the image was THERE, not what its src was.
+    with_img_marker = _IMG_TAG_RE.sub(" img ", html)
+    no_tags = _TAG_RE.sub(" ", with_img_marker)
+    text = _WHITESPACE_RE.sub(" ", no_tags).strip()
+    return (
+        text.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+        .replace("&#39;", "'")
+        .strip()
+    )
+
+
 def _external_thumb_from_html(html: str | None) -> str | None:
     """Return the first <img src="..."> only when it points to an http(s)
     URL. Inline data: URLs are dropped — those are exactly the bytes we're
@@ -2426,15 +2456,23 @@ def update_note(
     if "content" in body:
         # Safety net for the empty-overwrite bug class (a frontend race or a
         # silently-failed request could otherwise wipe a populated note). Refuse
-        # to replace non-trivial existing content with whitespace-only content
+        # to replace non-trivial existing content with VISUALLY-empty content
         # unless the caller opts in via {"force": true}. Returns 409 so the
         # frontend can surface it in the save-status pill instead of pretending
         # the write succeeded. Title/space/visibility patches still apply.
+        #
+        # Visual emptiness (NOT byte emptiness): TipTap serializes a freshly-
+        # cleared editor as `<p></p>` (7 bytes). The original guard used
+        # `.strip()` on the raw HTML, which let `<p></p>` through and let
+        # the editor wipe a populated note silently — the bug Daniel hit on
+        # note 248. Strip HTML tags + common entity stand-ins before the
+        # emptiness check so the guard catches every flavour of "user sees
+        # nothing on screen."
         new_content = body["content"]
-        prev_content = (note.content or "").strip()
-        new_stripped = (new_content or "").strip() if isinstance(new_content, str) else ""
+        prev_visible = _strip_html_to_visible_text(note.content or "")
+        new_visible = _strip_html_to_visible_text(new_content) if isinstance(new_content, str) else ""
         force = bool(body.get("force"))
-        if prev_content and not new_stripped and not force:
+        if prev_visible and not new_visible and not force:
             raise HTTPException(
                 status_code=409,
                 detail=(
