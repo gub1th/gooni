@@ -109,8 +109,15 @@ function useEditorStyles() {
       document.head.appendChild(style);
     }
     style.textContent = `
-      .gooni-note-editor { outline: none; }
-      .gooni-note-editor p { margin: 0 0 12px; }
+      .gooni-note-editor {
+        outline: none;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+        font-size: 15px;
+        line-height: 1.55;
+        color: #1C1C1E;
+        -webkit-font-smoothing: antialiased;
+      }
+      .gooni-note-editor p { margin: 0 0 10px; }
       .gooni-note-editor h1 { font-size: 1.7em; font-weight: 700; line-height: 1.25; margin: 1.4em 0 0.5em; letter-spacing: -0.01em; }
       .gooni-note-editor h2 { font-size: 1.35em; font-weight: 700; line-height: 1.3; margin: 1.2em 0 0.4em; letter-spacing: -0.005em; }
       .gooni-note-editor h3 { font-size: 1.15em; font-weight: 600; line-height: 1.35; margin: 1em 0 0.4em; }
@@ -329,7 +336,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   // stale title flicker. `null` when no parent or fetch is in flight.
   const [parentLink, setParentLink] = useState<{ id: number; title: string } | null>(null);
   const movePickerRef = useRef<HTMLDivElement>(null);
-  const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<string>(activeNote?.content ?? "");
   const titleRef = useRef<string>(activeNote?.title ?? "");
@@ -394,7 +400,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     if (savedTimer.current) clearTimeout(savedTimer.current);
     setSaveStatus("idle");
-    setLastSavedTime(null);
     setSpaceSuggestion(null);
     setNoteMemories([]);
     setDeleteConfirm(false);
@@ -876,8 +881,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       // for retry. Done eagerly so a stale stash from a prior outage doesn't
       // resurrect outdated content on next mount.
       try { clearLocalNoteDraft(activeNoteId); } catch {}
-      const time = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
-      setLastSavedTime(time);
       setSaveStatus("saved");
       if (savedTimer.current) clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setSaveStatus("idle"), 3000);
@@ -1029,46 +1032,70 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
               flexDirection: "column",
               overflow: "hidden",
               minWidth: 0,
+              position: "relative",
             }
       }
     >
       {/* Header bar — full variant only */}
       {!embedded && (
+      <>
+      {/* Top fade — content scrolls under the floating action pill so the
+          first lines dissolve into the page bg instead of slamming into the
+          toolbar. Apple-Notes feel. Pointer-events off so clicks pass to the
+          editor underneath. */}
       <div
         style={{
-          height: 52,
-          padding: "0 20px",
-          borderBottom: "1px solid rgba(0,0,0,0.06)",
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 84,
+          background:
+            "linear-gradient(to bottom, var(--gooni-card, #FFFFFF) 35%, rgba(255,255,255,0) 100%)",
+          pointerEvents: "none",
+          zIndex: 5,
+        }}
+      />
+      <div
+        style={{
+          // Floating action island — centered above the editor scroll. Frosted
+          // pill (backdrop-blur) so the fade-out content shows through faintly.
+          position: "absolute",
+          top: 14,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 10,
+          maxWidth: "calc(100% - 32px)",
           display: "flex",
           alignItems: "center",
-          // Toolbar sits next to the "Updated …" text instead of being
-          // banished to the far right — Daniel said the action icons feel
-          // far away when they're the only thing on the right edge. Save
-          // status + toolbar both anchor left with a small gap.
-          gap: 12,
-          flexShrink: 0,
+          gap: 6,
+          padding: "5px 8px",
+          borderRadius: 999,
+          background: "rgba(255,255,255,0.78)",
+          backdropFilter: "blur(22px) saturate(1.8)",
+          WebkitBackdropFilter: "blur(22px) saturate(1.8)",
+          boxShadow:
+            "0 4px 18px rgba(15,23,42,0.08), 0 0 0 0.5px rgba(15,23,42,0.06)",
         }}
       >
-        <span
-          style={{
-            fontSize: 12,
-            color:
-              saveStatus === "saving" ? "#8E8E93"
-              : saveStatus === "saved" ? "#34C759"
-              : saveStatus === "error" ? "#FF3B30"
-              : "#8E8E93",
-            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-            transition: "color 0.2s",
-          }}
-        >
-          {saveStatus === "saving"
-            ? "Saving…"
-            : saveStatus === "saved"
-            ? `Saved ${lastSavedTime}`
-            : saveStatus === "error"
-            ? "Save failed — your changes are still in the editor. Retrying on next edit."
-            : ""}
-        </span>
+        {/* Save status — only render when actively saving or errored. The
+            date line above the title shows last-saved timestamp, so the
+            steady-state "Saved …" pill text is redundant noise. */}
+        {(saveStatus === "saving" || saveStatus === "error") && (
+          <span
+            title={saveStatus === "error" ? "Save failed — changes are still in the editor. Retrying on next edit." : "Saving…"}
+            style={{
+              fontSize: 11.5,
+              padding: "0 6px",
+              color: saveStatus === "error" ? "#FF3B30" : "#8E8E93",
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+              transition: "color 0.2s",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {saveStatus === "saving" ? "Saving…" : "Save failed"}
+          </span>
+        )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {/* Space suggestion */}
@@ -1380,6 +1407,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
 
         </div>
       </div>
+      </>
       )}
 
       {/* Editor content */}
@@ -1524,7 +1552,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           ref={scrollContainerRef}
           style={{ flex: 1, overflowY: "auto", boxSizing: "border-box", width: "100%" }}
         >
-          <div style={{ maxWidth: 740, width: "100%", margin: "0 auto", padding: "32px 48px", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: 640, width: "100%", margin: "0 auto", padding: "40px 64px", boxSizing: "border-box" }}>
             {!activeNote && (
               <div
                 style={{
