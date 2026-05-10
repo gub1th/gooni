@@ -9,7 +9,6 @@ import { BacklogBoard } from "../components/lists/BacklogBoard";
 import { ListView } from "../components/lists/ListView";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
-import { FloatingPublishButton } from "../components/notes/FloatingPublishButton";
 import { NotesList } from "../components/notes/NotesList";
 import { PlanView } from "../components/PlanView";
 import { Sidebar } from "../components/notes/Sidebar";
@@ -325,14 +324,6 @@ function NotesPage() {
           );
         })()}
       </div>
-
-      {/* Floating Publish CTA — only on the notes view with a saved note,
-          so it never floats over chat / dashboard / lists. Sits to the left
-          of the Gooni orb (mounted by GooniLayer below) so the pair reads
-          as "primary action + assistant", with Publish as the primary. */}
-      {view === "notes" && activeNoteId && activeNoteId > 0 && (
-        <FloatingPublishButton noteId={activeNoteId} />
-      )}
 
       {/* FAB + floating panel + mascot all live in GooniLayer so /memories and
           any other authed route get the same chat affordance for free. */}

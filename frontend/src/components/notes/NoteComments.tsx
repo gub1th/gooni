@@ -352,7 +352,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
             }}
           >
             <span style={{ fontSize: 11, color: "#94A3B8" }}>
-              ⌘↵ to post · markdown shortcuts work (**bold**, ## heading, - list, ` code `)
+              ⌘↵ to post
             </span>
             <div style={{ display: "flex", gap: 6 }}>
               {hasContent && (
