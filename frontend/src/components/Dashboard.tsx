@@ -1,17 +1,21 @@
 import { useState, useEffect } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Hammer } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchDashboardStats,
   fetchGooniTake,
+  fetchDevTake,
+  createItem,
   type ApiNote, type DashboardStats, type GooniTakePayload,
 } from "../services/api";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
 import { NoteEditor } from "./notes/NoteEditor";
 import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
-import { ActivityCard } from "./ActivityCard";
 import { Skeleton } from "./Skeleton";
+import { WhoopStrip } from "./dashboard/WhoopStrip";
+import { FocusCardsRow } from "./dashboard/FocusCardsRow";
+import { TodoList } from "./dashboard/TodoList";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -78,6 +82,13 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   const { data: focusTake } = useQuery<GooniTakePayload>({
     queryKey: ["focus-take"],
     queryFn: () => fetchGooniTake(),
+    staleTime: 30 * 60_000,
+  });
+  // Dev take: paragraph derived from today's commits/PR titles. Same
+  // persistence shape (one row per UTC day in `gooni_takes` kind="dev").
+  const { data: devTake } = useQuery<GooniTakePayload>({
+    queryKey: ["dev-take"],
+    queryFn: () => fetchDevTake(),
     staleTime: 30 * 60_000,
   });
   // Helpers so the imperative submit/typing flow can still update + refetch.
@@ -155,25 +166,9 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <NeuralBrain size={66} onClick={() => setExploreOpen(true)} />
-              <StatCard
-                label="notes this week"
-                value={stats ? stats.notes_this_week : <Skeleton width={32} height={20} />}
-              >
-                {stats && (() => {
-                  const delta = stats.notes_this_week - stats.notes_last_week;
-                  if (delta === 0 && stats.notes_last_week === 0) return null;
-                  const isUp = delta > 0;
-                  const isFlat = delta === 0;
-                  return (
-                    <div style={{
-                      fontSize: 10.5, color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
-                      marginTop: 2, fontVariantNumeric: "tabular-nums",
-                    }}>
-                      {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
-                    </div>
-                  );
-                })()}
-              </StatCard>
+              {/* notes-this-week dropped per dashboard revamp — Daniel
+                  cared more about today's todos+focuses than weekly note
+                  velocity. Streak stays as the at-a-glance momentum tile. */}
               <StatCard
                 label="day streak"
                 value={stats ? stats.streak : <Skeleton width={28} height={20} />}
@@ -197,28 +192,14 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
       <div>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
 
-        {/* Gooni's Take — persisted in `gooni_takes` (kind="focus"), one row
-            per UTC day. Renders when a take exists for today; silent when
-            there's nothing meaningful to say (no notes + no focuses). */}
+        {/* Gooni's Takes — split into focus (one-sentence, top of feed)
+            and dev (paragraph, below the work surfaces). Both persisted
+            in `gooni_takes` and render only when populated. */}
         {focusTake?.take && (
-          <div style={{
-            marginBottom: 16,
-            padding: "10px 14px",
-            background: "var(--gooni-card, #FFFFFF)",
-            border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-            borderRadius: 10,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-          }}>
-            <Sparkles size={14} color="var(--gooni-muted, #8E8E93)" strokeWidth={1.7} />
-            <div style={{
-              fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
-              lineHeight: 1.5, fontFamily: FONT,
-            }}>
-              {focusTake.take}
-            </div>
-          </div>
+          <TakePill
+            icon={<Sparkles size={14} color="var(--gooni-muted, #8E8E93)" strokeWidth={1.7} />}
+            text={focusTake.take}
+          />
         )}
 
         {/* Note input — embedded NoteEditor quick-input. The recent-notes
@@ -228,12 +209,39 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
           <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
         </div>
 
-        {/* Primary focus treatment now lives inline in ActivityCard's focus
-            list (green left rail + tint + pulsing dot). The old heading-style
-            PrimaryFocusCard was removed. */}
+        {/* Whoop strip (renders nothing when not connected). */}
+        <WhoopStrip />
 
-        {/* Unified Activity card — Today + Focuses + Dev Activity. */}
-        <ActivityCard />
+        {/* Focus cards — horizontal row above the todo list. */}
+        <div style={{ marginBottom: 12 }}>
+          <FocusCardsRow
+            onAdd={async () => {
+              const text = window.prompt("New focus name?");
+              if (!text?.trim()) return;
+              try {
+                await createItem({ text: text.trim(), committed: true });
+                queryClient.invalidateQueries({ queryKey: ["focuses"] });
+              } catch (e) { console.error(e); }
+            }}
+          />
+        </div>
+
+        {/* Todo list — primary at top, open below, completed today + dev
+            activity toggle in the Done section. */}
+        <TodoList />
+
+        {/* Dev take — short paragraph under the work surfaces. Daniel
+            wanted "what did I ship today" decoupled from "what should I
+            be focused on", since the answer is often a different shape. */}
+        {devTake?.take && (
+          <div style={{ marginTop: 18 }}>
+            <TakePill
+              icon={<Hammer size={14} color="var(--gooni-muted, #8E8E93)" strokeWidth={1.7} />}
+              text={devTake.take}
+              label="Today's dev activity"
+            />
+          </div>
+        )}
 
         </div>
       </div>
@@ -244,6 +252,44 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
       {/* Semantic graph of all notes — opens as a full-screen modal */}
       <ExploreModal open={exploreOpen} onClose={() => setExploreOpen(false)} />
 
+    </div>
+  );
+}
+
+function TakePill({ icon, text, label }: {
+  icon: React.ReactNode;
+  text: string;
+  label?: string;
+}) {
+  return (
+    <div style={{
+      marginBottom: 16,
+      padding: "10px 14px",
+      background: "var(--gooni-card, #FFFFFF)",
+      border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+      borderRadius: 10,
+      display: "flex",
+      alignItems: "flex-start",
+      gap: 10,
+    }}>
+      <div style={{ paddingTop: 2 }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {label && (
+          <div style={{
+            fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)",
+            letterSpacing: 0.4, textTransform: "uppercase",
+            marginBottom: 4, fontFamily: FONT,
+          }}>
+            {label}
+          </div>
+        )}
+        <div style={{
+          fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+          lineHeight: 1.5, fontFamily: FONT,
+        }}>
+          {text}
+        </div>
+      </div>
     </div>
   );
 }

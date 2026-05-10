@@ -71,7 +71,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
   const [done, setDone] = useState(item.done);
   const [dueDate, setDueDate] = useState(toDateInputValue(item.due_date ?? null));
   const [boardStatus, setBoardStatus] = useState<BoardStatus>(
-    (item.board_status as BoardStatus | null) || (item.done ? "done" : "todo")
+    (item.board_status as BoardStatus | null) || (item.done ? "done" : "not_yet")
   );
   const [prUrl, setPrUrl] = useState(item.pr_url ?? "");
   const [saving, setSaving] = useState(false);
@@ -108,7 +108,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
     const currentDue = item.due_date ?? null;
     if ((nextDue || null) !== (currentDue || null)) patch.due_date = nextDue;
     if (showBoardFields) {
-      const currentBoard = (item.board_status as BoardStatus | null) || (item.done ? "done" : "todo");
+      const currentBoard = (item.board_status as BoardStatus | null) || (item.done ? "done" : "not_yet");
       if (boardStatus !== currentBoard) patch.board_status = boardStatus;
       const trimmedPr = prUrl.trim();
       if ((trimmedPr || null) !== (item.pr_url || null)) patch.pr_url = trimmedPr || null;
@@ -261,7 +261,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
               <div>
                 <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Status</div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  {(["todo", "in_progress", "done"] as BoardStatus[]).map((s) => (
+                  {(["not_yet", "doing", "done"] as BoardStatus[]).map((s) => (
                     <button
                       key={s}
                       onClick={() => setBoardStatus(s)}
@@ -274,7 +274,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
                         cursor: "pointer",
                       }}
                     >
-                      {s === "todo" ? "Todo" : s === "in_progress" ? "In progress" : "Done"}
+                      {s === "not_yet" ? "Todo" : s === "doing" ? "In progress" : "Done"}
                     </button>
                   ))}
                 </div>
