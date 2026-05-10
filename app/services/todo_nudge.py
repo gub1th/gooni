@@ -1,10 +1,15 @@
 """Daily morning digest — user-prompt-driven LLM message.
 
 Daniel writes the instruction for what the daily digest should say (stored on
-Settings.nudge_prompt). This module gathers today's data (overdue todos,
-due-today todos, top focuses) and asks the LLM to produce ONE conversational
-chat message following his prompt. No indexed list, no `done <n>` reply
-commands — the message reads like a normal text from Gooni.
+Settings.nudge_prompt). This module gathers today's todo data (overdue,
+due-today, and a small slice of open-no-due-date items) and asks the LLM to
+produce ONE conversational chat message following his prompt. No indexed
+list, no `done <n>` reply commands — the message reads like a normal text
+from Gooni.
+
+Focuses are intentionally excluded: they are long-running and were dominating
+the digest at the expense of today's todos. The focus surface gets its own
+revamp track.
 
 Used by the FastAPI lifespan scheduler in app/main.py.
 """
@@ -14,8 +19,13 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Focus, Settings, Todo
+from app.db.models import Settings, Todo
 from app.llm.client import llm_client
+
+
+# Cap on how many open-no-due-date todos we surface. The LLM picks 1-2 to
+# name-drop; more than 5 is wasted prompt context.
+_OPEN_TODO_CAP = 5
 
 
 # Default prompt — used when Settings.nudge_prompt is empty. Surfaced to the
@@ -24,12 +34,12 @@ from app.llm.client import llm_client
 DEFAULT_PROMPT = (
     "You are Gooni, Daniel's personal AI assistant. Send him a short "
     "good-morning message (2-4 sentences max) that references what he's "
-    "actually working on today: any overdue todos, what's due today, and his "
-    "top focuses. Be conversational, not corporate. No emoji. No bullet "
-    "lists. No greetings like 'Good morning!'. Reference 1-2 specific items "
-    "by name when it adds color, but don't list everything — pick what "
-    "matters most. If nothing is overdue or due today, mention his focuses "
-    "instead and keep it light."
+    "actually working on today: any overdue todos, what's due today, and a "
+    "couple of open todos worth nudging. Be conversational, not corporate. "
+    "No emoji. No bullet lists. No greetings like 'Good morning!'. Reference "
+    "1-2 specific items by name when it adds color, but don't list "
+    "everything — pick what matters most. If the list is quiet, keep the "
+    "message short and light."
 )
 
 
@@ -42,8 +52,10 @@ def _today_bounds() -> tuple[datetime, datetime]:
 def gather_context(db: Session) -> dict[str, Any]:
     """Pull the data the LLM needs to render a personalized digest.
 
-    Returns a dict with overdue/today todos and active focuses. All lists
-    use plain text titles — the LLM doesn't need the full ListItem object.
+    Returns a dict with three todo buckets: overdue, due-today, and a small
+    slice of open-no-due-date todos so a digest still has material on a day
+    where nothing is explicitly scheduled (most of Daniel's todos carry no
+    due_date, so omitting this bucket left the nudge effectively empty).
     Caller is responsible for deciding whether the context is empty enough
     to skip the send entirely (see compose_message)."""
     today, tomorrow = _today_bounds()
@@ -70,34 +82,46 @@ def gather_context(db: Session) -> dict[str, Any]:
         .all()
     )
 
-    # Active committed focuses (non-someday).
-    focuses = (
-        db.query(Focus)
+    # Open todos with no due_date. Capped — surfacing 30+ items would dump
+    # the whole backlog into every digest. Primary-first so the singleton
+    # gets prioritized; ties broken by manual sort_order.
+    open_no_due = (
+        db.query(Todo)
         .filter(
-            Focus.committed.is_(True),
-            Focus.done.is_(False),
+            Todo.done.is_(False),
+            Todo.due_date.is_(None),
         )
-        .order_by(Focus.sort_order.asc())
+        .order_by(Todo.is_primary.desc(), Todo.sort_order.asc(), Todo.id.asc())
+        .limit(_OPEN_TODO_CAP)
         .all()
     )
 
-    # Primary now lives on Todo (post-revamp), not Focus. Surface the
-    # primary todo separately so the LLM can star it in the digest.
+    # Primary singleton, surfaced separately so the LLM can star it even
+    # when it's also in overdue / today / open buckets.
     primary_todo = (
         db.query(Todo)
         .filter(Todo.is_primary.is_(True), Todo.done.is_(False))
         .first()
     )
     return {
-        "overdue": [{"text": t.text, "days_late": (today - t.due_date.replace(hour=0, minute=0, second=0, microsecond=0)).days} for t in overdue],
+        "overdue": [
+            {
+                "text": t.text,
+                "days_late": (
+                    today
+                    - t.due_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                ).days,
+            }
+            for t in overdue
+        ],
         "today": [{"text": t.text} for t in due_today],
-        "focuses": [{"text": f.text} for f in focuses],
+        "open": [{"text": t.text} for t in open_no_due],
         "primary_todo": primary_todo.text if primary_todo else None,
     }
 
 
 def _has_anything(ctx: dict) -> bool:
-    return bool(ctx["overdue"] or ctx["today"] or ctx["focuses"])
+    return bool(ctx["overdue"] or ctx["today"] or ctx["open"])
 
 
 def _format_context_block(ctx: dict) -> str:
@@ -115,12 +139,12 @@ def _format_context_block(ctx: dict) -> str:
             lines.append(f"  - {t['text']}")
     if ctx.get("primary_todo"):
         lines.append(f"PRIMARY TODO: {ctx['primary_todo']}")
-    if ctx["focuses"]:
-        lines.append("ACTIVE FOCUSES:")
-        for f in ctx["focuses"]:
-            lines.append(f"  - {f['text']}")
+    if ctx["open"]:
+        lines.append("OPEN (no due date):")
+        for t in ctx["open"]:
+            lines.append(f"  - {t['text']}")
     if not lines:
-        lines.append("(nothing scheduled, no active focuses)")
+        lines.append("(nothing scheduled, no open todos)")
     return "\n".join(lines)
 
 
@@ -175,7 +199,7 @@ def _fallback(ctx: dict) -> str:
     if not parts:
         if ctx.get("primary_todo"):
             return f"Quiet day on the docket — keep moving on {ctx['primary_todo']}."
-        if ctx["focuses"]:
-            return f"Quiet day on the docket — focused on {ctx['focuses'][0]['text']}."
+        if ctx["open"]:
+            return f"Quiet day on the docket — maybe pick up {ctx['open'][0]['text']}."
         return "Quiet day on the docket."
     return ", ".join(parts).capitalize() + "."
