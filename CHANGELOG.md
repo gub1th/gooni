@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.59.0 — 2026-05-10 (minor)
+
+- feat(notes): apple-notes editor pass — system font, slim column, floating action pill (#173)
+
 ## 0.58.0 — 2026-05-10 (minor)
 
 - feat(stats): leetcode card — streak/today/week + 53x7 heatmap (#174)
