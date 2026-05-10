@@ -1,10 +1,13 @@
-"""Focus CRUD over the dedicated `focuses` table (extracted from list_items).
+"""Focus CRUD over the dedicated `focuses` table.
 
 Focuses are long-running commitments. Each carries endgoal / health /
-confidence / scale / is_primary / status / start_at / end_at / committed —
-the full focus-shaped payload that used to bloat ListItem.
+confidence / scale / status / start_at / end_at / committed and a
+`color` for the dot system that visually links to its todos.
 
-Linked to todos via focus_todo_links (M2M); see todo_service for that side.
+After the dashboard revamp:
+  - is_primary moved to Todo (todos are the active-execution layer).
+  - focus_todo_links M2M dropped; todo links via the single
+    `todos.focus_id` FK.
 """
 
 from __future__ import annotations
@@ -15,8 +18,21 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Focus, FocusTodoLink, Todo
+from ..db.models import Focus, Todo
 from .list_service import _item_embed_text, list_service
+
+
+# 10-color palette mirroring the migration. New focuses cycle through
+# this in creation order.
+_COLOR_PALETTE = [
+    "#22C55E", "#3B82F6", "#F59E0B", "#A855F7", "#EF4444",
+    "#06B6D4", "#EC4899", "#84CC16", "#F97316", "#14B8A6",
+]
+
+
+def _next_color(db: Session) -> str:
+    n = db.query(Focus).count()
+    return _COLOR_PALETTE[n % len(_COLOR_PALETTE)]
 
 
 class FocusService:
@@ -45,6 +61,7 @@ class FocusService:
         start_at: datetime | None = None,
         end_at: datetime | None = None,
         subtitle: str | None = None,
+        color: str | None = None,
     ) -> Focus:
         max_order = (
             db.query(Focus.sort_order)
@@ -66,6 +83,7 @@ class FocusService:
             committed=bool(committed),
             status=status,
             scale=scale,
+            color=color or _next_color(db),
             health=health,
             confidence=confidence,
             start_at=start_at,
@@ -83,13 +101,9 @@ class FocusService:
         f = self.get(db, focus_id)
         if not f:
             return None
-        if patch.get("is_primary") is True:
-            db.query(Focus).filter(
-                Focus.is_primary.is_(True), Focus.id != focus_id
-            ).update({"is_primary": False}, synchronize_session=False)
         for key in (
             "text", "endgoal", "subtitle", "committed", "done",
-            "is_primary", "status", "scale", "health", "confidence",
+            "status", "scale", "color", "health", "confidence",
             "start_at", "end_at", "sort_order",
         ):
             if key in patch:
@@ -113,10 +127,12 @@ class FocusService:
         f = self.get(db, focus_id)
         if not f:
             return False
-        # Cascade: drop links first to keep referential integrity (SQLite
-        # doesn't enforce FK ON DELETE CASCADE without explicit wiring).
-        db.query(FocusTodoLink).filter(FocusTodoLink.focus_id == focus_id).delete(
-            synchronize_session=False
+        # Clear focus_id on any linked todos so they survive as
+        # focus-less rows. Cleaner than cascading the delete to todos
+        # (which would surprise the user — "I deleted a focus and lost
+        # my todos").
+        db.query(Todo).filter(Todo.focus_id == focus_id).update(
+            {"focus_id": None}, synchronize_session=False
         )
         db.delete(f)
         db.commit()
@@ -132,8 +148,7 @@ class FocusService:
     def linked_todos(self, db: Session, focus_id: int) -> list[Todo]:
         return (
             db.query(Todo)
-            .join(FocusTodoLink, FocusTodoLink.todo_id == Todo.id)
-            .filter(FocusTodoLink.focus_id == focus_id)
+            .filter(Todo.focus_id == focus_id)
             .order_by(Todo.sort_order, Todo.id)
             .all()
         )
@@ -166,9 +181,9 @@ def serialize_focus(f: Focus) -> dict[str, Any]:
         "endgoal": f.endgoal,
         "committed": bool(f.committed),
         "done": bool(f.done),
-        "is_primary": bool(f.is_primary),
         "status": f.status,
         "scale": f.scale,
+        "color": f.color,
         "health": f.health,
         "confidence": f.confidence,
         "start_at": f.start_at.isoformat() if f.start_at else None,
