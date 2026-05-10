@@ -164,9 +164,11 @@ alembic upgrade head                     # apply locally
 
 `alembic upgrade head` runs automatically on uvicorn boot via
 `_alembic_upgrade()` in `app/main.py`, so prod picks up new migrations
-on next deploy. Don't hand-edit the DB or `_run_column_migrations` —
-that legacy migrator only runs for one-shot cutover on pre-Alembic DBs
-and is scheduled for deletion.
+on next deploy. The legacy cutover branch (`_run_column_migrations` /
+`_migrate_memories_legacy_schema` / `_backfill_memories` + the
+`create_all` before stamping) was deleted — every active environment is
+past baseline, and the pre-stamp `create_all` was the root cause of the
+"table already exists" crash loop on new add-table migrations.
 
 ## Key API Endpoints
 
@@ -321,7 +323,7 @@ returns a 0-or-1-element list now.
 - **Zustand persist**: if you change a store's shape, bump the persist key to avoid stale state (e.g. `v1` → `v2`)
 - **Singleton services**: each `app/services/*.py` creates one instance at the bottom — whole app shares it
 - **FastAPI `db: Session = Depends(get_db)`** — session created/closed per request automatically
-- **Schema changes via Alembic**: every schema mutation goes through `alembic revision --autogenerate -m "msg"` then `alembic upgrade head`. Migrations live in `alembic/versions/`. `app/main.py:_alembic_upgrade` runs `upgrade head` on every boot. The legacy `_run_column_migrations` / `_migrate_memories_legacy_schema` / `_backfill_memories` functions are kept ONLY as a one-shot cutover for DBs predating Alembic — gated by "no `alembic_version` table + has tables" — and become unreachable after first boot. Delete them in a follow-up PR after prod is confirmed stamped.
+- **Schema changes via Alembic**: every schema mutation goes through `alembic revision --autogenerate -m "msg"` then `alembic upgrade head`. Migrations live in `alembic/versions/`. `app/main.py:_alembic_upgrade` runs `upgrade head` on every boot. No `Base.metadata.create_all` at runtime — alembic alone owns schema. Fresh DBs walk from baseline (`ebbf04b84ba5`) to head on first boot.
 - **Optimistic UI**: `createNote` adds a temp note instantly, replaces with real API response
 - **React StrictMode**: kept intentionally — double-fires effects in dev to expose bugs; never remove it
 - **hasChanges ref**: NoteEditor only calls save() if user actually typed — prevents updated_at being touched on blur

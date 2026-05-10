@@ -397,7 +397,19 @@ def upgrade() -> None:
 
     # Drop the now-unused columns from list_items. batch_alter_table handles
     # the SQLite table-rebuild dance for engines older than 3.35.
+    #
+    # Before opening the batch: drop ix_list_items_parent_id explicitly if
+    # it exists. SQLite's batch rebuild copies the table to a temp, drops
+    # the original, renames, and then re-CREATEs every index that lived on
+    # the original. ix_list_items_parent_id references `parent_id` which
+    # we're about to drop — recreating it crashes with
+    # "no such column: parent_id". Telling the batch to drop_index ahead
+    # of the column drop removes that index from the recreate set.
+    inspector = sa.inspect(bind)
+    existing_indexes = {ix["name"] for ix in inspector.get_indexes("list_items")}
     with op.batch_alter_table("list_items") as batch_op:
+        if "ix_list_items_parent_id" in existing_indexes:
+            batch_op.drop_index(batch_op.f("ix_list_items_parent_id"))
         for col in _DROPPED_LIST_ITEM_COLUMNS:
             if _has_column(bind, "list_items", col):
                 batch_op.drop_column(col)

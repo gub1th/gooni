@@ -80,13 +80,12 @@ _EVAL_DB_URL = os.environ.get("EVAL_DATABASE_URL", "sqlite:///./db/gooni-eval.db
 os.environ["DATABASE_URL"] = _EVAL_DB_URL
 
 from app.db.database import SessionLocal, engine
-from app.db.models import Base
 from app.db.models import Conversation as ConvModel
 from app.db.models import ListItem as ListItemModel
 from app.db.models import Memory as MemoryModel
 from app.db.models import Message as MessageModel
 from app.llm.client import llm_client
-from app.main import _run_column_migrations
+from app.main import _alembic_upgrade
 from app.services.item_service import item_service
 from app.services.orchestrator import Orchestrator as orchestrator  # singleton instance
 from app.services.trace_builder import PROMPT_VERSION
@@ -94,13 +93,11 @@ from evals.judge import JUDGE_MODEL, grade
 
 
 def _ensure_scratch_db_ready() -> None:
-    """Run column migrations + create_all on the eval scratch DB. Idempotent.
-
-    On first run, the scratch DB file is created empty by SQLite, then this
-    builds the schema. On subsequent runs, no-ops if schema already matches.
+    """Build / upgrade the eval scratch DB via alembic. Idempotent — on
+    first run the empty SQLite file gets every migration applied; on
+    subsequent runs the version cursor matches head and it's a no-op.
     """
-    _run_column_migrations(engine)
-    Base.metadata.create_all(engine)
+    _alembic_upgrade(engine)
 
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "orchestrator.json"
