@@ -116,11 +116,18 @@ Exposes Gooni to Claude Code via stdio. Tools:
 - `list_comments(note_id)` — read all comments on a note, oldest first.
 - `list_spaces()` — list all spaces
 - `list_notes(space_id, limit)` — browse notes in a space
-- `read_list(list_ref="backlog", limit, include_done)` — read items from any list. Resolves by type ("backlog"/"todo"/"focus") → name → numeric id, so callers don't hard-code shifting ids.
-- `add_list_item(text, list_ref="backlog", subtitle?, skip_conflict_check=False)` — add to a list. Cosine-checks against existing items; near-duplicates surface as `conflicts: [{id, text, similarity, severity}]` in the response so the caller (or user) can merge instead of stacking dupes. Pass `skip_conflict_check=True` for bulk imports.
-- `find_similar_items(text, list_ref="backlog", threshold=0.78, limit=5)` — read-only similarity search over a list, no insert. Use before adding to confirm an idea doesn't already exist.
-- `check_list_item(match, list_ref="backlog", done=True)` — toggle done by text match (first-hit-wins)
-- `delete_list_item(match, list_ref="backlog")` — delete by text match; refuses ambiguous matches
+- `read_list(list_ref="todo", limit, include_done)` — read items from a list (todo / focus singletons + user-defined lists). Resolves by type → name → numeric id. **`list_ref="backlog"` is REJECTED** — backlog tickets live in their own table; use `read_backlog` instead.
+- `add_list_item(text, list_ref="todo", subtitle?, skip_conflict_check=False)` — add to a list_items list. Cosine-checks against existing items; near-duplicates surface as `conflicts: [{id, text, similarity, severity}]`. **`list_ref="backlog"` is REJECTED** — use `add_backlog_item`.
+- `find_similar_items(text, list_ref="todo", threshold=0.78, limit=5)` — read-only similarity search over a list_items list. **`list_ref="backlog"` is REJECTED** — use `find_similar_backlog`.
+- `check_list_item(match, list_ref="todo", done=True)` — toggle done by text match (first-hit-wins). **`list_ref="backlog"` is REJECTED** — use `complete_backlog_item`.
+- `delete_list_item(match, list_ref="todo")` — delete by text match; refuses ambiguous matches. **`list_ref="backlog"` is REJECTED** — use `delete_backlog_item`.
+
+**Backlog tickets** (own `backlog_tickets` table — separate from list_items since the focus/todo/backlog extraction):
+- `read_backlog(limit, include_done)` — list tickets w/ board_status + pr_url
+- `add_backlog_item(text, subtitle?, skip_conflict_check=False)` — create; conflict scan via the new `POST /backlog/tickets/similar` route. Same `conflicts` response shape as `add_list_item`.
+- `find_similar_backlog(text, threshold=0.78, limit=5)` — read-only cosine search across the board.
+- `complete_backlog_item(match)` — mark a ticket done by text match.
+- `delete_backlog_item(match)` — delete a ticket; refuses ambiguous matches.
 
 ## Running
 
