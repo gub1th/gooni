@@ -3,8 +3,10 @@
 Two surfaces consume these:
   - Dashboard "Gooni's Take" pill (kind="focus") — what Daniel is focused
     on right now, derived from recently-touched notes + active focuses.
-  - StatsView "Dev activity" card (kind="dev") — what Daniel shipped on
-    Gooni today, derived from commits + PR titles across tracked repos.
+  - Dashboard "Dev activity" tab on the take card (kind="dev") — what
+    Daniel shipped on Gooni THIS WEEK, derived from commits + PR titles
+    across tracked repos. (Was 24h until v2 prompt; weekly window
+    matches the dashboard tab title "what did I ship this week?")
 
 Both are upserted into `gooni_takes` keyed on (day, kind) — one row per
 day per kind. /dashboard/take and /dashboard/dev-take return today's row
@@ -30,7 +32,7 @@ from ..llm.client import llm_client
 from . import github as gh
 from .item_service import item_service
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 
 def _strip_html(html: str | None) -> str:
@@ -86,12 +88,17 @@ def _build_focus_inputs(db: Session) -> tuple[str, list[int], str, list[int]]:
 def _focus_prompt(note_block: str, focus_block: str) -> str:
     return (
         "You are Gooni — Daniel's AI notebook companion.\n\n"
-        "Write ONE sentence (max 25 words) describing what Daniel is focused on RIGHT NOW. "
-        "Recent notes carry more weight than older ones. Find the dominant thread.\n\n"
+        "Surface Daniel's CURRENT FOCUSES / PRIORITIES — the question this "
+        "answers is literally 'what are my current focuses?' on the dashboard.\n\n"
+        "Write ONE sentence (max 25 words) naming the dominant thread he's "
+        "working on right now. Recent notes carry more weight than older ones. "
+        "Active-focus rows below are the long-running commitments — anchor "
+        "your sentence to those when they overlap with the notes.\n\n"
         "Format options (pick what fits):\n"
         '  "Focus is on X."\n'
         '  "Split between X and Y."\n'
         '  "Mostly X, with some Y on the side."\n'
+        '  "Priorities: X, then Y."\n'
         '  "Heads-down on X this week."\n\n'
         "No preamble, no sign-off, no filler. Just the sentence.\n\n"
         f"Active focuses:\n{focus_block}\n\n"
@@ -118,18 +125,28 @@ def generate_focus_take(db: Session) -> tuple[str, dict[str, Any]]:
 # ── Dev take (commits + PR titles → one short paragraph) ──────────────────
 
 
+# Window the dev take looks back over. Bumped from 24h → 7 days for v2
+# so the dashboard "what did I ship this week?" tab actually summarises
+# the week. If you change this, also update the prompt copy + the user-
+# facing tab title in TakeTabs.tsx.
+DEV_TAKE_LOOKBACK_DAYS = 7
+DEV_TAKE_MAX_COMMITS = 60
+
+
 def _build_dev_inputs(db: Session) -> tuple[str, list[str], list[str]]:
     """Returns (commit_block, commit_shas, pr_urls).
 
-    Pulls last-24h commits across every tracked github repo. Keeps the
-    block tight (max 25 commits) so the prompt stays cheap. PR titles
-    come for free — github embeds them in the merge commit subject.
+    Pulls last-7d commits across every tracked github repo. Cap at 60
+    commits to keep the prompt cheap on busy weeks. PR titles come for
+    free — github embeds them in the merge commit subject.
     """
     tracked = db.query(TrackedRepo).filter(TrackedRepo.provider == "github").all()
     if not tracked:
         return "", [], []
 
-    since_iso = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    since_iso = (
+        datetime.now(timezone.utc) - timedelta(days=DEV_TAKE_LOOKBACK_DAYS)
+    ).isoformat()
     lines: list[str] = []
     shas: list[str] = []
     pr_urls: list[str] = []
@@ -157,9 +174,9 @@ def _build_dev_inputs(db: Session) -> tuple[str, list[str], list[str]]:
               # subjects in the prompt — useful for future history surfaces.
             if "pull request" in msg.lower() and html_url:
                 pr_urls.append(html_url)
-            if len(lines) >= 25:
+            if len(lines) >= DEV_TAKE_MAX_COMMITS:
                 break
-        if len(lines) >= 25:
+        if len(lines) >= DEV_TAKE_MAX_COMMITS:
             break
 
     return "\n".join(lines), shas, pr_urls
@@ -168,16 +185,18 @@ def _build_dev_inputs(db: Session) -> tuple[str, list[str], list[str]]:
 def _dev_prompt(commit_block: str) -> str:
     return (
         "You are Gooni — Daniel's AI notebook companion.\n\n"
-        "Write ONE short paragraph (2-3 sentences, max 60 words) describing "
-        "what Daniel shipped on Gooni today. Read the commits + merged PRs "
-        "below; identify the dominant thread of work. Be specific about "
-        "features, fixes, or refactors — no generic filler. If the commit "
-        "list is empty or trivial (typo, version bump only), say so plainly "
-        "in one short line.\n\n"
+        "Answer the question 'what did I ship this WEEK?' using the commits + "
+        "merged PRs below. Write 2-4 short sentences (max 90 words) that "
+        "describe the dominant threads of work. Group related commits — if "
+        "10 commits all touch the dashboard, say 'revamped the dashboard' "
+        "once instead of listing each. Call out merged PRs by name when they "
+        "land a feature (you can lead with 'Shipped PR #N: …'). If the week "
+        "is mostly chores (typo fixes, dep bumps, version commits), say so "
+        "plainly in one line.\n\n"
         "Voice: first-person ('I shipped…' / 'I refactored…'), plain, "
         "slightly self-aware. No headers, no bullets, no sign-off.\n\n"
-        f"Commits + PRs (last 24h):\n{commit_block or '(none)'}\n\n"
-        "Today's dev take:"
+        f"Commits + merged PRs (last 7 days):\n{commit_block or '(none)'}\n\n"
+        "This week's dev take:"
     )
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crown, Plus, X, Sparkles } from "lucide-react";
+import { Crown, Plus, X, AlertTriangle } from "lucide-react";
 import {
   fetchTodos, createTodo, updateTodo, cycleTodoState, deleteTodo,
   promoteTodoToPrimary, fetchFocuses,
@@ -8,36 +8,42 @@ import {
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
 
-// TodoList — dashboard todos block. Shape after the dashboard revamp:
+// TodoList — dashboard todos block. Mockup-aligned shape:
 //
-//   ┌ Crown row  (singleton primary; segregated from "open" bucket)
-//   ├ open todos ordered with `doing` floated above `not_yet`
-//   ├ inline create row ("+ add a todo")
-//   └ Done section (toggle: Dev Activity ↔ Completed today)
+//   ┌ Primary card (thick info-blue border, crown, hollow check, age, focus dot)
+//   │   Crown is CLICKABLE → demote primary back to a regular open todo.
+//   ├ Header row: TODAY'S TODOS · X/Y · "+" button
+//   ├ Open todos w/ tinted age pills (today=green / yesterday=amber / N days=red+icon)
+//   ├ Inline create row at bottom ("Add a todo…" + tiny "todo" pill)
+//   └ Done section: "DONE TODAY" header, dimmed rows w/ filled grey check
 //
-// The 3-state cycle (not_yet → doing → done) is one click; the Done state
-// pops a small picker so users can revert without a long-press.
+// 3-state cycle (not_yet → doing → done) is one click; Done state pops a
+// state-picker so a misclick is recoverable.
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
-// Two consecutive doneCycle invocations within this window after landing
-// on `done` count as a confirm (safety against accidental double-clicks).
 const CASCADE_STAGGER_MS = 80;
+
+const AGE_TINTS = {
+  today:     { bg: "#E1F5EE", fg: "#085041" },
+  yesterday: { bg: "#FAEEDA", fg: "#854F0B" },
+  stale:     { bg: "#FCEBEB", fg: "#791F1F" },
+} as const;
 
 interface Props {
   onOpenSourceNote?: (noteId: number) => void;
 }
 
-function ageHint(iso: string | null): string {
-  if (!iso) return "";
+function ageHint(iso: string | null): { label: string; tint: keyof typeof AGE_TINTS } | null {
+  if (!iso) return null;
   const created = new Date(iso);
-  if (Number.isNaN(created.getTime())) return "";
+  if (Number.isNaN(created.getTime())) return null;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const day = new Date(created); day.setHours(0, 0, 0, 0);
   const diff = Math.round((today.getTime() - day.getTime()) / 86400000);
-  if (diff <= 0) return "today";
-  if (diff === 1) return "yesterday";
-  return `${diff}d ago`;
+  if (diff <= 0) return { label: "today", tint: "today" };
+  if (diff === 1) return { label: "yesterday", tint: "yesterday" };
+  return { label: `${diff} days`, tint: "stale" };
 }
 
 export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
@@ -57,9 +63,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
     return m;
   }, [focuses]);
 
-  // Cascading-done staggered animation: when the user marks several todos
-  // done quickly, fade them out one after another (80ms apart) so the eye
-  // can track the satisfaction. Tracked locally (not server-driven).
+  // Cascade-done staggered fade for batched check-offs.
   const [cascadeIds, setCascadeIds] = useState<number[]>([]);
   const cascadeTimersRef = useRef<Record<number, number>>({});
 
@@ -82,28 +86,27 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
   }, []);
 
   async function onCycle(t: ApiTodo) {
-    if (t.state === "done") {
-      // From done, the row's StatePicker handles re-pick; cycle is a no-op.
-      return;
-    }
+    if (t.state === "done") return;
     try {
       const next = await cycleTodoState(t.id);
       if (next.state === "done") scheduleCascade(t.id);
       refresh();
-    } catch (e) {
-      console.error("cycle todo failed", e);
-    }
+    } catch (e) { console.error("cycle todo failed", e); }
   }
 
   async function onPickState(id: number, state: TodoState) {
-    try {
-      await updateTodo(id, { state });
-      refresh();
-    } catch (e) { console.error(e); }
+    try { await updateTodo(id, { state }); refresh(); } catch (e) { console.error(e); }
   }
 
   async function onPromotePrimary(id: number) {
     try { await promoteTodoToPrimary(id); refresh(); } catch (e) { console.error(e); }
+  }
+
+  async function onDemotePrimary(id: number) {
+    // Crown click on the primary row sets is_primary=false. Server
+    // doesn't enforce a "must have a primary" invariant — the slot can
+    // sit empty until Daniel promotes another todo.
+    try { await updateTodo(id, { is_primary: false }); refresh(); } catch (e) { console.error(e); }
   }
 
   async function onDelete(id: number) {
@@ -122,7 +125,6 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
     try {
       await createTodo({ text });
       setDraft("");
-      // Stay in create mode so Daniel can add several in a row; ESC exits.
       refresh();
     } catch (e) { console.error(e); }
   }
@@ -135,8 +137,12 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
     );
   }
 
+  const openCount = bundle.open.length + (bundle.primary ? 1 : 0);
+  const doneCount = bundle.done_today.length;
+  const totalToday = openCount + doneCount;
+
   return (
-    <div style={{ fontFamily: FONT, display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ fontFamily: FONT }}>
       <style>{`
         @keyframes gooni-todo-fade-out {
           0%   { opacity: 1; transform: translateX(0);   }
@@ -144,45 +150,88 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           100% { opacity: 0; transform: translateX(12px); }
         }
         .gooni-todo-row { transition: background 0.12s; }
-        .gooni-todo-row:hover { background: rgba(0,0,0,0.035); }
+        .gooni-todo-row:hover { background: rgba(0,0,0,0.025); }
         .gooni-todo-cascade { animation: gooni-todo-fade-out 600ms ease forwards; }
       `}</style>
 
+      {/* Primary card — separate visual treatment, sits above the list. */}
       {bundle.primary && (
-        <TodoRow
+        <PrimaryCard
           t={bundle.primary}
-          isPrimary
           focus={bundle.primary.focus_id ? focusById.get(bundle.primary.focus_id) ?? null : null}
           cascade={cascadeIds.includes(bundle.primary.id)}
           onCycle={() => onCycle(bundle.primary!)}
           onPickState={(s) => onPickState(bundle.primary!.id, s)}
-          onPromotePrimary={() => {/* already primary */}}
+          onDemote={() => onDemotePrimary(bundle.primary!.id)}
           onDelete={() => onDelete(bundle.primary!.id)}
         />
       )}
 
-      {bundle.open.map((t) => (
-        <TodoRow
-          key={t.id}
-          t={t}
-          focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
-          cascade={cascadeIds.includes(t.id)}
-          onCycle={() => onCycle(t)}
-          onPickState={(s) => onPickState(t.id, s)}
-          onPromotePrimary={() => onPromotePrimary(t.id)}
-          onDelete={() => onDelete(t.id)}
-        />
-      ))}
-
-      {/* Inline create row */}
-      {creating ? (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 10,
-          padding: "8px 10px", borderRadius: 8,
-          border: "1px dashed rgba(0,0,0,0.15)",
-          background: "rgba(0,0,0,0.015)",
+      {/* Section header */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        margin: "0 4px 8px",
+      }}>
+        <span style={{
+          fontSize: 12, fontWeight: 500, letterSpacing: 0.4,
+          color: "var(--gooni-muted, #6B7280)",
         }}>
-          <Plus size={14} color="#8E8E93" />
+          TODAY'S TODOS
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            fontSize: 12, color: "var(--gooni-muted, #9CA3AF)",
+            fontVariantNumeric: "tabular-nums",
+          }}>
+            {doneCount} / {totalToday}
+          </span>
+          <button
+            onClick={() => setCreating(true)}
+            title="Add a todo"
+            style={{
+              width: 24, height: 24, borderRadius: 6,
+              background: "rgba(59,130,246,0.10)",
+              color: "#1D4ED8",
+              border: "none", cursor: "pointer",
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      </div>
+
+      {/* Open list */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {bundle.open.map((t) => (
+          <TodoRow
+            key={t.id}
+            t={t}
+            focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
+            cascade={cascadeIds.includes(t.id)}
+            onCycle={() => onCycle(t)}
+            onPickState={(s) => onPickState(t.id, s)}
+            onPromotePrimary={() => onPromotePrimary(t.id)}
+            onDelete={() => onDelete(t.id)}
+          />
+        ))}
+      </div>
+
+      {/* Inline create row — always visible per mockup. Click anywhere
+          to focus the input; ESC collapses back to the placeholder hint. */}
+      <div
+        onClick={() => setCreating(true)}
+        style={{
+          padding: "10px 16px",
+          display: "flex", alignItems: "center", gap: 12,
+          opacity: creating ? 1 : 0.55,
+          borderBottom: "0.5px solid rgba(0,0,0,0.06)",
+          cursor: "text",
+          marginTop: 2,
+        }}
+      >
+        <Plus size={14} color="#9CA3AF" />
+        {creating ? (
           <input
             ref={inputRef}
             value={draft}
@@ -195,26 +244,27 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
             placeholder="What needs doing?"
             style={{
               flex: 1, border: "none", outline: "none",
-              fontFamily: FONT, fontSize: 13.5, background: "transparent",
+              fontFamily: FONT, fontSize: 13, background: "transparent",
               color: "var(--gooni-text, #1C1C1E)",
             }}
           />
-        </div>
-      ) : (
-        <button
-          onClick={() => setCreating(true)}
-          className="gooni-todo-add"
-          style={{
-            display: "flex", alignItems: "center", gap: 10,
-            padding: "8px 10px", borderRadius: 8,
-            border: "none", background: "transparent",
-            cursor: "pointer", textAlign: "left",
-            color: "var(--gooni-muted, #8E8E93)", fontFamily: FONT, fontSize: 12.5,
-          }}
-        >
-          <Plus size={14} /> add a todo
-        </button>
-      )}
+        ) : (
+          <span style={{
+            flex: 1, fontSize: 13,
+            color: "var(--gooni-muted, #9CA3AF)",
+          }}>
+            Add a todo...
+          </span>
+        )}
+        <span style={{
+          fontSize: 11,
+          color: "var(--gooni-muted, #9CA3AF)",
+          background: "rgba(0,0,0,0.05)",
+          padding: "2px 8px", borderRadius: 99,
+        }}>
+          todo
+        </span>
+      </div>
 
       {bundle.done_today.length > 0 && (
         <DoneSection todos={bundle.done_today} focusById={focusById} />
@@ -223,16 +273,118 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
   );
 }
 
-// ── Single row ────────────────────────────────────────────────────────────
+// ── Primary card ─────────────────────────────────────────────────────────
+
+function PrimaryCard({
+  t, focus, cascade,
+  onCycle, onPickState, onDemote, onDelete,
+}: {
+  t: ApiTodo;
+  focus: ApiFocus | null;
+  cascade: boolean;
+  onCycle: () => void;
+  onPickState: (s: TodoState) => void;
+  onDemote: () => void;
+  onDelete: () => void;
+}) {
+  const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
+  const age = ageHint(t.created_at);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <div
+      className={cascade ? "gooni-todo-cascade" : ""}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        position: "relative",
+        background: "var(--gooni-card, #FFFFFF)",
+        border: "2px solid #3B82F6",
+        borderRadius: 12,
+        padding: "12px 16px",
+        display: "flex", alignItems: "center", gap: 12,
+        marginBottom: 12,
+        fontFamily: FONT,
+      }}
+    >
+      <button
+        onClick={onDemote}
+        title="Demote — clear primary"
+        aria-label="Demote primary"
+        style={{
+          border: "none", background: "transparent",
+          color: "#BA7517", cursor: "pointer",
+          display: "flex", alignItems: "center", padding: 0,
+        }}
+      >
+        <Crown size={16} fill="currentColor" strokeWidth={1.5} />
+      </button>
+
+      <Checkbox
+        state={t.state}
+        onClick={() => {
+          if (t.state === "done") setPickerOpen(true);
+          else onCycle();
+        }}
+        size="lg"
+      />
+
+      <span style={{
+        flex: 1, fontSize: 14, fontWeight: 500,
+        color: "var(--gooni-text, #1C1C1E)",
+        textDecoration: t.state === "done" ? "line-through" : "none",
+        opacity: t.state === "done" ? 0.55 : 1,
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+      }}>
+        {t.text}
+      </span>
+
+      {age && t.state !== "done" && <AgePill age={age} />}
+
+      {focus && (
+        <span
+          title={focus.text}
+          style={{
+            width: 8, height: 8, borderRadius: "50%",
+            background: dotColor, flexShrink: 0,
+          }}
+        />
+      )}
+
+      {hovered && (
+        <button
+          title="Delete"
+          onClick={onDelete}
+          style={{
+            border: "none", background: "transparent", cursor: "pointer",
+            padding: 2, color: "#9CA3AF", display: "flex",
+          }}
+        >
+          <X size={12} />
+        </button>
+      )}
+
+      {pickerOpen && (
+        <StatePicker
+          current={t.state}
+          onPick={(s) => { onPickState(s); setPickerOpen(false); }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Single open row ──────────────────────────────────────────────────────
 
 function TodoRow({
-  t, focus, isPrimary, cascade,
+  t, focus, cascade,
   onCycle, onPickState, onPromotePrimary, onDelete,
 }: {
   t: ApiTodo;
   focus: ApiFocus | null;
-  isPrimary?: boolean;
-  cascade?: boolean;
+  cascade: boolean;
   onCycle: () => void;
   onPickState: (s: TodoState) => void;
   onPromotePrimary: () => void;
@@ -249,16 +401,14 @@ function TodoRow({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "8px 10px",
-        borderRadius: 8,
         position: "relative",
-        // Primary row: green left rail + soft tint, pulse dot to the right.
-        background: isPrimary ? "rgba(48, 161, 78, 0.07)" : "transparent",
-        borderLeft: isPrimary ? "2px solid #30A14E" : "2px solid transparent",
+        background: "var(--gooni-card, #FFFFFF)",
+        border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+        borderRadius: 8,
+        padding: "10px 16px",
+        display: "flex", alignItems: "center", gap: 12,
       }}
     >
-      {/* Checkbox cycler */}
       <Checkbox
         state={t.state}
         onClick={() => {
@@ -267,7 +417,18 @@ function TodoRow({
         }}
       />
 
-      {/* Focus color dot */}
+      <span style={{
+        flex: 1, minWidth: 0,
+        fontSize: 14, color: "var(--gooni-text, #1C1C1E)",
+        textDecoration: t.state === "done" ? "line-through" : "none",
+        opacity: t.state === "done" ? 0.55 : 1,
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+      }}>
+        {t.text}
+      </span>
+
+      {age && t.state !== "done" && <AgePill age={age} />}
+
       {focus && (
         <span
           title={focus.text}
@@ -278,41 +439,13 @@ function TodoRow({
         />
       )}
 
-      {/* Crown for primary */}
-      {isPrimary && (
-        <Crown size={12} color="#D97706" strokeWidth={2} />
-      )}
-
-      {/* Text */}
-      <div style={{
-        flex: 1, minWidth: 0,
-        fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
-        textDecoration: t.state === "done" ? "line-through" : "none",
-        opacity: t.state === "done" ? 0.5 : 1,
-        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-      }}>
-        {t.text}
-      </div>
-
-      {/* Age tag */}
-      {age && t.state !== "done" && (
-        <span style={{
-          fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)",
-          fontVariantNumeric: "tabular-nums",
-          flexShrink: 0,
-        }}>
-          {age}
-        </span>
-      )}
-
-      {/* Hover actions: promote-to-primary, delete */}
-      {hovered && !isPrimary && (
+      {hovered && (
         <button
           title="Make primary"
           onClick={onPromotePrimary}
           style={{
             border: "none", background: "transparent", cursor: "pointer",
-            padding: 2, color: "#8E8E93", display: "flex",
+            padding: 2, color: "#9CA3AF", display: "flex",
           }}
         >
           <Crown size={12} />
@@ -324,14 +457,13 @@ function TodoRow({
           onClick={onDelete}
           style={{
             border: "none", background: "transparent", cursor: "pointer",
-            padding: 2, color: "#8E8E93", display: "flex",
+            padding: 2, color: "#9CA3AF", display: "flex",
           }}
         >
           <X size={12} />
         </button>
       )}
 
-      {/* State picker pops above the row when a done row is clicked. */}
       {pickerOpen && (
         <StatePicker
           current={t.state}
@@ -343,12 +475,35 @@ function TodoRow({
   );
 }
 
+// ── Age pill ─────────────────────────────────────────────────────────────
+
+function AgePill({ age }: { age: { label: string; tint: keyof typeof AGE_TINTS } }) {
+  const { bg, fg } = AGE_TINTS[age.tint];
+  const showWarn = age.tint === "stale";
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      fontSize: 11, color: fg, background: bg,
+      padding: "2px 8px", borderRadius: 99,
+      flexShrink: 0,
+    }}>
+      {age.label}
+      {showWarn && <AlertTriangle size={11} />}
+    </span>
+  );
+}
+
 // ── Checkbox cycler ──────────────────────────────────────────────────────
 
-function Checkbox({ state, onClick }: { state: TodoState; onClick: () => void }) {
-  // Visual: empty square (not_yet) / dotted half (doing) / filled check (done).
+function Checkbox({ state, onClick, size = "md" }: {
+  state: TodoState;
+  onClick: () => void;
+  size?: "md" | "lg";
+}) {
+  const dim = size === "lg" ? 16 : 16;
+  const innerDim = size === "lg" ? 8 : 8;
   const common: React.CSSProperties = {
-    width: 16, height: 16, borderRadius: 4,
+    width: dim, height: dim, borderRadius: "50%",
     flexShrink: 0, cursor: "pointer",
     display: "inline-flex", alignItems: "center", justifyContent: "center",
     fontFamily: FONT, fontSize: 11, lineHeight: 1,
@@ -358,8 +513,8 @@ function Checkbox({ state, onClick }: { state: TodoState; onClick: () => void })
     return (
       <span onClick={onClick} style={{
         ...common,
-        background: "#30A14E", color: "#fff",
-        border: "1px solid #2B8C4D",
+        background: "#9CA3AF", color: "#fff",
+        border: "none",
       }}>✓</span>
     );
   }
@@ -367,28 +522,32 @@ function Checkbox({ state, onClick }: { state: TodoState; onClick: () => void })
     return (
       <span onClick={onClick} style={{
         ...common,
-        background: "#FEF3C7", color: "#92400E",
-        border: "1px solid #F59E0B",
-      }}>·</span>
+        background: "transparent",
+        border: "2px solid #1D9E75",
+      }}>
+        <span style={{
+          width: innerDim, height: innerDim, borderRadius: "50%",
+          background: "#1D9E75",
+        }} />
+      </span>
     );
   }
   return (
     <span onClick={onClick} style={{
       ...common,
       background: "transparent",
-      border: "1px solid rgba(0,0,0,0.25)",
+      border: "1.5px solid rgba(0,0,0,0.22)",
     }} />
   );
 }
 
-// ── State picker (popover on done) ───────────────────────────────────────
+// ── Done picker (popover on done row click) ──────────────────────────────
 
 function StatePicker({ current, onPick, onClose }: {
   current: TodoState;
   onPick: (s: TodoState) => void;
   onClose: () => void;
 }) {
-  // Click-outside via a fixed overlay; popover docked relative to the row.
   return (
     <>
       <div onClick={onClose} style={{
@@ -422,106 +581,52 @@ function StatePicker({ current, onPick, onClose }: {
 }
 
 // ── Done section ─────────────────────────────────────────────────────────
-//
-// Daniel's spec: under the open list, surface a small section that toggles
-// between "Dev Activity" (commits/PR titles for today) and "Completed
-// today" (the done_today bucket). Default = Completed when there are
-// completions, else Dev Activity. Dev Activity content is rendered by a
-// sibling component (DevActivityToday) — here we own only the toggle +
-// completed list.
 
 function DoneSection({ todos, focusById }: {
   todos: ApiTodo[];
   focusById: Map<number, ApiFocus>;
 }) {
-  const [tab, setTab] = useState<"completed" | "dev">("completed");
-
   return (
-    <div style={{ marginTop: 14 }}>
+    <div style={{ marginTop: 20 }}>
       <div style={{
-        display: "flex", alignItems: "center", gap: 8,
-        marginBottom: 6,
-        fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
-        textTransform: "uppercase", letterSpacing: 0.4,
+        margin: "0 4px 8px",
+        fontSize: 12, fontWeight: 500, letterSpacing: 0.4,
+        color: "var(--gooni-muted, #9CA3AF)",
       }}>
-        <Sparkles size={11} />
-        <button
-          onClick={() => setTab("completed")}
-          style={{
-            border: "none", background: "transparent", padding: 0,
-            fontSize: 11, letterSpacing: 0.4, textTransform: "uppercase",
-            color: tab === "completed" ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-muted, #8E8E93)",
-            fontWeight: tab === "completed" ? 600 : 400,
-            cursor: "pointer", fontFamily: FONT,
-          }}
-        >
-          Completed today
-        </button>
-        <span style={{ opacity: 0.4 }}>·</span>
-        <button
-          onClick={() => setTab("dev")}
-          style={{
-            border: "none", background: "transparent", padding: 0,
-            fontSize: 11, letterSpacing: 0.4, textTransform: "uppercase",
-            color: tab === "dev" ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-muted, #8E8E93)",
-            fontWeight: tab === "dev" ? 600 : 400,
-            cursor: "pointer", fontFamily: FONT,
-          }}
-        >
-          Dev activity
-        </button>
+        DONE TODAY
       </div>
-
-      {tab === "completed" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {todos.map((t) => {
-            const focus = t.focus_id ? focusById.get(t.focus_id) ?? null : null;
-            const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
-            return (
-              <div key={t.id} style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "4px 10px", borderRadius: 6,
-                opacity: 0.55,
-              }}>
-                <span style={{
-                  width: 14, height: 14, borderRadius: 3,
-                  background: "#30A14E", color: "#fff",
-                  display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 10, fontFamily: FONT,
-                }}>✓</span>
-                {focus && (
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor }} />
-                )}
-                <span style={{
-                  fontSize: 12.5, color: "var(--gooni-text, #1C1C1E)",
-                  textDecoration: "line-through", flex: 1, minWidth: 0,
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                }}>{t.text}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {tab === "dev" && (
-        <DevActivityToday />
-      )}
-    </div>
-  );
-}
-
-// Lightweight inline dev-activity preview. Pulls dev take from the cache
-// (already fetched by the dashboard's GooniTake panel), so this is just
-// a rendered string — no extra fetch. Shows "(no commits today)" when
-// the dev take is empty.
-function DevActivityToday() {
-  return (
-    <div style={{
-      padding: "6px 10px",
-      fontSize: 12, color: "var(--gooni-muted, #8E8E93)",
-      fontFamily: FONT, fontStyle: "italic",
-    }}>
-      See "Gooni's Dev Take" above for today's shipped work.
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {todos.map((t) => {
+          const focus = t.focus_id ? focusById.get(t.focus_id) ?? null : null;
+          const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
+          return (
+            <div key={t.id} style={{
+              background: "var(--gooni-card, #FFFFFF)",
+              border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+              borderRadius: 8,
+              padding: "10px 16px",
+              display: "flex", alignItems: "center", gap: 12,
+              opacity: 0.45,
+            }}>
+              <span style={{
+                width: 16, height: 16, borderRadius: "50%",
+                background: "#9CA3AF", color: "#fff",
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                fontSize: 11, fontFamily: FONT, flexShrink: 0,
+              }}>✓</span>
+              <span style={{
+                flex: 1, minWidth: 0,
+                fontSize: 14, color: "var(--gooni-text, #1C1C1E)",
+                textDecoration: "line-through",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }}>{t.text}</span>
+              {focus && (
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
