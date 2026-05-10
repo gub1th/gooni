@@ -12,12 +12,13 @@ After the dashboard revamp, todos carry:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Focus, Todo
+from ..db.models import Focus, Settings, Todo
 from .list_service import _item_embed_text, list_service
 
 
@@ -64,15 +65,28 @@ class TodoService:
 
     def list_done_today(self, db: Session) -> list[Todo]:
         """Todos completed today (used by the Done section's Completed
-        view). 'Today' uses local UTC midnight — same boundary that
-        Daniel's daily snapshots use."""
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        view). 'Today' = local midnight in `Settings.nudge_tz`
+        (defaults to America/Los_Angeles), converted to UTC for the
+        comparison. Was UTC midnight, which leaked yesterday-evening-
+        PST completions into 'today'.
+        """
+        settings = db.query(Settings).first()
+        tz_name = (settings.nudge_tz if settings else None) or "America/Los_Angeles"
+        try:
+            tz = ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            tz = ZoneInfo("UTC")
+        now_local = datetime.now(tz)
+        local_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        # `completed_at` is stored as naive UTC, so strip tzinfo after
+        # converting to UTC to keep the comparison apples-to-apples.
+        cutoff_utc = local_midnight.astimezone(timezone.utc).replace(tzinfo=None)
         return (
             db.query(Todo)
             .filter(
                 Todo.done.is_(True),
                 Todo.completed_at.is_not(None),
-                Todo.completed_at >= today_start,
+                Todo.completed_at >= cutoff_utc,
             )
             .order_by(Todo.completed_at.desc())
             .all()
