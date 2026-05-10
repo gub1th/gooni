@@ -36,6 +36,23 @@ class BacklogService:
         source_note_id: int | None = None,
         board_status: str | None = None,
     ) -> BacklogTicket:
+        # Idempotent on (source_note_id) — repeated "tag to backlog" clicks
+        # from the same note return the existing open ticket instead of
+        # stacking duplicates. Only matches non-done tickets so a closed
+        # ticket on the same note doesn't block re-opening the work.
+        if source_note_id is not None:
+            existing = (
+                db.query(BacklogTicket)
+                .filter(
+                    BacklogTicket.source_note_id == source_note_id,
+                    BacklogTicket.done.is_(False),
+                )
+                .order_by(BacklogTicket.id.desc())
+                .first()
+            )
+            if existing is not None:
+                return existing
+
         max_order = (
             db.query(BacklogTicket.sort_order)
             .order_by(BacklogTicket.sort_order.desc())

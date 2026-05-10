@@ -19,7 +19,7 @@ import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
 import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
-import { MemoryBrain } from "./MemoryBrain";
+import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
 import { NoteComments } from "./NoteComments";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
@@ -280,17 +280,6 @@ function formatNoteDate(iso: string | null): string {
     " at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
-function formatShortDate(iso: string | null): string {
-  if (!iso) return "";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  const now = new Date();
-  const sameYear = d.getFullYear() === now.getFullYear();
-  return d.toLocaleDateString("en-US", sameYear
-    ? { month: "short", day: "numeric" }
-    : { month: "short", day: "numeric", year: "numeric" });
-}
-
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 interface NoteEditorProps {
@@ -457,6 +446,18 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     refetchNote(activeNoteId).catch(() => {});
   }, [activeNoteId, activeNote?.is_public, activeNote?.unique_viewers, refetchNote]);
 
+  // Lazy-fetch full body when opening a list-shape row. Space-list / recent /
+  // pinned / drafts endpoints ship `content: null` (only excerpt + thumb_src)
+  // to keep the column-2 payload small. Without this, the editor mounts empty
+  // on first open and stays empty until some other path (autosave, memorize)
+  // repopulates content in the store.
+  useEffect(() => {
+    if (!activeNoteId || activeNoteId < 0) return;
+    if (!activeNote) return;
+    if (activeNote.content != null) return; // already have full body
+    refetchNote(activeNoteId).catch(() => {});
+  }, [activeNoteId, activeNote?.content, refetchNote]);
+
   // Memorize previous note on leave; touch new note on enter — catches ALL
   // navigation paths. Embed + memorize are gated on isDirty so a pure open
   // (click → look → close) doesn't burn an OpenAI call or bump updated_at.
@@ -538,8 +539,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
         attributes: {
           style: [
             "font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-            embedded ? "font-size: 14.5px" : "font-size: 15.5px",
-            "line-height: 1.65",
+            embedded ? "font-size: 14.5px" : "font-size: 16.5px",
+            embedded ? "line-height: 1.65" : "line-height: 1.7",
             "color: #1C1C1E",
             "outline: none",
             embedded ? "min-height: 80px" : "min-height: 200px",
@@ -550,6 +551,14 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           if (embedded && event.key === "Enter" && !event.shiftKey && !event.isComposing) {
             event.preventDefault();
             void handleSubmitRef.current();
+            return true;
+          }
+          // Cmd/Ctrl+Shift+M → toggle inline code on selection. TipTap's
+          // built-in Code shortcut is Mod-e; this adds the Apple-Notes-style
+          // alias Daniel asked for.
+          if ((event.metaKey || event.ctrlKey) && event.shiftKey && (event.key === "m" || event.key === "M")) {
+            event.preventDefault();
+            editorRef.current?.chain().focus().toggleCode().run();
             return true;
           }
           return false;
@@ -793,6 +802,17 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   useEffect(() => {
     if (!editor || !activeNote) return;
     if (hydratedNoteId.current !== activeNoteId) {
+      // List-shape rows ship `content: null`. Clear the editor so the
+      // previous note's body doesn't bleed through, but DON'T mark hydrated
+      // yet — the lazy refetch effect above will repopulate the full body
+      // shortly, and we want the next pass to install it.
+      if (activeNote.content == null && activeNoteId && activeNoteId > 0) {
+        if (!editor.isEmpty) {
+          editor.commands.setContent("");
+          bodyRef.current = "";
+        }
+        return;
+      }
       // Check for a leftover unsaved draft in localStorage from a prior
       // failed save (e.g. fly OOM mid-PATCH on the previous session). If
       // it's newer than the server copy, prefer the local draft — the
@@ -1047,8 +1067,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
             ? `Saved ${lastSavedTime}`
             : saveStatus === "error"
             ? "Save failed — your changes are still in the editor. Retrying on next edit."
-            : activeNote
-            ? `Created ${formatShortDate(activeNote.created_at)} · Updated ${formatNoteDate(activeNote.updated_at)}`
             : ""}
         </span>
 
@@ -1266,12 +1284,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                 if (!text) return; // nothing to tag yet
                 setTaggingInFlight(true);
                 try {
-                  const { useListsStore } = await import("../../stores/useListsStore");
-                  const lists = useListsStore.getState().lists;
-                  const backlog = lists.find((l) => l.type === "backlog");
-                  if (!backlog) return;
-                  const { addListItem } = await import("../../services/api");
-                  await addListItem(backlog.id, text, {
+                  // Backlog tickets live in `backlog_tickets` (post the focus/
+                  // todo/backlog extraction) — not list_items. Hitting
+                  // /lists/{id}/items is a no-op for the board, which was the
+                  // bug. Backend dedupes idempotently on source_note_id so
+                  // repeat clicks return the existing ticket.
+                  const { createBacklogTicket } = await import("../../services/api");
+                  await createBacklogTicket(text, {
                     source_note_id: activeNoteId,
                     subtitle: titleClean && firstLine !== titleClean ? firstLine : null,
                   });
@@ -1334,50 +1353,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           </Tooltip>
         )}
 
-        {/* Public toggle — same visual family as Pin: icon-only with colored background when active */}
-        {activeNote && activeNoteId && activeNoteId > 0 && (
-          <Tooltip label={localIsPublic ? "Unpublish from portfolio" : "Publish to portfolio"}>
-            <button
-              onClick={() => {
-                if (!activeNoteId || activeNoteId < 0) return;
-                const next = !localIsPublic;
-                setLocalIsPublic(next);
-                apiPatchNote(activeNoteId, { is_public: next }).catch(() => {});
-                // Backend auto-clears is_draft when a note flips public (it
-                // shipped → no longer a draft). Mirror that locally so the
-                // draft pill + sidebar DRAFTS section refresh without a full
-                // page reload.
-                if (next && activeNote?.is_draft) {
-                  useNotesContentStore.setState((s) => {
-                    const updated: Record<string, ApiNote[]> = {};
-                    for (const [k, list] of Object.entries(s.notes)) {
-                      updated[k] = list.map((n) => (n.id === activeNoteId ? { ...n, is_draft: false } : n));
-                    }
-                    return { notes: updated };
-                  });
-                  useDraftVersionStore.getState().bump();
-                }
-              }}
-              style={{
-                width: 30, height: 30, borderRadius: 8,
-                border: "none",
-                background: localIsPublic ? "rgba(52,199,89,0.16)" : "transparent",
-                cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                padding: 0, flexShrink: 0,
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
-              onMouseLeave={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              <span style={{
-                fontSize: 13, lineHeight: 1,
-                filter: localIsPublic ? "none" : "grayscale(1) opacity(0.5)",
-                transition: "filter 0.15s",
-              }}>🌐</span>
-            </button>
-          </Tooltip>
-        )}
+        {/* Inline 🌐 toggle removed — Publish is now the primary CTA via
+            the floating orb mounted from routes/index.tsx
+            (FloatingPublishButton). Viewer count stays in the toolbar so
+            Daniel still gets the live read count next to the title. */}
 
         {/* Viewer count — only when published. Optimistic-render falls back
             to "—" while unique_viewers hydrates from the single-note GET. */}
@@ -1601,6 +1580,22 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                     <span>from “{parentLink.title}”</span>
                   </button>
                 )}
+                {/* Apple-Notes-style date line — sits centred above the title
+                    in muted grey, mirroring the "Edited Mar 4 at 9:42 AM"
+                    treatment Daniel called out in note 246. Updates live as
+                    autosave runs (activeNote.updated_at re-renders this). */}
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "var(--gooni-muted, #8E8E93)",
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                    textAlign: "center",
+                    marginBottom: 14,
+                    letterSpacing: 0.1,
+                  }}
+                >
+                  {formatNoteDate(activeNote.updated_at)}
+                </div>
                 <input
                   ref={titleInputRef}
                   value={localTitle}
@@ -1611,7 +1606,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   style={{
                     display: "block",
                     width: "100%",
-                    fontSize: 28,
+                    fontSize: 30,
                     fontWeight: 700,
                     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                     color: "var(--gooni-text, #1C1C1E)",
@@ -1620,7 +1615,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                     background: "transparent",
                     marginBottom: 16,
                     padding: 0,
-                    lineHeight: 1.3,
+                    lineHeight: 1.25,
+                    letterSpacing: "-0.4px",
                   }}
                 />
                 {(() => {
@@ -1739,11 +1735,15 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      background: "#1C1C1E",
-                      borderRadius: 8,
-                      padding: "3px 4px",
-                      gap: 1,
-                      boxShadow: "0 6px 22px rgba(0,0,0,0.22)",
+                      background: "#FFFFFF",
+                      borderRadius: 12,
+                      padding: "5px 6px",
+                      gap: 2,
+                      // Apple-Notes selection-toolbar feel: soft elevation,
+                      // hairline border so it reads as paper floating above
+                      // the editor surface, no harsh dark slab.
+                      boxShadow:
+                        "0 8px 22px rgba(15,23,42,0.14), 0 1px 3px rgba(15,23,42,0.10), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
                     }}
                   >
                     {/* Inline marks only — block-level conversions (H1/H2/lists/quote/code/table)
@@ -1760,43 +1760,49 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                         onMouseDown={(e) => { e.preventDefault(); item.action(); }}
                         style={{
                           display: "flex", alignItems: "center", justifyContent: "center",
-                          width: 26, height: 26,
+                          width: 30, height: 30,
                           padding: 0,
-                          borderRadius: 5,
+                          borderRadius: 8,
                           border: "none",
-                          background: item.active ? "rgba(255,255,255,0.18)" : "transparent",
-                          color: item.active ? "#fff" : "rgba(255,255,255,0.78)",
+                          background: item.active ? "rgba(15,23,42,0.08)" : "transparent",
+                          color: item.active ? "#0F172A" : "#475569",
                           cursor: "pointer",
-                          transition: "background 0.1s, color 0.1s",
+                          transition: "background 0.12s, color 0.12s",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!item.active) (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.05)";
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!item.active) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
                         }}
                       >
-                        <item.Icon size={14} strokeWidth={1.9} />
+                        <item.Icon size={15} strokeWidth={1.9} />
                       </button>
                     ))}
                     {/* Vertical separator before the structural action — keeps
                         the formatting marks visually grouped. */}
                     {activeNoteId && activeNoteId > 0 && (
                       <>
-                        <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.18)", margin: "0 4px" }} />
+                        <span style={{ width: 1, height: 18, background: "rgba(15,23,42,0.10)", margin: "0 4px" }} />
                         <button
                           title="Extract to new linked note"
                           onMouseDown={(e) => { e.preventDefault(); void handleExtractToChildNote(); }}
                           style={{
                             display: "flex", alignItems: "center", justifyContent: "center",
                             gap: 4,
-                            height: 26,
-                            padding: "0 8px",
-                            borderRadius: 5,
+                            height: 30,
+                            padding: "0 10px",
+                            borderRadius: 8,
                             border: "none",
                             background: "transparent",
-                            color: "rgba(255,255,255,0.78)",
+                            color: "#475569",
                             cursor: "pointer",
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: 500,
-                            transition: "background 0.1s, color 0.1s",
+                            transition: "background 0.12s, color 0.12s",
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.12)"; e.currentTarget.style.color = "#fff"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.78)"; }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(15,23,42,0.05)"; e.currentTarget.style.color = "#0F172A"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#475569"; }}
                         >
                           <CornerUpRight size={13} strokeWidth={1.9} />
                           Extract
@@ -1840,7 +1846,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   <EditorContent editor={editor} />
                 </div>
 
-                <MemoryBrain memories={noteMemories} />
+                <NoteMemoriesPanel memories={noteMemories} />
 
                 {activeNote?.id && activeNote.id > 0 ? (
                   <NoteComments noteId={activeNote.id} />

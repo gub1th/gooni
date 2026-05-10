@@ -138,12 +138,12 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
   // emoji default in CommentAvatar.
   const myIdentity = identityFor("daniel");
 
-  // Map an identity to the right avatar URL. Only "user"-kind authors
-  // honour the uploaded avatar; claude + gooni keep their brand visuals.
-  function avatarFor(identity: Identity, author: string): string | null {
-    if (identity.kind !== "user") return null;
-    if (author.trim().toLowerCase() === "daniel") return avatarUrl;
-    return null;
+  // Map an identity to the right avatar URL. Only owner-kind (Daniel)
+  // honours the uploaded avatar; claude + gooni keep their brand visuals;
+  // rando users get the auto-generated bot tile.
+  function avatarFor(identity: Identity): string | null {
+    if (identity.kind !== "owner") return null;
+    return avatarUrl;
   }
 
   return (
@@ -240,7 +240,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
                 alignItems: "flex-start",
               }}
             >
-              <CommentAvatar identity={identity} avatarUrl={avatarFor(identity, c.author)} size={36} />
+              <CommentAvatar identity={identity} avatarUrl={avatarFor(identity)} size={36} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
                   style={{
