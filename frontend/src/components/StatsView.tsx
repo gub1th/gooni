@@ -4,6 +4,7 @@ import {
   fetchDevActivity,
   fetchDevTake,
   fetchExtendedStats,
+  fetchLeetcodeToday,
   fetchTimeOnGooni,
   fetchWhoopStatus,
   fetchWhoopToday,
@@ -12,6 +13,7 @@ import {
   type DevActivityRepo,
   type ExtendedStats,
   type GooniTakePayload,
+  type LeetcodeToday,
   type TimeOnGooni,
   type WhoopStatus,
   type WhoopToday,
@@ -61,6 +63,7 @@ export function StatsView() {
             the dashboard's compact tile view as the single source of truth. */}
         <UsageCards />
         <WhoopSection />
+        <LeetcodeSection />
         <DevSection />
         <ActivitySection />
       </div>
@@ -251,6 +254,208 @@ function RecoveryRing({ score, color }: { score: number | null; color: string })
     </div>
   );
 }
+
+function LeetcodeSection() {
+  const { data, isLoading, refetch, isFetching } = useQuery<LeetcodeToday>({
+    queryKey: ["leetcode-today"],
+    queryFn: () => fetchLeetcodeToday(),
+    staleTime: 30 * 60_000,
+    retry: false,
+  });
+
+  const refreshButton = (
+    <button
+      onClick={() => fetchLeetcodeToday(true).then(() => refetch())}
+      disabled={isFetching}
+      style={{
+        fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+        background: "transparent", border: "none", cursor: "pointer",
+        padding: 0, fontFamily: FONT,
+        opacity: isFetching ? 0.5 : 1,
+      }}
+    >
+      {isFetching ? "refreshing…" : "refresh"}
+    </button>
+  );
+
+  if (isLoading && !data) {
+    return (
+      <SectionShell label="LeetCode" right={refreshButton}>
+        <SkeletonRow />
+      </SectionShell>
+    );
+  }
+
+  if (!data?.available) {
+    return (
+      <SectionShell label="LeetCode" right={refreshButton}>
+        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>
+          No snapshot yet. LeetCode may have rate-limited the public profile
+          query — refresh later.
+        </div>
+      </SectionShell>
+    );
+  }
+
+  return (
+    <SectionShell
+      label={`LeetCode${data.username ? ` · ${data.username}` : ""}`}
+      right={refreshButton}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+          gap: 14,
+        }}>
+          <BigStat label="streak" value={fmtInt(data.streak)} sub="days" />
+          <BigStat label="today" value={fmtInt(data.today_count)} sub="subs" />
+          <BigStat label="past 7 days" value={fmtInt(data.week_count)} sub="subs" />
+          <BigStat label="solved" value={fmtInt(data.total_solved)} />
+        </div>
+
+        {(data.easy_solved != null || data.medium_solved != null || data.hard_solved != null) && (
+          <div style={{
+            display: "flex", gap: 14, flexWrap: "wrap",
+            fontSize: 12, color: "#3A3A3C",
+            paddingTop: 12,
+            borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.06))",
+          }}>
+            <span><span style={{ color: "#30A14E", fontWeight: 600 }}>easy</span> {fmtInt(data.easy_solved)}</span>
+            <span><span style={{ color: "#E2A26B", fontWeight: 600 }}>med</span> {fmtInt(data.medium_solved)}</span>
+            <span><span style={{ color: "#C76B6B", fontWeight: 600 }}>hard</span> {fmtInt(data.hard_solved)}</span>
+            {data.ranking != null && (
+              <span style={{ marginLeft: "auto", color: "#8E8E93" }}>
+                global rank {data.ranking.toLocaleString()}
+              </span>
+            )}
+          </div>
+        )}
+
+        <Heatmap calendar={data.calendar ?? {}} />
+
+        {data.updated_at && (
+          <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
+            updated {relTime(data.updated_at)}
+          </div>
+        )}
+      </div>
+    </SectionShell>
+  );
+}
+
+// 53-week × 7-day heatmap, GitHub-style. Today is the bottom-right cell of
+// the rightmost column. Each cell maps a UTC midnight unix timestamp to its
+// submission count via `calendar`. Color buckets are eyeballed against
+// LeetCode's own profile heatmap (0 / 1-2 / 3-5 / 6-9 / 10+).
+function Heatmap({ calendar }: { calendar: Record<string, number> }) {
+  const WEEKS = 53;
+  const DAYS = 7;
+  const CELL = 11;
+  const GAP = 2;
+
+  // Walk back from today (UTC) so each column = ISO week (Mon-Sun).
+  const today = new Date();
+  // Anchor on UTC midnight today.
+  const todayUtc = new Date(Date.UTC(
+    today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(),
+  ));
+
+  const cells: { ts: number; count: number; date: Date }[] = [];
+  const totalDays = WEEKS * DAYS;
+  for (let i = totalDays - 1; i >= 0; i--) {
+    const d = new Date(todayUtc);
+    d.setUTCDate(d.getUTCDate() - i);
+    const ts = Math.floor(d.getTime() / 1000);
+    const count = Number(calendar[String(ts)] ?? 0);
+    cells.push({ ts, count, date: d });
+  }
+
+  function cellColor(count: number): string {
+    if (count <= 0) return "var(--gooni-border, rgba(0,0,0,0.06))";
+    if (count < 3) return "#C6E6CF";
+    if (count < 6) return "#7FCB97";
+    if (count < 10) return "#3FA968";
+    return "#1F7A45";
+  }
+
+  // Month labels above the columns. Drop in a label whenever the first cell
+  // of a column starts a new month — cheap heuristic that mostly mirrors
+  // GitHub's layout without overlapping.
+  const monthLabels: { col: number; label: string }[] = [];
+  let lastMonth = -1;
+  for (let col = 0; col < WEEKS; col++) {
+    const cell = cells[col * DAYS];
+    if (!cell) continue;
+    const m = cell.date.getUTCMonth();
+    if (m !== lastMonth) {
+      monthLabels.push({
+        col,
+        label: cell.date.toLocaleString("en-US", { month: "short" }),
+      });
+      lastMonth = m;
+    }
+  }
+
+  const gridWidth = WEEKS * (CELL + GAP);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{
+        position: "relative", height: 12,
+        width: gridWidth, fontSize: 9.5, color: "#8E8E93",
+      }}>
+        {monthLabels.map((m) => (
+          <span
+            key={`${m.col}-${m.label}`}
+            style={{
+              position: "absolute",
+              left: m.col * (CELL + GAP),
+              top: 0,
+            }}
+          >
+            {m.label}
+          </span>
+        ))}
+      </div>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${WEEKS}, ${CELL}px)`,
+        gridTemplateRows: `repeat(${DAYS}, ${CELL}px)`,
+        columnGap: GAP, rowGap: GAP,
+        gridAutoFlow: "column",
+      }}>
+        {cells.map((c, idx) => (
+          <div
+            key={idx}
+            title={`${c.date.toISOString().slice(0, 10)} · ${c.count} submission${c.count === 1 ? "" : "s"}`}
+            style={{
+              width: CELL, height: CELL, borderRadius: 2,
+              background: cellColor(c.count),
+            }}
+          />
+        ))}
+      </div>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        fontSize: 10, color: "#8E8E93", marginTop: 2,
+      }}>
+        <span>less</span>
+        {[0, 1, 4, 8, 12].map((n) => (
+          <span
+            key={n}
+            style={{
+              width: CELL, height: CELL, borderRadius: 2,
+              background: cellColor(n), display: "inline-block",
+            }}
+          />
+        ))}
+        <span>more</span>
+      </div>
+    </div>
+  );
+}
+
 
 function DevSection() {
   const { data: dev, isLoading } = useQuery<DevActivity | null>({

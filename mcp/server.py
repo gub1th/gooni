@@ -1666,5 +1666,37 @@ def list_comments(note_id: int) -> str:
     return "\n".join(lines)
 
 
+@mcp.tool()
+def get_leetcode_activity() -> str:
+    """Get Daniel's recent LeetCode activity — current streak, today's
+    submission count, and the last 7 days' total. Pulls from Gooni's cached
+    daily snapshot (one row per UTC date in `leetcode_snapshots`).
+
+    Use this when Daniel asks how his LeetCode practice is going, or when
+    you want context on whether he's been grinding problems lately.
+    """
+    try:
+        resp = _session.get(f"{BASE_URL}/leetcode/today", timeout=15)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        return f"(leetcode fetch failed: {exc})"
+    data = resp.json() or {}
+    if not data.get("available"):
+        return "(no leetcode snapshot yet)"
+    parts = [
+        f"user: {data.get('username')}",
+        f"streak: {data.get('streak')} day(s)",
+        f"today: {data.get('today_count')} submissions",
+        f"past 7d: {data.get('week_count')} submissions",
+        f"total solved: {data.get('total_solved')} "
+        f"(easy {data.get('easy_solved')} / med {data.get('medium_solved')} / hard {data.get('hard_solved')})",
+        f"global rank: {data.get('ranking')}",
+    ]
+    snapshot_date = data.get("snapshot_date")
+    if snapshot_date:
+        parts.append(f"snapshot date: {snapshot_date}")
+    return "\n".join(parts)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

@@ -657,6 +657,38 @@ class WhoopSnapshot(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class LeetcodeSnapshot(Base):
+    """One row per day. Cached pull from leetcode.com/graphql so the
+    StatsView card + MCP `get_leetcode_activity` don't hit LeetCode on
+    every render. Idempotent on `date` — re-fetching overwrites.
+    """
+
+    __tablename__ = "leetcode_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, unique=True, index=True)
+
+    username = Column(String, nullable=False)
+
+    # Activity counters derived from submission calendar.
+    streak = Column(Integer, nullable=True)
+    total_active_days = Column(Integer, nullable=True)
+    today_count = Column(Integer, nullable=True)
+    week_count = Column(Integer, nullable=True)
+
+    # Cumulative solve totals.
+    total_solved = Column(Integer, nullable=True)
+    easy_solved = Column(Integer, nullable=True)
+    medium_solved = Column(Integer, nullable=True)
+    hard_solved = Column(Integer, nullable=True)
+    ranking = Column(Integer, nullable=True)
+
+    # Raw {unix_ts_string: count} payload for the heatmap (last 365d).
+    calendar_json = Column(Text, nullable=True)
+
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class FocusSession(Base):
     """One row per focus-cam tracked work session. Aggregate metrics are
     populated when the session ends (STOP click, Ctrl+C, or process exit).

@@ -3987,6 +3987,23 @@ def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
     }
 
 
+# ---------- LeetCode (public-data-only stats) ----------
+
+
+@app.get("/leetcode/today")
+def leetcode_today(refresh: bool = False, db: Session = Depends(get_db)):
+    """Return today's LeetCode snapshot for the configured username.
+
+    Lazy daily pull: cached in `leetcode_snapshots` (one row per UTC
+    date). First viewer per day pays a ~500ms hit to leetcode.com/graphql;
+    everyone else gets the cached row. Pass `?refresh=1` to force a live
+    refetch.
+    """
+    from .services import leetcode_service
+    row = leetcode_service.get_or_fetch(db, force=refresh)
+    return leetcode_service.serialize(row)
+
+
 # Whoop webhook signature: base64(HMAC-SHA256(timestamp + body, client_secret)).
 # Whoop reuses the OAuth client_secret for webhook signing — no separate
 # webhook secret in their model. Both `X-WHOOP-Signature` and
