@@ -523,11 +523,11 @@ function Checkbox({ state, onClick, size = "md" }: {
       <span onClick={onClick} style={{
         ...common,
         background: "transparent",
-        border: "2px solid #1D9E75",
+        border: "2px solid #F59E0B",
       }}>
         <span style={{
           width: innerDim, height: innerDim, borderRadius: "50%",
-          background: "#1D9E75",
+          background: "#F59E0B",
         }} />
       </span>
     );
