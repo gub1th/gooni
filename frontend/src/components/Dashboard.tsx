@@ -1,12 +1,9 @@
 import { useState, useEffect } from "react";
-import { Sparkles, Hammer } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchDashboardStats,
-  fetchGooniTake,
-  fetchDevTake,
   createItem,
-  type ApiNote, type DashboardStats, type GooniTakePayload,
+  type ApiNote, type DashboardStats,
 } from "../services/api";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
 import { NoteEditor } from "./notes/NoteEditor";
@@ -16,6 +13,7 @@ import { Skeleton } from "./Skeleton";
 import { WhoopStrip } from "./dashboard/WhoopStrip";
 import { FocusCardsRow } from "./dashboard/FocusCardsRow";
 import { TodoList } from "./dashboard/TodoList";
+import { TakeTabs } from "./dashboard/TakeTabs";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -79,18 +77,10 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   // Today's focus take. Persisted server-side (one row per UTC day in
   // gooni_takes), so re-mounting the dashboard during the day is a cheap
   // DB read; first request after midnight regenerates and writes a new row.
-  const { data: focusTake } = useQuery<GooniTakePayload>({
-    queryKey: ["focus-take"],
-    queryFn: () => fetchGooniTake(),
-    staleTime: 30 * 60_000,
-  });
-  // Dev take: paragraph derived from today's commits/PR titles. Same
-  // persistence shape (one row per UTC day in `gooni_takes` kind="dev").
-  const { data: devTake } = useQuery<GooniTakePayload>({
-    queryKey: ["dev-take"],
-    queryFn: () => fetchDevTake(),
-    staleTime: 30 * 60_000,
-  });
+  // Take queries moved into TakeTabs (mounted at the top of the dashboard)
+  // — that component owns its own React-Query subscriptions for the focus
+  // + dev takes. Same query keys, so cache stays shared if anything else
+  // ever subscribes.
   // Helpers so the imperative submit/typing flow can still update + refetch.
   const setStats = (next: DashboardStats) => queryClient.setQueryData<DashboardStats>(["dashboard-stats"], next);
   const refetchStats = () => queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
@@ -192,15 +182,11 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
       <div>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
 
-        {/* Gooni's Takes — split into focus (one-sentence, top of feed)
-            and dev (paragraph, below the work surfaces). Both persisted
-            in `gooni_takes` and render only when populated. */}
-        {focusTake?.take && (
-          <TakePill
-            icon={<Sparkles size={14} color="var(--gooni-muted, #8E8E93)" strokeWidth={1.7} />}
-            text={focusTake.take}
-          />
-        )}
+        {/* Gooni's Take — single card with tabs at the TOP of the
+            dashboard. Sparkle = focus take ("what are my current
+            focuses?"); Hammer = dev take ("what did I ship this week?",
+            now weekly per take_service v2). */}
+        <TakeTabs />
 
         {/* Note input — embedded NoteEditor quick-input. The recent-notes
             grid that used to live here moved to the Sidebar's RECENT
@@ -212,8 +198,8 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
         {/* Whoop strip (renders nothing when not connected). */}
         <WhoopStrip />
 
-        {/* Focus cards — horizontal row above the todo list. */}
-        <div style={{ marginBottom: 12 }}>
+        {/* Focus cards — 3-col grid above the todo list. */}
+        <div style={{ marginBottom: 16 }}>
           <FocusCardsRow
             onAdd={async () => {
               const text = window.prompt("New focus name?");
@@ -226,22 +212,10 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
           />
         </div>
 
-        {/* Todo list — primary at top, open below, completed today + dev
-            activity toggle in the Done section. */}
+        {/* Todo list — primary at top (clickable crown to demote), open
+            list w/ age tints, Done today section underneath. Dev activity
+            section dropped — moved up into the take card's tab. */}
         <TodoList />
-
-        {/* Dev take — short paragraph under the work surfaces. Daniel
-            wanted "what did I ship today" decoupled from "what should I
-            be focused on", since the answer is often a different shape. */}
-        {devTake?.take && (
-          <div style={{ marginTop: 18 }}>
-            <TakePill
-              icon={<Hammer size={14} color="var(--gooni-muted, #8E8E93)" strokeWidth={1.7} />}
-              text={devTake.take}
-              label="Today's dev activity"
-            />
-          </div>
-        )}
 
         </div>
       </div>
@@ -256,40 +230,3 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   );
 }
 
-function TakePill({ icon, text, label }: {
-  icon: React.ReactNode;
-  text: string;
-  label?: string;
-}) {
-  return (
-    <div style={{
-      marginBottom: 16,
-      padding: "10px 14px",
-      background: "var(--gooni-card, #FFFFFF)",
-      border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-      borderRadius: 10,
-      display: "flex",
-      alignItems: "flex-start",
-      gap: 10,
-    }}>
-      <div style={{ paddingTop: 2 }}>{icon}</div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {label && (
-          <div style={{
-            fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)",
-            letterSpacing: 0.4, textTransform: "uppercase",
-            marginBottom: 4, fontFamily: FONT,
-          }}>
-            {label}
-          </div>
-        )}
-        <div style={{
-          fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
-          lineHeight: 1.5, fontFamily: FONT,
-        }}>
-          {text}
-        </div>
-      </div>
-    </div>
-  );
-}
