@@ -542,11 +542,11 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       autofocus: embedded ? "end" : false,
       editorProps: {
         attributes: {
+          // Font / size / line-height live in the .gooni-note-editor CSS
+          // class (see useEditorStyles). Inline styles previously here
+          // overrode that CSS and were the reason the full-variant body
+          // still rendered at 16.5px / Inter after the Apple-Notes pass.
           style: [
-            "font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-            embedded ? "font-size: 14.5px" : "font-size: 16.5px",
-            embedded ? "line-height: 1.65" : "line-height: 1.7",
-            "color: #1C1C1E",
             "outline: none",
             embedded ? "min-height: 80px" : "min-height: 200px",
           ].join("; "),
