@@ -11,6 +11,7 @@ import StarterKit from "@tiptap/starter-kit";
 import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
   Trash2, FolderInput, Pin as PinIcon, ListPlus, Check, Pencil as PencilIcon,
+  Globe as GlobeIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -1011,6 +1012,41 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     }
   }
 
+  async function handleTogglePublic() {
+    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
+    const next = !activeNote.is_public;
+    // Optimistic flip — backend also clears `is_draft` when public goes
+    // true (note shipped → no longer a draft); mirror that locally.
+    useNotesContentStore.setState((s) => {
+      const updated: Record<string, ApiNote[]> = {};
+      for (const [k, list] of Object.entries(s.notes)) {
+        updated[k] = list.map((n) =>
+          n.id === activeNoteId
+            ? { ...n, is_public: next, is_draft: next ? false : n.is_draft }
+            : n,
+        );
+      }
+      return { notes: updated };
+    });
+    setLocalIsPublic(next);
+    if (next && activeNote.is_draft) useDraftVersionStore.getState().bump();
+    try {
+      await apiPatchNote(activeNoteId, { is_public: next });
+    } catch (e) {
+      console.error("publish toggle failed", e);
+      useNotesContentStore.setState((s) => {
+        const updated: Record<string, ApiNote[]> = {};
+        for (const [k, list] of Object.entries(s.notes)) {
+          updated[k] = list.map((n) =>
+            n.id === activeNoteId ? { ...n, is_public: !next } : n,
+          );
+        }
+        return { notes: updated };
+      });
+      setLocalIsPublic(!next);
+    }
+  }
+
   return (
     <div
       style={
@@ -1380,10 +1416,35 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           </Tooltip>
         )}
 
-        {/* Inline 🌐 toggle removed — Publish is now the primary CTA via
-            the floating orb mounted from routes/index.tsx
-            (FloatingPublishButton). Viewer count stays in the toolbar so
-            Daniel still gets the live read count next to the title. */}
+        {/* Publish — moved back into the floating action pill (the orb
+            felt too big sitting next to the Gooni chat launcher). Green
+            tint when live, neutral when private. Backend clears is_draft
+            when is_public flips true, so going live also closes out any
+            draft mark. */}
+        {activeNote && activeNoteId && activeNoteId > 0 && (
+          <Tooltip label={localIsPublic ? "Unpublish from portfolio" : "Publish to portfolio"}>
+            <button
+              onClick={handleTogglePublic}
+              style={{
+                width: 30, height: 30, borderRadius: 8,
+                border: "none",
+                background: localIsPublic ? "rgba(52,199,89,0.16)" : "transparent",
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: 0, flexShrink: 0,
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+              onMouseLeave={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              <GlobeIcon
+                size={15}
+                strokeWidth={1.7}
+                color={localIsPublic ? "#1F9E45" : "#636366"}
+              />
+            </button>
+          </Tooltip>
+        )}
 
         {/* Viewer count — only when published. Optimistic-render falls back
             to "—" while unique_viewers hydrates from the single-note GET. */}
