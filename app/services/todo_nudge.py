@@ -77,14 +77,22 @@ def gather_context(db: Session) -> dict[str, Any]:
             Focus.committed.is_(True),
             Focus.done.is_(False),
         )
-        .order_by(Focus.is_primary.desc(), Focus.sort_order.asc())
+        .order_by(Focus.sort_order.asc())
         .all()
     )
 
+    # Primary now lives on Todo (post-revamp), not Focus. Surface the
+    # primary todo separately so the LLM can star it in the digest.
+    primary_todo = (
+        db.query(Todo)
+        .filter(Todo.is_primary.is_(True), Todo.done.is_(False))
+        .first()
+    )
     return {
         "overdue": [{"text": t.text, "days_late": (today - t.due_date.replace(hour=0, minute=0, second=0, microsecond=0)).days} for t in overdue],
         "today": [{"text": t.text} for t in due_today],
-        "focuses": [{"text": f.text, "is_primary": bool(f.is_primary)} for f in focuses],
+        "focuses": [{"text": f.text} for f in focuses],
+        "primary_todo": primary_todo.text if primary_todo else None,
     }
 
 
@@ -105,11 +113,12 @@ def _format_context_block(ctx: dict) -> str:
         lines.append("DUE TODAY:")
         for t in ctx["today"]:
             lines.append(f"  - {t['text']}")
+    if ctx.get("primary_todo"):
+        lines.append(f"PRIMARY TODO: {ctx['primary_todo']}")
     if ctx["focuses"]:
         lines.append("ACTIVE FOCUSES:")
         for f in ctx["focuses"]:
-            star = " (primary)" if f["is_primary"] else ""
-            lines.append(f"  - {f['text']}{star}")
+            lines.append(f"  - {f['text']}")
     if not lines:
         lines.append("(nothing scheduled, no active focuses)")
     return "\n".join(lines)
@@ -163,9 +172,10 @@ def _fallback(ctx: dict) -> str:
     if ctx["today"]:
         n = len(ctx["today"])
         parts.append(f"{n} due today")
-    if not parts and ctx["focuses"]:
-        primary = next((f["text"] for f in ctx["focuses"] if f["is_primary"]), None)
-        if primary:
-            return f"Quiet day on the docket — keep moving on {primary}."
+    if not parts:
+        if ctx.get("primary_todo"):
+            return f"Quiet day on the docket — keep moving on {ctx['primary_todo']}."
+        if ctx["focuses"]:
+            return f"Quiet day on the docket — focused on {ctx['focuses'][0]['text']}."
         return "Quiet day on the docket."
     return ", ".join(parts).capitalize() + "."

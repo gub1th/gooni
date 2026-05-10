@@ -20,7 +20,6 @@ from .db.database import SessionLocal
 from .db.models import (  # noqa: F401 — triggers table creation
     Base,
     Conversation,
-    FocusTodoLink,
     GooniTake,
     McpCall,
     Memory,
@@ -1432,6 +1431,125 @@ def backlog_delete(ticket_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@app.post("/backlog/tickets/{ticket_id}/promote")
+def backlog_promote(ticket_id: int, db: Session = Depends(get_db)):
+    """Create a Todo mirroring this ticket and link them via ticket.todo_id.
+    Returns {ticket, todo}. Idempotent — re-promoting an already-linked
+    ticket returns the existing pair."""
+    from .services.backlog_service import backlog_service, serialize_ticket
+    from .services.todo_service import serialize_todo
+    result = backlog_service.promote(db, ticket_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    ticket, todo = result
+    return {"ticket": serialize_ticket(ticket), "todo": serialize_todo(todo)}
+
+
+@app.post("/backlog/tickets/{ticket_id}/demote")
+def backlog_demote(ticket_id: int, db: Session = Depends(get_db)):
+    """Sever the ticket↔todo link by deleting the linked Todo and clearing
+    ticket.todo_id. Backlog row stays."""
+    from .services.backlog_service import backlog_service, serialize_ticket
+    ticket = backlog_service.demote(db, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    return serialize_ticket(ticket)
+
+
+# ── Dedicated focus + todo routes (cleaner FE consumption than /items) ─
+
+@app.get("/focuses")
+def focuses_list(db: Session = Depends(get_db)):
+    """Active focuses with color + linked-todo progress for the dashboard
+    focus cards. Returns the same shape as item_service.list_tree['focuses']
+    but as a flat list."""
+    from .services.focus_service import focus_service
+    from .services.item_service import _focus_tree_node
+    return [_focus_tree_node(db, f) for f in focus_service.list_active(db)]
+
+
+@app.get("/todos")
+def todos_list(db: Session = Depends(get_db)):
+    """Open + completed-today todos, grouped. Powers the todo list UI."""
+    from .services.todo_service import todo_service, serialize_todo
+    open_rows = todo_service.list_open(db)
+    done_today = todo_service.list_done_today(db)
+    primary = todo_service.get_primary(db)
+    return {
+        "primary": serialize_todo(primary) if primary else None,
+        "open": [serialize_todo(t) for t in open_rows if not t.is_primary],
+        "done_today": [serialize_todo(t) for t in done_today],
+    }
+
+
+@app.post("/todos")
+def todos_create(body: dict, db: Session = Depends(get_db)):
+    """Inline-create a todo. Body: {text, focus_id?, due_date?, subtitle?,
+    state?}. The dashboard's "+" button hits this."""
+    from .services.todo_service import todo_service, serialize_todo
+    text_val = (body.get("text") or "").strip()
+    if not text_val:
+        raise HTTPException(status_code=400, detail="text required")
+    due_date = _parse_optional_due(body.get("due_date"))
+    todo = todo_service.create(
+        db,
+        text=text_val,
+        subtitle=body.get("subtitle"),
+        due_date=due_date,
+        focus_id=body.get("focus_id"),
+        state=(body.get("state") or "not_yet"),
+    )
+    return serialize_todo(todo)
+
+
+@app.patch("/todos/{todo_id}")
+def todos_update(todo_id: int, body: dict, db: Session = Depends(get_db)):
+    from .services.todo_service import todo_service, serialize_todo
+    patch: dict = {}
+    for key in ("text", "subtitle", "state", "focus_id", "is_primary", "sort_order", "done"):
+        if key in body:
+            patch[key] = body[key]
+    if "due_date" in body:
+        patch["due_date"] = _parse_optional_due(body["due_date"])
+    try:
+        t = todo_service.update(db, todo_id, **patch)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if t is None:
+        raise HTTPException(status_code=404, detail="todo not found")
+    return serialize_todo(t)
+
+
+@app.post("/todos/{todo_id}/cycle")
+def todos_cycle(todo_id: int, db: Session = Depends(get_db)):
+    """Two-click checkbox handler. Cycles state forward:
+       not_yet → doing → done. From `done`, the FE opens a state-picker
+       modal; cycle still bounces to not_yet for programmatic safety."""
+    from .services.todo_service import todo_service, serialize_todo
+    t = todo_service.cycle_state(db, todo_id)
+    if t is None:
+        raise HTTPException(status_code=404, detail="todo not found")
+    return serialize_todo(t)
+
+
+@app.delete("/todos/{todo_id}")
+def todos_delete(todo_id: int, db: Session = Depends(get_db)):
+    from .services.todo_service import todo_service
+    if not todo_service.delete(db, todo_id):
+        raise HTTPException(status_code=404, detail="todo not found")
+    return {"ok": True}
+
+
+@app.post("/todos/{todo_id}/promote-to-primary")
+def todos_promote_primary(todo_id: int, db: Session = Depends(get_db)):
+    """Singleton: clears any other primary, sets this one. Idempotent."""
+    from .services.todo_service import todo_service, serialize_todo
+    t = todo_service.update(db, todo_id, is_primary=True)
+    if t is None:
+        raise HTTPException(status_code=404, detail="todo not found")
+    return serialize_todo(t)
+
+
 # ── Items (unified focus + todo) ─────────────────────────────────────────────
 
 
@@ -1594,6 +1712,17 @@ def items_update(item_id: int, body: dict, db: Session = Depends(get_db)):
         patch["actionable"] = bool(body["actionable"])
     if "is_primary" in body:
         patch["is_primary"] = bool(body["is_primary"])
+    if "state" in body:
+        # Todo state enum (not_yet | doing | done). Reaches Todo via the
+        # item_service facade → todo_service.update which keeps `done`
+        # in sync + auto-clears is_primary on completion.
+        patch["state"] = body["state"]
+    if "focus_id" in body:
+        patch["focus_id"] = (
+            int(body["focus_id"]) if body["focus_id"] is not None else None
+        )
+    if "color" in body:
+        patch["color"] = body["color"] or None
     if "status" in body:
         patch["status"] = _validate_status(body["status"])
     if "scale" in body:
@@ -1629,18 +1758,27 @@ def items_reorder(body: dict, db: Session = Depends(get_db)):
 
 
 # ── Focus ↔ Todo links ─────────────────────────────────────────────────
-# Many-to-many: a todo can belong to multiple focuses, a focus can have many
-# todos. Stored in `focus_todo_links`. Endpoints below cover the three flows
-# the UI needs: derive (create + link in one shot), inspect a todo's focuses,
-# and sever a single link.
+# After the dashboard revamp, a todo links to at most ONE focus via
+# todos.focus_id (the legacy focus_todo_links M2M table is gone). These
+# routes keep their /items/* paths for backward compatibility but the
+# semantics narrowed: derive = create todo with focus_id set; link =
+# update focus_id; unlink = clear focus_id.
 
 
 @app.get("/items/{todo_id}/focuses")
 def items_get_focuses_for_todo(todo_id: int, db: Session = Depends(get_db)):
-    """Return the focuses linked to a given todo. Used by the TodoRow chip."""
+    """Return the focus linked to this todo (0 or 1 element). Kept as a
+    list shape for back-compat with callers that expect the old M2M
+    response."""
     from .services.todo_service import todo_service
-    focuses = todo_service.linked_focuses(db, todo_id)
-    return [{"id": f.id, "text": f.text, "is_primary": bool(f.is_primary)} for f in focuses]
+    from .services.focus_service import focus_service
+    todo = todo_service.get(db, todo_id)
+    if not todo or not todo.focus_id:
+        return []
+    f = focus_service.get(db, todo.focus_id)
+    if not f:
+        return []
+    return [{"id": f.id, "text": f.text, "color": f.color}]
 
 
 @app.get("/items/{focus_id}/todos")
@@ -1654,10 +1792,10 @@ def items_get_todos_for_focus(focus_id: int, db: Session = Depends(get_db)):
 
 @app.post("/items/{focus_id}/derive-todo")
 def items_derive_todo(focus_id: int, body: dict, db: Session = Depends(get_db)):
-    """Create a leaf todo and link it to this focus.
+    """Create a leaf todo with focus_id set to this focus.
 
     Body: {"text": str, "due_date"?: iso8601 | "today" | "tomorrow"}.
-    Returns {"todo": serialized_todo, "link_id": int}.
+    Returns {"todo": serialized_todo}.
     """
     from .services.focus_service import focus_service
     from .services.todo_service import todo_service, serialize_todo
@@ -1671,18 +1809,14 @@ def items_derive_todo(focus_id: int, body: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="text required")
     due_date = _parse_optional_due(body.get("due_date"))
 
-    todo = todo_service.create(db, text=text_val, due_date=due_date)
-    link = FocusTodoLink(focus_id=focus.id, todo_id=todo.id)
-    db.add(link)
-    db.commit()
-    db.refresh(link)
-    return {"todo": serialize_todo(todo), "link_id": link.id}
+    todo = todo_service.create(db, text=text_val, due_date=due_date, focus_id=focus.id)
+    return {"todo": serialize_todo(todo)}
 
 
 @app.post("/items/{focus_id}/link-todo/{todo_id}")
 def items_link_existing_todo(focus_id: int, todo_id: int, db: Session = Depends(get_db)):
-    """Attach an existing todo to a focus. Idempotent — returns the existing
-    link if the pair is already linked."""
+    """Set the todo's focus_id to this focus. Idempotent — re-linking
+    the same pair is a no-op."""
     from .services.focus_service import focus_service
     from .services.todo_service import todo_service
 
@@ -1690,31 +1824,21 @@ def items_link_existing_todo(focus_id: int, todo_id: int, db: Session = Depends(
     todo = todo_service.get(db, todo_id)
     if not focus or not todo:
         raise HTTPException(status_code=404, detail="focus or todo not found")
-    existing = (
-        db.query(FocusTodoLink)
-        .filter(
-            FocusTodoLink.focus_id == focus_id,
-            FocusTodoLink.todo_id == todo_id,
-        )
-        .first()
-    )
-    if existing:
-        return {"link_id": existing.id, "created": False}
-    link = FocusTodoLink(focus_id=focus_id, todo_id=todo_id)
-    db.add(link)
-    db.commit()
-    db.refresh(link)
-    return {"link_id": link.id, "created": True}
+    if todo.focus_id == focus_id:
+        return {"linked": True, "created": False}
+    todo_service.update(db, todo_id, focus_id=focus_id)
+    return {"linked": True, "created": True}
 
 
 @app.delete("/focus-todo-links/{link_id}")
 def items_unlink_focus_todo(link_id: int, db: Session = Depends(get_db)):
-    link = db.query(FocusTodoLink).filter(FocusTodoLink.id == link_id).first()
-    if not link:
-        raise HTTPException(status_code=404, detail="link not found")
-    db.delete(link)
-    db.commit()
-    return {"ok": True}
+    """Legacy unlink endpoint — focus_todo_links is gone. The frontend
+    should hit PATCH /todos/{id} {focus_id: null} instead. We keep the
+    URL alive for one release returning 410 so old clients learn."""
+    raise HTTPException(
+        status_code=410,
+        detail="focus_todo_links removed; PATCH /todos/{id} {focus_id: null} instead",
+    )
 
 
 @app.get("/items/today-todos")

@@ -65,6 +65,7 @@ class BacklogService:
             return None
         for key in (
             "text", "subtitle", "board_status", "pr_url", "done", "sort_order",
+            "todo_id",
         ):
             if key in patch:
                 setattr(t, key, patch[key])
@@ -86,6 +87,44 @@ class BacklogService:
         db.delete(t)
         db.commit()
         return True
+
+    def promote(self, db: Session, ticket_id: int) -> tuple[BacklogTicket, "Todo"] | None:
+        """Create a Todo mirroring this ticket's text/subtitle and link
+        them via ticket.todo_id. Idempotent — re-promoting an already-
+        linked ticket returns the existing pair.
+        """
+        from .todo_service import todo_service
+        t = self.get(db, ticket_id)
+        if not t:
+            return None
+        if t.todo_id is not None:
+            existing = todo_service.get(db, t.todo_id)
+            if existing:
+                return t, existing
+            # Linked todo was deleted out from under us — fall through and
+            # create a fresh one.
+        todo = todo_service.create(
+            db, text=t.text, subtitle=t.subtitle,
+            source_note_id=t.source_note_id,
+        )
+        t.todo_id = todo.id
+        db.commit()
+        db.refresh(t)
+        return t, todo
+
+    def demote(self, db: Session, ticket_id: int) -> BacklogTicket | None:
+        """Sever the ticket↔todo link by deleting the linked todo and
+        clearing ticket.todo_id. Backlog row stays."""
+        from .todo_service import todo_service
+        t = self.get(db, ticket_id)
+        if not t:
+            return None
+        if t.todo_id is not None:
+            todo_service.delete(db, t.todo_id)
+        t.todo_id = None
+        db.commit()
+        db.refresh(t)
+        return t
 
     def find_similar(
         self, db: Session, text: str, threshold: float = 0.78, limit: int = 5
@@ -125,6 +164,7 @@ def serialize_ticket(t: BacklogTicket) -> dict[str, Any]:
         "subtitle": t.subtitle,
         "board_status": t.board_status,
         "pr_url": t.pr_url,
+        "todo_id": t.todo_id,
         "done": bool(t.done),
         "completed_at": t.completed_at.isoformat() if t.completed_at else None,
         "sort_order": t.sort_order,

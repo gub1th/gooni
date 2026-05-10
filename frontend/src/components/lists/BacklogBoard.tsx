@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { GripVertical, ExternalLink } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { GripVertical, ExternalLink, ListChecks, X } from "lucide-react";
 import type { ApiBacklogTicket, BoardStatus } from "../../services/api";
+import { promoteBacklogTicket, demoteBacklogTicket } from "../../services/api";
 import { useBacklogStore } from "../../stores/useBacklogStore";
 import { ItemModal } from "./ItemModal";
 
@@ -25,9 +27,9 @@ interface Column {
 // the work flow direction: start in Todo, move right to In progress, finish
 // in Done.
 const COLUMNS: Column[] = [
-  { status: "todo",        label: "Todo",        hint: "Not yet picked up",   tint: "#94A3B8" },
-  { status: "in_progress", label: "In progress", hint: "Actively working",    tint: "#F59E0B" },
-  { status: "done",        label: "Done",        hint: "Shipped or closed",   tint: "#16A34A" },
+  { status: "not_yet", label: "Todo",        hint: "Not yet picked up",   tint: "#94A3B8" },
+  { status: "doing",   label: "In progress", hint: "Actively working",    tint: "#F59E0B" },
+  { status: "done",    label: "Done",        hint: "Shipped or closed",   tint: "#16A34A" },
 ];
 
 // Map a stored ticket → which column it lands in. `done=true` always wins
@@ -35,8 +37,8 @@ const COLUMNS: Column[] = [
 // from the board. Server keeps the two in sync on update.
 function statusOf(t: ApiBacklogTicket): BoardStatus {
   if (t.done) return "done";
-  if (t.board_status === "in_progress") return "in_progress";
-  return "todo";
+  if (t.board_status === "doing") return "doing";
+  return "not_yet";
 }
 
 // Click-vs-drag disambiguation: drag is initiated only on the GripVertical
@@ -50,6 +52,26 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
   const updateTicket = useBacklogStore((s) => s.updateTicket);
   const reorder = useBacklogStore((s) => s.reorder);
   const deleteTicket = useBacklogStore((s) => s.deleteTicket);
+  const qc = useQueryClient();
+
+  // Promote/demote a backlog ticket to/from a Todo. Both endpoints are
+  // idempotent so re-clicking is safe; afterwards we kick the backlog
+  // refresh + the todos-bundle cache so the dashboard's TodoList picks
+  // up the new row.
+  async function onPromote(ticketId: number) {
+    try {
+      await promoteBacklogTicket(ticketId);
+      await refresh();
+      qc.invalidateQueries({ queryKey: ["todos-bundle"] });
+    } catch (e) { console.error("promote failed", e); }
+  }
+  async function onDemote(ticketId: number) {
+    try {
+      await demoteBacklogTicket(ticketId);
+      await refresh();
+      qc.invalidateQueries({ queryKey: ["todos-bundle"] });
+    } catch (e) { console.error("demote failed", e); }
+  }
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -62,7 +84,7 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
   const [openItemId, setOpenItemId] = useState<number | null>(null);
 
   const grouped = useMemo(() => {
-    const m: Record<BoardStatus, ApiBacklogTicket[]> = { todo: [], in_progress: [], done: [] };
+    const m: Record<BoardStatus, ApiBacklogTicket[]> = { not_yet: [], doing: [], done: [] };
     for (const t of tickets) m[statusOf(t)].push(t);
     // Within column, sort by sort_order asc (server-managed).
     for (const k of Object.keys(m) as BoardStatus[]) {
@@ -244,6 +266,8 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
                         onOpenPr={() => {
                           if (item.pr_url) window.open(item.pr_url, "_blank", "noopener,noreferrer");
                         }}
+                        onPromote={() => onPromote(item.id)}
+                        onDemote={() => onDemote(item.id)}
                       />
                     </div>
                   );
@@ -290,6 +314,8 @@ function BacklogCard({
   onCardDragOver,
   onClick,
   onOpenPr,
+  onPromote,
+  onDemote,
 }: {
   item: ApiBacklogTicket;
   dragging: boolean;
@@ -298,7 +324,10 @@ function BacklogCard({
   onCardDragOver: (e: React.DragEvent) => void;
   onClick: () => void;
   onOpenPr: () => void;
+  onPromote: () => void;
+  onDemote: () => void;
 }) {
+  const linkedToTodo = item.todo_id != null;
   return (
     <div
       // Whole card is the drag source. Browser naturally suppresses the
@@ -368,12 +397,16 @@ function BacklogCard({
           {item.subtitle}
         </div>
       )}
-      {/* Inline meta row — only PR pill surfaces here. The "from note #N"
+      {/* Inline meta row — PR pill + todo-link pill. The "from note #N"
           ref previously rendered here was visually noisy on every card;
           it now only shows in the modal (open by clicking the card),
           where it's clickable to navigate to the source note. */}
-      {item.pr_url && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        marginTop: 8, fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+        flexWrap: "wrap",
+      }}>
+        {item.pr_url && (
           <button
             data-card-action
             onClick={(e) => { e.stopPropagation(); onOpenPr(); }}
@@ -389,8 +422,49 @@ function BacklogCard({
             <ExternalLink size={10} strokeWidth={1.7} />
             PR
           </button>
-        </div>
-      )}
+        )}
+        {linkedToTodo ? (
+          <span
+            data-card-action
+            title={`Linked to todo #${item.todo_id} — click X to unlink`}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              padding: "2px 6px", borderRadius: 4,
+              background: "rgba(59,130,246,0.10)", color: "#1D4ED8",
+              border: "1px solid rgba(59,130,246,0.25)",
+              fontSize: 10.5, fontWeight: 600,
+            }}
+          >
+            <ListChecks size={10} strokeWidth={1.7} /> todo
+            <button
+              onClick={(e) => { e.stopPropagation(); onDemote(); }}
+              title="Unlink (deletes the linked todo)"
+              style={{
+                display: "inline-flex", alignItems: "center",
+                background: "transparent", border: "none",
+                color: "#1D4ED8", cursor: "pointer", padding: 0,
+              }}
+            >
+              <X size={10} strokeWidth={2} />
+            </button>
+          </span>
+        ) : (
+          <button
+            data-card-action
+            onClick={(e) => { e.stopPropagation(); onPromote(); }}
+            title="Promote to todo on the dashboard"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              padding: "2px 6px", borderRadius: 4,
+              background: "transparent", color: "#6B7280",
+              border: "1px dashed rgba(0,0,0,0.18)",
+              cursor: "pointer", fontSize: 10.5, fontWeight: 500,
+            }}
+          >
+            + todo
+          </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -45,9 +45,9 @@ Evolving toward an ambient physical assistant — a device that knows you passiv
 - **Check off Gooni Backlog items as you ship them.** When a backlog item lands (commit pushed, work is in), call `mcp__gooni__check_list_item` with a distinctive substring of the item's text — don't wait for PR merge, don't batch at session end. The goal is "did this ship or not?" being answerable at a glance from the backlog, not by reading commit history. Match against the most unique phrase in the item title. If a single PR closes multiple backlog items (common for bundled UX work), check off each one individually. If you're catching up after forgetting mid-flight, batch the check-offs in parallel — but the default is check-as-you-ship.
 
 - **Backlog ticket lifecycle (Jira-board flow).** Every non-trivial task lives on the backlog board. Work begins by claiming a ticket, ends by marking it Done with a PR link. Specifically:
-  1. **Before you start coding**: search the backlog for an existing ticket that matches the work (`mcp__gooni__find_similar_items` with the task description; threshold 0.78). If one exists, flip its `board_status` to `in_progress` via `PATCH /list-items/{id}` body `{"board_status": "in_progress"}`. If none exists, create one via `mcp__gooni__add_list_item` first, then flip it.
-  2. **While working**: ticket stays `in_progress`. If scope shifts mid-flight, edit the ticket text/subtitle to match (don't open a second one).
-  3. **On PR merge** (or when the work is otherwise live): set the ticket to Done **and** paste the PR URL into `pr_url`: `PATCH /list-items/{id} {"board_status": "done", "pr_url": "https://github.com/.../pull/N"}`. The board column flips and the card surfaces a clickable PR pill.
+  1. **Before you start coding**: search the backlog for an existing ticket that matches the work (`mcp__gooni__find_similar_items` with the task description; threshold 0.78). If one exists, flip its `board_status` to `doing` via `PATCH /backlog/tickets/{id}` body `{"board_status": "doing"}`. If none exists, create one via `mcp__gooni__add_list_item` first, then flip it. (Vocab note: the dashboard-revamp migration remapped legacy `'todo'`/`'in_progress'` values to `'not_yet'`/`'doing'` — use the new vocab when calling REST directly.)
+  2. **While working**: ticket stays `doing`. If scope shifts mid-flight, edit the ticket text/subtitle to match (don't open a second one).
+  3. **On PR merge** (or when the work is otherwise live): set the ticket to Done **and** paste the PR URL into `pr_url`: `PATCH /backlog/tickets/{id} {"board_status": "done", "pr_url": "https://github.com/.../pull/N"}`. The board column flips and the card surfaces a clickable PR pill.
   4. **One ticket per PR** is the default. Bundled PRs that close several tickets get N sequential PATCH calls — same `pr_url` on each.
   Skip this whole flow only for truly trivial fixes (typo, version bump, one-line edit) where the ceremony costs more than the tracking is worth.
 
@@ -58,7 +58,7 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 
 ### Backend (`app/`)
 - **`app/main.py`** — All FastAPI routes + startup migrations. CORS allows `localhost:5173`.
-- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note` (carries `is_pinned` + `is_draft` + `is_public` + `excerpt` (cached plain-text preview, stripped of HTML/`<img>`, capped at 240 chars — populated on every save, lazy-backfilled at startup so list endpoints don't ship full bodies)), `Conversation`, `Message`, `Memory`, `List`, `ListItem` (generic list rows only — text/subtitle/done/sort_order; focus / todo / backlog fields all moved to dedicated tables in the focus/todo/backlog extraction), `Focus` (long-running commitments — endgoal/health/confidence/scale/is_primary/status/start_at/end_at/committed; extracted from list_items), `Todo` (actionable item with optional due_date; extracted from list_items), `BacklogTicket` (engineering backlog ticket with board_status + pr_url; extracted from list_items), `FocusTodoLink` (M2M between Focus and Todo — one todo can serve multiple focuses), `PublicProfile` (carries `bio` + `avatar_url` — uploaded avatar URL via R2; NULL falls back to a deterministic goofy-emoji avatar in NoteComments), `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `EvalMessageRating` (per-assistant-message thumbs — 1=bad/2=meh/3=good with optional comment, UNIQUE on `message_id`; complements step-level feedback + segment overall rating), `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`), `GooniTake` (daily LLM-generated takes — kind="focus" one-sentence on what Daniel's focused on, kind="dev" short paragraph on what Daniel shipped today; UNIQUE on (`day`, `kind`); upserted by `take_service.get_or_generate`), `NoteComment` (Confluence-style flat comment thread under each note; CASCADE-deletes with the note; `author` is a free-text label like "daniel"/"gooni"/"claude")
+- **`app/db/models.py`** — SQLAlchemy models: `Space`, `Note` (carries `is_pinned` + `is_draft` + `is_public` + `excerpt` (cached plain-text preview, stripped of HTML/`<img>`, capped at 240 chars — populated on every save, lazy-backfilled at startup so list endpoints don't ship full bodies)), `Conversation`, `Message`, `Memory`, `List`, `ListItem` (generic list rows only — text/subtitle/done/sort_order; focus / todo / backlog fields all moved to dedicated tables in the focus/todo/backlog extraction), `Focus` (long-running commitments — endgoal/health/confidence/scale/status/start_at/end_at/committed/`color`; auto-assigned 10-color palette dot for the dashboard. **Post-revamp:** `is_primary` moved to Todo; the M2M `focus_todo_links` table is gone — todos link via single FK), `Todo` (actionable item; carries `state` enum ('not_yet' | 'doing' | 'done' — synced w/ legacy `done` bool), `focus_id` single-FK to its parent focus, `is_primary` singleton (only one Todo across the table can be True; auto-cleared on completion)), `BacklogTicket` (engineering backlog ticket with board_status + pr_url + `todo_id` (FK set when promoted into a Todo via `/backlog/tickets/{id}/promote`); `board_status` vocab is `'not_yet' | 'doing' | 'done'` post-revamp (was `'todo' | 'in_progress' | 'done'` — migrated)), `PublicProfile` (carries `bio` + `avatar_url` — uploaded avatar URL via R2; NULL falls back to a deterministic goofy-emoji avatar in NoteComments), `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall` (append-only log of MCP-tagged HTTP requests; powers the dashboard "claude activity" stat), `ClaudeUsageTurn` (one row per Claude Code assistant turn, ingested by `scripts/upload_claude_usage.py`; UNIQUE on `session_id, ts`), `EvalSegment`, `EvalStepFeedback`, `EvalMessageRating` (per-assistant-message thumbs — 1=bad/2=meh/3=good with optional comment, UNIQUE on `message_id`; complements step-level feedback + segment overall rating), `WhoopSnapshot` (one row per day; cached recovery/HRV/RHR/strain/sleep pull served by `/whoop/today`), `GooniTake` (daily LLM-generated takes — kind="focus" one-sentence on what Daniel's focused on, kind="dev" short paragraph on what Daniel shipped today; UNIQUE on (`day`, `kind`); upserted by `take_service.get_or_generate`), `NoteComment` (Confluence-style flat comment thread under each note; CASCADE-deletes with the note; `author` is a free-text label like "daniel"/"gooni"/"claude")
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`
 - **`app/services/memory_service.py`** — Local SQL-backed memory store (the `memories` table). Per chat exchange: `extract_candidates` (LLM) → cosine-search similar active memories → `reconcile_candidate` (LLM, ADD/UPDATE/DELETE/NONE) → apply. Retrieval injects always-included preferences plus top-5 facts/episodes by cosine similarity. Replaced the old Mem0 hosted service; legacy callers still see `{id, memory, ...}` dict shape via `_serialize`.
 - **`app/services/orchestrator.py`** — Unified chat handler across all surfaces (web, telegram, whatsapp, imessage). `Orchestrator` singleton. Source defaults to `"web"`; bot channels share a single persistent conversation per source (no gap-based sessioning). Each turn builds a structured trace via `TraceBuilder` and stamps it on `Message.trace`.
@@ -81,7 +81,12 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 - **`components/notes/NotesList.tsx`** — Notes for selected space (260px).
 - **`components/notes/NoteEditor.tsx`** — Title + TipTap body. Auto-saves after 1.5s. `🌐 Public` toggle pill. Supports image drag/drop + paste (base64 inline). `hasChanges` ref prevents spurious saves on blur.
 - **`components/ChatView.tsx`** — Full chat view when chat section is active. Uses `chat/InputBar` (Gemini-style: + popup → upload image, model selector, mic for Web-Speech-API voice-to-text, send). Image attachments flow as base64 data URL via `image_url` to `/conversations/{id}/messages`.
-- **`components/Dashboard.tsx`** — Greeting + 3 stat cards (notes-this-week, day streak, claude activity) + thin "Stats →" card linking to the stats view. Gooni's Take pill (persisted focus take, kind="focus" from `gooni_takes`) above the composer. Focuses (committed/pending/someday). Public bio editor lives on `/public`, not the dashboard.
+- **`components/Dashboard.tsx`** — Greeting + day-streak stat tile (notes-this-week was dropped in the dashboard revamp). Gooni's Take pill (focus take, kind="focus" from `gooni_takes`) above the composer; Dev Take (kind="dev") below the work surfaces. Below the composer: `WhoopStrip` (3 slim cards — Recovery / Sleep / Strain — only renders when Whoop is connected) → `FocusCardsRow` (horizontal cards w/ color rail + X/Y progress, "+ add" creates a committed focus inline) → `TodoList` (primary singleton crowned at top, open todos w/ `doing` floated above `not_yet`, inline create, age tag, cascade-done animation, Done section toggle: Completed today ↔ Dev activity). Public bio editor lives on `/public`, not the dashboard.
+- **`components/dashboard/TodoList.tsx`** — Pulls `/todos` (primary + open + done_today buckets). 3-state cycle: empty square → dotted half (doing) → filled check (done); from done, click pops a state-picker. Focus color dot per row (resolves via `utils/focusColors.ts`). Hover row exposes promote-to-primary (crown) + delete (×).
+- **`components/dashboard/FocusCardsRow.tsx`** — Pulls `/focuses`. Horizontal scrollable row, card per active focus w/ color left-rail + dot, X/Y progress bar of linked todos sourced from `_focus_tree_node`.
+- **`components/dashboard/WhoopStrip.tsx`** — 3 slim cards (Recovery/Sleep/Strain) gated on Whoop status; uses cached `/whoop/today` payload.
+- **`utils/focusColors.ts`** — Mirror of backend `_COLOR_PALETTE` (10 colors). `resolveFocusColor(color, id)` falls back to id-derived palette index when stored color is null (legacy rows).
+- **`components/FocusFlow.tsx`** — Legacy focus-flow editor (committed/pending/someday + spotlight + Quick/Slow). No longer mounted on the dashboard after the revamp; still reachable via the Plan view.
 - **`components/StatsView.tsx`** — Sidebar entry "Stats". Sections: OpenAI usage (live month-to-date from Admin API), Claude Code usage, **Whoop today** (recovery ring + HRV/RHR/strain + sleep block; only renders when Whoop is connected), Dev activity (streak + Gooni's Dev Take + per-repo recent commits — Dev Take is kind="dev" from `gooni_takes`, derived from commits/PRs across tracked repos), Activity (notes/messages/conversations/todos counters).
 - **`components/SettingsModal.tsx`** — Tabbed modal: Appearance (theme + face), Notifications (daily nudge), Integrations (Google Calendar + GitHub + Whoop w/ real logos — connect/disconnect only, live data lives in StatsView), Deployments (Fly + Vercel health pings). Version always shown in the tab sidebar header.
 - **`components/FocusOverlay.tsx`** — Distraction-free overlay surfaced from the primary focus row's "focus" pill. Blurs the page, shows meditating Gooni, fades chrome on idle, exits via X / Esc.
@@ -207,8 +212,20 @@ GET  /settings/nudge-prompt-default  → bundled default LLM instruction (used b
 POST /settings/test-nudge            → fire the digest immediately (bypasses idempotency)
 
 GET  /items?limit=50&offset=0   → focus + inbox tree (status, scale per node). Root-level pagination — server caps at 50 top-level items per tree by default; clamped to [1,200]. Each surviving root keeps its full subtree. Response carries `total_focuses` / `total_inbox` for "load more" UI.
-POST /items                     → create item; accepts status, scale, is_primary in body
-PATCH /items/{id}               → patches now accept status + scale; status syncs `committed`
+POST /items                     → create item; accepts status, scale, color in body. is_primary on items is a no-op now (moved to Todo).
+PATCH /items/{id}               → patches accept status + scale + color. status syncs `committed`.
+
+# Dashboard revamp routes (own dedicated tables, slim shapes):
+GET  /focuses                   → active (not-done) focuses, each w/ color + linked-todo progress {done,total} from `_focus_tree_node`. Drives the dashboard FocusCardsRow.
+GET  /todos                     → bucketed payload {primary, open, done_today}. `open` is sorted with `doing` floated above `not_yet`.
+POST /todos                     → inline-create. Body: `{text, focus_id?, due_date?, subtitle?, state?}`.
+PATCH /todos/{id}               → patch any of `{text, subtitle, state, focus_id, is_primary, due_date, sort_order, done}`. Setting `state="done"` (or `done=true`) auto-clears `is_primary` and syncs the linked backlog ticket (if any).
+POST /todos/{id}/cycle          → two-click checkbox handler: not_yet → doing → done. From `done`, the FE pops a state-picker — programmatic cycle bounces back to not_yet.
+POST /todos/{id}/promote-to-primary → singleton: clears any other primary, sets this one. Idempotent.
+DELETE /todos/{id}              → also clears `backlog_tickets.todo_id` for any linked ticket.
+
+POST /backlog/tickets/{id}/promote → idempotent. Creates a Todo mirroring text/subtitle and stores `ticket.todo_id`. Re-promote returns the existing pair.
+POST /backlog/tickets/{id}/demote  → deletes the linked Todo, clears `ticket.todo_id`. Backlog row stays.
 
 POST /lists/{id}/items          → add item; response includes `conflicts: [{id, text, similarity, severity}]` for near-duplicates already in the list. Pass `skip_conflict_check: true` to bypass the embed scan.
 POST /lists/{id}/similar        → cosine-search a list { text, threshold?, limit?, include_done?, exclude_item_id? } → { matches: [{id, text, similarity}] }. Read-only.
@@ -221,20 +238,30 @@ original purpose: arbitrary user-defined lists. Three dedicated tables
 own the previously-overloaded fields:
 
 - **`focuses`** (`Focus` model, `app/services/focus_service.py`):
-  long-running commitments. Carries `endgoal`, `committed`, `is_primary`
-  (singleton — only one Focus row across the whole table can be primary),
-  `status` ('committed' | 'someday'), `scale` ('quick' | 'slow'),
-  `health` (0..100), `confidence` (0..100), `start_at`, `end_at`. Routes
-  via `/items/*` (item_service facade) — focus-shaped patches land here.
+  long-running commitments. Carries `endgoal`, `committed`, `status`
+  ('committed' | 'someday'), `scale` ('quick' | 'slow'), `health`
+  (0..100), `confidence` (0..100), `start_at`, `end_at`, and `color`
+  (auto-assigned from a 10-color palette via `_next_color`, cycled by
+  total focus count). **Post-revamp:** `is_primary` MOVED to Todo
+  (active-execution lives there); the `focus_todo_links` M2M table is
+  GONE — todos link via `todos.focus_id` single-FK. Routes via `/items/*`
+  (item_service facade) AND the new `/focuses` GET.
 - **`todos`** (`Todo` model, `app/services/todo_service.py`): actionable
-  items with optional `due_date`. Linked to focuses via
-  `focus_todo_links`. Routes via `/items/*` and `/items/today-todos`.
+  items with optional `due_date`. Carries `state` enum
+  ('not_yet' | 'doing' | 'done', synced w/ legacy `done` bool),
+  `focus_id` single-FK to its parent focus, and `is_primary` singleton
+  (only one Todo across the whole table can be True; auto-cleared when
+  the row flips to done). Routes via `/items/*` AND the new `/todos*`
+  family (GET buckets / POST create / PATCH / cycle /
+  promote-to-primary / DELETE).
 - **`backlog_tickets`** (`BacklogTicket` model,
   `app/services/backlog_service.py`): engineering backlog tickets with
-  `board_status` ('todo' | 'in_progress' | 'done') + `pr_url`. Routes
-  via `/backlog/tickets`. Auto-routed from notes via
-  `feature_request_tool` when the classifier flags a feature_request
-  signal.
+  `board_status` ('not_yet' | 'doing' | 'done' — vocab remapped from
+  legacy 'todo'/'in_progress' by the dashboard-revamp migration),
+  `pr_url`, and `todo_id` FK (set when promoted into a Todo via
+  `/backlog/tickets/{id}/promote`; cleared by `/demote`). Auto-routed
+  from notes via `feature_request_tool` when the classifier flags a
+  feature_request signal.
 
 `item_service` is now a thin facade over focus_service + todo_service —
 existing `/items/*` routes still work unchanged. `_serialize_item` is
@@ -262,23 +289,23 @@ The old indexed-list format + `done <n>` / `tom <n>` / `kill <n>` reply
 commands were removed — message arrives as a single conversational chat
 message and Daniel just talks back to Gooni normally if he wants to act on it.
 
-### Focus ↔ Todo links
+### Focus ↔ Todo link (single FK)
 
-`focus_todo_links` is a many-to-many between `focuses.id` and `todos.id`
-(retargeted from list_items.id during the focus/todo/backlog extraction).
-Endpoints:
+Post-dashboard-revamp the M2M `focus_todo_links` table is gone — a Todo
+links to at most one Focus via `todos.focus_id`. Endpoints kept for
+back-compat with the legacy item_service callers; `/items/{todo_id}/focuses`
+returns a 0-or-1-element list now.
 
-- `POST /items/{focus_id}/derive-todo` — create a leaf todo + link in one
-  shot. Body `{text, due_date?}`. Returns `{todo, link_id}`.
-- `POST /items/{focus_id}/link-todo/{todo_id}` — attach an existing todo to
-  a focus. Idempotent.
-- `GET  /items/{focus_id}/todos` — todos linked to a focus.
-- `GET  /items/{todo_id}/focuses` — focuses linked to a todo.
-- `GET  /items/today-todos` — open todos due today, each row includes a
-  `focuses: [{id, text, is_primary}]` chip array. Powers the dashboard's
-  "Today's todos" section that replaced the legacy "Quick · today" focus
-  column in `FocusFlow`.
-- `DELETE /focus-todo-links/{link_id}` — sever a single link.
+- `POST /items/{focus_id}/derive-todo` — create a leaf todo with
+  `focus_id` set in one shot. Body `{text, due_date?}`. Returns
+  `{todo, link_id}` (link_id mirrors `todo.id` since there's no separate
+  link row).
+- `GET  /items/{focus_id}/todos` — todos with `focus_id == focus_id`.
+- `GET  /items/{todo_id}/focuses` — 0-or-1-element list (the parent focus).
+- `GET  /items/today-todos` — open todos due today; each row carries a
+  `focuses: [chip]` array (always 0 or 1 element under the new FK model).
+- `DELETE /focus-todo-links/{link_id}` — returns 410 Gone (M2M dropped).
+  Use `PATCH /todos/{id}` with `focus_id: null` to sever instead.
 
 ## Code Patterns
 

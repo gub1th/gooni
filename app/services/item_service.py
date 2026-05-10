@@ -18,7 +18,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Focus, FocusTodoLink, Todo
+from ..db.models import Focus, Todo
 from .focus_service import focus_service, serialize_focus
 from .todo_service import todo_service, serialize_todo
 
@@ -29,12 +29,12 @@ _STALE_DAYS = 7
 class ItemService:
     """Public surface preserved for the existing routes / callsites.
 
-    Routing rules (mirror legacy item_service behavior):
+    Routing rules:
       - parent_id None + (committed=True OR endgoal set) → focus
       - parent_id None + neither                          → todo
-      - parent_id not None                                → todo linked to
-        the parent (the parent must be a focus; we add a focus_todo_links
-        row in addition to creating the todo row)
+      - parent_id not None                                → todo with
+        focus_id set to the parent focus (legacy M2M was dropped in
+        the dashboard-revamp PR; one todo links to at most one focus).
     """
 
     # ── CRUD ────────────────────────────────────────────────────────────
@@ -67,15 +67,13 @@ class ItemService:
                 raise ValueError(
                     f"parent_id {parent_id} must reference a focus (not a todo)"
                 )
-            todo = todo_service.create(
+            return todo_service.create(
                 db,
                 text=text,
                 due_date=due_date,
                 source_note_id=source_note_id,
+                focus_id=parent.id,
             )
-            db.add(FocusTodoLink(focus_id=parent.id, todo_id=todo.id))
-            db.commit()
-            return todo
 
         is_focus = bool(committed) or bool(endgoal)
         if is_focus:
@@ -188,14 +186,11 @@ class ItemService:
 
 def _focus_tree_node(db: Session, f: Focus) -> dict[str, Any]:
     todo_count = (
-        db.query(FocusTodoLink)
-        .filter(FocusTodoLink.focus_id == f.id)
-        .count()
+        db.query(Todo).filter(Todo.focus_id == f.id).count()
     )
     done_count = (
-        db.query(FocusTodoLink)
-        .join(Todo, Todo.id == FocusTodoLink.todo_id)
-        .filter(FocusTodoLink.focus_id == f.id, Todo.done.is_(True))
+        db.query(Todo)
+        .filter(Todo.focus_id == f.id, Todo.done.is_(True))
         .count()
     )
     updated = f.updated_at or f.created_at
@@ -231,7 +226,6 @@ def _todo_tree_node(t: Todo) -> dict[str, Any]:
         # Todos don't carry these — return None for legacy consumers.
         "endgoal": None,
         "committed": False,
-        "is_primary": False,
         "status": None,
         "scale": None,
         "health": None,

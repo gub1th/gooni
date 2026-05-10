@@ -298,12 +298,15 @@ class ListItem(Base):
 
 
 class Focus(Base):
-    """Long-running commitment. Carries health/confidence/scale/primary —
-    everything that used to bloat list_items.
+    """Long-running commitment. Theme-shaped (e.g. "Ship the dashboard
+    revamp", "Get fit") with optional health/confidence telemetry. After
+    the dashboard-revamp PR, primary moved to Todo — focuses no longer
+    carry is_primary. Each focus has a `color` for the dot system that
+    visually links it to its child todos on the dashboard.
 
-    A focus has many todos (via focus_todo_links). The old "child step"
-    pattern (focus with parent_id-pointing children) is gone — child steps
-    are now todos linked to the focus.
+    A focus has many todos via the `todos.focus_id` FK (a todo links to
+    at most one focus — the legacy `focus_todo_links` M2M was dropped
+    when the dashboard revamp landed).
     """
 
     __tablename__ = "focuses"
@@ -313,9 +316,11 @@ class Focus(Base):
     subtitle = Column(Text, nullable=True)
     endgoal = Column(Text, nullable=True)
     committed = Column(Boolean, default=False, nullable=False)
-    # Singleton: only one Focus row can have is_primary=True. Enforced
-    # in focus_service.update().
-    is_primary = Column(Boolean, default=False, nullable=False)
+    # Color hex (e.g. "#22C55E") for the dot rendered on this focus's
+    # card and on every linked todo. Auto-assigned from a 10-color
+    # palette in focus_service.create when the caller doesn't supply
+    # one. Wraps after 10 focuses.
+    color = Column(String, nullable=True)
     # Engagement state: 'committed' | 'someday'. Mirrors `committed` —
     # kept for richer UI labelling.
     status = Column(String, nullable=True)
@@ -342,11 +347,12 @@ class Focus(Base):
 
 
 class Todo(Base):
-    """Actionable item with optional due_date. Lives independently of
-    `list_items` — todos are their own primitive now.
-
-    Linked to focuses via focus_todo_links (one todo can serve many
-    focuses). Sourced from notes via source_note_id.
+    """Actionable item Daniel is doing or about to do. After the
+    dashboard-revamp PR, todos carry a 3-state enum (`not_yet` | `doing`
+    | `done`), an optional `focus_id` FK (legacy M2M `focus_todo_links`
+    dropped — one todo links to at most one focus), and an `is_primary`
+    singleton flag (only one Todo across the table can have
+    is_primary=True; primary moved here from Focus).
     """
 
     __tablename__ = "todos"
@@ -354,6 +360,16 @@ class Todo(Base):
     id = Column(Integer, primary_key=True, index=True)
     text = Column(Text, nullable=False)
     subtitle = Column(Text, nullable=True)
+    # 3-state enum. Default 'not_yet' on creation. UI cycles via two
+    # checkbox clicks: not_yet → doing → done. The `done` boolean is
+    # kept in sync (state == 'done' ↔ done == True) so legacy callers
+    # that read `done` keep working without porting.
+    state = Column(String, nullable=False, default="not_yet", index=True)
+    # Optional FK back to a focus — visualised as a color dot on the
+    # todo. NULL means "free-floating todo" (groceries, calls, etc).
+    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=True, index=True)
+    # Singleton across the whole table. Service enforces the invariant.
+    is_primary = Column(Boolean, default=False, nullable=False)
     due_date = Column(DateTime, nullable=True, index=True)
     done = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime, nullable=True)
@@ -380,12 +396,19 @@ class BacklogTicket(Base):
     id = Column(Integer, primary_key=True, index=True)
     text = Column(Text, nullable=False)
     subtitle = Column(Text, nullable=True)
-    # 'todo' | 'in_progress' | 'done'. Truth table for board column:
+    # 'not_yet' | 'doing' | 'done' (aligned with Todo.state in the
+    # dashboard revamp; was 'todo' | 'in_progress' | 'done' pre-revamp,
+    # remapped in migration). Truth table for board column:
     #   done=True → Done column (regardless of board_status)
-    #   done=False + board_status='in_progress' → In Progress
+    #   done=False + board_status='doing' → In Progress
     #   otherwise → Todo column
     board_status = Column(String, nullable=True)
     pr_url = Column(Text, nullable=True)
+    # Set when this ticket has been promoted into Daniel's todo list.
+    # Promote = create a Todo with focus_id null, link it here. Demote =
+    # delete the linked Todo, clear this column. When the linked todo's
+    # state flips to 'done', the ticket auto-marks done too.
+    todo_id = Column(Integer, ForeignKey("todos.id"), nullable=True, index=True)
     done = Column(Boolean, default=False, nullable=False)
     completed_at = Column(DateTime, nullable=True)
     sort_order = Column(Integer, default=0, nullable=False)
@@ -472,23 +495,6 @@ class Settings(Base):
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
-
-
-class FocusTodoLink(Base):
-    """Many-to-many: a todo can serve multiple focuses, a focus can have many
-    todos. After the focus / todo extraction, FKs point at the dedicated
-    `focuses` and `todos` tables (was both pointing at `list_items.id`).
-    """
-
-    __tablename__ = "focus_todo_links"
-    __table_args__ = (
-        UniqueConstraint("focus_id", "todo_id", name="uq_focus_todo_link"),
-    )
-
-    id = Column(Integer, primary_key=True)
-    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=False, index=True)
-    todo_id = Column(Integer, ForeignKey("todos.id"), nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class TrackedRepo(Base):

@@ -740,6 +740,161 @@ export async function reorderItems(ids: number[]): Promise<void> {
   if (!res.ok) throw new Error("Failed to reorder items");
 }
 
+// ── Dashboard revamp: dedicated focus + todo tables ────────────────────
+//
+// After the schema split, focuses and todos no longer ride the legacy
+// `list_items` god-table. The /focuses + /todos endpoints below return
+// these slimmed shapes — used by the new dashboard FocusCardsRow + the
+// TodoList component. ApiItem above is kept for the legacy item tree
+// callers until they migrate.
+
+export type TodoState = "not_yet" | "doing" | "done";
+
+export interface ApiTodo {
+  id: number;
+  text: string;
+  subtitle: string | null;
+  state: TodoState;
+  // Single FK now (legacy M2M `focus_todo_links` was dropped).
+  focus_id: number | null;
+  // Singleton across the whole todos table. Crowned at the top of the
+  // dashboard list, auto-cleared on completion.
+  is_primary: boolean;
+  due_date: string | null;
+  done: boolean;
+  completed_at: string | null;
+  sort_order: number;
+  source_note_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+// Bucketed payload from GET /todos. Frontend renders `primary` as the
+// crowned row, `open` below it, and `done_today` in the collapsed
+// "Completed" toggle of the Done section.
+export interface ApiTodoBundle {
+  primary: ApiTodo | null;
+  open: ApiTodo[];
+  done_today: ApiTodo[];
+}
+
+export interface ApiFocus {
+  id: number;
+  text: string;
+  subtitle: string | null;
+  endgoal: string | null;
+  committed: boolean;
+  done: boolean;
+  status: FocusStatus | null;
+  scale: FocusScale | null;
+  // Auto-assigned palette color (one of 10) used by the focus card's
+  // left rail + the dot rendered next to linked todos.
+  color: string | null;
+  health: number | null;
+  confidence: number | null;
+  start_at: string | null;
+  end_at: string | null;
+  completed_at: string | null;
+  sort_order: number;
+  source_note_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+  // Tree-node compat fields baked in by `_focus_tree_node` so the same
+  // object renders in the dashboard FocusCardsRow without a second fetch.
+  children?: unknown[];
+  progress?: { done: number; total: number };
+  stale?: boolean;
+}
+
+export async function fetchFocuses(): Promise<ApiFocus[]> {
+  const res = await apiFetch(`${BASE}/focuses`);
+  if (!res.ok) throw new Error("Failed to fetch focuses");
+  return res.json();
+}
+
+export async function fetchTodos(): Promise<ApiTodoBundle> {
+  const res = await apiFetch(`${BASE}/todos`);
+  if (!res.ok) throw new Error("Failed to fetch todos");
+  return res.json();
+}
+
+export async function createTodo(body: {
+  text: string;
+  subtitle?: string | null;
+  focus_id?: number | null;
+  due_date?: string | null;
+  state?: TodoState;
+}): Promise<ApiTodo> {
+  const res = await apiFetch(`${BASE}/todos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to create todo");
+  return res.json();
+}
+
+export async function updateTodo(
+  id: number,
+  patch: Partial<{
+    text: string;
+    subtitle: string | null;
+    state: TodoState;
+    focus_id: number | null;
+    is_primary: boolean;
+    due_date: string | null;
+    sort_order: number;
+    done: boolean;
+  }>,
+): Promise<ApiTodo> {
+  const res = await apiFetch(`${BASE}/todos/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update todo");
+  return res.json();
+}
+
+export async function cycleTodoState(id: number): Promise<ApiTodo> {
+  const res = await apiFetch(`${BASE}/todos/${id}/cycle`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to cycle todo");
+  return res.json();
+}
+
+export async function deleteTodo(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/todos/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete todo");
+}
+
+export async function promoteTodoToPrimary(id: number): Promise<ApiTodo> {
+  const res = await apiFetch(`${BASE}/todos/${id}/promote-to-primary`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to promote todo to primary");
+  return res.json();
+}
+
+export async function promoteBacklogTicket(
+  ticketId: number,
+): Promise<{ ticket: ApiBacklogTicket; todo: ApiTodo }> {
+  const res = await apiFetch(`${BASE}/backlog/tickets/${ticketId}/promote`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to promote backlog ticket");
+  return res.json();
+}
+
+export async function demoteBacklogTicket(
+  ticketId: number,
+): Promise<ApiBacklogTicket> {
+  const res = await apiFetch(`${BASE}/backlog/tickets/${ticketId}/demote`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to demote backlog ticket");
+  return res.json();
+}
+
 // Focus ↔ Todo links — many-to-many. The same todo can appear under
 // multiple focuses; the chip on a todo row shows where it's linked.
 export interface FocusChip {
@@ -806,7 +961,11 @@ export interface ApiList {
   created_at: string | null;
 }
 
-export type BoardStatus = "todo" | "in_progress" | "done";
+// Board status mirrors the new todo state vocab so a backlog ticket
+// promoted to a todo can share the same enum. Old values ('todo' /
+// 'in_progress') were remapped by the dashboard-revamp migration to
+// 'not_yet' / 'doing'.
+export type BoardStatus = "not_yet" | "doing" | "done";
 
 // Generic list row — focus / todo / backlog fields all moved to dedicated
 // tables in the focus/todo/backlog extraction. ApiListItem now mirrors
@@ -832,6 +991,10 @@ export interface ApiBacklogTicket {
   subtitle: string | null;
   board_status: BoardStatus | null;
   pr_url: string | null;
+  // Set when this backlog ticket was promoted into a todo via
+  // POST /backlog/tickets/{id}/promote. Null means "engineering-only,
+  // not on Daniel's todo list yet".
+  todo_id: number | null;
   done: boolean;
   completed_at: string | null;
   sort_order: number;
