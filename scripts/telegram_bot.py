@@ -45,15 +45,29 @@ async def _respond(update: Update, message: str, image_url: str | None = None) -
         # Sender not allowlisted. The chat_filter on the handler should also
         # reject these, but defense in depth.
         return
-    raw, rendered = result
-    try:
-        await update.message.reply_text(rendered, parse_mode="HTML")
-    except Exception as e:
-        # If Telegram rejects our HTML (rare — escapes are conservative, but
-        # a stray tag can slip through), retry as raw markdown rather than
-        # dropping the response on the floor.
-        print(f"telegram HTML send error: {e}; falling back to plain text")
-        await update.message.reply_text(raw)
+    raw, segments = result
+    # Multi-bubble cadence: send each segment as its own message with a small
+    # delay between bubbles so the conversation reads like a person texting
+    # instead of one wall of text. See split_for_bots in messaging/base.py.
+    for idx, segment in enumerate(segments):
+        if idx > 0:
+            # Brief pause + typing indicator so consecutive bubbles don't feel
+            # bot-instantaneous. 600ms is short enough to feel responsive.
+            try:
+                await update.message.chat.send_action(action="typing")
+            except Exception:
+                pass
+            await asyncio.sleep(0.6)
+        try:
+            await update.message.reply_text(segment, parse_mode="HTML")
+        except Exception as e:
+            # If Telegram rejects our HTML (rare — escapes are conservative,
+            # but a stray tag can slip through), retry as raw markdown rather
+            # than dropping the response on the floor. Use the raw full text
+            # only on the first segment failure to avoid duplicating content.
+            print(f"telegram HTML send error: {e}; falling back to plain text")
+            await update.message.reply_text(raw if idx == 0 else segment)
+            break
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

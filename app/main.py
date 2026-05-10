@@ -1702,8 +1702,13 @@ async def imessage_webhook(
     result = dispatch_inbound(imessage_channel, handle, text, db)
     if result is None:
         return {"ok": True, "skipped": "not_allowlisted"}
-    _raw, formatted = result
-    imessage_channel.send(handle, formatted)
+    _raw, segments = result
+    # Multi-bubble cadence: each segment goes out as its own iMessage with a
+    # short delay so the reply feels like texting, not bot dump.
+    for idx, segment in enumerate(segments):
+        if idx > 0:
+            time.sleep(0.6)
+        imessage_channel.send(handle, segment)
     return {"ok": True}
 
 
@@ -1792,8 +1797,13 @@ async def whatsapp_webhook(
                 result = dispatch_inbound(whatsapp_channel, sender, body, db)
                 if result is None:
                     continue  # not allowlisted; silent drop
-                _raw, formatted = result
-                whatsapp_channel.send(sender, formatted)
+                _raw, segments = result
+                # Multi-bubble cadence: WA Cloud API sends one message per
+                # POST; loop with a short pause so bubbles feel like texting.
+                for idx, segment in enumerate(segments):
+                    if idx > 0:
+                        time.sleep(0.6)
+                    whatsapp_channel.send(sender, segment)
                 handled_any = True
     return {"ok": True, "handled": handled_any}
 
