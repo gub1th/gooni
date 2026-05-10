@@ -8,7 +8,7 @@ import { GooniFacePreview } from "./GooniMascot";
 import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
 import { RepoPicker } from "./RepoPicker";
-import { CommentAvatar, goofyEmojiFor } from "./notes/CommentAvatar";
+import { CommentAvatar } from "./notes/CommentAvatar";
 
 interface SettingsModalProps {
   open: boolean;
@@ -298,11 +298,6 @@ function ProfileTab() {
     }
   }
 
-  // Default preview = the deterministic goofy emoji avatar (same renderer
-  // the comments use), so the user sees their fallback identity before
-  // they upload.
-  const goofy = goofyEmojiFor("daniel");
-
   return (
     <>
       <h2 style={{
@@ -314,8 +309,8 @@ function ProfileTab() {
       <section style={{ marginBottom: 22 }}>
         <SectionLabel>avatar</SectionLabel>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {/* Preview = uploaded URL if present, else the goofy emoji shape
-              that NoteComments will render as the fallback. */}
+          {/* Preview = uploaded URL if present, else the owner initial tile
+              (same renderer NoteComments uses as the fallback). */}
           {avatarUrl ? (
             <img
               src={avatarUrl}
@@ -327,7 +322,7 @@ function ProfileTab() {
               }}
             />
           ) : (
-            <CommentAvatar identity={{ kind: "user", display: "Daniel" }} avatarUrl={null} size={72} />
+            <CommentAvatar identity={{ kind: "owner", display: "Daniel", initial: "D" }} avatarUrl={null} size={72} />
           )}
           <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -360,7 +355,7 @@ function ProfileTab() {
             <span style={{ fontSize: 11.5, color: "#94A3B8", fontFamily: FONT }}>
               {avatarUrl
                 ? (savedFlash ? "✓ saved" : "PNG / JPG, up to 10 MB")
-                : `Default avatar: ${goofy} (deterministic per name)`}
+                : "Default avatar: your initial on a soft pastel tile."}
             </span>
             {error && (
               <span style={{ fontSize: 11.5, color: "#DC2626", fontFamily: FONT }}>

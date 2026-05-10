@@ -162,6 +162,17 @@ function PublicNotePage() {
               .public-prose a { color: #2B6CB0; text-decoration: underline;
                                 text-decoration-thickness: 1px; text-underline-offset: 2px; }
               .public-prose a:hover { color: #1A4F8C; }
+              /* Tables — mirror the editor styling so public renders match what
+                 you see while writing. Browsers default to borderless tables, so
+                 without these rules a TipTap table just looks like floating cells. */
+              .public-prose table { border-collapse: collapse; width: 100%;
+                                    margin: 16px 0; font-size: 14px;
+                                    display: block; overflow-x: auto; }
+              .public-prose table td, .public-prose table th {
+                  border: 1px solid rgba(0,0,0,0.12); padding: 6px 10px;
+                  min-width: 80px; vertical-align: top; }
+              .public-prose table th { background: rgba(0,0,0,0.04); font-weight: 600;
+                                       text-align: left; }
               /* First heading in content shouldn't double-space against the meta line. */
               .public-prose > :first-child { margin-top: 0; }
             `}</style>
