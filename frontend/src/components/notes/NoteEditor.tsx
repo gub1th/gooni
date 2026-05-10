@@ -112,7 +112,7 @@ function useEditorStyles() {
       .gooni-note-editor {
         outline: none;
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-        font-size: 15px;
+        font-size: 14.5px;
         line-height: 1.55;
         color: #1C1C1E;
         -webkit-font-smoothing: antialiased;
@@ -1552,7 +1552,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           ref={scrollContainerRef}
           style={{ flex: 1, overflowY: "auto", boxSizing: "border-box", width: "100%" }}
         >
-          <div style={{ maxWidth: 640, width: "100%", margin: "0 auto", padding: "40px 64px", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: 780, width: "100%", margin: "0 auto", padding: "48px 72px", boxSizing: "border-box" }}>
             {!activeNote && (
               <div
                 style={{
@@ -1634,14 +1634,14 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                   style={{
                     display: "block",
                     width: "100%",
-                    fontSize: 30,
+                    fontSize: 24,
                     fontWeight: 700,
-                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
                     color: "var(--gooni-text, #1C1C1E)",
                     border: "none",
                     outline: "none",
                     background: "transparent",
-                    marginBottom: 16,
+                    marginBottom: 14,
                     padding: 0,
                     lineHeight: 1.25,
                     letterSpacing: "-0.4px",
