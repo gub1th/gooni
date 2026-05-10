@@ -915,6 +915,161 @@ def complete_backlog_item(match: str) -> str:
     return f"[x] {item['text']}"
 
 
+# ── Backlog-tickets MCP surface ──────────────────────────────────────────
+#
+# Mirrors read_list / add_list_item / find_similar_items / delete_list_item
+# but routes through /backlog/tickets/* directly. The legacy list-shaped
+# tools refuse list_ref="backlog" (the underlying list_items rows were
+# extracted into the dedicated `backlog_tickets` table — they now sit
+# empty).
+
+
+@mcp.tool()
+def read_backlog(limit: int = 50, include_done: bool = False) -> str:
+    """Read tickets from the engineering backlog board.
+
+    Backlog tickets carry a board_status enum ('not_yet' | 'doing' |
+    'done') and an optional pr_url. They live in `backlog_tickets`,
+    NOT `list_items` — for arbitrary user lists, use read_list.
+
+    Args:
+        limit: max tickets to return (default 50)
+        include_done: include shipped tickets (default False)
+    """
+    resp = _session.get(
+        f"{BASE_URL}/backlog/tickets?include_done={'true' if include_done else 'false'}",
+        timeout=10,
+    )
+    resp.raise_for_status()
+    rows = resp.json() or []
+    rows = rows[:limit]
+    if not rows:
+        return "(backlog is empty)"
+    lines = ["# backlog"]
+    for t in rows:
+        mark = "[x]" if t.get("done") else "[ ]"
+        status = t.get("board_status") or "-"
+        sub = f" — {t['subtitle']}" if t.get("subtitle") else ""
+        pr = f" ({t['pr_url']})" if t.get("pr_url") else ""
+        note_ref = f" [note #{t['source_note_id']}]" if t.get("source_note_id") else ""
+        lines.append(f"#{t['id']} {mark} [{status}] {t['text']}{sub}{pr}{note_ref}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_backlog_item(
+    text: str,
+    subtitle: str = None,
+    skip_conflict_check: bool = False,
+) -> str:
+    """Add a ticket to the engineering backlog.
+
+    Conflict detection is on by default: the backend cosine-searches
+    existing tickets and surfaces near-duplicates. The ticket is still
+    inserted — but the response flags any matches so the caller can
+    decide whether to merge or delete the new one. Pass
+    `skip_conflict_check=True` for bulk imports / migrations.
+
+    Args:
+        text: ticket text
+        subtitle: optional secondary line
+        skip_conflict_check: bypass embed + dedup scan (default False)
+    """
+    text = (text or "").strip()
+    if not text:
+        return "(text required)"
+    body: dict = {"text": text}
+    if subtitle:
+        body["subtitle"] = subtitle
+    if skip_conflict_check:
+        body["skip_conflict_check"] = True
+    resp = _session.post(f"{BASE_URL}/backlog/tickets", json=body, timeout=20)
+    resp.raise_for_status()
+    t = resp.json()
+    msg = f"added backlog #{t['id']}: {t['text']}"
+    conflicts = t.get("conflicts") or []
+    if conflicts:
+        msg += "\n\n⚠ near-duplicate(s) already on the board:"
+        for c in conflicts:
+            sev = c.get("severity", "medium")
+            sim = c.get("similarity", 0)
+            msg += f"\n  [{sev} {sim:.2f}] #{c['id']} {c['text']}"
+        msg += "\n(call delete_backlog_item or PATCH if this should be merged.)"
+    return msg
+
+
+@mcp.tool()
+def find_similar_backlog(
+    text: str,
+    threshold: float = 0.78,
+    limit: int = 5,
+    include_done: bool = False,
+) -> str:
+    """Cosine-search the backlog for tickets similar to `text` without
+    inserting anything. Use before add_backlog_item to confirm an idea
+    isn't already on the board, or to find merge candidates.
+
+    Args:
+        text: query string
+        threshold: minimum cosine similarity (0..1, default 0.78)
+        limit: max matches to return (default 5)
+        include_done: include shipped tickets (default False)
+    """
+    text = (text or "").strip()
+    if not text:
+        return "(text required)"
+    resp = _session.post(
+        f"{BASE_URL}/backlog/tickets/similar",
+        json={
+            "text": text,
+            "threshold": float(threshold),
+            "limit": int(limit),
+            "include_done": bool(include_done),
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+    matches = resp.json().get("matches") or []
+    if not matches:
+        return f"(no backlog tickets above similarity {threshold:.2f})"
+    lines = [f"# similar to '{text}' on backlog:"]
+    for m in matches:
+        status = m.get("board_status") or "-"
+        lines.append(f"[{m['similarity']:.2f}] #{m['id']} [{status}] {m['text']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def delete_backlog_item(match: str) -> str:
+    """Delete a backlog ticket by text match. Refuses if the match is
+    ambiguous — narrow it to exactly one ticket. To merge instead of
+    delete, PATCH the surviving ticket and DELETE the dupe.
+
+    Args:
+        match: substring of the ticket text or subtitle (case-insensitive)
+    """
+    match_l = (match or "").strip().lower()
+    if not match_l:
+        return "(empty match string)"
+    resp = _session.get(f"{BASE_URL}/backlog/tickets", timeout=10)
+    resp.raise_for_status()
+    rows = resp.json() or []
+    candidates = [
+        t for t in rows
+        if match_l in (t.get("text") or "").lower()
+        or match_l in (t.get("subtitle") or "").lower()
+    ]
+    if not candidates:
+        return f"(no backlog tickets matching '{match}')"
+    if len(candidates) > 1:
+        preview = "; ".join(f"#{t['id']} {t['text'][:40]}" for t in candidates[:5])
+        return f"(ambiguous: {len(candidates)} matches — {preview}). Narrow the substring."
+    t = candidates[0]
+    del_resp = _session.delete(f"{BASE_URL}/backlog/tickets/{t['id']}", timeout=10)
+    del_resp.raise_for_status()
+    return f"deleted backlog #{t['id']}: {t['text']}"
+
+
 def _fetch_focuses(include_done: bool = False, include_someday: bool = True) -> list[dict]:
     """Top-level focus items (committed roots in the new /items tree).
 
@@ -1105,10 +1260,24 @@ def _fetch_lists() -> list[dict]:
 
 
 def _resolve_list(list_ref: str) -> tuple[dict | None, str | None]:
-    """Resolve a list by type ('backlog'/'todo'/'focus'), name, or numeric id."""
+    """Resolve a list by type ('todo'/'focus'), name, or numeric id.
+
+    `list_ref="backlog"` is REJECTED — backlog tickets were extracted
+    out of `list_items` into a dedicated `backlog_tickets` table, so
+    the legacy "Backlog" list_items row is empty. Callers must use the
+    backlog-tickets surface instead: read_backlog, add_backlog_item,
+    find_similar_backlog, complete_backlog_item, delete_backlog_item.
+    """
     ref = (list_ref or "").strip()
     if not ref:
         return None, "(empty list reference)"
+    if ref.lower() == "backlog":
+        return None, (
+            "(list_ref='backlog' is deprecated — backlog tickets live in "
+            "their own table now. Use read_backlog / add_backlog_item / "
+            "find_similar_backlog / complete_backlog_item / "
+            "delete_backlog_item instead.)"
+        )
     lists = _fetch_lists()
     # numeric id wins
     if ref.isdigit():
@@ -1187,15 +1356,19 @@ def _find_list_item(
 
 
 @mcp.tool()
-def read_list(list_ref: str = "backlog", limit: int = 50, include_done: bool = False) -> str:
-    """Read items from a Gooni list — backlog, todo, focus, or any user-created list.
+def read_list(list_ref: str = "todo", limit: int = 50, include_done: bool = False) -> str:
+    """Read items from a Gooni list — todo, focus, or any user-created list.
 
-    Lists are looked up by type ('backlog'/'todo'/'focus') first, then by name,
+    For BACKLOG tickets, use `read_backlog` — backlog rows were
+    extracted out of `list_items` into a dedicated table.
+
+    Lists are looked up by type ('todo'/'focus') first, then by name,
     then by numeric id. Type-based lookup is the stable path: it survives DB
     rebuilds where ids shift.
 
     Args:
-        list_ref: 'backlog' (default), 'todo', 'focus', a list name, or a numeric id
+        list_ref: 'todo' (default), 'focus', a list name, or a numeric id.
+            'backlog' is rejected — use read_backlog instead.
         limit: max items to return (default 50)
         include_done: include checked-off items (default False)
     """
@@ -1226,11 +1399,15 @@ def read_list(list_ref: str = "backlog", limit: int = 50, include_done: bool = F
 @mcp.tool()
 def add_list_item(
     text: str,
-    list_ref: str = "backlog",
+    list_ref: str = "todo",
     subtitle: str = None,
     skip_conflict_check: bool = False,
 ) -> str:
-    """Add an item to a Gooni list (defaults to backlog).
+    """Add an item to a Gooni list.
+
+    For BACKLOG tickets use `add_backlog_item` — backlog lives in its
+    own table now. This tool only handles `list_items` rows (todo /
+    focus singletons + user-created generic lists).
 
     Conflict detection is on by default: the backend cosine-searches existing
     items in the same list and surfaces near-duplicates. The item is still
@@ -1240,7 +1417,8 @@ def add_list_item(
 
     Args:
         text: item text (e.g. "spike WhatsApp business onboarding")
-        list_ref: 'backlog' (default), 'todo', 'focus', name, or numeric id
+        list_ref: 'todo' (default), 'focus', name, or numeric id.
+            'backlog' is rejected — use add_backlog_item instead.
         subtitle: optional secondary line shown under the item
         skip_conflict_check: bypass embed + dedup scan (default False)
     """
@@ -1273,7 +1451,7 @@ def add_list_item(
 @mcp.tool()
 def find_similar_items(
     text: str,
-    list_ref: str = "backlog",
+    list_ref: str = "todo",
     threshold: float = 0.78,
     limit: int = 5,
     include_done: bool = False,
@@ -1282,9 +1460,13 @@ def find_similar_items(
     inserting anything. Useful before adding to check if an idea already
     exists, or to find merge candidates among existing items.
 
+    For BACKLOG search use `find_similar_backlog` — backlog rows live
+    in a separate table.
+
     Args:
         text: query string
-        list_ref: which list to search (default 'backlog')
+        list_ref: which list to search (default 'todo'). 'backlog' is
+            rejected — use find_similar_backlog instead.
         threshold: minimum cosine similarity (0..1, default 0.78)
         limit: max matches to return (default 5)
         include_done: include checked-off items (default False)
@@ -1316,12 +1498,15 @@ def find_similar_items(
 
 
 @mcp.tool()
-def check_list_item(match: str, list_ref: str = "backlog", done: bool = True) -> str:
+def check_list_item(match: str, list_ref: str = "todo", done: bool = True) -> str:
     """Toggle a list item's done flag by text match (first-hit-wins, like claim_task).
+
+    For BACKLOG tickets use `complete_backlog_item`.
 
     Args:
         match: substring of the item's text (case-insensitive)
-        list_ref: which list to look in (default 'backlog')
+        list_ref: which list to look in (default 'todo'). 'backlog' is
+            rejected — use complete_backlog_item instead.
         done: True to check, False to uncheck
     """
     lst, err = _resolve_list(list_ref)
@@ -1339,13 +1524,16 @@ def check_list_item(match: str, list_ref: str = "backlog", done: bool = True) ->
 
 
 @mcp.tool()
-def delete_list_item(match: str, list_ref: str = "backlog") -> str:
+def delete_list_item(match: str, list_ref: str = "todo") -> str:
     """Delete a list item by text match. Refuses if the match is ambiguous —
     you must narrow it to exactly one item.
 
+    For BACKLOG tickets use `delete_backlog_item`.
+
     Args:
         match: substring of the item's text (case-insensitive). Must hit exactly one item.
-        list_ref: which list to look in (default 'backlog')
+        list_ref: which list to look in (default 'todo'). 'backlog' is
+            rejected — use delete_backlog_item instead.
     """
     lst, err = _resolve_list(list_ref)
     if err:

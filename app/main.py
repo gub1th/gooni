@@ -1396,6 +1396,13 @@ def backlog_list(include_done: bool = True, db: Session = Depends(get_db)):
 
 @app.post("/backlog/tickets")
 def backlog_create(body: dict, db: Session = Depends(get_db)):
+    """Create a backlog ticket. Mirrors /lists/{id}/items conflict
+    detection: response carries `conflicts: [{id, text, similarity,
+    severity}]` for near-duplicates already on the board, so a caller
+    (MCP, FE) can prompt the user to merge instead of stacking dupes.
+    Pass `skip_conflict_check: true` to bypass the embed scan (bulk
+    imports / migrations).
+    """
     from .services.backlog_service import backlog_service, serialize_ticket
     text_val = (body.get("text") or "").strip()
     if not text_val:
@@ -1407,7 +1414,58 @@ def backlog_create(body: dict, db: Session = Depends(get_db)):
         source_note_id=body.get("source_note_id"),
         board_status=body.get("board_status"),
     )
-    return serialize_ticket(ticket)
+    out = serialize_ticket(ticket)
+    if not body.get("skip_conflict_check"):
+        # Severity bands match list_service: 0.92+ = high (almost
+        # certainly the same item), 0.85+ = medium, otherwise low.
+        text_for_match = text_val
+        if body.get("subtitle"):
+            text_for_match = f"{text_val}\n{body.get('subtitle')}"
+        matches = backlog_service.find_similar(
+            db, text=text_for_match, threshold=0.78, limit=5,
+        )
+        conflicts = []
+        for tk, sim in matches:
+            if tk.id == ticket.id:
+                continue
+            severity = "high" if sim >= 0.92 else ("medium" if sim >= 0.85 else "low")
+            conflicts.append({
+                "id": tk.id, "text": tk.text,
+                "similarity": round(sim, 3), "severity": severity,
+            })
+        if conflicts:
+            out["conflicts"] = conflicts
+    return out
+
+
+@app.post("/backlog/tickets/similar")
+def backlog_similar(body: dict, db: Session = Depends(get_db)):
+    """Cosine-search backlog tickets without inserting. Body:
+    {text, threshold?, limit?, include_done?}. Mirrors the
+    /lists/{id}/similar shape so MCP find_similar_backlog can match
+    find_similar_items's response contract.
+    """
+    from .services.backlog_service import backlog_service
+    text_val = (body.get("text") or "").strip()
+    if not text_val:
+        raise HTTPException(status_code=400, detail="text required")
+    threshold = float(body.get("threshold", 0.78))
+    limit = int(body.get("limit", 5))
+    include_done = bool(body.get("include_done", False))
+    matches = backlog_service.find_similar(
+        db, text=text_val, threshold=threshold, limit=limit,
+    )
+    out = []
+    for tk, sim in matches:
+        if not include_done and tk.done:
+            continue
+        out.append({
+            "id": tk.id, "text": tk.text, "subtitle": tk.subtitle,
+            "similarity": round(sim, 3),
+            "board_status": tk.board_status,
+            "done": bool(tk.done),
+        })
+    return {"matches": out}
 
 
 @app.patch("/backlog/tickets/{ticket_id}")
