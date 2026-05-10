@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.57.0 — 2026-05-10 (minor)
+
+- feat(notes): note ux batch — empty-body fix, floating publish, memories panel, comment avatars, apple-notes editor lean (#172)
+
 ## 0.56.1 — 2026-05-10 (patch)
 
 - fix(notes): empty-overwrite guard catches TipTap empty doc + chip click awaits save (#171)
