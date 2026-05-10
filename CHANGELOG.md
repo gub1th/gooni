@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.54.0 — 2026-05-10 (minor)
+
+- feat(dashboard): revamp — Whoop strip + focus cards + todo list (state enum, primary→Todo, color palette) (#168)
+
 ## 0.53.1 — 2026-05-09 (patch)
 
 - fix(notes): TipTap composer + HTML rendering for comments (in-app + public) (#167)
