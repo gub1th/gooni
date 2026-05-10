@@ -429,6 +429,33 @@ export async function fetchWhoopToday(refresh = false): Promise<WhoopToday> {
   return res.json();
 }
 
+export interface LeetcodeToday {
+  available: boolean;
+  username?: string;
+  snapshot_date?: string | null;
+  streak?: number | null;
+  total_active_days?: number | null;
+  today_count?: number | null;
+  week_count?: number | null;
+  total_solved?: number | null;
+  easy_solved?: number | null;
+  medium_solved?: number | null;
+  hard_solved?: number | null;
+  ranking?: number | null;
+  // {unix_ts_string: count}, last 365d
+  calendar?: Record<string, number>;
+  updated_at?: string | null;
+}
+export async function fetchLeetcodeToday(refresh = false): Promise<LeetcodeToday> {
+  const url = `${BASE}/leetcode/today${refresh ? "?refresh=1" : ""}`;
+  const res = await apiFetch(url);
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`LeetCode today fetch failed: ${msg || res.status}`);
+  }
+  return res.json();
+}
+
 export interface GithubRepo {
   owner: string;
   name: string;
