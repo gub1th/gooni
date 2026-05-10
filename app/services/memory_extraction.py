@@ -310,8 +310,9 @@ feature_requests:
 memories:
 - Persistent facts about Daniel — same shape as before.
 - "preference" = stable like/dislike. "fact" = declarative truth (includes
-  identity-shaped aspirations). "routine" = recurring habit. "constraint"
-  = hard limit. "episode" = notable moment.
+  identity-shaped aspirations, relationships, family). "routine" = recurring
+  habit. "constraint" = hard limit OR a self-named recurring pattern Daniel
+  has flagged about himself. "episode" = notable moment.
 - DO NOT emit "goal" — action-shaped aspirations belong in focuses list
   (list_items), not memory. Skip extraction; focus pipeline handles them.
 - key is snake_case for typed memories; null for episodes.
@@ -320,6 +321,42 @@ memories:
 - Skip temporary states or one-off remarks.
 - Empty when text is just a question, a thought, or a feature request with nothing
   declarative about Daniel.
+
+- Identity / relationship / self-pattern signals — under-extracted in
+  practice; fire on these even when they sound casual:
+  - Family or close-relationship mentions are FACT-typed when they reveal
+    durable info (who, role, dynamic). Casual references count.
+      Text "buying flowers for my mom for mother's day" →
+        {{type:"fact", key:"family_mom", content:"Daniel has a mother
+        he wants to honor with thoughtful gestures (Mother's Day flowers
+        mentioned).", scope:"global", confidence:0.85}}
+      Text "my brother just moved to Austin" →
+        {{type:"fact", key:"family_brother_location",
+        content:"Daniel's brother lives in Austin (recent move).",
+        scope:"global", confidence:0.9}}
+  - Recurring self-patterns Daniel names about himself = CONSTRAINT-typed
+    even though they're not hard limits, because they're load-bearing for
+    every future reply. Phrasing cues: "i notice i...", "i always...",
+    "i have a hard time with...", "i keep doing X", "the pattern is...".
+      Text "i build productivity systems but resist being governed by them" →
+        {{type:"constraint", key:"meta_resists_own_systems",
+        content:"Daniel builds productivity systems but resists submitting
+        to them — the friction is not having tools, it's accepting their
+        rules.", scope:"global", confidence:0.85}}
+      Text "i forget gooni exists when i'm scattered" →
+        {{type:"constraint", key:"forgets_gooni_when_scattered",
+        content:"Daniel loses recall of Gooni at the moments he most needs
+        it (scattered / drifting state).", scope:"global", confidence:0.9}}
+  - Identity-shaped statements ("i'm the kind of person who...", "i value
+    X over Y", "i think of myself as...") = FACT-typed.
+      Text "i'd rather ship ugly than polish forever" →
+        {{type:"fact", key:"identity_ship_over_polish",
+        content:"Daniel prefers shipping rough work to over-polishing —
+        velocity over polish is a stated value.", scope:"global",
+        confidence:0.9}}
+- Bias for capture on these three categories. Daniel is building a memory
+  store; missing a relationship or self-pattern signal is more expensive
+  than emitting a near-duplicate (the reconcile step will dedupe).
 
 worth_expanding (bool):
 - TRUE if the text names a topic, idea, concept, project, or open question that
