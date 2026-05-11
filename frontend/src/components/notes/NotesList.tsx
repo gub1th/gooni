@@ -237,6 +237,9 @@ export function NotesList() {
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [cleanConfirm, setCleanConfirm] = useState(false);
   const [search, setSearch] = useState("");
+  // Public-only toggle for the All Notes view. Lets Daniel scan + edit
+  // his published portfolio without hunting through every space.
+  const [publicOnly, setPublicOnly] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -245,14 +248,17 @@ export function NotesList() {
   const allNotes = notes[spaceId] ?? [];
 
   // Clear search whenever the user switches spaces — a query only makes sense
-  // in the space it was typed in.
+  // in the space it was typed in. Same for the public-only toggle: it only
+  // applies on All Notes, so reset when leaving.
   useEffect(() => { setSearch(""); }, [spaceId]);
+  useEffect(() => { if (!isAllNotes) setPublicOnly(false); }, [isAllNotes]);
 
   // Client-side title+excerpt search. Case-insensitive substring match.
   // List rows only carry `excerpt` (no full body) — full-content search
   // lives behind the semantic `/mcp/notes/search` route used by AllNotes.
   const searchTrimmed = search.trim().toLowerCase();
-  const noteList = !searchTrimmed ? allNotes : allNotes.filter((n) => {
+  const publicFiltered = (isAllNotes && publicOnly) ? allNotes.filter((n) => n.is_public) : allNotes;
+  const noteList = !searchTrimmed ? publicFiltered : publicFiltered.filter((n) => {
     const title = (n.title ?? "").toLowerCase();
     if (title.includes(searchTrimmed)) return true;
     const plain = (n.excerpt ?? (n.content ? stripHtml(n.content) : "")).toLowerCase();
@@ -341,6 +347,29 @@ export function NotesList() {
         </span>
         {isAllNotes && (
           <button
+            onClick={() => setPublicOnly((v) => !v)}
+            title={publicOnly ? "Showing public notes only — click to show all" : "Filter to public notes"}
+            style={{
+              width: 26, height: 26, borderRadius: 6,
+              background: publicOnly ? "rgba(10,132,255,0.14)" : "transparent",
+              border: "none", cursor: "pointer",
+              color: publicOnly ? "#0A84FF" : "#8E8E93",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: 0, flexShrink: 0, transition: "background 0.1s, color 0.1s",
+            }}
+            onMouseEnter={(e) => { if (!publicOnly) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+            onMouseLeave={(e) => { if (!publicOnly) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+              <path d="M2 8H14" stroke="currentColor" strokeWidth="1.4"/>
+              <path d="M8 2C10 4.5 10 11.5 8 14" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+              <path d="M8 2C6 4.5 6 11.5 8 14" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+            </svg>
+          </button>
+        )}
+        {isAllNotes && (
+          <button
             onClick={handleCleanInbox}
             onMouseLeave={() => setCleanConfirm(false)}
             title={cleanConfirm ? "Click again to confirm" : "Delete empty untitled notes"}
@@ -416,7 +445,11 @@ export function NotesList() {
       <div style={{ flex: 1, overflowY: "auto" }}>
         {noteList.length === 0 && (
           <div style={{ padding: "32px 14px", textAlign: "center", color: "#AEAEB2", fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-            {searchTrimmed ? `No notes match “${search.trim()}”` : "No notes yet. Press + to create one."}
+            {searchTrimmed
+              ? `No notes match “${search.trim()}”`
+              : (isAllNotes && publicOnly)
+                ? "No public notes yet. Toggle 🌐 on a note to publish."
+                : "No notes yet. Press + to create one."}
           </div>
         )}
 
