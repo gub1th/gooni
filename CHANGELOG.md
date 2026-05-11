@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.62.0 — 2026-05-11 (minor)
+
+- feat(chat): SSE streaming for web chat — live pipeline + tool cards (#187)
+
 ## 0.61.1 — 2026-05-11 (patch)
 
 - fix(alembic): make tool_calls migration idempotent (#185)
