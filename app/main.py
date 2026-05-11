@@ -2786,6 +2786,103 @@ def send_conversation_message(
     }
 
 
+@app.post("/conversations/{conversation_id}/messages/stream")
+def send_conversation_message_stream(
+    conversation_id: int, body: dict,
+):
+    """SSE variant of /messages. Same payload, but streams pipeline events
+    so the web chat UI can show "Thinking…" → tool cards in flight →
+    final reply land progressively.
+
+    Events emitted (one per `data:` line, JSON):
+      - {"type":"stage","stage":"intent|memory_recall|generate","label":"..."}
+      - {"type":"tool_start","id":N,"tool_name":"...","args":{...}}
+      - {"type":"tool_done","id":N,"tool_name":"...","status":"done|failed","error":...}
+      - {"type":"done","messages":[...],"intention":"...","tools_used":[...]}
+      - {"type":"error","message":"..."}
+
+    The endpoint takes no db Session via Depends — the chat path runs in
+    a background thread with its own session, so the request handler stays
+    free to stream events as fast as the queue drains.
+
+    Bot channels (telegram/whatsapp/imessage) do NOT use this — they go
+    through the non-streaming /messages endpoint.
+    """
+    from fastapi.responses import StreamingResponse
+    from threading import Thread
+    from queue import Queue, Empty
+
+    user_content = (body.get("content") or "").strip()
+    image_url = body.get("image_url") or None
+    if not user_content and not image_url:
+        raise HTTPException(status_code=400, detail="content or image_url is required")
+    entry_content = body.get("entry_content", "")
+    model = body.get("model") or None
+
+    queue: Queue = Queue()
+    SENTINEL = object()
+
+    def _worker():
+        # Background thread owns its own DB session — the FastAPI-managed
+        # session can't cross threads safely. SessionLocal is the same
+        # factory get_db uses for HTTP-bound work.
+        from .db.database import SessionLocal
+        worker_db = SessionLocal()
+        try:
+            try:
+                _, usage = Orchestrator.handle_chat(
+                    user_content,
+                    worker_db,
+                    conversation_id=conversation_id,
+                    entry_content=entry_content,
+                    model=model,
+                    image_url=image_url,
+                    event_cb=queue.put,
+                )
+                msgs = conversation_service.get_messages(conversation_id, worker_db)
+                queue.put({
+                    "type": "done",
+                    "messages": [_serialize_message(m) for m in msgs],
+                    "intention": (usage or {}).get("intention") or "",
+                    "tools_used": (usage or {}).get("tools_used") or [],
+                })
+            except ValueError as e:
+                queue.put({"type": "error", "message": str(e)})
+            except Exception as e:
+                # Same swallow-but-surface posture as the non-streaming path:
+                # never crash the SSE stream — emit an error event the
+                # frontend can render.
+                queue.put({"type": "error", "message": f"chat failed: {e}"})
+        finally:
+            queue.put(SENTINEL)
+            worker_db.close()
+
+    Thread(target=_worker, daemon=True).start()
+
+    def _event_source():
+        while True:
+            try:
+                # Heartbeat every 15s so reverse proxies (Fly's edge) don't
+                # idle-kill the SSE connection on long replies.
+                evt = queue.get(timeout=15.0)
+            except Empty:
+                yield ": heartbeat\n\n"
+                continue
+            if evt is SENTINEL:
+                break
+            yield f"data: {json.dumps(evt, default=str)}\n\n"
+
+    return StreamingResponse(
+        _event_source(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disables nginx-style buffering at the edge
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @app.get("/conversations/{conversation_id}/graph")
 def get_conversation_graph(conversation_id: int, db: Session = Depends(get_db)):
     """Topic graph for the chat-flow visualization in GooniPanel. Cached on

@@ -34,8 +34,64 @@ function getDateStr(): string {
   return new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
 
+// Live progress card. Stage = current pipeline step ("Pulling related
+// memories…"). Tools = in-flight tool calls, each row collapses from
+// running → done/failed when the tool_done event arrives. Renders only
+// while `streamingStage` or `streamingTools` are non-empty; ChatView
+// falls back to <ThinkingIndicator/> for the brief gap before the first
+// event arrives.
+function StreamingProgress({
+  stage,
+  tools,
+}: {
+  stage: string | null;
+  tools: { id: number | null; tool_name: string; status: "running" | "done" | "failed"; error?: string | null }[];
+}) {
+  if (!stage && tools.length === 0) return null;
+  return (
+    <div
+      style={{
+        padding: "8px 10px",
+        borderRadius: 8,
+        background: "rgba(0,0,0,0.03)",
+        border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))",
+        fontFamily: FONT,
+        maxWidth: "80%",
+        marginBottom: 6,
+      }}
+    >
+      {stage && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#636366", fontSize: 12.5 }}>
+          <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 3, background: "#0A84FF", animation: "pulse 1.2s ease-in-out infinite" }} />
+          <span>{stage}…</span>
+        </div>
+      )}
+      {tools.length > 0 && (
+        <div style={{ marginTop: stage ? 8 : 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          {tools.map((t, idx) => {
+            const icon =
+              t.status === "running" ? "◯" : t.status === "done" ? "✓" : "✗";
+            const color =
+              t.status === "running" ? "#0A84FF" : t.status === "done" ? "#34C759" : "#FF3B30";
+            return (
+              <div
+                key={`${t.id ?? "noid"}-${t.tool_name}-${idx}`}
+                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#636366" }}
+              >
+                <span style={{ color, fontSize: 13, width: 14, display: "inline-block" }}>{icon}</span>
+                <span style={{ fontFamily: "ui-monospace, monospace" }}>{t.tool_name}</span>
+                {t.error && <span style={{ color: "#FF3B30" }}>· {t.error}</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ChatView() {
-  const { activeId, messages, sending, pendingIntention, send } = useConversationsStore();
+  const { activeId, messages, sending, pendingIntention, streamingStage, streamingTools, send } = useConversationsStore();
   const [input, setInput] = useState("");
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -121,7 +177,8 @@ export function ChatView() {
                 </div>
               </div>
             )}
-            <ThinkingIndicator />
+            <StreamingProgress stage={streamingStage} tools={streamingTools} />
+            {!streamingStage && streamingTools.length === 0 && <ThinkingIndicator />}
           </div>
         )}
         <div ref={messagesEndRef} />
