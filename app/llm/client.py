@@ -22,6 +22,7 @@ def _execute_with_audit(
     tool_args: dict,
     db,
     conversation_id: int | None,
+    event_cb=None,
 ) -> tuple[str, int | None]:
     """Run a tool, persist a ToolCall audit row, return (result, row_id).
 
@@ -32,6 +33,11 @@ def _execute_with_audit(
 
     `tool` may be None (unknown tool name from the model) — we still log a
     failed row so the audit captures the hallucinated call.
+
+    `event_cb` (optional): callable(dict) — fires with `tool_start` before
+    execute and `tool_done` after. Used by the SSE streaming endpoint to
+    push live tool-call cards to the web UI. Callback failures are
+    swallowed so the audit/chat path stays bulletproof.
     """
     from ..db.models import ToolCall
 
@@ -52,6 +58,17 @@ def _execute_with_audit(
             # Auditing must never break the chat path. Log and continue.
             print(f"[tool_call audit] insert failed: {e}")
             tc = None
+
+    if event_cb is not None:
+        try:
+            event_cb({
+                "type": "tool_start",
+                "id": tc.id if tc is not None else None,
+                "tool_name": tool_name,
+                "args": tool_args,
+            })
+        except Exception as e:
+            print(f"[event_cb] tool_start failed: {e}")
 
     if tool is None:
         result = f"Unknown tool: {tool_name}"
@@ -76,6 +93,18 @@ def _execute_with_audit(
             db.commit()
         except Exception as e:
             print(f"[tool_call audit] update failed: {e}")
+
+    if event_cb is not None:
+        try:
+            event_cb({
+                "type": "tool_done",
+                "id": tc.id if tc is not None else None,
+                "tool_name": tool_name,
+                "status": status,
+                "error": error,
+            })
+        except Exception as e:
+            print(f"[event_cb] tool_done failed: {e}")
 
     return result, (tc.id if tc is not None else None)
 
@@ -122,6 +151,7 @@ class LLMClient:
         db=None,
         model: str = None,
         conversation_id: int | None = None,
+        event_cb=None,
     ) -> tuple[str, dict]:
         """Generate response with memory context and tool use."""
         messages = [{"role": "system", "content": system_prompt(memory_context, is_first_time)}]
@@ -154,7 +184,8 @@ class LLMClient:
                         tool_args = json.loads(tool_call.function.arguments)
                         tool = tool_map.get(tool_name)
                         result, tc_id = _execute_with_audit(
-                            tool, tool_name, tool_args, db, conversation_id
+                            tool, tool_name, tool_args, db, conversation_id,
+                            event_cb=event_cb,
                         )
                         tools_used.append(tool_name)
                         if tc_id is not None:

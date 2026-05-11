@@ -55,6 +55,7 @@ class Orchestrator:
         source: str = "web",
         entry_content: str = "",
         model: str = None,
+        event_cb=None,
     ) -> tuple[str, dict | None]:
         """Unified chat handler for all sources.
 
@@ -62,6 +63,10 @@ class Orchestrator:
         - conversation_id=<id>  → use that conversation directly (note threads)
         - source                → 'web' | 'telegram' | 'imessage' | ...
         - entry_content         → original note text injected as context (web only)
+        - event_cb              → optional callback(dict) for streaming events.
+          When set, fires per pipeline step + per tool_start/tool_done so the
+          SSE endpoint can stream live progress to the web chat UI. Failures
+          are swallowed by callees — auditing never blocks the chat path.
         """
         stripped = message.strip()
         command = stripped.lower()
@@ -261,8 +266,21 @@ class Orchestrator:
 
         query = message if message.strip() else "image"
 
+        # Pipeline-step events for the streaming UI. Each step fires its
+        # event right after it produces its data — gives the web chat
+        # progress dots like "Figuring out intent…" → "Pulling memories…".
+        def _emit(stage: str, label: str):
+            if event_cb is None:
+                return
+            try:
+                event_cb({"type": "stage", "stage": stage, "label": label})
+            except Exception as e:
+                print(f"[event_cb] stage {stage} failed: {e}")
+
+        _emit("intent", "Reading your message")
         intention_context = llm_client.generate_intention_context(query, recent_history[-6:])
         tb.intent(query, intention_context)
+        _emit("memory_recall", "Pulling related memories")
         memory_context, recalled_memories = memory_service.build_memory_context_with_debug(query, db=db)
         tb.memory_recall(query, recalled_memories)
         # If the active note is large, summarize it before injection to keep
@@ -294,6 +312,7 @@ class Orchestrator:
             focus_context,
         ]))
         tb.master_prompt(full_context, recent_history)
+        _emit("generate", "Thinking")
 
         if image_url:
             response, usage = llm_client.generate_response_with_image(
@@ -305,6 +324,7 @@ class Orchestrator:
                 message, full_context, recent_history,
                 is_first_time=is_first_time, db=db, model=model,
                 conversation_id=conv.id,
+                event_cb=event_cb,
             )
 
         # Mixed turn (feedback + new question): prepend the ack so Daniel
