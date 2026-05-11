@@ -28,6 +28,7 @@ from ..db.models import (
     EvalStepFeedback,
     Message,
     Note,
+    ToolCall,
 )
 from .list_service import list_service
 
@@ -248,8 +249,10 @@ def get_segment_full(db: Session, segment_id: int) -> dict | None:
         .order_by(Message.created_at.asc())
         .all()
     )
-    feedbacks_by_msg = _feedbacks_by_message(db, segment_id, [m.id for m in msgs])
-    ratings_by_msg = _message_ratings_by_id(db, [m.id for m in msgs])
+    message_ids = [m.id for m in msgs]
+    feedbacks_by_msg = _feedbacks_by_message(db, segment_id, message_ids)
+    ratings_by_msg = _message_ratings_by_id(db, message_ids)
+    tool_calls_by_msg = _tool_calls_by_message(db, message_ids)
     return {
         "segment": _serialize_segment(seg, conv, None),
         "messages": [
@@ -263,10 +266,50 @@ def get_segment_full(db: Session, segment_id: int) -> dict | None:
                 "trace": _decode_trace(m.trace),
                 "step_feedback": feedbacks_by_msg.get(m.id, []),
                 "rating": ratings_by_msg.get(m.id),
+                "tool_calls": tool_calls_by_msg.get(m.id, []),
             }
             for m in msgs
         ],
     }
+
+
+def _tool_calls_by_message(
+    db: Session, message_ids: list[int]
+) -> dict[int, list[dict]]:
+    """Audit rows from `tool_calls`, grouped by message_id.
+
+    Surfaces the ground truth of what executed: status, error, latency,
+    args/result snapshots. The `Message.trace` array carries a snapshot
+    too, but it's the orchestrator's pre-execution view — when chat
+    hallucinates a tool name or a tool errors mid-run, the trace can
+    diverge from reality. The audit rows are authoritative.
+    """
+    if not message_ids:
+        return {}
+    rows = (
+        db.query(ToolCall)
+        .filter(ToolCall.message_id.in_(message_ids))
+        .order_by(ToolCall.started_at.asc(), ToolCall.id.asc())
+        .all()
+    )
+    out: dict[int, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r.message_id, []).append({
+            "id": r.id,
+            "tool_name": r.tool_name,
+            "status": r.status,
+            "args_json": r.args_json,
+            "result_json": r.result_json,
+            "error": r.error,
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+            "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            "duration_ms": (
+                int((r.finished_at - r.started_at).total_seconds() * 1000)
+                if r.finished_at and r.started_at
+                else None
+            ),
+        })
+    return out
 
 
 def _decode_trace(raw: str | None) -> list[dict] | None:

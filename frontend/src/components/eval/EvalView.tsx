@@ -13,6 +13,7 @@ import {
   type EvalSegmentFull,
   type EvalSegmentSummary,
   type EvalStatus,
+  type EvalToolCall,
   type EvalToolLegendEntry,
   type MessageTraceStep,
 } from "../../services/api";
@@ -1348,6 +1349,158 @@ function MessageCard({
                 );
               })}
             </div>
+          )}
+        </div>
+      )}
+
+      {isAssistant && msg.tool_calls.length > 0 && (
+        <ToolCallsSection toolCalls={msg.tool_calls} />
+      )}
+    </div>
+  );
+}
+
+// ── Tool Calls audit section ─────────────────────────────────────────────────
+//
+// Renders the ground-truth ToolCall audit rows (separate from the
+// Message.trace JSON). Trace shows what the orchestrator *intended* to
+// run; the audit shows what *actually* executed — status (running/done/
+// failed), error text on failures, duration. When chat hallucinates a
+// tool name or a tool crashes mid-run, this is the only place that tells
+// you the truth.
+function ToolCallsSection({ toolCalls }: { toolCalls: EvalToolCall[] }) {
+  const [open, setOpen] = useState(false);
+  const failed = toolCalls.filter((tc) => tc.status === "failed").length;
+  const running = toolCalls.filter((tc) => tc.status === "running").length;
+  const summary = [
+    `${toolCalls.length} call${toolCalls.length === 1 ? "" : "s"}`,
+    failed > 0 ? `${failed} failed` : null,
+    running > 0 ? `${running} running` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return (
+    <div style={{ marginTop: 12 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          color: failed > 0 ? "#FF3B30" : "#0A84FF",
+          fontSize: 12,
+          fontFamily: FONT,
+        }}
+      >
+        {open ? "▾" : "▸"} Tool Calls ({summary})
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+          {toolCalls.map((tc) => (
+            <ToolCallRow key={tc.id} tc={tc} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolCallRow({ tc }: { tc: EvalToolCall }) {
+  const [expanded, setExpanded] = useState(false);
+  const pillBg =
+    tc.status === "done"
+      ? "#E8F5E9"
+      : tc.status === "failed"
+      ? "#FFEBEE"
+      : "#FFF8E1";
+  const pillColor =
+    tc.status === "done"
+      ? "#1B5E20"
+      : tc.status === "failed"
+      ? "#B71C1C"
+      : "#8D6E00";
+  return (
+    <div
+      style={{
+        border: "1px solid #E5E5EA",
+        borderRadius: 8,
+        padding: 8,
+        background: "#FFFFFF",
+        fontFamily: FONT,
+        fontSize: 12,
+      }}
+    >
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span
+          style={{
+            background: pillBg,
+            color: pillColor,
+            padding: "2px 6px",
+            borderRadius: 4,
+            fontSize: 10,
+            textTransform: "uppercase",
+            letterSpacing: 0.3,
+            fontWeight: 600,
+          }}
+        >
+          {tc.status}
+        </span>
+        <strong style={{ color: "#1C1C1E" }}>{tc.tool_name}</strong>
+        {tc.duration_ms != null && (
+          <span style={{ color: "#8E8E93" }}>· {tc.duration_ms}ms</span>
+        )}
+        <span style={{ color: "#8E8E93", marginLeft: "auto" }}>
+          #{tc.id} {expanded ? "▾" : "▸"}
+        </span>
+      </div>
+      {tc.error && (
+        <div style={{ marginTop: 6, color: "#B71C1C", fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap" }}>
+          {tc.error}
+        </div>
+      )}
+      {expanded && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+          {tc.args_json && (
+            <details>
+              <summary style={{ cursor: "pointer", color: "#3A6AA1" }}>args</summary>
+              <pre
+                style={{
+                  margin: "4px 0 0 0",
+                  padding: 8,
+                  background: "#F5F8FB",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {tc.args_json}
+              </pre>
+            </details>
+          )}
+          {tc.result_json && (
+            <details>
+              <summary style={{ cursor: "pointer", color: "#3A6AA1" }}>result</summary>
+              <pre
+                style={{
+                  margin: "4px 0 0 0",
+                  padding: 8,
+                  background: "#F5F8FB",
+                  borderRadius: 6,
+                  fontSize: 11,
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {tc.result_json}
+              </pre>
+            </details>
           )}
         </div>
       )}
