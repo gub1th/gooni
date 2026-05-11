@@ -1708,6 +1708,18 @@ export interface EvalMessageRating {
   updated_at: string | null;
 }
 
+export interface EvalToolCall {
+  id: number;
+  tool_name: string;
+  status: "running" | "done" | "failed";
+  args_json: string | null;
+  result_json: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+}
+
 export interface EvalMessage {
   id: number;
   role: "user" | "assistant";
@@ -1718,6 +1730,7 @@ export interface EvalMessage {
   trace: MessageTraceStep[] | null;
   step_feedback: EvalStepFeedback[];
   rating: EvalMessageRating | null;
+  tool_calls: EvalToolCall[];
 }
 
 export interface EvalSegmentFull {
