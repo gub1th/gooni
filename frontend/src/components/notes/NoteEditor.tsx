@@ -10,6 +10,7 @@ import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
+  Heading1, Heading2,
   Trash2, FolderInput, Pin as PinIcon, ListPlus, Check, Pencil as PencilIcon,
   Globe as GlobeIcon,
 } from "lucide-react";
@@ -528,7 +529,9 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   const editor = useEditor(
     {
       extensions: [
-        StarterKit,
+        // Limit heading levels to 1 + 2 — note bodies don't need a 6-level
+        // outline depth and the bubble-menu surface only exposes these two.
+        StarterKit.configure({ heading: { levels: [1, 2] } }),
         Figure,
         TaskList,
         TaskItem.configure({ nested: true }),
@@ -1835,9 +1838,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                         "0 8px 22px rgba(15,23,42,0.14), 0 1px 3px rgba(15,23,42,0.10), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
                     }}
                   >
-                    {/* Inline marks only — block-level conversions (H1/H2/lists/quote/code/table)
-                        live in the slash menu now, which is the cleaner Confluence-style split. */}
+                    {/* H1/H2 leading the menu so highlighted text can be
+                        promoted to a heading without remembering the slash
+                        command. Followed by inline marks. Heading levels are
+                        capped at [1, 2] in the StarterKit config above. */}
                     {([
+                      { Icon: Heading1,      title: "Heading 1",   action: () => editor.chain().focus().toggleHeading({ level: 1 }).run(), active: editor.isActive("heading", { level: 1 }) },
+                      { Icon: Heading2,      title: "Heading 2",   action: () => editor.chain().focus().toggleHeading({ level: 2 }).run(), active: editor.isActive("heading", { level: 2 }) },
                       { Icon: BoldIcon,      title: "Bold",        action: () => editor.chain().focus().toggleBold().run(),    active: editor.isActive("bold") },
                       { Icon: ItalicIcon,    title: "Italic",      action: () => editor.chain().focus().toggleItalic().run(),  active: editor.isActive("italic") },
                       { Icon: Strikethrough, title: "Strike",      action: () => editor.chain().focus().toggleStrike().run(),  active: editor.isActive("strike") },
