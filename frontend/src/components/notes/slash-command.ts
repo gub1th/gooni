@@ -3,7 +3,7 @@ import { ReactRenderer } from "@tiptap/react";
 import Suggestion from "@tiptap/suggestion";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
 import {
-  Heading1, Heading2, Heading3,
+  Heading1, Heading2,
   List, ListOrdered, ListChecks,
   Quote, Code2, Minus, Table as TableIcon,
 } from "lucide-react";
@@ -29,14 +29,6 @@ const ITEMS: SlashItem[] = [
     keywords: ["h2", "subtitle", "heading"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).setNode("heading", { level: 2 }).run(),
-  },
-  {
-    title: "Heading 3",
-    description: "Smaller section title",
-    Icon: Heading3,
-    keywords: ["h3", "heading"],
-    command: ({ editor, range }) =>
-      editor.chain().focus().deleteRange(range).setNode("heading", { level: 3 }).run(),
   },
   {
     title: "Bullet list",
