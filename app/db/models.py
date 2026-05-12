@@ -139,6 +139,10 @@ class Note(Base):
     embedding = deferred(Column(Text, nullable=True))
     is_public = Column(Boolean, default=False, nullable=False)
     is_pinned = Column(Boolean, default=False, nullable=False)
+    # Separate from is_pinned (sidebar). Pins this note to the top of the
+    # /public page as a hero card. Independent of is_pinned so a note can
+    # be a public-page hero without crowding the owner's working sidebar.
+    is_public_pinned = Column(Boolean, default=False, nullable=False)
     # User-marked "I intend to publish this" flag. Surfaces in the sidebar's
     # DRAFTS section so in-progress posts have a fast path back; independent
     # of is_pinned (a draft can also be pinned). Auto-clears when the note

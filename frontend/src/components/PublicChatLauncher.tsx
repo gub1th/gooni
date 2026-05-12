@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useChatLauncherRectStore } from "../stores/useChatLauncherRectStore";
 import { useMascotOutStore } from "../stores/useMascotOutStore";
+import { GooniLauncherCharacter } from "./GooniLauncherCharacter";
 
 // Public-facing FAB. Same visual + drag-handoff as ChatLauncher, but:
 // - No auth/store dependency on useGooniStore (no chat panel on public route)
@@ -22,39 +23,6 @@ export function PublicChatLauncher() {
   const [showMsg, setShowMsg] = useState(false);
   const pointerStateRef = useRef<{ x: number; y: number; t: number } | null>(null);
   const handedOffRef = useRef(false);
-  const eyeLeftRef = useRef<SVGCircleElement>(null);
-  const eyeRightRef = useRef<SVGCircleElement>(null);
-
-  useEffect(() => {
-    function onMove(e: MouseEvent) {
-      if (characterHidden) return;
-      const el = ref.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const cx = r.left + r.width / 2;
-      const cy = r.top + r.height / 2;
-      const dx = e.clientX - cx;
-      const dy = e.clientY - cy;
-      const dist = Math.hypot(dx, dy) || 1;
-      const MAX = 2.5;
-      const ux = dx / dist;
-      const uy = dy / dist;
-      const t = Math.min(1, dist / 240);
-      const tx = ux * MAX * t;
-      const ty = uy * MAX * t;
-      const transform = `translate(${tx.toFixed(2)} ${ty.toFixed(2)})`;
-      eyeLeftRef.current?.setAttribute("transform", transform);
-      eyeRightRef.current?.setAttribute("transform", transform);
-    }
-    window.addEventListener("mousemove", onMove, { passive: true });
-    return () => window.removeEventListener("mousemove", onMove);
-  }, [characterHidden]);
-
-  useEffect(() => {
-    if (!characterHidden) return;
-    eyeLeftRef.current?.setAttribute("transform", "translate(0 0)");
-    eyeRightRef.current?.setAttribute("transform", "translate(0 0)");
-  }, [characterHidden]);
 
   useEffect(() => {
     function publish() {
@@ -212,29 +180,7 @@ export function PublicChatLauncher() {
             : "gooni-public-aura 3.6s ease-in-out infinite",
         }}
       >
-        <svg
-          width={SIZE + 16}
-          height={SIZE + 16}
-          viewBox="0 0 90 100"
-          style={{
-            position: "absolute",
-            bottom: -8,
-            left: -8,
-            pointerEvents: "none",
-            transition: "opacity 0.2s ease, transform 0.2s ease",
-            opacity: characterHidden ? 0 : 1,
-            transform: characterHidden ? "translateY(8px)" : "translateY(0)",
-          }}
-        >
-          <rect x="29" y="50" width="32" height="38" rx="6" fill="#4ADE80" />
-          <rect x="6" y="54" width="24" height="7" rx="3.5" fill="#1A1A1A" />
-          <rect x="60" y="54" width="24" height="7" rx="3.5" fill="#1A1A1A" />
-          <circle cx="45" cy="32" r="22" fill="#1A1A1A" />
-          <circle cx="45" cy="32" r="17" fill="#F2F2F2" />
-          <circle ref={eyeLeftRef}  cx="38" cy="30" r="3" fill="#1A1A1A" />
-          <circle ref={eyeRightRef} cx="52" cy="30" r="3" fill="#1A1A1A" />
-          <path d="M38 39 Q45 45 52 40" stroke="#1A1A1A" strokeWidth="2.2" fill="none" strokeLinecap="round" />
-        </svg>
+        <GooniLauncherCharacter size={SIZE} characterHidden={characterHidden} />
 
         <span
           aria-hidden
