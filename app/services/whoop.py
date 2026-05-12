@@ -25,13 +25,29 @@ import os
 import secrets
 import time
 import urllib.parse
-from datetime import datetime, timedelta, timezone
+from datetime import date as date_cls, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy.orm import Session
 
-from ..db.models import OAuthToken, WhoopSnapshot
+from ..db.models import OAuthToken, Settings as SettingsModel, WhoopSnapshot
+
+
+def _local_today(db: Session) -> date_cls:
+    """Today in Daniel's configured TZ (Settings.nudge_tz, defaults to
+    America/Los_Angeles). UTC date would key snapshots to the wrong day
+    after ~5pm PT, at 11pm local on May 11, UTC is already May 12 and
+    the snapshot row would land on tomorrow's date.
+    """
+    settings = db.query(SettingsModel).first()
+    tz_name = (settings.nudge_tz if settings else None) or "America/Los_Angeles"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("America/Los_Angeles")
+    return datetime.now(tz).date()
 
 
 AUTHORIZE_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"
@@ -238,23 +254,39 @@ def fetch_today_snapshot(db: Session) -> dict[str, Any] | None:
         return None
 
     end = datetime.now(timezone.utc)
-    start = end - timedelta(days=2)
-    params = {"start": start.isoformat(), "end": end.isoformat(), "limit": 5}
+    # 4-day window so the "newest scored record" lookup still finds something
+    # for users who don't sync every morning. Cycle/strain wants today; recovery
+    # + sleep are happy with yesterday if today hasn't scored yet.
+    start = end - timedelta(days=4)
+    params = {"start": start.isoformat(), "end": end.isoformat(), "limit": 10}
 
     recovery_records = _get(token, "/v1/recovery", params).get("records", [])
     cycle_records = _get(token, "/v1/cycle", params).get("records", [])
     sleep_records = _get(token, "/v1/activity/sleep", params).get("records", [])
 
-    # Pick the freshest of each. Whoop returns newest first by default,
-    # but sort defensively by created_at so this isn't a silent contract.
-    def _newest(records: list[dict], key: str = "created_at") -> dict | None:
+    # Pick the newest record whose score field is actually populated. Whoop
+    # returns in-progress / pending records with `score: null` or an empty
+    # dict — picking those by created_at alone would surface a "scored 0%"
+    # ghost row. Sorts by `updated_at` then `created_at`, both defensive
+    # since Whoop's order isn't a guaranteed contract.
+    def _newest_scored(records: list[dict], score_key: str) -> dict | None:
         if not records:
             return None
-        return sorted(records, key=lambda r: r.get(key) or "", reverse=True)[0]
+        def _ts(r: dict) -> str:
+            return r.get("updated_at") or r.get("created_at") or ""
+        scored = [r for r in records if (r.get("score") or {}).get(score_key) is not None]
+        if scored:
+            return sorted(scored, key=_ts, reverse=True)[0]
+        # Fallback: newest record at all. Score may still be null — fine,
+        # downstream `.get()`s will yield None and the UI shows "—".
+        return sorted(records, key=_ts, reverse=True)[0]
 
-    recovery = _newest(recovery_records) or {}
-    cycle = _newest(cycle_records) or {}
-    sleep = _newest(sleep_records) or {}
+    recovery = _newest_scored(recovery_records, "recovery_score") or {}
+    cycle = _newest_scored(cycle_records, "strain") or {}
+    # Sleep's headline value lives under stage_summary.total_in_bed_time_milli;
+    # `sleep_performance_percentage` works as the scored-ness signal because
+    # Whoop fills it in only after the sleep cycle is finalized.
+    sleep = _newest_scored(sleep_records, "sleep_performance_percentage") or {}
 
     rec_score = (recovery.get("score") or {})
     cyc_score = (cycle.get("score") or {})
@@ -276,10 +308,12 @@ def fetch_today_snapshot(db: Session) -> dict[str, Any] | None:
 
 
 def upsert_today_snapshot(db: Session, payload: dict[str, Any]) -> WhoopSnapshot | None:
-    """Save a snapshot row for today. Idempotent on (date) — re-running
+    """Save a snapshot row for today. Idempotent on (date), re-running
     overwrites the same day's row rather than stacking duplicates.
+    `today` uses Daniel's local TZ so the row keys on his lived day,
+    not on UTC.
     """
-    today = datetime.now(timezone.utc).date()
+    today = _local_today(db)
     row = db.query(WhoopSnapshot).filter(WhoopSnapshot.date == today).first()
     if row is None:
         row = WhoopSnapshot(date=today)

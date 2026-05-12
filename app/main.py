@@ -3769,9 +3769,11 @@ def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
     to force a live API hit; otherwise we serve the cached row if it was
     updated within the last 2 hours, else refetch.
     """
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from datetime import datetime as _dt, timedelta as _td
     from .db.models import WhoopSnapshot
-    today = _dt.now(_tz.utc).date()
+    # `today` keyed on Daniel's local TZ so the snapshot maps to his lived
+    # day, not UTC. Whoop service mirrors this in `_local_today`.
+    today = whoop._local_today(db)
     row = db.query(WhoopSnapshot).filter(WhoopSnapshot.date == today).first()
     stale = (
         row is None
