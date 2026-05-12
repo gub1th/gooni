@@ -391,6 +391,64 @@ class Focus(Base):
     )
 
 
+class FocusCandidate(Base):
+    """Proposed focus surfaced by the synthesizer. Lives in 'proposed'
+    state until Daniel promotes (→ creates Focus row) or dismisses it.
+
+    Why a separate table from Focus: candidates are pre-curation noise +
+    signal mixed. Most surface a few times then never again; some grow
+    seen_count as the synthesizer keeps re-emitting them; a small
+    fraction get promoted. Persisting them lets the synthesizer dedup
+    on re-emission and lets Daniel review without losing context, but
+    we never want them mixed into the real Focus list.
+
+    cluster_signature is sha256 of sorted "{kind}#{id}" item pairs —
+    deterministic per cluster shape, so repeat synth runs that produce
+    the same cluster upsert the same row (bump seen_count) instead of
+    spawning duplicates. If items shift, the sig changes and a new
+    candidate spawns.
+    """
+
+    __tablename__ = "focus_candidates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(Text, nullable=False)
+    endgoal = Column(Text, nullable=True)
+    # 'focus' for v1 — only focus-shaped clusters get persisted.
+    # State + noise stay ephemeral in the synth output.
+    category = Column(String, nullable=False, default="focus")
+    confidence = Column(Float, nullable=False, default=0.0)
+    reasoning = Column(Text, nullable=True)
+    # sha256 hex of sorted "{kind}#{id}" items. Indexed unique — same
+    # cluster shape across runs upserts the same row.
+    cluster_signature = Column(String, nullable=False, unique=True, index=True)
+    # JSON list of {kind, id, snippet}. Snapshot of the cluster's items
+    # at the time of last sighting. Refreshed every time we re-sight.
+    evidence_json = Column(Text, nullable=False)
+    # JSON-encoded centroid vector. Deferred — same pattern as
+    # Note.embedding. Needed for future binding-to-existing-Focus pass.
+    centroid_embedding = deferred(Column(Text, nullable=True))
+    # If this candidate came from a sub-cluster under a parent
+    # candidate, link back. Top-level candidates leave this null.
+    parent_candidate_id = Column(
+        Integer, ForeignKey("focus_candidates.id"), nullable=True, index=True
+    )
+    # Lifecycle: 'proposed' | 'promoted' | 'dismissed'.
+    status = Column(String, nullable=False, default="proposed", index=True)
+    promoted_focus_id = Column(
+        Integer, ForeignKey("focuses.id"), nullable=True, index=True
+    )
+    promoted_at = Column(DateTime, nullable=True)
+    dismissed_at = Column(DateTime, nullable=True)
+    first_seen_in_synth = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_in_synth = Column(DateTime, default=datetime.utcnow, nullable=False)
+    seen_count = Column(Integer, default=1, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
 class Todo(Base):
     """Actionable item Daniel is doing or about to do. After the
     dashboard-revamp PR, todos carry a 3-state enum (`not_yet` | `doing`

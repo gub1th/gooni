@@ -1293,6 +1293,78 @@ def focus_synthesis_run(body: dict | None = None, db: Session = Depends(get_db))
     return synthesize(db, **kwargs)
 
 
+@app.post("/focus-candidates/run")
+def focus_candidates_run(body: dict | None = None, db: Session = Depends(get_db)):
+    """Run the synthesizer and PERSIST every focus-shaped candidate.
+
+    Same body shape as /focus-synthesis/run (the pure probe), plus
+    DB writes via focus_candidate_service.persist_run. Repeat calls
+    upsert by cluster_signature — same cluster shape bumps seen_count
+    instead of spawning a duplicate row. State / noise clusters in
+    the synth output are NOT persisted; state lives as bound evidence
+    under its parent focus only.
+
+    Returns: {synth_stats, persisted: [<candidate dict>...]}.
+    """
+    from .services.focus_synthesizer import synthesize
+    from .services import focus_candidate_service
+
+    body = body or {}
+    kwargs: dict = {}
+    for key in (
+        "include_kinds", "threshold", "merge_threshold", "sub_threshold",
+        "min_parent_for_subcluster", "min_sub_size", "min_cluster_size",
+        "classify", "classify_model", "state_bind_sim", "state_bind_margin",
+    ):
+        if key in body and body[key] is not None:
+            kwargs[key] = body[key]
+
+    out = synthesize(db, **kwargs)
+    persisted = focus_candidate_service.persist_run(db, out)
+    return {"synth_stats": out["stats"], "persisted": persisted}
+
+
+@app.get("/focus-candidates")
+def focus_candidates_list(
+    status: str | None = "proposed", db: Session = Depends(get_db)
+):
+    """List candidates, default filter status='proposed'. Pass
+    status='' or status='all' to skip the filter.
+    """
+    from .services import focus_candidate_service
+    filter_status: str | None = status
+    if status in ("", "all"):
+        filter_status = None
+    rows = focus_candidate_service.list_candidates(db, status=filter_status)
+    return [focus_candidate_service.serialize_candidate(r) for r in rows]
+
+
+@app.post("/focus-candidates/{candidate_id}/promote")
+def focus_candidates_promote(candidate_id: int, db: Session = Depends(get_db)):
+    """Promote a candidate into a real Focus row. Idempotent on a
+    candidate already promoted (returns the existing pair). Refuses
+    candidates that are dismissed.
+    """
+    from .services import focus_candidate_service
+    result = focus_candidate_service.promote(db, candidate_id)
+    if not result:
+        raise HTTPException(404, "candidate not found or not promotable")
+    cand, focus = result
+    return {
+        "candidate": focus_candidate_service.serialize_candidate(cand),
+        "focus_id": focus.id,
+    }
+
+
+@app.post("/focus-candidates/{candidate_id}/dismiss")
+def focus_candidates_dismiss(candidate_id: int, db: Session = Depends(get_db)):
+    from .services import focus_candidate_service
+    cand = focus_candidate_service.dismiss(db, candidate_id)
+    if not cand:
+        raise HTTPException(404, "candidate not found or already settled")
+    return focus_candidate_service.serialize_candidate(cand)
+
+
 @app.get("/todos")
 def todos_list(db: Session = Depends(get_db)):
     """Open + completed-today todos, grouped. Powers the todo list UI."""
