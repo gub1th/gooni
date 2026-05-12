@@ -21,6 +21,10 @@ export const Route = createFileRoute("/public/")(({
 }));
 
 const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+// Display serif for the name + hero titles. System serifs only — no webfont
+// network cost. "Iowan Old Style" + "Hoefler Text" are macOS-native and
+// genuinely beautiful at display size; Georgia is a clean fallback elsewhere.
+const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
 
 function PenIcon() {
   return (
@@ -276,43 +280,50 @@ function PublicPage() {
 
         {/* Header */}
         <div style={{ marginBottom: 40 }}>
-          <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.5px", marginBottom: 14 }}>
+          <div style={{
+            fontFamily: DISPLAY,
+            fontSize: 36,
+            fontWeight: 500,
+            letterSpacing: "-0.6px",
+            marginBottom: 14,
+            color: "#111",
+          }}>
             hi, my name is daniel
           </div>
-          <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", color: "#8a8a8a", fontSize: 13.5 }}>
             {noteCount !== null && (
-              <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#666" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <PenIcon />
-                <span style={{ fontSize: 14 }}>
+                <span>
                   {noteCount} notes written
                   {notes.length > 0 && noteCount > notes.length && (
-                    <span style={{ color: "#bbb", marginLeft: 5 }}>· {notes.length} public</span>
+                    <span style={{ color: "#c5c5c5", marginLeft: 4 }}>· {notes.length} public</span>
                   )}
                 </span>
               </div>
             )}
             {lastActive && (
-              <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#bbb" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <ClockIcon />
-                <span style={{ fontSize: 14 }}>active {timeAgo(lastActive)}</span>
+                <span>active {timeAgo(lastActive)}</span>
               </div>
             )}
             {visitors !== null && visitors > 0 && (
-              <span style={{ fontSize: 13, color: "#cfcfcf", fontVariantNumeric: "tabular-nums" }}>
-                {visitors.toLocaleString()} unique {visitors === 1 ? "visitor" : "visitors"}
+              <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                {visitors.toLocaleString()} {visitors === 1 ? "visitor" : "visitors"}
               </span>
             )}
             <Link
               to="/public/mcp"
               style={{
-                fontSize: 13, color: "#666", textDecoration: "none",
+                fontSize: 13, color: "#8a8a8a", textDecoration: "none",
                 fontFamily: FONT,
                 display: "inline-flex", alignItems: "center", gap: 5,
-                borderBottom: "1px dashed rgba(0,0,0,0.20)",
+                borderBottom: "1px dashed rgba(0,0,0,0.18)",
                 paddingBottom: 1,
               }}
               onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#111")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#666")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#8a8a8a")}
             >
               <PlugIcon /> mcp
             </Link>
@@ -409,11 +420,24 @@ function PublicPage() {
                   key={name}
                   onClick={() => setFilter(active ? null : name)}
                   style={{
-                    padding: "4px 12px", borderRadius: 20, cursor: "pointer", fontFamily: FONT,
-                    border: `1px solid ${active ? "#111" : "rgba(0,0,0,0.18)"}`,
+                    padding: "5px 13px", borderRadius: 999, cursor: "pointer", fontFamily: FONT,
+                    border: `1px solid ${active ? "#111" : "rgba(0,0,0,0.14)"}`,
                     background: active ? "#111" : "transparent",
-                    color: active ? "#fff" : "#555",
-                    fontSize: 12.5, transition: "background 0.15s, color 0.15s",
+                    color: active ? "#fff" : "#666",
+                    fontSize: 12.5, fontWeight: 500,
+                    transition: "all 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    if (active) return;
+                    const el = e.currentTarget as HTMLButtonElement;
+                    el.style.borderColor = "rgba(0,0,0,0.30)";
+                    el.style.color = "#111";
+                  }}
+                  onMouseLeave={(e) => {
+                    if (active) return;
+                    const el = e.currentTarget as HTMLButtonElement;
+                    el.style.borderColor = "rgba(0,0,0,0.14)";
+                    el.style.color = "#666";
                   }}
                 >
                   {name}
@@ -474,7 +498,14 @@ function PublicPage() {
                 }}>
                   <Pin size={11} strokeWidth={2.2} /> start here
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.3px", marginBottom: 8 }}>
+                <div style={{
+                  fontFamily: DISPLAY,
+                  fontSize: 25,
+                  fontWeight: 500,
+                  letterSpacing: "-0.3px",
+                  marginBottom: 8,
+                  lineHeight: 1.25,
+                }}>
                   {displayTitle({ title: note.title, content: note.excerpt })}
                 </div>
                 <div style={{
@@ -524,6 +555,22 @@ function PublicPage() {
           </div>
         )}
 
+        {/* Section label between the pinned hero and the rest. Only renders
+            when there's actually a pinned hero above the list — otherwise
+            it'd dangle in front of the only section. */}
+        {pinned.length > 0 && rest.length > 0 && (
+          <div style={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: "#a8a8a8",
+            marginBottom: 6,
+          }}>
+            more notes
+          </div>
+        )}
+
         {/* Notes list */}
         {displayed.length === 0 ? (
           <p style={{ color: "#aaa", fontSize: 14 }}>No posts yet.</p>
@@ -540,21 +587,44 @@ function PublicPage() {
                   queryClient.prefetchQuery(publicNoteQueryOptions(note.id));
                 }}
                 onMouseLeave={() => setHoveredId((cur) => (cur === note.id ? null : cur))}
-                style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, padding: "13px 0", borderBottom: "1px solid rgba(0,0,0,0.07)" }}
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  gap: 16,
+                  padding: "16px 14px 16px 14px",
+                  margin: "0 -14px",
+                  borderBottom: "1px solid rgba(0,0,0,0.06)",
+                  borderRadius: 8,
+                  background: hoveredId === note.id ? "rgba(74,222,128,0.04)" : "transparent",
+                  transition: "background 0.15s ease",
+                }}
               >
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <Link
                     to="/public/$noteId"
                     params={{ noteId: String(note.id) }}
                     onFocus={() => queryClient.prefetchQuery(publicNoteQueryOptions(note.id))}
-                    style={{ fontSize: 17, fontWeight: 500, color: "#111", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: "none" }}
-                    onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "underline")}
-                    onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "none")}
+                    style={{
+                      fontFamily: DISPLAY,
+                      fontSize: 18,
+                      fontWeight: 500,
+                      color: "#111",
+                      display: "block",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      textDecoration: "none",
+                      letterSpacing: "-0.1px",
+                      transform: hoveredId === note.id ? "translateX(2px)" : "translateX(0)",
+                      transition: "transform 0.15s ease",
+                    }}
                   >
                     {displayTitle({ title: note.title, content: note.excerpt })}
                   </Link>
-                  <span style={{ fontSize: 13.5, color: "#999", marginTop: 3, display: "block" }}>
-                    {formatDate(note.updated_at)} · {note.read_time_minutes} min read
+                  <span style={{ fontSize: 13, color: "#a0a0a0", marginTop: 4, display: "block" }}>
+                    {formatDate(note.updated_at)}
+                    <span style={{ color: "#cfcfcf" }}> · {note.read_time_minutes} min</span>
                   </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -623,7 +693,7 @@ function PublicPage() {
                     </button>
                   )}
                   {note.space_name && (
-                    <span style={{ fontSize: 12, color: "#666", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12, padding: "3px 9px" }}>
+                    <span style={{ fontSize: 11.5, color: "#9a9a9a", border: "1px solid rgba(0,0,0,0.10)", borderRadius: 10, padding: "2px 8px", fontWeight: 500 }}>
                       {note.space_name}
                     </span>
                   )}
@@ -632,6 +702,33 @@ function PublicPage() {
             ))}
           </ul>
         )}
+
+        {/* Footer signature — small + quiet, just enough to ground the page
+            so it doesn't feel like content stops mid-air. */}
+        <div style={{
+          marginTop: 80,
+          paddingTop: 22,
+          borderTop: "1px solid rgba(0,0,0,0.06)",
+          fontSize: 12,
+          color: "#b5b5b5",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}>
+          <span>written in <span style={{ color: "#4ADE80", fontWeight: 600 }}>gooni</span>, my personal AI notebook</span>
+          <a
+            href="https://github.com/gub1th/gooni"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "#b5b5b5", textDecoration: "none", borderBottom: "1px dashed rgba(0,0,0,0.12)" }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#777")}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#b5b5b5")}
+          >
+            source on github
+          </a>
+        </div>
       </div>
       <div
         ref={mascotBoundsRef}
