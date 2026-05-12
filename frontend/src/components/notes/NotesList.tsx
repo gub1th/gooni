@@ -81,6 +81,100 @@ interface NoteRowProps {
   onTogglePin: (note: ApiNote) => void;
 }
 
+// Status filter pill — used in the row under the search bar to toggle
+// Public / Draft / Pinned + show the active Space narrowing. Active vs
+// inactive must read at a glance: active uses a tinted bg + accent text,
+// inactive uses a muted outlined chip. Same height for keyboard rhythm.
+function FilterPill({
+  label,
+  icon,
+  active,
+  iconRight,
+  onClick,
+}: {
+  label: string;
+  icon?: string;
+  active: boolean;
+  iconRight?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        height: 22,
+        padding: "0 9px",
+        borderRadius: 11,
+        background: active ? "rgba(10,132,255,0.14)" : "transparent",
+        border: `1px solid ${active ? "rgba(10,132,255,0.35)" : "rgba(0,0,0,0.10)"}`,
+        cursor: "pointer",
+        color: active ? "#0A84FF" : "#636366",
+        fontSize: 11,
+        fontWeight: active ? 600 : 500,
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        transition: "background 0.1s, color 0.1s, border-color 0.1s",
+        flexShrink: 0,
+      }}
+      onMouseEnter={(e) => {
+        if (!active) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+      }}
+    >
+      {icon && !iconRight && <span style={{ fontSize: 10 }}>{icon}</span>}
+      <span>{label}</span>
+      {icon && iconRight && <span style={{ fontSize: 9, opacity: 0.7 }}>{icon}</span>}
+    </button>
+  );
+}
+
+// Single row in the space-filter dropdown menu. Tight, hover-tinted,
+// shows an inline check mark on the active row.
+function SpaceMenuItem({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        width: "100%",
+        padding: "6px 10px",
+        border: "none",
+        background: active ? "rgba(10,132,255,0.10)" : "transparent",
+        cursor: "pointer",
+        borderRadius: 6,
+        fontSize: 12.5,
+        color: active ? "#0A84FF" : "var(--gooni-text, #1C1C1E)",
+        fontWeight: active ? 600 : 400,
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+        textAlign: "left",
+      }}
+      onMouseEnter={(e) => {
+        if (!active) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+      }}
+    >
+      <span>{label}</span>
+      {active && <span style={{ fontSize: 11 }}>✓</span>}
+    </button>
+  );
+}
+
 function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDragEnd, onContextMenu, onTogglePin }: NoteRowProps) {
   // Derive title from content when the note has no real title — so the list
   // never shows a row of repeated "New Note" placeholders. Prefer the
@@ -158,6 +252,37 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
         >
           {title}
         </div>
+        {/* Status badges — tiny chips just before the timestamp.
+            🌐 = public, ✏️ = draft, 📌 stays on the existing pin button
+            below. Renders nothing for the default state. */}
+        {note.is_draft && (
+          <span
+            title="Draft"
+            style={{
+              fontSize: 9,
+              padding: "1px 5px",
+              borderRadius: 4,
+              background: "rgba(255,149,0,0.14)",
+              color: "#B86E00",
+              fontWeight: 600,
+              letterSpacing: 0.3,
+              flexShrink: 0,
+              textTransform: "uppercase",
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+            }}
+          >draft</span>
+        )}
+        {note.is_public && (
+          <span
+            title="Public"
+            style={{
+              fontSize: 10,
+              color: "#0A84FF",
+              flexShrink: 0,
+              lineHeight: 1,
+            }}
+          >🌐</span>
+        )}
         <span style={{
           fontSize: 10.5, color: "#C7C7CC", flexShrink: 0,
           fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -237,9 +362,16 @@ export function NotesList() {
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [cleanConfirm, setCleanConfirm] = useState(false);
   const [search, setSearch] = useState("");
-  // Public-only toggle for the All Notes view. Lets Daniel scan + edit
-  // his published portfolio without hunting through every space.
+  // Status filters for All Notes — public / draft / pinned + optional
+  // space narrowing. Stack as AND: enabling multiple means rows must
+  // match all of them. Reset when leaving All Notes since they're
+  // meaningless inside a single space.
   const [publicOnly, setPublicOnly] = useState(false);
+  const [draftOnly, setDraftOnly] = useState(false);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [spaceFilter, setSpaceFilter] = useState<number | null>(null);
+  const [spaceMenuOpen, setSpaceMenuOpen] = useState(false);
+  const spaceMenuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -251,19 +383,49 @@ export function NotesList() {
   // in the space it was typed in. Same for the public-only toggle: it only
   // applies on All Notes, so reset when leaving.
   useEffect(() => { setSearch(""); }, [spaceId]);
-  useEffect(() => { if (!isAllNotes) setPublicOnly(false); }, [isAllNotes]);
+  useEffect(() => {
+    if (!isAllNotes) {
+      setPublicOnly(false);
+      setDraftOnly(false);
+      setPinnedOnly(false);
+      setSpaceFilter(null);
+      setSpaceMenuOpen(false);
+    }
+  }, [isAllNotes]);
+
+  // Dismiss space-filter dropdown on outside click.
+  useEffect(() => {
+    if (!spaceMenuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (spaceMenuRef.current && !spaceMenuRef.current.contains(e.target as Node)) {
+        setSpaceMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [spaceMenuOpen]);
 
   // Client-side title+excerpt search. Case-insensitive substring match.
   // List rows only carry `excerpt` (no full body) — full-content search
   // lives behind the semantic `/mcp/notes/search` route used by AllNotes.
   const searchTrimmed = search.trim().toLowerCase();
-  const publicFiltered = (isAllNotes && publicOnly) ? allNotes.filter((n) => n.is_public) : allNotes;
-  const noteList = !searchTrimmed ? publicFiltered : publicFiltered.filter((n) => {
+  const statusFiltered = !isAllNotes ? allNotes : allNotes.filter((n) => {
+    if (publicOnly && !n.is_public) return false;
+    if (draftOnly && !n.is_draft) return false;
+    if (pinnedOnly && !n.is_pinned) return false;
+    if (spaceFilter !== null && n.space_id !== spaceFilter) return false;
+    return true;
+  });
+  const noteList = !searchTrimmed ? statusFiltered : statusFiltered.filter((n) => {
     const title = (n.title ?? "").toLowerCase();
     if (title.includes(searchTrimmed)) return true;
     const plain = (n.excerpt ?? (n.content ? stripHtml(n.content) : "")).toLowerCase();
     return plain.includes(searchTrimmed);
   });
+  const anyFilterActive = publicOnly || draftOnly || pinnedOnly || spaceFilter !== null;
+  const filterSpaceName = spaceFilter !== null
+    ? (spaces.find((s) => typeof s.id === "number" && s.id === spaceFilter)?.name ?? "Space")
+    : null;
 
   const currentSpace = isAllNotes ? null : spaces.find((s) => String(s.id) === spaceId);
   const headerName = isAllNotes ? "All Notes" : (currentSpace?.name ?? "Notes");
@@ -347,29 +509,6 @@ export function NotesList() {
         </span>
         {isAllNotes && (
           <button
-            onClick={() => setPublicOnly((v) => !v)}
-            title={publicOnly ? "Showing public notes only — click to show all" : "Filter to public notes"}
-            style={{
-              width: 26, height: 26, borderRadius: 6,
-              background: publicOnly ? "rgba(10,132,255,0.14)" : "transparent",
-              border: "none", cursor: "pointer",
-              color: publicOnly ? "#0A84FF" : "#8E8E93",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: 0, flexShrink: 0, transition: "background 0.1s, color 0.1s",
-            }}
-            onMouseEnter={(e) => { if (!publicOnly) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
-            onMouseLeave={(e) => { if (!publicOnly) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-              <path d="M2 8H14" stroke="currentColor" strokeWidth="1.4"/>
-              <path d="M8 2C10 4.5 10 11.5 8 14" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-              <path d="M8 2C6 4.5 6 11.5 8 14" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-            </svg>
-          </button>
-        )}
-        {isAllNotes && (
-          <button
             onClick={handleCleanInbox}
             onMouseLeave={() => setCleanConfirm(false)}
             title={cleanConfirm ? "Click again to confirm" : "Delete empty untitled notes"}
@@ -439,6 +578,83 @@ export function NotesList() {
             >×</button>
           )}
         </div>
+        {/* Status pill filters — only on All Notes. Active vs inactive
+            states are visually distinct: active = filled accent bg +
+            saturated text, inactive = outlined chip + muted text. */}
+        {isAllNotes && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+            <FilterPill
+              label="Public"
+              icon="🌐"
+              active={publicOnly}
+              onClick={() => setPublicOnly((v) => !v)}
+            />
+            <FilterPill
+              label="Draft"
+              icon="✏️"
+              active={draftOnly}
+              onClick={() => setDraftOnly((v) => !v)}
+            />
+            <FilterPill
+              label="Pinned"
+              icon="📌"
+              active={pinnedOnly}
+              onClick={() => setPinnedOnly((v) => !v)}
+            />
+            <div ref={spaceMenuRef} style={{ position: "relative" }}>
+              <FilterPill
+                label={filterSpaceName ?? "Space"}
+                icon="▾"
+                iconRight
+                active={spaceFilter !== null}
+                onClick={() => setSpaceMenuOpen((v) => !v)}
+              />
+              {spaceMenuOpen && (
+                <div style={{
+                  position: "absolute", top: "100%", left: 0, marginTop: 4,
+                  background: "var(--gooni-card, #FFFFFF)",
+                  border: "1px solid var(--gooni-border, rgba(0,0,0,0.08))",
+                  borderRadius: 8, boxShadow: "0 6px 24px rgba(0,0,0,0.10)",
+                  zIndex: 50, minWidth: 140, padding: 4, maxHeight: 260,
+                  overflowY: "auto",
+                }}>
+                  <SpaceMenuItem
+                    label="All spaces"
+                    active={spaceFilter === null}
+                    onClick={() => { setSpaceFilter(null); setSpaceMenuOpen(false); }}
+                  />
+                  {spaces
+                    .filter((s): s is typeof s & { id: number } => typeof s.id === "number")
+                    .map((s) => (
+                      <SpaceMenuItem
+                        key={s.id}
+                        label={`${s.emoji ?? "📁"} ${s.name}`}
+                        active={spaceFilter === s.id}
+                        onClick={() => { setSpaceFilter(s.id); setSpaceMenuOpen(false); }}
+                      />
+                    ))}
+                </div>
+              )}
+            </div>
+            {anyFilterActive && (
+              <button
+                onClick={() => {
+                  setPublicOnly(false);
+                  setDraftOnly(false);
+                  setPinnedOnly(false);
+                  setSpaceFilter(null);
+                }}
+                title="Clear all filters"
+                style={{
+                  height: 22, padding: "0 8px", borderRadius: 11,
+                  background: "transparent", border: "none", cursor: "pointer",
+                  color: "var(--gooni-muted, #8E8E93)", fontSize: 11,
+                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                }}
+              >clear</button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Note list */}
@@ -447,8 +663,8 @@ export function NotesList() {
           <div style={{ padding: "32px 14px", textAlign: "center", color: "#AEAEB2", fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
             {searchTrimmed
               ? `No notes match “${search.trim()}”`
-              : (isAllNotes && publicOnly)
-                ? "No public notes yet. Toggle 🌐 on a note to publish."
+              : (isAllNotes && anyFilterActive)
+                ? "No notes match the active filters. Click 'clear' to reset."
                 : "No notes yet. Press + to create one."}
           </div>
         )}
