@@ -385,6 +385,40 @@ class Focus(Base):
     # JSON-serialised embedding for cosine similarity (conflict detection
     # when adding focuses). Deferred — ~31KB per row.
     embedding = deferred(Column(Text, nullable=True))
+
+    # --- Drift / hybrid-binding columns (added by the focus-drift PR) ---
+    # initial_signature: centroid of the cluster's evidence at promotion
+    # time, frozen forever. current_signature: weighted-mean updated on
+    # every successful bind during a synth run. Drift = the cosine
+    # distance between these two — when it crosses 0.65, the focus is
+    # flagged for rename/fork. Same deferred pattern as `embedding` to
+    # keep list endpoints from hydrating the vectors.
+    initial_signature = deferred(Column(Text, nullable=True))
+    current_signature = deferred(Column(Text, nullable=True))
+    # JSON snapshot of the cluster bound to this focus on the last synth
+    # run (list of {kind, id, snippet}). Refreshed every successful bind.
+    current_evidence_json = Column(Text, nullable=True)
+    last_seen_in_synth = Column(DateTime, nullable=True)
+    # Consecutive synth runs where no cluster bound to this focus. After
+    # MISSED_RUN_DORMANCY_THRESHOLD (default 3), the binding pass flips
+    # status='dormant' — not deleted, just demoted.
+    missed_run_count = Column(Integer, default=0, nullable=False)
+    # When the drift score (1 - cos(initial, current)) first crossed the
+    # warning threshold. Cleared on rename. Surfaces in UI as a "rename
+    # or fork?" prompt.
+    drift_flagged_at = Column(DateTime, nullable=True)
+    # Forward link back to the FocusCandidate row this focus was promoted
+    # from. Lets us walk the audit trail without joining backward.
+    promoted_from_candidate_id = Column(
+        Integer, ForeignKey("focus_candidates.id"), nullable=True
+    )
+    # Set when this focus was forked from a prior one — lineage chain.
+    # The old focus carries status='evolved' + the new focus carries this
+    # pointer back. Walks the chain so the UI can render breadcrumbs.
+    evolved_from_focus_id = Column(
+        Integer, ForeignKey("focuses.id"), nullable=True
+    )
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
