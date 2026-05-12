@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.65.0 — 2026-05-12 (minor)
+
+- feat(public): is_public_pinned hero card + replace AuraOrb w/ shared mascot (#191)
+
 ## 0.64.0 — 2026-05-12 (minor)
 
 - feat(notes): status pills + space dropdown filters on All Notes (#190)
