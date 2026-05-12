@@ -51,6 +51,18 @@ MIN_PARENT_FOR_SUBCLUSTER = 8
 MIN_SUB_SIZE = 3
 SNIPPET_LEN = 200
 
+# State→focus binding uses a compound test: a state cluster's centroid
+# must clear BOTH an absolute cosine floor and beat the runner-up focus
+# by a margin. Pure abs-floor binds noisily because intent/activity
+# centroids sit at lower-than-expected sims (~0.40 even for clearly
+# matched pairs like "Get Jacked" intent ↔ weight/rep logs); meanwhile
+# unrelated state clusters often score ~0.45 against an arbitrary focus.
+# The margin requirement is what discriminates real homes from
+# coincidence — the right focus tends to dominate by a 0.15+ gap, while
+# ambiguous state clusters land within 0.01-0.05 of multiple focuses.
+STATE_BIND_SIM = 0.38  # absolute floor — best match must clear this
+STATE_BIND_MARGIN = 0.10  # best match must beat the runner-up by this
+
 # Cheap model for the per-cluster classify call. Task is short-context
 # multi-class classification (focus / state / noise) with a one-sentence
 # reasoning — well within 4o-mini's capability and ~25x cheaper than the
@@ -417,6 +429,81 @@ def _subcluster_parent(
     return [s for s in sub_clusters if len(s) >= min_sub_size]
 
 
+def _centroid_of_items(items: list[dict]) -> list[float]:
+    """Mean of item embeddings. Used by the state→focus binding pass to
+    measure cosine distance between cluster centroids after classify."""
+    if not items:
+        return []
+    dim = len(items[0]["embedding"])
+    acc = [0.0] * dim
+    for it in items:
+        vec = it["embedding"]
+        for d in range(dim):
+            acc[d] += vec[d]
+    return [x / len(items) for x in acc]
+
+
+def _bind_state_to_focus(
+    parent_payloads: list[dict],
+    threshold: float = STATE_BIND_SIM,
+    margin: float = STATE_BIND_MARGIN,
+) -> None:
+    """For each state cluster, attach it to the focus cluster with the
+    closest centroid — but only when the match is unambiguously the
+    best home. Two conditions must hold:
+      1. best_sim ≥ threshold (absolute cosine floor)
+      2. best_sim − second_best_sim ≥ margin (decisive winner)
+
+    The margin is what discriminates real binds from coincidence. State
+    clusters that genuinely belong to a focus tend to dominate the
+    runner-up by ≥0.15 (e.g. weight logs ↔ Get Jacked = 0.40 vs next
+    0.16, gap 0.24). State clusters with no clear home land within
+    0.01-0.05 of multiple focuses and should orphan.
+
+    When only one focus exists, the margin test passes trivially (no
+    runner-up to beat). The absolute floor is the only gate.
+
+    State cluster gets `bound_to_index` set; focus cluster gains a
+    `bound_state` entry carrying the state items + classification +
+    bind sim. Mutates parent_payloads in place.
+    """
+    focus_meta: list[tuple[int, list[float]]] = []
+    state_meta: list[tuple[int, list[float]]] = []
+    for idx, p in enumerate(parent_payloads):
+        cls = p.get("classification") or {}
+        cat = cls.get("category")
+        if cat == "focus":
+            focus_meta.append((idx, _centroid_of_items(p["items"])))
+        elif cat == "state":
+            state_meta.append((idx, _centroid_of_items(p["items"])))
+
+    if not (focus_meta and state_meta):
+        return
+
+    for s_idx, s_centroid in state_meta:
+        sims = [
+            (f_idx, _cosine_similarity(s_centroid, f_centroid))
+            for f_idx, f_centroid in focus_meta
+        ]
+        sims.sort(key=lambda x: -x[1])
+        best_f_idx, best_sim = sims[0]
+        if best_sim < threshold:
+            continue
+        second_best_sim = sims[1][1] if len(sims) > 1 else -1.0
+        if best_sim - second_best_sim < margin:
+            continue
+
+        state_payload = parent_payloads[s_idx]
+        target = parent_payloads[best_f_idx]
+        target.setdefault("bound_state", []).append({
+            "items": state_payload["items"],
+            "classification": state_payload.get("classification"),
+            "bind_sim": round(best_sim, 3),
+            "bind_margin": round(best_sim - second_best_sim, 3),
+        })
+        state_payload["bound_to_index"] = best_f_idx
+
+
 def _classify_cluster(items: list[dict], model: str = CLASSIFY_MODEL) -> dict:
     evidence = "\n".join(
         f"- [{it['kind']}] {it['text'][:SNIPPET_LEN]}" for it in items
@@ -456,6 +543,8 @@ def synthesize(
     min_cluster_size: int = MIN_CLUSTER_SIZE,
     classify: bool = True,
     classify_model: str = CLASSIFY_MODEL,
+    state_bind_sim: float = STATE_BIND_SIM,
+    state_bind_margin: float = STATE_BIND_MARGIN,
 ) -> dict:
     """Run the full synthesis pass and return JSON.
 
@@ -477,6 +566,16 @@ def synthesize(
             before classify.
         classify: when False, skip every per-cluster LLM call (cheap
             dry-run to inspect raw cluster shape).
+        state_bind_sim: absolute cosine floor for state→focus binding.
+            The state cluster's centroid must score at least this high
+            against the best-matching focus cluster's centroid. Set to
+            1.1 to disable binding entirely.
+        state_bind_margin: minimum lead the best focus must have over
+            the runner-up for the bind to take. Discriminates real
+            "this is the home" matches from "tied between multiple
+            focuses" — empirically a ≥0.10 gap means the right focus
+            is decisively the home; smaller gaps mean ambiguity and
+            the state cluster should orphan rather than be force-bound.
     """
     include_kinds = include_kinds or ["note", "todo", "fact", "message"]
     items: list[dict] = []
@@ -560,8 +659,29 @@ def synthesize(
             for ch in p["children"]:
                 ch["classification"] = None
 
+    # State→focus binding pass — only meaningful when classify ran, since
+    # we key off the category labels. Intent statements ("get jacked")
+    # and activity logs ("185 lbs 8 reps") cluster apart at the embedding
+    # level due to language shape, but they describe the same focus.
+    # This pass re-attaches state clusters to their nearest focus.
+    bound_state_count = 0
+    if classify:
+        _bind_state_to_focus(
+            parent_payloads,
+            threshold=state_bind_sim,
+            margin=state_bind_margin,
+        )
+        bound_state_count = sum(
+            len(p.get("bound_state") or []) for p in parent_payloads
+        )
+
     candidates: list[dict] = []
     for p in parent_payloads:
+        # Skip payloads that were bound to another focus — they no longer
+        # belong at the top level; they live nested as bound_state on
+        # their parent focus.
+        if p.get("bound_to_index") is not None:
+            continue
         evidence = [
             {
                 "kind": it["kind"],
@@ -585,12 +705,32 @@ def synthesize(
                 "classification": ch["classification"],
                 "evidence": sub_evidence,
             })
-        candidates.append({
+        bound_state_payload: list[dict] = []
+        for bs in p.get("bound_state") or []:
+            bs_items = bs["items"]
+            bound_state_payload.append({
+                "size": len(bs_items),
+                "classification": bs.get("classification"),
+                "bind_sim": bs.get("bind_sim"),
+                "bind_margin": bs.get("bind_margin"),
+                "evidence": [
+                    {
+                        "kind": it["kind"],
+                        "id": it["id"],
+                        "snippet": it["text"][:SNIPPET_LEN],
+                    }
+                    for it in bs_items
+                ],
+            })
+        candidate = {
             "size": len(p["items"]),
             "classification": p["classification"],
             "evidence": evidence,
             "children": children,
-        })
+        }
+        if bound_state_payload:
+            candidate["bound_state"] = bound_state_payload
+        candidates.append(candidate)
 
     # Order: classified-as-focus first by confidence desc, then unclassified
     # by size desc. Lets the eyeball test focus on what the LLM endorsed.
@@ -611,6 +751,7 @@ def synthesize(
             "kept_count": len(kept),
             "classified_count": sum(1 for c in candidates if c["classification"] is not None),
             "subcluster_count": subcluster_total,
+            "bound_state_count": bound_state_count,
             "params": {
                 "threshold": threshold,
                 "merge_threshold": merge_threshold,
@@ -621,6 +762,8 @@ def synthesize(
                 "include_kinds": include_kinds,
                 "classify": classify,
                 "classify_model": classify_model,
+                "state_bind_sim": state_bind_sim,
+                "state_bind_margin": state_bind_margin,
             },
         },
     }

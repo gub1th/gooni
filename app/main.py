@@ -1258,7 +1258,11 @@ def focus_synthesis_run(body: dict | None = None, db: Session = Depends(get_db))
         "min_cluster_size": int (default 3),
         "classify": bool (default true; false skips every per-cluster LLM call),
         "classify_model": str (override the classify model, e.g. "gpt-4o" for
-            higher-fidelity comparison runs; defaults to the cheap classifier)
+            higher-fidelity comparison runs; defaults to the cheap classifier),
+        "state_bind_sim": float (absolute cosine floor for state→focus binding;
+            default 0.38, set to 1.1 to disable),
+        "state_bind_margin": float (minimum gap best focus must beat runner-up
+            by for the bind to take; default 0.10)
       }
     """
     from .services.focus_synthesizer import synthesize
@@ -1282,6 +1286,10 @@ def focus_synthesis_run(body: dict | None = None, db: Session = Depends(get_db))
         kwargs["classify"] = bool(body["classify"])
     if "classify_model" in body and body["classify_model"]:
         kwargs["classify_model"] = str(body["classify_model"])
+    if "state_bind_sim" in body and body["state_bind_sim"] is not None:
+        kwargs["state_bind_sim"] = float(body["state_bind_sim"])
+    if "state_bind_margin" in body and body["state_bind_margin"] is not None:
+        kwargs["state_bind_margin"] = float(body["state_bind_margin"])
     return synthesize(db, **kwargs)
 
 
