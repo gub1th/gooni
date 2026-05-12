@@ -1238,6 +1238,53 @@ def focuses_list(db: Session = Depends(get_db)):
     return [_focus_tree_node(db, f) for f in focus_service.list_active(db)]
 
 
+@app.post("/focus-synthesis/run")
+def focus_synthesis_run(body: dict | None = None, db: Session = Depends(get_db)):
+    """Probe endpoint — runs the focus synthesizer over recent notes /
+    todos / deduped facts / chat messages and returns candidate clusters
+    as JSON. Does NOT persist anything; this is a quality probe.
+
+    Body (all optional):
+      {
+        "include_kinds": ["note","todo","fact","message"],
+        "threshold": float (cosine join floor, default 0.48),
+        "merge_threshold": float (centroid-merge floor, default 0.62; set
+            to 1.1 to disable the merge pass),
+        "sub_threshold": float (tighter cosine for within-parent sub-cluster,
+            default 0.62),
+        "min_parent_for_subcluster": int (only parents this size or larger
+            get sub-clustered; default 8, set to 9999 to disable),
+        "min_sub_size": int (drop sub-clusters smaller than this; default 3),
+        "min_cluster_size": int (default 3),
+        "classify": bool (default true; false skips every per-cluster LLM call),
+        "classify_model": str (override the classify model, e.g. "gpt-4o" for
+            higher-fidelity comparison runs; defaults to the cheap classifier)
+      }
+    """
+    from .services.focus_synthesizer import synthesize
+    body = body or {}
+    kwargs: dict = {}
+    if "include_kinds" in body and body["include_kinds"]:
+        kwargs["include_kinds"] = list(body["include_kinds"])
+    if "threshold" in body and body["threshold"] is not None:
+        kwargs["threshold"] = float(body["threshold"])
+    if "merge_threshold" in body and body["merge_threshold"] is not None:
+        kwargs["merge_threshold"] = float(body["merge_threshold"])
+    if "sub_threshold" in body and body["sub_threshold"] is not None:
+        kwargs["sub_threshold"] = float(body["sub_threshold"])
+    if "min_parent_for_subcluster" in body and body["min_parent_for_subcluster"] is not None:
+        kwargs["min_parent_for_subcluster"] = int(body["min_parent_for_subcluster"])
+    if "min_sub_size" in body and body["min_sub_size"] is not None:
+        kwargs["min_sub_size"] = int(body["min_sub_size"])
+    if "min_cluster_size" in body and body["min_cluster_size"] is not None:
+        kwargs["min_cluster_size"] = int(body["min_cluster_size"])
+    if "classify" in body and body["classify"] is not None:
+        kwargs["classify"] = bool(body["classify"])
+    if "classify_model" in body and body["classify_model"]:
+        kwargs["classify_model"] = str(body["classify_model"])
+    return synthesize(db, **kwargs)
+
+
 @app.get("/todos")
 def todos_list(db: Session = Depends(get_db)):
     """Open + completed-today todos, grouped. Powers the todo list UI."""
