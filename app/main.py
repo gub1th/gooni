@@ -1295,19 +1295,22 @@ def focus_synthesis_run(body: dict | None = None, db: Session = Depends(get_db))
 
 @app.post("/focus-candidates/run")
 def focus_candidates_run(body: dict | None = None, db: Session = Depends(get_db)):
-    """Run the synthesizer and PERSIST every focus-shaped candidate.
+    """Run synthesizer → bind clusters to existing Focuses → persist
+    the unbound focus-shaped clusters as candidates.
 
-    Same body shape as /focus-synthesis/run (the pure probe), plus
-    DB writes via focus_candidate_service.persist_run. Repeat calls
-    upsert by cluster_signature — same cluster shape bumps seen_count
-    instead of spawning a duplicate row. State / noise clusters in
-    the synth output are NOT persisted; state lives as bound evidence
-    under its parent focus only.
+    Binding pass runs FIRST so clusters that match an existing Focus
+    don't duplicate as candidates. Updates current_signature +
+    evidence + last_seen_in_synth + missed_run_count on the bound
+    Focus; flags drift; auto-marks dormant after DORMANCY_THRESHOLD
+    consecutive missed runs.
 
-    Returns: {synth_stats, persisted: [<candidate dict>...]}.
+    Same body shape as /focus-synthesis/run. Returns:
+      {synth_stats, binding: {bound, dormant_focus_ids,
+       newly_drifted_focus_ids}, persisted}
     """
     from .services.focus_synthesizer import synthesize
     from .services import focus_candidate_service
+    from .services.focus_service import bind_to_clusters
 
     body = body or {}
     kwargs: dict = {}
@@ -1320,8 +1323,59 @@ def focus_candidates_run(body: dict | None = None, db: Session = Depends(get_db)
             kwargs[key] = body[key]
 
     out = synthesize(db, **kwargs)
+    binding = bind_to_clusters(db, out)
     persisted = focus_candidate_service.persist_run(db, out)
-    return {"synth_stats": out["stats"], "persisted": persisted}
+    return {
+        "synth_stats": out["stats"],
+        "binding": binding,
+        "persisted": persisted,
+    }
+
+
+@app.post("/focuses/{focus_id}/rename")
+def focus_rename(
+    focus_id: int, body: dict, db: Session = Depends(get_db),
+):
+    """User-driven rename for a drifted focus. Snaps initial_signature
+    to current_signature so future drift re-bases from the new origin;
+    clears drift_flagged_at. Body: {text?, endgoal?}.
+    """
+    from .services.focus_service import rename, serialize_focus
+    f = rename(
+        db, focus_id,
+        text=body.get("text"),
+        endgoal=body.get("endgoal"),
+    )
+    if not f:
+        raise HTTPException(404, "focus not found")
+    return serialize_focus(f)
+
+
+@app.post("/focuses/{focus_id}/fork")
+def focus_fork(
+    focus_id: int, body: dict, db: Session = Depends(get_db),
+):
+    """Fork a drifted focus into a new lineage. Old focus is preserved
+    with status='evolved'; new Focus inherits current_signature as its
+    origin and links back via evolved_from_focus_id. Body:
+    {new_text, new_endgoal?}.
+    """
+    from .services.focus_service import fork, serialize_focus
+    new_text = (body.get("new_text") or "").strip()
+    if not new_text:
+        raise HTTPException(400, "new_text required")
+    result = fork(
+        db, focus_id,
+        new_text=new_text,
+        new_endgoal=body.get("new_endgoal"),
+    )
+    if not result:
+        raise HTTPException(404, "focus not found")
+    old, new = result
+    return {
+        "old_focus": serialize_focus(old),
+        "new_focus": serialize_focus(new),
+    }
 
 
 @app.get("/focus-candidates")

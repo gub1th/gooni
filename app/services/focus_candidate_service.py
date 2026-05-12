@@ -194,11 +194,26 @@ def promote(
         committed=True,
         status="committed",
     )
+
+    # Stamp the drift / lineage cols. initial_signature is frozen at
+    # promotion — never moves. current_signature starts identical, then
+    # drifts as the binding pass re-binds clusters on future runs.
+    # current_evidence_json is the snapshot of what backed the focus
+    # at birth; it's refreshed every successful bind.
+    centroid_json = cand.centroid_embedding  # already JSON-encoded
+    focus.initial_signature = centroid_json
+    focus.current_signature = centroid_json
+    focus.current_evidence_json = cand.evidence_json
+    focus.last_seen_in_synth = datetime.utcnow()
+    focus.missed_run_count = 0
+    focus.promoted_from_candidate_id = cand.id
+
     cand.status = "promoted"
     cand.promoted_focus_id = focus.id
     cand.promoted_at = datetime.utcnow()
     db.commit()
     db.refresh(cand)
+    db.refresh(focus)
     return cand, focus
 
 

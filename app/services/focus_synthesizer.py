@@ -704,6 +704,7 @@ def synthesize(
                 "size": len(ch["items"]),
                 "classification": ch["classification"],
                 "evidence": sub_evidence,
+                "centroid_embedding": _centroid_of_items(ch["items"]),
             })
         bound_state_payload: list[dict] = []
         for bs in p.get("bound_state") or []:
@@ -727,6 +728,10 @@ def synthesize(
             "classification": p["classification"],
             "evidence": evidence,
             "children": children,
+            # Centroid emitted so downstream consumers (FocusCandidate
+            # persistence, hybrid binding to existing Focus rows) can
+            # compute cosine sims without re-loading per-item embeddings.
+            "centroid_embedding": _centroid_of_items(p["items"]),
         }
         if bound_state_payload:
             candidate["bound_state"] = bound_state_payload
