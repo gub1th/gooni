@@ -299,12 +299,15 @@ class LLMClient:
         prompt: str,
         max_tokens: int = 300,
         temperature: float = 0.7,
+        model: str | None = None,
     ) -> str:
         """Single-turn completion. Used for briefings, commentary, and other ad-hoc tasks.
-        Pass temperature=0.0 for structured extraction calls where determinism matters."""
+        Pass temperature=0.0 for structured extraction calls where determinism matters.
+        Pass `model` to override `self.chat_model` (e.g. "gpt-4o-mini" for cheap
+        bulk classify work where quality bar is low)."""
         try:
             response = self.client.chat.completions.create(
-                model=self.chat_model,
+                model=model or self.chat_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=temperature,
                 max_completion_tokens=max_tokens,
