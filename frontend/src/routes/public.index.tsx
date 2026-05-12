@@ -5,7 +5,7 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import LinkExtension from "@tiptap/extension-link";
 import { updatePublicProfile, getStoredToken, patchNote, type PublicNote } from "../services/api";
-import { Globe } from "lucide-react";
+import { Globe, Pin, PinOff } from "lucide-react";
 import { displayTitle } from "../utils/notePreview";
 import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
@@ -239,9 +239,39 @@ function PublicPage() {
     new Set(notes.map((n) => n.space_name).filter((s): s is string => s !== null))
   );
   const displayed = filter ? notes.filter((n) => n.space_name === filter) : notes;
+  // Split: pinned notes hero above, rest in the list. Pinned still respects
+  // the active space filter so the section feels coherent w/ the filter pill.
+  const pinned = displayed.filter((n) => n.is_public_pinned);
+  const rest = displayed.filter((n) => !n.is_public_pinned);
+
+  function handleTogglePin(note: PublicNote) {
+    const next = !note.is_public_pinned;
+    // Optimistic flip in the local list so the hero card jumps immediately.
+    const updated = notes.map((n) =>
+      n.id === note.id ? { ...n, is_public_pinned: next } : n,
+    );
+    setLocalNotes(updated);
+    patchNote(note.id, { is_public_pinned: next })
+      .then(() => {
+        queryClient.setQueryData(publicNotesListQueryOptions().queryKey, updated);
+        setLocalNotes(null);
+      })
+      .catch((e) => {
+        console.error("[public] toggle pin failed", e);
+        setLocalNotes(null);
+      });
+  }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#fff", fontFamily: FONT, color: "#111" }}>
+    <div style={{
+      minHeight: "100vh",
+      // Subtle warm gradient — reads less generic than flat #fff, but keeps
+      // typography first. Almost-invisible green tint at the top echoes the
+      // mascot palette without screaming "themed."
+      background: "radial-gradient(ellipse 1100px 600px at 50% -10%, rgba(74,222,128,0.06), transparent 70%), linear-gradient(180deg, #fbfaf7 0%, #ffffff 40%)",
+      fontFamily: FONT,
+      color: "#111",
+    }}>
       <div style={{ maxWidth: 680, margin: "0 auto", padding: "60px 24px 120px" }}>
 
         {/* Header */}
@@ -393,12 +423,113 @@ function PublicPage() {
           </div>
         )}
 
+        {/* Pinned hero cards — public-pinned notes surfaced above the
+            list. The owner pins via the pin button on a regular row;
+            the hero card lets a YC reviewer (or anyone landing cold)
+            hit the intro post first instead of scanning the list. */}
+        {pinned.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 28 }}>
+            {pinned.map((note) => (
+              <Link
+                key={note.id}
+                to="/public/$noteId"
+                params={{ noteId: String(note.id) }}
+                onMouseEnter={() => queryClient.prefetchQuery(publicNoteQueryOptions(note.id))}
+                onFocus={() => queryClient.prefetchQuery(publicNoteQueryOptions(note.id))}
+                style={{
+                  display: "block",
+                  padding: "20px 22px",
+                  borderRadius: 16,
+                  background: "linear-gradient(135deg, #ffffff 0%, #f9fbf7 100%)",
+                  border: "1px solid rgba(74,222,128,0.30)",
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03)",
+                  textDecoration: "none",
+                  color: "#111",
+                  transition: "transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease",
+                  position: "relative",
+                }}
+                onMouseOver={(e) => {
+                  const el = e.currentTarget as HTMLAnchorElement;
+                  el.style.transform = "translateY(-2px)";
+                  el.style.boxShadow = "0 10px 28px rgba(0,0,0,0.07), 0 2px 6px rgba(0,0,0,0.04)";
+                  el.style.borderColor = "rgba(74,222,128,0.55)";
+                }}
+                onMouseOut={(e) => {
+                  const el = e.currentTarget as HTMLAnchorElement;
+                  el.style.transform = "translateY(0)";
+                  el.style.boxShadow = "0 4px 14px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03)";
+                  el.style.borderColor = "rgba(74,222,128,0.30)";
+                }}
+              >
+                <div style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  color: "#1b8b4a",
+                  marginBottom: 8,
+                }}>
+                  <Pin size={11} strokeWidth={2.2} /> start here
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.3px", marginBottom: 8 }}>
+                  {displayTitle({ title: note.title, content: note.excerpt })}
+                </div>
+                <div style={{
+                  fontSize: 14.5,
+                  color: "#555",
+                  lineHeight: 1.6,
+                  display: "-webkit-box",
+                  WebkitLineClamp: 3,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}>
+                  {note.excerpt}
+                </div>
+                <div style={{ marginTop: 12, fontSize: 12.5, color: "#999" }}>
+                  {formatDate(note.updated_at)} · {note.read_time_minutes} min read
+                </div>
+                {isOwner && (
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleTogglePin(note);
+                    }}
+                    title="Unpin from public hero"
+                    aria-label="Unpin from public hero"
+                    style={{
+                      position: "absolute",
+                      top: 14,
+                      right: 14,
+                      background: "transparent",
+                      border: "1px solid rgba(0,0,0,0.10)",
+                      borderRadius: 999,
+                      width: 28,
+                      height: 28,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#666",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <PinOff size={13} strokeWidth={1.8} />
+                  </button>
+                )}
+              </Link>
+            ))}
+          </div>
+        )}
+
         {/* Notes list */}
         {displayed.length === 0 ? (
           <p style={{ color: "#aaa", fontSize: 14 }}>No posts yet.</p>
-        ) : (
+        ) : rest.length === 0 ? null : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {displayed.map((note) => (
+            {rest.map((note) => (
               <li
                 key={note.id}
                 onMouseEnter={() => {
@@ -427,6 +558,32 @@ function PublicPage() {
                   </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  {/* Owner-only: pin to public hero. */}
+                  {isOwner && (
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleTogglePin(note);
+                      }}
+                      title="Pin to public hero"
+                      aria-label={`Pin "${displayTitle({ title: note.title, content: note.excerpt })}" to public hero`}
+                      style={{
+                        background: "transparent",
+                        border: "1px solid rgba(0,0,0,0.10)",
+                        borderRadius: 999,
+                        width: 26, height: 26,
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        color: "#444",
+                        cursor: "pointer",
+                        opacity: hoveredId === note.id ? 1 : 0,
+                        transition: "opacity 0.15s ease",
+                      }}
+                      onFocus={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = "1")}
+                    >
+                      <Pin size={12} strokeWidth={1.8} />
+                    </button>
+                  )}
                   {/* Owner-only: per-row globe → unpublish. Visible on hover
                       and (for keyboard users) when the row is focused. The
                       icon is also keyboard-reachable since it's a button. */}

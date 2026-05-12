@@ -2047,6 +2047,7 @@ def _serialize_note(n: Note) -> dict:
         "last_opened_at": n.last_opened_at,
         "is_public": bool(n.is_public),
         "is_pinned": bool(n.is_pinned),
+        "is_public_pinned": bool(getattr(n, "is_public_pinned", False)),
         "is_draft": bool(getattr(n, "is_draft", False)),
         # Snapshot of what classify_note routed for this note's most recent
         # save. Drives the "Routed:" disclosure under the title — same shape
@@ -2076,6 +2077,7 @@ def _serialize_note_lite(n: Note) -> dict:
         "last_opened_at": n.last_opened_at,
         "is_public": bool(n.is_public),
         "is_pinned": bool(n.is_pinned),
+        "is_public_pinned": bool(getattr(n, "is_public_pinned", False)),
         "is_draft": bool(getattr(n, "is_draft", False)),
         "classify_signals": None,
         "parent_note_id": n.parent_note_id,
@@ -2211,6 +2213,8 @@ def update_note(
             note.is_draft = False
     if "is_pinned" in body:
         note.is_pinned = bool(body["is_pinned"])
+    if "is_public_pinned" in body:
+        note.is_public_pinned = bool(body["is_public_pinned"])
     if "is_draft" in body:
         note.is_draft = bool(body["is_draft"])
     db.commit()
@@ -3523,12 +3527,13 @@ def _unique_viewers_for_note(db: Session, note_id: int) -> int:
 
 @app.get("/public/notes")
 def get_public_notes(db: Session = Depends(get_db)):
-    """Return all public notes with their space name, newest first. No auth."""
+    """Return all public notes with their space name. Public-pinned first,
+    then newest. No auth."""
     rows = (
         db.query(Note, Space)
         .outerjoin(Space, Note.space_id == Space.id)
         .filter(Note.is_public == True)  # noqa: E712
-        .order_by(_notes_order())
+        .order_by(Note.is_public_pinned.desc(), _notes_order())
         .all()
     )
     result = []
@@ -3541,6 +3546,7 @@ def get_public_notes(db: Session = Depends(get_db)):
             "excerpt": excerpt,
             "updated_at": n.updated_at,
             "read_time_minutes": _read_time_min(n.content or ""),
+            "is_public_pinned": bool(n.is_public_pinned),
         })
     return result
 

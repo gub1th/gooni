@@ -536,7 +536,7 @@ export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: numbe
 
 export async function patchNote(
   id: number,
-  patch: { is_public?: boolean; is_pinned?: boolean; is_draft?: boolean; title?: string; content?: string },
+  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string },
 ): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
@@ -561,6 +561,7 @@ export interface PublicNote {
   excerpt: string;
   updated_at: string;
   read_time_minutes: number;
+  is_public_pinned?: boolean;
 }
 
 export interface PublicNoteDetail {
