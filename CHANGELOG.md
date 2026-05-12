@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.69.2 — 2026-05-12 (patch)
+
+- fix(alembic): idempotent migrations for partial-deploy recovery (PROD DOWN) (#197)
+
 ## 0.69.1 — 2026-05-12 (patch)
 
 - fix(alembic): merge focus-drift + is_public_pinned heads (#196)
