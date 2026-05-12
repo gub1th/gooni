@@ -330,6 +330,6 @@ returns a 0-or-1-element list now.
 - **hasChanges ref**: NoteEditor only calls save() if user actually typed — prevents updated_at being touched on blur
 - **Public routes**: `/public` and `/public/$noteId` are standalone pages (no sidebar, no auth)
 - **Images in notes**: base64 data URLs stored inline in note content via TipTap Image extension
-- **Deferred embedding columns**: `Note.embedding`, `Note.classified_embedding`, `ListItem.embedding`, `Memory.embedding` are wrapped in `deferred()`. ORM hydration skips them — list/read endpoints don't pay the ~31KB-per-row cost. Similarity callers must opt back in via tuple queries (`db.query(Note.id, Note.embedding).all()`) instead of `.query(Note).all()` to avoid an N+1 lazy-load storm. Pattern lives in `note_service.search_by_query`, `list_service.find_similar`, `memory_service` retrieval.
+- **Deferred embedding columns**: `Note.embedding`, `Note.classified_embedding`, `ListItem.embedding`, `Memory.embedding`, `Message.embedding` are wrapped in `deferred()`. ORM hydration skips them — list/read endpoints don't pay the ~31KB-per-row cost. Similarity callers must opt back in via tuple queries (`db.query(Note.id, Note.embedding).all()`) instead of `.query(Note).all()` to avoid an N+1 lazy-load storm. Pattern lives in `note_service.search_by_query`, `list_service.find_similar`, `memory_service` retrieval, and `focus_synthesizer._gather_messages` (lazy-populates `Message.embedding` on first read — messages are immutable post-create so cache never goes stale).
 
 ## Known Issues

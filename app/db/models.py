@@ -76,6 +76,11 @@ class Message(Base):
     # Schema: [{ "type": "intention" | "memory_recall" | "tool_call" | "reply",
     #            "label": str, "detail": str | None, "args": dict | None }]
     trace = Column(Text, nullable=True)
+    # JSON-encoded embedding for the message text. Lazily populated by the
+    # focus synthesizer on first read (messages are immutable post-create, so
+    # cache never goes stale). Deferred so list/read queries don't hydrate
+    # the ~31KB-per-row vector — same pattern as Note.embedding.
+    embedding = deferred(Column(Text, nullable=True))
 
 
 class ToolCall(Base):

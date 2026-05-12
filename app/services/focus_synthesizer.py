@@ -195,47 +195,81 @@ def _gather_facts_deduped(db: Session) -> list[dict]:
 
 
 def _gather_messages(db: Session) -> list[dict]:
-    """Recent user messages over the length floor. Embeds in parallel via
-    a thread pool — Messages don't have a persisted `embedding` column,
-    so we pay the embedding API on every run. Parallelizing turns ~17s
-    of sequential RTT into ~2s.
+    """Recent user messages over the length floor.
+
+    Messages are immutable after creation, so we cache their embeddings
+    in the `messages.embedding` deferred column. On every run we pull
+    the stored vector when present; on a miss we embed via the API,
+    persist back to the row, and use the fresh vector. First run after
+    the migration eats the full cost; subsequent runs are zero API
+    calls in this gather. Misses are embedded in parallel via a thread
+    pool — turns ~17s of sequential RTT into ~2s.
     """
     cutoff = datetime.utcnow() - timedelta(days=RECENT_DAYS_MESSAGES)
     rows = (
-        db.query(Message.id, Message.content)
+        db.query(Message.id, Message.content, Message.embedding)
         .filter(Message.role == "user")
         .filter(Message.created_at >= cutoff)
         .order_by(Message.id.desc())
         .limit(MESSAGE_GATHER_CAP)
         .all()
     )
-    # Filter first so embed calls only fire for items we actually keep.
-    payloads: list[tuple[int, str]] = []
-    for mid, content in rows:
+
+    cached: list[tuple[int, str, list[float]]] = []
+    misses: list[tuple[int, str]] = []
+    for mid, content, emb_str in rows:
         text = (content or "").strip()
         if len(text) < MESSAGE_MIN_LEN:
             continue
-        payloads.append((mid, text))
+        cached_vec = _parse_vec(emb_str)
+        if cached_vec:
+            cached.append((mid, text, cached_vec))
+        else:
+            misses.append((mid, text))
 
-    if not payloads:
-        return []
+    # Embed only the misses, in parallel.
+    fresh: list[tuple[int, str, list[float]]] = []
+    if misses:
+        def _embed(text: str) -> list[float]:
+            emb, _ = llm_client.generate_embedding(text[:2000])
+            return emb or []
 
-    def _embed(text: str) -> list[float]:
-        emb, _ = llm_client.generate_embedding(text[:2000])
-        return emb or []
+        with ThreadPoolExecutor(max_workers=LLM_WORKERS) as ex:
+            embeddings = list(ex.map(_embed, [t for _, t in misses]))
 
-    with ThreadPoolExecutor(max_workers=LLM_WORKERS) as ex:
-        embeddings = list(ex.map(_embed, [t for _, t in payloads]))
+        for (mid, text), vec in zip(misses, embeddings):
+            if not vec:
+                continue
+            fresh.append((mid, text, vec))
+
+        # Persist the fresh embeddings so next run hits the cache.
+        # Wrapped in a try/except + flush — gather must never break the
+        # synth pipeline if the write fails (read-only fallback is fine).
+        if fresh:
+            try:
+                for mid, _, vec in fresh:
+                    db.query(Message).filter(Message.id == mid).update(
+                        {"embedding": json.dumps(vec)},
+                        synchronize_session=False,
+                    )
+                db.commit()
+            except Exception:
+                db.rollback()
 
     items: list[dict] = []
-    for (mid, text), emb in zip(payloads, embeddings):
-        if not emb:
-            continue
+    for mid, text, vec in cached:
         items.append({
             "kind": "message",
             "id": mid,
             "text": text,
-            "embedding": emb,
+            "embedding": vec,
+        })
+    for mid, text, vec in fresh:
+        items.append({
+            "kind": "message",
+            "id": mid,
+            "text": text,
+            "embedding": vec,
         })
     return items
 
