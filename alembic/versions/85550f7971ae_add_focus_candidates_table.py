@@ -22,51 +22,58 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
-    op.create_table(
-        'focus_candidates',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('name', sa.Text(), nullable=False),
-        sa.Column('endgoal', sa.Text(), nullable=True),
-        sa.Column('category', sa.String(), nullable=False),
-        sa.Column('confidence', sa.Float(), nullable=False),
-        sa.Column('reasoning', sa.Text(), nullable=True),
-        sa.Column('cluster_signature', sa.String(), nullable=False),
-        sa.Column('evidence_json', sa.Text(), nullable=False),
-        sa.Column('centroid_embedding', sa.Text(), nullable=True),
-        sa.Column('parent_candidate_id', sa.Integer(), nullable=True),
-        sa.Column('status', sa.String(), nullable=False),
-        sa.Column('promoted_focus_id', sa.Integer(), nullable=True),
-        sa.Column('promoted_at', sa.DateTime(), nullable=True),
-        sa.Column('dismissed_at', sa.DateTime(), nullable=True),
-        sa.Column('first_seen_in_synth', sa.DateTime(), nullable=False),
-        sa.Column('last_seen_in_synth', sa.DateTime(), nullable=False),
-        sa.Column('seen_count', sa.Integer(), nullable=False),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(['parent_candidate_id'], ['focus_candidates.id'], ),
-        sa.ForeignKeyConstraint(['promoted_focus_id'], ['focuses.id'], ),
-        sa.PrimaryKeyConstraint('id'),
-    )
+    """Upgrade schema.
+
+    Idempotent: an earlier deploy crashed after CREATE TABLE succeeded but
+    before alembic stamped the revision, so prod hit "table focus_candidates
+    already exists" on retry. Guard each DDL op against pre-existing state
+    so the migration is safe to re-run.
+    """
+    from sqlalchemy import inspect
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    has_table = 'focus_candidates' in inspector.get_table_names()
+
+    if not has_table:
+        op.create_table(
+            'focus_candidates',
+            sa.Column('id', sa.Integer(), nullable=False),
+            sa.Column('name', sa.Text(), nullable=False),
+            sa.Column('endgoal', sa.Text(), nullable=True),
+            sa.Column('category', sa.String(), nullable=False),
+            sa.Column('confidence', sa.Float(), nullable=False),
+            sa.Column('reasoning', sa.Text(), nullable=True),
+            sa.Column('cluster_signature', sa.String(), nullable=False),
+            sa.Column('evidence_json', sa.Text(), nullable=False),
+            sa.Column('centroid_embedding', sa.Text(), nullable=True),
+            sa.Column('parent_candidate_id', sa.Integer(), nullable=True),
+            sa.Column('status', sa.String(), nullable=False),
+            sa.Column('promoted_focus_id', sa.Integer(), nullable=True),
+            sa.Column('promoted_at', sa.DateTime(), nullable=True),
+            sa.Column('dismissed_at', sa.DateTime(), nullable=True),
+            sa.Column('first_seen_in_synth', sa.DateTime(), nullable=False),
+            sa.Column('last_seen_in_synth', sa.DateTime(), nullable=False),
+            sa.Column('seen_count', sa.Integer(), nullable=False),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['parent_candidate_id'], ['focus_candidates.id'], ),
+            sa.ForeignKeyConstraint(['promoted_focus_id'], ['focuses.id'], ),
+            sa.PrimaryKeyConstraint('id'),
+        )
+
+    existing_indexes = {ix['name'] for ix in inspector.get_indexes('focus_candidates')} if has_table else set()
+    wanted_indexes = [
+        ('ix_focus_candidates_cluster_signature', ['cluster_signature'], True),
+        ('ix_focus_candidates_id', ['id'], False),
+        ('ix_focus_candidates_parent_candidate_id', ['parent_candidate_id'], False),
+        ('ix_focus_candidates_promoted_focus_id', ['promoted_focus_id'], False),
+        ('ix_focus_candidates_status', ['status'], False),
+    ]
     with op.batch_alter_table('focus_candidates', schema=None) as batch_op:
-        batch_op.create_index(
-            batch_op.f('ix_focus_candidates_cluster_signature'),
-            ['cluster_signature'], unique=True,
-        )
-        batch_op.create_index(
-            batch_op.f('ix_focus_candidates_id'), ['id'], unique=False,
-        )
-        batch_op.create_index(
-            batch_op.f('ix_focus_candidates_parent_candidate_id'),
-            ['parent_candidate_id'], unique=False,
-        )
-        batch_op.create_index(
-            batch_op.f('ix_focus_candidates_promoted_focus_id'),
-            ['promoted_focus_id'], unique=False,
-        )
-        batch_op.create_index(
-            batch_op.f('ix_focus_candidates_status'), ['status'], unique=False,
-        )
+        for name, cols, unique in wanted_indexes:
+            if name in existing_indexes:
+                continue
+            batch_op.create_index(batch_op.f(name), cols, unique=unique)
 
 
 def downgrade() -> None:

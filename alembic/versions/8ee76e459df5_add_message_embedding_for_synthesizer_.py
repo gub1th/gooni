@@ -23,7 +23,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
+    """Upgrade schema. Idempotent: paired with the focus-candidates partial
+    deploy, this column may already exist from an earlier crashed run."""
+    from sqlalchemy import inspect
+    bind = op.get_bind()
+    existing = {c['name'] for c in inspect(bind).get_columns('messages')}
+    if 'embedding' in existing:
+        return
     with op.batch_alter_table('messages', schema=None) as batch_op:
         batch_op.add_column(sa.Column('embedding', sa.Text(), nullable=True))
 
