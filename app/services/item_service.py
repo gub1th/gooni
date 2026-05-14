@@ -199,7 +199,7 @@ def _focus_tree_node(db: Session, f: Focus) -> dict[str, Any]:
         and (datetime.utcnow() - updated).days >= _STALE_DAYS
     )
     return {
-        **serialize_focus(f),
+        **serialize_focus(f, db=db),
         # Compatibility: legacy shape was `{children, progress, stale}`.
         # Children are gone after extraction; surface as empty list so
         # rendering paths don't NPE.

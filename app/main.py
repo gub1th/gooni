@@ -1448,7 +1448,7 @@ def focus_rename(
     )
     if not f:
         raise HTTPException(404, "focus not found")
-    return serialize_focus(f)
+    return serialize_focus(f, db=db)
 
 
 @app.post("/focuses/{focus_id}/fork")
@@ -1473,9 +1473,54 @@ def focus_fork(
         raise HTTPException(404, "focus not found")
     old, new = result
     return {
-        "old_focus": serialize_focus(old),
-        "new_focus": serialize_focus(new),
+        "old_focus": serialize_focus(old, db=db),
+        "new_focus": serialize_focus(new, db=db),
     }
+
+
+@app.get("/focuses/{focus_id}")
+def focus_get(focus_id: int, db: Session = Depends(get_db)):
+    """Single-focus detail — includes the parsed bound-state evidence
+    array (snippets of notes/todos/facts/messages currently bound to
+    this focus). Heavier than the /focuses list endpoint; used by the
+    dashboard drill-down modal.
+    """
+    from .services.focus_service import serialize_focus
+    from .db.models import Focus
+    import json as _json
+    f = db.query(Focus).filter(Focus.id == focus_id).first()
+    if not f:
+        raise HTTPException(404, "focus not found")
+    payload = serialize_focus(f, db=db)
+    evidence: list = []
+    if f.current_evidence_json:
+        try:
+            parsed = _json.loads(f.current_evidence_json)
+            if isinstance(parsed, list):
+                evidence = parsed
+        except Exception:
+            pass
+    payload["evidence"] = evidence
+    return payload
+
+
+@app.post("/focuses/{focus_id}/reactivate")
+def focus_reactivate(focus_id: int, db: Session = Depends(get_db)):
+    """Bring a dormant focus back into the active pool. Clears
+    missed_run_count + drift flag, sets status='committed'. Idempotent
+    on already-active focuses (just resets the counters)."""
+    from .services.focus_service import serialize_focus
+    from .db.models import Focus
+    f = db.query(Focus).filter(Focus.id == focus_id).first()
+    if not f:
+        raise HTTPException(404, "focus not found")
+    f.status = "committed"
+    f.committed = True
+    f.missed_run_count = 0
+    f.drift_flagged_at = None
+    db.commit()
+    db.refresh(f)
+    return serialize_focus(f, db=db)
 
 
 @app.get("/focus-candidates")

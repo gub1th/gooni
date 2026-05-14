@@ -173,7 +173,34 @@ class FocusService:
         return "\n".join(lines)
 
 
-def serialize_focus(f: Focus) -> dict[str, Any]:
+def serialize_focus(f: Focus, db: Session | None = None) -> dict[str, Any]:
+    """Standard serialize. Includes drift / lineage cols + a derived
+    `signals_count` (number of evidence items currently bound to this
+    focus) and a 1-step lineage breadcrumb (parent focus name) when
+    `evolved_from_focus_id` is set.
+
+    db is optional — without it the lineage name lookup is skipped;
+    signals_count still derives purely from current_evidence_json.
+    """
+    signals_count = 0
+    if f.current_evidence_json:
+        try:
+            parsed = json.loads(f.current_evidence_json)
+            if isinstance(parsed, list):
+                signals_count = len(parsed)
+        except Exception:
+            pass
+
+    evolved_from_name: str | None = None
+    if f.evolved_from_focus_id and db is not None:
+        prior = (
+            db.query(Focus.text)
+            .filter(Focus.id == f.evolved_from_focus_id)
+            .first()
+        )
+        if prior:
+            evolved_from_name = prior[0]
+
     return {
         "id": f.id,
         "text": f.text,
@@ -200,6 +227,8 @@ def serialize_focus(f: Focus) -> dict[str, Any]:
         ),
         "promoted_from_candidate_id": f.promoted_from_candidate_id,
         "evolved_from_focus_id": f.evolved_from_focus_id,
+        "evolved_from_name": evolved_from_name,
+        "signals_count": signals_count,
         "created_at": f.created_at.isoformat() if f.created_at else None,
         "updated_at": f.updated_at.isoformat() if f.updated_at else None,
     }
