@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.70.0 — 2026-05-14 (minor)
+
+- feat(habits): daily binary tracker w/ 7-day strip widget + log_habit chat tool (#199)
+
 ## 0.69.3 — 2026-05-14 (patch)
 
 - fix(list): drop stale due_date kwarg from ListItem insert path (#198)
