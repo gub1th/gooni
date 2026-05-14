@@ -1990,3 +1990,87 @@ export async function uploadImage(file: File): Promise<ImageUploadResult> {
   }
   return { kind: "error", status: res.status, message };
 }
+
+// ── Habits (daily binary trackers) ─────────────────────────────────────
+
+export interface ApiHabitCell {
+  date: string; // YYYY-MM-DD
+  value: boolean | null; // null = unlogged / unknown
+}
+
+export interface ApiHabit {
+  id: number;
+  name: string;
+  color: string | null;
+  polarity: "positive" | "negative";
+  archived_at: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  streak: number;
+  recent: ApiHabitCell[]; // 7 cells, oldest → newest
+}
+
+export async function fetchHabits(): Promise<ApiHabit[]> {
+  const res = await apiFetch(`${BASE}/habits`);
+  if (!res.ok) throw new Error("Failed to fetch habits");
+  return res.json();
+}
+
+export async function createHabit(
+  name: string,
+  polarity: "positive" | "negative" = "positive",
+  color?: string,
+): Promise<ApiHabit> {
+  const res = await apiFetch(`${BASE}/habits`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, polarity, color }),
+  });
+  if (!res.ok) throw new Error("Failed to create habit");
+  return res.json();
+}
+
+export async function patchHabit(
+  id: number,
+  patch: Partial<{
+    name: string;
+    color: string;
+    polarity: "positive" | "negative";
+    sort_order: number;
+    archived: boolean;
+  }>,
+): Promise<ApiHabit> {
+  const res = await apiFetch(`${BASE}/habits/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to patch habit");
+  return res.json();
+}
+
+export async function deleteHabit(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/habits/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete habit");
+}
+
+export async function setHabitEntry(
+  habitId: number,
+  day: string,
+  value: boolean,
+): Promise<void> {
+  const res = await apiFetch(`${BASE}/habits/${habitId}/entries/${day}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) throw new Error("Failed to set entry");
+}
+
+export async function unlogHabitEntry(habitId: number, day: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/habits/${habitId}/entries/${day}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to unlog entry");
+}

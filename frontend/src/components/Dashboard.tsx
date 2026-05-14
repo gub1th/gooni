@@ -13,6 +13,7 @@ import { Skeleton } from "./Skeleton";
 import { WhoopStrip } from "./dashboard/WhoopStrip";
 import { FocusCardsRow } from "./dashboard/FocusCardsRow";
 import { TodoList } from "./dashboard/TodoList";
+import { HabitsStrip } from "./dashboard/HabitsStrip";
 import { TakeTabs } from "./dashboard/TakeTabs";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -216,6 +217,11 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
             list w/ age tints, Done today section underneath. Dev activity
             section dropped — moved up into the take card's tab. */}
         <TodoList />
+
+        {/* Habits — daily binary trackers, 7-day strip. Sits at bottom
+            of the dashboard so it's a glance-and-tap surface, not
+            something Daniel has to navigate to. */}
+        <HabitsStrip />
 
         </div>
       </div>

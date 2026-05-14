@@ -964,3 +964,71 @@ class NoteComment(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class Habit(Base):
+    """Daily binary tracking. Each habit is a recurring yes/no question
+    Daniel checks against per day ("went to gym", "stayed clean from
+    vaping", "went to office"). Phrasing is ALWAYS positive — value=True
+    means "I did the thing I said I would." `polarity` carries the
+    underlying connotation so downstream surfaces can colour negative-
+    framed habits differently or roll up "consecutive clean days"
+    separately, without polluting the data model.
+
+    Streak = consecutive value=True days from today (or yesterday if
+    today is unlogged) walking backward. Missing entry breaks the streak;
+    explicit value=False breaks the streak.
+    """
+
+    __tablename__ = "habits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(Text, nullable=False)
+    # Hex color for the dot/cell rendering. Defaults set by service.
+    color = Column(String, nullable=True)
+    # 'positive' = "do the thing" (gym, church, office, write).
+    # 'negative' = the underlying action is bad but phrasing is still
+    # positive ("stayed clean from vaping" — value=True still means
+    # the GOOD outcome). UI uses polarity to colour or label, never
+    # to invert value semantics.
+    polarity = Column(String, nullable=False, default="positive")
+    # Soft-delete. Archived habits stay in DB for entry history but
+    # don't render in the dashboard widget.
+    archived_at = Column(DateTime, nullable=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class HabitEntry(Base):
+    """One row per (habit, date). Absence of a row = unknown / unlogged.
+    Explicit False = "I did NOT do it." Explicit True = "I did it."
+    Three visual states in the UI: empty cell, ✓, ✗.
+
+    UNIQUE(habit_id, date) — date is a calendar Date, not DateTime,
+    so timezones don't shift logging. The service writes today using
+    the server's local-date interpretation.
+    """
+
+    __tablename__ = "habit_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    habit_id = Column(
+        Integer,
+        ForeignKey("habits.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    date = Column(Date, nullable=False, index=True)
+    value = Column(Boolean, nullable=False)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("habit_id", "date", name="uq_habit_entry_per_day"),
+    )
+
+
