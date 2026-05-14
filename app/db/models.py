@@ -1032,3 +1032,23 @@ class HabitEntry(Base):
     )
 
 
+class WaProcessedId(Base):
+    """Idempotency log for inbound WhatsApp messages.
+
+    Meta's WhatsApp Cloud API redelivers any webhook delivery we don't 200-ack
+    fast enough (their ceiling is ~20s; one chat turn through the orchestrator
+    can take 30s+ on a slow LLM round-trip). Every retry carries the same
+    `messages[i].id` (a stable `wamid.…` string). We insert it on first sight
+    inside the HTTP handler — UNIQUE on `wamid` forces a clean dedup boundary
+    so a parallel-arriving retry hits IntegrityError instead of double-firing
+    the orchestrator.
+
+    Rows are cheap and small; a tiny background sweep can age them out past
+    24h if the table grows, but it isn't load-bearing for correctness.
+    """
+
+    __tablename__ = "wa_processed_ids"
+
+    wamid = Column(String, primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+

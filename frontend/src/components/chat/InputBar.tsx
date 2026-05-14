@@ -48,10 +48,14 @@ export function InputBar({ input, setInput, onSend, sending }: InputBarProps) {
   }, [menuOpen]);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key !== "Enter" || e.shiftKey) return;
+    // OS-level key-repeat fires keydown continuously while Enter is held —
+    // each repeat would slip past the store's sending guard if it landed
+    // before React flushed sending=true. Drop the repeats. isComposing skips
+    // IME confirmation Enters (macOS suggestion picker fires Enter twice).
+    if (e.repeat || e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    handleSend();
   }
 
   function handleSend() {

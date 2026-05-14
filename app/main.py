@@ -10,9 +10,10 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import bindparam, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from .db.database import engine, get_db
@@ -31,6 +32,7 @@ from .db.models import (
     Settings,
     Space,
     Visit,
+    WaProcessedId,
 )
 from .db.schemas import ChatRequest
 from .llm.client import llm_client
@@ -2029,9 +2031,56 @@ def _verify_whatsapp_signature(raw_body: bytes, header: str | None) -> bool:
     return hmac.compare_digest(expected, header[len("sha256="):])
 
 
+def _wa_claim_msg_id(wamid: str, db: Session) -> bool:
+    """Atomic first-write claim on a Meta-issued message id.
+
+    Returns True if THIS handler invocation owns the message (insert succeeded);
+    False if another delivery (a Meta retry, or a parallel webhook arrival)
+    already claimed it. UNIQUE on `wa_processed_ids.wamid` is the race boundary
+    — IntegrityError = lost the race = treat as duplicate.
+    """
+    if not wamid:
+        return True  # malformed payload; let downstream skip on missing fields
+    db.add(WaProcessedId(wamid=wamid))
+    try:
+        db.commit()
+        return True
+    except IntegrityError:
+        db.rollback()
+        return False
+
+
+def _process_wa_message(sender: str, body: str) -> None:
+    """Run the inbound WhatsApp message through the orchestrator + send replies.
+
+    Spawned via BackgroundTasks so the HTTP handler can 200-ack Meta inside
+    their (~20s) redelivery window even when the chat turn takes 30s+. Owns
+    its own SessionLocal — the request-scoped session is gone by the time
+    this runs.
+    """
+    bg_db = SessionLocal()
+    try:
+        result = dispatch_inbound(whatsapp_channel, sender, body, bg_db)
+        if result is None:
+            return  # not allowlisted; silent drop
+        _raw, segments = result
+        for idx, segment in enumerate(segments):
+            if idx > 0:
+                time.sleep(0.6)
+            try:
+                whatsapp_channel.send(sender, segment)
+            except Exception as e:
+                print(f"[wa] send failed for {sender}: {e}")
+    except Exception as e:
+        print(f"[wa] orchestrator failed for {sender}: {e}")
+    finally:
+        bg_db.close()
+
+
 @app.post("/webhooks/whatsapp")
 async def whatsapp_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
     db: Session = Depends(get_db),
 ):
@@ -2041,6 +2090,14 @@ async def whatsapp_webhook(
       - `messages`  — actual user-sent text/media (what we care about)
       - `statuses`  — delivery/read receipts for messages WE sent (ignore;
                       otherwise every reply triggers an echo and we'd loop)
+
+    Two layers protect against double-processing:
+      1. `_wa_claim_msg_id` — Meta redelivers any webhook we don't 200-ack
+         within ~20s; one orchestrator turn often blows past that. The claim
+         table is a UNIQUE(wamid) PK so a retry hits IntegrityError and we
+         skip. This is the load-bearing one.
+      2. `BackgroundTasks` — pushes the (slow) dispatch + send out of the
+         request lifecycle so we return 200 fast and Meta stops retrying.
 
     Auth layers (defense in depth):
       1. HMAC-SHA256 signature header (Meta-issued; verified against app secret)
@@ -2059,7 +2116,8 @@ async def whatsapp_webhook(
     # Meta wraps each event in entry[].changes[]. There can be multiple, but
     # for a single inbound message it's typically one change with one message.
     entries = payload.get("entry") or []
-    handled_any = False
+    queued = 0
+    duplicates = 0
     for entry in entries:
         for change in entry.get("changes") or []:
             value = change.get("value") or {}
@@ -2069,22 +2127,17 @@ async def whatsapp_webhook(
             for msg in messages:
                 if msg.get("type") != "text":
                     continue  # v1: text only
+                wamid = msg.get("id") or ""
                 sender = msg.get("from") or ""
                 body = (msg.get("text") or {}).get("body") or ""
                 if not sender or not body:
                     continue
-                result = dispatch_inbound(whatsapp_channel, sender, body, db)
-                if result is None:
-                    continue  # not allowlisted; silent drop
-                _raw, segments = result
-                # Multi-bubble cadence: WA Cloud API sends one message per
-                # POST; loop with a short pause so bubbles feel like texting.
-                for idx, segment in enumerate(segments):
-                    if idx > 0:
-                        time.sleep(0.6)
-                    whatsapp_channel.send(sender, segment)
-                handled_any = True
-    return {"ok": True, "handled": handled_any}
+                if not _wa_claim_msg_id(wamid, db):
+                    duplicates += 1
+                    continue
+                background_tasks.add_task(_process_wa_message, sender, body)
+                queued += 1
+    return {"ok": True, "queued": queued, "duplicates": duplicates}
 
 
 # ── Settings (daily nudge config) ──────────────────────────────────────────────
