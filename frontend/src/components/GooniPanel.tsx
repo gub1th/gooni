@@ -188,6 +188,8 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
       return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
+      // See InputBar.handleKeyDown — same key-repeat + IME defense.
+      if (e.repeat || e.nativeEvent.isComposing) return;
       e.preventDefault();
       handleSend();
     }

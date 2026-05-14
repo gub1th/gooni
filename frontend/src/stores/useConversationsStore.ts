@@ -80,6 +80,12 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
   },
 
   send: async (content, noteContent, imageUrl) => {
+    // Component-level `if (sending) return` reads from a render-bound closure
+    // and is stale between the click → setState → re-render flush. A rapid
+    // Enter-Enter or stuck-key auto-repeat slips a second send() through. The
+    // store sees the live value via get(), so guard once here as the canonical
+    // single-fire boundary. See PR #NN for the WhatsApp counterpart.
+    if (get().sending) return;
     const optimistic: ConversationMessage = {
       id: Date.now(),
       role: "user",
