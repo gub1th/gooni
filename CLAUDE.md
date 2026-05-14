@@ -82,6 +82,7 @@ See **`docs/TODO.md`** for the full backlog (gitignored — local only).
 - **`routes/public.tsx`** — Layout shell for `/public/*` (just renders `<Outlet />`).
 - **`routes/public.index.tsx`** — Public portfolio list: Posts tab (space-filtered) + About tab (bio).
 - **`routes/public.$noteId.tsx`** — Full public note detail page.
+- **`routes/creative.tsx`** — Experimental 3D scene at `/creative` (standalone shell, no sidebar). React-three-fiber + drei canvas: reflective pond (`three/examples/jsm/objects/Water.js`), warm-dusk sky + fog, GLTF rowboat w/ primitive fallback, instanced lily pads, WASD/arrow steering w/ 3rd-person follow camera, click-gated ambient audio. Components in `src/components/creative/`. Assets in `public/{models,textures,audio}/` — texture loader falls back to a procedural normal map if `waternormals.jpg` is absent; GLTF falls back to a primitive boat. Long-term: may replace `/public` once it earns its keep.
 - **`components/notes/Sidebar.tsx`** — 200px. Two draggable sections (Notes / Chat), order persisted in localStorage. Notes section has: All Notes, collapsible Spaces list, recent notes. Chat section has: New Chat + recent conversations.
 - **`components/notes/NotesList.tsx`** — Notes for selected space (260px).
 - **`components/notes/NoteEditor.tsx`** — Title + TipTap body. Auto-saves after 1.5s. `🌐 Public` toggle pill. Supports image drag/drop + paste (base64 inline). `hasChanges` ref prevents spurious saves on blur.
