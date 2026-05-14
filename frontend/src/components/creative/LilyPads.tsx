@@ -1,10 +1,10 @@
-import { useMemo } from "react";
-import { Instance, Instances } from "@react-three/drei";
+import { useLayoutEffect, useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
 type Props = { count: number };
 
-// Deterministic pseudo-random so the layout is stable across reloads.
+// Deterministic PRNG so the pad layout is stable across reloads.
 function mulberry32(seed: number) {
   let t = seed >>> 0;
   return () => {
@@ -16,46 +16,115 @@ function mulberry32(seed: number) {
   };
 }
 
-// Single-geometry single-draw-call lily pads scattered on a ring around
-// the origin. Slight Y-jitter + per-pad random rotation breaks the grid.
+// Single ShapeGeometry w/ a wedge slit — the classic lily-pad silhouette.
+// Built once + reused for every instance.
+function makeLilyPadGeometry(): THREE.ShapeGeometry {
+  const shape = new THREE.Shape();
+  const r = 1;
+  const slitHalf = Math.PI * 0.09; // ~16° wedge
+  shape.moveTo(0, 0);
+  shape.lineTo(Math.cos(-slitHalf) * r, Math.sin(-slitHalf) * r);
+  shape.absarc(0, 0, r, -slitHalf, Math.PI * 2 - slitHalf, false);
+  shape.lineTo(0, 0);
+  const geo = new THREE.ShapeGeometry(shape, 24);
+  // Center the pivot so per-instance rotation spins around the disc center.
+  geo.computeBoundingBox();
+  return geo;
+}
+
 export function LilyPads({ count }: Props) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const geometry = useMemo(makeLilyPadGeometry, []);
+
+  // Pre-compute per-instance transforms + a per-instance phase so each
+  // pad bobs on its own cycle (not lock-step like a marching band).
   const placements = useMemo(() => {
     const rand = mulberry32(0x1117_4d);
-    const out: { pos: [number, number, number]; rot: number; scale: number }[] = [];
+    const out: {
+      x: number;
+      z: number;
+      baseY: number;
+      yaw: number;
+      scale: number;
+      bobPhase: number;
+      bobAmp: number;
+      color: THREE.Color;
+    }[] = [];
     for (let i = 0; i < count; i++) {
-      // Distribute on a ring from r=6..40 — clears the spawn area for the boat.
+      // Ring r=6..40 keeps the spawn zone clear for the boat.
       const angle = rand() * Math.PI * 2;
       const radius = 6 + rand() * 34;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      const y = 0.02 + rand() * 0.02; // tiny float above the water
+      // Mild hue jitter in HSL so pads read as a population, not clones.
+      const c = new THREE.Color().setHSL(
+        0.31 + rand() * 0.06,            // green band
+        0.45 + rand() * 0.18,
+        0.28 + rand() * 0.08,
+      );
       out.push({
-        pos: [x, y, z],
-        rot: rand() * Math.PI * 2,
-        scale: 0.7 + rand() * 0.7,
+        x: Math.cos(angle) * radius,
+        z: Math.sin(angle) * radius,
+        baseY: 0.025 + rand() * 0.015,
+        yaw: rand() * Math.PI * 2,
+        scale: 0.55 + rand() * 0.7,
+        bobPhase: rand() * Math.PI * 2,
+        bobAmp: 0.02 + rand() * 0.025,
+        color: c,
       });
     }
     return out;
   }, [count]);
 
+  // Set initial transforms + per-instance colors once on mount.
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const dummy = new THREE.Object3D();
+    placements.forEach((p, i) => {
+      dummy.position.set(p.x, p.baseY, p.z);
+      dummy.rotation.set(-Math.PI / 2, 0, p.yaw);
+      dummy.scale.setScalar(p.scale);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setColorAt(i, p.color);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }, [placements]);
+
+  // Per-frame bob: each pad oscillates Y around its baseY with its own
+  // phase. Yaw drifts very slowly so the pond reads "alive" rather
+  // than "screenshot."
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  useFrame((state) => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const t = state.clock.elapsedTime;
+    placements.forEach((p, i) => {
+      const y = p.baseY + Math.sin(t * 0.9 + p.bobPhase) * p.bobAmp;
+      const yawDrift = p.yaw + Math.sin(t * 0.18 + p.bobPhase) * 0.04;
+      dummy.position.set(p.x, y, p.z);
+      dummy.rotation.set(-Math.PI / 2, 0, yawDrift);
+      dummy.scale.setScalar(p.scale);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  });
+
   return (
-    <Instances limit={count} castShadow={false} receiveShadow>
-      {/* Wide flat disc — reads as a lily pad from above the water. */}
-      <circleGeometry args={[0.55, 16]} />
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, undefined, count]}
+      castShadow={false}
+      receiveShadow
+    >
       <meshStandardMaterial
-        color="#3f7a4a"
-        roughness={0.85}
-        metalness={0.05}
+        // Per-instance color modulates this base (multiplied in shader).
+        color="#ffffff"
+        roughness={0.7}
+        metalness={0.02}
         side={THREE.DoubleSide}
       />
-      {placements.map((p, i) => (
-        <Instance
-          key={i}
-          position={p.pos}
-          rotation={[-Math.PI / 2, 0, p.rot]}
-          scale={p.scale}
-        />
-      ))}
-    </Instances>
+    </instancedMesh>
   );
 }

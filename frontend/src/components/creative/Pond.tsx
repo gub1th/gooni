@@ -6,7 +6,6 @@ import { SUN_POSITION } from "./Atmosphere";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 // Register the Water class with R3F so it's usable as <water /> in JSX.
-// drei doesn't ship a Water wrapper; this is the stock three.js example.
 extend({ Water });
 
 declare global {
@@ -20,9 +19,8 @@ declare global {
 
 const WATER_NORMALS_URL = "/textures/waternormals.jpg";
 
-// Procedural fallback used when /textures/waternormals.jpg is missing.
-// 256×256 mostly-flat normal map w/ tiny random perturbation so the
-// surface still has a slight shimmer.
+// Procedural fallback — flat normal w/ tiny perturbation so the surface
+// still shimmers if waternormals.jpg is absent.
 function makeFallbackNormals(): THREE.Texture {
   const size = 256;
   const data = new Uint8Array(size * size * 4);
@@ -44,7 +42,7 @@ function makeFallbackNormals(): THREE.Texture {
 function WaterMesh({ normals }: { normals: THREE.Texture }) {
   const ref = useRef<any>(null);
   const { scene } = useThree();
-  const geometry = useMemo(() => new THREE.PlaneGeometry(200, 200), []);
+  const geometry = useMemo(() => new THREE.PlaneGeometry(220, 220, 1, 1), []);
 
   const config = useMemo(
     () => ({
@@ -52,9 +50,11 @@ function WaterMesh({ normals }: { normals: THREE.Texture }) {
       textureHeight: 512,
       waterNormals: normals,
       sunDirection: new THREE.Vector3(...SUN_POSITION).normalize(),
-      sunColor: 0xffd9a0,
-      waterColor: 0x355a4a,
-      distortionScale: 2.6,
+      // Warmer sun reflection — matches the dusk key light.
+      sunColor: 0xffc88a,
+      // Murky tea-green; reads "still pond water" not "ocean."
+      waterColor: 0x2a4438,
+      distortionScale: 2.1,
       fog: scene.fog !== null,
     }),
     [normals, scene.fog],
@@ -62,7 +62,8 @@ function WaterMesh({ normals }: { normals: THREE.Texture }) {
 
   useFrame((_, dt) => {
     if (ref.current) {
-      ref.current.material.uniforms.time.value += dt * 0.55;
+      // Slow current — Japanese ponds are mostly still.
+      ref.current.material.uniforms.time.value += dt * 0.35;
     }
   });
 
@@ -79,7 +80,6 @@ function WaterMesh({ normals }: { normals: THREE.Texture }) {
 
 function WaterReal() {
   const tex = useLoader(THREE.TextureLoader, WATER_NORMALS_URL);
-  // Tile the normal map so each ripple cell stays small relative to the pond.
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   return <WaterMesh normals={tex} />;

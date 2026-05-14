@@ -1,47 +1,84 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
-export type BoatKeys = {
-  forward: boolean;
-  back: boolean;
-  left: boolean;
-  right: boolean;
+// Module-singleton input state. Boat reads it from useFrame; keyboard
+// and touch joystick both write into it. Single source of truth keeps
+// the physics integrator simple — it never branches on "which input."
+const input = {
+  thrust: 0,  // -1..1, negative = reverse
+  turn: 0,    // -1..1, positive = left
+  reset: false,
 };
 
-// Keyboard → boolean key state, kept in a ref so per-frame reads in
-// useFrame don't trigger React re-renders. WASD + arrow keys both work.
-export function useBoatControls() {
-  const keys = useRef<BoatKeys>({ forward: false, back: false, left: false, right: false });
+export function getBoatInput() {
+  return input;
+}
 
+export function setBoatAxis(axis: "thrust" | "turn", value: number) {
+  input[axis] = Math.max(-1, Math.min(1, value));
+}
+
+export function fireBoatReset() {
+  input.reset = true;
+}
+
+// Edge-trigger: returns true once per reset, then auto-clears so the
+// Boat integrator doesn't loop on a stuck flag.
+export function consumeBoatReset(): boolean {
+  if (input.reset) {
+    input.reset = false;
+    return true;
+  }
+  return false;
+}
+
+// Install keyboard listeners + drive the input axes. Call once from
+// the top of the scene — multiple installs would double-fire.
+export function useBoatKeyboard() {
   useEffect(() => {
-    function set(code: string, down: boolean) {
-      switch (code) {
+    const held = { w: false, a: false, s: false, d: false };
+
+    function syncAxes() {
+      setBoatAxis("thrust", (held.w ? 1 : 0) - (held.s ? 1 : 0));
+      setBoatAxis("turn", (held.a ? 1 : 0) - (held.d ? 1 : 0));
+    }
+
+    function onKey(e: KeyboardEvent, down: boolean) {
+      switch (e.code) {
         case "KeyW":
         case "ArrowUp":
-          keys.current.forward = down;
+          held.w = down;
           break;
         case "KeyS":
         case "ArrowDown":
-          keys.current.back = down;
+          held.s = down;
           break;
         case "KeyA":
         case "ArrowLeft":
-          keys.current.left = down;
+          held.a = down;
           break;
         case "KeyD":
         case "ArrowRight":
-          keys.current.right = down;
+          held.d = down;
           break;
+        case "KeyR":
+          if (down) fireBoatReset();
+          return;
+        default:
+          return;
       }
+      syncAxes();
     }
-    const onDown = (e: KeyboardEvent) => set(e.code, true);
-    const onUp = (e: KeyboardEvent) => set(e.code, false);
+
+    const onDown = (e: KeyboardEvent) => onKey(e, true);
+    const onUp = (e: KeyboardEvent) => onKey(e, false);
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
     return () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
+      // Release axes on unmount so a stale value doesn't survive HMR.
+      setBoatAxis("thrust", 0);
+      setBoatAxis("turn", 0);
     };
   }, []);
-
-  return keys;
 }

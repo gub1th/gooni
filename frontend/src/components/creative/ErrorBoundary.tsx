@@ -13,8 +13,11 @@ export class ErrorBoundary extends Component<
     return { errored: true };
   }
 
-  componentDidCatch() {
-    // Swallow — fallback handles the user-visible state.
+  componentDidCatch(error: Error) {
+    // Visible in console for debugging but doesn't bubble up — the
+    // fallback handles the user-visible state. Most common cause: a
+    // missing /models/*.glb asset.
+    console.warn("[creative] asset boundary caught:", error.message);
   }
 
   render() {
