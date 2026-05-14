@@ -619,7 +619,14 @@ export async function fetchPublicVisitCount(): Promise<{ unique_visitors: number
 
 // Status: 'pending' was dropped in the focus-flow redesign — every focus is
 // either committed or someday now.
-export type FocusStatus = "committed" | "someday";
+// 'dormant' added by focus-drift (auto-flipped after 3 missed bind
+// runs); 'evolved' set by /focuses/{id}/fork. Both are excluded from
+// the active binding game on the backend.
+export type FocusStatus =
+  | "committed"
+  | "someday"
+  | "dormant"
+  | "evolved";
 // Pace bucket — Quick (one-off, today) vs Slow burn (multi-day).
 export type FocusScale = "quick" | "slow";
 
@@ -824,6 +831,16 @@ export interface ApiFocus {
   completed_at: string | null;
   sort_order: number;
   source_note_id: number | null;
+  // Drift / lineage cols populated by the focus-drift PR. Used by
+  // the dashboard's FocusCard to render drifting / dormant / lineage
+  // states.
+  last_seen_in_synth: string | null;
+  missed_run_count: number;
+  drift_flagged_at: string | null;
+  promoted_from_candidate_id: number | null;
+  evolved_from_focus_id: number | null;
+  evolved_from_name: string | null;
+  signals_count: number;
   created_at: string | null;
   updated_at: string | null;
   // Tree-node compat fields baked in by `_focus_tree_node` so the same
@@ -831,6 +848,16 @@ export interface ApiFocus {
   children?: unknown[];
   progress?: { done: number; total: number };
   stale?: boolean;
+}
+
+export interface ApiFocusEvidence {
+  kind: string;
+  id: number;
+  snippet: string;
+}
+
+export interface ApiFocusDetail extends ApiFocus {
+  evidence: ApiFocusEvidence[];
 }
 
 export async function fetchFocuses(): Promise<ApiFocus[]> {
@@ -2073,4 +2100,121 @@ export async function unlogHabitEntry(habitId: number, day: string): Promise<voi
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to unlog entry");
+}
+
+// ── Focus candidates + drift mutators ──────────────────────────────────
+
+export interface ApiFocusCandidate {
+  id: number;
+  name: string;
+  endgoal: string | null;
+  category: string;
+  confidence: number;
+  reasoning: string | null;
+  cluster_signature: string;
+  evidence: ApiFocusEvidence[];
+  parent_candidate_id: number | null;
+  status: "proposed" | "promoted" | "dismissed";
+  promoted_focus_id: number | null;
+  promoted_at: string | null;
+  dismissed_at: string | null;
+  first_seen_in_synth: string | null;
+  last_seen_in_synth: string | null;
+  seen_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export async function fetchFocusCandidates(
+  status: "proposed" | "promoted" | "dismissed" | "all" = "proposed",
+): Promise<ApiFocusCandidate[]> {
+  const res = await apiFetch(`${BASE}/focus-candidates?status=${status}`);
+  if (!res.ok) throw new Error("Failed to fetch focus candidates");
+  return res.json();
+}
+
+export async function runFocusCandidates(): Promise<{
+  synth_stats: unknown;
+  binding: unknown;
+  persisted: ApiFocusCandidate[];
+}> {
+  const res = await apiFetch(`${BASE}/focus-candidates/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error("Failed to run focus synth");
+  return res.json();
+}
+
+export async function promoteFocusCandidate(
+  id: number,
+): Promise<{ candidate: ApiFocusCandidate; focus_id: number }> {
+  const res = await apiFetch(`${BASE}/focus-candidates/${id}/promote`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to promote candidate");
+  return res.json();
+}
+
+export async function dismissFocusCandidate(
+  id: number,
+): Promise<ApiFocusCandidate> {
+  const res = await apiFetch(`${BASE}/focus-candidates/${id}/dismiss`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to dismiss candidate");
+  return res.json();
+}
+
+export async function fetchFocusDetail(id: number): Promise<ApiFocusDetail> {
+  const res = await apiFetch(`${BASE}/focuses/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch focus detail");
+  return res.json();
+}
+
+export async function renameFocus(
+  id: number, body: { text?: string; endgoal?: string },
+): Promise<ApiFocus> {
+  const res = await apiFetch(`${BASE}/focuses/${id}/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to rename focus");
+  return res.json();
+}
+
+export async function forkFocus(
+  id: number, body: { new_text: string; new_endgoal?: string },
+): Promise<{ old_focus: ApiFocus; new_focus: ApiFocus }> {
+  const res = await apiFetch(`${BASE}/focuses/${id}/fork`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to fork focus");
+  return res.json();
+}
+
+export async function deleteFocus(id: number): Promise<void> {
+  // Focuses share the /items delete route w/ todos via item_service. The
+  // service clears focus_id on linked todos before removing the row so
+  // todos survive as focus-less.
+  const res = await apiFetch(`${BASE}/items/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete focus");
+}
+
+export async function reactivateFocus(id: number): Promise<ApiFocus> {
+  const res = await apiFetch(`${BASE}/focuses/${id}/reactivate`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to reactivate focus");
+  return res.json();
+}
+
+export async function fetchTodosByFocus(focusId: number): Promise<ApiTodo[]> {
+  const res = await apiFetch(`${BASE}/items/${focusId}/todos`);
+  if (!res.ok) throw new Error("Failed to fetch focus todos");
+  return res.json();
 }

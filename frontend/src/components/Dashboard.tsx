@@ -2,63 +2,20 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchDashboardStats,
-  createItem,
   type ApiNote, type DashboardStats,
 } from "../services/api";
 import { useGooniThemeStore, THEME_PALETTES } from "../stores/useGooniThemeStore";
+import { useDashboardStore } from "../stores/useDashboardStore";
 import { NoteEditor } from "./notes/NoteEditor";
-import { NeuralBrain } from "./animations/NeuralBrain";
 import { ExploreModal } from "./ExploreModal";
-import { Skeleton } from "./Skeleton";
-import { WhoopStrip } from "./dashboard/WhoopStrip";
-import { FocusCardsRow } from "./dashboard/FocusCardsRow";
 import { TodoList } from "./dashboard/TodoList";
 import { HabitsStrip } from "./dashboard/HabitsStrip";
 import { TakeTabs } from "./dashboard/TakeTabs";
+import { DashboardHeader } from "./dashboard/DashboardHeader";
+import { TabToggle } from "./dashboard/TabToggle";
+import { FocusesView } from "./dashboard/FocusesView";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
-
-function getGreeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
-
-function getDateStr(): string {
-  return new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-}
-
-// Compact card variant of the original right-column stat tile. Used in
-// the header (Notes, Streak) and the side column (Claude). DevStreakStat
-// renders its own card chrome so it doesn't go through this helper.
-function StatCard({ label, value, children, width }: {
-  label: string;
-  value: React.ReactNode;
-  children?: React.ReactNode;
-  width?: number | string;
-}) {
-  return (
-    <div style={{
-      background: "var(--gooni-card, #fff)",
-      border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-      borderRadius: 10, padding: "10px 14px",
-      display: "flex", flexDirection: "column", alignItems: "flex-start", justifyContent: "space-between",
-      width: width ?? "auto", flexShrink: 0,
-      minHeight: 66,
-    }}>
-      <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", letterSpacing: 0.3 }}>{label}</div>
-      <div style={{
-        fontSize: 20, fontWeight: 600,
-        color: "var(--gooni-text, #1C1C1E)", marginTop: 1, lineHeight: 1.1,
-        fontVariantNumeric: "tabular-nums",
-      }}>
-        {value}
-      </div>
-      {children}
-    </div>
-  );
-}
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 // The dashboard itself:
@@ -89,6 +46,8 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   const [exploreOpen, setExploreOpen] = useState(false);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
+  const activeTab = useDashboardStore((s) => s.activeTab);
+  const setActiveTab = useDashboardStore((s) => s.setActiveTab);
 
   // Keep body/html background in sync with theme so any gap around the app fills correctly.
   useEffect(() => {
@@ -123,8 +82,6 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
     setTimeout(() => { refetchStats(); }, 4500);
   }
 
-  const activityPerDay = stats?.activity_per_day ?? [0, 0, 0, 0, 0, 0, 0];
-
   return (
     <div style={{ flex: 1, overflowY: "auto", background: palette.main, fontFamily: FONT, position: "relative" }}>
       <style>{`
@@ -135,46 +92,14 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
         .gooni-todo-add:focus-within { background: rgba(0,0,0,0.035); }
       `}</style>
 
-      {/* Header band — greeting/date on the left, brain + Notes + Streak
-          cards on the right. Centered at the same 720px column as the rest
-          of the dashboard so the title row visually anchors the content
-          width. Notes + Streak are real cards (same chrome as before),
-          NOT the inline borderless variant — Daniel wants them readable
-          as discrete tiles. */}
+      {/* Header band — greeting/date on the left, inline Whoop stats +
+          day-streak on the right. Whoop stats only render when Whoop
+          is connected; the standalone WhoopStrip below the composer
+          was removed when this consolidation landed (the data lives
+          in the header now, full stop). */}
       <div style={{ background: palette.main }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: 28, fontWeight: 700, color: "var(--gooni-text, #1C1C1E)",
-                letterSpacing: "-0.5px", lineHeight: 1.2,
-              }}>
-                {getGreeting()}, Daniel.
-              </div>
-              <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", marginTop: 4 }}>
-                {getDateStr()}
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <NeuralBrain size={66} onClick={() => setExploreOpen(true)} />
-              {/* notes-this-week dropped per dashboard revamp — Daniel
-                  cared more about today's todos+focuses than weekly note
-                  velocity. Streak stays as the at-a-glance momentum tile. */}
-              <StatCard
-                label="day streak"
-                value={stats ? stats.streak : <Skeleton width={28} height={20} />}
-              >
-                <div style={{ display: "flex", gap: 2.5, marginTop: 4 }}>
-                  {activityPerDay.map((v, i) => (
-                    <div key={i} style={{
-                      width: 6, height: 6, borderRadius: "50%",
-                      background: v > 0 ? "#30A14E" : "rgba(0,0,0,0.10)",
-                    }} />
-                  ))}
-                </div>
-              </StatCard>
-            </div>
-          </div>
+          <DashboardHeader stats={stats} onBrainClick={() => setExploreOpen(true)} />
         </div>
       </div>
 
@@ -196,31 +121,27 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
           <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
         </div>
 
-        {/* Whoop strip (renders nothing when not connected). */}
-        <WhoopStrip />
+        {/* Todos / Focuses toggle replaces the prior always-on dual
+            stack. Active tab persists via useDashboardStore so reload
+            doesn't snap back to default. */}
+        <TabToggle active={activeTab} onChange={setActiveTab} />
 
-        {/* Focus cards — 3-col grid above the todo list. */}
-        <div style={{ marginBottom: 16 }}>
-          <FocusCardsRow
-            onAdd={async () => {
-              const text = window.prompt("New focus name?");
-              if (!text?.trim()) return;
-              try {
-                await createItem({ text: text.trim(), committed: true });
-                queryClient.invalidateQueries({ queryKey: ["focuses"] });
-              } catch (e) { console.error(e); }
-            }}
-          />
-        </div>
-
-        {/* Todo list — primary at top (clickable crown to demote), open
-            list w/ age tints, Done today section underneath. Dev activity
-            section dropped — moved up into the take card's tab. */}
-        <TodoList />
+        {activeTab === "todos" ? (
+          /* Todo list — primary at top (clickable crown to demote), open
+             list w/ age tints, Done today section underneath. Dev activity
+             section dropped — moved up into the take card's tab. */
+          <TodoList />
+        ) : (
+          /* Focuses view — synthesizer audit pills (promote/dismiss
+             inline) above the 3-col focus card grid w/ drift /
+             dormant / lineage states. Click a card → drill-down modal. */
+          <FocusesView />
+        )}
 
         {/* Habits — daily binary trackers, 7-day strip. Sits at bottom
             of the dashboard so it's a glance-and-tap surface, not
-            something Daniel has to navigate to. */}
+            something Daniel has to navigate to. Stays visible across
+            both tabs since habits are orthogonal to todos/focuses. */}
         <HabitsStrip />
 
         </div>
