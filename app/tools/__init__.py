@@ -11,6 +11,7 @@ from .note_tools import (
 )
 from .todo_tools import AddTodoTool, ListTodosTool, SetTodoStateTool
 from .focus_tools import AddFocusTool, ListFocusesTool
+from .habit_tools import LogHabitTool
 from .feature_request_tool import RequestFeatureTool
 from .calendar_tools import (
     CreateCalendarEventTool,
@@ -43,6 +44,8 @@ registry = [
     # Focuses
     AddFocusTool(),
     ListFocusesTool(),
+    # Habits
+    LogHabitTool(),
     # Feature requests + calendar
     RequestFeatureTool(),
     CreateCalendarEventTool(),
