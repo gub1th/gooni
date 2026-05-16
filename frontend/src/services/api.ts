@@ -2197,6 +2197,72 @@ export async function forkFocus(
   return res.json();
 }
 
+// ── Ops mode (backlog + evals + tool failures) ─────────────────────────
+
+export interface ToolCallFailure {
+  id: number;
+  tool_name: string;
+  error: string;
+  conversation_id: number | null;
+  message_id: number | null;
+  started_at: string | null;
+}
+
+export async function fetchToolCallFailures(
+  days = 7, limit = 20,
+): Promise<ToolCallFailure[]> {
+  const res = await apiFetch(`${BASE}/tool-calls/failures?days=${days}&limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch tool failures");
+  return res.json();
+}
+
+export interface ApiEvalSegment {
+  id: number;
+  conversation_id: number;
+  source: string;
+  last_message_at: string | null;
+  message_count: number;
+  eval_status: "not_yet" | "pending" | "done";
+  overall_rating: number | null;
+  overall_comment: string | null;
+  preview?: string;
+  title?: string | null;
+}
+
+export async function fetchEvalSegments(
+  opts: {
+    statuses?: string;
+    sources?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<ApiEvalSegment[]> {
+  const params = new URLSearchParams();
+  if (opts.statuses) params.set("statuses", opts.statuses);
+  if (opts.sources) params.set("sources", opts.sources);
+  if (opts.limit != null) params.set("limit", String(opts.limit));
+  if (opts.offset != null) params.set("offset", String(opts.offset));
+  const res = await apiFetch(`${BASE}/eval/segments?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch eval segments");
+  return res.json();
+}
+
+export async function patchEvalSegment(
+  id: number,
+  body: {
+    eval_status?: string;
+    overall_rating?: number;
+    overall_comment?: string;
+  },
+): Promise<void> {
+  const res = await apiFetch(`${BASE}/eval/segments/${id}/summary`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to patch eval segment");
+}
+
 // ── Gooni health (Build mode) ──────────────────────────────────────────
 
 export type HealthAxisName =
