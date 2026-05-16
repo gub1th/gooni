@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { GripVertical, ExternalLink, ListChecks, Plus, Search, X } from "lucide-react";
+import { GripVertical, ExternalLink, ListChecks, Plus, Search, X, Bot } from "lucide-react";
 import type { ApiBacklogTicket, BoardStatus } from "../../services/api";
 import { promoteBacklogTicket, demoteBacklogTicket } from "../../services/api";
 import { useBacklogStore } from "../../stores/useBacklogStore";
@@ -770,6 +770,26 @@ function BacklogCard({
         }}>
           #{item.id} {item.text}
         </div>
+        {/* Agent attribution pill — set on a ticket by an autonomous worker
+            (Claude Code stamps claimed_by="claude" at task start). Backend
+            auto-clears on done so the pill is implicitly live-only. */}
+        {item.claimed_by && !item.done && (
+          <span
+            data-card-action
+            title={`${item.claimed_by} is driving this ticket`}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              padding: "2px 6px", borderRadius: 4,
+              background: "rgba(217,70,239,0.10)", color: "#86198F",
+              border: "1px solid rgba(217,70,239,0.30)",
+              fontSize: 10.5, fontWeight: 600,
+              flexShrink: 0,
+            }}
+          >
+            <Bot size={10} strokeWidth={1.9} />
+            {item.claimed_by} picked up
+          </span>
+        )}
         {/* Right-aligned action slot — single icon-only button. Promote
             (+todo) is the common case; demote (X next to "todo" pill)
             collapses into the same slot when already linked. */}

@@ -1192,6 +1192,10 @@ export interface ApiBacklogTicket {
   // Free-form ticket body — multi-line context, design notes, follow-up
   // scratch. Subtitle stays as the one-line tagline; notes is the story.
   notes: string | null;
+  // Free-text agent attribution. Non-null while an autonomous worker
+  // (e.g. "claude") is actively driving the ticket; auto-cleared by the
+  // backend when the ticket flips to done.
+  claimed_by: string | null;
   // Set when this backlog ticket was promoted into a todo via
   // POST /backlog/tickets/{id}/promote. Null means "engineering-only,
   // not on Daniel's todo list yet".
@@ -1320,6 +1324,7 @@ export async function updateBacklogTicket(
     subtitle?: string | null;
     board_status?: BoardStatus | null;
     pr_url?: string | null;
+    claimed_by?: string | null;
     done?: boolean;
     sort_order?: number;
   },

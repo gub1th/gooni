@@ -333,7 +333,7 @@ class BacklogService:
             ).update({"is_primary": False}, synchronize_session=False)
         for key in (
             "text", "subtitle", "board_status", "pr_url", "done", "sort_order",
-            "todo_id", "notes", "is_primary",
+            "todo_id", "notes", "is_primary", "claimed_by",
         ):
             if key in patch:
                 setattr(t, key, patch[key])
@@ -343,6 +343,15 @@ class BacklogService:
             # auto-clear on state='done'.
             if patch["done"]:
                 t.is_primary = False
+        # Auto-clear claimed_by once the ticket lands in Done — the
+        # "🤖 claude picked up" pill is for live work only. Triggers on
+        # either signal: board_status='done' or done=True.
+        ending = (
+            patch.get("board_status") == "done"
+            or patch.get("done") is True
+        )
+        if ending:
+            t.claimed_by = None
         if any(k in patch for k in ("text", "subtitle")):
             embed_raw = _item_embed_text(t.text, t.subtitle)
             vec = list_service._embed_item_text(embed_raw)
@@ -437,6 +446,7 @@ def serialize_ticket(t: BacklogTicket) -> dict[str, Any]:
         "board_status": t.board_status,
         "pr_url": t.pr_url,
         "notes": t.notes,
+        "claimed_by": t.claimed_by,
         "todo_id": t.todo_id,
         "is_primary": bool(t.is_primary),
         "done": bool(t.done),

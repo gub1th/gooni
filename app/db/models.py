@@ -635,6 +635,11 @@ class BacklogTicket(Base):
     # Timestamp of the most-recent friction_event tied to this ticket.
     # Drives recency weighting + the "currently hitting workflow" surface.
     last_friction_at = Column(DateTime, nullable=True, index=True)
+    # Free-text agent attribution. Set when an autonomous worker (e.g.
+    # Claude Code) picks up the ticket so the board surfaces a "🤖 claude
+    # picked up" pill while it's actively being driven. Auto-cleared when
+    # the ticket flips to done — the pill is for live work only.
+    claimed_by = Column(String, nullable=True)
     # Set when this ticket has been promoted into Daniel's todo list.
     # Promote = create a Todo with focus_id null, link it here. Demote =
     # delete the linked Todo, clear this column. When the linked todo's
