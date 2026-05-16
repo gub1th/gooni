@@ -1,38 +1,38 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, AlertTriangle, ChevronRight } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, SkipForward } from "lucide-react";
 import {
-  fetchBacklogTickets,
   fetchEvalSegments,
+  fetchEvalSegmentFull,
   patchEvalSegment,
+  putMessageRating,
   fetchToolCallFailures,
-  type ApiBacklogTicket,
   type ApiEvalSegment,
+  type EvalSegmentFull,
+  type EvalMessage,
   type ToolCallFailure,
 } from "../../services/api";
+import { useListsStore } from "../../stores/useListsStore";
+import { BuildMode } from "./BuildMode";
+import { CapabilityProfileCard } from "./CapabilityProfileCard";
+import { BacklogBoard } from "../lists/BacklogBoard";
 
-// OpsMode — "operator's console". Three sections:
-//   1. Last eval line + eval queue (3 unrated segments w/ inline rating)
-//   2. Backlog (all statuses, sorted by board status then updated_at)
-//   3. Recent tool-call failures (hallucination / integration breakage)
-//
-// Goal: reduce friction on rating evals. Daniel said he doesn't get
-// into the eval habit — surfacing the queue here makes it a 1-tap
-// action rather than a separate-page visit.
+// OpsMode — single "operator's console". Folds in what used to be Build.
+// Top → bottom:
+//   1. Gooni-health cards (was Build mode) + CapabilityProfileCard
+//   2. Evals: ONE convo at a time. Per-assistant-turn rating + optional
+//      comment. Skip pulls the next unrated.
+//   3. Backlog: the kanban BacklogBoard rendered in a fixed-height
+//      scroll container, plus an "open full board" link to the
+//      standalone /lists/<backlog-id> route.
+//   4. Tool-call failures (last 7d).
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
-const RATING_LABEL: Record<number, string> = {
-  1: "bad",
-  2: "meh",
-  3: "good",
-};
-
-const RATING_COLOR: Record<number, string> = {
-  1: "#791F1F",
-  2: "#BA7517",
-  3: "#0F6E56",
-};
+const RATING_LABEL: Record<number, string> = { 1: "bad", 2: "meh", 3: "good" };
+const RATING_COLOR: Record<number, string> = { 1: "#791F1F", 2: "#BA7517", 3: "#0F6E56" };
+const RATING_GLYPH: Record<number, string> = { 1: "✗", 2: "·", 3: "✓" };
 
 function fmtAgo(iso: string | null): string {
   if (!iso) return "—";
@@ -49,7 +49,9 @@ function fmtAgo(iso: string | null): string {
 
 export function OpsMode() {
   return (
-    <div style={{ fontFamily: FONT, display: "flex", flexDirection: "column", gap: 18 }}>
+    <div style={{ fontFamily: FONT, display: "flex", flexDirection: "column", gap: 22 }}>
+      <BuildMode />
+      <CapabilityProfileCard />
       <EvalSection />
       <BacklogSection />
       <FailuresSection />
@@ -57,260 +59,299 @@ export function OpsMode() {
   );
 }
 
-// ── eval section ───────────────────────────────────────────────────────
+// ── eval drilldown ────────────────────────────────────────────────────
 
 function EvalSection() {
   const qc = useQueryClient();
-  // Last eval = most recent segment w/ done status.
-  const { data: doneSegs = [] } = useQuery<ApiEvalSegment[]>({
-    queryKey: ["eval-done"],
-    queryFn: () => fetchEvalSegments({ statuses: "done", limit: 1 }),
-  });
-  // Unrated queue = not_yet status.
+  // Pull a small queue of unrated segments. We drill into one at a time;
+  // skip = client-side advance; rate-and-mark-done = server flip + advance.
   const { data: queue = [] } = useQuery<ApiEvalSegment[]>({
-    queryKey: ["eval-not-yet"],
-    queryFn: () => fetchEvalSegments({ statuses: "not_yet", limit: 3 }),
+    queryKey: ["eval-not-yet-queue"],
+    queryFn: () => fetchEvalSegments({ statuses: "not_yet", limit: 20 }),
   });
 
-  const last = doneSegs[0];
-
-  const handleRate = async (id: number, rating: number) => {
-    await patchEvalSegment(id, {
-      overall_rating: rating, eval_status: "done",
-    });
-    qc.invalidateQueries({ queryKey: ["eval-not-yet"] });
-    qc.invalidateQueries({ queryKey: ["eval-done"] });
-  };
+  const [skipped, setSkipped] = useState<Set<number>>(new Set());
+  const visibleQueue = useMemo(
+    () => queue.filter((s) => !skipped.has(s.id)),
+    [queue, skipped],
+  );
+  const current = visibleQueue[0] ?? null;
 
   return (
-    <Section title="Evals">
-      <div style={{
-        fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
-        marginBottom: 10,
-      }}>
-        {last ? (
-          <>
-            Last eval: <strong>{fmtAgo(last.last_message_at)}</strong>
-            {last.overall_rating != null && (
-              <>
-                {" · "}
-                <span style={{ color: RATING_COLOR[last.overall_rating] }}>
-                  {RATING_LABEL[last.overall_rating]}
-                </span>
-              </>
-            )}
-          </>
-        ) : (
-          "No evals yet — rate one below to start."
-        )}
-      </div>
-
-      {queue.length === 0 ? (
-        <EmptyHint>Queue clear. New conversations will surface here when they finish.</EmptyHint>
+    <Section title="Evals" count={visibleQueue.length}>
+      {!current ? (
+        <EmptyHint>Queue clear. Rate one below as new chats finish.</EmptyHint>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {queue.map((seg) => (
-            <EvalRow key={seg.id} seg={seg} onRate={handleRate} />
-          ))}
-        </div>
+        <EvalDrilldown
+          key={current.id}
+          segment={current}
+          onSkip={() => setSkipped((s) => new Set(s).add(current.id))}
+          onDone={async () => {
+            await patchEvalSegment(current.id, { eval_status: "done" });
+            qc.invalidateQueries({ queryKey: ["eval-not-yet-queue"] });
+          }}
+          remaining={visibleQueue.length}
+        />
       )}
     </Section>
   );
 }
 
-function EvalRow({ seg, onRate }: {
-  seg: ApiEvalSegment;
-  onRate: (id: number, rating: number) => void;
+function EvalDrilldown({ segment, onSkip, onDone, remaining }: {
+  segment: ApiEvalSegment;
+  onSkip: () => void;
+  onDone: () => Promise<void>;
+  remaining: number;
 }) {
+  const { data: full, isLoading } = useQuery<EvalSegmentFull>({
+    queryKey: ["eval-segment-full", segment.id],
+    queryFn: () => fetchEvalSegmentFull(segment.id),
+  });
+
   return (
     <div style={{
       background: "var(--gooni-card, #fff)",
       border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.10))",
       borderRadius: 10,
-      padding: "10px 14px",
-      display: "grid",
-      gridTemplateColumns: "1fr auto",
-      gap: 12,
-      alignItems: "center",
+      overflow: "hidden",
     }}>
-      <div style={{ minWidth: 0 }}>
-        <div style={{
-          fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
-          textTransform: "uppercase", letterSpacing: 0.4,
-          marginBottom: 3,
-        }}>
-          {seg.source} · {seg.message_count} msgs · {fmtAgo(seg.last_message_at)}
-        </div>
-        <div style={{
-          fontSize: 12, color: "var(--gooni-text, #1C1C1E)",
-          overflow: "hidden", textOverflow: "ellipsis",
-          display: "-webkit-box",
-          WebkitLineClamp: 2 as unknown as number,
-          WebkitBoxOrient: "vertical" as unknown as "vertical",
-        }}>
-          {seg.preview ?? seg.title ?? `Segment #${seg.id}`}
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 4 }}>
-        {[1, 2, 3].map((r) => (
-          <button
-            key={r}
-            onClick={() => onRate(seg.id, r)}
-            title={RATING_LABEL[r]}
-            style={{
-              width: 26, height: 26, borderRadius: 6,
-              background: "var(--gooni-card, #fff)",
-              border: "0.5px solid rgba(0,0,0,0.12)",
-              color: RATING_COLOR[r],
-              cursor: "pointer", fontSize: 13, fontWeight: 600,
-              padding: 0, fontFamily: "inherit",
-            }}
-          >
-            {r === 1 ? "✗" : r === 2 ? "·" : "✓"}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── backlog section ────────────────────────────────────────────────────
-
-const BOARD_STATUS_ORDER: Record<string, number> = { doing: 0, not_yet: 1, done: 2 };
-const BOARD_STATUS_LABEL: Record<string, string> = {
-  not_yet: "Not yet",
-  doing: "Doing",
-  done: "Done",
-};
-const BOARD_STATUS_COLOR: Record<string, string> = {
-  not_yet: "var(--gooni-muted, #8E8E93)",
-  doing: "#BA7517",
-  done: "#0F6E56",
-};
-
-function BacklogSection() {
-  const { data: tickets = [] } = useQuery<ApiBacklogTicket[]>({
-    queryKey: ["backlog-tickets"],
-    queryFn: () => fetchBacklogTickets(true),
-  });
-
-  const sorted = [...tickets].sort((a, b) => {
-    const sa = BOARD_STATUS_ORDER[a.board_status ?? "not_yet"] ?? 9;
-    const sb = BOARD_STATUS_ORDER[b.board_status ?? "not_yet"] ?? 9;
-    if (sa !== sb) return sa - sb;
-    const ta = a.updated_at ? Date.parse(a.updated_at) : 0;
-    const tb = b.updated_at ? Date.parse(b.updated_at) : 0;
-    return tb - ta;
-  });
-
-  return (
-    <Section title="Backlog" count={tickets.length}>
-      {sorted.length === 0 ? (
-        <EmptyHint>Backlog empty. Chat about a feature request to add one.</EmptyHint>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {sorted.map((t) => (
-            <BacklogRow key={t.id} ticket={t} />
-          ))}
-        </div>
-      )}
-    </Section>
-  );
-}
-
-function BacklogRow({ ticket }: { ticket: ApiBacklogTicket }) {
-  const hasNotes = !!(ticket.notes && ticket.notes.trim());
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div style={{
-      background: "var(--gooni-card, #fff)",
-      border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.10))",
-      borderRadius: 8,
-      padding: "8px 12px",
-      opacity: ticket.board_status === "done" ? 0.65 : 1,
-    }}>
+      {/* Convo header */}
       <div style={{
-        display: "grid",
-        gridTemplateColumns: "auto auto 1fr auto",
-        alignItems: "center",
-        gap: 10,
+        padding: "10px 14px",
+        borderBottom: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+        display: "flex", alignItems: "center", gap: 12,
+        background: "rgba(0,0,0,0.015)",
       }}>
-        {/* Chevron — only renders when notes exist, otherwise spacer. */}
-        {hasNotes ? (
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            title={expanded ? "Hide notes" : "Show notes"}
-            style={{
-              background: "transparent", border: "none", padding: 0,
-              cursor: "pointer", display: "flex", alignItems: "center",
-              color: "var(--gooni-muted, #8E8E93)",
-              transform: expanded ? "rotate(90deg)" : "none",
-              transition: "transform 0.12s",
-            }}
-          >
-            <ChevronRight size={11} />
-          </button>
-        ) : (
-          <span style={{ width: 11 }} />
-        )}
-        <span style={{
-          fontSize: 10, fontWeight: 500,
-          color: BOARD_STATUS_COLOR[ticket.board_status ?? "not_yet"],
-          background: "rgba(0,0,0,0.04)",
-          padding: "2px 6px", borderRadius: 4,
-          textTransform: "uppercase", letterSpacing: 0.4,
-          whiteSpace: "nowrap",
-        }}>
-          {BOARD_STATUS_LABEL[ticket.board_status ?? "not_yet"] ?? ticket.board_status}
-        </span>
-        <div style={{ minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 12,
-            color: "var(--gooni-text, #1C1C1E)",
-            textDecoration: ticket.board_status === "done" ? "line-through" : "none",
+            fontSize: 10, fontWeight: 600, letterSpacing: 0.4,
+            textTransform: "uppercase",
+            color: "var(--gooni-muted, #8E8E93)",
+            marginBottom: 2,
+          }}>
+            {segment.source} · {segment.message_count} msgs · {fmtAgo(segment.last_message_at)}
+          </div>
+          <div style={{
+            fontSize: 12, color: "var(--gooni-text, #1C1C1E)",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
-            {ticket.text}
+            {segment.preview ?? segment.title ?? `Segment #${segment.id}`}
           </div>
-          {ticket.subtitle && (
-            <div style={{
-              fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            }}>
-              {ticket.subtitle}
-            </div>
-          )}
         </div>
-        {ticket.pr_url ? (
-          <a
-            href={ticket.pr_url} target="_blank" rel="noopener noreferrer"
-            title="View PR"
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 3,
-              fontSize: 10, color: "#0F6E56",
-              textDecoration: "none",
-              padding: "2px 6px", borderRadius: 4,
-              background: "rgba(15,110,86,0.08)",
-            }}
-          >
-            PR <ExternalLink size={9} />
-          </a>
-        ) : <span />}
+        <button
+          onClick={onSkip}
+          title="Skip to next unrated convo"
+          style={navButton}
+        >
+          <SkipForward size={12} /> Skip
+        </button>
+        <button
+          onClick={() => void onDone()}
+          title="Mark this convo done + advance"
+          style={primaryButton}
+        >
+          Done <ChevronRight size={12} />
+        </button>
       </div>
-      {hasNotes && expanded && (
-        <div style={{
-          marginTop: 8,
-          paddingTop: 8,
-          borderTop: "0.5px dashed var(--gooni-border, rgba(0,0,0,0.10))",
-          fontSize: 11,
-          color: "var(--gooni-text, #1C1C1E)",
-          whiteSpace: "pre-wrap",
-          lineHeight: 1.5,
-        }}>
-          {ticket.notes}
+
+      {/* Transcript — scrollable. Per-assistant-turn rating row inline. */}
+      <div style={{
+        maxHeight: 420, overflowY: "auto",
+        padding: "10px 14px",
+      }}>
+        {isLoading || !full ? (
+          <div style={{
+            fontSize: 12, color: "var(--gooni-muted, #8E8E93)", padding: 20,
+          }}>
+            Loading conversation…
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {full.messages.map((m) => (
+              <MessageBlock key={m.id} segmentId={segment.id} msg={m} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer hint */}
+      <div style={{
+        padding: "6px 14px",
+        borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+        fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+      }}>
+        <span>{remaining - 1} more in queue after this</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <ChevronLeft size={10} /> bad · meh · good <ChevronRight size={10} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function MessageBlock({ segmentId, msg }: {
+  segmentId: number;
+  msg: EvalMessage;
+}) {
+  const qc = useQueryClient();
+  const isAssistant = msg.role === "assistant";
+  const [rating, setRating] = useState<1 | 2 | 3 | null>(
+    (msg.rating?.rating as 1 | 2 | 3 | undefined) ?? null,
+  );
+  const [comment, setComment] = useState<string>(msg.rating?.comment ?? "");
+  const [commentOpen, setCommentOpen] = useState<boolean>(!!msg.rating?.comment);
+  const [saving, setSaving] = useState(false);
+
+  async function save(nextRating: 1 | 2 | 3, nextComment: string | null) {
+    setSaving(true);
+    try {
+      await putMessageRating(segmentId, msg.id, {
+        rating: nextRating,
+        comment: nextComment,
+      });
+      qc.invalidateQueries({ queryKey: ["eval-segment-full", segmentId] });
+    } catch (e) {
+      console.error("rating save failed", e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{
+      borderLeft: `2px solid ${isAssistant ? "#3B82F6" : "rgba(0,0,0,0.12)"}`,
+      paddingLeft: 10,
+      display: "flex", flexDirection: "column", gap: 6,
+    }}>
+      <div style={{
+        fontSize: 10, fontWeight: 600, letterSpacing: 0.4,
+        textTransform: "uppercase",
+        color: isAssistant ? "#3B82F6" : "var(--gooni-muted, #8E8E93)",
+      }}>
+        {isAssistant ? "Gooni" : "User"}
+      </div>
+      <div style={{
+        fontSize: 13, color: "var(--gooni-text, #1C1C1E)",
+        whiteSpace: "pre-wrap", lineHeight: 1.5,
+        maxHeight: 220, overflowY: "auto",
+      }}>
+        {msg.content || <em style={{ color: "var(--gooni-muted, #8E8E93)" }}>(empty)</em>}
+      </div>
+
+      {isAssistant && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {[1, 2, 3].map((r) => {
+              const active = rating === r;
+              return (
+                <button
+                  key={r}
+                  onClick={() => { setRating(r as 1 | 2 | 3); void save(r as 1 | 2 | 3, comment || null); }}
+                  disabled={saving}
+                  title={RATING_LABEL[r]}
+                  style={{
+                    width: 26, height: 26, borderRadius: 6,
+                    background: active ? RATING_COLOR[r] : "var(--gooni-card, #fff)",
+                    border: `0.5px solid ${active ? RATING_COLOR[r] : "rgba(0,0,0,0.12)"}`,
+                    color: active ? "#fff" : RATING_COLOR[r],
+                    cursor: saving ? "wait" : "pointer", fontSize: 13, fontWeight: 600,
+                    padding: 0, fontFamily: "inherit",
+                  }}
+                >
+                  {RATING_GLYPH[r]}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setCommentOpen((v) => !v)}
+              style={{
+                marginLeft: 4,
+                background: "transparent", border: "none", cursor: "pointer",
+                color: "var(--gooni-muted, #8E8E93)", fontSize: 11,
+                padding: 0, fontFamily: "inherit",
+              }}
+            >
+              {commentOpen ? "hide note" : (msg.rating?.comment ? "edit note" : "+ note")}
+            </button>
+            {msg.rating?.updated_at && (
+              <span style={{
+                marginLeft: "auto",
+                fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
+              }}>
+                saved {fmtAgo(msg.rating.updated_at)}
+              </span>
+            )}
+          </div>
+          {commentOpen && (
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              onBlur={() => { if (rating) void save(rating, comment || null); }}
+              rows={2}
+              placeholder="what went wrong / right"
+              style={{
+                width: "100%", resize: "vertical",
+                fontFamily: "inherit", fontSize: 12, lineHeight: 1.45,
+                padding: "6px 8px",
+                background: "var(--gooni-card, #fff)",
+                border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.12))",
+                borderRadius: 6,
+                color: "var(--gooni-text, #1C1C1E)",
+                outline: "none",
+              }}
+            />
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+// ── backlog (kanban, scrollable) ──────────────────────────────────────
+
+function BacklogSection() {
+  const navigate = useNavigate();
+  const lists = useListsStore((s) => s.lists);
+  const fetchAll = useListsStore((s) => s.fetchAll);
+  useEffect(() => {
+    if (!lists.length) void fetchAll();
+  }, [lists.length, fetchAll]);
+  const backlogList = lists.find((l) => l.type === "backlog");
+
+  return (
+    <Section
+      title="Backlog"
+      right={backlogList && (
+        <button
+          onClick={() => navigate({
+            to: "/",
+            search: { note: undefined, conv: undefined, list: backlogList.id, audit: undefined },
+          })}
+          style={{
+            background: "transparent", border: "none", cursor: "pointer",
+            color: "var(--gooni-muted, #8E8E93)", fontSize: 11,
+            display: "inline-flex", alignItems: "center", gap: 3,
+            fontFamily: "inherit", padding: 0,
+          }}
+          title="Open full backlog board"
+        >
+          open full <ExternalLink size={10} />
+        </button>
+      )}
+    >
+      {/* Scrollable wrapper — fixed height so the rest of OpsMode stays
+          reachable without endless scroll. BacklogBoard's columns shrink
+          naturally into the narrower container. */}
+      <div style={{
+        height: 360, overflow: "auto",
+        border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+        borderRadius: 10,
+        background: "rgba(0,0,0,0.015)",
+      }}>
+        <BacklogBoard />
+      </div>
+    </Section>
   );
 }
 
@@ -370,10 +411,11 @@ function FailuresSection() {
 
 // ── primitives ─────────────────────────────────────────────────────────
 
-function Section({ title, count, tone = "default", children }: {
+function Section({ title, count, tone = "default", right, children }: {
   title: string;
   count?: number;
   tone?: "default" | "warn";
+  right?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -393,6 +435,7 @@ function Section({ title, count, tone = "default", children }: {
             · {count}
           </span>
         )}
+        {right && <span style={{ marginLeft: "auto" }}>{right}</span>}
       </div>
       {children}
     </div>
@@ -407,3 +450,23 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
     }}>{children}</div>
   );
 }
+
+const navButton: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 4,
+  padding: "5px 10px", borderRadius: 6,
+  border: "0.5px solid rgba(0,0,0,0.12)",
+  background: "var(--gooni-card, #fff)",
+  color: "var(--gooni-muted, #6B7280)",
+  fontSize: 11, fontWeight: 500, cursor: "pointer",
+  fontFamily: FONT,
+};
+
+const primaryButton: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 4,
+  padding: "5px 10px", borderRadius: 6,
+  border: "none",
+  background: "var(--gooni-text, #1C1C1E)",
+  color: "var(--gooni-card, #fff)",
+  fontSize: 11, fontWeight: 500, cursor: "pointer",
+  fontFamily: FONT,
+};

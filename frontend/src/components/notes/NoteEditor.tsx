@@ -550,7 +550,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         NoteLink,
       ],
       content: activeNote?.content ?? "",
-      autofocus: embedded ? "end" : false,
+      // Embedded variant intentionally does NOT autofocus — focus
+       // triggers the dashboard's expand-and-dim layout, which would
+       // fire on every dashboard mount otherwise. User clicks to start.
+      autofocus: false,
       editorProps: {
         attributes: {
           // Font / size / line-height live in the .gooni-note-editor CSS
@@ -840,7 +843,11 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       // shortly, and we want the next pass to install it.
       if (activeNote.content == null && activeNoteId && activeNoteId > 0) {
         if (!editor.isEmpty) {
-          editor.commands.setContent("");
+          // emitUpdate=false so the programmatic clear doesn't trip the
+          // editor's onUpdate handler (which flips hasChanges + schedules
+          // an autosave). Without this, opening a list-shape note marks
+          // the doc dirty even though the user never typed.
+          editor.commands.setContent("", { emitUpdate: false });
           bodyRef.current = "";
         }
         return;
@@ -867,7 +874,14 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         restoredFromLocal = true;
       }
       if (editor.getHTML() !== desired) {
-        editor.commands.setContent(desired);
+        // emitUpdate=false so loading a note doesn't trip onUpdate (which
+        // would flip hasChanges + schedule an autosave). The save-on-leave
+        // guard relied on hasChanges to skip clean opens, but onUpdate fired
+        // on every programmatic load — so every note touch turned into an
+        // /embed + /memorize cascade on the next switch. Pass false here +
+        // the explicit `hasChanges.current = true` below covers the genuine
+        // restore-from-local-draft case.
+        editor.commands.setContent(desired, { emitUpdate: false });
         bodyRef.current = desired;
       }
       titleRef.current = desiredTitle;
