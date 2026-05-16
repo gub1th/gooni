@@ -10,6 +10,7 @@ from .item_service import item_service
 from .memory_extraction import extract_signals
 from .memory_service import memory_service
 from .list_service import list_service
+from . import promise_service
 from .trace_builder import TraceBuilder
 from ..tools.feature_request_tool import feature_request_tool
 
@@ -25,6 +26,65 @@ _UNDO_FEEDBACK_RE = re.compile(
 # Above this length, raw note content is summarized before injection so the
 # system prompt doesn't balloon to 5K tokens for a single note.
 ENTRY_SUMMARIZE_THRESHOLD = 2000
+
+
+def _build_jarvis_ack(
+    *,
+    tone_rules: list[str],
+    feature_titles: list[str],
+    promises: list[dict],
+) -> str | None:
+    """Compose a natural, confidence-projecting acknowledgement when any
+    signal fired this turn. Replaces the old "Feedback detected: ... /
+    Logged feature request: ..." structured-receipt style that Daniel
+    called too LLM-y.
+
+    Voice rules:
+      - Speak like a friend who took a note, not a system logging an event.
+      - Mention WHAT landed (which list / which promise) so Daniel has
+        confidence Gooni actually did the thing — but in passing, not as
+        a bullet list. Confidence ≠ hallucinating.
+      - Multi-signal turns chain with " — " or comma, never bullet style.
+      - Return None when no signals fired (caller falls through to LLM).
+
+    Phrases are deterministic for v1 — easy to test, fast, free of LLM
+    cost. A future PR can swap in a tiny LLM call per ack if the variety
+    matters, but the cost stops being free.
+    """
+    parts: list[str] = []
+    if tone_rules:
+        rule = tone_rules[0]
+        if len(tone_rules) > 1:
+            parts.append(f"noted — sharper next time ({len(tone_rules)} rules)")
+        else:
+            # Quote the rule briefly so Daniel can see it landed as intended.
+            quoted = rule if len(rule) <= 60 else rule[:60].rstrip() + "…"
+            parts.append(f"noted — {quoted.lower().rstrip('.')}")
+    if feature_titles:
+        if len(feature_titles) == 1:
+            parts.append(f"on the backlog: \"{feature_titles[0]}\"")
+        else:
+            head = feature_titles[0]
+            parts.append(
+                f"on the backlog: \"{head}\" (+{len(feature_titles) - 1} more)"
+            )
+    if promises:
+        if len(promises) == 1:
+            p = promises[0]
+            due = p.get("inferred_due")
+            tail = ""
+            if due:
+                tail = " — i'll check in"
+            slip = p.get("slip_count", 0) or 0
+            if slip > 0:
+                tail = f" — heads up, you've slipped this one {slip}x before"
+            summary = p.get("summary") or p.get("utterance") or ""
+            parts.append(f"got it: \"{summary}\"{tail}")
+        else:
+            parts.append(f"got {len(promises)} promises — i'll be in touch")
+    if not parts:
+        return None
+    return " · ".join(parts)
 
 
 def _summarize_entry(text: str) -> str:
@@ -106,9 +166,11 @@ class Orchestrator:
         signals_summary: dict = {
             "tone_corrections": [],
             "feature_requests": [],
+            "soft_promises": [],
             "memory_count": 0,
         }
         memory_candidates: list[dict] = []
+        captured_promises: list[dict] = []
         skip_normal_reply = False
 
         if not image_url and saved_message.strip():
@@ -116,9 +178,9 @@ class Orchestrator:
                 # Explicit undo command — runs before extraction so it always wins.
                 removed = memory_service.deactivate_last_feedback_preference(db=db)
                 if removed:
-                    feedback_ack = f"Feedback removed: \"{removed.content}\"."
+                    feedback_ack = f"rolled back — i'll drop \"{removed.content}\""
                 else:
-                    feedback_ack = "No active feedback to undo."
+                    feedback_ack = "nothing to undo — clean slate."
                 skip_normal_reply = True
                 feedback_tools.append("undo_feedback")
                 tb.tool_call(
@@ -138,6 +200,7 @@ class Orchestrator:
                 )
                 signals = extract_signals(saved_message, prev_assistant=prev_text)
                 memory_candidates = signals["memories"]
+                soft_promises = signals.get("soft_promises", [])
                 signals_summary = {
                     "tone_corrections": [
                         {
@@ -150,6 +213,10 @@ class Orchestrator:
                     "feature_requests": [
                         {"title": f["title"], "why": f.get("why", "")}
                         for f in signals["feature_requests"]
+                    ],
+                    "soft_promises": [
+                        {"utterance": p["utterance"], "time_hint": p.get("time_hint")}
+                        for p in soft_promises
                     ],
                     "memory_count": len(memory_candidates),
                 }
@@ -204,29 +271,63 @@ class Orchestrator:
                         user_msg.is_feedback = True
                         db.commit()
 
-                # Build the ack from whichever signals fired. Multi-signal
-                # turns get a combined line so Daniel sees what landed where.
-                ack_parts: list[str] = []
-                if tone_rules:
-                    ack_parts.append(
-                        f"Feedback detected: {tone_rules[0]}."
-                        + (f" (+{len(tone_rules) - 1} more)" if len(tone_rules) > 1 else "")
-                    )
-                if feature_titles:
-                    titles_joined = ", ".join(f'"{t}"' for t in feature_titles[:2])
-                    ack_parts.append(
-                        f"Logged feature request: {titles_joined}"
-                        + (f" (+{len(feature_titles) - 2} more)" if len(feature_titles) > 2 else "")
-                        + "."
-                    )
-                if ack_parts:
-                    feedback_ack = " ".join(ack_parts)
-                    if tone_rules:
-                        feedback_ack += " Say \"undo last feedback\" to revert."
+                # Soft-promise capture — distinct from feature_request (which
+                # targets Gooni). Promise = Daniel committing to himself.
+                # Persisted as Promise rows w/ utters edge from source Message
+                # + supports edge to closest active Focus if cosine match.
+                for sp in soft_promises:
+                    try:
+                        time_hint = sp.get("time_hint") or ""
+                        # Compose utterance + time_hint so the regex parser
+                        # in promise_service has a fighting chance at finding
+                        # the anchor (LLM may have stripped it from the verb
+                        # phrase when summarizing the utterance).
+                        utter_for_parse = sp["utterance"]
+                        if time_hint and time_hint not in utter_for_parse.lower():
+                            utter_for_parse = f"{utter_for_parse} {time_hint}"
+                        try:
+                            from .promise_service import _infer_due_from_text
+                            inferred = _infer_due_from_text(utter_for_parse)
+                        except Exception:
+                            inferred = None
+                        p = promise_service.create(
+                            db,
+                            utterance=sp["utterance"],
+                            summary=sp.get("summary"),
+                            source_message_id=user_msg.id,
+                            inferred_due=inferred,
+                        )
+                        captured_promises.append(promise_service.serialize(p))
+                        feedback_tools.append("router:promise")
+                        tb.tool_call(
+                            "router:promise",
+                            label="Captured promise",
+                            args={
+                                "utterance": sp["utterance"],
+                                "time_hint": time_hint or None,
+                                "inferred_due": p.inferred_due.isoformat() if p.inferred_due else None,
+                                "slip_count": p.slip_count,
+                            },
+                        )
+                    except Exception as e:
+                        print(f"promise capture error: {e}")
+
+                # Build the Jarvis-voice ack from whichever signals fired.
+                # No structured receipts ("Feedback detected:", "Logged
+                # feature request:") — Daniel called those out as too
+                # clinical. Each signal contributes a natural phrase; we
+                # join with light punctuation so multi-signal turns still
+                # read like one breath.
+                feedback_ack = _build_jarvis_ack(
+                    tone_rules=tone_rules,
+                    feature_titles=feature_titles,
+                    promises=captured_promises,
+                )
+                if feedback_ack is not None:
                     # Skip the LLM reply only when the message was *purely*
-                    # tone/feature signal — heuristic: no extracted memories
-                    # AND ack is short. Otherwise fall through so Daniel
-                    # gets a real answer to his actual question.
+                    # signal — heuristic: no extracted memories, AND short.
+                    # Otherwise fall through so Daniel gets a real answer
+                    # to his actual question.
                     pure_signal = (
                         not memory_candidates
                         and len(saved_message.split()) < 25
@@ -314,8 +415,28 @@ class Orchestrator:
             f"Daniel's current intent: {intention_context}"
             if intention_context else ""
         )
+        # Per-channel cadence hint. On WA/Telegram/iMessage the reply is
+        # split into bubbles by `split_for_bots` (in messaging/base.py),
+        # which keys off blank-line paragraph boundaries. If the LLM
+        # packs multiple thoughts into a single paragraph w/ internal
+        # \n line breaks, the splitter sees one bubble — Daniel called
+        # this out as mechanical-feeling ("one line / newline / one
+        # line / two newlines" reading off). Instruct the model
+        # explicitly so the structural intent survives the wire.
+        cadence_block = ""
+        if source != "web":
+            cadence_block = (
+                "Cadence: this reply ships over WhatsApp/Telegram as separate "
+                "bubbles. Structure as 1-4 short distinct thoughts, each its "
+                "own paragraph separated by a BLANK LINE (i.e. \\n\\n between "
+                "thoughts). Never pack multiple thoughts into one paragraph "
+                "with internal single-line breaks — that flattens into one "
+                "wall-of-text bubble. Each bubble should carry one complete "
+                "thought, ≤ ~280 characters. Cut filler over completeness."
+            )
         full_context = "\n\n".join(filter(None, [
             intention_block,
+            cadence_block,
             memory_context,
             entry_context,
             list_context,
