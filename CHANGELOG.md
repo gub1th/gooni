@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.77.0 — 2026-05-16 (minor)
+
+- feat(frontend): app-wide error boundary + 404 page with Gooni mascot (#211)
+
 ## 0.76.0 — 2026-05-16 (minor)
 
 - feat(dashboard): glow-up — focus halos, themed dev take, focus-on-write composer (#209)
