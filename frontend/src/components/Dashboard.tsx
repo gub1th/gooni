@@ -14,6 +14,9 @@ import { TakeTabs } from "./dashboard/TakeTabs";
 import { DashboardHeader } from "./dashboard/DashboardHeader";
 import { TabToggle } from "./dashboard/TabToggle";
 import { FocusesView } from "./dashboard/FocusesView";
+import { ModeToggle } from "./dashboard/ModeToggle";
+import { BuildMode } from "./dashboard/BuildMode";
+import { PulseMode } from "./dashboard/PulseMode";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -48,12 +51,20 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   const palette = THEME_PALETTES[theme];
   const activeTab = useDashboardStore((s) => s.activeTab);
   const setActiveTab = useDashboardStore((s) => s.setActiveTab);
+  const activeMode = useDashboardStore((s) => s.activeMode);
+  const modeColors = useDashboardStore((s) => s.modeColors);
 
-  // Keep body/html background in sync with theme so any gap around the app fills correctly.
+  // Background for the dashboard is theme color unless the active mode
+  // has a custom tint set — then that takes over so each mode reads
+  // visually distinct.
+  const modeBg = modeColors[activeMode] || palette.main;
+
+  // Keep body/html background in sync. Use the mode tint when set so the
+  // dashboard's bleed area picks it up too.
   useEffect(() => {
-    document.body.style.background = palette.main;
-    document.documentElement.style.background = palette.main;
-  }, [palette.main]);
+    document.body.style.background = modeBg;
+    document.documentElement.style.background = modeBg;
+  }, [modeBg]);
 
   // Quick-capture composer (Cmd+E) saves notes outside the dashboard's
   // own submit flow, so listen for its event and re-pull stats so the
@@ -83,7 +94,7 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   }
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", background: palette.main, fontFamily: FONT, position: "relative" }}>
+    <div style={{ flex: 1, overflowY: "auto", background: modeBg, fontFamily: FONT, position: "relative", transition: "background 0.2s" }}>
       <style>{`
         @keyframes gooni-spin { to { transform: rotate(360deg); } }
         /* Quiet hover on the 'add a todo' row — matches the per-row hover treatment above it. */
@@ -93,56 +104,47 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
       `}</style>
 
       {/* Header band — greeting/date on the left, inline Whoop stats +
-          day-streak on the right. Whoop stats only render when Whoop
-          is connected; the standalone WhoopStrip below the composer
-          was removed when this consolidation landed (the data lives
-          in the header now, full stop). */}
-      <div style={{ background: palette.main }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 14px" }}>
+          day-streak on the right. Stays the same shape across all modes
+          so the top-of-page anchor is constant. */}
+      <div style={{ background: modeBg }}>
+        <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 8px" }}>
           <DashboardHeader stats={stats} onBrainClick={() => setExploreOpen(true)} />
         </div>
       </div>
 
-      {/* Single-column body. Dev + OpenAI usage live in the dedicated
-          Stats view (sidebar → Stats, or the "Stats →" card above). */}
+      {/* Single-column body — content swaps based on activeMode. */}
       <div>
-          <div style={{ maxWidth: 720, margin: "0 auto", padding: "20px 40px 120px" }}>
+          <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 40px 120px" }}>
 
-        {/* Gooni's Take — single card with tabs at the TOP of the
-            dashboard. Sparkle = focus take ("what are my current
-            focuses?"); Hammer = dev take ("what did I ship this week?",
-            now weekly per take_service v2). */}
-        <TakeTabs />
+        {/* Top-tier mode toggle — Today | Build | Pulse. Per-mode bg
+            color customizable via the palette button. */}
+        <ModeToggle />
 
-        {/* Note input — embedded NoteEditor quick-input. The recent-notes
-            grid that used to live here moved to the Sidebar's RECENT
-            section, including the post-submit ink + typewriter animation. */}
-        <div style={{ marginBottom: 14 }}>
-          <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
-        </div>
-
-        {/* Todos / Focuses toggle replaces the prior always-on dual
-            stack. Active tab persists via useDashboardStore so reload
-            doesn't snap back to default. */}
-        <TabToggle active={activeTab} onChange={setActiveTab} />
-
-        {activeTab === "todos" ? (
-          /* Todo list — primary at top (clickable crown to demote), open
-             list w/ age tints, Done today section underneath. Dev activity
-             section dropped — moved up into the take card's tab. */
-          <TodoList />
-        ) : (
-          /* Focuses view — synthesizer audit pills (promote/dismiss
-             inline) above the 3-col focus card grid w/ drift /
-             dormant / lineage states. Click a card → drill-down modal. */
-          <FocusesView />
+        {activeMode === "today" && (
+          <>
+            {/* Today mode = the existing dashboard. TakeTabs → composer →
+                inner Todos/Focuses toggle → HabitsStrip. Unchanged. */}
+            <TakeTabs />
+            <div style={{ marginBottom: 14 }}>
+              <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
+            </div>
+            <TabToggle active={activeTab} onChange={setActiveTab} />
+            {activeTab === "todos" ? <TodoList /> : <FocusesView />}
+            <HabitsStrip />
+          </>
         )}
 
-        {/* Habits — daily binary trackers, 7-day strip. Sits at bottom
-            of the dashboard so it's a glance-and-tap surface, not
-            something Daniel has to navigate to. Stays visible across
-            both tabs since habits are orthogonal to todos/focuses. */}
-        <HabitsStrip />
+        {activeMode === "build" && (
+          /* Build mode = Gooni health — 6-axis composite scores. Click
+             any card → drill-down modal with per-component breakdown. */
+          <BuildMode />
+        )}
+
+        {activeMode === "pulse" && (
+          /* Pulse mode = life-stats grid. Whoop / LeetCode / habits /
+             commits / engagement etc, in a consistent stat-card chrome. */
+          <PulseMode />
+        )}
 
         </div>
       </div>

@@ -3483,6 +3483,16 @@ def get_openai_usage(refresh: bool = False):
     return openai_usage.fetch_month_to_date(refresh=refresh)
 
 
+@app.get("/health/scores")
+def health_scores(db: Session = Depends(get_db)):
+    """Composite 0-100 score per Gooni health axis. Drives the Build
+    mode dashboard. Computed on-demand; cheap aggregates over existing
+    tables, no caching. See `health_service.compute_all` for the per-
+    axis scoring logic."""
+    from .services.health_service import compute_all
+    return compute_all(db)
+
+
 @app.get("/dashboard/claude-usage")
 def get_claude_usage(
     days: int = 30,
