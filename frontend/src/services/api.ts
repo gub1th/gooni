@@ -2276,7 +2276,11 @@ export async function fetchEvalSegments(
   if (opts.offset != null) params.set("offset", String(opts.offset));
   const res = await apiFetch(`${BASE}/eval/segments?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to fetch eval segments");
-  return res.json();
+  // Endpoint returns `{segments, total}` — unwrap to keep the
+  // ApiEvalSegment[] contract callers expect. Without this OpsMode's
+  // `n.map` blew up because `data` was the wrapper object.
+  const body = await res.json();
+  return Array.isArray(body) ? body : (body?.segments ?? []);
 }
 
 export async function patchEvalSegment(
