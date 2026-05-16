@@ -1430,6 +1430,35 @@ export async function fetchTakesHistory(
   return res.json() as Promise<GooniTakePayload[]>;
 }
 
+// Dev take v3 → JSON array of {theme, summary}. Older v2 rows store a
+// plain paragraph. Parser returns either shape so callers can branch on
+// the rendering path.
+export interface DevThemeItem { theme: string; summary: string; }
+export type DevTakeView =
+  | { kind: "themes"; themes: DevThemeItem[] }
+  | { kind: "text"; text: string }
+  | { kind: "empty" };
+
+export function parseDevTake(raw: string | undefined | null): DevTakeView {
+  if (!raw || !raw.trim()) return { kind: "empty" };
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const themes: DevThemeItem[] = [];
+      for (const item of parsed) {
+        if (!item || typeof item !== "object") continue;
+        const theme = String((item as { theme?: unknown }).theme ?? "").trim();
+        const summary = String((item as { summary?: unknown }).summary ?? "").trim();
+        if (theme && summary) themes.push({ theme, summary });
+      }
+      if (themes.length) return { kind: "themes", themes };
+    }
+  } catch {
+    // fall through to plain-text render
+  }
+  return { kind: "text", text: raw };
+}
+
 // ── Conversations ──────────────────────────────────────────────────────────────
 
 export interface ApiConversation {

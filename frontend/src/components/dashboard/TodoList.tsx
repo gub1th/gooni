@@ -152,6 +152,29 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         .gooni-todo-row { transition: background 0.12s; }
         .gooni-todo-row:hover { background: rgba(0,0,0,0.025); }
         .gooni-todo-cascade { animation: gooni-todo-fade-out 600ms ease forwards; }
+
+        /* Primary-todo card: soft yellow halo + a one-shot border-race
+           on mount. The race is a conic-gradient masked to a 1.5px ring
+           that rotates once; afterwards opacity fades to 0 leaving just
+           the soft glow behind the card. */
+        @keyframes gooni-primary-race {
+          0%   { transform: rotate(0deg);   opacity: 0.95; }
+          85%  { transform: rotate(360deg); opacity: 0.85; }
+          100% { transform: rotate(360deg); opacity: 0;    }
+        }
+        .gooni-primary-race {
+          position: absolute;
+          inset: -1.5px;
+          border-radius: 13.5px;
+          padding: 1.5px;
+          background: conic-gradient(from 0deg, transparent 0deg, #F5C849 80deg, #FCE5A0 140deg, transparent 220deg);
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask-composite: exclude;
+          pointer-events: none;
+          animation: gooni-primary-race 1100ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+        }
       `}</style>
 
       {/* Primary card — separate visual treatment, sits above the list. */}
@@ -291,6 +314,15 @@ function PrimaryCard({
   const age = ageHint(t.created_at);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
+  // Race-border one-shot — keyed on todo id so promoting another todo to
+  // primary re-fires the animation. Local state flips off after the
+  // animation duration so re-renders don't keep restarting it.
+  const [racing, setRacing] = useState(true);
+  useEffect(() => {
+    setRacing(true);
+    const id = window.setTimeout(() => setRacing(false), 1200);
+    return () => clearTimeout(id);
+  }, [t.id]);
 
   return (
     <div
@@ -300,14 +332,16 @@ function PrimaryCard({
       style={{
         position: "relative",
         background: "var(--gooni-card, #FFFFFF)",
-        border: "2px solid #3B82F6",
+        border: "0.5px solid rgba(245,200,73,0.35)",
         borderRadius: 12,
         padding: "12px 16px",
         display: "flex", alignItems: "center", gap: 12,
         marginBottom: 12,
         fontFamily: FONT,
+        boxShadow: "0 0 0 1px rgba(245,200,73,0.18), 0 6px 22px rgba(245,200,73,0.22), 0 2px 8px rgba(245,200,73,0.14)",
       }}
     >
+      {racing && <div className="gooni-primary-race" aria-hidden /> }
       <button
         onClick={onDemote}
         title="Demote — clear primary"

@@ -54,19 +54,17 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   const activeTab = useDashboardStore((s) => s.activeTab);
   const setActiveTab = useDashboardStore((s) => s.setActiveTab);
   const activeMode = useDashboardStore((s) => s.activeMode);
-  const modeColors = useDashboardStore((s) => s.modeColors);
+  const composerFocused = useDashboardStore((s) => s.composerFocused);
+  const setComposerFocused = useDashboardStore((s) => s.setComposerFocused);
 
-  // Background for the dashboard is theme color unless the active mode
-  // has a custom tint set — then that takes over so each mode reads
-  // visually distinct.
-  const modeBg = modeColors[activeMode] || palette.main;
+  const pageBg = palette.main;
 
-  // Keep body/html background in sync. Use the mode tint when set so the
-  // dashboard's bleed area picks it up too.
+  // Keep body/html background in sync with the theme. Mode-specific
+  // tints were removed — global theme bg owns the page surface.
   useEffect(() => {
-    document.body.style.background = modeBg;
-    document.documentElement.style.background = modeBg;
-  }, [modeBg]);
+    document.body.style.background = pageBg;
+    document.documentElement.style.background = pageBg;
+  }, [pageBg]);
 
   // Quick-capture composer (Cmd+E) saves notes outside the dashboard's
   // own submit flow, so listen for its event and re-pull stats so the
@@ -96,7 +94,7 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   }
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", background: modeBg, fontFamily: FONT, position: "relative", transition: "background 0.2s" }}>
+    <div style={{ flex: 1, overflowY: "auto", background: pageBg, fontFamily: FONT, position: "relative", transition: "background 0.2s" }}>
       <style>{`
         @keyframes gooni-spin { to { transform: rotate(360deg); } }
         /* Quiet hover on the 'add a todo' row — matches the per-row hover treatment above it. */
@@ -108,7 +106,7 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
       {/* Header band — greeting/date on the left, inline Whoop stats +
           day-streak on the right. Stays the same shape across all modes
           so the top-of-page anchor is constant. */}
-      <div style={{ background: modeBg }}>
+      <div style={{ background: pageBg }}>
         <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 8px" }}>
           <DashboardHeader stats={stats} onBrainClick={() => setExploreOpen(true)} />
         </div>
@@ -118,21 +116,49 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
       <div>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 40px 120px" }}>
 
-        {/* Top-tier mode toggle — Today | Build | Ops | Pulse. Per-mode
-            bg color customizable via the palette button. */}
+        {/* Top-tier mode toggle — Today | Build | Ops | Pulse. */}
         <ModeToggle />
 
         {activeMode === "today" && (
           <>
-            {/* Today mode = the existing dashboard. TakeTabs → composer →
-                inner Todos/Focuses toggle → HabitsStrip. Unchanged. */}
-            <TakeTabs />
-            <div style={{ marginBottom: 14 }}>
-              <NoteEditor variant="embedded" onSubmitted={handleSubmitted} />
+            {/* Today mode. When the composer is focused, TakeTabs collapses
+                to a thin row and dims so the writing surface gets the eye.
+                Mounted as `display: grid` w/ a single 0/1fr row that we
+                transition for a smooth squish. */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateRows: composerFocused ? "0fr" : "1fr",
+                opacity: composerFocused ? 0.15 : 1,
+                transition: "grid-template-rows 280ms ease, opacity 220ms ease",
+                pointerEvents: composerFocused ? "none" : "auto",
+              }}
+            >
+              <div style={{ minHeight: 0, overflow: "hidden" }}>
+                <TakeTabs />
+              </div>
             </div>
-            <TabToggle active={activeTab} onChange={setActiveTab} />
-            {activeTab === "todos" ? <TodoList /> : <FocusesView />}
-            <HabitsStrip />
+            <div style={{ marginBottom: 14, position: "relative", zIndex: 2 }}>
+              <NoteEditor
+                variant="embedded"
+                onSubmitted={(note, rect) => {
+                  setComposerFocused(false);
+                  handleSubmitted(note, rect);
+                }}
+                onFocusChange={setComposerFocused}
+              />
+            </div>
+            <div
+              style={{
+                opacity: composerFocused ? 0.15 : 1,
+                transition: "opacity 220ms ease",
+                pointerEvents: composerFocused ? "none" : "auto",
+              }}
+            >
+              <TabToggle active={activeTab} onChange={setActiveTab} />
+              {activeTab === "todos" ? <TodoList /> : <FocusesView />}
+              <HabitsStrip />
+            </div>
           </>
         )}
 

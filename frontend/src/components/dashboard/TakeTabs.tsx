@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Sparkles, Hammer } from "lucide-react";
 import {
-  fetchGooniTake, fetchDevTake,
+  fetchGooniTake, fetchDevTake, parseDevTake,
   type GooniTakePayload,
 } from "../../services/api";
 
@@ -75,23 +75,67 @@ export function TakeTabs() {
         {meta.question}
       </div>
 
-      {/* Body */}
-      {active?.take ? (
-        <div style={{
-          fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
-          lineHeight: 1.55,
-        }}>
-          {active.take}
-        </div>
-      ) : (
+      {/* Body. Dev take is rendered as themed bullets when the row is v3
+          JSON; legacy v2 paragraph rows fall through to plain-text. */}
+      {!active?.take ? (
         <div style={{
           fontSize: 12.5, color: "var(--gooni-muted, #8E8E93)",
           fontStyle: "italic",
         }}>
           {meta.emptyHint}
         </div>
+      ) : tab === "dev" ? (
+        <DevTakeBody raw={active.take} />
+      ) : (
+        <div style={{
+          fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+          lineHeight: 1.55,
+        }}>
+          {active.take}
+        </div>
       )}
     </div>
+  );
+}
+
+function DevTakeBody({ raw }: { raw: string }) {
+  const view = parseDevTake(raw);
+  if (view.kind === "empty") return null;
+  if (view.kind === "text") {
+    return (
+      <div style={{
+        fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+        lineHeight: 1.55,
+      }}>
+        {raw}
+      </div>
+    );
+  }
+  return (
+    <ul style={{
+      margin: 0, padding: 0, listStyle: "none",
+      display: "flex", flexDirection: "column", gap: 8,
+    }}>
+      {view.themes.map((t) => (
+        <li key={t.theme} style={{
+          display: "flex", gap: 10, alignItems: "baseline",
+          fontSize: 13.5, lineHeight: 1.5,
+        }}>
+          <span style={{
+            flexShrink: 0,
+            fontSize: 11, fontWeight: 600, letterSpacing: 0.3,
+            color: "var(--gooni-text, #1C1C1E)",
+            background: "rgba(0,0,0,0.05)",
+            padding: "2px 8px", borderRadius: 99,
+          }}>
+            {t.theme}
+          </span>
+          <span style={{ color: "var(--gooni-text, #3A3A3C)" }}>
+            {t.summary}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

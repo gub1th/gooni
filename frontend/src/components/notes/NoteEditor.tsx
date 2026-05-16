@@ -297,9 +297,13 @@ interface NoteEditorProps {
   // Fires when the editor's empty state changes — lets parents react to
   // "user started typing" without reading editor internals.
   onEmptyChange?: (empty: boolean) => void;
+  // Fires when the editor gains/loses focus. Used by the dashboard's
+  // embedded composer to dim surrounding chrome (TakeTabs etc) so the
+  // writing surface gets the eye.
+  onFocusChange?: (focused: boolean) => void;
 }
 
-export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: NoteEditorProps = {}) {
+export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFocusChange }: NoteEditorProps = {}) {
   useEditorStyles();
   const embedded = variant === "embedded";
 
@@ -315,6 +319,9 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   // from `embeddedToast` so we can render the pill, animate it in, hold,
   // animate it out, then unmount — without flashing on initial mount.
   const [embeddedToastVisible, setEmbeddedToastVisible] = useState(false);
+  // Embedded composer focus state — drives the expand-on-focus layout
+  // (taller editor surface + parent dim of TakeTabs / focuses row).
+  const [embeddedFocused, setEmbeddedFocused] = useState(false);
 
   const spaceId = selectedSpaceId ?? "general";
   const activeNote = (notes[spaceId] ?? []).find((n) => n.id === activeNoteId) ?? null;
@@ -562,6 +569,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
             void handleSubmitRef.current();
             return true;
           }
+          // Esc on the embedded composer collapses focus mode without
+          // submitting. TipTap doesn't blur on Esc by default; do it here.
+          if (embedded && event.key === "Escape") {
+            event.preventDefault();
+            (event.target as HTMLElement | null)?.blur?.();
+            return true;
+          }
           // Cmd/Ctrl+Shift+M → toggle inline code on selection. TipTap's
           // built-in Code shortcut is Mod-e; this adds the Apple-Notes-style
           // alias Daniel asked for.
@@ -581,9 +595,18 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
         // Embedded quick-note is ephemeral — no debounced save. Everything persists on submit.
         if (!embedded) scheduleSave();
       },
+      onFocus: () => {
+        if (embedded) {
+          setEmbeddedFocused(true);
+          onFocusChange?.(true);
+        }
+      },
       onBlur: async () => {
-        // Embedded: ephemeral, no save on blur — content persists only on submit.
-        if (embedded) return;
+        if (embedded) {
+          setEmbeddedFocused(false);
+          onFocusChange?.(false);
+          return;
+        }
         await save();
         embedAndCheck(activeNoteId);
       },
@@ -1490,9 +1513,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
             padding: "18px 22px",
             boxSizing: "border-box",
             width: "100%",
-            minHeight: 80 + 18 * 2,
+            minHeight: embeddedFocused ? 220 : 80 + 18 * 2,
             overflow: "hidden",
             borderRadius: 14,
+            transition: "min-height 280ms cubic-bezier(0.22, 0.61, 0.36, 1)",
           }}
         >
             <div
