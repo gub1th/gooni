@@ -541,6 +541,9 @@ class BacklogTicket(Base):
     #   otherwise → Todo column
     board_status = Column(String, nullable=True)
     pr_url = Column(Text, nullable=True)
+    # Free-form ticket body — context, design notes, follow-up scratch.
+    # subtitle stays as the one-line tagline; notes is the multi-line story.
+    notes = Column(Text, nullable=True)
     # Set when this ticket has been promoted into Daniel's todo list.
     # Promote = create a Todo with focus_id null, link it here. Demote =
     # delete the linked Todo, clear this column. When the linked todo's

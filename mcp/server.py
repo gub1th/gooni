@@ -892,7 +892,11 @@ def _find_backlog_item(match: str, only_open: bool = True) -> tuple[dict | None,
 
 
 @mcp.tool()
-def complete_backlog_item(match: str) -> str:
+def complete_backlog_item(
+    match: str,
+    pr_url: str = None,
+    notes: str = None,
+) -> str:
     """Mark a backlog ticket as done by text match.
 
     Backlog tickets now live in their own `backlog_tickets` table — they
@@ -902,17 +906,27 @@ def complete_backlog_item(match: str) -> str:
 
     Args:
         match: text contained in the backlog item (matches text OR subtitle)
+        pr_url: optional GitHub PR URL to stamp on close (closes the lifecycle loop)
+        notes: optional body update — append context / decision log on close
     """
     item, err = _find_backlog_item(match)
     if err:
         return err
+    body: dict = {"done": True, "board_status": "done"}
+    if pr_url:
+        body["pr_url"] = pr_url
+    if notes is not None:
+        body["notes"] = notes
     resp = _session.patch(
         f"{BASE_URL}/backlog/tickets/{item['id']}",
-        json={"done": True},
+        json=body,
         timeout=10,
     )
     resp.raise_for_status()
-    return f"[x] {item['text']}"
+    out = f"[x] {item['text']}"
+    if pr_url:
+        out += f"\nPR: {pr_url}"
+    return out
 
 
 # ── Backlog-tickets MCP surface ──────────────────────────────────────────
@@ -960,6 +974,7 @@ def read_backlog(limit: int = 50, include_done: bool = False) -> str:
 def add_backlog_item(
     text: str,
     subtitle: str = None,
+    notes: str = None,
     skip_conflict_check: bool = False,
 ) -> str:
     """Add a ticket to the engineering backlog.
@@ -972,7 +987,8 @@ def add_backlog_item(
 
     Args:
         text: ticket text
-        subtitle: optional secondary line
+        subtitle: optional one-line tagline
+        notes: optional multi-line body — context, design notes, follow-up
         skip_conflict_check: bypass embed + dedup scan (default False)
     """
     text = (text or "").strip()
@@ -981,6 +997,8 @@ def add_backlog_item(
     body: dict = {"text": text}
     if subtitle:
         body["subtitle"] = subtitle
+    if notes:
+        body["notes"] = notes
     if skip_conflict_check:
         body["skip_conflict_check"] = True
     resp = _session.post(f"{BASE_URL}/backlog/tickets", json=body, timeout=20)
