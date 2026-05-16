@@ -4,17 +4,20 @@ import { persist } from "zustand/middleware";
 // Dashboard-level UI state.
 //
 //   activeTab — within-mode toggle for the Today view (Todos vs Focuses).
-//   activeMode — top-level mode toggle (Today vs Build vs Ops vs Pulse).
-//     Each mode has its own full-body layout.
+//   activeMode — top-level mode toggle (Today vs Ops vs Pulse).
+//     Each mode has its own full-body layout. Build was folded into Ops
+//     in PR #213 — health cards now live at the top of OpsMode.
 //   composerFocused — transient flag set while the embedded NoteEditor
 //     ("start writing…") is focused. Used by Dashboard to dim/collapse
 //     surrounding chrome (TakeTabs, focuses row) so writing feels focused.
 //     NOT persisted — purely a session-scoped layout signal.
 //
-// Persisted under bumped key gooni-dashboard-v3 (v2 had modeColors, removed).
+// Persisted under key gooni-dashboard-v3. `migrate` coerces legacy
+// activeMode='build' values to 'ops' so existing localStorage doesn't
+// land users on a now-deleted tab.
 
 export type DashboardTab = "todos" | "focuses";
-export type DashboardMode = "today" | "build" | "ops" | "pulse";
+export type DashboardMode = "today" | "ops" | "pulse";
 
 interface DashboardState {
   activeTab: DashboardTab;
@@ -41,6 +44,11 @@ export const useDashboardStore = create<DashboardState>()(
         activeTab: s.activeTab,
         activeMode: s.activeMode,
       }),
+      migrate: (persisted: unknown) => {
+        const s = (persisted ?? {}) as Record<string, unknown>;
+        if (s.activeMode === "build") s.activeMode = "ops";
+        return s as unknown as DashboardState;
+      },
     },
   ),
 );

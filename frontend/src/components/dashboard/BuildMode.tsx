@@ -41,7 +41,7 @@ export function BuildMode() {
         </div>
       ) : (
         <div style={{
-          display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+          display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
           gap: 10,
         }}>
           {axes.map((ax) => (

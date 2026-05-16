@@ -153,27 +153,38 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         .gooni-todo-row:hover { background: rgba(0,0,0,0.025); }
         .gooni-todo-cascade { animation: gooni-todo-fade-out 600ms ease forwards; }
 
-        /* Primary-todo card: soft yellow halo + a one-shot border-race
-           on mount. The race is a conic-gradient masked to a 1.5px ring
-           that rotates once; afterwards opacity fades to 0 leaving just
-           the soft glow behind the card. */
-        @keyframes gooni-primary-race {
-          0%   { transform: rotate(0deg);   opacity: 0.95; }
-          85%  { transform: rotate(360deg); opacity: 0.85; }
-          100% { transform: rotate(360deg); opacity: 0;    }
+        /* Primary-todo card: a single small yellow bullet that travels
+           around the card perimeter once then fades. Implemented as an
+           SVG <rect> with a tiny stroke-dasharray gap; we animate
+           stroke-dashoffset so the visible dash slides along the path.
+           The whole svg layer also fades out at the end so the soft
+           halo (box-shadow on the card) is what remains. */
+        @keyframes gooni-primary-race-offset {
+          0%   { stroke-dashoffset: 0;     }
+          100% { stroke-dashoffset: -2400; }
+        }
+        @keyframes gooni-primary-race-fade {
+          0%, 85% { opacity: 1; }
+          100%    { opacity: 0; }
         }
         .gooni-primary-race {
           position: absolute;
-          inset: -1.5px;
-          border-radius: 13.5px;
-          padding: 1.5px;
-          background: conic-gradient(from 0deg, transparent 0deg, #F5C849 80deg, #FCE5A0 140deg, transparent 220deg);
-          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          -webkit-mask-composite: xor;
-          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          mask-composite: exclude;
+          inset: 0;
           pointer-events: none;
-          animation: gooni-primary-race 1100ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+          overflow: visible;
+          animation: gooni-primary-race-fade 1300ms ease forwards;
+        }
+        .gooni-primary-race rect {
+          fill: none;
+          stroke: #F5C849;
+          stroke-width: 1.5;
+          stroke-linecap: round;
+          /* 36px visible bullet + huge gap so only one segment shows
+             at a time. Offset animates a full lap around the rect. */
+          stroke-dasharray: 36 2000;
+          stroke-dashoffset: 0;
+          filter: drop-shadow(0 0 4px rgba(245, 200, 73, 0.7));
+          animation: gooni-primary-race-offset 1100ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
         }
       `}</style>
 
@@ -341,7 +352,19 @@ function PrimaryCard({
         boxShadow: "0 0 0 1px rgba(245,200,73,0.18), 0 6px 22px rgba(245,200,73,0.22), 0 2px 8px rgba(245,200,73,0.14)",
       }}
     >
-      {racing && <div className="gooni-primary-race" aria-hidden /> }
+      {racing && (
+        <svg
+          className="gooni-primary-race"
+          aria-hidden
+          preserveAspectRatio="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          {/* Rect fills the SVG; stroke is centered on the path so
+              half lies outside (overflow:visible on the parent svg
+              renders it). The bullet rides right on the card border. */}
+          <rect x="0" y="0" width="100%" height="100%" rx="12" ry="12" />
+        </svg>
+      )}
       <button
         onClick={onDemote}
         title="Demote — clear primary"
