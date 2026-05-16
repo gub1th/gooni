@@ -2315,3 +2315,84 @@ export async function fetchTodosByFocus(focusId: number): Promise<ApiTodo[]> {
   if (!res.ok) throw new Error("Failed to fetch focus todos");
   return res.json();
 }
+
+// ── Capability profile + Reflections ──────────────────────────────────────────
+
+export type CapabilityLayer = "mechanical" | "functional" | "behavioral" | "architectural";
+export type CapabilityStatus = "claimed" | "verified" | "unverified" | "broken" | "removed";
+
+export interface ApiCapabilityFacet {
+  id: number;
+  layer: CapabilityLayer | string;
+  facet_key: string;
+  facet_text: string;
+  status: CapabilityStatus | string;
+  source: string;
+  evidence_json: string | null;
+  last_verified_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface CapabilitiesResponse {
+  by_layer: Record<string, ApiCapabilityFacet[]>;
+  total: number;
+}
+
+export async function fetchCapabilityFacets(): Promise<CapabilitiesResponse> {
+  const res = await apiFetch(`${BASE}/capabilities`);
+  if (!res.ok) throw new Error("Failed to fetch capabilities");
+  return res.json();
+}
+
+export async function patchCapabilityFacet(
+  id: number,
+  patch: Partial<Pick<ApiCapabilityFacet, "facet_text" | "status" | "layer">>,
+): Promise<ApiCapabilityFacet> {
+  const res = await apiFetch(`${BASE}/capabilities/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to patch capability");
+  return res.json();
+}
+
+export async function refreshCapabilityTelemetry(): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`${BASE}/capabilities/telemetry/refresh`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to refresh telemetry");
+  return res.json();
+}
+
+export type ReflectionAction = "acted" | "described" | "mixed" | "na";
+
+export interface ApiReflection {
+  id: number;
+  message_id: number;
+  conversation_id: number;
+  user_critique_present: boolean;
+  critique_summary: string | null;
+  action_vs_described: ReflectionAction | string;
+  gap_exposed: string | null;
+  proposed_self_fix: string | null;
+  severity: 1 | 2 | 3 | number;
+  model: string;
+  created_at: string | null;
+}
+
+export async function fetchReflections(opts: {
+  conversationId?: number;
+  messageId?: number;
+  severityMin?: number;
+  limit?: number;
+} = {}): Promise<{ reflections: ApiReflection[] }> {
+  const params = new URLSearchParams();
+  if (opts.conversationId != null) params.set("conversation_id", String(opts.conversationId));
+  if (opts.messageId != null) params.set("message_id", String(opts.messageId));
+  if (opts.severityMin != null) params.set("severity_min", String(opts.severityMin));
+  if (opts.limit != null) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const res = await apiFetch(`${BASE}/reflections${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch reflections");
+  return res.json();
+}

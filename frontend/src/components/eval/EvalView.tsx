@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ChatAuditPanel } from "./ChatAuditPanel";
 import {
   deleteMessageRating,
   dispatchEvalToCc,
   fetchEvalSegmentFull,
   fetchEvalToolsLegend,
+  fetchReflections,
   listEvalSegments,
   patchEvalSummary,
   postEvalFeedback,
@@ -1355,6 +1357,76 @@ function MessageCard({
 
       {isAssistant && msg.tool_calls.length > 0 && (
         <ToolCallsSection toolCalls={msg.tool_calls} />
+      )}
+
+      {isAssistant && <SelfTakePanel messageId={msg.id} />}
+    </div>
+  );
+}
+
+// ── Gooni's Self-Take ─────────────────────────────────────────────────────────
+//
+// Renders the per-message Reflection row (from the reflexion_service that
+// fires after every assistant reply). Color-coded by severity:
+//   1 = clean (gray, hidden by default since clean reflections are noise)
+//   2 = notable (yellow)
+//   3 = load-bearing (red)
+// Pulls lazily — only fetches when the panel mounts in EvalView's drill-down.
+function SelfTakePanel({ messageId }: { messageId: number }) {
+  const { data } = useQuery({
+    queryKey: ["reflections", "by-message", messageId],
+    queryFn: () => fetchReflections({ messageId, limit: 1 }),
+    staleTime: 60_000,
+  });
+  const reflection = data?.reflections?.[0];
+  if (!reflection) return null;
+  // Hide sev 1 by default — they're "nothing to learn" rows; keep them in
+  // the DB for classifier eval, just don't clutter the UI per-message.
+  if (reflection.severity < 2) return null;
+
+  const palette = (
+    reflection.severity === 3
+      ? { bg: "#FFF5F5", border: "#FFD3D3", accent: "#FF3B30", label: "load-bearing" }
+      : { bg: "#FFFBEA", border: "#FFE6A6", accent: "#FF9500", label: "notable" }
+  );
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: "10px 12px",
+        background: palette.bg,
+        border: `1px solid ${palette.border}`,
+        borderLeft: `3px solid ${palette.accent}`,
+        borderRadius: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.3,
+          color: palette.accent,
+          fontWeight: 600,
+          marginBottom: 6,
+        }}
+      >
+        Gooni's self-take · sev {reflection.severity} · {palette.label} · {reflection.action_vs_described}
+      </div>
+      {reflection.critique_summary && (
+        <div style={{ fontSize: 13, color: "#1C1C1E", marginBottom: 4 }}>
+          <strong>Daniel pushed back:</strong> {reflection.critique_summary}
+        </div>
+      )}
+      {reflection.gap_exposed && (
+        <div style={{ fontSize: 13, color: "#1C1C1E", marginBottom: 4 }}>
+          <strong>Gap:</strong> {reflection.gap_exposed}
+        </div>
+      )}
+      {reflection.proposed_self_fix && (
+        <div style={{ fontSize: 13, color: "#1C1C1E" }}>
+          <strong>Proposed fix:</strong> {reflection.proposed_self_fix}
+        </div>
       )}
     </div>
   );

@@ -1698,5 +1698,114 @@ def get_leetcode_activity() -> str:
     return "\n".join(parts)
 
 
+@mcp.tool()
+def read_capability_facets(layer: str = "") -> str:
+    """Read Gooni's capability inventory — what it can/can't do, grouped by
+    layer (mechanical = tools+routes+channels; functional = composed
+    capabilities; behavioral = patterns from reflection clustering;
+    architectural = model/runtime/memory shape).
+
+    Used by the /capability-audit slash command to inspect what's currently
+    on record before proposing PR-time facet edits.
+
+    Args:
+        layer: optional layer filter ('mechanical' | 'functional' | 'behavioral' | 'architectural').
+               Empty string returns all user-visible layers.
+    """
+    try:
+        resp = _session.get(f"{BASE_URL}/capabilities", timeout=15)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        return f"(capabilities fetch failed: {exc})"
+    by_layer = (resp.json() or {}).get("by_layer", {})
+    target_layers = [layer] if layer else list(by_layer.keys())
+    out = []
+    for L in target_layers:
+        rows = by_layer.get(L) or []
+        out.append(f"## {L} ({len(rows)})")
+        for r in rows:
+            badge = f"[{r['status']}]"
+            out.append(f"- {badge} {r['facet_key']} — {r['facet_text'][:160]}")
+    return "\n".join(out) if out else "(no facets)"
+
+
+@mcp.tool()
+def update_capability_facet(
+    facet_key: str,
+    facet_text: str = "",
+    status: str = "",
+    layer: str = "",
+) -> str:
+    """Create or update one of Gooni's capability facets.
+
+    Used by the /capability-audit skill to apply PR-derived edits, and by
+    Claude Code when reviewing changes to tools/services. Idempotent on
+    facet_key.
+
+    Args:
+        facet_key: stable slug (e.g. 'tool.add_note', 'functional.web_search').
+        facet_text: new short description (required when creating).
+        status: 'claimed' | 'verified' | 'unverified' | 'broken'.
+        layer: 'mechanical' | 'functional' | 'behavioral' | 'architectural' (required when creating).
+    """
+    facet_key = (facet_key or "").strip()
+    if not facet_key:
+        return "facet_key required"
+
+    # Look up existing first.
+    try:
+        resp = _session.get(f"{BASE_URL}/capabilities", timeout=15)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        return f"(capabilities fetch failed: {exc})"
+    by_layer = (resp.json() or {}).get("by_layer", {})
+    existing: dict | None = None
+    for rows in by_layer.values():
+        for r in rows:
+            if r["facet_key"] == facet_key:
+                existing = r
+                break
+        if existing:
+            break
+
+    if existing is None:
+        if not facet_text or not layer:
+            return (
+                f"facet '{facet_key}' not found; provide both facet_text and "
+                "layer to create it."
+            )
+        body = {
+            "facet_key": facet_key,
+            "facet_text": facet_text,
+            "layer": layer,
+        }
+        if status:
+            body["status"] = status
+        try:
+            r2 = _session.post(f"{BASE_URL}/capabilities", json=body, timeout=15)
+            r2.raise_for_status()
+        except httpx.HTTPError as exc:
+            return f"(create failed: {exc})"
+        return f"created facet '{facet_key}'"
+
+    body = {}
+    if facet_text:
+        body["facet_text"] = facet_text
+    if status:
+        body["status"] = status
+    if layer:
+        body["layer"] = layer
+    if not body:
+        return f"no changes specified for '{facet_key}'"
+    try:
+        r3 = _session.patch(
+            f"{BASE_URL}/capabilities/{existing['id']}", json=body, timeout=15
+        )
+        r3.raise_for_status()
+    except httpx.HTTPError as exc:
+        return f"(update failed: {exc})"
+    return f"updated facet '{facet_key}': {', '.join(body.keys())}"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
