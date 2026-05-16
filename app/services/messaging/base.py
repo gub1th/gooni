@@ -43,7 +43,13 @@ _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
 # Tuning. Short enough to read on phone glance, long enough that we're not
 # fragmenting every clause. 4 bubbles max keeps notifications sane.
-_MIN_SEGMENT_CHARS = 40
+# _MIN_SEGMENT_CHARS lowered from 40 → 18 in the WA-promises rewrite:
+# Daniel called out the prior "one line / newline / one line / two newlines"
+# in-bubble pattern as mechanical-reading. The merge step was greedily
+# concatenating ≤40-char bubbles into a single bubble with internal \n
+# breaks, which is exactly that ugly pattern. Lower threshold keeps short
+# intentional bubbles as their own messages.
+_MIN_SEGMENT_CHARS = 18
 _MAX_SEGMENT_CHARS = 320
 _MAX_SEGMENTS = 4
 

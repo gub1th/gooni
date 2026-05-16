@@ -64,7 +64,13 @@ class RequestFeatureTool(BaseTool):
             subtitle=why or None,
             source_note_id=source_note_id,
         )
-        return f"Logged feature request #{ticket.id}: {title}"
+        # Internal tool-result string the LLM sees and paraphrases for
+        # the user. Kept naturally phrased so the model's reflexive
+        # paraphrase reads like a friend confirming, not a logging
+        # system ("on the backlog: ...", "added that one", etc).
+        # Avoid "Logged feature request" verbiage — Daniel called the
+        # structured-receipt voice too clinical.
+        return f"added to the backlog (id #{ticket.id}): {title}"
 
 
 feature_request_tool = RequestFeatureTool()
