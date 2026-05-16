@@ -17,6 +17,7 @@ import { FocusesView } from "./dashboard/FocusesView";
 import { ModeToggle } from "./dashboard/ModeToggle";
 import { BuildMode } from "./dashboard/BuildMode";
 import { PulseMode } from "./dashboard/PulseMode";
+import { CapabilityProfileCard } from "./dashboard/CapabilityProfileCard";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -136,8 +137,16 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
 
         {activeMode === "build" && (
           /* Build mode = Gooni health — 6-axis composite scores. Click
-             any card → drill-down modal with per-component breakdown. */
-          <BuildMode />
+             any card → drill-down modal with per-component breakdown.
+             Capability profile sits underneath: "Who I am right now"
+             card surfaces the top functional/behavioral/architectural
+             facets; drawer opens the full inventory (mechanical + everything)
+             and lets Daniel edit status. Auto-populated from boot scan +
+             per-turn reflection clustering. */
+          <>
+            <BuildMode />
+            <CapabilityProfileCard />
+          </>
         )}
 
         {activeMode === "pulse" && (

@@ -13,6 +13,7 @@ from .todo_tools import AddTodoTool, ListTodosTool, SetTodoStateTool
 from .focus_tools import AddFocusTool, ListFocusesTool
 from .habit_tools import LogHabitTool
 from .feature_request_tool import RequestFeatureTool
+from .update_capability_tool import UpdateCapabilityFacetTool
 from .calendar_tools import (
     CreateCalendarEventTool,
     CheckCalendarFreeBusyTool,
@@ -48,6 +49,8 @@ registry = [
     LogHabitTool(),
     # Feature requests + calendar
     RequestFeatureTool(),
+    # Self-improvement
+    UpdateCapabilityFacetTool(),
     CreateCalendarEventTool(),
     CheckCalendarFreeBusyTool(),
     ListUpcomingEventsTool(),
