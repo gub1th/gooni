@@ -6,33 +6,23 @@ import { persist } from "zustand/middleware";
 //   activeTab — within-mode toggle for the Today view (Todos vs Focuses).
 //   activeMode — top-level mode toggle (Today vs Build vs Pulse). Each
 //     mode has its own full-body layout.
-//   modeColors — per-mode background tint. Picker on the mode toggle
-//     swaps the hex. Lets Daniel give each mode a distinct visual
-//     identity ("I'm in Build now") without re-theming the whole app.
+//   composerFocused — transient flag set while the embedded NoteEditor
+//     ("start writing…") is focused. Used by Dashboard to dim/collapse
+//     surrounding chrome (TakeTabs, focuses row) so writing feels focused.
+//     NOT persisted — purely a session-scoped layout signal.
 //
-// Persisted under bumped key gooni-dashboard-v2 (v1 had only activeTab).
+// Persisted under bumped key gooni-dashboard-v3 (v2 had modeColors, removed).
 
 export type DashboardTab = "todos" | "focuses";
 export type DashboardMode = "today" | "build" | "pulse";
 
-// 6-color preset palette for the mode-bg picker. Soft tints — won't
-// fight the foreground content. Default null = use the theme's main bg.
-export const MODE_COLOR_SWATCHES: { name: string; hex: string }[] = [
-  { name: "ivory", hex: "#FAF7F0" },
-  { name: "sand", hex: "#FAEEDA" },
-  { name: "sage", hex: "#E1F5EE" },
-  { name: "sky", hex: "#E6F0FA" },
-  { name: "blush", hex: "#FCEBEB" },
-  { name: "dusk", hex: "#EEEDFE" },
-];
-
 interface DashboardState {
   activeTab: DashboardTab;
   activeMode: DashboardMode;
-  modeColors: Record<DashboardMode, string | null>;
+  composerFocused: boolean;
   setActiveTab: (t: DashboardTab) => void;
   setActiveMode: (m: DashboardMode) => void;
-  setModeColor: (m: DashboardMode, hex: string | null) => void;
+  setComposerFocused: (v: boolean) => void;
 }
 
 export const useDashboardStore = create<DashboardState>()(
@@ -40,18 +30,16 @@ export const useDashboardStore = create<DashboardState>()(
     (set) => ({
       activeTab: "todos",
       activeMode: "today",
-      modeColors: { today: null, build: null, pulse: null },
+      composerFocused: false,
       setActiveTab: (activeTab) => set({ activeTab }),
       setActiveMode: (activeMode) => set({ activeMode }),
-      setModeColor: (mode, hex) =>
-        set((s) => ({ modeColors: { ...s.modeColors, [mode]: hex } })),
+      setComposerFocused: (composerFocused) => set({ composerFocused }),
     }),
     {
-      name: "gooni-dashboard-v2",
+      name: "gooni-dashboard-v3",
       partialize: (s) => ({
         activeTab: s.activeTab,
         activeMode: s.activeMode,
-        modeColors: s.modeColors,
       }),
     },
   ),
