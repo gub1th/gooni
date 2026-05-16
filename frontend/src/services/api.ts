@@ -2197,6 +2197,37 @@ export async function forkFocus(
   return res.json();
 }
 
+// ── Gooni health (Build mode) ──────────────────────────────────────────
+
+export type HealthAxisName =
+  | "memory" | "chat" | "engagement"
+  | "availability" | "cost" | "connectors";
+
+export interface HealthComponent {
+  name: string;
+  score: number; // 0-100
+  weight: number; // 0-1
+  detail: string;
+}
+
+export interface HealthAxis {
+  axis: HealthAxisName;
+  score: number; // composite 0-100
+  headline: string;
+  components: HealthComponent[];
+  error?: string;
+}
+
+export interface HealthScores {
+  axes: HealthAxis[];
+}
+
+export async function fetchHealthScores(): Promise<HealthScores> {
+  const res = await apiFetch(`${BASE}/health/scores`);
+  if (!res.ok) throw new Error("Failed to fetch health scores");
+  return res.json();
+}
+
 export async function deleteFocus(id: number): Promise<void> {
   // Focuses share the /items delete route w/ todos via item_service. The
   // service clears focus_id on linked todos before removing the row so
