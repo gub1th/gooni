@@ -35,6 +35,7 @@ class BacklogService:
         subtitle: str | None = None,
         source_note_id: int | None = None,
         board_status: str | None = None,
+        notes: str | None = None,
     ) -> BacklogTicket:
         # Idempotent on (source_note_id) — repeated "tag to backlog" clicks
         # from the same note return the existing open ticket instead of
@@ -67,6 +68,7 @@ class BacklogService:
             text=text.strip(),
             subtitle=subtitle,
             board_status=board_status,
+            notes=notes,
             sort_order=next_order,
             source_note_id=source_note_id,
             embedding=json.dumps(embed_vec) if embed_vec else None,
@@ -82,7 +84,7 @@ class BacklogService:
             return None
         for key in (
             "text", "subtitle", "board_status", "pr_url", "done", "sort_order",
-            "todo_id",
+            "todo_id", "notes",
         ):
             if key in patch:
                 setattr(t, key, patch[key])
@@ -181,6 +183,7 @@ def serialize_ticket(t: BacklogTicket) -> dict[str, Any]:
         "subtitle": t.subtitle,
         "board_status": t.board_status,
         "pr_url": t.pr_url,
+        "notes": t.notes,
         "todo_id": t.todo_id,
         "done": bool(t.done),
         "completed_at": t.completed_at.isoformat() if t.completed_at else None,

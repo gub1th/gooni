@@ -16,6 +16,7 @@ import { TabToggle } from "./dashboard/TabToggle";
 import { FocusesView } from "./dashboard/FocusesView";
 import { ModeToggle } from "./dashboard/ModeToggle";
 import { BuildMode } from "./dashboard/BuildMode";
+import { OpsMode } from "./dashboard/OpsMode";
 import { PulseMode } from "./dashboard/PulseMode";
 import { CapabilityProfileCard } from "./dashboard/CapabilityProfileCard";
 
@@ -115,7 +116,7 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
       <div>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 40px 120px" }}>
 
-        {/* Top-tier mode toggle — Today | Build | Pulse. */}
+        {/* Top-tier mode toggle — Today | Build | Ops | Pulse. */}
         <ModeToggle />
 
         {activeMode === "today" && (
@@ -173,6 +174,12 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
             <BuildMode />
             <CapabilityProfileCard />
           </>
+        )}
+
+        {activeMode === "ops" && (
+          /* Ops mode = eval queue + backlog + tool-call failures.
+             Where the maintenance/quality loops live. */
+          <OpsMode />
         )}
 
         {activeMode === "pulse" && (

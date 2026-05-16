@@ -4,8 +4,8 @@ import { persist } from "zustand/middleware";
 // Dashboard-level UI state.
 //
 //   activeTab — within-mode toggle for the Today view (Todos vs Focuses).
-//   activeMode — top-level mode toggle (Today vs Build vs Pulse). Each
-//     mode has its own full-body layout.
+//   activeMode — top-level mode toggle (Today vs Build vs Ops vs Pulse).
+//     Each mode has its own full-body layout.
 //   composerFocused — transient flag set while the embedded NoteEditor
 //     ("start writing…") is focused. Used by Dashboard to dim/collapse
 //     surrounding chrome (TakeTabs, focuses row) so writing feels focused.
@@ -14,7 +14,7 @@ import { persist } from "zustand/middleware";
 // Persisted under bumped key gooni-dashboard-v3 (v2 had modeColors, removed).
 
 export type DashboardTab = "todos" | "focuses";
-export type DashboardMode = "today" | "build" | "pulse";
+export type DashboardMode = "today" | "build" | "ops" | "pulse";
 
 interface DashboardState {
   activeTab: DashboardTab;

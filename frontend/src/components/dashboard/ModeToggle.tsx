@@ -14,6 +14,7 @@ const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const MODES: { id: DashboardMode; label: string }[] = [
   { id: "today", label: "Today" },
   { id: "build", label: "Build" },
+  { id: "ops", label: "Ops" },
   { id: "pulse", label: "Pulse" },
 ];
 
