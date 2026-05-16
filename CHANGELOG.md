@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.71.2 — 2026-05-16 (patch)
+
+- fix(alembic): also make wa_processed_ids migration idempotent (#203)
+
 ## 0.71.1 — 2026-05-16 (patch)
 
 - fix(alembic): make habits migration idempotent (PROD DOWN) (#202)
