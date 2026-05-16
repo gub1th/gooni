@@ -13,7 +13,7 @@ import { persist } from "zustand/middleware";
 // Persisted under bumped key gooni-dashboard-v2 (v1 had only activeTab).
 
 export type DashboardTab = "todos" | "focuses";
-export type DashboardMode = "today" | "build" | "pulse";
+export type DashboardMode = "today" | "build" | "ops" | "pulse";
 
 // 6-color preset palette for the mode-bg picker. Soft tints — won't
 // fight the foreground content. Default null = use the theme's main bg.
@@ -40,7 +40,7 @@ export const useDashboardStore = create<DashboardState>()(
     (set) => ({
       activeTab: "todos",
       activeMode: "today",
-      modeColors: { today: null, build: null, pulse: null },
+      modeColors: { today: null, build: null, ops: null, pulse: null },
       setActiveTab: (activeTab) => set({ activeTab }),
       setActiveMode: (activeMode) => set({ activeMode }),
       setModeColor: (mode, hex) =>

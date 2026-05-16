@@ -16,6 +16,7 @@ import { TabToggle } from "./dashboard/TabToggle";
 import { FocusesView } from "./dashboard/FocusesView";
 import { ModeToggle } from "./dashboard/ModeToggle";
 import { BuildMode } from "./dashboard/BuildMode";
+import { OpsMode } from "./dashboard/OpsMode";
 import { PulseMode } from "./dashboard/PulseMode";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -116,8 +117,8 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
       <div>
           <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 40px 120px" }}>
 
-        {/* Top-tier mode toggle — Today | Build | Pulse. Per-mode bg
-            color customizable via the palette button. */}
+        {/* Top-tier mode toggle — Today | Build | Ops | Pulse. Per-mode
+            bg color customizable via the palette button. */}
         <ModeToggle />
 
         {activeMode === "today" && (
@@ -138,6 +139,12 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
           /* Build mode = Gooni health — 6-axis composite scores. Click
              any card → drill-down modal with per-component breakdown. */
           <BuildMode />
+        )}
+
+        {activeMode === "ops" && (
+          /* Ops mode = eval queue + backlog + tool-call failures.
+             Where the maintenance/quality loops live. */
+          <OpsMode />
         )}
 
         {activeMode === "pulse" && (
