@@ -88,3 +88,4 @@ db/gooni-eval.db.*
 # Eval per-case cache — sha256 of (case + pipeline_model + prompt_version + judge).
 # Local artifact, regenerates on demand. Don't commit.
 evals/cache/
+docs/private/

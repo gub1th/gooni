@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, AlertTriangle } from "lucide-react";
+import { ExternalLink, AlertTriangle, ChevronRight } from "lucide-react";
 import {
   fetchBacklogTickets,
   fetchEvalSegments,
@@ -218,61 +219,97 @@ function BacklogSection() {
 }
 
 function BacklogRow({ ticket }: { ticket: ApiBacklogTicket }) {
+  const hasNotes = !!(ticket.notes && ticket.notes.trim());
+  const [expanded, setExpanded] = useState(false);
   return (
     <div style={{
       background: "var(--gooni-card, #fff)",
       border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.10))",
       borderRadius: 8,
       padding: "8px 12px",
-      display: "grid",
-      gridTemplateColumns: "auto 1fr auto",
-      alignItems: "center",
-      gap: 10,
       opacity: ticket.board_status === "done" ? 0.65 : 1,
     }}>
-      <span style={{
-        fontSize: 10, fontWeight: 500,
-        color: BOARD_STATUS_COLOR[ticket.board_status ?? "not_yet"],
-        background: "rgba(0,0,0,0.04)",
-        padding: "2px 6px", borderRadius: 4,
-        textTransform: "uppercase", letterSpacing: 0.4,
-        whiteSpace: "nowrap",
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "auto auto 1fr auto",
+        alignItems: "center",
+        gap: 10,
       }}>
-        {BOARD_STATUS_LABEL[ticket.board_status ?? "not_yet"] ?? ticket.board_status}
-      </span>
-      <div style={{ minWidth: 0 }}>
-        <div style={{
-          fontSize: 12,
-          color: "var(--gooni-text, #1C1C1E)",
-          textDecoration: ticket.board_status === "done" ? "line-through" : "none",
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        {/* Chevron — only renders when notes exist, otherwise spacer. */}
+        {hasNotes ? (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? "Hide notes" : "Show notes"}
+            style={{
+              background: "transparent", border: "none", padding: 0,
+              cursor: "pointer", display: "flex", alignItems: "center",
+              color: "var(--gooni-muted, #8E8E93)",
+              transform: expanded ? "rotate(90deg)" : "none",
+              transition: "transform 0.12s",
+            }}
+          >
+            <ChevronRight size={11} />
+          </button>
+        ) : (
+          <span style={{ width: 11 }} />
+        )}
+        <span style={{
+          fontSize: 10, fontWeight: 500,
+          color: BOARD_STATUS_COLOR[ticket.board_status ?? "not_yet"],
+          background: "rgba(0,0,0,0.04)",
+          padding: "2px 6px", borderRadius: 4,
+          textTransform: "uppercase", letterSpacing: 0.4,
+          whiteSpace: "nowrap",
         }}>
-          {ticket.text}
-        </div>
-        {ticket.subtitle && (
+          {BOARD_STATUS_LABEL[ticket.board_status ?? "not_yet"] ?? ticket.board_status}
+        </span>
+        <div style={{ minWidth: 0 }}>
           <div style={{
-            fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
+            fontSize: 12,
+            color: "var(--gooni-text, #1C1C1E)",
+            textDecoration: ticket.board_status === "done" ? "line-through" : "none",
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
           }}>
-            {ticket.subtitle}
+            {ticket.text}
           </div>
-        )}
+          {ticket.subtitle && (
+            <div style={{
+              fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>
+              {ticket.subtitle}
+            </div>
+          )}
+        </div>
+        {ticket.pr_url ? (
+          <a
+            href={ticket.pr_url} target="_blank" rel="noopener noreferrer"
+            title="View PR"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 3,
+              fontSize: 10, color: "#0F6E56",
+              textDecoration: "none",
+              padding: "2px 6px", borderRadius: 4,
+              background: "rgba(15,110,86,0.08)",
+            }}
+          >
+            PR <ExternalLink size={9} />
+          </a>
+        ) : <span />}
       </div>
-      {ticket.pr_url ? (
-        <a
-          href={ticket.pr_url} target="_blank" rel="noopener noreferrer"
-          title="View PR"
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 3,
-            fontSize: 10, color: "#0F6E56",
-            textDecoration: "none",
-            padding: "2px 6px", borderRadius: 4,
-            background: "rgba(15,110,86,0.08)",
-          }}
-        >
-          PR <ExternalLink size={9} />
-        </a>
-      ) : <span />}
+      {hasNotes && expanded && (
+        <div style={{
+          marginTop: 8,
+          paddingTop: 8,
+          borderTop: "0.5px dashed var(--gooni-border, rgba(0,0,0,0.10))",
+          fontSize: 11,
+          color: "var(--gooni-text, #1C1C1E)",
+          whiteSpace: "pre-wrap",
+          lineHeight: 1.5,
+        }}>
+          {ticket.notes}
+        </div>
+      )}
     </div>
   );
 }

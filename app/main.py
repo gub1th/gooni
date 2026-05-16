@@ -1192,6 +1192,7 @@ def backlog_create(body: dict, db: Session = Depends(get_db)):
         subtitle=body.get("subtitle"),
         source_note_id=body.get("source_note_id"),
         board_status=body.get("board_status"),
+        notes=body.get("notes"),
     )
     out = serialize_ticket(ticket)
     if not body.get("skip_conflict_check"):
@@ -1251,7 +1252,10 @@ def backlog_similar(body: dict, db: Session = Depends(get_db)):
 def backlog_update(ticket_id: int, body: dict, db: Session = Depends(get_db)):
     from .services.backlog_service import backlog_service, serialize_ticket
     patch: dict = {}
-    for key in ("text", "subtitle", "board_status", "pr_url", "done", "sort_order"):
+    for key in (
+        "text", "subtitle", "board_status", "pr_url", "done", "sort_order",
+        "notes",
+    ):
         if key in body:
             patch[key] = body[key]
     ticket = backlog_service.update(db, ticket_id, **patch)

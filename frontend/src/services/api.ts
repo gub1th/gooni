@@ -1040,6 +1040,9 @@ export interface ApiBacklogTicket {
   subtitle: string | null;
   board_status: BoardStatus | null;
   pr_url: string | null;
+  // Free-form ticket body — multi-line context, design notes, follow-up
+  // scratch. Subtitle stays as the one-line tagline; notes is the story.
+  notes: string | null;
   // Set when this backlog ticket was promoted into a todo via
   // POST /backlog/tickets/{id}/promote. Null means "engineering-only,
   // not on Daniel's todo list yet".
