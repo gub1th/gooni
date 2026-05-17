@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.79.0 — 2026-05-17 (minor)
+
+- feat(eval+dashboard): chat-bubble eval transcripts, ops surface polish, todo/habit parity (#214)
+
 ## 0.78.0 — 2026-05-16 (minor)
 
 - feat(dashboard): fold Build into Ops + eval drilldown + scrollable kanban + composer/note fixes (#213)
