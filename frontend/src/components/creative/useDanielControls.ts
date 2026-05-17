@@ -34,6 +34,25 @@ export function subscribeLandings(fn: LandingListener): () => void {
   return () => landingListeners.delete(fn);
 }
 
+// Tile lifecycle events — emitted by TileFloor when a tile enters its
+// `breaking` phase or completes a `rising` heal. Consumers (e.g. coins
+// on note-tiles) use this to hide/show without duplicating TileFloor's
+// internal phase tracking.
+export type TileStateEvent = {
+  gx: number;
+  gz: number;
+  state: "broken" | "healed";
+};
+type TileStateListener = (e: TileStateEvent) => void;
+const tileStateListeners = new Set<TileStateListener>();
+export function fireTileState(e: TileStateEvent) {
+  tileStateListeners.forEach((l) => l(e));
+}
+export function subscribeTileState(fn: TileStateListener): () => void {
+  tileStateListeners.add(fn);
+  return () => tileStateListeners.delete(fn);
+}
+
 type Snap = { dx: number; dz: number };
 
 const input = {

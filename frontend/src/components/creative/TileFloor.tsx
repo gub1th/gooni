@@ -3,11 +3,13 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import {
   GRID_PITCH,
+  fireTileState,
   registerTileExists,
   setTileSolid,
   subscribeLandings,
   type LandingEvent,
 } from "./useDanielControls";
+import { buildTileGrid } from "./tileGrid";
 import { getToonGradient } from "./toonGradient";
 import { fireVfx } from "./vfx";
 import { playTileBreak, playTileHeal } from "./sfx";
@@ -22,8 +24,8 @@ const tileGradient = getToonGradient();
 
 // Pitch went from 1.4 → 2.0 (in useDanielControls). Tile count
 // reduced so total plaza diameter stays similar.
-const PLAZA_INNER = 12.5;
-const GRID_RADIUS_TILES = 6;
+// Grid geometry (radius + plaza extent) extracted to ./tileGrid so
+// NoteCoins can pick coin positions from the same authoritative grid.
 // Spec: 0.97 of cell (= 0.03 unit gap). Was 0.94.
 const TILE_VISIBLE_SIZE = GRID_PITCH * 0.97;
 const TILE_HEIGHT = 0.10;
@@ -102,25 +104,18 @@ export function TileFloor() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
 
   const tiles = useMemo<TileEntry[]>(() => {
-    const out: TileEntry[] = [];
-    for (let gz = -GRID_RADIUS_TILES; gz <= GRID_RADIUS_TILES; gz++) {
-      for (let gx = -GRID_RADIUS_TILES; gx <= GRID_RADIUS_TILES; gx++) {
-        const x = gx * GRID_PITCH;
-        const z = gz * GRID_PITCH;
-        if (Math.hypot(x, z) > PLAZA_INNER) continue;
-        const h = Math.abs(gx * 37 + gz * 71 + gx * gz * 13) & 0xff;
-        const palIdx = h % PALETTE.length;
-        const colorJitter = ((h >> 4) / 255 - 0.5) * 0.04;
-        // Tiles in the outer 2 rings get 5% darker per spec.
-        const isEdge = Math.hypot(gx, gz) >= EDGE_RING_RADIUS;
-        const lightnessDelta = colorJitter - (isEdge ? EDGE_DARKEN : 0);
-        const baseColor = PALETTE[palIdx].clone().offsetHSL(0, 0, lightnessDelta);
-        // Y jitter ±0.02 per spec.
-        const yJitter = (((h >> 2) & 0xff) / 255 - 0.5) * 0.04;
-        out.push({ gx, gz, x, z, baseColor, yJitter });
-      }
-    }
-    return out;
+    return buildTileGrid().map(({ gx, gz, x, z }) => {
+      const h = Math.abs(gx * 37 + gz * 71 + gx * gz * 13) & 0xff;
+      const palIdx = h % PALETTE.length;
+      const colorJitter = ((h >> 4) / 255 - 0.5) * 0.04;
+      // Tiles in the outer 2 rings get 5% darker per spec.
+      const isEdge = Math.hypot(gx, gz) >= EDGE_RING_RADIUS;
+      const lightnessDelta = colorJitter - (isEdge ? EDGE_DARKEN : 0);
+      const baseColor = PALETTE[palIdx].clone().offsetHSL(0, 0, lightnessDelta);
+      // Y jitter ±0.02 per spec.
+      const yJitter = (((h >> 2) & 0xff) / 255 - 0.5) * 0.04;
+      return { gx, gz, x, z, baseColor, yJitter };
+    });
   }, []);
 
   const indexMap = useMemo(() => {
@@ -251,6 +246,7 @@ export function TileFloor() {
               color: { r: t.baseColor.r, g: t.baseColor.g, b: t.baseColor.b },
             });
             playTileBreak();
+            fireTileState({ gx: e.from.gx, gz: e.from.gz, state: "broken" });
           }
         }
       }
@@ -329,6 +325,7 @@ export function TileFloor() {
           yOff = 0; scale = 1; tilt = 0;
           setTileSolid(t.gx, t.gz, true);
           playTileHeal();
+          fireTileState({ gx: t.gx, gz: t.gz, state: "healed" });
         }
       }
       dummy.position.set(t.x, Y_OFFSET + yOff, t.z);
