@@ -15,6 +15,7 @@ import { LandingCamera } from "./LandingCamera";
 import { IntroCamera, ORBIT_BASELINE } from "./IntroCamera";
 import { NoteReaderOverlay } from "./NoteReaderOverlay";
 import { NotePeekHost } from "./NotePeekHost";
+import { setPeekState } from "./peekBus";
 import { AmbientAudio } from "./AmbientAudio";
 import { PostFX } from "./PostFX";
 import { TileFloor } from "./TileFloor";
@@ -272,11 +273,6 @@ export function Scene() {
   const [playerName, setPlayerName] = useState(DEFAULT_PLAYER_NAME);
   const [playerColor, setPlayerColor] = useState(DEFAULT_PLAYER_COLOR);
   const countryFlag = useCountryFlag();
-  const [externalTarget, setExternalTarget] = useState<{
-    pos: THREE.Vector3;
-    look: THREE.Vector3;
-    duration?: number;
-  } | null>(null);
 
   const orbitRef = useRef<any>(null);
   const danielRef = useRef<DanielHandle | null>(null);
@@ -307,24 +303,18 @@ export function Scene() {
     ? 1.5
     : Math.min(window.devicePixelRatio ?? 1, 2);
 
-  function handleSelect(note: PublicNote, worldPos: THREE.Vector3) {
+  function handleSelect(note: PublicNote, _worldPos: THREE.Vector3) {
+    // Reader is a fullscreen DOM overlay — moving the camera does
+    // nothing visible while it's open and only produces a jarring
+    // snap when it closes. Just open the reader. Also clear the peek
+    // bar so it doesn't pop back over the same coin once the reader
+    // closes — re-landing is the way to bring peek back.
     setSelectedNote(note);
-    const dir = new THREE.Vector3().copy(worldPos).normalize().multiplyScalar(2.3);
-    const camPos = worldPos.clone().add(new THREE.Vector3(dir.x, 1.4 + dir.y, dir.z));
-    setExternalTarget({
-      pos: camPos,
-      look: worldPos.clone().add(new THREE.Vector3(0, 0.9, 0)),
-      duration: 0.9,
-    });
+    setPeekState({ note: null });
   }
 
   function handleClose() {
     setSelectedNote(null);
-    setExternalTarget({
-      pos: ORBIT_BASELINE.position.clone(),
-      look: ORBIT_BASELINE.target.clone(),
-      duration: 1.0,
-    });
   }
 
   function handleEnter(name: string, color: string) {
@@ -403,7 +393,7 @@ export function Scene() {
           active={entered && !introDone}
           onSwoopLanded={() => setSwoopLanded(true)}
           onComplete={() => setIntroDone(true)}
-          externalTarget={introDone ? externalTarget : null}
+          externalTarget={null}
         />
 
         <OrbitControls
@@ -455,7 +445,7 @@ export function Scene() {
         onClose={handleClose}
       />
 
-      {entered && introDone && <NotePeekHost />}
+      {entered && introDone && !selectedNote && <NotePeekHost />}
 
       {entered && <BrandingMark />}
       {entered && <NotesLink visible={introDone && !selectedNote} />}
