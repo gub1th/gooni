@@ -33,6 +33,8 @@ from .list_service import _cosine, list_service
 
 SUPPORTS_THRESHOLD = 0.75  # promise → focus auto-link cutoff
 SLIP_THRESHOLD = 0.80      # match against past broken promises
+DEDUP_THRESHOLD = 0.85     # match against active pending promises (higher
+                           # bar: must be near-paraphrase, not just related)
 
 
 _TIME_HINTS = {
@@ -94,6 +96,13 @@ def create(
     Focus by cosine similarity. Slip count is set from the cosine match
     against past broken promises so re-uttering an old broken pattern
     surfaces immediately.
+
+    Active-pending dedup: if the utterance cosine-matches an existing
+    pending Promise above DEDUP_THRESHOLD, we return the existing row
+    instead of inserting a duplicate. Wires an `utters` edge from the
+    new source message so the conversation graph still records the
+    re-statement. Fixes T4→T5 of segment #209 where Daniel re-uttered
+    a near-duplicate and the system silently piled up rows.
     """
     cleaned = utterance.strip()
     if not cleaned:
@@ -101,6 +110,27 @@ def create(
 
     inferred = inferred_due or _infer_due_from_text(cleaned)
     vec = _embed(cleaned)
+
+    # Active-pending dedup BEFORE insert. Skip when no embedding —
+    # cosine match isn't possible.
+    if vec is not None:
+        existing = _find_pending_duplicate(db, vec)
+        if existing is not None:
+            # Touch source-msg edge on the existing row so we don't lose
+            # the re-statement provenance.
+            if source_message_id is not None:
+                try:
+                    edge_service.link(
+                        db,
+                        src_kind="message",
+                        src_id=source_message_id,
+                        dst_kind="promise",
+                        dst_id=existing.id,
+                        kind="utters",
+                    )
+                except Exception as e:
+                    print(f"[promise dedup] edge link failed: {e}")
+            return existing
 
     slip = _count_prior_slips(db, vec) if vec else 0
 
@@ -143,6 +173,30 @@ def create(
     return p
 
 
+def _find_pending_duplicate(db: Session, vec: list[float]) -> Promise | None:
+    """Return the closest active pending Promise above DEDUP_THRESHOLD,
+    or None. Tuple-walk first to avoid hydrating non-matches."""
+    rows = (
+        db.query(Promise.id, Promise.embedding)
+        .filter(Promise.state == "pending", Promise.embedding.is_not(None))
+        .all()
+    )
+    best_id: int | None = None
+    best_score = 0.0
+    for pid, raw in rows:
+        try:
+            emb = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        score = _cosine(vec, emb)
+        if score >= DEDUP_THRESHOLD and score > best_score:
+            best_id = pid
+            best_score = score
+    if best_id is None:
+        return None
+    return db.query(Promise).filter(Promise.id == best_id).first()
+
+
 def _count_prior_slips(db: Session, vec: list[float]) -> int:
     """Count past broken promises whose embedding cosine-matches the
     new utterance above SLIP_THRESHOLD. Tuple query so we don't hydrate
@@ -164,18 +218,18 @@ def _count_prior_slips(db: Session, vec: list[float]) -> int:
 
 
 def _closest_focus(db: Session, vec: list[float]) -> tuple[int | None, float]:
-    """Best-matching active Focus by cosine over its name+endgoal
+    """Best-matching active Focus by cosine over its text+endgoal
     embedding. Returns (focus_id, score). Embedding lazy-built here if
     Focus doesn't have one yet — first call pays the cost.
     """
     rows = (
-        db.query(Focus.id, Focus.name, Focus.endgoal, Focus.current_signature)
+        db.query(Focus.id, Focus.text, Focus.endgoal, Focus.current_signature)
         .filter(Focus.status.in_(("committed", "someday")))
         .all()
     )
     best_id: int | None = None
     best_score = 0.0
-    for fid, name, endgoal, sig_raw in rows:
+    for fid, text, endgoal, sig_raw in rows:
         if sig_raw:
             try:
                 emb = json.loads(sig_raw)
@@ -184,9 +238,9 @@ def _closest_focus(db: Session, vec: list[float]) -> tuple[int | None, float]:
         else:
             emb = None
         if not emb:
-            # Lazy embed of name+endgoal — cheap and cached by upstream
+            # Lazy embed of text+endgoal — cheap and cached by upstream
             # focus logic; here we just compute one-shot for matching.
-            emb = _embed(f"{name or ''}\n{endgoal or ''}")
+            emb = _embed(f"{text or ''}\n{endgoal or ''}")
         if not emb:
             continue
         score = _cosine(vec, emb)

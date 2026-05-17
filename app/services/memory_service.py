@@ -297,11 +297,16 @@ class MemoryService:
         """
         if not user_message or len(user_message.strip()) < MIN_EXCHANGE_LEN:
             return
+        from .intent_handlers.memories import _reconcile_one
+
         sess, owns = self._scoped(db)
         try:
             candidates = extract_candidates(user_message, assistant_reply)
             for c in candidates:
-                self._reconcile_and_apply(sess, c)
+                try:
+                    _reconcile_one(sess, c)
+                except Exception as e:
+                    print(f"add_exchange per-candidate error: {e}")
             if candidates:
                 self._has_memories_cache = True
         except Exception as e:
@@ -316,18 +321,30 @@ class MemoryService:
         db: Session | None = None,
         source_note_id: int | None = None,
     ) -> list[Memory]:
-        """Reconcile + apply pre-extracted memory candidates. Returns the list
-        of Memory rows actually written (ADDs + UPDATEs) so callers can record
-        which note spawned which memories. NONE / DELETE actions don't return
-        new rows. Failures logged, never raised.
+        """Reconcile + apply pre-extracted memory candidates. Returns the
+        list of Memory rows actually written (ADDs + UPDATEs).
+
+        Thin shim around `intent_handlers.memories._reconcile_one` — the
+        per-candidate dance (cosine + key search → LLM reconcile → apply)
+        was extracted to the handler in phase 3 so memory_service stays a
+        CRUD primitive layer. This method is kept for backward compat;
+        new callers should go through `intent_router.dispatch`.
+
+        Failures logged, never raised.
         """
         if not candidates:
             return []
+        from .intent_handlers.memories import _reconcile_one
+
         written: list[Memory] = []
         sess, owns = self._scoped(db)
         try:
             for c in candidates:
-                m = self._reconcile_and_apply(sess, c, source_note_id=source_note_id)
+                try:
+                    m = _reconcile_one(sess, c, source_note_id=source_note_id)
+                except Exception as e:
+                    print(f"apply_memory_candidates per-candidate error: {e}")
+                    continue
                 if m is not None:
                     written.append(m)
             self._has_memories_cache = True
@@ -337,100 +354,6 @@ class MemoryService:
             if owns:
                 sess.close()
         return written
-
-    def _reconcile_and_apply(
-        self,
-        db: Session,
-        candidate: dict,
-        source_note_id: int | None = None,
-    ) -> Memory | None:
-        """Returns the Memory row written (ADD/UPDATE), or None when the
-        decision was NONE / DELETE-only / reconcile failed without a write."""
-        # Cheap deterministic dedup BEFORE the LLM call: if the candidate's
-        # normalized content matches an existing active memory of the same
-        # type, treat as NONE — bump confidence on the existing row and
-        # skip the LLM. Catches exact + near-exact dupes (case, punctuation,
-        # whitespace, leading "User prefers" vs "user prefers"). Without this,
-        # every "User prefers concise responses" rephrase ate an LLM call AND
-        # often slipped through reconcile because cosine missed it.
-        cand_norm = _normalize_for_dedup(candidate.get("content", ""))
-        if cand_norm:
-            same_type_active = (
-                db.query(Memory)
-                .filter(
-                    Memory.type == candidate["type"],
-                    Memory.is_active == True,
-                )
-                .all()
-            )
-            for m in same_type_active:
-                if _normalize_for_dedup(m.content or "") == cand_norm:
-                    self._apply_none(db, m.id)
-                    return None
-
-        embedding = self._embed(candidate["content"])
-        # Skip embedding-less candidates only on the search side; we still
-        # want to ADD them so the memory isn't lost.
-        existing: list[dict] = []
-        seen_ids: set[int] = set()
-
-        # Per-type tuning: prefs get a lower floor + higher top_k since
-        # paraphrases are common and we'd rather over-recall than miss a dupe.
-        is_pref = candidate.get("type") == "preference"
-        floor = RECONCILE_PREFERENCE_FLOOR if is_pref else RECONCILE_SIMILARITY_FLOOR
-        top_k = RECONCILE_PREFERENCE_TOP_K if is_pref else RECONCILE_TOP_K
-
-        # Key-based retrieval first — catches "prefers dark mode" → "prefers
-        # light mode" contradictions where cosine sim is misleadingly low
-        # (opposing facts share less language than they should).
-        candidate_key = candidate.get("key")
-        if candidate_key:
-            key_matches = (
-                db.query(Memory)
-                .filter(
-                    Memory.key == candidate_key,
-                    Memory.type == candidate["type"],
-                    Memory.is_active == True,
-                )
-                .all()
-            )
-            for m in key_matches:
-                if m.id not in seen_ids:
-                    seen_ids.add(m.id)
-                    existing.append(_serialize(m))
-
-        if embedding:
-            similar = self._cosine_search(
-                db,
-                embedding,
-                type_filter=[candidate["type"]],
-                limit=top_k,
-                floor=floor,
-            )
-            for m, _ in similar:
-                if m.id not in seen_ids:
-                    seen_ids.add(m.id)
-                    existing.append(_serialize(m))
-            existing = existing[:top_k + 2]  # cap so prompt stays bounded
-
-        decision = reconcile_candidate(candidate, existing)
-        if not decision:
-            return self._apply_add(db, candidate, embedding or [], source_note_id=source_note_id)
-
-        action = decision["action"]
-        target = decision.get("target_id")
-        if action == "ADD":
-            return self._apply_add(db, candidate, embedding or [], source_note_id=source_note_id)
-        elif action == "UPDATE" and isinstance(target, int):
-            return self._apply_update(db, candidate, embedding or [], target, source_note_id=source_note_id)
-        elif action == "DELETE" and isinstance(target, int):
-            self._apply_delete(db, target)
-            return self._apply_add(db, candidate, embedding or [], source_note_id=source_note_id)
-        elif action == "NONE" and isinstance(target, int):
-            self._apply_none(db, target)
-            return None
-        else:
-            return self._apply_add(db, candidate, embedding or [], source_note_id=source_note_id)
 
     def add_feedback_preference(
         self,
@@ -475,9 +398,11 @@ class MemoryService:
             "context": {"time": None, "location": None, "scope": "global"},
             "confidence": 0.9,
         }
+        from .intent_handlers.memories import _reconcile_one
+
         sess, owns = self._scoped(db)
         try:
-            self._reconcile_and_apply(sess, candidate)
+            _reconcile_one(sess, candidate)
             self._has_memories_cache = True
             # Return the freshly-inserted/active row for this key for caller
             # convenience (e.g. so we can link it to the audit page later).

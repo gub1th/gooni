@@ -81,12 +81,12 @@ os.environ["DATABASE_URL"] = _EVAL_DB_URL
 
 from app.db.database import SessionLocal, engine
 from app.db.models import Conversation as ConvModel
+from app.db.models import Focus as FocusModel
 from app.db.models import ListItem as ListItemModel
 from app.db.models import Memory as MemoryModel
 from app.db.models import Message as MessageModel
 from app.llm.client import llm_client
 from app.main import _alembic_upgrade
-from app.services.item_service import item_service
 from app.services.orchestrator import Orchestrator as orchestrator  # singleton instance
 from app.services.trace_builder import PROMPT_VERSION
 from evals.judge import JUDGE_MODEL, grade
@@ -296,20 +296,18 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
         text = (entry.get("text") or "").strip()
         if not text:
             continue
-        focus_list = item_service.get_focus_list(db)
-        item = ListItemModel(
-            list_id=focus_list.id,
+        # Focus moved out of list_items into its own table (PR d4e1f2a3b5c8).
+        # is_primary moved further to Todo (dashboard revamp e6c2a9b1f4d3).
+        focus = FocusModel(
             text=text,
             endgoal=entry.get("endgoal"),
             committed=True,
-            actionable=True,
-            is_primary=bool(entry.get("is_primary", False)),
             status=entry.get("status", "committed"),
             scale=entry.get("scale"),
         )
-        db.add(item)
+        db.add(focus)
         db.flush()
-        seeded_focus_ids.append(item.id)
+        seeded_focus_ids.append(focus.id)
 
     for turn in case.get("history") or []:
         msg = MessageModel(
@@ -333,8 +331,8 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
                 MessageModel.id.in_(seeded_message_ids)
             ).delete(synchronize_session=False)
         if seeded_focus_ids:
-            db.query(ListItemModel).filter(
-                ListItemModel.id.in_(seeded_focus_ids)
+            db.query(FocusModel).filter(
+                FocusModel.id.in_(seeded_focus_ids)
             ).delete(synchronize_session=False)
         db.commit()
 
