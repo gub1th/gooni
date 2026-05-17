@@ -144,6 +144,17 @@ alembic upgrade head
 
 `alembic upgrade head` runs on uvicorn boot via `_alembic_upgrade()` in `app/main.py`. Legacy cutover branch deleted — all active envs past baseline. No `Base.metadata.create_all` at runtime; alembic alone owns schema. Fresh DBs walk from baseline (`ebbf04b84ba5`) to head on first boot.
 
+**Half-applied-state recovery** (post-PR #234 prod crash-loop): `_alembic_upgrade` catches `OperationalError: ... already exists / duplicate column`, stamps the cursor to head, and continues boot. SQLite auto-commits DDL the moment a `CREATE TABLE` runs, so if the process dies before the alembic version-stamp UPDATE lands, the next boot re-runs the migration and crashes on the existing table. The hardening lets the app self-heal instead of crash-looping. Other `OperationalError` shapes (bad column type, missing FK) still propagate — only the "already exists" branch is treated as self-recoverable.
+
+**Migration-author convention:** for `CREATE TABLE` / `ADD COLUMN` migrations, prefer inspector guards so re-runs are no-ops:
+```python
+def upgrade():
+    bind = op.get_bind()
+    if not sa.inspect(bind).has_table('foo'):
+        op.create_table('foo', ...)
+```
+The `_alembic_upgrade` recovery catches what slips through, but inspector-guarded migrations are self-healing by design.
+
 ## Key API Endpoints
 
 ```

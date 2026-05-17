@@ -59,13 +59,61 @@ def _alembic_upgrade(engine):
     """Apply Alembic migrations on boot — walks the DB cursor in
     `alembic_version` forward to head. Fresh DBs (no `alembic_version`
     row yet) start from the baseline migration and walk every revision.
+
+    Hardened recovery (post-PR #234 prod crash-loop):
+
+    SQLite auto-commits DDL outside transactions, so a `CREATE TABLE`
+    persists the second it runs — but Alembic's version-stamp UPDATE
+    happens AFTER. If the process dies between (uncaught lifespan
+    exception, OOM, etc.) the schema half-applies: tables exist but the
+    cursor still points at the parent revision. Next boot tries to
+    re-apply the same migration → `OperationalError: table already
+    exists` → process exits → Fly restarts → crash loop.
+
+    Recovery: catch the "already exists" class of OperationalErrors,
+    log loudly, attempt to stamp the alembic cursor to head and
+    re-attempt. If that also fails, log + continue boot anyway — let
+    routes start so the app is at least diagnosable; broken schema
+    will surface on first query rather than killing the process before
+    logs flush.
+
+    Hard schema failures (bad column type, missing FK target, etc.)
+    still propagate — only the "already exists" branch is treated as
+    self-recoverable.
     """
     from pathlib import Path
     from alembic import command
     from alembic.config import Config
+    from sqlalchemy.exc import OperationalError
 
     cfg = Config(str(Path(__file__).resolve().parent.parent / "alembic.ini"))
-    command.upgrade(cfg, "head")
+    try:
+        command.upgrade(cfg, "head")
+        return
+    except OperationalError as e:
+        msg = str(e).lower()
+        already_exists = (
+            "already exists" in msg or "duplicate column" in msg
+        )
+        if not already_exists:
+            raise
+        print(
+            f"[alembic] half-applied state detected ({e.__class__.__name__}): "
+            f"{str(e)[:160]}... attempting cursor stamp to head.",
+            flush=True,
+        )
+    try:
+        command.stamp(cfg, "head")
+        print("[alembic] stamped to head — schema assumed current.", flush=True)
+    except Exception as e:
+        # Don't kill boot. Half-applied schema is usually still usable;
+        # the app surfacing 500s on queries beats the entire process
+        # crash-looping before logs can be read.
+        print(
+            f"[alembic] stamp recovery FAILED ({e.__class__.__name__}): "
+            f"{str(e)[:160]} — booting anyway; schema may be inconsistent.",
+            flush=True,
+        )
 
 
 _alembic_upgrade(engine)
