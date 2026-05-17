@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -1154,6 +1155,112 @@ class CapabilityFacet(Base):
 
     __table_args__ = (
         UniqueConstraint("facet_key", name="uq_capability_facet_key"),
+    )
+
+
+class Promise(Base):
+    """A soft commitment extracted from a Daniel WA/chat message — "imma X
+    tonight" / "i'll Y this week" / "trying to Z daily". Distinct primitive
+    from Todo (chore-shaped) and Focus (long arc). Captures the *uttered*
+    intent so Gooni can act as accountability partner: follow up
+    conversationally, count slips, retire stale promises with consent.
+
+    Lifecycle: pending → kept | broken | abandoned. State transitions
+    happen on user response to the follow-up nudge ("yeah did it" → kept,
+    "nah lost steam" → abandoned) or on time-anchored auto-broken when
+    inferred_due passes and the user never confirmed completion.
+
+    Cross-entity links (supports Focus, closes Todo, utters from Message)
+    live in the `edges` table — Promise can semantically connect to many
+    things and adding an FK column per relation would explode the schema.
+    """
+
+    __tablename__ = "promises"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Verbatim quote of what Daniel said. Preserves his words for the
+    # follow-up ("you said 'imma finish the video tonight' — still on?").
+    utterance = Column(Text, nullable=False)
+    # LLM-summarized one-line description for places where the raw
+    # utterance is too long or needs scrubbing (dashboard cards, nudge
+    # subject lines).
+    summary = Column(Text, nullable=True)
+    # Inferred deadline parsed from the utterance ("tonight" → today
+    # 23:59 local; "this week" → +7 days from creation; null when no
+    # time anchor is present).
+    inferred_due = Column(DateTime, nullable=True)
+    # 'pending' | 'kept' | 'broken' | 'abandoned'.
+    state = Column(String, nullable=False, default="pending", index=True)
+    # How many times Daniel has previously broken a near-identical
+    # promise (cosine-matched against past broken promises at create
+    # time). Drives slip-pattern memory without aggregation queries.
+    slip_count = Column(Integer, nullable=False, default=0)
+    # Timestamp when state flipped to a terminal (kept/broken/abandoned).
+    # Null while pending.
+    resolved_at = Column(DateTime, nullable=True)
+    # FK to the Message that triggered creation. Ownership — every
+    # promise has a single canonical source utterance, so FK is the
+    # right tool. Cross-cutting many-to-many links live in `edges`.
+    source_message_id = Column(
+        Integer, ForeignKey("messages.id"), nullable=True, index=True
+    )
+    # Cached embedding for cosine matches against focuses (to wire
+    # `supports` edges) and against historical broken promises (for
+    # slip_count). Deferred — same pattern as Note.embedding so list
+    # queries don't hydrate the ~31KB vector.
+    embedding = deferred(Column(Text, nullable=True))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class Edge(Base):
+    """Graph layer for semantic many-to-many links across entities.
+
+    Existing FKs (Comment.note_id, Memory.source_note_id, Todo.focus_id,
+    BacklogTicket.todo_id, etc) stay — those model OWNERSHIP. This table
+    models semantic links where adding an FK column per relation would
+    M²-explode the schema as new entities land. Promise is the first
+    citizen; new entity types plug in for free.
+
+    Edge kinds (v1):
+      'utters'        — Message → Promise   (source utterance)
+      'supports'     — Promise → Focus      (this promise serves a focus)
+      'closes'       — Promise → Todo       (promise fulfilled by completing todo)
+      'derives_from' — generic provenance (e.g. Note → Promise via classify)
+      'mentions'     — references without owning
+
+    Uniqueness: (src_kind, src_id, dst_kind, dst_id, kind) — re-emit of
+    the same link is idempotent. Indexes on (src_kind, src_id) and
+    (dst_kind, dst_id) for both-direction traversal.
+    """
+
+    __tablename__ = "edges"
+
+    id = Column(Integer, primary_key=True, index=True)
+    src_kind = Column(String, nullable=False)
+    src_id = Column(Integer, nullable=False)
+    dst_kind = Column(String, nullable=False)
+    dst_id = Column(Integer, nullable=False)
+    kind = Column(String, nullable=False)
+    # Optional confidence/strength on the link (0..1). Cosine similarity
+    # for inferred edges, null for explicit user-authored ones.
+    weight = Column(Float, nullable=True)
+    # Arbitrary kind-specific metadata as JSON string.
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "src_kind", "src_id", "dst_kind", "dst_id", "kind",
+            name="uq_edges_endpoints_kind",
+        ),
+        Index("ix_edges_src", "src_kind", "src_id"),
+        Index("ix_edges_dst", "dst_kind", "dst_id"),
     )
 
 

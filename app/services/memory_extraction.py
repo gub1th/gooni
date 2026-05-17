@@ -206,6 +206,13 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "why":   "<one sentence describing what's missing today>"
     }}
   ],
+  "soft_promises": [
+    {{
+      "utterance": "<verbatim quote of Daniel's commitment phrase, no rewriting>",
+      "summary":   "<short 3rd-person description, max 10 words — for nudge subjects>",
+      "time_hint": "tonight|today|tomorrow|this week|this weekend|next week|by friday|null"
+    }}
+  ],
   "memories": [
     {{
       "type": "preference" | "fact" | "routine" | "constraint" | "episode",
@@ -306,6 +313,48 @@ feature_requests:
     "you don't have a scheduler"        → [{{title:"Add scheduler", ...}}]
 - Empty when text is a question, or isn't asserting a missing capability.
 
+soft_promises:
+- Daniel committing TO HIMSELF — distinct from feature_requests (which
+  target Gooni). Phrasing cues: "imma X", "i'm gonna X", "i'll X",
+  "i wanna X by Y", "trying to X", "gonna X tonight", "i need to X
+  before Z", "promise myself i'll X". The shared signal: a self-declared
+  intent with a verb + (often) a time anchor.
+- DO emit when Daniel states a real intent — even if he doesn't explicitly
+  say "promise". Capture the moment of declaration; that's what makes the
+  accountability surface work.
+- DO NOT emit when:
+  - The verb is asking Gooni for help ("can you remind me to call mom" =
+    feature_request shape, not a promise).
+  - Daniel is reporting a completed action ("just shipped X" = episode
+    memory, not a promise).
+  - Daniel is venting an aspiration without a verb ("man, leetcode would
+    be nice" → empty; "i'm gonna leetcode daily" → promise).
+- `utterance` MUST be a verbatim quote — Daniel's words, not paraphrased.
+  Preserves voice for the follow-up ("you said 'X' — still on?").
+- `summary` is a clean 3rd-person rewrite for surfaces where the raw
+  utterance is too long / unclear without context ("finish DSA video
+  tonight").
+- `time_hint` mirrors the natural-language phrase Daniel used; the
+  backend parses it into an actual datetime. Use `null` when no time
+  anchor was uttered.
+- Examples (fires):
+    Text "imma finish that DSA video tonight and solve the leetcode" →
+      {{utterance:"imma finish that DSA video tonight and solve the leetcode",
+        summary:"finish DSA video + solve daily leetcode",
+        time_hint:"tonight"}}
+    Text "i'm gonna leetcode every day this week" →
+      {{utterance:"i'm gonna leetcode every day this week",
+        summary:"leetcode daily this week",
+        time_hint:"this week"}}
+    Text "i'll call my mom tomorrow" →
+      {{utterance:"i'll call my mom tomorrow", summary:"call mom",
+        time_hint:"tomorrow"}}
+- Examples (skip):
+    "Can you remind me to call mom?" → feature_request, not promise.
+    "Just finished the leetcode" → episode memory, not promise.
+    "Wish i could leetcode more" → null (no commitment verb).
+- Empty when no self-committal verb fired.
+
 memories:
 - Persistent facts about Daniel — same shape as before.
 - "preference" = stable like/dislike. "fact" = declarative truth (includes
@@ -405,6 +454,26 @@ def _normalize_memories(items: Any) -> list[dict]:
     return [c for c in items if _validate_candidate(c)]
 
 
+def _normalize_promises(items: Any) -> list[dict]:
+    out = []
+    if not isinstance(items, list):
+        return out
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        utt = it.get("utterance")
+        if not (isinstance(utt, str) and utt.strip()):
+            continue
+        summary = it.get("summary")
+        time_hint = it.get("time_hint")
+        out.append({
+            "utterance": utt.strip()[:500],
+            "summary": summary.strip()[:200] if isinstance(summary, str) and summary.strip() else None,
+            "time_hint": time_hint.strip()[:60] if isinstance(time_hint, str) and time_hint.strip() and time_hint.strip().lower() != "null" else None,
+        })
+    return out
+
+
 def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, Any]:
     """Single LLM call that emits all signal types from one input.
 
@@ -422,6 +491,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
     empty = {
         "tone_corrections": [],
         "feature_requests": [],
+        "soft_promises": [],
         "memories": [],
     }
     if not text or not text.strip():
@@ -451,6 +521,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
     return {
         "tone_corrections": _normalize_tone(parsed.get("tone_corrections")),
         "feature_requests": _normalize_features(parsed.get("feature_requests")),
+        "soft_promises":    _normalize_promises(parsed.get("soft_promises")),
         "memories":         _normalize_memories(parsed.get("memories")),
     }
 

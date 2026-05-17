@@ -522,6 +522,20 @@ async def _lifespan(app: FastAPI):
     except Exception as e:
         print(f"[eval] pending backfill failed: {e}", flush=True)
 
+    # Fly-revive handshake: if the prior process died mid-turn, the user
+    # has WA messages with no assistant reply. Catch them up on boot
+    # before scheduling other background work.
+    try:
+        from .services.fly_revive import catch_up_orphaned_messages
+        revive_db = SessionLocal()
+        try:
+            orphans = catch_up_orphaned_messages(revive_db)
+            print(f"[fly-revive] caught up {orphans} orphaned messages", flush=True)
+        finally:
+            revive_db.close()
+    except Exception as e:
+        print(f"[fly-revive] boot scan failed: {e}", flush=True)
+
     nudge_task = asyncio.create_task(_nudge_loop())
     backfill_task = asyncio.create_task(_backfill_list_item_embeddings_loop())
     excerpt_task = asyncio.create_task(_backfill_note_excerpts_loop())
