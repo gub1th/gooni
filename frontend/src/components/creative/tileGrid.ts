@@ -1,0 +1,33 @@
+import { GRID_PITCH } from "./useDanielControls";
+
+// Shared tile-grid geometry. TileFloor renders these as the visible
+// hex/grid plaza; NoteCoins picks a deterministic subset to place
+// note-coins on. Both consume buildTileGrid() so the grid stays
+// authoritative in one place.
+
+export const PLAZA_INNER = 12.5;
+export const GRID_RADIUS_TILES = 6;
+
+export type BaseTile = {
+  gx: number;
+  gz: number;
+  x: number;
+  z: number;
+};
+
+export function buildTileGrid(): BaseTile[] {
+  const out: BaseTile[] = [];
+  for (let gz = -GRID_RADIUS_TILES; gz <= GRID_RADIUS_TILES; gz++) {
+    for (let gx = -GRID_RADIUS_TILES; gx <= GRID_RADIUS_TILES; gx++) {
+      const x = gx * GRID_PITCH;
+      const z = gz * GRID_PITCH;
+      if (Math.hypot(x, z) > PLAZA_INNER) continue;
+      out.push({ gx, gz, x, z });
+    }
+  }
+  return out;
+}
+
+export function tileKey(gx: number, gz: number): string {
+  return `${gx},${gz}`;
+}

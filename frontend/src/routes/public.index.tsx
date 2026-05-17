@@ -26,6 +26,56 @@ const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
 // genuinely beautiful at display size; Georgia is a clean fallback elsewhere.
 const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
 
+function PlazaCta() {
+  return (
+    <Link
+      to="/creative"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "12px 22px 12px 18px",
+        borderRadius: 999,
+        // Warm gold→pink gradient picks up the plaza's pinned-coin
+        // accent so the visual hand-off is obvious — same palette,
+        // different surface.
+        background: "linear-gradient(135deg, #ffe79a 0%, #ffb464 55%, #ff7ab8 100%)",
+        color: "#2a1810",
+        textDecoration: "none",
+        fontFamily: FONT,
+        fontSize: 14.5,
+        fontWeight: 600,
+        letterSpacing: "0.01em",
+        boxShadow: "0 8px 22px rgba(255,170,80,0.40), 0 1px 3px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.45) inset",
+        transition: "transform 200ms ease, box-shadow 200ms ease",
+        animation: "plaza-cta-bob 3.8s ease-in-out infinite",
+        cursor: "pointer",
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLAnchorElement;
+        el.style.transform = "translateY(-2px) scale(1.02)";
+        el.style.boxShadow = "0 12px 28px rgba(255,170,80,0.55), 0 1px 3px rgba(0,0,0,0.12), 0 0 0 1px rgba(255,255,255,0.65) inset";
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLAnchorElement;
+        el.style.transform = "translateY(0) scale(1)";
+        el.style.boxShadow = "0 8px 22px rgba(255,170,80,0.40), 0 1px 3px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.45) inset";
+      }}
+    >
+      <span style={{ fontSize: 17, lineHeight: 1 }}>🪙</span>
+      <span>wander the plaza</span>
+      <span style={{ fontSize: 16, lineHeight: 1, marginLeft: 2 }}>→</span>
+      <style>{`
+        @keyframes plaza-cta-bob {
+          0%   { transform: translateY(0); }
+          50%  { transform: translateY(-3px); }
+          100% { transform: translateY(0); }
+        }
+      `}</style>
+    </Link>
+  );
+}
+
 function PenIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0 }}>
@@ -408,6 +458,15 @@ function PublicPage() {
               )}
             </div>
           )}
+        </div>
+
+        {/* Bold cross-route CTA — bridges this list-view portfolio with
+            the 3D plaza at /creative. The plaza surfaces these same
+            public notes as floating coins on tiles, so this button is
+            the "step inside" handshake from cold list to immersive
+            reader. */}
+        <div style={{ marginBottom: 32 }}>
+          <PlazaCta />
         </div>
 
         {/* Space filter bubbles */}

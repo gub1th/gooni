@@ -8,7 +8,7 @@ import { SkyDome } from "./SkyDome";
 import { Plaza } from "./Plaza";
 import { Nature } from "./Nature";
 import { Clouds } from "./Clouds";
-import { AvatarCrowd } from "./AvatarCrowd";
+import { NoteCoins } from "./NoteCoins";
 import { DanielAvatar, type DanielHandle } from "./DanielAvatar";
 import { NpcAvatar } from "./NpcAvatar";
 import { LandingCamera } from "./LandingCamera";
@@ -392,12 +392,7 @@ export function Scene() {
           accentColor="#3d7fcc"
           initialDelayMs={600}
         />
-        {entered && introDone && (
-          <AvatarCrowd
-            onSelect={handleSelect}
-            focusedNoteId={selectedNote?.id ?? null}
-          />
-        )}
+        {entered && introDone && <NoteCoins onSelect={handleSelect} />}
 
         {/* Landing bird's-eye — runs while overlay is up; hands off to
             IntroCamera on click. */}
@@ -460,7 +455,63 @@ export function Scene() {
       />
 
       {entered && <BrandingMark />}
+      {entered && <NotesLink visible={introDone && !selectedNote} />}
     </>
+  );
+}
+
+function NotesLink({ visible }: { visible: boolean }) {
+  return (
+    <a
+      href="/public"
+      style={{
+        position: "fixed",
+        top: 22,
+        left: 22,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "10px 18px 10px 16px",
+        borderRadius: 999,
+        background: "linear-gradient(135deg, rgba(255,228,140,0.95) 0%, rgba(255,180,80,0.95) 100%)",
+        color: "#3a2a08",
+        textDecoration: "none",
+        fontFamily: FONT,
+        fontSize: 13,
+        fontWeight: 600,
+        letterSpacing: "0.02em",
+        boxShadow: "0 6px 18px rgba(255,170,40,0.35), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.35) inset",
+        backdropFilter: "blur(6px) saturate(160%)",
+        WebkitBackdropFilter: "blur(6px) saturate(160%)",
+        zIndex: 8,
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateY(0)" : "translateY(-8px)",
+        transition: "opacity 320ms ease, transform 320ms ease, box-shadow 200ms ease",
+        animation: visible ? "notes-link-pulse 3.4s ease-in-out infinite" : undefined,
+        pointerEvents: visible ? "auto" : "none",
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLAnchorElement;
+        el.style.transform = "translateY(-2px)";
+        el.style.boxShadow = "0 10px 24px rgba(255,170,40,0.55), 0 1px 3px rgba(0,0,0,0.12), 0 0 0 1px rgba(255,255,255,0.55) inset";
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLAnchorElement;
+        el.style.transform = "translateY(0)";
+        el.style.boxShadow = "0 6px 18px rgba(255,170,40,0.35), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.35) inset";
+      }}
+    >
+      <span style={{ fontSize: 15, lineHeight: 1 }}>📜</span>
+      <span>read my notes</span>
+      <span style={{ fontSize: 15, lineHeight: 1, marginLeft: 2 }}>→</span>
+      <style>{`
+        @keyframes notes-link-pulse {
+          0%   { box-shadow: 0 6px 18px rgba(255,170,40,0.35), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.35) inset; }
+          50%  { box-shadow: 0 6px 22px rgba(255,170,40,0.60), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.55) inset; }
+          100% { box-shadow: 0 6px 18px rgba(255,170,40,0.35), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.35) inset; }
+        }
+      `}</style>
+    </a>
   );
 }
 
@@ -883,7 +934,7 @@ function NavHint() {
       whiteSpace: "nowrap",
       boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
     }}>
-      arrows to hop · drag to orbit · click an avatar to read
+      arrows to hop · drag to orbit · land on a coin to peek, click to read
     </div>
   );
 }
