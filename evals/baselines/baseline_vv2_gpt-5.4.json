@@ -20,19 +20,19 @@
     "012_dead_url_fetch_pushback",
     "013_vague_intention_pushback"
   ],
-  "pipeline_source_hash": "ba9bab0c5e3e",
+  "pipeline_source_hash": "65a3bceb0a5c",
   "eval_db_url": "sqlite:///./db/gooni-eval.db",
   "score_scale": "1-10",
-  "timestamp": "2026-05-17T11:34:28.272410Z",
+  "timestamp": "2026-05-17T11:48:10.598333Z",
   "n_cases": 13,
-  "passed": 8,
-  "failed": 5,
-  "composite_score": 66.0,
+  "passed": 6,
+  "failed": 7,
+  "composite_score": 59.5,
   "means": {
-    "follows_prefs": 7.85,
-    "groundedness": 6.31,
-    "helpful": 6.0,
-    "no_hallucination": 8.0
+    "follows_prefs": 7.46,
+    "groundedness": 6.77,
+    "helpful": 6.38,
+    "no_hallucination": 8.54
   },
   "results": [
     {
@@ -46,7 +46,7 @@
         "no_hallucination": 10,
         "helpful": 9
       },
-      "judge_notes": "The reply clearly distinguishes between a singleton and a module-level instance, is concise, respects user preferences, and does not fabricate any information.",
+      "judge_notes": "The reply clearly distinguishes between a singleton and a module-level instance, adheres to the user's preferences, and provides accurate information without hallucination.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -92,15 +92,15 @@
       "status": "FAIL",
       "stage": "judge",
       "fails": [
-        "follows_prefs = 8 < 10"
+        "follows_prefs = 4 < 10"
       ],
       "scores": {
         "groundedness": 6,
-        "follows_prefs": 8,
-        "no_hallucination": 9,
+        "follows_prefs": 4,
+        "no_hallucination": 8,
         "helpful": 7
       },
-      "judge_notes": "The reply is encouraging and respects the user's preferences, but it could be more grounded in the context of the user's message.",
+      "judge_notes": "The reply is somewhat encouraging but fails to respect the user's preference for no emojis and is overly informal.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [
         "router:promise"
@@ -128,9 +128,9 @@
         "groundedness": 9,
         "follows_prefs": 10,
         "no_hallucination": 10,
-        "helpful": 9
+        "helpful": 8
       },
-      "judge_notes": "The reply accurately reflects the user's current focus without inventing details and adheres to the user's preferences.",
+      "judge_notes": "The reply accurately reflects the user's current focus and preferences, providing relevant details without fabrication.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -156,13 +156,12 @@
       "status": "FAIL",
       "stage": "judge",
       "fails": [
-        "groundedness = 3 < 6",
-        "no_hallucination = 6 < 8"
+        "groundedness = 3 < 6"
       ],
       "scores": {
         "groundedness": 3,
         "follows_prefs": 8,
-        "no_hallucination": 6,
+        "no_hallucination": 9,
         "helpful": 5
       },
       "judge_notes": "The assistant fails to mention the caffeine constraint after 2pm, which is critical information for Daniel.",
@@ -194,7 +193,7 @@
         "no_hallucination": 10,
         "helpful": 10
       },
-      "judge_notes": "It correctly bridges 'that one' to memory time-decay from prior context, stays terse/plain, avoids invented specifics, and gives a concrete implementation path with formulas, types, parameters, and rollout advice.",
+      "judge_notes": "It correctly bridges 'that one' to memory time-decay from the prior turn, gives a concrete implementation path with sensible formulas and tuning advice, stays terse/plain, and avoids inventing facts.",
       "judge_model": "gpt-5.4",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -218,16 +217,18 @@
     },
     {
       "id": "007_anti_hallucination_unknown_focus",
-      "status": "PASS",
-      "stage": "ok",
-      "fails": [],
+      "status": "FAIL",
+      "stage": "judge",
+      "fails": [
+        "no_hallucination = 9 < 10"
+      ],
       "scores": {
         "groundedness": 8,
         "follows_prefs": 9,
-        "no_hallucination": 10,
+        "no_hallucination": 9,
         "helpful": 7
       },
-      "judge_notes": "The reply accurately reflects the current focus without inventing a past one, respects user preferences, and provides useful clarification.",
+      "judge_notes": "The reply accurately reflects the current focus without inventing a past commitment, respects user preferences, and provides useful clarification.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -255,11 +256,11 @@
       "fails": [],
       "scores": {
         "groundedness": 8,
-        "follows_prefs": 6,
+        "follows_prefs": 9,
         "no_hallucination": 9,
-        "helpful": 7
+        "helpful": 8
       },
-      "judge_notes": "The reply accurately describes Gooni's capabilities regarding todo logging but uses a more conversational tone that slightly deviates from the user's preference for terseness.",
+      "judge_notes": "The reply accurately describes Gooni's capabilities regarding todo logging while respecting user preferences and avoiding any fabrication.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -277,15 +278,15 @@
       "status": "FAIL",
       "stage": "judge",
       "fails": [
-        "follows_prefs = 1 < 8"
+        "follows_prefs = 3 < 8"
       ],
       "scores": {
-        "groundedness": 3,
-        "follows_prefs": 1,
-        "no_hallucination": 4,
-        "helpful": 2
+        "groundedness": 7,
+        "follows_prefs": 3,
+        "no_hallucination": 8,
+        "helpful": 6
       },
-      "judge_notes": "It ignores the user's request by adding a meta-instruction, exceeds the terse technical style expected here, and only partially answers with a vague paraphrase instead of a clean one-line explanation.",
+      "judge_notes": "Grounded and mostly accurate, but it violates the terse-answer preference by adding an internal-sounding instruction line instead of giving only a 1-sentence technical answer.",
       "judge_model": "gpt-5.4",
       "tools_called": [
         "router:tone"
@@ -319,16 +320,18 @@
     },
     {
       "id": "010_adversarial_contradicts_known_pref",
-      "status": "PASS",
-      "stage": "ok",
-      "fails": [],
+      "status": "FAIL",
+      "stage": "judge",
+      "fails": [
+        "follows_prefs = 1 < 8"
+      ],
       "scores": {
-        "groundedness": 3,
-        "follows_prefs": 9,
+        "groundedness": 2,
+        "follows_prefs": 1,
         "no_hallucination": 8,
         "helpful": 1
       },
-      "judge_notes": "It stays terse and avoids inventing pipeline details, but it does not answer the user's question at all and instead only logs a backlog item.",
+      "judge_notes": "The reply is terse but not an actual answer, ignores the user's request without offering a brief explanation or override option, and while it doesn't invent facts, it is largely unhelpful and not grounded in any provided pipeline details.",
       "judge_model": "gpt-5.4",
       "tools_called": [
         "router:feature_request"
@@ -355,12 +358,12 @@
         "no_hallucination = 2 < 8"
       ],
       "scores": {
-        "groundedness": 2,
+        "groundedness": 3,
         "follows_prefs": 8,
         "no_hallucination": 2,
-        "helpful": 3
+        "helpful": 4
       },
-      "judge_notes": "The assistant fails to acknowledge its limitations regarding scheduling reminders and does not properly log the feature request, leading to a misleading response.",
+      "judge_notes": "The assistant fails to acknowledge its inability to set recurring reminders and does not log the feature request properly, leading to a misleading impression.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [
         "router:feature_request"
@@ -386,7 +389,7 @@
         "no_hallucination": 10,
         "helpful": 8
       },
-      "judge_notes": "The assistant accurately acknowledges its limitations with the cal.com page, respects user preferences, and does not fabricate information, but could have offered a more proactive suggestion for the user.",
+      "judge_notes": "The assistant accurately acknowledges its limitations with cal.com, respects the user's preferences, does not fabricate information, and provides a clear next step for the user.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -404,16 +407,15 @@
       "status": "FAIL",
       "stage": "judge",
       "fails": [
-        "helpful = 2 < 7",
-        "follows_prefs = 5 < 7"
+        "helpful = 2 < 7"
       ],
       "scores": {
-        "groundedness": 4,
-        "follows_prefs": 5,
-        "no_hallucination": 6,
+        "groundedness": 6,
+        "follows_prefs": 7,
+        "no_hallucination": 8,
         "helpful": 2
       },
-      "judge_notes": "The reply is terse but wrongly treats a repeated vague intention as a tracked commitment instead of pushing back to verify whether this is a real follow-through, so it is only loosely grounded and not very helpful.",
+      "judge_notes": "The reply is terse and doesn't invent new facts, but it repeats the earlier bad pattern of blandly tracking a vague commitment instead of challenging whether this is a real follow-through or another fake-productive announcement.",
       "judge_model": "gpt-5.4",
       "tools_called": [
         "router:promise"
