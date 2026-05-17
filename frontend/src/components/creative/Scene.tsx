@@ -14,6 +14,7 @@ import { NpcAvatar } from "./NpcAvatar";
 import { LandingCamera } from "./LandingCamera";
 import { IntroCamera, ORBIT_BASELINE } from "./IntroCamera";
 import { NoteReaderOverlay } from "./NoteReaderOverlay";
+import { NotePeekHost } from "./NotePeekHost";
 import { AmbientAudio } from "./AmbientAudio";
 import { PostFX } from "./PostFX";
 import { TileFloor } from "./TileFloor";
@@ -453,6 +454,8 @@ export function Scene() {
         noteId={selectedNote?.id ?? null}
         onClose={handleClose}
       />
+
+      {entered && introDone && <NotePeekHost />}
 
       {entered && <BrandingMark />}
       {entered && <NotesLink visible={introDone && !selectedNote} />}

@@ -9,16 +9,16 @@ import { subscribeLandings, subscribeTileState } from "./useDanielControls";
 import { fireVfx } from "./vfx";
 import { playCoinPickup } from "./sfx";
 import { NoteCoin } from "./NoteCoin";
-import { NotePeekCard } from "./NotePeekCard";
+import { getPeekState, setPeekState } from "./peekBus";
 
 // Orchestrates note-coins across the plaza:
 //   1. fetches public notes (cached 60s)
 //   2. assigns each to a deterministic tile via buildNoteTileMap
 //   3. tracks player landings (filtered to actor="player" so NPC hops
 //      don't pop the peek)
-//   4. renders one NoteCoin per assignment plus a bottom-anchored
-//      NotePeekCard portal showing the current note's title + excerpt;
-//      click peek → onSelect → fullscreen NoteReaderOverlay
+//   4. renders one NoteCoin per assignment. The bottom peek bar lives
+//      outside the Canvas tree via the peekBus + <NotePeekHost>; this
+//      component only publishes peek state.
 //   5. proximity glow: coins within 2 tiles of player ramp emissive
 //   6. read state: localStorage tracks expanded notes; visited coins
 //      desaturate so the plaza becomes a journey log
@@ -75,9 +75,11 @@ export function NoteCoins({ onSelect }: Props) {
   // localStorage so the plaza reflects history across sessions.
   const [readIds, setReadIds] = useState<Set<number>>(() => loadReadIds());
 
-  // Latest player landing — drives proximity glow + current peek tile.
+  // Latest player landing — drives proximity glow. Peek note state
+  // lives on the module bus so a sibling-of-Canvas host renders it as
+  // real DOM (createPortal from inside R3F throws "Span is not part
+  // of THREE namespace").
   const [playerGrid, setPlayerGrid] = useState<{ gx: number; gz: number } | null>(null);
-  const [currentNote, setCurrentNote] = useState<PublicNote | null>(null);
 
   // Refs let the landing subscriber read current assignment + read
   // state without re-subscribing on every change.
@@ -91,12 +93,12 @@ export function NoteCoins({ onSelect }: Props) {
       if (e.actor !== "player") return;
       if (e.fellOff) {
         setPlayerGrid(null);
-        setCurrentNote(null);
+        setPeekState({ note: null });
         return;
       }
       setPlayerGrid({ gx: e.gx, gz: e.gz });
       const note = noteByTile.get(tileKey(e.gx, e.gz)) ?? null;
-      setCurrentNote(note);
+      setPeekState({ note });
       // Pickup chime + sparkle burst when player lands on a coin-tile.
       // Use the assignment's pinned-or-not status for tint so the
       // sparkle matches the coin (rose for pinned, gold for regular).
@@ -126,11 +128,12 @@ export function NoteCoins({ onSelect }: Props) {
   useEffect(() => {
     return subscribeTileState((e) => {
       if (e.state !== "broken") return;
-      setCurrentNote((prev) => {
-        if (!prev) return prev;
-        const tileNote = noteByTile.get(tileKey(e.gx, e.gz));
-        return tileNote && tileNote.id === prev.id ? null : prev;
-      });
+      const prev = getPeekState().note;
+      if (!prev) return;
+      const tileNote = noteByTile.get(tileKey(e.gx, e.gz));
+      if (tileNote && tileNote.id === prev.id) {
+        setPeekState({ note: null });
+      }
     });
   }, [noteByTile]);
 
@@ -151,7 +154,20 @@ export function NoteCoins({ onSelect }: Props) {
   }, [onSelect]);
 
   const handleDismiss = useCallback(() => {
-    setCurrentNote(null);
+    setPeekState({ note: null });
+  }, []);
+
+  // Push the latest callbacks onto the bus so <NotePeekHost> (outside
+  // Canvas) renders the bottom card with stable handlers.
+  useEffect(() => {
+    setPeekState({ onExpand: handleExpand, onDismiss: handleDismiss });
+  }, [handleExpand, handleDismiss]);
+
+  // Unmount = nothing to peek at.
+  useEffect(() => {
+    return () => {
+      setPeekState({ note: null });
+    };
   }, []);
 
   // Empty-state sign floats above plaza center when there are no
@@ -163,27 +179,24 @@ export function NoteCoins({ onSelect }: Props) {
   if (!data) return null;
 
   return (
-    <>
-      <group>
-        {assignments.map(({ note, tile }) => {
-          const isRead = readIds.has(note.id);
-          const isNear =
-            playerGrid !== null &&
-            Math.abs(playerGrid.gx - tile.gx) + Math.abs(playerGrid.gz - tile.gz) <= PROXIMITY_TILES;
-          return (
-            <NoteCoin
-              key={note.id}
-              note={note}
-              tile={tile}
-              isRead={isRead}
-              isNear={isNear}
-              onSelect={onSelect}
-            />
-          );
-        })}
-      </group>
-      <NotePeekCard note={currentNote} onExpand={handleExpand} onDismiss={handleDismiss} />
-    </>
+    <group>
+      {assignments.map(({ note, tile }) => {
+        const isRead = readIds.has(note.id);
+        const isNear =
+          playerGrid !== null &&
+          Math.abs(playerGrid.gx - tile.gx) + Math.abs(playerGrid.gz - tile.gz) <= PROXIMITY_TILES;
+        return (
+          <NoteCoin
+            key={note.id}
+            note={note}
+            tile={tile}
+            isRead={isRead}
+            isNear={isNear}
+            onSelect={onSelect}
+          />
+        );
+      })}
+    </group>
   );
 }
 
