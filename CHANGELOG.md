@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.92.0 — 2026-05-17 (minor)
+
+- feat(alembic): harden _alembic_upgrade against half-applied state (#239)
+
 ## 0.91.3 — 2026-05-17 (patch)
 
 - fix(creative): no camera shift on note open, hide peek under reader (#238)
