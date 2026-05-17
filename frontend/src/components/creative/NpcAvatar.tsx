@@ -333,6 +333,7 @@ export function NpcAvatar({
             fellOff: true,
             impactVel: 0,
             breaksTile: h.breaksTile,
+            actor: "npc",
           });
         } else {
           gridRef.current = { gx: h.toGx, gz: h.toGz };
@@ -349,6 +350,7 @@ export function NpcAvatar({
             fellOff: false,
             impactVel: HOP_HEIGHT * 6,
             breaksTile: h.breaksTile,
+            actor: "npc",
           });
           fireVfx({
             kind: "dust",
