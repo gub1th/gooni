@@ -174,12 +174,15 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
       <div
         style={{
           flex: 1,
-          overflowY: "auto",
+          minHeight: 0,
+          // Outer container no longer scrolls — each column owns its own
+          // scroll so DONE filling up doesn't drag TODO + IN PROGRESS along.
+          overflow: "hidden",
           padding: 20,
           display: "grid",
           gridTemplateColumns: "repeat(3, minmax(260px, 1fr))",
           gap: 14,
-          alignItems: "start",
+          alignItems: "stretch",
         }}
       >
         {COLUMNS.map((col) => {
@@ -215,12 +218,15 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
                 boxShadow: isHover ? `0 0 0 2px ${col.tint}33` : "none",
                 transition: "border-color 0.12s, box-shadow 0.12s",
                 minHeight: 200,
+                // Match grid row height so each column scrolls inside itself.
+                height: "100%",
                 display: "flex",
                 flexDirection: "column",
                 gap: 8,
+                overflow: "hidden",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 6, borderBottom: "1px solid rgba(0,0,0,0.05)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 6, borderBottom: "1px solid rgba(0,0,0,0.05)", flexShrink: 0 }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: col.tint }} />
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", textTransform: "uppercase", letterSpacing: 0.6 }}>
                   {col.label}
@@ -230,49 +236,56 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
                 </span>
               </div>
 
-              {colItems.length === 0 ? (
-                <div style={{ padding: "20px 6px", color: "var(--gooni-muted, #B0B0B5)", fontSize: 12, textAlign: "center" }}>
-                  {col.hint}
-                </div>
-              ) : (
-                colItems.map((item, idx) => {
-                  const isDragging = dragId === item.id;
-                  return (
-                    <div key={item.id}>
-                      {/* Drop indicator above the card when hovering between items */}
-                      {hoverIndex?.status === col.status && hoverIndex.index === idx && dragId != null && dragId !== item.id && (
-                        <div style={{ height: 2, background: col.tint, borderRadius: 1, margin: "2px 4px" }} />
-                      )}
-                      <BacklogCard
-                        item={item}
-                        dragging={isDragging}
-                        onDragStart={(e) => handleDragStart(e, item.id)}
-                        onDragEnd={handleDragEnd}
-                        onCardDragOver={(e) => {
-                          if (dragId == null || dragId === item.id) return;
-                          e.preventDefault();
-                          // Decide insert-before vs insert-after based on Y midpoint.
-                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                          const before = e.clientY < rect.top + rect.height / 2;
-                          const targetIdx = before ? idx : idx + 1;
-                          if (
-                            hoverIndex?.status !== col.status ||
-                            hoverIndex.index !== targetIdx
-                          ) {
-                            setHoverIndex({ status: col.status, index: targetIdx });
-                          }
-                        }}
-                        onClick={() => setOpenItemId(item.id)}
-                        onOpenPr={() => {
-                          if (item.pr_url) window.open(item.pr_url, "_blank", "noopener,noreferrer");
-                        }}
-                        onPromote={() => onPromote(item.id)}
-                        onDemote={() => onDemote(item.id)}
-                      />
-                    </div>
-                  );
-                })
-              )}
+              {/* Inner scroll container — each column owns its scroll. */}
+              <div style={{
+                flex: 1, minHeight: 0, overflowY: "auto",
+                display: "flex", flexDirection: "column", gap: 8,
+                paddingRight: 4,
+              }}>
+                {colItems.length === 0 ? (
+                  <div style={{ padding: "20px 6px", color: "var(--gooni-muted, #B0B0B5)", fontSize: 12, textAlign: "center" }}>
+                    {col.hint}
+                  </div>
+                ) : (
+                  colItems.map((item, idx) => {
+                    const isDragging = dragId === item.id;
+                    return (
+                      <div key={item.id}>
+                        {/* Drop indicator above the card when hovering between items */}
+                        {hoverIndex?.status === col.status && hoverIndex.index === idx && dragId != null && dragId !== item.id && (
+                          <div style={{ height: 2, background: col.tint, borderRadius: 1, margin: "2px 4px" }} />
+                        )}
+                        <BacklogCard
+                          item={item}
+                          dragging={isDragging}
+                          onDragStart={(e) => handleDragStart(e, item.id)}
+                          onDragEnd={handleDragEnd}
+                          onCardDragOver={(e) => {
+                            if (dragId == null || dragId === item.id) return;
+                            e.preventDefault();
+                            // Decide insert-before vs insert-after based on Y midpoint.
+                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                            const before = e.clientY < rect.top + rect.height / 2;
+                            const targetIdx = before ? idx : idx + 1;
+                            if (
+                              hoverIndex?.status !== col.status ||
+                              hoverIndex.index !== targetIdx
+                            ) {
+                              setHoverIndex({ status: col.status, index: targetIdx });
+                            }
+                          }}
+                          onClick={() => setOpenItemId(item.id)}
+                          onOpenPr={() => {
+                            if (item.pr_url) window.open(item.pr_url, "_blank", "noopener,noreferrer");
+                          }}
+                          onPromote={() => onPromote(item.id)}
+                          onDemote={() => onDemote(item.id)}
+                        />
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           );
         })}

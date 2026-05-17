@@ -551,6 +551,38 @@ def _bump_segment_pending(db: Session, segment_id: int) -> None:
         db.commit()
 
 
+def backfill_pending_status(db: Session) -> int:
+    """One-shot backfill: any segment currently `not_yet` that already has
+    a reviewer touch (message rating OR step feedback) gets flipped to
+    `pending`. Idempotent — re-runs are no-ops once everything is settled.
+
+    Returns the count of segments flipped.
+    """
+    # Distinct segment ids that have at least one reviewer artifact.
+    rating_seg_ids = {
+        sid for (sid,) in db.query(EvalMessageRating.segment_id).distinct().all()
+        if sid is not None
+    }
+    feedback_seg_ids = {
+        sid for (sid,) in db.query(EvalStepFeedback.segment_id).distinct().all()
+        if sid is not None
+    }
+    touched = rating_seg_ids | feedback_seg_ids
+    if not touched:
+        return 0
+    rows = (
+        db.query(EvalSegment)
+        .filter(EvalSegment.eval_status == "not_yet")
+        .filter(EvalSegment.id.in_(touched))
+        .all()
+    )
+    for r in rows:
+        r.eval_status = "pending"
+    if rows:
+        db.commit()
+    return len(rows)
+
+
 # ── Summary update ───────────────────────────────────────────────────────────
 
 
