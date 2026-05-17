@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.84.0 — 2026-05-17 (minor)
+
+- feat(ops+eval): ops sub-tabs, per-column backlog scroll, single status entry, pending backfill (#220)
+
 ## 0.83.0 — 2026-05-17 (minor)
 
 - feat(creative): sky-island plaza — Quaternius GLTFs, stacking, NPCs, nametags (#219)
