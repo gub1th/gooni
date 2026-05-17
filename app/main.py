@@ -505,6 +505,23 @@ async def _lifespan(app: FastAPI):
     except Exception as e:
         print(f"[capability] boot scan failed: {e}", flush=True)
 
+    # One-shot backfill: flip any segment currently `not_yet` that has at
+    # least one rating or step-feedback row to `pending`. Necessary because
+    # `upsert_message_rating` only started bumping pending after PR #214;
+    # segments rated before that landed are stuck not_yet despite real
+    # reviewer input.
+    try:
+        from .services import eval_service
+        db = SessionLocal()
+        try:
+            bumped = eval_service.backfill_pending_status(db)
+            if bumped:
+                print(f"[eval] pending backfill: {bumped} segments flipped", flush=True)
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[eval] pending backfill failed: {e}", flush=True)
+
     nudge_task = asyncio.create_task(_nudge_loop())
     backfill_task = asyncio.create_task(_backfill_list_item_embeddings_loop())
     excerpt_task = asyncio.create_task(_backfill_note_excerpts_loop())

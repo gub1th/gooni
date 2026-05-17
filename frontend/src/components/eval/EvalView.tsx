@@ -47,12 +47,6 @@ const STATUS_STYLE: Record<EvalStatus, { color: string; bg: string; label: strin
 const SOURCES = ["web", "telegram", "whatsapp", "imessage"] as const;
 const STATUSES: EvalStatus[] = ["not_yet", "pending", "done"];
 
-const RATING_OPTIONS: { value: 1 | 2 | 3; label: string; emoji: string }[] = [
-  { value: 1, label: "Bad", emoji: "👎" },
-  { value: 2, label: "Meh", emoji: "😐" },
-  { value: 3, label: "Good", emoji: "👍" },
-];
-
 // "audit" tab merged into "convos" — active feedback rules now render at
 // the top of the convos surface and the chat-audit feed is reachable via
 // the legacy /chat-audit route for power-user use. See PR #259 ticket.
@@ -837,6 +831,21 @@ function EvalDetailView({
     }
   }
 
+  // Cycle the segment status via the header pill — the single status entry
+  // point. not_yet → pending → done → not_yet.
+  async function cycleStatus() {
+    if (!data) return;
+    const order: EvalStatus[] = ["not_yet", "pending", "done"];
+    const cur = data.segment.eval_status;
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+    try {
+      await patchEvalSummary(segmentId, { eval_status: next });
+      await reload();
+    } catch (err) {
+      console.error("status cycle failed", err);
+    }
+  }
+
   const seg = data?.segment;
 
   return (
@@ -886,7 +895,7 @@ function EvalDetailView({
               {SOURCE_STYLE[seg.source]?.label}
             </span>
             {seg.is_active && <ActiveBadge />}
-            <StatusPill status={seg.eval_status} />
+            <StatusPill status={seg.eval_status} onCycle={cycleStatus} />
           </>
         )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
@@ -1129,18 +1138,16 @@ function SummaryEditor({
 }) {
   const [rating, setRating] = useState<number | null>(initial.overall_rating);
   const [comment, setComment] = useState(initial.overall_comment ?? "");
-  const [status, setStatus] = useState<EvalStatus>(initial.eval_status);
   const [saving, setSaving] = useState(false);
+  // Status flips via the header pill, not here — Overall is just rating + comment.
   const dirty =
     rating !== initial.overall_rating ||
-    comment !== (initial.overall_comment ?? "") ||
-    status !== initial.eval_status;
+    comment !== (initial.overall_comment ?? "");
 
   async function save() {
     setSaving(true);
     try {
       await patchEvalSummary(segmentId, {
-        eval_status: status,
         overall_rating: rating,
         overall_comment: comment,
       });
@@ -1164,23 +1171,8 @@ function SummaryEditor({
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12, flexWrap: "wrap" }}>
         <strong style={{ fontSize: 13 }}>Overall</strong>
         <RatingPicker value={rating} onChange={setRating} />
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value as EvalStatus)}
-          style={{
-            padding: "4px 8px",
-            border: "1px solid #E5E5EA",
-            borderRadius: 6,
-            fontSize: 12,
-            fontFamily: FONT,
-          }}
-        >
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {STATUS_STYLE[s].label}
-            </option>
-          ))}
-        </select>
+        {/* Status entry point moved to the clickable pill in the header.
+            This row is now rating + comment + save only. */}
         <button
           onClick={save}
           disabled={!dirty || saving}
@@ -2240,10 +2232,15 @@ function ActiveBadge() {
   );
 }
 
-function StatusPill({ status }: { status: EvalStatus }) {
+function StatusPill({ status, onCycle }: { status: EvalStatus; onCycle?: () => void }) {
   const s = STATUS_STYLE[status];
+  const clickable = !!onCycle;
   return (
-    <span
+    <button
+      type="button"
+      onClick={onCycle}
+      disabled={!clickable}
+      title={clickable ? "Click to cycle status" : undefined}
       style={{
         display: "inline-block",
         padding: "2px 8px",
@@ -2254,10 +2251,13 @@ function StatusPill({ status }: { status: EvalStatus }) {
         fontWeight: 600,
         textTransform: "uppercase",
         letterSpacing: 0.3,
+        border: "none",
+        cursor: clickable ? "pointer" : "default",
+        fontFamily: FONT,
       }}
     >
       {s.label}
-    </span>
+    </button>
   );
 }
 
@@ -2268,20 +2268,27 @@ function RatingPicker({
   value: number | null;
   onChange: (v: number | null) => void;
 }) {
-  // #101: button label shows number + emoji + word so the reviewer sees
-  // what 1/2/3 mean without hovering for the title tooltip. Title kept
-  // for accessibility / longer keyboard exploration.
+  // Lucide X / Minus / Check w/ ops-board palette — parity with per-msg
+  // rating row. Numbered prefix kept so the keyboard shortcut hints
+  // (1/2/3) still read as labels.
   return (
     <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-      {RATING_OPTIONS.map((opt) => (
+      {[1, 2, 3].map((r) => {
+        const active = value === r;
+        const icon = r === 1
+          ? <X size={14} strokeWidth={3} />
+          : r === 2
+            ? <Minus size={14} strokeWidth={3} />
+            : <Check size={14} strokeWidth={3} />;
+        return (
         <button
-          key={opt.value}
-          onClick={() => onChange(value === opt.value ? null : opt.value)}
-          title={`${opt.value} = ${opt.label}`}
+          key={r}
+          onClick={() => onChange(value === r ? null : r)}
+          title={`${r} = ${RATING_LABEL_EVAL[r]}`}
           style={{
-            background: value === opt.value ? "#0A84FF" : "transparent",
-            color: value === opt.value ? "#FFFFFF" : "#1C1C1E",
-            border: "1px solid #E5E5EA",
+            background: active ? RATING_COLOR_EVAL[r] : "transparent",
+            color: active ? "#FFFFFF" : RATING_COLOR_EVAL[r],
+            border: `1px solid ${active ? RATING_COLOR_EVAL[r] : "#E5E5EA"}`,
             borderRadius: 6,
             padding: "4px 10px",
             cursor: "pointer",
@@ -2291,13 +2298,15 @@ function RatingPicker({
             alignItems: "center",
             gap: 6,
             fontVariantNumeric: "tabular-nums",
+            transition: "background 120ms ease, color 120ms ease",
           }}
         >
-          <span style={{ fontWeight: 600 }}>{opt.value}</span>
-          <span>{opt.emoji}</span>
-          <span style={{ fontSize: 12 }}>{opt.label.toLowerCase()}</span>
+          <span style={{ fontWeight: 600 }}>{r}</span>
+          {icon}
+          <span style={{ fontSize: 12 }}>{RATING_LABEL_EVAL[r]}</span>
         </button>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -98,14 +98,73 @@ function fmtAgo(iso: string | null): string {
   return "just now";
 }
 
+type OpsTab = "evals" | "backlog" | "health";
+const OPS_TABS: { key: OpsTab; label: string }[] = [
+  { key: "evals", label: "Evals" },
+  { key: "backlog", label: "Backlog" },
+  { key: "health", label: "Health" },
+];
+
 export function OpsMode() {
+  const [tab, setTab] = useState<OpsTab>(() => {
+    if (typeof window !== "undefined") {
+      const stored = window.localStorage.getItem("gooni-ops-tab") as OpsTab | null;
+      if (stored && OPS_TABS.some((t) => t.key === stored)) return stored;
+    }
+    return "evals";
+  });
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("gooni-ops-tab", tab);
+    }
+  }, [tab]);
+
   return (
-    <div style={{ fontFamily: FONT, display: "flex", flexDirection: "column", gap: 22 }}>
-      <BuildMode />
-      <CapabilityProfileCard />
-      <EvalSection />
-      <BacklogSection />
-      <FailuresSection />
+    <div style={{ fontFamily: FONT, display: "flex", flexDirection: "column", gap: 14 }}>
+      <OpsTabBar active={tab} onChange={setTab} />
+      {tab === "evals" && <EvalSection />}
+      {tab === "backlog" && <BacklogSection />}
+      {tab === "health" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+          <BuildMode />
+          <CapabilityProfileCard />
+          <FailuresSection />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OpsTabBar({ active, onChange }: { active: OpsTab; onChange: (t: OpsTab) => void }) {
+  return (
+    <div style={{
+      display: "inline-flex", alignSelf: "flex-start",
+      padding: 3, gap: 2,
+      borderRadius: 10,
+      background: "rgba(0,0,0,0.05)",
+    }}>
+      {OPS_TABS.map((t) => {
+        const on = active === t.key;
+        return (
+          <button
+            key={t.key}
+            onClick={() => onChange(t.key)}
+            style={{
+              padding: "5px 14px",
+              borderRadius: 8,
+              border: "none",
+              background: on ? "var(--gooni-card, #fff)" : "transparent",
+              boxShadow: on ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+              color: on ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-muted, #6B7280)",
+              fontSize: 12, fontWeight: 600, letterSpacing: 0.2,
+              cursor: "pointer", fontFamily: FONT,
+              transition: "background 120ms ease, color 120ms ease",
+            }}
+          >
+            {t.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -621,14 +680,15 @@ function BacklogSection() {
         </button>
       )}
     >
-      {/* Scrollable wrapper — fixed height so the rest of OpsMode stays
-          reachable without endless scroll. BacklogBoard's columns shrink
-          naturally into the narrower container. */}
+      {/* Fixed-height kanban with per-column inner scroll (BacklogBoard
+          owns its own column overflow). Taller now that Backlog is its own
+          Ops tab and gets the whole viewport region. */}
       <div style={{
-        height: 360, overflow: "auto",
+        height: 560,
         border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
         borderRadius: 10,
         background: "rgba(0,0,0,0.015)",
+        display: "flex", flexDirection: "column",
       }}>
         <BacklogBoard />
       </div>
