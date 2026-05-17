@@ -8,6 +8,7 @@ import {
   fetchTimeOnGooni,
   fetchWhoopStatus,
   fetchWhoopToday,
+  parseDevTake,
   type DashboardStats,
   type DevActivity,
   type DevActivityRepo,
@@ -511,28 +512,56 @@ function DevSection() {
         />
       </div>
 
-      {devTake?.take && (
-        <div style={{
-          marginTop: 18,
-          background: "linear-gradient(180deg, #FAFBFC, #F4F6F8)",
-          border: "0.5px solid rgba(0,0,0,0.06)",
-          borderRadius: 10, padding: "12px 14px",
-        }}>
+      {devTake?.take && (() => {
+        const view = parseDevTake(devTake.take);
+        return (
           <div style={{
-            fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
-            textTransform: "uppercase", color: "#8E8E93",
-            marginBottom: 6,
+            marginTop: 18,
+            background: "linear-gradient(180deg, #FAFBFC, #F4F6F8)",
+            border: "0.5px solid rgba(0,0,0,0.06)",
+            borderRadius: 10, padding: "12px 14px",
           }}>
-            Gooni's dev take · {devTake.day}
+            <div style={{
+              fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+              textTransform: "uppercase", color: "#8E8E93",
+              marginBottom: 6,
+            }}>
+              Gooni's dev take · {devTake.day}
+            </div>
+            {view.kind === "themes" ? (
+              <ul style={{
+                margin: 0, padding: 0, listStyle: "none",
+                display: "flex", flexDirection: "column", gap: 6,
+              }}>
+                {view.themes.map((t) => (
+                  <li key={t.theme} style={{
+                    display: "flex", gap: 10, alignItems: "baseline",
+                    fontSize: 13, lineHeight: 1.5, color: "#3A3A3C",
+                  }}>
+                    <span style={{
+                      flexShrink: 0,
+                      fontSize: 10.5, fontWeight: 600, letterSpacing: 0.3,
+                      color: "#1C1C1E",
+                      background: "rgba(0,0,0,0.05)",
+                      padding: "1.5px 7px", borderRadius: 99,
+                    }}>
+                      {t.theme}
+                    </span>
+                    <span>{t.summary}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div style={{
+                fontSize: 13, color: "#3A3A3C", lineHeight: 1.55,
+                whiteSpace: "pre-wrap",
+              }}>
+                {devTake.take}
+              </div>
+            )}
           </div>
-          <div style={{
-            fontSize: 13, color: "#3A3A3C", lineHeight: 1.55,
-            whiteSpace: "pre-wrap",
-          }}>
-            {devTake.take}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       <div style={{ marginTop: 18 }}>
         <div style={{

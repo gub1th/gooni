@@ -28,6 +28,7 @@ from ..db.models import (
     EvalStepFeedback,
     Message,
     Note,
+    Reflection,
     ToolCall,
 )
 from .list_service import list_service
@@ -124,7 +125,21 @@ def _walk_gap_windows(
 # ── List + serialize ─────────────────────────────────────────────────────────
 
 
+# Recency window for the live "currently active" badge on segment cards.
+# Tuned so a segment Daniel is mid-conversation in stays lit while ambient
+# bot replies don't keep stale threads "active". 30 min ≈ a single phone
+# session; bump if the bot replies feel like they keep tripping it.
+_ACTIVE_RECENT_MINUTES = 30
+
+
 def _serialize_segment(seg: EvalSegment, conv: Conversation, preview: str | None) -> dict:
+    is_active = False
+    if seg.last_message_at is not None:
+        last = seg.last_message_at
+        # last_message_at is stored naive UTC; compare against naive utcnow.
+        if last.tzinfo is not None:
+            last = last.replace(tzinfo=None)
+        is_active = (datetime.utcnow() - last) < timedelta(minutes=_ACTIVE_RECENT_MINUTES)
     return {
         "id": seg.id,
         "conversation_id": seg.conversation_id,
@@ -142,6 +157,7 @@ def _serialize_segment(seg: EvalSegment, conv: Conversation, preview: str | None
         ),
         "dispatched_note_id": seg.dispatched_note_id,
         "preview": preview,
+        "is_active": is_active,
     }
 
 
@@ -253,6 +269,7 @@ def get_segment_full(db: Session, segment_id: int) -> dict | None:
     feedbacks_by_msg = _feedbacks_by_message(db, segment_id, message_ids)
     ratings_by_msg = _message_ratings_by_id(db, message_ids)
     tool_calls_by_msg = _tool_calls_by_message(db, message_ids)
+    reflections_by_msg = _reflections_by_message(db, message_ids)
     return {
         "segment": _serialize_segment(seg, conv, None),
         "messages": [
@@ -267,10 +284,46 @@ def get_segment_full(db: Session, segment_id: int) -> dict | None:
                 "step_feedback": feedbacks_by_msg.get(m.id, []),
                 "rating": ratings_by_msg.get(m.id),
                 "tool_calls": tool_calls_by_msg.get(m.id, []),
+                # Latest Reflexion row for this assistant turn (or None).
+                # Joined here instead of N+1 fetching per message so the eval
+                # drilldown and dispatched note can both render the self-take.
+                "reflection": reflections_by_msg.get(m.id),
             }
             for m in msgs
         ],
     }
+
+
+def _reflections_by_message(
+    db: Session, message_ids: list[int]
+) -> dict[int, dict]:
+    if not message_ids:
+        return {}
+    rows = (
+        db.query(Reflection)
+        .filter(Reflection.message_id.in_(message_ids))
+        .order_by(Reflection.created_at.desc())
+        .all()
+    )
+    # message_id is the de-facto key — there should only ever be one
+    # Reflection per assistant message, but order_by desc means if a duplicate
+    # somehow exists we keep the most recent.
+    out: dict[int, dict] = {}
+    for r in rows:
+        if r.message_id in out:
+            continue
+        out[r.message_id] = {
+            "id": r.id,
+            "severity": r.severity,
+            "user_critique_present": bool(r.user_critique_present),
+            "critique_summary": r.critique_summary,
+            "action_vs_described": r.action_vs_described,
+            "gap_exposed": r.gap_exposed,
+            "proposed_self_fix": r.proposed_self_fix,
+            "model": r.model,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+    return out
 
 
 def _tool_calls_by_message(
@@ -387,6 +440,10 @@ def upsert_message_rating(
         existing.segment_id = segment_id
     db.commit()
     db.refresh(existing)
+    # Reviewer touched the segment → flip not_yet → pending. Mirrors what
+    # `upsert_feedback` already does for step-level flags. Without this, a
+    # message rated + commented stays "not_yet" until explicit Done click.
+    _bump_segment_pending(db, segment_id)
     return existing
 
 
@@ -620,10 +677,43 @@ def _format_dispatch_body(full: dict) -> str:
     lines.append("<h3>Transcript + trace + flags</h3>")
     if not full["messages"]:
         lines.append("<p><em>(no messages in segment range)</em></p>")
+    rating_emoji_map = {1: "👎 bad", 2: "➖ neutral", 3: "👍 good"}
+    sev_label_map = {1: "clean", 2: "notable", 3: "load-bearing"}
     for m in full["messages"]:
         role = (m["role"] or "").upper()
         lines.append(f"<h4>[{role}] msg #{m['id']}</h4>")
         lines.append(f"<p>{_escape((m['content'] or '')[:1500])}</p>")
+        # Per-message reviewer rating + comment (the thumbs row Daniel uses
+        # in the eval drilldown). Previously omitted from dispatch — Daniel
+        # flagged that the dispatched note was missing his per-turn evals.
+        if m.get("rating"):
+            rating = m["rating"]
+            label = rating_emoji_map.get(rating["rating"], "?")
+            comment_html = (
+                f"<blockquote>{_escape(rating.get('comment') or '')}</blockquote>"
+                if rating.get("comment")
+                else ""
+            )
+            lines.append(
+                f"<p><strong>Reviewer rating:</strong> {label}</p>{comment_html}"
+            )
+        # Gooni's self-take (Reflexion row). Surface sev ≥ 2 only so clean
+        # turns don't bloat the note.
+        if m.get("reflection") and (m["reflection"].get("severity") or 0) >= 2:
+            ref = m["reflection"]
+            sev = ref.get("severity")
+            sev_label = sev_label_map.get(sev, str(sev))
+            ref_lines = [
+                f"<p><strong>Gooni's self-take</strong> · sev {sev} · {sev_label} "
+                f"· {ref.get('action_vs_described') or ''}</p>"
+            ]
+            if ref.get("critique_summary"):
+                ref_lines.append(f"<p><em>Daniel pushed back:</em> {_escape(ref['critique_summary'])}</p>")
+            if ref.get("gap_exposed"):
+                ref_lines.append(f"<p><em>Gap:</em> {_escape(ref['gap_exposed'])}</p>")
+            if ref.get("proposed_self_fix"):
+                ref_lines.append(f"<p><em>Proposed fix:</em> {_escape(ref['proposed_self_fix'])}</p>")
+            lines.extend(ref_lines)
         # `<details><summary>` aren't in TipTap StarterKit so the editor
         # silently dropped them on render — that's why dispatched notes
         # looked half-empty. Use a plain heading + list so traces stay
@@ -635,13 +725,29 @@ def _format_dispatch_body(full: dict) -> str:
                 label = step.get("label") or ""
                 lines.append(f"<li><strong>{key}</strong> — {_escape(label)}</li>")
             lines.append("</ul>")
+        if m.get("tool_calls"):
+            lines.append("<h5>Tool calls (audit)</h5><ul>")
+            for tc in m["tool_calls"]:
+                status = tc.get("status") or "?"
+                dur = tc.get("duration_ms")
+                dur_s = f" · {dur}ms" if dur is not None else ""
+                err = (
+                    f" · <em>error:</em> {_escape(tc['error'] or '')}"
+                    if tc.get("error")
+                    else ""
+                )
+                lines.append(
+                    f"<li><strong>{tc.get('tool_name')}</strong> "
+                    f"[{status}]{dur_s}{err}</li>"
+                )
+            lines.append("</ul>")
         if m.get("step_feedback"):
-            lines.append("<ul>")
+            lines.append("<h5>Step flags</h5><ul>")
             for fb in m["step_feedback"]:
-                rating_emoji = {1: "👎", 2: "😐", 3: "👍"}.get(fb["rating"], "?")
+                rating_label = rating_emoji_map.get(fb["rating"], "?")
                 lines.append(
                     f"<li>🚩 <strong>{fb['step_key']}</strong> "
-                    f"{rating_emoji} — {_escape(fb.get('comment') or '')}</li>"
+                    f"{rating_label} — {_escape(fb.get('comment') or '')}</li>"
                 )
             lines.append("</ul>")
     lines.append(

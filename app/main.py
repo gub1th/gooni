@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, aliased
 from .db.database import engine, get_db
 from .db.database import SessionLocal
 from .db.models import (
+    CapabilityFacet,
     Conversation,
     GooniTake,
     McpCall,
@@ -29,6 +30,7 @@ from .db.models import (
     Note,
     NoteComment,
     PublicProfile,
+    Reflection,
     Settings,
     Space,
     Visit,
@@ -439,16 +441,79 @@ async def _memory_watchdog_loop():
             print(f"[mem] watchdog error: {e}", flush=True)
 
 
+async def _capability_telemetry_loop():
+    """Daily rollup of ToolCall audit → CapabilityFacet.status transitions.
+
+    Sleep to the next 03:00 in nudge_tz, then run capability_service
+    telemetry. Idempotency via Settings.capability_telemetry_last_run_day
+    (YYYY-MM-DD in nudge_tz) so a Fly horizontal-scale race can't double-run.
+    Loop survives errors by sleeping a minute and retrying.
+    """
+    from .services.capability_service import capability_service
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                s = _settings_row(db)
+                tz_name = s.nudge_tz or "America/Los_Angeles"
+                last_run = s.capability_telemetry_last_run_day
+            finally:
+                db.close()
+            now = _dt.now(ZoneInfo(tz_name) if ZoneInfo else None)
+            target = _next_fire(now, hour=3, minute=0, tz_name=tz_name)
+            wait = max(1.0, (target - now).total_seconds())
+            await asyncio.sleep(wait)
+            # Idempotency check after wakeup: re-read in case another machine
+            # already wrote today's token.
+            db = SessionLocal()
+            try:
+                s = _settings_row(db)
+                today_str = _dt.now(
+                    ZoneInfo(tz_name) if ZoneInfo else None
+                ).strftime("%Y-%m-%d")
+                if s.capability_telemetry_last_run_day == today_str:
+                    await asyncio.sleep(70)
+                    continue
+                s.capability_telemetry_last_run_day = today_str
+                db.commit()
+                result = capability_service.run_telemetry_rollup(db)
+                print(f"[capability] telemetry: {result}", flush=True)
+            finally:
+                db.close()
+            await asyncio.sleep(70)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[capability] loop error: {e}", flush=True)
+            await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    # Boot-time mechanical capability scan — populates the facet table
+    # from the live tool registry + FastAPI routes + messaging channels.
+    # Idempotent + source-hash short-circuited so it's cheap to re-run on
+    # every uvicorn restart.
+    try:
+        from .services.capability_service import capability_service
+        db = SessionLocal()
+        try:
+            result = capability_service.refresh_mechanical_layer(db)
+            print(f"[capability] boot scan: {result}", flush=True)
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[capability] boot scan failed: {e}", flush=True)
+
     nudge_task = asyncio.create_task(_nudge_loop())
     backfill_task = asyncio.create_task(_backfill_list_item_embeddings_loop())
     excerpt_task = asyncio.create_task(_backfill_note_excerpts_loop())
     mem_task = asyncio.create_task(_memory_watchdog_loop())
+    capability_task = asyncio.create_task(_capability_telemetry_loop())
     try:
         yield
     finally:
-        for t in (nudge_task, backfill_task, excerpt_task, mem_task):
+        for t in (nudge_task, backfill_task, excerpt_task, mem_task, capability_task):
             t.cancel()
             try:
                 await t
@@ -1127,6 +1192,7 @@ def backlog_create(body: dict, db: Session = Depends(get_db)):
         subtitle=body.get("subtitle"),
         source_note_id=body.get("source_note_id"),
         board_status=body.get("board_status"),
+        notes=body.get("notes"),
     )
     out = serialize_ticket(ticket)
     if not body.get("skip_conflict_check"):
@@ -1186,7 +1252,10 @@ def backlog_similar(body: dict, db: Session = Depends(get_db)):
 def backlog_update(ticket_id: int, body: dict, db: Session = Depends(get_db)):
     from .services.backlog_service import backlog_service, serialize_ticket
     patch: dict = {}
-    for key in ("text", "subtitle", "board_status", "pr_url", "done", "sort_order"):
+    for key in (
+        "text", "subtitle", "board_status", "pr_url", "done", "sort_order",
+        "notes",
+    ):
         if key in body:
             patch[key] = body[key]
     ticket = backlog_service.update(db, ticket_id, **patch)
@@ -1448,7 +1517,7 @@ def focus_rename(
     )
     if not f:
         raise HTTPException(404, "focus not found")
-    return serialize_focus(f)
+    return serialize_focus(f, db=db)
 
 
 @app.post("/focuses/{focus_id}/fork")
@@ -1473,9 +1542,54 @@ def focus_fork(
         raise HTTPException(404, "focus not found")
     old, new = result
     return {
-        "old_focus": serialize_focus(old),
-        "new_focus": serialize_focus(new),
+        "old_focus": serialize_focus(old, db=db),
+        "new_focus": serialize_focus(new, db=db),
     }
+
+
+@app.get("/focuses/{focus_id}")
+def focus_get(focus_id: int, db: Session = Depends(get_db)):
+    """Single-focus detail — includes the parsed bound-state evidence
+    array (snippets of notes/todos/facts/messages currently bound to
+    this focus). Heavier than the /focuses list endpoint; used by the
+    dashboard drill-down modal.
+    """
+    from .services.focus_service import serialize_focus
+    from .db.models import Focus
+    import json as _json
+    f = db.query(Focus).filter(Focus.id == focus_id).first()
+    if not f:
+        raise HTTPException(404, "focus not found")
+    payload = serialize_focus(f, db=db)
+    evidence: list = []
+    if f.current_evidence_json:
+        try:
+            parsed = _json.loads(f.current_evidence_json)
+            if isinstance(parsed, list):
+                evidence = parsed
+        except Exception:
+            pass
+    payload["evidence"] = evidence
+    return payload
+
+
+@app.post("/focuses/{focus_id}/reactivate")
+def focus_reactivate(focus_id: int, db: Session = Depends(get_db)):
+    """Bring a dormant focus back into the active pool. Clears
+    missed_run_count + drift flag, sets status='committed'. Idempotent
+    on already-active focuses (just resets the counters)."""
+    from .services.focus_service import serialize_focus
+    from .db.models import Focus
+    f = db.query(Focus).filter(Focus.id == focus_id).first()
+    if not f:
+        raise HTTPException(404, "focus not found")
+    f.status = "committed"
+    f.committed = True
+    f.missed_run_count = 0
+    f.drift_flagged_at = None
+    db.commit()
+    db.refresh(f)
+    return serialize_focus(f, db=db)
 
 
 @app.get("/focus-candidates")
@@ -3438,6 +3552,48 @@ def get_openai_usage(refresh: bool = False):
     return openai_usage.fetch_month_to_date(refresh=refresh)
 
 
+@app.get("/tool-calls/failures")
+def tool_call_failures(
+    days: int = 7,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+):
+    """Recent failed tool calls — surfaces hallucination + integration
+    breakage signal on the Build / Ops dashboard."""
+    from datetime import datetime, timedelta
+    from .db.models import ToolCall
+    cutoff = datetime.utcnow() - timedelta(days=int(days))
+    rows = (
+        db.query(ToolCall)
+        .filter(ToolCall.status == "failed")
+        .filter(ToolCall.started_at >= cutoff)
+        .order_by(ToolCall.started_at.desc())
+        .limit(int(limit))
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "tool_name": r.tool_name,
+            "error": r.error or "",
+            "conversation_id": r.conversation_id,
+            "message_id": r.message_id,
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/health/scores")
+def health_scores(db: Session = Depends(get_db)):
+    """Composite 0-100 score per Gooni health axis. Drives the Build
+    mode dashboard. Computed on-demand; cheap aggregates over existing
+    tables, no caching. See `health_service.compute_all` for the per-
+    axis scoring logic."""
+    from .services.health_service import compute_all
+    return compute_all(db)
+
+
 @app.get("/dashboard/claude-usage")
 def get_claude_usage(
     days: int = 30,
@@ -4778,6 +4934,157 @@ def get_eval_run(filename: str):
     if not p.exists():
         raise HTTPException(404, "report not found")
     return HTMLResponse(content=p.read_text())
+
+
+# ── Capability profile + Reflection routes ────────────────────────────────────
+# Two surfaces:
+#   - /capabilities: read + patch Gooni's self-knowledge inventory (facets).
+#   - /reflections : read per-turn self-evaluations (Reflexion rows).
+# Plus a manual telemetry trigger for the lifespan loop's nightly aggregation.
+
+
+def _serialize_capability_facet(f: CapabilityFacet) -> dict:
+    return {
+        "id": f.id,
+        "layer": f.layer,
+        "facet_key": f.facet_key,
+        "facet_text": f.facet_text,
+        "status": f.status,
+        "source": f.source,
+        "evidence_json": f.evidence_json,
+        "last_verified_at": f.last_verified_at.isoformat() if f.last_verified_at else None,
+        "created_at": f.created_at.isoformat() if f.created_at else None,
+        "updated_at": f.updated_at.isoformat() if f.updated_at else None,
+    }
+
+
+@app.get("/capabilities")
+def list_capabilities(db: Session = Depends(get_db)):
+    """List all user-visible capability facets grouped by layer.
+
+    Skips the `_meta` layer (internal scan-hash sentinel). Status='removed'
+    rows are returned so the FE can render them dimmed — useful for "Gooni
+    used to do X but a refactor removed it."
+    """
+    rows = (
+        db.query(CapabilityFacet)
+        .filter(CapabilityFacet.layer != "_meta")
+        .order_by(CapabilityFacet.layer, CapabilityFacet.id)
+        .all()
+    )
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r.layer, []).append(_serialize_capability_facet(r))
+    return {"by_layer": out, "total": len(rows)}
+
+
+@app.patch("/capabilities/{facet_id}")
+def patch_capability(facet_id: int, body: dict, db: Session = Depends(get_db)):
+    """Hand-edit a facet. Allowed fields: facet_text, status, layer.
+    Source flips to 'chat_tool_update' to mark provenance.
+    """
+    row = db.query(CapabilityFacet).filter(CapabilityFacet.id == facet_id).one_or_none()
+    if row is None:
+        raise HTTPException(404, "facet not found")
+    if "facet_text" in body:
+        new_text = (body["facet_text"] or "").strip()
+        if new_text:
+            row.facet_text = new_text
+    if "status" in body:
+        new_status = str(body["status"])
+        if new_status not in {"claimed", "verified", "unverified", "broken", "removed"}:
+            raise HTTPException(400, "invalid status")
+        row.status = new_status
+    if "layer" in body:
+        new_layer = str(body["layer"])
+        if new_layer not in {"mechanical", "functional", "behavioral", "architectural"}:
+            raise HTTPException(400, "invalid layer")
+        row.layer = new_layer
+    row.source = "chat_tool_update"
+    db.commit()
+    return _serialize_capability_facet(row)
+
+
+@app.post("/capabilities")
+def create_capability(body: dict, db: Session = Depends(get_db)):
+    """Create a facet manually (Daniel-seeded functional/architectural rows).
+    facet_key must be unique; conflicts return 409.
+    """
+    facet_key = (body.get("facet_key") or "").strip()
+    layer = (body.get("layer") or "").strip()
+    facet_text = (body.get("facet_text") or "").strip()
+    if not facet_key or not layer or not facet_text:
+        raise HTTPException(400, "facet_key, layer, facet_text required")
+    if layer not in {"mechanical", "functional", "behavioral", "architectural"}:
+        raise HTTPException(400, "invalid layer")
+    existing = db.query(CapabilityFacet).filter(CapabilityFacet.facet_key == facet_key).one_or_none()
+    if existing is not None:
+        raise HTTPException(409, "facet_key already exists")
+    row = CapabilityFacet(
+        facet_key=facet_key,
+        layer=layer,
+        facet_text=facet_text,
+        status=str(body.get("status") or "claimed"),
+        source=str(body.get("source") or "manual_seed"),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _serialize_capability_facet(row)
+
+
+@app.post("/capabilities/telemetry/refresh")
+def trigger_capability_telemetry(db: Session = Depends(get_db)):
+    """Manual trigger for the runtime-telemetry rollup. Same op the nightly
+    lifespan loop fires at 03:00 local. Useful for FE-driven 'refresh now'.
+    """
+    from .services.capability_service import capability_service
+    return capability_service.run_telemetry_rollup(db)
+
+
+@app.post("/capabilities/boot-scan/refresh")
+def trigger_capability_boot_scan(db: Session = Depends(get_db)):
+    """Manual trigger for the boot-time mechanical-layer scan. Same op the
+    lifespan startup hook fires. Use when you've added a tool/route mid-session
+    without restarting uvicorn."""
+    from .services.capability_service import capability_service
+    return capability_service.refresh_mechanical_layer(db)
+
+
+def _serialize_reflection(r: Reflection) -> dict:
+    return {
+        "id": r.id,
+        "message_id": r.message_id,
+        "conversation_id": r.conversation_id,
+        "user_critique_present": bool(r.user_critique_present),
+        "critique_summary": r.critique_summary,
+        "action_vs_described": r.action_vs_described,
+        "gap_exposed": r.gap_exposed,
+        "proposed_self_fix": r.proposed_self_fix,
+        "severity": r.severity,
+        "model": r.model,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+@app.get("/reflections")
+def list_reflections(
+    conversation_id: int | None = None,
+    message_id: int | None = None,
+    severity_min: int = 1,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """List reflections, filterable by conversation, message, or min severity.
+    Default returns most-recent 50 across the whole DB."""
+    q = db.query(Reflection)
+    if conversation_id is not None:
+        q = q.filter(Reflection.conversation_id == conversation_id)
+    if message_id is not None:
+        q = q.filter(Reflection.message_id == message_id)
+    q = q.filter(Reflection.severity >= severity_min)
+    rows = q.order_by(Reflection.id.desc()).limit(min(max(limit, 1), 500)).all()
+    return {"reflections": [_serialize_reflection(r) for r in rows]}
 
 
 @app.get("/eval/baselines")

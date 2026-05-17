@@ -236,10 +236,20 @@ class Orchestrator:
         if skip_normal_reply and feedback_ack is not None:
             tb.reply(feedback_ack, usage={"short_circuit": True})
             short_trace = tb.build()
-            conversation_service.add_message(
+            short_assistant_msg = conversation_service.add_message(
                 conv.id, "assistant", feedback_ack, db,
                 trace=json.dumps(short_trace) if short_trace else None,
             )
+            # Reflexion fires even on short-circuit replies — these are the
+            # exact turns most prone to the "logged, didn't act" failure mode.
+            if short_assistant_msg is not None:
+                from .reflexion_service import reflexion_service as _rxn
+                _rxn.reflect_async(
+                    user_msg=saved_message,
+                    assistant_reply=feedback_ack,
+                    message_id=short_assistant_msg.id,
+                    conversation_id=conv.id,
+                )
             # Reconcile any memory candidates off-thread even on short-circuit.
             if memory_candidates:
                 threading.Thread(
@@ -364,6 +374,19 @@ class Orchestrator:
                 args=(memory_candidates,),
                 daemon=True,
             ).start()
+
+        # Per-turn reflexion (Shinn et al. — see services/reflexion_service.py).
+        # Runs in its own thread with its own SessionLocal, never blocks the
+        # reply path. Fires AFTER the ToolCall message_id backfill above so
+        # the reflexion thread sees its tools stitched to this message row.
+        if assistant_msg is not None:
+            from .reflexion_service import reflexion_service as _rxn
+            _rxn.reflect_async(
+                user_msg=saved_message,
+                assistant_reply=response,
+                message_id=assistant_msg.id,
+                conversation_id=conv.id,
+            )
 
         # Refresh the rolling conversation summary every N messages. Also
         # off-thread — adds an LLM call but shouldn't block the user.

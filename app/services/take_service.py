@@ -32,7 +32,17 @@ from ..llm.client import llm_client
 from . import github as gh
 from .item_service import item_service
 
-PROMPT_VERSION = "v2"
+# Per-kind prompt versions. Bump when the prompt/input shape changes so
+# stored rows from the prior version are auto-regenerated on next read.
+PROMPT_VERSIONS: dict[str, str] = {"focus": "v2", "dev": "v3"}
+
+
+def _version_for(kind: str) -> str:
+    return PROMPT_VERSIONS.get(kind, "v1")
+
+
+# Back-compat: a single PROMPT_VERSION constant some old callers reference.
+PROMPT_VERSION = PROMPT_VERSIONS["dev"]
 
 
 def _strip_html(html: str | None) -> str:
@@ -185,19 +195,55 @@ def _build_dev_inputs(db: Session) -> tuple[str, list[str], list[str]]:
 def _dev_prompt(commit_block: str) -> str:
     return (
         "You are Gooni — Daniel's AI notebook companion.\n\n"
-        "Answer the question 'what did I ship this WEEK?' using the commits + "
-        "merged PRs below. Write 2-4 short sentences (max 90 words) that "
-        "describe the dominant threads of work. Group related commits — if "
-        "10 commits all touch the dashboard, say 'revamped the dashboard' "
-        "once instead of listing each. Call out merged PRs by name when they "
-        "land a feature (you can lead with 'Shipped PR #N: …'). If the week "
-        "is mostly chores (typo fixes, dep bumps, version commits), say so "
-        "plainly in one line.\n\n"
-        "Voice: first-person ('I shipped…' / 'I refactored…'), plain, "
-        "slightly self-aware. No headers, no bullets, no sign-off.\n\n"
+        "Answer 'what did I ship this WEEK?' for a head-of-engineering audience "
+        "reading the dashboard. Group the commits + merged PRs below into 3-5 "
+        "THEMES — areas of work, not individual PRs. Themes might be things like "
+        "'Chat quality', 'Memory', 'Platform', 'Dashboard', 'Capabilities', "
+        "'Infra' — pick whatever shape actually fits this week's work. Each "
+        "theme summary is ONE short sentence describing the substance. NO PR "
+        "numbers, NO commit SHAs, NO 'shipped PR #N'.\n\n"
+        "Output ONLY valid JSON — a single array of objects with shape "
+        '`[{"theme": "Chat quality", "summary": "Streaming UX + feedback ack loop."}]`. '
+        "No prose, no markdown fences, no preamble. Max 5 themes. If the week is "
+        "mostly chores (typo fixes, dep bumps, version commits), return a single "
+        'theme `{"theme": "Maintenance", "summary": "Mostly chores — typo fixes, version bumps."}`.\n\n'
         f"Commits + merged PRs (last 7 days):\n{commit_block or '(none)'}\n\n"
-        "This week's dev take:"
+        "JSON:"
     )
+
+
+def _parse_dev_themes(raw: str) -> str:
+    """Validate the LLM's themed-JSON response. Returns a JSON-stringified
+    array of `{theme, summary}` objects, or empty string on parse failure.
+
+    Stored verbatim in `take_text`; frontend tries `JSON.parse` and falls
+    back to plain-text rendering for legacy v2 (paragraph) rows.
+    """
+    if not raw:
+        return ""
+    # Strip common LLM fence wrappers just in case the model leaks them.
+    s = raw.strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```(?:json)?\s*", "", s)
+        s = re.sub(r"\s*```$", "", s)
+    try:
+        parsed = json.loads(s)
+    except json.JSONDecodeError as e:
+        print(f"[take_service] dev take JSON parse failed: {e}")
+        return ""
+    if not isinstance(parsed, list):
+        return ""
+    cleaned: list[dict[str, str]] = []
+    for item in parsed[:5]:
+        if not isinstance(item, dict):
+            continue
+        theme = str(item.get("theme") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        if theme and summary:
+            cleaned.append({"theme": theme, "summary": summary})
+    if not cleaned:
+        return ""
+    return json.dumps(cleaned)
 
 
 def generate_dev_take(db: Session) -> tuple[str, dict[str, Any]]:
@@ -206,11 +252,11 @@ def generate_dev_take(db: Session) -> tuple[str, dict[str, Any]]:
         return "", {"commit_shas": [], "pr_urls": []}
     prompt = _dev_prompt(commit_block)
     try:
-        take = llm_client.generate_simple_completion(prompt, max_tokens=200)
-        take = take.strip().strip('"').strip("'")
+        raw = llm_client.generate_simple_completion(prompt, max_tokens=400, temperature=0.4)
     except Exception as e:
         print(f"[take_service] dev take failed: {e}")
-        take = ""
+        raw = ""
+    take = _parse_dev_themes(raw)
     return take, {"commit_shas": shas, "pr_urls": pr_urls}
 
 
@@ -253,7 +299,8 @@ def get_or_generate(
         .filter(GooniTake.day == today, GooniTake.kind == kind)
         .first()
     )
-    if existing and not force:
+    target_version = _version_for(kind)
+    if existing and not force and existing.prompt_version == target_version:
         return _serialize(existing)
 
     if kind == "focus":
@@ -274,7 +321,7 @@ def get_or_generate(
     if existing:
         existing.take_text = take_text
         existing.model = llm_client.chat_model
-        existing.prompt_version = PROMPT_VERSION
+        existing.prompt_version = target_version
         existing.sources = json.dumps(sources)
         db.commit()
         db.refresh(existing)
@@ -285,7 +332,7 @@ def get_or_generate(
         kind=kind,
         take_text=take_text,
         model=llm_client.chat_model,
-        prompt_version=PROMPT_VERSION,
+        prompt_version=target_version,
         sources=json.dumps(sources),
     )
     db.add(row)

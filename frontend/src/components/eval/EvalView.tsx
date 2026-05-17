@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChatAuditPanel } from "./ChatAuditPanel";
+import { useQuery } from "@tanstack/react-query";
+import { ActiveRulesCard } from "./ActiveRulesCard";
 import {
+  BASE,
   deleteMessageRating,
   dispatchEvalToCc,
   fetchEvalSegmentFull,
   fetchEvalToolsLegend,
+  fetchReflections,
   listEvalSegments,
   patchEvalSummary,
   postEvalFeedback,
@@ -17,6 +20,7 @@ import {
   type EvalToolLegendEntry,
   type MessageTraceStep,
 } from "../../services/api";
+import { Check, Minus, X } from "lucide-react";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -49,10 +53,18 @@ const RATING_OPTIONS: { value: 1 | 2 | 3; label: string; emoji: string }[] = [
   { value: 3, label: "Good", emoji: "👍" },
 ];
 
-type Tab = "eval" | "audit" | "runs";
+// "audit" tab merged into "convos" — active feedback rules now render at
+// the top of the convos surface and the chat-audit feed is reachable via
+// the legacy /chat-audit route for power-user use. See PR #259 ticket.
+type Tab = "convos" | "runs";
 
-export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void } = {}) {
-  const [tab, setTab] = useState<Tab>("eval");
+export function EvalView({ onOpenNote, initialSegmentId = null }: {
+  onOpenNote?: (noteId: number) => void;
+  // When the user deep-links via ?segment=N (e.g. from the Ops eval section's
+  // "open full" button), pre-open that segment's drilldown on mount.
+  initialSegmentId?: number | null;
+} = {}) {
+  const [tab, setTab] = useState<Tab>("convos");
   const [segments, setSegments] = useState<EvalSegmentSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -96,7 +108,13 @@ export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void
   }, [hideRated]);
   const [search, setSearch] = useState("");
 
-  const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(null);
+  const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(initialSegmentId);
+
+  // Honor a fresh ?segment=N navigation after mount too — e.g. user clicks
+  // "open full" on an Ops drilldown while already on /audit.
+  useEffect(() => {
+    if (initialSegmentId != null) setSelectedSegmentId(initialSegmentId);
+  }, [initialSegmentId]);
 
   async function loadSegments() {
     setLoading(true);
@@ -272,7 +290,7 @@ export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "#1C1C1E" }}>Audit</h1>
-          {tab === "eval" && (
+          {tab === "convos" && (
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span
                 style={{ fontSize: 11, color: "#8E8E93" }}
@@ -288,22 +306,20 @@ export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void
           )}
         </div>
         <div style={{ display: "flex", gap: 0, marginTop: 14 }}>
-          <TabButton active={tab === "eval"} onClick={() => setTab("eval")}>Eval</TabButton>
-          <TabButton active={tab === "audit"} onClick={() => setTab("audit")}>Chat audit</TabButton>
-          <TabButton active={tab === "runs"} onClick={() => setTab("runs")}>Eval runs</TabButton>
+          <TabButton active={tab === "convos"} onClick={() => setTab("convos")}>Conversations</TabButton>
+          <TabButton active={tab === "runs"} onClick={() => setTab("runs")}>Runs</TabButton>
         </div>
       </div>
 
-      {tab === "audit" ? (
-        // Inline the chat-audit content so the tab is the actual thing, not a
-        // jump-link. Same component is reused by the legacy /chat-audit route.
-        <div style={{ flex: 1, overflow: "auto", background: "#FAFAFA" }}>
-          <ChatAuditPanel />
-        </div>
-      ) : tab === "runs" ? (
+      {tab === "runs" ? (
         <EvalRunsPanel />
       ) : (
         <>
+          {/* Active feedback rules — moved up from the old Chat audit tab.
+              Renders at most ~8 rules (320px scroll cap) so the segment
+              list stays the primary surface. */}
+          <ActiveRulesCard />
+
           {/* Filter rail */}
           <div
             style={{
@@ -536,7 +552,10 @@ function SegmentCard({
           <Dot color={sourceStyle.accent} />
           {sourceStyle.label}
         </span>
-        <StatusPill status={seg.eval_status} />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          {seg.is_active && <ActiveBadge />}
+          <StatusPill status={seg.eval_status} />
+        </span>
       </div>
       <div style={{ fontSize: 13, color: "#1C1C1E", lineHeight: 1.45, flex: 1 }}>
         {seg.preview
@@ -866,6 +885,7 @@ function EvalDetailView({
               <Dot color={SOURCE_STYLE[seg.source]?.accent ?? "#8E8E93"} />
               {SOURCE_STYLE[seg.source]?.label}
             </span>
+            {seg.is_active && <ActiveBadge />}
             <StatusPill status={seg.eval_status} />
           </>
         )}
@@ -1356,6 +1376,76 @@ function MessageCard({
       {isAssistant && msg.tool_calls.length > 0 && (
         <ToolCallsSection toolCalls={msg.tool_calls} />
       )}
+
+      {isAssistant && <SelfTakePanel messageId={msg.id} />}
+    </div>
+  );
+}
+
+// ── Gooni's Self-Take ─────────────────────────────────────────────────────────
+//
+// Renders the per-message Reflection row (from the reflexion_service that
+// fires after every assistant reply). Color-coded by severity:
+//   1 = clean (gray, hidden by default since clean reflections are noise)
+//   2 = notable (yellow)
+//   3 = load-bearing (red)
+// Pulls lazily — only fetches when the panel mounts in EvalView's drill-down.
+function SelfTakePanel({ messageId }: { messageId: number }) {
+  const { data } = useQuery({
+    queryKey: ["reflections", "by-message", messageId],
+    queryFn: () => fetchReflections({ messageId, limit: 1 }),
+    staleTime: 60_000,
+  });
+  const reflection = data?.reflections?.[0];
+  if (!reflection) return null;
+  // Hide sev 1 by default — they're "nothing to learn" rows; keep them in
+  // the DB for classifier eval, just don't clutter the UI per-message.
+  if (reflection.severity < 2) return null;
+
+  const palette = (
+    reflection.severity === 3
+      ? { bg: "#FFF5F5", border: "#FFD3D3", accent: "#FF3B30", label: "load-bearing" }
+      : { bg: "#FFFBEA", border: "#FFE6A6", accent: "#FF9500", label: "notable" }
+  );
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: "10px 12px",
+        background: palette.bg,
+        border: `1px solid ${palette.border}`,
+        borderLeft: `3px solid ${palette.accent}`,
+        borderRadius: 8,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.3,
+          color: palette.accent,
+          fontWeight: 600,
+          marginBottom: 6,
+        }}
+      >
+        Gooni's self-take · sev {reflection.severity} · {palette.label} · {reflection.action_vs_described}
+      </div>
+      {reflection.critique_summary && (
+        <div style={{ fontSize: 13, color: "#1C1C1E", marginBottom: 4 }}>
+          <strong>Daniel pushed back:</strong> {reflection.critique_summary}
+        </div>
+      )}
+      {reflection.gap_exposed && (
+        <div style={{ fontSize: 13, color: "#1C1C1E", marginBottom: 4 }}>
+          <strong>Gap:</strong> {reflection.gap_exposed}
+        </div>
+      )}
+      {reflection.proposed_self_fix && (
+        <div style={{ fontSize: 13, color: "#1C1C1E" }}>
+          <strong>Proposed fix:</strong> {reflection.proposed_self_fix}
+        </div>
+      )}
     </div>
   );
 }
@@ -1510,6 +1600,9 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
 
 // ── Per-message rating row (👎/😐/👍 + optional comment) ─────────────────────
 
+const RATING_COLOR_EVAL: Record<number, string> = { 1: "#791F1F", 2: "#6B7280", 3: "#0F6E56" };
+const RATING_LABEL_EVAL: Record<number, string> = { 1: "bad", 2: "neutral", 3: "good" };
+
 function MessageRatingRow({
   segmentId,
   messageId,
@@ -1521,21 +1614,20 @@ function MessageRatingRow({
   existing: EvalMessage["rating"];
   onChanged: () => void;
 }) {
-  const [pending, setPending] = useState(false);
-  const [editingComment, setEditingComment] = useState(false);
   const [comment, setComment] = useState(existing?.comment ?? "");
+  const [pending, setPending] = useState(false);
 
-  // Sync local comment buffer when the row remounts onto a different msg
-  // or the server returns updated state.
   useEffect(() => {
     setComment(existing?.comment ?? "");
   }, [existing?.comment, messageId]);
 
+  const dirty = (existing?.comment ?? "") !== comment;
+  const canSave = !!existing?.rating && dirty && !pending;
+
   async function setRating(rating: 1 | 2 | 3) {
     setPending(true);
     try {
-      // If clicking the already-active rating, clear it instead.
-      if (existing?.rating === rating && !editingComment) {
+      if (existing?.rating === rating) {
         await deleteMessageRating(messageId);
       } else {
         await putMessageRating(segmentId, messageId, {
@@ -1550,14 +1642,13 @@ function MessageRatingRow({
   }
 
   async function saveComment() {
-    if (!existing) return;
+    if (!existing?.rating) return;
     setPending(true);
     try {
       await putMessageRating(segmentId, messageId, {
         rating: existing.rating,
         comment: comment.trim() || null,
       });
-      setEditingComment(false);
       onChanged();
     } finally {
       setPending(false);
@@ -1572,105 +1663,94 @@ function MessageRatingRow({
         borderTop: "1px dashed rgba(0,0,0,0.06)",
         display: "flex",
         flexDirection: "column",
-        gap: 6,
+        gap: 8,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ fontSize: 11, color: "#8E8E93", marginRight: 4 }}>Reply</span>
-        {RATING_OPTIONS.map((opt) => {
-          const active = existing?.rating === opt.value;
+        {[1, 2, 3].map((r) => {
+          const active = existing?.rating === r;
+          const icon = r === 1
+            ? <X size={14} strokeWidth={3} />
+            : r === 2
+              ? <Minus size={14} strokeWidth={3} />
+              : <Check size={14} strokeWidth={3} />;
           return (
             <button
-              key={opt.value}
-              onClick={() => setRating(opt.value)}
+              key={r}
+              onClick={() => setRating(r as 1 | 2 | 3)}
               disabled={pending}
-              title={opt.label}
+              title={RATING_LABEL_EVAL[r]}
               style={{
-                background: active ? "#0A84FF" : "transparent",
-                color: active ? "#FFFFFF" : "#3C3C43",
-                border: active ? "none" : "1px solid #E5E5EA",
-                borderRadius: 6,
-                padding: "3px 8px",
+                width: 28, height: 28, borderRadius: 8,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                background: active ? RATING_COLOR_EVAL[r] : "transparent",
+                border: `1px solid ${active ? RATING_COLOR_EVAL[r] : "#E5E5EA"}`,
+                color: active ? "#fff" : RATING_COLOR_EVAL[r],
                 cursor: pending ? "wait" : "pointer",
-                fontSize: 13,
-                fontFamily: FONT,
-                lineHeight: 1.2,
+                padding: 0, fontFamily: "inherit",
+                transition: "background 120ms ease, transform 120ms ease",
+                transform: active ? "scale(1.05)" : "scale(1)",
               }}
             >
-              {opt.emoji}
+              {icon}
             </button>
           );
         })}
-        {existing && (
-          <button
-            onClick={() => setEditingComment((v) => !v)}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#0A84FF",
-              fontSize: 11,
-              fontFamily: FONT,
-              cursor: "pointer",
-              marginLeft: 4,
-            }}
-          >
-            {editingComment ? "Cancel" : existing.comment ? "Edit comment" : "+ comment"}
-          </button>
-        )}
-        {existing?.comment && !editingComment && (
-          <span
-            style={{
-              fontSize: 11,
-              color: "#3C3C43",
-              fontStyle: "italic",
-              marginLeft: 4,
-              maxWidth: 360,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={existing.comment}
-          >
-            "{existing.comment}"
-          </span>
-        )}
       </div>
-      {editingComment && (
-        <div style={{ display: "flex", gap: 6 }}>
-          <textarea
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="Why this rating? (optional)"
-            rows={2}
-            style={{
-              flex: 1,
-              fontSize: 12,
-              fontFamily: FONT,
-              padding: 6,
-              border: "1px solid #E5E5EA",
-              borderRadius: 6,
-              resize: "vertical",
-            }}
-          />
+      {/* Full-width comment textbox always visible. Manual save — no autosave.
+          Save button enables only when there's a rating + a buffer change. */}
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder={existing?.rating ? "why this rating?" : "pick a rating above to save a note"}
+        rows={3}
+        style={{
+          width: "100%",
+          fontSize: 12.5,
+          fontFamily: FONT,
+          lineHeight: 1.5,
+          padding: "8px 10px",
+          border: "1px solid #E5E5EA",
+          borderRadius: 8,
+          resize: "vertical",
+          outline: "none",
+          background: "#fff",
+          color: "#1C1C1E",
+        }}
+      />
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+        {dirty && (
           <button
-            onClick={saveComment}
+            onClick={() => setComment(existing?.comment ?? "")}
             disabled={pending}
             style={{
-              background: "#0A84FF",
-              color: "#FFFFFF",
-              border: "none",
-              borderRadius: 6,
-              padding: "0 12px",
-              fontSize: 12,
-              fontWeight: 600,
-              fontFamily: FONT,
-              cursor: pending ? "wait" : "pointer",
+              padding: "5px 12px", borderRadius: 6,
+              border: "1px solid #E5E5EA", background: "transparent",
+              color: "#6E6E73", fontSize: 11.5, fontWeight: 500,
+              cursor: pending ? "wait" : "pointer", fontFamily: FONT,
             }}
           >
-            Save
+            Cancel
           </button>
-        </div>
-      )}
+        )}
+        <button
+          onClick={saveComment}
+          disabled={!canSave}
+          title={!existing?.rating ? "pick a rating first" : !dirty ? "no changes" : "save note"}
+          style={{
+            padding: "5px 12px", borderRadius: 6,
+            border: "none",
+            background: canSave ? "#0A84FF" : "#E5E5EA",
+            color: canSave ? "#fff" : "#8E8E93",
+            fontSize: 11.5, fontWeight: 600,
+            cursor: canSave ? "pointer" : "not-allowed",
+            fontFamily: FONT,
+          }}
+        >
+          {existing?.comment ? "Save" : "Add note"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -2131,6 +2211,35 @@ function Dot({ color }: { color: string }) {
   );
 }
 
+// Pulsing green badge that signals "this convo is currently active" —
+// last_message_at < 30 min ago, server-derived. Halo ring uses keyframes
+// so the dot reads as alive without being loud.
+function ActiveBadge() {
+  return (
+    <span
+      title="Active conversation — last message <30 min ago"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        fontSize: 10, color: "#0F6E56", fontWeight: 600,
+        letterSpacing: 0.4, textTransform: "uppercase",
+      }}
+    >
+      <style>{`
+        @keyframes gooni-active-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); }
+          50%      { box-shadow: 0 0 0 5px rgba(34,197,94,0); }
+        }
+      `}</style>
+      <span style={{
+        width: 7, height: 7, borderRadius: "50%",
+        background: "#22C55E",
+        animation: "gooni-active-pulse 1.6s ease-out infinite",
+      }} />
+      live
+    </span>
+  );
+}
+
 function StatusPill({ status }: { status: EvalStatus }) {
   const s = STATUS_STYLE[status];
   return (
@@ -2255,7 +2364,7 @@ function EvalRunsPanel() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/eval/runs");
+        const res = await fetch(`${BASE}/eval/runs`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
@@ -2347,7 +2456,7 @@ function EvalRunsPanel() {
         {selected ? (
           <iframe
             key={selected}
-            src={`/eval/runs/${encodeURIComponent(selected)}`}
+            src={`${BASE}/eval/runs/${encodeURIComponent(selected)}`}
             style={{ width: "100%", height: "100%", border: "none" }}
             title={selected}
           />

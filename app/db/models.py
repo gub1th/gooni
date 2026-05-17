@@ -541,6 +541,9 @@ class BacklogTicket(Base):
     #   otherwise → Todo column
     board_status = Column(String, nullable=True)
     pr_url = Column(Text, nullable=True)
+    # Free-form ticket body — context, design notes, follow-up scratch.
+    # subtitle stays as the one-line tagline; notes is the multi-line story.
+    notes = Column(Text, nullable=True)
     # Set when this ticket has been promoted into Daniel's todo list.
     # Promote = create a Todo with focus_id null, link it here. Demote =
     # delete the linked Todo, clear this column. When the linked todo's
@@ -629,6 +632,10 @@ class Settings(Base):
     # gets this verbatim plus today's todos/focuses data and produces the
     # outgoing chat message. Empty string = use the bundled default.
     nudge_prompt = Column(Text, nullable=False, default="")
+    # YYYY-MM-DD idempotency token for the daily capability-telemetry rollup
+    # (same shape as nudge_last_sent_day). Prevents double-fire when Fly
+    # scales horizontally — the loop checks this before doing work.
+    capability_telemetry_last_run_day = Column(String, nullable=True)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
@@ -1051,4 +1058,102 @@ class WaProcessedId(Base):
 
     wamid = Column(String, primary_key=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class Reflection(Base):
+    """Per-turn self-evaluation row. Written asynchronously after every
+    assistant Message lands. The Reflexion pattern (Shinn et al.) — Gooni
+    judges its own most recent reply against Daniel's intent + tool outcomes
+    and surfaces gap_exposed / proposed_self_fix.
+
+    Severity 1 = clean turn, 2 = notable, 3 = load-bearing. All rows persist
+    (even severity 1) so the reflexion classifier itself stays eval-able.
+
+    When severity >= 2 and gap_exposed is non-null, the gap text gets embedded
+    and cosine-clustered against prior reflections. A cluster of >= 3 hits at
+    similarity > 0.8 auto-promotes a behavioral CapabilityFacet — that's how
+    Gooni learns persistent patterns about itself without nightly cron jobs.
+    """
+
+    __tablename__ = "reflections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(
+        Integer,
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    conversation_id = Column(
+        Integer,
+        ForeignKey("conversations.id"),
+        nullable=False,
+        index=True,
+    )
+    user_critique_present = Column(Boolean, nullable=False, default=False)
+    critique_summary = Column(Text, nullable=True)
+    action_vs_described = Column(String, nullable=False)
+    # 'acted' | 'described' | 'mixed' | 'na'
+    gap_exposed = Column(Text, nullable=True)
+    gap_embedding = deferred(Column(Text, nullable=True))
+    # json.dumps([float, ...]) — same convention as Note.embedding etc.
+    proposed_self_fix = Column(Text, nullable=True)
+    severity = Column(Integer, nullable=False, default=1)
+    # 1 = clean, 2 = notable, 3 = load-bearing
+    model = Column(String, nullable=False)
+    created_at = Column(
+        DateTime, default=datetime.utcnow, nullable=False, index=True
+    )
+
+
+class CapabilityFacet(Base):
+    """One row per discrete capability claim Gooni makes about itself.
+
+    Layers:
+      - mechanical    — tool / route / channel primitives derived from the
+                        codebase. Auto-populated via boot-time introspection.
+      - functional    — composed "what I can do for you" facets.
+                        Human / PR-audit curated.
+      - behavioral    — emergent patterns from reflection clustering
+                        ("I keep defaulting to logging instead of acting").
+      - architectural — model, runtime, memory window, ambient-sensing
+                        status. Rarely changes; manual_seed source.
+
+    Status transitions (idempotent, never destructive):
+      claimed     — initial state from any source.
+      verified    — ToolCall telemetry confirms recent successful invocations.
+      unverified  — no successful invocations in 30d.
+      broken      — >=3 failed invocations in 7d (evidence_json snapshots).
+      removed     — boot scan no longer sees this tool/route in the registry.
+
+    facet_key is a stable slug (e.g. "tool.add_note", "route.POST./focuses").
+    UNIQUE on facet_key so all sources upsert against the same row.
+    """
+
+    __tablename__ = "capability_facets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    layer = Column(String, nullable=False, index=True)
+    # 'mechanical' | 'functional' | 'behavioral' | 'architectural'
+    facet_key = Column(String, nullable=False, index=True)
+    facet_text = Column(Text, nullable=False)
+    status = Column(String, nullable=False, default="claimed")
+    # 'claimed' | 'verified' | 'unverified' | 'broken' | 'removed'
+    source = Column(String, nullable=False)
+    # 'code_introspection' | 'pr_audit' | 'reflection_cluster' |
+    # 'manual_seed' | 'chat_tool_update'
+    evidence_json = Column(Text, nullable=True)
+    last_verified_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("facet_key", name="uq_capability_facet_key"),
+    )
+
 

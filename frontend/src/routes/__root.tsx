@@ -3,6 +3,7 @@ import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { THEME_PALETTES, useGooniThemeStore } from "../stores/useGooniThemeStore";
 import { QuickNav } from "../components/QuickNav";
 import { QuickComposer } from "../components/QuickComposer";
+import { ErrorView, NotFoundView } from "../components/ErrorView";
 
 // Pushes the current theme's tokens to CSS custom properties on <html>. Components
 // read them via `var(--gooni-text, ...)` etc., with sensible light fallbacks so
@@ -51,4 +52,10 @@ export const Route = createRootRoute({
       <QuickComposer />
     </>
   ),
+  // Tanstack Router's `errorComponent` doubles as a React error boundary
+  // for everything below — catches render throws in any child route /
+  // component so a bad .map() doesn't blank the page. `notFoundComponent`
+  // owns unmatched URLs.
+  errorComponent: ErrorView,
+  notFoundComponent: NotFoundView,
 });

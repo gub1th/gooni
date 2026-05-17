@@ -1,5 +1,8 @@
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+// Exported so non-fetch consumers (iframe src, image previews, etc) can
+// build absolute URLs to the backend instead of relative paths that fall
+// through the Vite SPA index.html and return HTML.
+export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export function getStoredToken(): string | null {
   return localStorage.getItem("gooni_token");
@@ -619,7 +622,14 @@ export async function fetchPublicVisitCount(): Promise<{ unique_visitors: number
 
 // Status: 'pending' was dropped in the focus-flow redesign — every focus is
 // either committed or someday now.
-export type FocusStatus = "committed" | "someday";
+// 'dormant' added by focus-drift (auto-flipped after 3 missed bind
+// runs); 'evolved' set by /focuses/{id}/fork. Both are excluded from
+// the active binding game on the backend.
+export type FocusStatus =
+  | "committed"
+  | "someday"
+  | "dormant"
+  | "evolved";
 // Pace bucket — Quick (one-off, today) vs Slow burn (multi-day).
 export type FocusScale = "quick" | "slow";
 
@@ -824,6 +834,16 @@ export interface ApiFocus {
   completed_at: string | null;
   sort_order: number;
   source_note_id: number | null;
+  // Drift / lineage cols populated by the focus-drift PR. Used by
+  // the dashboard's FocusCard to render drifting / dormant / lineage
+  // states.
+  last_seen_in_synth: string | null;
+  missed_run_count: number;
+  drift_flagged_at: string | null;
+  promoted_from_candidate_id: number | null;
+  evolved_from_focus_id: number | null;
+  evolved_from_name: string | null;
+  signals_count: number;
   created_at: string | null;
   updated_at: string | null;
   // Tree-node compat fields baked in by `_focus_tree_node` so the same
@@ -831,6 +851,16 @@ export interface ApiFocus {
   children?: unknown[];
   progress?: { done: number; total: number };
   stale?: boolean;
+}
+
+export interface ApiFocusEvidence {
+  kind: string;
+  id: number;
+  snippet: string;
+}
+
+export interface ApiFocusDetail extends ApiFocus {
+  evidence: ApiFocusEvidence[];
 }
 
 export async function fetchFocuses(): Promise<ApiFocus[]> {
@@ -1013,6 +1043,9 @@ export interface ApiBacklogTicket {
   subtitle: string | null;
   board_status: BoardStatus | null;
   pr_url: string | null;
+  // Free-form ticket body — multi-line context, design notes, follow-up
+  // scratch. Subtitle stays as the one-line tagline; notes is the story.
+  notes: string | null;
   // Set when this backlog ticket was promoted into a todo via
   // POST /backlog/tickets/{id}/promote. Null means "engineering-only,
   // not on Daniel's todo list yet".
@@ -1400,6 +1433,35 @@ export async function fetchTakesHistory(
   return res.json() as Promise<GooniTakePayload[]>;
 }
 
+// Dev take v3 → JSON array of {theme, summary}. Older v2 rows store a
+// plain paragraph. Parser returns either shape so callers can branch on
+// the rendering path.
+export interface DevThemeItem { theme: string; summary: string; }
+export type DevTakeView =
+  | { kind: "themes"; themes: DevThemeItem[] }
+  | { kind: "text"; text: string }
+  | { kind: "empty" };
+
+export function parseDevTake(raw: string | undefined | null): DevTakeView {
+  if (!raw || !raw.trim()) return { kind: "empty" };
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const themes: DevThemeItem[] = [];
+      for (const item of parsed) {
+        if (!item || typeof item !== "object") continue;
+        const theme = String((item as { theme?: unknown }).theme ?? "").trim();
+        const summary = String((item as { summary?: unknown }).summary ?? "").trim();
+        if (theme && summary) themes.push({ theme, summary });
+      }
+      if (themes.length) return { kind: "themes", themes };
+    }
+  } catch {
+    // fall through to plain-text render
+  }
+  return { kind: "text", text: raw };
+}
+
 // ── Conversations ──────────────────────────────────────────────────────────────
 
 export interface ApiConversation {
@@ -1755,6 +1817,9 @@ export interface EvalSegmentSummary {
   dispatched_note_id: number | null;
   preview: string | null;
   flag_count: number;
+  // True when last_message_at < 30 min ago. Derived server-side so the
+  // FE can render a "currently active" pulsing dot without polling time.
+  is_active?: boolean;
 }
 
 export interface EvalSegmentList {
@@ -1790,6 +1855,18 @@ export interface EvalToolCall {
   duration_ms: number | null;
 }
 
+export interface EvalReflectionInline {
+  id: number;
+  severity: number;
+  user_critique_present: boolean;
+  critique_summary: string | null;
+  action_vs_described: string;
+  gap_exposed: string | null;
+  proposed_self_fix: string | null;
+  model: string;
+  created_at: string | null;
+}
+
 export interface EvalMessage {
   id: number;
   role: "user" | "assistant";
@@ -1801,6 +1878,7 @@ export interface EvalMessage {
   step_feedback: EvalStepFeedback[];
   rating: EvalMessageRating | null;
   tool_calls: EvalToolCall[];
+  reflection: EvalReflectionInline | null;
 }
 
 export interface EvalSegmentFull {
@@ -2073,4 +2151,304 @@ export async function unlogHabitEntry(habitId: number, day: string): Promise<voi
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to unlog entry");
+}
+
+// ── Focus candidates + drift mutators ──────────────────────────────────
+
+export interface ApiFocusCandidate {
+  id: number;
+  name: string;
+  endgoal: string | null;
+  category: string;
+  confidence: number;
+  reasoning: string | null;
+  cluster_signature: string;
+  evidence: ApiFocusEvidence[];
+  parent_candidate_id: number | null;
+  status: "proposed" | "promoted" | "dismissed";
+  promoted_focus_id: number | null;
+  promoted_at: string | null;
+  dismissed_at: string | null;
+  first_seen_in_synth: string | null;
+  last_seen_in_synth: string | null;
+  seen_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export async function fetchFocusCandidates(
+  status: "proposed" | "promoted" | "dismissed" | "all" = "proposed",
+): Promise<ApiFocusCandidate[]> {
+  const res = await apiFetch(`${BASE}/focus-candidates?status=${status}`);
+  if (!res.ok) throw new Error("Failed to fetch focus candidates");
+  return res.json();
+}
+
+export async function runFocusCandidates(): Promise<{
+  synth_stats: unknown;
+  binding: unknown;
+  persisted: ApiFocusCandidate[];
+}> {
+  const res = await apiFetch(`${BASE}/focus-candidates/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error("Failed to run focus synth");
+  return res.json();
+}
+
+export async function promoteFocusCandidate(
+  id: number,
+): Promise<{ candidate: ApiFocusCandidate; focus_id: number }> {
+  const res = await apiFetch(`${BASE}/focus-candidates/${id}/promote`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to promote candidate");
+  return res.json();
+}
+
+export async function dismissFocusCandidate(
+  id: number,
+): Promise<ApiFocusCandidate> {
+  const res = await apiFetch(`${BASE}/focus-candidates/${id}/dismiss`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to dismiss candidate");
+  return res.json();
+}
+
+export async function fetchFocusDetail(id: number): Promise<ApiFocusDetail> {
+  const res = await apiFetch(`${BASE}/focuses/${id}`);
+  if (!res.ok) throw new Error("Failed to fetch focus detail");
+  return res.json();
+}
+
+export async function renameFocus(
+  id: number, body: { text?: string; endgoal?: string },
+): Promise<ApiFocus> {
+  const res = await apiFetch(`${BASE}/focuses/${id}/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to rename focus");
+  return res.json();
+}
+
+export async function forkFocus(
+  id: number, body: { new_text: string; new_endgoal?: string },
+): Promise<{ old_focus: ApiFocus; new_focus: ApiFocus }> {
+  const res = await apiFetch(`${BASE}/focuses/${id}/fork`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to fork focus");
+  return res.json();
+}
+
+// ── Ops mode (backlog + evals + tool failures) ─────────────────────────
+
+export interface ToolCallFailure {
+  id: number;
+  tool_name: string;
+  error: string;
+  conversation_id: number | null;
+  message_id: number | null;
+  started_at: string | null;
+}
+
+export async function fetchToolCallFailures(
+  days = 7, limit = 20,
+): Promise<ToolCallFailure[]> {
+  const res = await apiFetch(`${BASE}/tool-calls/failures?days=${days}&limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch tool failures");
+  return res.json();
+}
+
+export interface ApiEvalSegment {
+  id: number;
+  conversation_id: number;
+  source: string;
+  last_message_at: string | null;
+  message_count: number;
+  eval_status: "not_yet" | "pending" | "done";
+  overall_rating: number | null;
+  overall_comment: string | null;
+  preview?: string;
+  title?: string | null;
+  is_active?: boolean;
+}
+
+export async function fetchEvalSegments(
+  opts: {
+    statuses?: string;
+    sources?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<ApiEvalSegment[]> {
+  const params = new URLSearchParams();
+  if (opts.statuses) params.set("statuses", opts.statuses);
+  if (opts.sources) params.set("sources", opts.sources);
+  if (opts.limit != null) params.set("limit", String(opts.limit));
+  if (opts.offset != null) params.set("offset", String(opts.offset));
+  const res = await apiFetch(`${BASE}/eval/segments?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch eval segments");
+  // Endpoint returns `{segments, total}` — unwrap to keep the
+  // ApiEvalSegment[] contract callers expect. Without this OpsMode's
+  // `n.map` blew up because `data` was the wrapper object.
+  const body = await res.json();
+  return Array.isArray(body) ? body : (body?.segments ?? []);
+}
+
+export async function patchEvalSegment(
+  id: number,
+  body: {
+    eval_status?: string;
+    overall_rating?: number;
+    overall_comment?: string;
+  },
+): Promise<void> {
+  const res = await apiFetch(`${BASE}/eval/segments/${id}/summary`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to patch eval segment");
+}
+
+// ── Gooni health (Build mode) ──────────────────────────────────────────
+
+export type HealthAxisName =
+  | "memory" | "chat" | "engagement"
+  | "availability" | "cost" | "connectors";
+
+export interface HealthComponent {
+  name: string;
+  score: number; // 0-100
+  weight: number; // 0-1
+  detail: string;
+}
+
+export interface HealthAxis {
+  axis: HealthAxisName;
+  score: number; // composite 0-100
+  headline: string;
+  components: HealthComponent[];
+  error?: string;
+}
+
+export interface HealthScores {
+  axes: HealthAxis[];
+}
+
+export async function fetchHealthScores(): Promise<HealthScores> {
+  const res = await apiFetch(`${BASE}/health/scores`);
+  if (!res.ok) throw new Error("Failed to fetch health scores");
+  return res.json();
+}
+
+export async function deleteFocus(id: number): Promise<void> {
+  // Focuses share the /items delete route w/ todos via item_service. The
+  // service clears focus_id on linked todos before removing the row so
+  // todos survive as focus-less.
+  const res = await apiFetch(`${BASE}/items/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete focus");
+}
+
+export async function reactivateFocus(id: number): Promise<ApiFocus> {
+  const res = await apiFetch(`${BASE}/focuses/${id}/reactivate`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to reactivate focus");
+  return res.json();
+}
+
+export async function fetchTodosByFocus(focusId: number): Promise<ApiTodo[]> {
+  const res = await apiFetch(`${BASE}/items/${focusId}/todos`);
+  if (!res.ok) throw new Error("Failed to fetch focus todos");
+  return res.json();
+}
+
+// ── Capability profile + Reflections ──────────────────────────────────────────
+
+export type CapabilityLayer = "mechanical" | "functional" | "behavioral" | "architectural";
+export type CapabilityStatus = "claimed" | "verified" | "unverified" | "broken" | "removed";
+
+export interface ApiCapabilityFacet {
+  id: number;
+  layer: CapabilityLayer | string;
+  facet_key: string;
+  facet_text: string;
+  status: CapabilityStatus | string;
+  source: string;
+  evidence_json: string | null;
+  last_verified_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface CapabilitiesResponse {
+  by_layer: Record<string, ApiCapabilityFacet[]>;
+  total: number;
+}
+
+export async function fetchCapabilityFacets(): Promise<CapabilitiesResponse> {
+  const res = await apiFetch(`${BASE}/capabilities`);
+  if (!res.ok) throw new Error("Failed to fetch capabilities");
+  return res.json();
+}
+
+export async function patchCapabilityFacet(
+  id: number,
+  patch: Partial<Pick<ApiCapabilityFacet, "facet_text" | "status" | "layer">>,
+): Promise<ApiCapabilityFacet> {
+  const res = await apiFetch(`${BASE}/capabilities/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to patch capability");
+  return res.json();
+}
+
+export async function refreshCapabilityTelemetry(): Promise<Record<string, unknown>> {
+  const res = await apiFetch(`${BASE}/capabilities/telemetry/refresh`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to refresh telemetry");
+  return res.json();
+}
+
+export type ReflectionAction = "acted" | "described" | "mixed" | "na";
+
+export interface ApiReflection {
+  id: number;
+  message_id: number;
+  conversation_id: number;
+  user_critique_present: boolean;
+  critique_summary: string | null;
+  action_vs_described: ReflectionAction | string;
+  gap_exposed: string | null;
+  proposed_self_fix: string | null;
+  severity: 1 | 2 | 3 | number;
+  model: string;
+  created_at: string | null;
+}
+
+export async function fetchReflections(opts: {
+  conversationId?: number;
+  messageId?: number;
+  severityMin?: number;
+  limit?: number;
+} = {}): Promise<{ reflections: ApiReflection[] }> {
+  const params = new URLSearchParams();
+  if (opts.conversationId != null) params.set("conversation_id", String(opts.conversationId));
+  if (opts.messageId != null) params.set("message_id", String(opts.messageId));
+  if (opts.severityMin != null) params.set("severity_min", String(opts.severityMin));
+  if (opts.limit != null) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const res = await apiFetch(`${BASE}/reflections${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch reflections");
+  return res.json();
 }

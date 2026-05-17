@@ -297,9 +297,13 @@ interface NoteEditorProps {
   // Fires when the editor's empty state changes — lets parents react to
   // "user started typing" without reading editor internals.
   onEmptyChange?: (empty: boolean) => void;
+  // Fires when the editor gains/loses focus. Used by the dashboard's
+  // embedded composer to dim surrounding chrome (TakeTabs etc) so the
+  // writing surface gets the eye.
+  onFocusChange?: (focused: boolean) => void;
 }
 
-export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: NoteEditorProps = {}) {
+export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFocusChange }: NoteEditorProps = {}) {
   useEditorStyles();
   const embedded = variant === "embedded";
 
@@ -315,6 +319,9 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
   // from `embeddedToast` so we can render the pill, animate it in, hold,
   // animate it out, then unmount — without flashing on initial mount.
   const [embeddedToastVisible, setEmbeddedToastVisible] = useState(false);
+  // Embedded composer focus state — drives the expand-on-focus layout
+  // (taller editor surface + parent dim of TakeTabs / focuses row).
+  const [embeddedFocused, setEmbeddedFocused] = useState(false);
 
   const spaceId = selectedSpaceId ?? "general";
   const activeNote = (notes[spaceId] ?? []).find((n) => n.id === activeNoteId) ?? null;
@@ -543,7 +550,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
         NoteLink,
       ],
       content: activeNote?.content ?? "",
-      autofocus: embedded ? "end" : false,
+      // Embedded variant intentionally does NOT autofocus — focus
+       // triggers the dashboard's expand-and-dim layout, which would
+       // fire on every dashboard mount otherwise. User clicks to start.
+      autofocus: false,
       editorProps: {
         attributes: {
           // Font / size / line-height live in the .gooni-note-editor CSS
@@ -560,6 +570,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           if (embedded && event.key === "Enter" && !event.shiftKey && !event.isComposing) {
             event.preventDefault();
             void handleSubmitRef.current();
+            return true;
+          }
+          // Esc on the embedded composer collapses focus mode without
+          // submitting. TipTap doesn't blur on Esc by default; do it here.
+          if (embedded && event.key === "Escape") {
+            event.preventDefault();
+            (event.target as HTMLElement | null)?.blur?.();
             return true;
           }
           // Cmd/Ctrl+Shift+M → toggle inline code on selection. TipTap's
@@ -581,9 +598,18 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
         // Embedded quick-note is ephemeral — no debounced save. Everything persists on submit.
         if (!embedded) scheduleSave();
       },
+      onFocus: () => {
+        if (embedded) {
+          setEmbeddedFocused(true);
+          onFocusChange?.(true);
+        }
+      },
       onBlur: async () => {
-        // Embedded: ephemeral, no save on blur — content persists only on submit.
-        if (embedded) return;
+        if (embedded) {
+          setEmbeddedFocused(false);
+          onFocusChange?.(false);
+          return;
+        }
         await save();
         embedAndCheck(activeNoteId);
       },
@@ -647,7 +673,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
           // that ever changes.
         }
         selectNote(id);
-        navigate({ to: "/", search: { note: id, conv: undefined, list: undefined, audit: undefined } });
+        navigate({ to: "/", search: { note: id, conv: undefined, list: undefined, audit: undefined, segment: undefined } });
       })();
     };
     dom.addEventListener("click", onClick);
@@ -704,7 +730,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
     // reaches for it (otherwise the editor briefly renders an empty note).
     await refetchNote(child.id).catch(() => {});
     selectNote(child.id);
-    navigate({ to: "/", search: { note: child.id, conv: undefined, list: undefined, audit: undefined } });
+    navigate({ to: "/", search: { note: child.id, conv: undefined, list: undefined, audit: undefined, segment: undefined } });
   }
 
   async function handleSubmit() {
@@ -817,7 +843,11 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
       // shortly, and we want the next pass to install it.
       if (activeNote.content == null && activeNoteId && activeNoteId > 0) {
         if (!editor.isEmpty) {
-          editor.commands.setContent("");
+          // emitUpdate=false so the programmatic clear doesn't trip the
+          // editor's onUpdate handler (which flips hasChanges + schedules
+          // an autosave). Without this, opening a list-shape note marks
+          // the doc dirty even though the user never typed.
+          editor.commands.setContent("", { emitUpdate: false });
           bodyRef.current = "";
         }
         return;
@@ -844,7 +874,14 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
         restoredFromLocal = true;
       }
       if (editor.getHTML() !== desired) {
-        editor.commands.setContent(desired);
+        // emitUpdate=false so loading a note doesn't trip onUpdate (which
+        // would flip hasChanges + schedule an autosave). The save-on-leave
+        // guard relied on hasChanges to skip clean opens, but onUpdate fired
+        // on every programmatic load — so every note touch turned into an
+        // /embed + /memorize cascade on the next switch. Pass false here +
+        // the explicit `hasChanges.current = true` below covers the genuine
+        // restore-from-local-draft case.
+        editor.commands.setContent(desired, { emitUpdate: false });
         bodyRef.current = desired;
       }
       titleRef.current = desiredTitle;
@@ -1279,7 +1316,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                       setDeleteConfirm(false);
                       if (neighbor) {
                         selectNote(neighbor.id);
-                        navigate({ to: "/", search: { note: neighbor.id, conv: undefined, list: undefined, audit: undefined } });
+                        navigate({ to: "/", search: { note: neighbor.id, conv: undefined, list: undefined, audit: undefined, segment: undefined } });
                       }
                     }}
                     style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#FF3B30", textAlign: "left" }}
@@ -1490,9 +1527,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
             padding: "18px 22px",
             boxSizing: "border-box",
             width: "100%",
-            minHeight: 80 + 18 * 2,
+            minHeight: embeddedFocused ? 220 : 80 + 18 * 2,
             overflow: "hidden",
             borderRadius: 14,
+            transition: "min-height 280ms cubic-bezier(0.22, 0.61, 0.36, 1)",
           }}
         >
             <div
@@ -1558,12 +1596,12 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
               const lists = useListsStore.getState().lists;
               const backlog = lists.find((l) => l.type === "backlog");
               if (backlog) {
-                navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined} });
+                navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined, segment: undefined} });
               }
             } catch (e) { console.error(e); }
           };
           const openNote = () => {
-            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined , audit: undefined} });
+            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined , audit: undefined, segment: undefined} });
           };
           return (
             <div
@@ -1643,7 +1681,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                     onClick={async () => {
                       await save();
                       selectNote(parentLink.id);
-                      navigate({ to: "/", search: { note: parentLink.id, conv: undefined, list: undefined, audit: undefined } });
+                      navigate({ to: "/", search: { note: parentLink.id, conv: undefined, list: undefined, audit: undefined, segment: undefined } });
                     }}
                     title={`Back to "${parentLink.title}"`}
                     style={{
@@ -1731,7 +1769,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange }: Not
                       const lists = useListsStore.getState().lists;
                       const backlog = lists.find((l) => l.type === "backlog");
                       if (backlog) {
-                        navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined} });
+                        navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined, segment: undefined} });
                       }
                     } catch (e) {
                       console.error("openBacklog failed", e);

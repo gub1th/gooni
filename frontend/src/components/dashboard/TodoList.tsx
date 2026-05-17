@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crown, Plus, X, AlertTriangle } from "lucide-react";
+import { Crown, Plus, AlertTriangle } from "lucide-react";
 import {
   fetchTodos, createTodo, updateTodo, cycleTodoState, deleteTodo,
   promoteTodoToPrimary, fetchFocuses,
   type ApiTodo, type ApiTodoBundle, type ApiFocus, type TodoState,
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
+import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 
 // TodoList — dashboard todos block. Mockup-aligned shape:
 //
@@ -152,6 +153,49 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         .gooni-todo-row { transition: background 0.12s; }
         .gooni-todo-row:hover { background: rgba(0,0,0,0.025); }
         .gooni-todo-cascade { animation: gooni-todo-fade-out 600ms ease forwards; }
+
+        /* Primary-todo card: a single small yellow bullet that travels
+           around the card perimeter once then fades. Implemented as an
+           SVG <rect> with a tiny stroke-dasharray gap; we animate
+           stroke-dashoffset so the visible dash slides along the path.
+           The whole svg layer also fades out at the end so the soft
+           halo (box-shadow on the card) is what remains. */
+        @keyframes gooni-primary-race-offset {
+          0%   { stroke-dashoffset: 0;     }
+          100% { stroke-dashoffset: -2400; }
+        }
+        @keyframes gooni-primary-race-fade {
+          0%, 88% { opacity: 1; }
+          100%    { opacity: 0; }
+        }
+        .gooni-primary-race {
+          /* Rides the card border itself (rect rx matches the card's
+             border-radius). Explicit width/height — SVG is a CSS
+             replaced element so 'inset: 0' alone wouldn't reliably
+             stretch it. */
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          pointer-events: none;
+          overflow: visible;
+          animation: gooni-primary-race-fade 2400ms ease forwards;
+        }
+        .gooni-primary-race rect {
+          fill: none;
+          stroke: #F5C849;
+          stroke-width: 2;
+          stroke-linecap: round;
+          /* 36px visible bullet + huge gap so only one segment shows
+             at a time. */
+          stroke-dasharray: 36 2400;
+          stroke-dashoffset: 0;
+          filter: drop-shadow(0 0 5px rgba(245, 200, 73, 0.7));
+          /* Slower lap so the eye can track the bullet around the
+             border without it feeling like a hurry. */
+          animation: gooni-primary-race-offset 2200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        }
       `}</style>
 
       {/* Primary card — separate visual treatment, sits above the list. */}
@@ -190,8 +234,8 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
             title="Add a todo"
             style={{
               width: 24, height: 24, borderRadius: 6,
-              background: "rgba(59,130,246,0.10)",
-              color: "#1D4ED8",
+              background: "rgba(15,110,86,0.12)",
+              color: "#0F6E56",
               border: "none", cursor: "pointer",
               display: "inline-flex", alignItems: "center", justifyContent: "center",
             }}
@@ -291,6 +335,15 @@ function PrimaryCard({
   const age = ageHint(t.created_at);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
+  // Race-border one-shot — keyed on todo id so promoting another todo to
+  // primary re-fires the animation. Local state flips off after the
+  // animation duration so re-renders don't keep restarting it.
+  const [racing, setRacing] = useState(true);
+  useEffect(() => {
+    setRacing(true);
+    const id = window.setTimeout(() => setRacing(false), 2500);
+    return () => clearTimeout(id);
+  }, [t.id]);
 
   return (
     <div
@@ -300,14 +353,28 @@ function PrimaryCard({
       style={{
         position: "relative",
         background: "var(--gooni-card, #FFFFFF)",
-        border: "2px solid #3B82F6",
+        border: "0.5px solid rgba(245,200,73,0.35)",
         borderRadius: 12,
         padding: "12px 16px",
         display: "flex", alignItems: "center", gap: 12,
         marginBottom: 12,
         fontFamily: FONT,
+        boxShadow: "0 0 0 1px rgba(245,200,73,0.18), 0 6px 22px rgba(245,200,73,0.22), 0 2px 8px rgba(245,200,73,0.14)",
       }}
     >
+      {racing && (
+        <svg
+          className="gooni-primary-race"
+          aria-hidden
+          preserveAspectRatio="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          {/* Rect rides the card edge itself; rx 12 matches the card's
+              borderRadius. Stroke is centered on the path so half sits
+              just outside the border (overflow:visible on the parent). */}
+          <rect x="0" y="0" width="100%" height="100%" rx="12" ry="12" />
+        </svg>
+      )}
       <button
         onClick={onDemote}
         title="Demote — clear primary"
@@ -353,16 +420,7 @@ function PrimaryCard({
       )}
 
       {hovered && (
-        <button
-          title="Delete"
-          onClick={onDelete}
-          style={{
-            border: "none", background: "transparent", cursor: "pointer",
-            padding: 2, color: "#9CA3AF", display: "flex",
-          }}
-        >
-          <X size={12} />
-        </button>
+        <ConfirmDeleteButton onConfirm={onDelete} />
       )}
 
       {pickerOpen && (
@@ -452,16 +510,7 @@ function TodoRow({
         </button>
       )}
       {hovered && (
-        <button
-          title="Delete"
-          onClick={onDelete}
-          style={{
-            border: "none", background: "transparent", cursor: "pointer",
-            padding: 2, color: "#9CA3AF", display: "flex",
-          }}
-        >
-          <X size={12} />
-        </button>
+        <ConfirmDeleteButton onConfirm={onDelete} />
       )}
 
       {pickerOpen && (

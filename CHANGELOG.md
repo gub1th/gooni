@@ -5,6 +5,70 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.82.0 — 2026-05-17 (minor)
+
+- feat(ops): calm Claude-app theme + open-full deeplink, slow race on card border (#218)
+
+## 0.81.0 — 2026-05-17 (minor)
+
+- feat(audit): merge Eval + Chat audit into single Conversations tab (#217)
+
+## 0.80.0 — 2026-05-17 (minor)
+
+- feat(eval): "live" active-conversation badge on segments (#216)
+
+## 0.79.1 — 2026-05-17 (patch)
+
+- fix(todo): primary-card race SVG drifting to random spot (#215)
+
+## 0.79.0 — 2026-05-17 (minor)
+
+- feat(eval+dashboard): chat-bubble eval transcripts, ops surface polish, todo/habit parity (#214)
+
+## 0.78.0 — 2026-05-16 (minor)
+
+- feat(dashboard): fold Build into Ops + eval drilldown + scrollable kanban + composer/note fixes (#213)
+
+## 0.77.1 — 2026-05-16 (patch)
+
+- fix(api): unwrap eval/segments response so OpsMode .map() works (#212)
+
+## 0.77.0 — 2026-05-16 (minor)
+
+- feat(frontend): app-wide error boundary + 404 page with Gooni mascot (#211)
+
+## 0.76.0 — 2026-05-16 (minor)
+
+- feat(dashboard): glow-up — focus halos, themed dev take, focus-on-write composer (#209)
+
+## 0.75.0 — 2026-05-16 (minor)
+
+- feat(backlog): notes column + pr_url-on-close MCP support (#208)
+
+## 0.74.0 — 2026-05-16 (minor)
+
+- feat(gooni): per-turn Reflexion loop + capability inventory (self-knowledge substrate) (#207)
+
+## 0.73.0 — 2026-05-16 (minor)
+
+- feat(dashboard): Ops mode — eval queue + backlog + tool-call failures (#205)
+
+## 0.72.0 — 2026-05-16 (minor)
+
+- feat(dashboard): Today/Build/Pulse mode toggle + Gooni-health scoring (#204)
+
+## 0.71.2 — 2026-05-16 (patch)
+
+- fix(alembic): also make wa_processed_ids migration idempotent (#203)
+
+## 0.71.1 — 2026-05-16 (patch)
+
+- fix(alembic): make habits migration idempotent (PROD DOWN) (#202)
+
+## 0.71.0 — 2026-05-14 (minor)
+
+- feat(dashboard): Todos/Focuses tab toggle + synth audit + focus drill-down (#201)
+
 ## 0.70.1 — 2026-05-14 (patch)
 
 - fix(chat): kill WhatsApp double-fire on slow turns + harden web chat against double-send race (#200)
