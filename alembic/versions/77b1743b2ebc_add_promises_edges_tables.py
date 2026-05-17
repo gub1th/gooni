@@ -29,45 +29,58 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    op.create_table(
-        'promises',
-        sa.Column('id', sa.Integer(), primary_key=True),
-        sa.Column('utterance', sa.Text(), nullable=False),
-        sa.Column('summary', sa.Text(), nullable=True),
-        sa.Column('inferred_due', sa.DateTime(), nullable=True),
-        sa.Column('state', sa.String(), nullable=False, server_default='pending'),
-        sa.Column('slip_count', sa.Integer(), nullable=False, server_default='0'),
-        sa.Column('resolved_at', sa.DateTime(), nullable=True),
-        sa.Column('source_message_id', sa.Integer(), nullable=True),
-        sa.Column('embedding', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.Column('updated_at', sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(['source_message_id'], ['messages.id']),
-    )
-    op.create_index('ix_promises_id', 'promises', ['id'])
-    op.create_index('ix_promises_state', 'promises', ['state'])
-    op.create_index('ix_promises_source_message_id', 'promises', ['source_message_id'])
+def _table_exists(bind, name: str) -> bool:
+    """Inspector check — needed because prod ran the original CREATE on
+    a prior boot, then the alembic version stamp didn't commit, leaving
+    physical tables in place with the cursor still at the parent
+    revision. Re-runs crashed on `table already exists`. This guard makes
+    the migration idempotent so a half-applied upgrade can recover."""
+    return sa.inspect(bind).has_table(name)
 
-    op.create_table(
-        'edges',
-        sa.Column('id', sa.Integer(), primary_key=True),
-        sa.Column('src_kind', sa.String(), nullable=False),
-        sa.Column('src_id', sa.Integer(), nullable=False),
-        sa.Column('dst_kind', sa.String(), nullable=False),
-        sa.Column('dst_id', sa.Integer(), nullable=False),
-        sa.Column('kind', sa.String(), nullable=False),
-        sa.Column('weight', sa.Float(), nullable=True),
-        sa.Column('metadata_json', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.UniqueConstraint(
-            'src_kind', 'src_id', 'dst_kind', 'dst_id', 'kind',
-            name='uq_edges_endpoints_kind',
-        ),
-    )
-    op.create_index('ix_edges_id', 'edges', ['id'])
-    op.create_index('ix_edges_src', 'edges', ['src_kind', 'src_id'])
-    op.create_index('ix_edges_dst', 'edges', ['dst_kind', 'dst_id'])
+
+def upgrade() -> None:
+    bind = op.get_bind()
+
+    if not _table_exists(bind, 'promises'):
+        op.create_table(
+            'promises',
+            sa.Column('id', sa.Integer(), primary_key=True),
+            sa.Column('utterance', sa.Text(), nullable=False),
+            sa.Column('summary', sa.Text(), nullable=True),
+            sa.Column('inferred_due', sa.DateTime(), nullable=True),
+            sa.Column('state', sa.String(), nullable=False, server_default='pending'),
+            sa.Column('slip_count', sa.Integer(), nullable=False, server_default='0'),
+            sa.Column('resolved_at', sa.DateTime(), nullable=True),
+            sa.Column('source_message_id', sa.Integer(), nullable=True),
+            sa.Column('embedding', sa.Text(), nullable=True),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.Column('updated_at', sa.DateTime(), nullable=False),
+            sa.ForeignKeyConstraint(['source_message_id'], ['messages.id']),
+        )
+        op.create_index('ix_promises_id', 'promises', ['id'])
+        op.create_index('ix_promises_state', 'promises', ['state'])
+        op.create_index('ix_promises_source_message_id', 'promises', ['source_message_id'])
+
+    if not _table_exists(bind, 'edges'):
+        op.create_table(
+            'edges',
+            sa.Column('id', sa.Integer(), primary_key=True),
+            sa.Column('src_kind', sa.String(), nullable=False),
+            sa.Column('src_id', sa.Integer(), nullable=False),
+            sa.Column('dst_kind', sa.String(), nullable=False),
+            sa.Column('dst_id', sa.Integer(), nullable=False),
+            sa.Column('kind', sa.String(), nullable=False),
+            sa.Column('weight', sa.Float(), nullable=True),
+            sa.Column('metadata_json', sa.Text(), nullable=True),
+            sa.Column('created_at', sa.DateTime(), nullable=False),
+            sa.UniqueConstraint(
+                'src_kind', 'src_id', 'dst_kind', 'dst_id', 'kind',
+                name='uq_edges_endpoints_kind',
+            ),
+        )
+        op.create_index('ix_edges_id', 'edges', ['id'])
+        op.create_index('ix_edges_src', 'edges', ['src_kind', 'src_id'])
+        op.create_index('ix_edges_dst', 'edges', ['dst_kind', 'dst_id'])
 
 
 def downgrade() -> None:
