@@ -288,6 +288,8 @@ class Orchestrator:
                 signals = extract_signals(saved_message, prev_assistant=prev_text)
                 memory_candidates = signals["memories"]
                 soft_promises = signals.get("soft_promises", [])
+                extracted_todos = signals.get("todos", [])
+                reply_intent = signals.get("reply_intent", "answer")
                 signals_summary = {
                     "tone_corrections": [
                         {
@@ -305,6 +307,11 @@ class Orchestrator:
                         {"utterance": p["utterance"], "time_hint": p.get("time_hint")}
                         for p in soft_promises
                     ],
+                    "todos": [
+                        {"text": t["text"], "due_hint": t.get("due_hint")}
+                        for t in extracted_todos
+                    ],
+                    "reply_intent": reply_intent,
                     "memory_count": len(memory_candidates),
                 }
                 tb.extracted_signals(saved_message, signals)
@@ -330,6 +337,8 @@ class Orchestrator:
                         "tone_corrections": signals["tone_corrections"],
                         "feature_requests": signals["feature_requests"],
                         "soft_promises": soft_promises,
+                        "todos": extracted_todos,
+                        "reply_intent": reply_intent,
                         # memory_candidates routed separately (off-thread).
                         "memories": [],
                     },
@@ -363,15 +372,20 @@ class Orchestrator:
                     promises=captured_promises,
                 )
                 if feedback_ack is not None:
-                    # Skip the LLM reply only when the message was *purely*
-                    # signal — heuristic: no extracted memories, AND short.
-                    # Otherwise fall through so Daniel gets a real answer
-                    # to his actual question.
+                    # Skip the LLM reply when:
+                    #   - extractor classified the message as task_only or
+                    #     no_reply (phase 5 reply_intent), OR
+                    #   - message was *purely* signal — heuristic: no
+                    #     extracted memories AND short.
+                    # reply_intent is the more authoritative signal but
+                    # the pure_signal heuristic catches the long tail
+                    # where the extractor is conservative.
                     pure_signal = (
                         not memory_candidates
                         and len(saved_message.split()) < 25
                     )
-                    skip_normal_reply = pure_signal
+                    intent_skip = routed.reply_intent in ("task_only", "no_reply")
+                    skip_normal_reply = pure_signal or intent_skip
 
         if skip_normal_reply and feedback_ack is not None:
             tb.reply(feedback_ack, usage={"short_circuit": True})
