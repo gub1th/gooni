@@ -471,46 +471,51 @@ function NotesLink({ visible }: { visible: boolean }) {
         display: "inline-flex",
         alignItems: "center",
         gap: 8,
-        padding: "10px 18px 10px 16px",
+        padding: "9px 16px 9px 14px",
         borderRadius: 999,
-        background: "linear-gradient(135deg, rgba(255,228,140,0.95) 0%, rgba(255,180,80,0.95) 100%)",
-        color: "#3a2a08",
+        // Glass pill on the 3D scene — matches MuteToggle/PerfToggle
+        // styling so the top-corner cluster reads as one family. No
+        // shadow saturation; quiet but legible.
+        background: "rgba(255,255,255,0.86)",
+        color: "#1a1a1a",
         textDecoration: "none",
         fontFamily: FONT,
         fontSize: 13,
-        fontWeight: 600,
-        letterSpacing: "0.02em",
-        boxShadow: "0 6px 18px rgba(255,170,40,0.35), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.35) inset",
-        backdropFilter: "blur(6px) saturate(160%)",
-        WebkitBackdropFilter: "blur(6px) saturate(160%)",
+        fontWeight: 500,
+        letterSpacing: "0.01em",
+        border: "1px solid rgba(0,0,0,0.06)",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06)",
+        backdropFilter: "blur(14px) saturate(160%)",
+        WebkitBackdropFilter: "blur(14px) saturate(160%)",
         zIndex: 8,
         opacity: visible ? 1 : 0,
         transform: visible ? "translateY(0)" : "translateY(-8px)",
-        transition: "opacity 320ms ease, transform 320ms ease, box-shadow 200ms ease",
-        animation: visible ? "notes-link-pulse 3.4s ease-in-out infinite" : undefined,
+        transition: "opacity 320ms ease, transform 200ms ease, background 180ms ease",
         pointerEvents: visible ? "auto" : "none",
       }}
       onMouseEnter={(e) => {
         const el = e.currentTarget as HTMLAnchorElement;
-        el.style.transform = "translateY(-2px)";
-        el.style.boxShadow = "0 10px 24px rgba(255,170,40,0.55), 0 1px 3px rgba(0,0,0,0.12), 0 0 0 1px rgba(255,255,255,0.55) inset";
+        el.style.background = "rgba(255,255,255,0.96)";
+        el.style.transform = "translateY(-1px)";
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget as HTMLAnchorElement;
+        el.style.background = "rgba(255,255,255,0.86)";
         el.style.transform = "translateY(0)";
-        el.style.boxShadow = "0 6px 18px rgba(255,170,40,0.35), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.35) inset";
       }}
     >
-      <span style={{ fontSize: 15, lineHeight: 1 }}>📜</span>
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: "#1b8b4a",
+          boxShadow: "0 0 0 3px rgba(74,222,128,0.20)",
+        }}
+      />
       <span>read my notes</span>
-      <span style={{ fontSize: 15, lineHeight: 1, marginLeft: 2 }}>→</span>
-      <style>{`
-        @keyframes notes-link-pulse {
-          0%   { box-shadow: 0 6px 18px rgba(255,170,40,0.35), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.35) inset; }
-          50%  { box-shadow: 0 6px 22px rgba(255,170,40,0.60), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.55) inset; }
-          100% { box-shadow: 0 6px 18px rgba(255,170,40,0.35), 0 1px 2px rgba(0,0,0,0.10), 0 0 0 1px rgba(255,255,255,0.35) inset; }
-        }
-      `}</style>
+      <span style={{ fontSize: 14, lineHeight: 1, marginLeft: 1, color: "#555" }}>→</span>
     </a>
   );
 }
