@@ -1,21 +1,56 @@
 import { useEffect, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
-import { AdaptiveDpr, AdaptiveEvents, Trail, useProgress } from "@react-three/drei";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { AdaptiveDpr, AdaptiveEvents, OrbitControls, useProgress } from "@react-three/drei";
 import * as THREE from "three";
+import { Volume2, VolumeX, Activity } from "lucide-react";
 import { Atmosphere } from "./Atmosphere";
-import { Pond } from "./Pond";
-import { LilyPads } from "./LilyPads";
-import { Boat } from "./Boat";
-import { Shore } from "./Shore";
-import { Ripples, RippleClickPlane, type RippleHandle } from "./Ripples";
-import { PostFX } from "./PostFX";
+import { SkyDome } from "./SkyDome";
+import { Plaza } from "./Plaza";
+import { Nature } from "./Nature";
+import { Clouds } from "./Clouds";
+import { AvatarCrowd } from "./AvatarCrowd";
+import { DanielAvatar, type DanielHandle } from "./DanielAvatar";
+import { NpcAvatar } from "./NpcAvatar";
+import { LandingCamera } from "./LandingCamera";
+import { IntroCamera, ORBIT_BASELINE } from "./IntroCamera";
+import { NoteReaderOverlay } from "./NoteReaderOverlay";
 import { AmbientAudio } from "./AmbientAudio";
-import { MobileJoystick } from "./MobileJoystick";
-import { Petals } from "./Petals";
-import { fireBoatReset, useBoatKeyboard } from "./useBoatControls";
+import { PostFX } from "./PostFX";
+import { TileFloor } from "./TileFloor";
+import { PerfSampler, type PerfMetrics } from "./PerfSampler";
+import { Particles } from "./Particles";
+import { TreeFader } from "./TreeFader";
+import {
+  setCameraForward,
+  setControlsEnabled,
+  subscribeLandings,
+  useDanielKeyboard,
+} from "./useDanielControls";
+import { setSfxMuted } from "./sfx";
+import { fireVfx } from "./vfx";
+import { useCountryFlag } from "./useCountryFlag";
+import type { PublicNote } from "../../services/api";
 
 const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
+
+// Spec: FPS HUD hidden unless ?debug=true in the URL.
+function useDebugFlag(): boolean {
+  const [debug, setDebug] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    const p = new URLSearchParams(window.location.search);
+    return p.has("debug");
+  });
+  useEffect(() => {
+    function onPop() {
+      const p = new URLSearchParams(window.location.search);
+      setDebug(p.has("debug"));
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  return debug;
+}
 
 function useIsMobile(): boolean {
   const [mobile, setMobile] = useState<boolean>(() =>
@@ -31,215 +66,824 @@ function useIsMobile(): boolean {
   return mobile;
 }
 
+// Camera director — orbit target follow w/ Y damping + look-ahead pan
+// in character's hop direction + landing shake + tile-break dip + auto-
+// return to the default rear-3/4 offset after a couple seconds of idle.
+function CameraDirector({
+  controlsRef,
+  danielRef,
+  enabled,
+}: {
+  controlsRef: React.MutableRefObject<any>;
+  danielRef: React.MutableRefObject<DanielHandle | null>;
+  enabled: boolean;
+}) {
+  const followTargetRef = useRef(new THREE.Vector3());
+  const cameraTargetYRef = useRef(0.7);
+  const lookAheadRef = useRef(new THREE.Vector3());
+  const shakeRef = useRef<{ amp: number; t: number; dur: number }>({ amp: 0, t: 0, dur: 0 });
+  const dipRef = useRef<{ active: boolean; t: number }>({ active: false, t: 0 });
+  const lastHopAtRef = useRef(0);
+  const lastUserInteractRef = useRef(0);
+  const wasHoppingRef = useRef(false);
+  const initedRef = useRef(false);
+
+  // Cardinal rear offset — matches ORBIT_BASELINE so the auto-return
+  // settles at the same pose the intro lands on (no slow drift after
+  // intro completes).
+  const DEFAULT_OFFSET = new THREE.Vector3(0, 8, 10);
+  const RETURN_DELAY_MS = 1100;
+  const MIN_CAM_DIST = 7;
+
+  useEffect(() => {
+    const ctl = controlsRef.current;
+    if (!ctl) return;
+    function onStart() { lastUserInteractRef.current = performance.now(); }
+    function onEnd() { lastUserInteractRef.current = performance.now(); }
+    ctl.addEventListener("start", onStart);
+    ctl.addEventListener("end", onEnd);
+    return () => {
+      ctl.removeEventListener("start", onStart);
+      ctl.removeEventListener("end", onEnd);
+    };
+  }, [controlsRef.current]);
+
+  useEffect(() => {
+    return subscribeLandings((e) => {
+      // Spec: 0.03 amp / 0.1s decay. Cap velocity hard so high hops
+      // don't trigger an earthquake.
+      const v = Math.min(e.impactVel, 8);
+      if (v > 1.0) {
+        shakeRef.current.amp = v * 0.004;
+        shakeRef.current.t = 0;
+        shakeRef.current.dur = 0.10;
+      }
+      if (e.from && !e.fellOff) {
+        dipRef.current.active = true;
+        dipRef.current.t = 0;
+      }
+    });
+  }, []);
+
+  const tmp = useRef(new THREE.Vector3()).current;
+  const tmpShake = useRef(new THREE.Vector3()).current;
+  const tmpDesired = useRef(new THREE.Vector3()).current;
+
+  useFrame((_, rawDt) => {
+    if (!enabled) {
+      initedRef.current = false;
+      return;
+    }
+    const ctl = controlsRef.current;
+    const d = danielRef.current;
+    if (!ctl || !d?.group) return;
+    const dt = Math.min(rawDt, 0.05);
+
+    d.group.getWorldPosition(tmp);
+
+    // First frame after enable: snap internal state to current ctl.target +
+    // char pos so there's no lerp from (0,0,0) to baseline.
+    if (!initedRef.current) {
+      cameraTargetYRef.current = ctl.target.y;
+      followTargetRef.current.copy(ctl.target);
+      lookAheadRef.current.set(0, 0, 0);
+      initedRef.current = true;
+    }
+
+    // During fall-off / sky-respawn / lying, don't track the char's Y —
+    // the char is either far below the world or way above it. Anchor
+    // the camera at the gameplay pose around plaza center so the player
+    // doesn't lose orientation. Resume normal tracking once char hits
+    // the idle phase post-get-up.
+    const phase = d.phase();
+    const isRespawnPhase =
+      phase === "falling" || phase === "respawning" ||
+      phase === "lying" || phase === "getting-up";
+    if (isRespawnPhase) {
+      ctl.target.lerp(new THREE.Vector3(0, 0.6, 0), 0.04);
+      tmpDesired.set(0, 8, 10);
+      ctl.object.position.lerp(tmpDesired, 0.03);
+      ctl.update();
+      return;
+    }
+
+    cameraTargetYRef.current += ((tmp.y + 0.7) - cameraTargetYRef.current) * 0.04;
+
+    const heading = d.heading();
+    const hopping = d.isHopping();
+    if (hopping && !wasHoppingRef.current) lastHopAtRef.current = performance.now();
+    wasHoppingRef.current = hopping;
+
+    // Look-ahead during hop, ease back to 0 when idle.
+    const ax = hopping ? Math.sin(heading) * 1.2 : 0;
+    const az = hopping ? Math.cos(heading) * 1.2 : 0;
+    lookAheadRef.current.x += (ax - lookAheadRef.current.x) * 0.05;
+    lookAheadRef.current.z += (az - lookAheadRef.current.z) * 0.05;
+
+    followTargetRef.current.set(
+      tmp.x + lookAheadRef.current.x,
+      cameraTargetYRef.current,
+      tmp.z + lookAheadRef.current.z,
+    );
+    ctl.target.lerp(followTargetRef.current, 0.16);
+
+    // Auto-return to default offset behind character once idle for a
+    // moment. Any user orbit interaction cancels.
+    const now = performance.now();
+    const sinceHop = now - lastHopAtRef.current;
+    const sinceUser = now - lastUserInteractRef.current;
+    if (!hopping && sinceHop > RETURN_DELAY_MS && sinceUser > RETURN_DELAY_MS) {
+      tmpDesired.copy(tmp).add(DEFAULT_OFFSET);
+      ctl.object.position.lerp(tmpDesired, 0.025);
+    }
+
+    // Landing shake
+    const sh = shakeRef.current;
+    if (sh.amp > 0 && sh.t < sh.dur) {
+      sh.t += dt;
+      const u = sh.t / sh.dur;
+      const amp = sh.amp * (1 - u);
+      tmpShake.set(
+        (Math.random() - 0.5) * amp * 2,
+        (Math.random() - 0.5) * amp * 1.2,
+        (Math.random() - 0.5) * amp * 2,
+      );
+      ctl.object.position.add(tmpShake);
+      ctl.target.add(tmpShake);
+    }
+
+    const dp = dipRef.current;
+    if (dp.active) {
+      dp.t += dt;
+      const u = dp.t / 0.18;
+      if (u >= 1) { dp.active = false; }
+      else {
+        const off = Math.sin(u * Math.PI) * 0.025;
+        ctl.object.position.y -= off;
+      }
+    }
+
+    // Hard min distance from character — push camera back along its
+    // current target→camera direction if the lerp pulled it too close.
+    const camPos = ctl.object.position;
+    const dx = camPos.x - tmp.x;
+    const dy = camPos.y - tmp.y;
+    const dz = camPos.z - tmp.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist < MIN_CAM_DIST && dist > 0.001) {
+      const k = MIN_CAM_DIST / dist;
+      camPos.x = tmp.x + dx * k;
+      camPos.z = tmp.z + dz * k;
+      if (dy < 2.2) camPos.y = tmp.y + 2.2;
+    }
+
+    ctl.update();
+  });
+
+  return null;
+}
+
+function CameraForwardTracker() {
+  const { camera } = useThree();
+  const tmp = useRef(new THREE.Vector3()).current;
+  useFrame(() => {
+    camera.getWorldDirection(tmp);
+    setCameraForward(tmp.x, tmp.z);
+  });
+  return null;
+}
+
+// Player identity collected at the StartOverlay before drop-in.
+const DEFAULT_PLAYER_COLOR = "#4ade80";
+const DEFAULT_PLAYER_NAME = "too lazy";
+
 export function Scene() {
   const mobile = useIsMobile();
+  const debug = useDebugFlag();
   const [entered, setEntered] = useState(false);
-  const ripplesRef = useRef<RippleHandle | null>(null);
+  const [swoopLanded, setSwoopLanded] = useState(false);
+  const [introDone, setIntroDone] = useState(false);
+  const [overlayMounted, setOverlayMounted] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const [perfOpen, setPerfOpen] = useState(true);
+  const [perf, setPerf] = useState<PerfMetrics>({ fps: 0, ms: 0, draws: 0, tris: 0 });
+  const [selectedNote, setSelectedNote] = useState<PublicNote | null>(null);
+  const [playerName, setPlayerName] = useState(DEFAULT_PLAYER_NAME);
+  const [playerColor, setPlayerColor] = useState(DEFAULT_PLAYER_COLOR);
+  const countryFlag = useCountryFlag();
+  const [externalTarget, setExternalTarget] = useState<{
+    pos: THREE.Vector3;
+    look: THREE.Vector3;
+    duration?: number;
+  } | null>(null);
 
-  // Wire keyboard once at scene mount. Joystick writes into the same
-  // singleton input state — both modalities coexist.
-  useBoatKeyboard();
+  const orbitRef = useRef<any>(null);
+  const danielRef = useRef<DanielHandle | null>(null);
+
+  useDanielKeyboard();
+
+  useEffect(() => {
+    setControlsEnabled(introDone && !selectedNote);
+  }, [introDone, selectedNote]);
+
+  useEffect(() => {
+    setSfxMuted(muted);
+  }, [muted]);
+
+  // Spec Phase 4: "small poof particle burst at center tile" when the
+  // character appears post-impact.
+  useEffect(() => {
+    if (swoopLanded) {
+      fireVfx({
+        kind: "puff",
+        world: { x: 0, y: 0.15, z: 0 },
+        intensity: 1.0,
+      });
+    }
+  }, [swoopLanded]);
 
   const dprMax = typeof window === "undefined"
     ? 1.5
     : Math.min(window.devicePixelRatio ?? 1, 2);
+
+  function handleSelect(note: PublicNote, worldPos: THREE.Vector3) {
+    setSelectedNote(note);
+    const dir = new THREE.Vector3().copy(worldPos).normalize().multiplyScalar(2.3);
+    const camPos = worldPos.clone().add(new THREE.Vector3(dir.x, 1.4 + dir.y, dir.z));
+    setExternalTarget({
+      pos: camPos,
+      look: worldPos.clone().add(new THREE.Vector3(0, 0.9, 0)),
+      duration: 0.9,
+    });
+  }
+
+  function handleClose() {
+    setSelectedNote(null);
+    setExternalTarget({
+      pos: ORBIT_BASELINE.position.clone(),
+      look: ORBIT_BASELINE.target.clone(),
+      duration: 1.0,
+    });
+  }
+
+  function handleEnter(name: string, color: string) {
+    setPlayerName(name);
+    setPlayerColor(color);
+    setEntered(true);
+    setTimeout(() => setOverlayMounted(false), 720);
+  }
+
+  const orbitEnabled = introDone && !selectedNote;
+  // Char mounts only AFTER the camera reaches impact pose (swoopLanded).
+  // Before that, the player sees an empty plaza while the camera drops
+  // in — so the get-up isn't visible mid-camera-spin. Spec Phase 4:
+  // "Character appears ONLY after camera reaches ground level."
+  const showCharacter = swoopLanded;
 
   return (
     <>
       <Canvas
         shadows={!mobile}
         dpr={[1, dprMax]}
-        // Start further out + lower so the boat-follow lerp draws a
-        // slow ~2s dolly toward the rower on first paint. Free intro.
-        camera={{ position: [3, 2.2, 14], fov: 54, near: 0.1, far: 200 }}
+        camera={{ position: [4.5, 17, 0], fov: 56, near: 0.05, far: 280 }}
+        // Set camera lookAt before first paint so the landing bird's-eye
+        // shows up clean — matches the LandingCamera t=0 pose so frame 0
+        // paints with the correct directly-above orientation.
+        onCreated={({ camera }) => {
+          camera.position.set(4.5, 17, 0);
+          camera.lookAt(0, 0, 0);
+          camera.updateProjectionMatrix();
+        }}
         gl={{
           antialias: !mobile,
           powerPreference: "high-performance",
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.1,
+          toneMappingExposure: 1.0,
           outputColorSpace: THREE.SRGBColorSpace,
         }}
       >
+        <SkyDome />
         <Atmosphere mobile={mobile} />
-        <Pond />
-        <Shore mobile={mobile} />
-        <LilyPads count={mobile ? 14 : 32} />
-        <Petals count={mobile ? 60 : 140} />
+        <Plaza />
+        <TileFloor />
+        <Nature />
+        <Clouds />
+        <Particles />
 
-        {/* Wake trail — drei Trail walks the wrapped child for an
-            Object3D target. Tapered ease-out so the tip dissolves. */}
-        <Trail
-          width={0.55}
-          length={6}
-          decay={4}
-          color={"#fff5e0"}
-          attenuation={(t: number) => t * t}
-        >
-          <Boat />
-        </Trail>
+        {showCharacter && (
+          <DanielAvatar
+            ref={danielRef}
+            active={entered}
+            introTrigger={swoopLanded}
+            controllable={introDone && !selectedNote}
+            onIntroComplete={() => setIntroDone(true)}
+            name={playerName}
+            bodyColor={playerColor}
+            showNametag={introDone}
+            flag={countryFlag}
+          />
+        )}
+        <NpcAvatar
+          startGx={3}
+          startGz={-2}
+          name="goonie"
+          showNametag={entered}
+          bodyColor="#5aa6ff"
+          accentColor="#3d7fcc"
+          initialDelayMs={600}
+        />
+        {entered && introDone && (
+          <AvatarCrowd
+            onSelect={handleSelect}
+            focusedNoteId={selectedNote?.id ?? null}
+          />
+        )}
 
-        <Ripples ref={ripplesRef} />
-        <RippleClickPlane onHit={(x, z) => ripplesRef.current?.spawn(x, z)} />
+        {/* Landing bird's-eye — runs while overlay is up; hands off to
+            IntroCamera on click. */}
+        <LandingCamera active={!entered} />
+
+        <IntroCamera
+          active={entered && !introDone}
+          onSwoopLanded={() => setSwoopLanded(true)}
+          onComplete={() => setIntroDone(true)}
+          externalTarget={introDone ? externalTarget : null}
+        />
+
+        <OrbitControls
+          ref={orbitRef}
+          enabled={orbitEnabled}
+          target={ORBIT_BASELINE.target.toArray()}
+          enablePan={false}
+          minDistance={ORBIT_BASELINE.minDistance}
+          maxDistance={ORBIT_BASELINE.maxDistance}
+          minPolarAngle={Math.PI * 0.16}
+          maxPolarAngle={Math.PI * 0.46}
+          rotateSpeed={0.6}
+          zoomSpeed={0.6}
+          autoRotate={false}
+          makeDefault
+        />
+        <CameraDirector controlsRef={orbitRef} danielRef={danielRef} enabled={orbitEnabled} />
+        <CameraForwardTracker />
+        <TreeFader targetRef={danielRef} />
 
         <AdaptiveDpr pixelated />
         <AdaptiveEvents />
-
         <PostFX mobile={mobile} />
+        {debug && <PerfSampler onSample={setPerf} />}
       </Canvas>
 
-      <SteeringHint mobile={mobile} />
-      {mobile && <MobileJoystick />}
-      {mobile && <MobileResetButton />}
+      {introDone && !selectedNote && <NavHint />}
 
-      {!entered && <StartOverlay onEnter={() => setEntered(true)} />}
-      {entered && <AmbientAudio />}
+      <div style={{ position: "fixed", top: 22, right: 22, display: "flex", gap: 10, zIndex: 8 }}>
+        {entered && debug && (
+          <PerfToggle open={perfOpen} onToggle={() => setPerfOpen((v) => !v)} />
+        )}
+        <MuteToggle muted={muted} onToggle={() => setMuted(!muted)} entered={entered} />
+      </div>
+      {entered && debug && perfOpen && <PerfPanel metrics={perf} />}
+
+      {overlayMounted && (
+        <StartOverlay
+          onEnter={handleEnter}
+          leaving={entered}
+          defaultName={DEFAULT_PLAYER_NAME}
+          defaultColor={DEFAULT_PLAYER_COLOR}
+        />
+      )}
+      {entered && <AmbientAudio muted={muted} />}
+
+      <NoteReaderOverlay
+        noteId={selectedNote?.id ?? null}
+        onClose={handleClose}
+      />
+
+      {entered && <BrandingMark />}
     </>
   );
 }
 
-function StartOverlay({ onEnter }: { onEnter: () => void }) {
+function BrandingMark() {
+  return (
+    <a
+      href="/"
+      style={{
+        position: "fixed",
+        bottom: 14,
+        left: 16,
+        color: "#ffffff",
+        opacity: 0.30,
+        textDecoration: "none",
+        fontFamily: FONT,
+        fontSize: 13,
+        letterSpacing: "0.06em",
+        zIndex: 6,
+        textShadow: "0 1px 6px rgba(0,0,0,0.55)",
+        transition: "opacity 200ms ease",
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "0.85"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLAnchorElement).style.opacity = "0.30"; }}
+    >
+      gooni
+    </a>
+  );
+}
+
+const SWATCHES = [
+  "#4ade80",  // default green
+  "#5aa6ff",
+  "#ffc14d",
+  "#ff6f8d",
+  "#a36cff",
+  "#ff8a4d",
+];
+
+function StartOverlay({
+  onEnter,
+  leaving,
+  defaultName,
+  defaultColor,
+}: {
+  onEnter: (name: string, color: string) => void;
+  leaving: boolean;
+  defaultName: string;
+  defaultColor: string;
+}) {
   const { progress, active } = useProgress();
-  // Once all assets loaded, the bar slides off-screen; clicking still
-  // dismisses regardless so impatient users aren't blocked.
   const ready = !active || progress >= 99;
+  const [titleHovered, setTitleHovered] = useState(false);
+  const [name, setName] = useState("");
+  const [color, setColor] = useState(defaultColor);
+
+  function submit() {
+    if (!ready) return;
+    onEnter(name.trim() || defaultName, color);
+  }
 
   return (
     <div
-      onClick={onEnter}
       style={{
         position: "fixed",
         inset: 0,
         background:
-          "radial-gradient(ellipse 800px 400px at 50% 50%, rgba(0,0,0,0.0) 0%, rgba(0,0,0,0.45) 100%)",
+          "linear-gradient(180deg, rgba(20,28,48,0.05) 0%, rgba(20,28,48,0.55) 100%)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
+        justifyContent: "flex-end",
+        paddingBottom: "14vh",
         gap: 18,
-        cursor: ready ? "pointer" : "wait",
         color: "#fff",
         fontFamily: FONT,
         zIndex: 10,
-        backdropFilter: "blur(2px)",
+        opacity: leaving ? 0 : 1,
+        pointerEvents: leaving ? "none" : "auto",
+        transition: "opacity 700ms ease-out",
       }}
     >
-      <div style={{
-        fontFamily: DISPLAY,
-        fontSize: 38,
-        letterSpacing: "-0.4px",
-        textShadow: "0 2px 18px rgba(0,0,0,0.4)",
-      }}>
-        a calm place
+      <div
+        onMouseEnter={() => setTitleHovered(true)}
+        onMouseLeave={() => setTitleHovered(false)}
+        style={{
+          fontFamily: DISPLAY,
+          fontSize: 48,
+          letterSpacing: "-0.6px",
+          textShadow: titleHovered
+            ? "0 2px 28px rgba(255,228,140,0.55), 0 0 40px rgba(255,228,140,0.35)"
+            : "0 2px 28px rgba(0,0,0,0.55), 0 0 40px rgba(180,200,235,0.22)",
+          transform: leaving ? "translateY(-8px)" : "translateY(0)",
+          transition: "transform 700ms ease-out, color 280ms ease, text-shadow 280ms ease",
+          animation: leaving ? undefined : "plaza-float-title 5.5s ease-in-out infinite",
+          willChange: "transform, opacity",
+          position: "relative",
+          color: titleHovered ? "#ffe79a" : "#ffffff",
+        }}
+      >
+        daniel's plaza
       </div>
-      <div style={{
-        fontSize: 13.5,
-        opacity: 0.85,
-        textShadow: "0 1px 8px rgba(0,0,0,0.5)",
-      }}>
-        {ready ? "tap to enter" : "preparing the pond…"}
-      </div>
-      {/* Thin progress bar — only visible while loading. Smooth lerp
-          via CSS transition. */}
-      <div style={{
-        width: 220,
-        height: 2,
-        background: "rgba(255,255,255,0.15)",
-        borderRadius: 999,
-        overflow: "hidden",
-        marginTop: 4,
-        opacity: ready ? 0 : 1,
-        transition: "opacity 400ms ease",
-      }}>
-        <div style={{
-          width: `${Math.max(2, progress)}%`,
-          height: "100%",
-          background: "rgba(255,255,255,0.85)",
-          transition: "width 280ms ease",
-        }} />
-      </div>
+
+      {ready ? (
+        <>
+          <input
+            type="text"
+            value={name}
+            placeholder="enter your nickname"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+            maxLength={20}
+            autoFocus
+            style={{
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: "#fff",
+              textAlign: "center",
+              fontSize: 18,
+              fontFamily: FONT,
+              width: 320,
+              padding: "8px 4px",
+              caretColor: "rgba(255,255,255,0.9)",
+              textShadow: "0 1px 8px rgba(0,0,0,0.5)",
+            }}
+          />
+          <style>{`input::placeholder { color: rgba(255,255,255,0.55); font-style: italic; letter-spacing: 0.02em; }`}</style>
+
+          <div style={{ display: "flex", gap: 9 }}>
+            {SWATCHES.map((c) => (
+              <button
+                key={c}
+                onClick={(e) => { e.stopPropagation(); setColor(c); }}
+                aria-label={`pick color ${c}`}
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  background: c,
+                  border: color === c ? "2px solid rgba(255,255,255,0.95)" : "2px solid rgba(255,255,255,0.15)",
+                  cursor: "inherit",
+                  padding: 0,
+                  boxShadow: color === c ? `0 0 12px ${c}80` : "none",
+                  transition: "border 160ms ease, box-shadow 160ms ease",
+                }}
+              />
+            ))}
+          </div>
+
+          <button
+            onClick={submit}
+            style={{
+              position: "relative",
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: "rgba(255,255,255,0.95)",
+              fontSize: 14,
+              fontFamily: FONT,
+              letterSpacing: "0.06em",
+              padding: "10px 22px",
+              cursor: "inherit",
+              marginTop: 6,
+              animation: "plaza-cta-glow 2.8s ease-in-out infinite",
+              textShadow: "0 1px 8px rgba(0,0,0,0.4)",
+              borderRadius: 999,
+            }}
+          >
+            click or press enter to drop in
+            <span style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: 999,
+              pointerEvents: "none",
+              boxShadow: "0 0 0 1px rgba(255,255,255,0.18) inset",
+              animation: "plaza-cta-ring 2.8s ease-in-out infinite",
+            }} />
+          </button>
+        </>
+      ) : (
+        <>
+          <div
+            style={{
+              fontSize: 14,
+              textShadow: "0 1px 12px rgba(0,0,0,0.6)",
+              animation: "plaza-pulse-sub 3.6s ease-in-out infinite",
+            }}
+          >
+            preparing the plaza…
+          </div>
+          <div style={{
+            width: 220,
+            height: 2,
+            background: "rgba(255,255,255,0.18)",
+            borderRadius: 999,
+            overflow: "hidden",
+            marginTop: 4,
+          }}>
+            <div style={{
+              width: `${Math.max(2, progress)}%`,
+              height: "100%",
+              background: "rgba(255,255,255,0.92)",
+              transition: "width 280ms ease",
+            }} />
+          </div>
+        </>
+      )}
+
+      <style>{`
+        @keyframes plaza-float-title {
+          0%   { transform: translateY(0px);    opacity: 1; }
+          50%  { transform: translateY(-7px);   opacity: 0.94; }
+          100% { transform: translateY(0px);    opacity: 1; }
+        }
+        @keyframes plaza-pulse-sub {
+          0%   { opacity: 0.78; }
+          50%  { opacity: 1.0; }
+          100% { opacity: 0.78; }
+        }
+        @keyframes plaza-cta-glow {
+          0%   { transform: translateY(0px) scale(1.0);    text-shadow: 0 1px 8px rgba(0,0,0,0.4); }
+          50%  { transform: translateY(-3px) scale(1.02);  text-shadow: 0 1px 10px rgba(255,228,140,0.55), 0 0 24px rgba(255,228,140,0.35); }
+          100% { transform: translateY(0px) scale(1.0);    text-shadow: 0 1px 8px rgba(0,0,0,0.4); }
+        }
+        @keyframes plaza-cta-ring {
+          0%   { box-shadow: 0 0 0 1px rgba(255,255,255,0.10) inset, 0 0 0 0 rgba(255,228,140,0.0); }
+          50%  { box-shadow: 0 0 0 1px rgba(255,255,255,0.28) inset, 0 0 14px 2px rgba(255,228,140,0.25); }
+          100% { box-shadow: 0 0 0 1px rgba(255,255,255,0.10) inset, 0 0 0 0 rgba(255,228,140,0.0); }
+        }
+      `}</style>
     </div>
   );
 }
 
-// Touch parity for the R reset key — mobile users can't otherwise
-// unstick from the tether boundary or recenter the camera.
-function MobileResetButton() {
+function MuteToggle({ muted, onToggle, entered }: { muted: boolean; onToggle: () => void; entered: boolean }) {
+  if (!entered) return null;
   return (
     <button
-      onClick={() => fireBoatReset()}
-      aria-label="Recenter boat"
+      onClick={onToggle}
+      aria-label={muted ? "Unmute" : "Mute"}
+      title={muted ? "Unmute" : "Mute"}
       style={{
-        position: "fixed",
-        bottom: 32,
-        right: 24,
-        width: 48,
-        height: 48,
-        borderRadius: "50%",
-        background: "rgba(0,0,0,0.28)",
-        border: "1px solid rgba(255,255,255,0.20)",
-        color: "rgba(255,255,255,0.9)",
-        fontFamily: "'Inter', system-ui, sans-serif",
-        fontSize: 11,
-        letterSpacing: "0.06em",
-        textTransform: "uppercase",
-        backdropFilter: "blur(6px)",
+        background: "rgba(255,255,255,0.86)",
+        border: "1px solid rgba(0,0,0,0.06)",
+        borderRadius: 999,
+        width: 40,
+        height: 40,
         cursor: "pointer",
-        zIndex: 6,
+        boxShadow: "0 4px 14px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backdropFilter: "blur(14px) saturate(160%)",
+        WebkitBackdropFilter: "blur(14px) saturate(160%)",
+        transition: "background 180ms ease, transform 120ms ease",
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLButtonElement;
+        el.style.background = "rgba(255,255,255,0.96)";
+        el.style.transform = "scale(1.04)";
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLButtonElement;
+        el.style.background = "rgba(255,255,255,0.86)";
+        el.style.transform = "scale(1.0)";
       }}
     >
-      reset
+      {muted ? <VolumeX size={17} color="#2a2a2a" strokeWidth={1.8} /> : <Volume2 size={17} color="#2a2a2a" strokeWidth={1.8} />}
     </button>
   );
 }
 
-function SteeringHint({ mobile }: { mobile: boolean }) {
-  const [visible, setVisible] = useState(true);
+function PerfToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      aria-label={open ? "Hide perf stats" : "Show perf stats"}
+      title="Toggle perf stats"
+      style={{
+        background: open ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.78)",
+        border: "1px solid rgba(0,0,0,0.06)",
+        borderRadius: 999,
+        width: 40,
+        height: 40,
+        cursor: "pointer",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backdropFilter: "blur(14px) saturate(160%)",
+        WebkitBackdropFilter: "blur(14px) saturate(160%)",
+        transition: "background 180ms ease, transform 120ms ease",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.04)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.0)";
+      }}
+    >
+      <Activity size={17} color="#2a2a2a" strokeWidth={1.8} />
+    </button>
+  );
+}
+
+// Thresholds + color picker for the perf HUD. Green = healthy, yellow
+// = borderline, red = bad. Tuned for a small 3D scene like this.
+function fpsColor(v: number): string {
+  if (v >= 55) return "#1aa863";
+  if (v >= 30) return "#d9a217";
+  return "#cc3a3a";
+}
+function msColor(v: number): string {
+  if (v <= 18) return "#1aa863";
+  if (v <= 33) return "#d9a217";
+  return "#cc3a3a";
+}
+function drawsColor(v: number): string {
+  if (v <= 80) return "#1aa863";
+  if (v <= 200) return "#d9a217";
+  return "#cc3a3a";
+}
+function trisColor(v: number): string {
+  if (v <= 100000) return "#1aa863";
+  if (v <= 300000) return "#d9a217";
+  return "#cc3a3a";
+}
+
+function PerfPanel({ metrics }: { metrics: PerfMetrics }) {
+  const rows: { label: string; value: string; color: string }[] = [
+    { label: "fps",   value: String(metrics.fps),                            color: fpsColor(metrics.fps) },
+    { label: "ms",    value: String(metrics.ms),                             color: msColor(metrics.ms) },
+    { label: "draws", value: String(metrics.draws),                          color: drawsColor(metrics.draws) },
+    { label: "tris",  value: formatThousands(metrics.tris),                  color: trisColor(metrics.tris) },
+  ];
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        top: 72,
+        right: 22,
+        background: "rgba(255,255,255,0.92)",
+        border: "1px solid rgba(0,0,0,0.06)",
+        borderRadius: 12,
+        padding: "10px 14px",
+        fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+        fontSize: 12,
+        color: "#2a2a2a",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06)",
+        backdropFilter: "blur(14px) saturate(160%)",
+        WebkitBackdropFilter: "blur(14px) saturate(160%)",
+        zIndex: 8,
+        minWidth: 120,
+        pointerEvents: "none",
+      }}
+    >
+      {rows.map((r) => (
+        <div
+          key={r.label}
+          style={{ display: "flex", justifyContent: "space-between", gap: 14, lineHeight: 1.55 }}
+        >
+          <span style={{ color: "#888" }}>{r.label}</span>
+          <span style={{ color: r.color, fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+            {r.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatThousands(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
+  return String(n);
+}
+
+function NavHint() {
+  // Spec: appear AFTER 2s of no-input post-introDone, fade on first
+  // input, never show again.
+  const [visible, setVisible] = useState(false);
+  const dismissedRef = useRef(false);
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (
-        ["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]
-          .includes(e.code)
-      ) {
-        setVisible(false);
-      }
-    }
-    function onTouch() {
+    function dismiss() {
+      dismissedRef.current = true;
       setVisible(false);
     }
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("touchstart", onTouch);
-    const t = setTimeout(() => setVisible(false), 9000);
+    window.addEventListener("keydown", dismiss);
+    window.addEventListener("pointerdown", dismiss);
+    const showTimer = setTimeout(() => {
+      if (!dismissedRef.current) setVisible(true);
+    }, 2000);
+    const hideTimer = setTimeout(() => setVisible(false), 11000);
     return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("touchstart", onTouch);
-      clearTimeout(t);
+      window.removeEventListener("keydown", dismiss);
+      window.removeEventListener("pointerdown", dismiss);
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
     };
   }, []);
   if (!visible) return null;
   return (
     <div style={{
       position: "fixed",
-      // Don't overlap the joystick on mobile — sit it up top instead.
-      bottom: mobile ? "auto" : 28,
-      top: mobile ? 28 : "auto",
+      bottom: 28,
       left: "50%",
       transform: "translateX(-50%)",
-      color: "rgba(255,255,255,0.88)",
+      color: "rgba(40,40,50,0.78)",
       fontSize: 12.5,
       letterSpacing: "0.04em",
       fontFamily: FONT,
-      background: "rgba(0,0,0,0.30)",
-      padding: "7px 14px",
+      background: "rgba(255,255,255,0.72)",
+      padding: "7px 16px",
       borderRadius: 999,
       backdropFilter: "blur(6px)",
       pointerEvents: "none",
       zIndex: 5,
-      textShadow: "0 1px 4px rgba(0,0,0,0.4)",
       whiteSpace: "nowrap",
+      boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
     }}>
-      {mobile
-        ? "drag the stick · tap the water"
-        : "WASD to row · click the water · R to reset"}
+      arrows to hop · drag to orbit · click an avatar to read
     </div>
   );
 }
