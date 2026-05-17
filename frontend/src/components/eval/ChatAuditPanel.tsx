@@ -119,7 +119,13 @@ export function ChatAuditPanel() {
             No active rules. Reply to a Gooni message with a correction (e.g. "less teacher-y") to add one.
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{
+            display: "flex", flexDirection: "column", gap: 6,
+            // Cap visible rules so the audit feed below doesn't get buried
+            // once feedback memories pile up. ~8 rows at gap:6 + padding ≈ 320px.
+            maxHeight: 320, overflowY: "auto",
+            paddingRight: 4,
+          }}>
             {activeRules.map((r) => (
               <div
                 key={r.memory_id}

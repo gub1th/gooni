@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X, Check, Minus } from "lucide-react";
 import {
@@ -10,6 +10,7 @@ import {
   type ApiHabit,
   type ApiHabitCell,
 } from "../../services/api";
+import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 
 // HabitsStrip — bottom-of-dashboard widget for daily binary trackers.
 // Each row: name + 7-day strip (oldest → newest) + current streak +
@@ -20,6 +21,9 @@ import {
 // good thing (went to gym / stayed clean). `polarity` carries the
 // underlying connotation for downstream colour decisions; the value
 // semantics never invert.
+//
+// Visual chrome — section title size + inline-create row — matches
+// TodoList so the two surfaces feel like sibling widgets.
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -48,9 +52,10 @@ export function HabitsStrip() {
     queryKey: ["habits"],
     queryFn: fetchHabits,
   });
-  const [adding, setAdding] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
   const [hoverId, setHoverId] = useState<number | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const handleCellClick = async (
     habit: ApiHabit, cell: ApiHabitCell,
@@ -66,41 +71,68 @@ export function HabitsStrip() {
 
   const handleCreate = async () => {
     const name = draft.trim();
-    if (!name) return;
+    if (!name) { setCreating(false); return; }
     await createHabit(name);
     setDraft("");
-    setAdding(false);
+    setCreating(false);
     qc.invalidateQueries({ queryKey: ["habits"] });
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm("Delete this habit? All history will be lost.")) return;
     await deleteHabit(id);
     qc.invalidateQueries({ queryKey: ["habits"] });
   };
 
   return (
     <div style={{ marginTop: 28, fontFamily: FONT }}>
+      {/* Section header — mirrors TodoList's TODAY'S TODOS row. + button is
+          greenish (same Gooni accent) and triggers the inline create row. */}
       <div style={{
-        fontSize: 11, fontWeight: 600, letterSpacing: 0.5,
-        color: "#94A3B8", textTransform: "uppercase",
-        marginBottom: 10,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        margin: "0 4px 8px",
       }}>
-        Habits
+        <span style={{
+          fontSize: 12, fontWeight: 500, letterSpacing: 0.4,
+          color: "var(--gooni-muted, #6B7280)",
+        }}>
+          HABITS
+        </span>
+        <button
+          onClick={() => { setCreating(true); window.setTimeout(() => inputRef.current?.focus(), 0); }}
+          title="Add a habit"
+          style={{
+            width: 24, height: 24, borderRadius: 6,
+            background: "rgba(15,110,86,0.12)",
+            color: "#0F6E56",
+            border: "none", cursor: "pointer",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <Plus size={14} />
+        </button>
       </div>
 
-      {habits.length === 0 && !adding ? (
-        <div style={{ color: "#94A3B8", fontSize: 13 }}>
-          No habits yet.{" "}
-          <button
-            onClick={() => setAdding(true)}
-            style={{
-              background: "none", border: "none", color: "#3B82F6",
-              cursor: "pointer", padding: 0, fontSize: 13,
-            }}
-          >
-            + add one
-          </button>
+      {habits.length === 0 && !creating ? (
+        <div style={{
+          padding: "10px 16px",
+          display: "flex", alignItems: "center", gap: 12,
+          opacity: 0.55,
+          borderBottom: "0.5px solid rgba(0,0,0,0.06)",
+          cursor: "text",
+        }}
+          onClick={() => { setCreating(true); window.setTimeout(() => inputRef.current?.focus(), 0); }}
+        >
+          <Plus size={14} color="#9CA3AF" />
+          <span style={{ flex: 1, fontSize: 13, color: "#9CA3AF" }}>
+            Add a habit...
+          </span>
+          <span style={{
+            fontSize: 11, color: "#9CA3AF",
+            background: "rgba(0,0,0,0.05)",
+            padding: "2px 8px", borderRadius: 99,
+          }}>
+            habit
+          </span>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -116,11 +148,11 @@ export function HabitsStrip() {
                 gap: 12,
                 padding: "6px 10px",
                 borderRadius: 6,
-                background: hoverId === h.id ? "#F8FAFC" : "transparent",
+                background: hoverId === h.id ? "rgba(0,0,0,0.025)" : "transparent",
               }}
             >
-              {/* Name w/ color dot */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#0F172A" }}>
+              {/* Name w/ color dot — fontSize matches todo row body text. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "var(--gooni-text, #1C1C1E)" }}>
                 <span style={{
                   width: 8, height: 8, borderRadius: "50%",
                   background: h.color || "#22C55E", flexShrink: 0,
@@ -163,67 +195,65 @@ export function HabitsStrip() {
                 {h.streak > 0 ? `🔥${h.streak}` : "—"}
               </div>
 
-              {/* Delete on hover */}
-              <button
-                onClick={() => handleDelete(h.id)}
-                style={{
-                  background: "none", border: "none",
-                  cursor: "pointer", padding: 2,
-                  visibility: hoverId === h.id ? "visible" : "hidden",
-                  color: "#94A3B8",
-                }}
-                title="Delete habit"
-              >
-                <X size={14} />
-              </button>
+              {/* Delete on hover — same two-step confirm as todos. */}
+              <div style={{ visibility: hoverId === h.id ? "visible" : "hidden" }}>
+                <ConfirmDeleteButton
+                  onConfirm={() => void handleDelete(h.id)}
+                  size={14}
+                  title="Delete habit"
+                />
+              </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Inline add */}
-      {adding ? (
-        <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleCreate();
-              if (e.key === "Escape") { setAdding(false); setDraft(""); }
-            }}
-            placeholder="e.g. went to gym"
-            autoFocus
-            style={{
-              flex: 1, padding: "6px 10px",
-              border: "1px solid #CBD5E1", borderRadius: 6,
-              fontSize: 13, fontFamily: FONT,
-            }}
-          />
-          <button
-            onClick={handleCreate}
-            style={{
-              padding: "6px 12px", border: "none",
-              background: "#0F172A", color: "white",
-              borderRadius: 6, cursor: "pointer", fontSize: 12,
-            }}
-          >
-            Add
-          </button>
-        </div>
-      ) : habits.length > 0 ? (
-        <button
-          onClick={() => setAdding(true)}
+      {/* Inline create row — same shape as TodoList's add-todo row.
+          Click anywhere to focus; Esc collapses; Enter saves. */}
+      {(creating || habits.length > 0) && (
+        <div
+          onClick={() => { setCreating(true); window.setTimeout(() => inputRef.current?.focus(), 0); }}
           style={{
-            background: "none", border: "1px dashed #CBD5E1",
-            color: "#64748B", fontSize: 12, padding: "6px 10px",
-            borderRadius: 6, cursor: "pointer", marginTop: 8,
-            display: "inline-flex", alignItems: "center", gap: 4,
-            fontFamily: FONT,
+            padding: "10px 16px",
+            display: "flex", alignItems: "center", gap: 12,
+            opacity: creating ? 1 : 0.55,
+            borderBottom: "0.5px solid rgba(0,0,0,0.06)",
+            cursor: "text",
+            marginTop: 8,
           }}
         >
-          <Plus size={12} /> add habit
-        </button>
-      ) : null}
+          <Plus size={14} color="#9CA3AF" />
+          {creating ? (
+            <input
+              ref={inputRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); void handleCreate(); }
+                if (e.key === "Escape") { e.preventDefault(); setCreating(false); setDraft(""); }
+              }}
+              onBlur={() => { if (!draft.trim()) setCreating(false); }}
+              placeholder="e.g. went to gym"
+              style={{
+                flex: 1, border: "none", outline: "none",
+                fontFamily: FONT, fontSize: 13, background: "transparent",
+                color: "var(--gooni-text, #1C1C1E)",
+              }}
+            />
+          ) : (
+            <span style={{ flex: 1, fontSize: 13, color: "#9CA3AF" }}>
+              Add a habit...
+            </span>
+          )}
+          <span style={{
+            fontSize: 11, color: "#9CA3AF",
+            background: "rgba(0,0,0,0.05)",
+            padding: "2px 8px", borderRadius: 99,
+          }}>
+            habit
+          </span>
+        </div>
+      )}
     </div>
   );
 }

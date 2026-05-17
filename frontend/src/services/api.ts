@@ -1,5 +1,8 @@
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+// Exported so non-fetch consumers (iframe src, image previews, etc) can
+// build absolute URLs to the backend instead of relative paths that fall
+// through the Vite SPA index.html and return HTML.
+export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export function getStoredToken(): string | null {
   return localStorage.getItem("gooni_token");
@@ -1849,6 +1852,18 @@ export interface EvalToolCall {
   duration_ms: number | null;
 }
 
+export interface EvalReflectionInline {
+  id: number;
+  severity: number;
+  user_critique_present: boolean;
+  critique_summary: string | null;
+  action_vs_described: string;
+  gap_exposed: string | null;
+  proposed_self_fix: string | null;
+  model: string;
+  created_at: string | null;
+}
+
 export interface EvalMessage {
   id: number;
   role: "user" | "assistant";
@@ -1860,6 +1875,7 @@ export interface EvalMessage {
   step_feedback: EvalStepFeedback[];
   rating: EvalMessageRating | null;
   tool_calls: EvalToolCall[];
+  reflection: EvalReflectionInline | null;
 }
 
 export interface EvalSegmentFull {
