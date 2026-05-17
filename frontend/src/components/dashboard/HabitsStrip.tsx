@@ -7,43 +7,61 @@ import {
   setHabitEntry,
   unlogHabitEntry,
   deleteHabit,
+  patchHabit,
   type ApiHabit,
   type ApiHabitCell,
 } from "../../services/api";
 import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 
 // HabitsStrip — bottom-of-dashboard widget for daily binary trackers.
-// Each row: name + 7-day strip (oldest → newest) + current streak +
-// hover-delete. Click any cell to cycle: empty → ✓ → ✗ → empty.
-// Today's cell is the rightmost; highlighted with a subtle ring.
-//
-// Habits are always phrased positively. value=true means Daniel did the
-// good thing (went to gym / stayed clean). `polarity` carries the
-// underlying connotation for downstream colour decisions; the value
-// semantics never invert.
-//
-// Visual chrome — section title size + inline-create row — matches
-// TodoList so the two surfaces feel like sibling widgets.
+// Two flavors:
+//   build (positive)  — "went to gym". Cycle empty → ✓ → ✗ → empty.
+//     Cell colors: ✓ green / ✗ red. Streak = consecutive ✓.
+//   break (negative)  — "vaping". Cycle empty → slip(✓) → empty.
+//     Cell colors: ✓ red (slip) / ✗ green (logged clean — rare).
+//     Streak = days since last slip (sober-tracker).
+// Weekday letters render above the 7-cell strip so the columns aren't
+// mystery boxes. Today's cell + label get a darker ring/weight.
+// Value semantics never invert: ✓ always = "did the literal action".
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+const DOW = ["S", "M", "T", "W", "T", "F", "S"];
 
-function nextValue(current: boolean | null): boolean | null {
-  // empty (null) → true → false → empty
+type Polarity = "positive" | "negative";
+
+function nextValue(current: boolean | null, polarity: Polarity): boolean | null {
+  // Break habits skip the explicit-false state — slip-or-not is enough.
+  if (polarity === "negative") {
+    if (current === true) return null;
+    return true;
+  }
   if (current === null) return true;
   if (current === true) return false;
   return null;
 }
 
-function cellColor(value: boolean | null, habitColor: string | null): string {
-  if (value === true) return habitColor || "#22C55E";
-  if (value === false) return "#FCA5A5"; // muted red — explicit "no"
-  return "#E2E8F0"; // neutral slate — unknown
+function cellColor(
+  value: boolean | null,
+  habitColor: string | null,
+  polarity: Polarity,
+): string {
+  const trueColor = polarity === "negative" ? "#EF4444" : (habitColor || "#22C55E");
+  const falseColor = polarity === "negative" ? "#22C55E" : "#FCA5A5";
+  if (value === true) return trueColor;
+  if (value === false) return falseColor;
+  return "#E2E8F0";
 }
 
 function CellIcon({ value }: { value: boolean | null }) {
   if (value === true) return <Check size={11} strokeWidth={3} color="white" />;
   if (value === false) return <X size={11} strokeWidth={3} color="white" />;
   return <Minus size={10} strokeWidth={2.5} color="#94A3B8" />;
+}
+
+function streakLabel(habit: ApiHabit): string {
+  if (habit.streak <= 0) return "—";
+  if (habit.polarity === "negative") return `💎 ${habit.streak}d`;
+  return `🔥 ${habit.streak}`;
 }
 
 export function HabitsStrip() {
@@ -54,13 +72,12 @@ export function HabitsStrip() {
   });
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState("");
+  const [draftPolarity, setDraftPolarity] = useState<Polarity>("positive");
   const [hoverId, setHoverId] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleCellClick = async (
-    habit: ApiHabit, cell: ApiHabitCell,
-  ) => {
-    const next = nextValue(cell.value);
+  const handleCellClick = async (habit: ApiHabit, cell: ApiHabitCell) => {
+    const next = nextValue(cell.value, habit.polarity);
     if (next === null) {
       await unlogHabitEntry(habit.id, cell.date);
     } else {
@@ -72,8 +89,9 @@ export function HabitsStrip() {
   const handleCreate = async () => {
     const name = draft.trim();
     if (!name) { setCreating(false); return; }
-    await createHabit(name);
+    await createHabit(name, draftPolarity);
     setDraft("");
+    setDraftPolarity("positive");
     setCreating(false);
     qc.invalidateQueries({ queryKey: ["habits"] });
   };
@@ -83,10 +101,14 @@ export function HabitsStrip() {
     qc.invalidateQueries({ queryKey: ["habits"] });
   };
 
+  const handleTogglePolarity = async (habit: ApiHabit) => {
+    const next: Polarity = habit.polarity === "negative" ? "positive" : "negative";
+    await patchHabit(habit.id, { polarity: next });
+    qc.invalidateQueries({ queryKey: ["habits"] });
+  };
+
   return (
     <div style={{ marginTop: 28, fontFamily: FONT }}>
-      {/* Section header — mirrors TodoList's TODAY'S TODOS row. + button is
-          greenish (same Gooni accent) and triggers the inline create row. */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         margin: "0 4px 8px",
@@ -136,80 +158,121 @@ export function HabitsStrip() {
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {habits.map((h) => (
-            <div
-              key={h.id}
-              onMouseEnter={() => setHoverId(h.id)}
-              onMouseLeave={() => setHoverId(null)}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr auto auto auto",
-                alignItems: "center",
-                gap: 12,
-                padding: "6px 10px",
-                borderRadius: 6,
-                background: hoverId === h.id ? "rgba(0,0,0,0.025)" : "transparent",
-              }}
-            >
-              {/* Name w/ color dot — fontSize matches todo row body text. */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "var(--gooni-text, #1C1C1E)" }}>
-                <span style={{
-                  width: 8, height: 8, borderRadius: "50%",
-                  background: h.color || "#22C55E", flexShrink: 0,
-                }} />
-                {h.name}
-              </div>
+          {habits.map((h) => {
+            const isBreak = h.polarity === "negative";
+            return (
+              <div
+                key={h.id}
+                onMouseEnter={() => setHoverId(h.id)}
+                onMouseLeave={() => setHoverId(null)}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto auto auto auto",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  background: hoverId === h.id ? "rgba(0,0,0,0.025)" : "transparent",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "var(--gooni-text, #1C1C1E)" }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: "50%",
+                    background: h.color || "#22C55E", flexShrink: 0,
+                  }} />
+                  {h.name}
+                </div>
 
-              {/* 7-day strip */}
-              <div style={{ display: "flex", gap: 3 }}>
-                {h.recent.map((cell, idx) => {
-                  const isToday = idx === h.recent.length - 1;
-                  return (
-                    <button
-                      key={cell.date}
-                      onClick={() => handleCellClick(h, cell)}
-                      title={`${cell.date}: ${cell.value === true ? "yes" : cell.value === false ? "no" : "unlogged"}`}
-                      style={{
-                        width: 22, height: 22,
-                        borderRadius: 4,
-                        border: isToday ? "1.5px solid #0F172A" : "none",
-                        background: cellColor(cell.value, h.color),
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: 0,
-                      }}
-                    >
-                      <CellIcon value={cell.value} />
-                    </button>
-                  );
-                })}
-              </div>
+                {/* Polarity chip — click toggles. Subtle until hover. */}
+                <button
+                  onClick={() => void handleTogglePolarity(h)}
+                  title={isBreak ? "Break-a-habit (click to switch to build)" : "Build-a-habit (click to switch to break)"}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: 0.4,
+                    color: isBreak ? "#B91C1C" : "#15803D",
+                    background: isBreak ? "rgba(239,68,68,0.10)" : "rgba(34,197,94,0.10)",
+                    border: "none",
+                    padding: "2px 7px",
+                    borderRadius: 99,
+                    cursor: "pointer",
+                    opacity: hoverId === h.id ? 1 : 0.55,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {isBreak ? "break" : "build"}
+                </button>
 
-              {/* Streak counter */}
-              <div style={{
-                fontSize: 12, color: "#475569", fontVariantNumeric: "tabular-nums",
-                minWidth: 32, textAlign: "right",
-              }}>
-                {h.streak > 0 ? `🔥${h.streak}` : "—"}
-              </div>
+                {/* 7-day strip with weekday letters above each cell. */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <div style={{ display: "flex", gap: 3 }}>
+                    {h.recent.map((cell, idx) => {
+                      const dow = new Date(cell.date + "T00:00:00").getDay();
+                      const isToday = idx === h.recent.length - 1;
+                      return (
+                        <div
+                          key={`${cell.date}-label`}
+                          style={{
+                            width: 22, textAlign: "center",
+                            fontSize: 9, fontWeight: isToday ? 700 : 500,
+                            color: isToday ? "#0F172A" : "#94A3B8",
+                            letterSpacing: 0.3,
+                          }}
+                        >
+                          {DOW[dow]}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", gap: 3 }}>
+                    {h.recent.map((cell, idx) => {
+                      const isToday = idx === h.recent.length - 1;
+                      return (
+                        <button
+                          key={cell.date}
+                          onClick={() => handleCellClick(h, cell)}
+                          title={`${cell.date}: ${cell.value === true ? (isBreak ? "slip" : "yes") : cell.value === false ? (isBreak ? "clean (logged)" : "no") : "unlogged"}`}
+                          style={{
+                            width: 22, height: 22,
+                            borderRadius: 4,
+                            border: isToday ? "1.5px solid #0F172A" : "none",
+                            background: cellColor(cell.value, h.color, h.polarity),
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: 0,
+                          }}
+                        >
+                          <CellIcon value={cell.value} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
-              {/* Delete on hover — same two-step confirm as todos. */}
-              <div style={{ visibility: hoverId === h.id ? "visible" : "hidden" }}>
-                <ConfirmDeleteButton
-                  onConfirm={() => void handleDelete(h.id)}
-                  size={14}
-                  title="Delete habit"
-                />
+                {/* Streak counter — fork on polarity. */}
+                <div style={{
+                  fontSize: 12, color: "#475569", fontVariantNumeric: "tabular-nums",
+                  minWidth: 48, textAlign: "right",
+                }}>
+                  {streakLabel(h)}
+                </div>
+
+                <div style={{ visibility: hoverId === h.id ? "visible" : "hidden" }}>
+                  <ConfirmDeleteButton
+                    onConfirm={() => void handleDelete(h.id)}
+                    size={14}
+                    title="Delete habit"
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Inline create row — same shape as TodoList's add-todo row.
-          Click anywhere to focus; Esc collapses; Enter saves. */}
       {(creating || habits.length > 0) && (
         <div
           onClick={() => { setCreating(true); window.setTimeout(() => inputRef.current?.focus(), 0); }}
@@ -224,22 +287,43 @@ export function HabitsStrip() {
         >
           <Plus size={14} color="#9CA3AF" />
           {creating ? (
-            <input
-              ref={inputRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); void handleCreate(); }
-                if (e.key === "Escape") { e.preventDefault(); setCreating(false); setDraft(""); }
-              }}
-              onBlur={() => { if (!draft.trim()) setCreating(false); }}
-              placeholder="e.g. went to gym"
-              style={{
-                flex: 1, border: "none", outline: "none",
-                fontFamily: FONT, fontSize: 13, background: "transparent",
-                color: "var(--gooni-text, #1C1C1E)",
-              }}
-            />
+            <>
+              <input
+                ref={inputRef}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); void handleCreate(); }
+                  if (e.key === "Escape") { e.preventDefault(); setCreating(false); setDraft(""); setDraftPolarity("positive"); }
+                }}
+                onBlur={() => { if (!draft.trim()) { setCreating(false); setDraftPolarity("positive"); } }}
+                placeholder={draftPolarity === "negative" ? "e.g. vaping" : "e.g. went to gym"}
+                style={{
+                  flex: 1, border: "none", outline: "none",
+                  fontFamily: FONT, fontSize: 13, background: "transparent",
+                  color: "var(--gooni-text, #1C1C1E)",
+                }}
+              />
+              {/* Polarity toggle while typing — click flips build ↔ break. */}
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault() /* keep input focus */}
+                onClick={() => setDraftPolarity(draftPolarity === "negative" ? "positive" : "negative")}
+                title="Toggle build / break"
+                style={{
+                  fontSize: 10, fontWeight: 600, letterSpacing: 0.4,
+                  color: draftPolarity === "negative" ? "#B91C1C" : "#15803D",
+                  background: draftPolarity === "negative" ? "rgba(239,68,68,0.10)" : "rgba(34,197,94,0.10)",
+                  border: "none",
+                  padding: "2px 7px",
+                  borderRadius: 99,
+                  cursor: "pointer",
+                  textTransform: "uppercase",
+                }}
+              >
+                {draftPolarity === "negative" ? "break" : "build"}
+              </button>
+            </>
           ) : (
             <span style={{ flex: 1, fontSize: 13, color: "#9CA3AF" }}>
               Add a habit...
