@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, SkipForward } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ExternalLink, Minus, SkipForward, X } from "lucide-react";
 import {
   fetchEvalSegments,
   fetchEvalSegmentFull,
@@ -11,8 +11,10 @@ import {
   type ApiEvalSegment,
   type EvalSegmentFull,
   type EvalMessage,
+  type EvalReflectionInline,
   type ToolCallFailure,
 } from "../../services/api";
+import { renderMarkdown } from "../../utils/markdown";
 import { useListsStore } from "../../stores/useListsStore";
 import { BuildMode } from "./BuildMode";
 import { CapabilityProfileCard } from "./CapabilityProfileCard";
@@ -30,9 +32,58 @@ import { BacklogBoard } from "../lists/BacklogBoard";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
-const RATING_LABEL: Record<number, string> = { 1: "bad", 2: "meh", 3: "good" };
-const RATING_COLOR: Record<number, string> = { 1: "#791F1F", 2: "#BA7517", 3: "#0F6E56" };
-const RATING_GLYPH: Record<number, string> = { 1: "✗", 2: "·", 3: "✓" };
+const RATING_LABEL: Record<number, string> = { 1: "bad", 2: "neutral", 3: "good" };
+const RATING_COLOR: Record<number, string> = { 1: "#791F1F", 2: "#6B7280", 3: "#0F6E56" };
+
+// Mirror of backend `split_for_bots` in app/services/messaging/base.py. Same
+// constants so the eval transcript renders the EXACT bubble shape Telegram /
+// WhatsApp / iMessage users actually saw on their phone.
+const _MIN_SEGMENT_CHARS = 40;
+const _MAX_SEGMENT_CHARS = 320;
+const _MAX_SEGMENTS = 4;
+const _PARA_RE = /\n\s*\n/;
+const _SENTENCE_RE = /(?<=[.!?])\s+(?=[A-Z])/;
+
+function splitForBubbles(text: string): string[] {
+  const raw = (text ?? "").trim();
+  if (!raw) return [];
+  const paragraphs = raw.split(_PARA_RE).map((p) => p.trim()).filter(Boolean);
+  if (!paragraphs.length) return [raw];
+
+  const pieces: string[] = [];
+  for (const para of paragraphs) {
+    if (para.length <= _MAX_SEGMENT_CHARS) {
+      pieces.push(para);
+      continue;
+    }
+    const sentences = para.split(_SENTENCE_RE);
+    let current = "";
+    for (let s of sentences) {
+      s = s.trim();
+      if (!s) continue;
+      if (!current) current = s;
+      else if (current.length + 1 + s.length <= _MAX_SEGMENT_CHARS) current = `${current} ${s}`;
+      else { pieces.push(current); current = s; }
+    }
+    if (current) pieces.push(current);
+  }
+
+  const merged: string[] = [];
+  for (const p of pieces) {
+    if (merged.length && merged[merged.length - 1].length < _MIN_SEGMENT_CHARS) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]}\n${p}`;
+    } else {
+      merged.push(p);
+    }
+  }
+
+  if (merged.length > _MAX_SEGMENTS) {
+    const head = merged.slice(0, _MAX_SEGMENTS - 1);
+    const tail = merged.slice(_MAX_SEGMENTS - 1).join("\n\n");
+    return [...head, tail];
+  }
+  return merged;
+}
 
 function fmtAgo(iso: string | null): string {
   if (!iso) return "—";
@@ -71,6 +122,7 @@ function EvalSection() {
   });
 
   const [skipped, setSkipped] = useState<Set<number>>(new Set());
+  const [celebrating, setCelebrating] = useState(false);
   const visibleQueue = useMemo(
     () => queue.filter((s) => !skipped.has(s.id)),
     [queue, skipped],
@@ -79,21 +131,72 @@ function EvalSection() {
 
   return (
     <Section title="Evals" count={visibleQueue.length}>
-      {!current ? (
-        <EmptyHint>Queue clear. Rate one below as new chats finish.</EmptyHint>
-      ) : (
-        <EvalDrilldown
-          key={current.id}
-          segment={current}
-          onSkip={() => setSkipped((s) => new Set(s).add(current.id))}
-          onDone={async () => {
-            await patchEvalSegment(current.id, { eval_status: "done" });
-            qc.invalidateQueries({ queryKey: ["eval-not-yet-queue"] });
-          }}
-          remaining={visibleQueue.length}
-        />
-      )}
+      <div style={{ position: "relative" }}>
+        {!current ? (
+          <EmptyHint>Queue clear. Rate one below as new chats finish.</EmptyHint>
+        ) : (
+          <EvalDrilldown
+            key={current.id}
+            segment={current}
+            onSkip={() => setSkipped((s) => new Set(s).add(current.id))}
+            onDone={async () => {
+              await patchEvalSegment(current.id, { eval_status: "done" });
+              setCelebrating(true);
+              window.setTimeout(() => setCelebrating(false), 1100);
+              qc.invalidateQueries({ queryKey: ["eval-not-yet-queue"] });
+            }}
+            remaining={visibleQueue.length}
+          />
+        )}
+        <DoneBurst show={celebrating} />
+      </div>
     </Section>
+  );
+}
+
+// Centered checkmark badge that scales-in then fades. One-shot, mounted at
+// EvalSection scope so the next segment can render underneath while the
+// animation plays out. ~1.1s total.
+function DoneBurst({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute", inset: 0, pointerEvents: "none",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        zIndex: 10,
+      }}
+    >
+      <style>{`
+        @keyframes gooni-done-pop {
+          0% { transform: scale(0.4); opacity: 0; }
+          30% { transform: scale(1.15); opacity: 1; }
+          55% { transform: scale(1); opacity: 1; }
+          100% { transform: scale(1.4); opacity: 0; }
+        }
+        @keyframes gooni-done-ring {
+          0% { transform: scale(0.4); opacity: 0.55; }
+          100% { transform: scale(2.4); opacity: 0; }
+        }
+      `}</style>
+      <div style={{ position: "relative", width: 88, height: 88 }}>
+        <div style={{
+          position: "absolute", inset: 0,
+          borderRadius: "50%", border: "2px solid #0F6E56",
+          animation: "gooni-done-ring 900ms ease-out forwards",
+        }} />
+        <div style={{
+          position: "absolute", inset: 0,
+          borderRadius: "50%", background: "#0F6E56",
+          boxShadow: "0 12px 36px rgba(15,110,86,0.35)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          animation: "gooni-done-pop 1100ms cubic-bezier(0.22, 1, 0.36, 1) forwards",
+        }}>
+          <Check size={42} color="#fff" strokeWidth={3} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -154,10 +257,12 @@ function EvalDrilldown({ segment, onSkip, onDone, remaining }: {
         </button>
       </div>
 
-      {/* Transcript — scrollable. Per-assistant-turn rating row inline. */}
+      {/* Transcript — scrollable, chat-bubble layout. Mirrors ChatView so the
+          eval surface reads as the same conversation the user actually saw. */}
       <div style={{
-        maxHeight: 420, overflowY: "auto",
-        padding: "10px 14px",
+        maxHeight: 520, overflowY: "auto",
+        padding: "14px 18px",
+        background: "var(--gooni-bg, #fafafa)",
       }}>
         {isLoading || !full ? (
           <div style={{
@@ -166,7 +271,7 @@ function EvalDrilldown({ segment, onSkip, onDone, remaining }: {
             Loading conversation…
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {full.messages.map((m) => (
               <MessageBlock key={m.id} segmentId={segment.id} msg={m} />
             ))}
@@ -174,17 +279,13 @@ function EvalDrilldown({ segment, onSkip, onDone, remaining }: {
         )}
       </div>
 
-      {/* Footer hint */}
+      {/* Footer — just queue count now. Rating legend lives on the buttons. */}
       <div style={{
         padding: "6px 14px",
         borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
         fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
-        display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
-        <span>{remaining - 1} more in queue after this</span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <ChevronLeft size={10} /> bad · meh · good <ChevronRight size={10} />
-        </span>
+        {remaining - 1} more in queue after this
       </div>
     </div>
   );
@@ -201,10 +302,16 @@ function MessageBlock({ segmentId, msg }: {
   );
   const [comment, setComment] = useState<string>(msg.rating?.comment ?? "");
   const [commentOpen, setCommentOpen] = useState<boolean>(!!msg.rating?.comment);
-  const [saving, setSaving] = useState(false);
+  const [pending, setPending] = useState(false);
 
+  const serverComment = msg.rating?.comment ?? "";
+  const commentDirty = serverComment !== comment;
+  const canSave = !!rating && commentDirty && !pending;
+
+  // Single source of truth for persistence. Backend requires rating ∈ {1,2,3},
+  // so comment-only edits stay client-side until the user picks a rating.
   async function save(nextRating: 1 | 2 | 3, nextComment: string | null) {
-    setSaving(true);
+    setPending(true);
     try {
       await putMessageRating(segmentId, msg.id, {
         rating: nextRating,
@@ -214,52 +321,107 @@ function MessageBlock({ segmentId, msg }: {
     } catch (e) {
       console.error("rating save failed", e);
     } finally {
-      setSaving(false);
+      setPending(false);
     }
   }
 
+  // Bubble shape: user = one bubble; assistant = N bubbles split by the same
+  // logic the bot channels used at send-time so the eval surface reads as the
+  // exact phone-side conversation.
+  const bubbles = useMemo(() => {
+    if (!msg.content) return [];
+    return isAssistant ? splitForBubbles(msg.content) : [msg.content];
+  }, [msg.content, isAssistant]);
+
   return (
     <div style={{
-      borderLeft: `2px solid ${isAssistant ? "#3B82F6" : "rgba(0,0,0,0.12)"}`,
-      paddingLeft: 10,
-      display: "flex", flexDirection: "column", gap: 6,
+      display: "flex", flexDirection: "column",
+      alignItems: isAssistant ? "flex-start" : "flex-end",
+      marginBottom: 14,
     }}>
+      {/* Bubble stack — tight vertical gap mimics multi-message phone view. */}
       <div style={{
-        fontSize: 10, fontWeight: 600, letterSpacing: 0.4,
-        textTransform: "uppercase",
-        color: isAssistant ? "#3B82F6" : "var(--gooni-muted, #8E8E93)",
+        display: "flex", flexDirection: "column", gap: 4,
+        alignItems: isAssistant ? "flex-start" : "flex-end",
+        maxWidth: "82%",
       }}>
-        {isAssistant ? "Gooni" : "User"}
-      </div>
-      <div style={{
-        fontSize: 13, color: "var(--gooni-text, #1C1C1E)",
-        whiteSpace: "pre-wrap", lineHeight: 1.5,
-        maxHeight: 220, overflowY: "auto",
-      }}>
-        {msg.content || <em style={{ color: "var(--gooni-muted, #8E8E93)" }}>(empty)</em>}
+        {bubbles.length === 0 ? (
+          <div style={{
+            fontSize: 12, fontStyle: "italic",
+            color: "var(--gooni-muted, #8E8E93)",
+          }}>(empty)</div>
+        ) : (
+          bubbles.map((b, i) => {
+            const isFirst = i === 0;
+            const isLast = i === bubbles.length - 1;
+            // iMessage-style tail logic: tighten the corner only on the very
+            // last bubble of the stack (closest to the avatar/edge).
+            const tailRadius = "4px";
+            const full = "18px";
+            const borderRadius = isAssistant
+              ? `${full} ${full} ${full} ${isLast ? tailRadius : full}`
+              : `${full} ${full} ${isLast ? tailRadius : full} ${full}`;
+            return (
+              <div
+                key={i}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius,
+                  background: isAssistant ? "#F2F2F7" : "#1C1C1E",
+                  color: isAssistant ? "#1C1C1E" : "#FFFFFF",
+                  fontSize: 14,
+                  fontFamily: FONT,
+                  lineHeight: 1.5,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  marginTop: isFirst ? 0 : 0,
+                }}
+              >
+                {isAssistant ? renderMarkdown(b) : b}
+              </div>
+            );
+          })
+        )}
       </div>
 
+      {/* Gooni's self-take (Reflexion row). Surfaces sev ≥ 2 only — clean
+          turns are still persisted for classifier eval but not shown here.
+          Same rule the dedicated Eval page uses. */}
+      {isAssistant && msg.reflection && msg.reflection.severity >= 2 && (
+        <SelfTakeInline reflection={msg.reflection} />
+      )}
+
       {isAssistant && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6, maxWidth: "82%", width: "100%" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {[1, 2, 3].map((r) => {
               const active = rating === r;
+              const icon = r === 1
+                ? <X size={14} strokeWidth={3} />
+                : r === 2
+                  ? <Minus size={14} strokeWidth={3} />
+                  : <Check size={14} strokeWidth={3} />;
               return (
                 <button
                   key={r}
-                  onClick={() => { setRating(r as 1 | 2 | 3); void save(r as 1 | 2 | 3, comment || null); }}
-                  disabled={saving}
+                  onClick={() => {
+                    setRating(r as 1 | 2 | 3);
+                    void save(r as 1 | 2 | 3, comment || null);
+                  }}
                   title={RATING_LABEL[r]}
                   style={{
-                    width: 26, height: 26, borderRadius: 6,
+                    width: 28, height: 28, borderRadius: 8,
+                    display: "inline-flex", alignItems: "center", justifyContent: "center",
                     background: active ? RATING_COLOR[r] : "var(--gooni-card, #fff)",
-                    border: `0.5px solid ${active ? RATING_COLOR[r] : "rgba(0,0,0,0.12)"}`,
+                    border: `0.5px solid ${active ? RATING_COLOR[r] : "rgba(0,0,0,0.14)"}`,
                     color: active ? "#fff" : RATING_COLOR[r],
-                    cursor: saving ? "wait" : "pointer", fontSize: 13, fontWeight: 600,
+                    cursor: "pointer",
                     padding: 0, fontFamily: "inherit",
+                    transition: "background 120ms ease, color 120ms ease, transform 120ms ease",
+                    transform: active ? "scale(1.05)" : "scale(1)",
                   }}
                 >
-                  {RATING_GLYPH[r]}
+                  {icon}
                 </button>
               );
             })}
@@ -274,34 +436,103 @@ function MessageBlock({ segmentId, msg }: {
             >
               {commentOpen ? "hide note" : (msg.rating?.comment ? "edit note" : "+ note")}
             </button>
-            {msg.rating?.updated_at && (
-              <span style={{
-                marginLeft: "auto",
-                fontSize: 10, color: "var(--gooni-muted, #8E8E93)",
-              }}>
-                saved {fmtAgo(msg.rating.updated_at)}
-              </span>
-            )}
           </div>
           {commentOpen && (
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              onBlur={() => { if (rating) void save(rating, comment || null); }}
-              rows={2}
-              placeholder="what went wrong / right"
-              style={{
-                width: "100%", resize: "vertical",
-                fontFamily: "inherit", fontSize: 12, lineHeight: 1.45,
-                padding: "6px 8px",
-                background: "var(--gooni-card, #fff)",
-                border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.12))",
-                borderRadius: 6,
-                color: "var(--gooni-text, #1C1C1E)",
-                outline: "none",
-              }}
-            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                rows={3}
+                placeholder={rating ? "what went wrong / right" : "pick a rating to save a note"}
+                style={{
+                  width: "100%", resize: "vertical",
+                  fontFamily: "inherit", fontSize: 12, lineHeight: 1.45,
+                  padding: "6px 8px",
+                  background: "var(--gooni-card, #fff)",
+                  border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.12))",
+                  borderRadius: 6,
+                  color: "var(--gooni-text, #1C1C1E)",
+                  outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+                {commentDirty && (
+                  <button
+                    onClick={() => setComment(serverComment)}
+                    disabled={pending}
+                    style={{
+                      padding: "4px 10px", borderRadius: 6,
+                      border: "0.5px solid rgba(0,0,0,0.12)",
+                      background: "transparent",
+                      color: "var(--gooni-muted, #6E6E73)",
+                      fontSize: 11, fontWeight: 500,
+                      cursor: pending ? "wait" : "pointer", fontFamily: "inherit",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+                <button
+                  onClick={() => rating && void save(rating, comment.trim() || null)}
+                  disabled={!canSave}
+                  title={!rating ? "pick a rating first" : !commentDirty ? "no changes" : "save note"}
+                  style={{
+                    padding: "4px 10px", borderRadius: 6,
+                    border: "none",
+                    background: canSave ? "#0A84FF" : "rgba(0,0,0,0.06)",
+                    color: canSave ? "#fff" : "var(--gooni-muted, #8E8E93)",
+                    fontSize: 11, fontWeight: 600,
+                    cursor: canSave ? "pointer" : "not-allowed",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  {serverComment ? "Save" : "Add note"}
+                </button>
+              </div>
+            </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Gooni's self-take (inline reflexion card) ────────────────────────
+// Mirror of EvalView's SelfTakePanel, embedded in the Ops eval drilldown so
+// chat audit and eval surfaces have parity on this block. Sev 2 = notable
+// (yellow), sev 3 = load-bearing (red). Sev 1 is filtered upstream.
+function SelfTakeInline({ reflection }: { reflection: EvalReflectionInline }) {
+  const palette = reflection.severity === 3
+    ? { bg: "#FFF5F5", border: "#FFD3D3", accent: "#FF3B30", label: "load-bearing" }
+    : { bg: "#FFFBEA", border: "#FFE6A6", accent: "#FF9500", label: "notable" };
+  return (
+    <div style={{
+      marginTop: 8, maxWidth: "82%",
+      padding: "8px 10px",
+      background: palette.bg,
+      border: `1px solid ${palette.border}`,
+      borderLeft: `3px solid ${palette.accent}`,
+      borderRadius: 8,
+    }}>
+      <div style={{
+        fontSize: 10, textTransform: "uppercase", letterSpacing: 0.3,
+        color: palette.accent, fontWeight: 600, marginBottom: 4,
+      }}>
+        Gooni's self-take · sev {reflection.severity} · {palette.label} · {reflection.action_vs_described}
+      </div>
+      {reflection.critique_summary && (
+        <div style={{ fontSize: 12.5, color: "#1C1C1E", marginBottom: 3 }}>
+          <strong>Daniel pushed back:</strong> {reflection.critique_summary}
+        </div>
+      )}
+      {reflection.gap_exposed && (
+        <div style={{ fontSize: 12.5, color: "#1C1C1E", marginBottom: 3 }}>
+          <strong>Gap:</strong> {reflection.gap_exposed}
+        </div>
+      )}
+      {reflection.proposed_self_fix && (
+        <div style={{ fontSize: 12.5, color: "#1C1C1E" }}>
+          <strong>Proposed fix:</strong> {reflection.proposed_self_fix}
         </div>
       )}
     </div>

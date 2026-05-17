@@ -105,14 +105,15 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
           day-streak on the right. Stays the same shape across all modes
           so the top-of-page anchor is constant. */}
       <div style={{ background: pageBg }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px 40px 8px" }}>
+        <div style={{ maxWidth: activeMode === "ops" ? 960 : 720, margin: "0 auto", padding: "24px 40px 8px", transition: "max-width 220ms ease" }}>
           <DashboardHeader stats={stats} onBrainClick={() => setExploreOpen(true)} />
         </div>
       </div>
 
-      {/* Single-column body — content swaps based on activeMode. */}
+      {/* Single-column body — content swaps based on activeMode.
+          Ops widens ~35% so backlog kanban + eval bubbles breathe. */}
       <div>
-          <div style={{ maxWidth: 720, margin: "0 auto", padding: "12px 40px 120px" }}>
+          <div style={{ maxWidth: activeMode === "ops" ? 960 : 720, margin: "0 auto", padding: "12px 40px 120px", transition: "max-width 220ms ease" }}>
 
         {/* Top-tier mode toggle — Today | Build | Ops | Pulse. */}
         <ModeToggle />

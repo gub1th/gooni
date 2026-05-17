@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crown, Plus, X, AlertTriangle } from "lucide-react";
+import { Crown, Plus, AlertTriangle } from "lucide-react";
 import {
   fetchTodos, createTodo, updateTodo, cycleTodoState, deleteTodo,
   promoteTodoToPrimary, fetchFocuses,
   type ApiTodo, type ApiTodoBundle, type ApiFocus, type TodoState,
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
+import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 
 // TodoList — dashboard todos block. Mockup-aligned shape:
 //
@@ -168,8 +169,12 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           100%    { opacity: 0; }
         }
         .gooni-primary-race {
+          /* Negative inset pushes the SVG box outside the card so the
+             stroke runs around the soft yellow halo, not the card
+             border. 10px outset + rect rx 22 (= card rx 12 + outset)
+             keeps corners proportional. */
           position: absolute;
-          inset: 0;
+          inset: -10px;
           pointer-events: none;
           overflow: visible;
           animation: gooni-primary-race-fade 1300ms ease forwards;
@@ -177,13 +182,14 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         .gooni-primary-race rect {
           fill: none;
           stroke: #F5C849;
-          stroke-width: 1.5;
+          stroke-width: 2;
           stroke-linecap: round;
-          /* 36px visible bullet + huge gap so only one segment shows
-             at a time. Offset animates a full lap around the rect. */
-          stroke-dasharray: 36 2000;
+          /* 44px visible bullet + huge gap so only one segment shows
+             at a time. Slightly longer than before since the perimeter
+             grew with the outset. */
+          stroke-dasharray: 44 2400;
           stroke-dashoffset: 0;
-          filter: drop-shadow(0 0 4px rgba(245, 200, 73, 0.7));
+          filter: drop-shadow(0 0 6px rgba(245, 200, 73, 0.85));
           animation: gooni-primary-race-offset 1100ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
         }
       `}</style>
@@ -224,8 +230,8 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
             title="Add a todo"
             style={{
               width: 24, height: 24, borderRadius: 6,
-              background: "rgba(59,130,246,0.10)",
-              color: "#1D4ED8",
+              background: "rgba(15,110,86,0.12)",
+              color: "#0F6E56",
               border: "none", cursor: "pointer",
               display: "inline-flex", alignItems: "center", justifyContent: "center",
             }}
@@ -359,10 +365,10 @@ function PrimaryCard({
           preserveAspectRatio="none"
           xmlns="http://www.w3.org/2000/svg"
         >
-          {/* Rect fills the SVG; stroke is centered on the path so
-              half lies outside (overflow:visible on the parent svg
-              renders it). The bullet rides right on the card border. */}
-          <rect x="0" y="0" width="100%" height="100%" rx="12" ry="12" />
+          {/* Rect fills the outset SVG box (inset: -10 on the parent),
+              so the stroke rides around the soft halo rather than the
+              card border. rx 22 = card rx 12 + 10px outset. */}
+          <rect x="0" y="0" width="100%" height="100%" rx="22" ry="22" />
         </svg>
       )}
       <button
@@ -410,16 +416,7 @@ function PrimaryCard({
       )}
 
       {hovered && (
-        <button
-          title="Delete"
-          onClick={onDelete}
-          style={{
-            border: "none", background: "transparent", cursor: "pointer",
-            padding: 2, color: "#9CA3AF", display: "flex",
-          }}
-        >
-          <X size={12} />
-        </button>
+        <ConfirmDeleteButton onConfirm={onDelete} />
       )}
 
       {pickerOpen && (
@@ -509,16 +506,7 @@ function TodoRow({
         </button>
       )}
       {hovered && (
-        <button
-          title="Delete"
-          onClick={onDelete}
-          style={{
-            border: "none", background: "transparent", cursor: "pointer",
-            padding: 2, color: "#9CA3AF", display: "flex",
-          }}
-        >
-          <X size={12} />
-        </button>
+        <ConfirmDeleteButton onConfirm={onDelete} />
       )}
 
       {pickerOpen && (

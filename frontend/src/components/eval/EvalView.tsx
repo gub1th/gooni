@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChatAuditPanel } from "./ChatAuditPanel";
 import {
+  BASE,
   deleteMessageRating,
   dispatchEvalToCc,
   fetchEvalSegmentFull,
@@ -19,6 +20,7 @@ import {
   type EvalToolLegendEntry,
   type MessageTraceStep,
 } from "../../services/api";
+import { Check, Minus, X } from "lucide-react";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -1582,6 +1584,9 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
 
 // ── Per-message rating row (👎/😐/👍 + optional comment) ─────────────────────
 
+const RATING_COLOR_EVAL: Record<number, string> = { 1: "#791F1F", 2: "#6B7280", 3: "#0F6E56" };
+const RATING_LABEL_EVAL: Record<number, string> = { 1: "bad", 2: "neutral", 3: "good" };
+
 function MessageRatingRow({
   segmentId,
   messageId,
@@ -1593,21 +1598,20 @@ function MessageRatingRow({
   existing: EvalMessage["rating"];
   onChanged: () => void;
 }) {
-  const [pending, setPending] = useState(false);
-  const [editingComment, setEditingComment] = useState(false);
   const [comment, setComment] = useState(existing?.comment ?? "");
+  const [pending, setPending] = useState(false);
 
-  // Sync local comment buffer when the row remounts onto a different msg
-  // or the server returns updated state.
   useEffect(() => {
     setComment(existing?.comment ?? "");
   }, [existing?.comment, messageId]);
 
+  const dirty = (existing?.comment ?? "") !== comment;
+  const canSave = !!existing?.rating && dirty && !pending;
+
   async function setRating(rating: 1 | 2 | 3) {
     setPending(true);
     try {
-      // If clicking the already-active rating, clear it instead.
-      if (existing?.rating === rating && !editingComment) {
+      if (existing?.rating === rating) {
         await deleteMessageRating(messageId);
       } else {
         await putMessageRating(segmentId, messageId, {
@@ -1622,14 +1626,13 @@ function MessageRatingRow({
   }
 
   async function saveComment() {
-    if (!existing) return;
+    if (!existing?.rating) return;
     setPending(true);
     try {
       await putMessageRating(segmentId, messageId, {
         rating: existing.rating,
         comment: comment.trim() || null,
       });
-      setEditingComment(false);
       onChanged();
     } finally {
       setPending(false);
@@ -1644,105 +1647,94 @@ function MessageRatingRow({
         borderTop: "1px dashed rgba(0,0,0,0.06)",
         display: "flex",
         flexDirection: "column",
-        gap: 6,
+        gap: 8,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ fontSize: 11, color: "#8E8E93", marginRight: 4 }}>Reply</span>
-        {RATING_OPTIONS.map((opt) => {
-          const active = existing?.rating === opt.value;
+        {[1, 2, 3].map((r) => {
+          const active = existing?.rating === r;
+          const icon = r === 1
+            ? <X size={14} strokeWidth={3} />
+            : r === 2
+              ? <Minus size={14} strokeWidth={3} />
+              : <Check size={14} strokeWidth={3} />;
           return (
             <button
-              key={opt.value}
-              onClick={() => setRating(opt.value)}
+              key={r}
+              onClick={() => setRating(r as 1 | 2 | 3)}
               disabled={pending}
-              title={opt.label}
+              title={RATING_LABEL_EVAL[r]}
               style={{
-                background: active ? "#0A84FF" : "transparent",
-                color: active ? "#FFFFFF" : "#3C3C43",
-                border: active ? "none" : "1px solid #E5E5EA",
-                borderRadius: 6,
-                padding: "3px 8px",
+                width: 28, height: 28, borderRadius: 8,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                background: active ? RATING_COLOR_EVAL[r] : "transparent",
+                border: `1px solid ${active ? RATING_COLOR_EVAL[r] : "#E5E5EA"}`,
+                color: active ? "#fff" : RATING_COLOR_EVAL[r],
                 cursor: pending ? "wait" : "pointer",
-                fontSize: 13,
-                fontFamily: FONT,
-                lineHeight: 1.2,
+                padding: 0, fontFamily: "inherit",
+                transition: "background 120ms ease, transform 120ms ease",
+                transform: active ? "scale(1.05)" : "scale(1)",
               }}
             >
-              {opt.emoji}
+              {icon}
             </button>
           );
         })}
-        {existing && (
-          <button
-            onClick={() => setEditingComment((v) => !v)}
-            style={{
-              background: "none",
-              border: "none",
-              color: "#0A84FF",
-              fontSize: 11,
-              fontFamily: FONT,
-              cursor: "pointer",
-              marginLeft: 4,
-            }}
-          >
-            {editingComment ? "Cancel" : existing.comment ? "Edit comment" : "+ comment"}
-          </button>
-        )}
-        {existing?.comment && !editingComment && (
-          <span
-            style={{
-              fontSize: 11,
-              color: "#3C3C43",
-              fontStyle: "italic",
-              marginLeft: 4,
-              maxWidth: 360,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={existing.comment}
-          >
-            "{existing.comment}"
-          </span>
-        )}
       </div>
-      {editingComment && (
-        <div style={{ display: "flex", gap: 6 }}>
-          <textarea
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="Why this rating? (optional)"
-            rows={2}
-            style={{
-              flex: 1,
-              fontSize: 12,
-              fontFamily: FONT,
-              padding: 6,
-              border: "1px solid #E5E5EA",
-              borderRadius: 6,
-              resize: "vertical",
-            }}
-          />
+      {/* Full-width comment textbox always visible. Manual save — no autosave.
+          Save button enables only when there's a rating + a buffer change. */}
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        placeholder={existing?.rating ? "why this rating?" : "pick a rating above to save a note"}
+        rows={3}
+        style={{
+          width: "100%",
+          fontSize: 12.5,
+          fontFamily: FONT,
+          lineHeight: 1.5,
+          padding: "8px 10px",
+          border: "1px solid #E5E5EA",
+          borderRadius: 8,
+          resize: "vertical",
+          outline: "none",
+          background: "#fff",
+          color: "#1C1C1E",
+        }}
+      />
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
+        {dirty && (
           <button
-            onClick={saveComment}
+            onClick={() => setComment(existing?.comment ?? "")}
             disabled={pending}
             style={{
-              background: "#0A84FF",
-              color: "#FFFFFF",
-              border: "none",
-              borderRadius: 6,
-              padding: "0 12px",
-              fontSize: 12,
-              fontWeight: 600,
-              fontFamily: FONT,
-              cursor: pending ? "wait" : "pointer",
+              padding: "5px 12px", borderRadius: 6,
+              border: "1px solid #E5E5EA", background: "transparent",
+              color: "#6E6E73", fontSize: 11.5, fontWeight: 500,
+              cursor: pending ? "wait" : "pointer", fontFamily: FONT,
             }}
           >
-            Save
+            Cancel
           </button>
-        </div>
-      )}
+        )}
+        <button
+          onClick={saveComment}
+          disabled={!canSave}
+          title={!existing?.rating ? "pick a rating first" : !dirty ? "no changes" : "save note"}
+          style={{
+            padding: "5px 12px", borderRadius: 6,
+            border: "none",
+            background: canSave ? "#0A84FF" : "#E5E5EA",
+            color: canSave ? "#fff" : "#8E8E93",
+            fontSize: 11.5, fontWeight: 600,
+            cursor: canSave ? "pointer" : "not-allowed",
+            fontFamily: FONT,
+          }}
+        >
+          {existing?.comment ? "Save" : "Add note"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -2327,7 +2319,7 @@ function EvalRunsPanel() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/eval/runs");
+        const res = await fetch(`${BASE}/eval/runs`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (cancelled) return;
@@ -2419,7 +2411,7 @@ function EvalRunsPanel() {
         {selected ? (
           <iframe
             key={selected}
-            src={`/eval/runs/${encodeURIComponent(selected)}`}
+            src={`${BASE}/eval/runs/${encodeURIComponent(selected)}`}
             style={{ width: "100%", height: "100%", border: "none" }}
             title={selected}
           />
