@@ -579,6 +579,7 @@ function StartOverlay({
 
   return (
     <div
+      onClick={submit}
       style={{
         position: "fixed",
         inset: 0,
@@ -627,6 +628,8 @@ function StartOverlay({
             placeholder="enter your nickname"
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             maxLength={20}
             autoFocus
             style={{
@@ -645,7 +648,7 @@ function StartOverlay({
           />
           <style>{`input::placeholder { color: rgba(255,255,255,0.55); font-style: italic; letter-spacing: 0.02em; }`}</style>
 
-          <div style={{ display: "flex", gap: 9 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 9 }}>
             {SWATCHES.map((c) => (
               <button
                 key={c}
@@ -667,7 +670,7 @@ function StartOverlay({
           </div>
 
           <button
-            onClick={submit}
+            onClick={(e) => { e.stopPropagation(); submit(); }}
             style={{
               position: "relative",
               background: "transparent",
