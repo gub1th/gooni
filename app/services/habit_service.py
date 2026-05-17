@@ -178,21 +178,41 @@ def _entries_by_date(
 
 
 def compute_streak(db: Session, habit_id: int) -> int:
-    """Consecutive value=True days walking backward from today.
+    """Streak fork on polarity. True always means "did the literal action"
+    regardless of polarity — only the streak metric changes.
 
-    Today unlogged → start walk from yesterday (one grace day so the
-    streak doesn't visually reset the second midnight ticks past). After
-    that grace, any missing day (or explicit False) breaks.
+    polarity='positive' (build a habit, e.g. "went to gym"):
+        consecutive True walking backward from today. Today unlogged →
+        start from yesterday (one grace day). Explicit False or a gap
+        breaks.
 
-    Bound the lookup to the last 400 days — well past any practical
-    streak length. Avoids unbounded scan if the table grows.
+    polarity='negative' (break a habit, e.g. "vaping"):
+        days since last True (last slip) — sober-tracker pattern. No
+        daily logging required. When no slip is recorded in the lookup
+        window, count from habit creation so a brand-new habit reads
+        "0d clean" instead of "400d".
+
+    Lookup is bounded to the last 400 days — well past any practical
+    streak length. Avoids unbounded scan.
     """
     today = date.today()
     cutoff = today - timedelta(days=400)
+    h = get(db, habit_id)
+    if not h:
+        return 0
     entries = _entries_by_date(db, habit_id, cutoff)
 
+    if h.polarity == "negative":
+        last_slip = max(
+            (d for d, v in entries.items() if v is True),
+            default=None,
+        )
+        if last_slip is None:
+            baseline = h.created_at.date() if h.created_at else today
+            return max(0, (today - baseline).days)
+        return max(0, (today - last_slip).days)
+
     cursor = today
-    # One grace step if today is unlogged.
     if today not in entries:
         cursor = today - timedelta(days=1)
 
