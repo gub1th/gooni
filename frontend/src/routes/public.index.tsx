@@ -9,6 +9,7 @@ import { Globe, Pin, PinOff } from "lucide-react";
 import { displayTitle } from "../utils/notePreview";
 import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
+import { Skeleton } from "../components/Skeleton";
 import {
   publicNoteQueryOptions,
   publicNotesListQueryOptions,
@@ -226,6 +227,13 @@ function PublicPage() {
   const lastActive = profileData?.last_active ?? null;
   const visitors = visitsData?.unique_visitors ?? null;
 
+  // Initial-fetch flags. Skeletons render until data lands. Optimistic
+  // edits set `localNotes`, so we treat any non-null local list as
+  // "loaded" — otherwise unpublishing the only note would flash the
+  // skeletons back on.
+  const profileLoading = profileData === undefined;
+  const notesLoading = notesData === undefined && localNotes === null;
+
   const isOwner = getStoredToken() !== null;
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -420,28 +428,44 @@ function PublicPage() {
           }}>
             hi, my name is daniel
           </div>
-          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", color: "#8a8a8a", fontSize: 13.5 }}>
-            {noteCount !== null && (
-              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <PenIcon />
-                <span>
-                  {noteCount} notes written
-                  {notes.length > 0 && noteCount > notes.length && (
-                    <span style={{ color: "#c5c5c5", marginLeft: 4 }}>· {notes.length} public</span>
-                  )}
-                </span>
-              </div>
-            )}
-            {lastActive && (
-              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <ClockIcon />
-                <span>active {timeAgo(lastActive)}</span>
-              </div>
-            )}
-            {visitors !== null && visitors > 0 && (
-              <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                {visitors.toLocaleString()} {visitors === 1 ? "visitor" : "visitors"}
-              </span>
+          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", color: "#8a8a8a", fontSize: 13.5, minHeight: 18 }}>
+            {profileLoading ? (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <PenIcon />
+                  <Skeleton width={110} height={12} />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <ClockIcon />
+                  <Skeleton width={90} height={12} />
+                </div>
+                <Skeleton width={70} height={12} />
+              </>
+            ) : (
+              <>
+                {noteCount !== null && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <PenIcon />
+                    <span>
+                      {noteCount} notes written
+                      {notes.length > 0 && noteCount > notes.length && (
+                        <span style={{ color: "#c5c5c5", marginLeft: 4 }}>· {notes.length} public</span>
+                      )}
+                    </span>
+                  </div>
+                )}
+                {lastActive && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <ClockIcon />
+                    <span>active {timeAgo(lastActive)}</span>
+                  </div>
+                )}
+                {visitors !== null && visitors > 0 && (
+                  <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {visitors.toLocaleString()} {visitors === 1 ? "visitor" : "visitors"}
+                  </span>
+                )}
+              </>
             )}
             <Link
               to="/public/mcp"
@@ -506,7 +530,13 @@ function PublicPage() {
             </div>
           ) : (
             <div style={{ display: "flex", alignItems: "flex-start", gap: 10, margin: "14px 0 0" }}>
-              {bio ? (
+              {profileLoading ? (
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <Skeleton width="92%" height={15} />
+                  <Skeleton width="78%" height={15} />
+                  <Skeleton width="55%" height={15} />
+                </div>
+              ) : bio ? (
                 bioIsHtml ? (
                   <div
                     className="gooni-public-bio"
@@ -550,11 +580,21 @@ function PublicPage() {
         </div>
 
 
+        {/* Pinned hero card skeleton — single placeholder during the
+            initial fetch. We assume one pinned note for now; matches
+            the actual card's padding + line heights so the real card
+            slots in without shifting the rest of the page. */}
+        {notesLoading && (
+          <div style={{ marginBottom: 28 }}>
+            <PinnedSkeleton />
+          </div>
+        )}
+
         {/* Pinned hero cards — public-pinned notes surfaced above the
             list. The owner pins via the pin button on a regular row;
             the hero card lets a YC reviewer (or anyone landing cold)
             hit the intro post first instead of scanning the list. */}
-        {pinned.length > 0 && (
+        {!notesLoading && pinned.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 28 }}>
             {pinned.map((note) => (
               <Link
@@ -675,7 +715,13 @@ function PublicPage() {
         )}
 
         {/* Notes list */}
-        {displayed.length === 0 ? (
+        {notesLoading ? (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <NoteRowSkeleton key={i} />
+            ))}
+          </ul>
+        ) : displayed.length === 0 ? (
           <p style={{ color: "#aaa", fontSize: 14 }}>No posts yet.</p>
         ) : rest.length === 0 ? null : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
@@ -884,5 +930,62 @@ function PublicPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// Hero-card skeleton — geometry mirrors the pinned <Link> above so the
+// real card drops in without nudging anything below it. One placeholder
+// is enough for the cold-load case (the page assumes a single pinned
+// note for now).
+function PinnedSkeleton() {
+  return (
+    <div
+      aria-hidden
+      style={{
+        display: "block",
+        padding: "20px 22px",
+        borderRadius: 16,
+        background: "linear-gradient(135deg, #ffffff 0%, #f9fbf7 100%)",
+        border: "1px solid rgba(74,222,128,0.20)",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03)",
+      }}
+    >
+      <Skeleton width={84} height={11} radius={4} style={{ marginBottom: 12 }} />
+      <div style={{ marginBottom: 12 }}>
+        <Skeleton width="72%" height={22} radius={5} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <Skeleton width="100%" height={13} />
+        <Skeleton width="92%" height={13} />
+        <Skeleton width="64%" height={13} />
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <Skeleton width={140} height={11} radius={4} />
+      </div>
+    </div>
+  );
+}
+
+// Row-level skeleton matching the rendered `more notes` <li> heights so
+// the real list slots in cleanly when the fetch resolves.
+function NoteRowSkeleton() {
+  return (
+    <li
+      aria-hidden
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        justifyContent: "space-between",
+        gap: 16,
+        padding: "16px 14px",
+        margin: "0 -14px",
+        borderBottom: "1px solid rgba(0,0,0,0.06)",
+      }}
+    >
+      <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+        <Skeleton width="62%" height={18} radius={5} />
+        <Skeleton width={120} height={12} />
+      </div>
+    </li>
   );
 }
