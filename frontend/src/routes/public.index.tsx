@@ -27,55 +27,138 @@ const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif"
 const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
 
 function PlazaCta() {
+  const shimRef = useRef<HTMLSpanElement>(null);
+  const arrowRef = useRef<HTMLSpanElement>(null);
   return (
     <Link
       to="/creative"
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 8,
-        padding: "8px 16px 8px 14px",
-        borderRadius: 999,
-        // Match the pinned-card sage palette — same green accent, same
-        // restraint as the rest of /public. No gradient, no shadow:
-        // looks like a sibling of "start here", not a Vegas pill.
-        background: "rgba(74,222,128,0.06)",
-        color: "#1b8b4a",
+        gap: 14,
+        padding: "16px 24px",
+        borderRadius: 18,
+        background: "#ffffff",
+        border: "1.5px solid #9FE1CB",
+        color: "#085041",
         textDecoration: "none",
         fontFamily: FONT,
-        fontSize: 13,
-        fontWeight: 600,
-        letterSpacing: "0.01em",
-        border: "1px solid rgba(74,222,128,0.35)",
-        transition: "background 160ms ease, border-color 160ms ease, transform 160ms ease",
+        transition: "all 0.25s ease",
         cursor: "pointer",
+        position: "relative",
+        overflow: "hidden",
+        maxWidth: 340,
       }}
       onMouseEnter={(e) => {
         const el = e.currentTarget as HTMLAnchorElement;
-        el.style.background = "rgba(74,222,128,0.14)";
-        el.style.borderColor = "rgba(74,222,128,0.55)";
-        el.style.transform = "translateY(-1px)";
+        el.style.borderColor = "#1D9E75";
+        el.style.transform = "translateY(-2px)";
+        if (arrowRef.current) arrowRef.current.style.transform = "translateX(6px)";
+        if (shimRef.current) shimRef.current.style.transform = "translateX(400px)";
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget as HTMLAnchorElement;
-        el.style.background = "rgba(74,222,128,0.06)";
-        el.style.borderColor = "rgba(74,222,128,0.35)";
+        el.style.borderColor = "#9FE1CB";
         el.style.transform = "translateY(0)";
+        if (arrowRef.current) arrowRef.current.style.transform = "translateX(0)";
+        if (shimRef.current) shimRef.current.style.transform = "translateX(-100px)";
       }}
     >
       <span
+        ref={shimRef}
         aria-hidden
         style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: "#1b8b4a",
-          boxShadow: "0 0 0 3px rgba(74,222,128,0.18)",
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: 60,
+          height: "100%",
+          background: "linear-gradient(90deg, transparent, rgba(29,158,117,0.06), transparent)",
+          transform: "translateX(-100px)",
+          transition: "transform 0.6s ease",
+          pointerEvents: "none",
         }}
       />
-      <span>wander the plaza</span>
-      <span style={{ fontSize: 14, lineHeight: 1, marginLeft: 1 }}>→</span>
+      <span
+        aria-hidden
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: "50%",
+          background: "#E1F5EE",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          overflow: "hidden",
+        }}
+      >
+        <WalkingGooni />
+      </span>
+      <span style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#085041" }}>Wander the plaza</span>
+        <span style={{ fontSize: 12, color: "#0F6E56", opacity: 0.6, marginTop: 1 }}>explore in 3D</span>
+      </span>
+      <span
+        ref={arrowRef}
+        aria-hidden
+        style={{ color: "#1D9E75", transition: "transform 0.25s", fontSize: 18 }}
+      >
+        →
+      </span>
     </Link>
+  );
+}
+
+function WalkingGooni() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden>
+      <g style={{ animation: "plazaCtaWalkBob 0.5s ease-in-out infinite" }}>
+        <circle cx="15" cy="8" r="5" fill="#F5F5F0" />
+        <circle cx="14" cy="7.5" r="1" fill="#1a1a1a" />
+        <circle cx="14.3" cy="7.2" r="0.3" fill="#fff" />
+        <path d="M13 9.5 Q14.5 10.8 15.5 9.8" stroke="#1a1a1a" strokeWidth="0.5" fill="none" />
+        <rect x="12" y="13" width="6" height="6" rx="2" fill="#4ADE80" />
+        <rect
+          x="10.5" y="14.5" width="2" height="1.2" rx="0.6" fill="#4ADE80"
+          style={{ animation: "plazaCtaArmBack 0.5s ease-in-out infinite", transformOrigin: "12.5px 14.5px" }}
+        />
+        <rect
+          x="17.5" y="14.5" width="2" height="1.2" rx="0.6" fill="#4ADE80"
+          style={{ animation: "plazaCtaArmFront 0.5s ease-in-out infinite", transformOrigin: "17.5px 14.5px" }}
+        />
+        <rect
+          x="12.5" y="19" width="1.8" height="3" rx="0.7" fill="#3AAD6E"
+          style={{ animation: "plazaCtaLegFront 0.5s ease-in-out infinite", transformOrigin: "13.4px 19px" }}
+        />
+        <rect
+          x="15.5" y="19" width="1.8" height="3" rx="0.7" fill="#3AAD6E"
+          style={{ animation: "plazaCtaLegBack 0.5s ease-in-out infinite", transformOrigin: "16.4px 19px" }}
+        />
+      </g>
+      <style>{`
+        @keyframes plazaCtaWalkBob {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-1.5px); }
+        }
+        @keyframes plazaCtaLegFront {
+          0%, 100% { transform: rotate(-15deg); }
+          50% { transform: rotate(15deg); }
+        }
+        @keyframes plazaCtaLegBack {
+          0%, 100% { transform: rotate(15deg); }
+          50% { transform: rotate(-15deg); }
+        }
+        @keyframes plazaCtaArmFront {
+          0%, 100% { transform: rotate(10deg); }
+          50% { transform: rotate(-10deg); }
+        }
+        @keyframes plazaCtaArmBack {
+          0%, 100% { transform: rotate(-10deg); }
+          50% { transform: rotate(10deg); }
+        }
+      `}</style>
+    </svg>
   );
 }
 
@@ -142,7 +225,6 @@ function PublicPage() {
   const noteCount = profileData?.note_count ?? null;
   const lastActive = profileData?.last_active ?? null;
   const visitors = visitsData?.unique_visitors ?? null;
-  const [filter, setFilter] = useState<string | null>(null);
 
   const isOwner = getStoredToken() !== null;
   const [editing, setEditing] = useState(false);
@@ -292,12 +374,7 @@ function PublicPage() {
   // Invisible viewport bounds for the mascot to walk in (matches GooniLayer).
   const mascotBoundsRef = useRef<HTMLDivElement>(null);
 
-  const spaceNames = Array.from(
-    new Set(notes.map((n) => n.space_name).filter((s): s is string => s !== null))
-  );
-  const displayed = filter ? notes.filter((n) => n.space_name === filter) : notes;
-  // Split: pinned notes hero above, rest in the list. Pinned still respects
-  // the active space filter so the section feels coherent w/ the filter pill.
+  const displayed = notes;
   const pinned = displayed.filter((n) => n.is_public_pinned);
   const rest = displayed.filter((n) => !n.is_public_pinned);
 
@@ -472,42 +549,6 @@ function PublicPage() {
           <PlazaCta />
         </div>
 
-        {/* Space filter bubbles */}
-        {spaceNames.length > 0 && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 28, flexWrap: "wrap" }}>
-            {spaceNames.map((name) => {
-              const active = filter === name;
-              return (
-                <button
-                  key={name}
-                  onClick={() => setFilter(active ? null : name)}
-                  style={{
-                    padding: "5px 13px", borderRadius: 999, cursor: "pointer", fontFamily: FONT,
-                    border: `1px solid ${active ? "#111" : "rgba(0,0,0,0.14)"}`,
-                    background: active ? "#111" : "transparent",
-                    color: active ? "#fff" : "#666",
-                    fontSize: 12.5, fontWeight: 500,
-                    transition: "all 0.15s ease",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (active) return;
-                    const el = e.currentTarget as HTMLButtonElement;
-                    el.style.borderColor = "rgba(0,0,0,0.30)";
-                    el.style.color = "#111";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (active) return;
-                    const el = e.currentTarget as HTMLButtonElement;
-                    el.style.borderColor = "rgba(0,0,0,0.14)";
-                    el.style.color = "#666";
-                  }}
-                >
-                  {name}
-                </button>
-              );
-            })}
-          </div>
-        )}
 
         {/* Pinned hero cards — public-pinned notes surfaced above the
             list. The owner pins via the pin button on a regular row;
