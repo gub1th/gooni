@@ -39,23 +39,29 @@ class MessagingChannel(ABC):
 # markdown response — splitting there would fight the rendered formatting.
 
 _PARA_RE = re.compile(r"\n\s*\n")
-_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+# Sentence splitter. Original required an uppercase letter after the period
+# (`(?=[A-Z])`), which never fired against Gooni's lowercase-casual voice —
+# long paragraphs like "i did x. then i did y. then z." stayed one bubble.
+# Drop the uppercase lookahead so lowercase-cased text splits too.
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+(?=\S)")
 
 # Tuning. Short enough to read on phone glance, long enough that we're not
-# fragmenting every clause. 4 bubbles max keeps notifications sane.
-# _MIN_SEGMENT_CHARS lowered from 40 → 18 in the WA-promises rewrite:
-# Daniel called out the prior "one line / newline / one line / two newlines"
-# in-bubble pattern as mechanical-reading. The merge step was greedily
-# concatenating ≤40-char bubbles into a single bubble with internal \n
-# breaks, which is exactly that ugly pattern. Lower threshold keeps short
-# intentional bubbles as their own messages.
+# fragmenting every clause.
+# _MIN_SEGMENT_CHARS lowered from 40 → 18 in the WA-promises rewrite: the
+# merge step was greedily concatenating ≤40-char bubbles into a single
+# bubble with internal \n breaks, which read as mechanical "one line /
+# newline / one line" pattern.
+# _MAX_SEGMENTS dropped from 4 → 2 in the alfred/terseness rewrite: eval
+# segment #209 showed multi-bubble replies firing even when content didn't
+# warrant. Master prompt now enforces terseness (1 bubble usually, 2 max);
+# this cap is the safety net if the LLM still rambles.
 _MIN_SEGMENT_CHARS = 18
 _MAX_SEGMENT_CHARS = 320
-_MAX_SEGMENTS = 4
+_MAX_SEGMENTS = 2
 
 
 def split_for_bots(text: str) -> list[str]:
-    """Split orchestrator output into 1–4 short message bubbles.
+    """Split orchestrator output into 1–2 short message bubbles.
 
     Pipeline:
       1. Split on blank lines (paragraph boundaries the LLM emitted).
@@ -125,7 +131,7 @@ def dispatch_inbound(
 
     Returns (raw_response, [formatted_segments]), or None if the sender was
     rejected. Raw is the orchestrator's full markdown; segments are the
-    channel-formatted bubbles ready for the wire — typically 1 short, 2–4
+    channel-formatted bubbles ready for the wire — typically 1 short, 2
     when the reply is longer. Callers iterate segments and send each.
 
     Splitting happens on raw text first, then per-segment formatting runs so
