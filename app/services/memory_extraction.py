@@ -214,6 +214,13 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "time_hint": "tonight|today|tomorrow|this week|this weekend|next week|by friday|null"
     }}
   ],
+  "todos": [
+    {{
+      "text":     "<short imperative chore, max 12 words>",
+      "due_hint": "tonight|today|tomorrow|this week|null"
+    }}
+  ],
+  "reply_intent": "answer|acknowledge|task_only|no_reply",
   "memories": [
     {{
       "type": "preference" | "fact" | "routine" | "constraint" | "episode",
@@ -356,6 +363,48 @@ soft_promises:
     "Wish i could leetcode more" → null (no commitment verb).
 - Empty when no self-committal verb fired.
 
+todos:
+- Chore-shaped actionable tasks Daniel needs to remember to do. Distinct
+  from soft_promises (which are first-person commitments tracked for
+  accountability). Todos = items for the chore list; promises = items
+  for the accountability surface.
+- The dashboard composer's "demo for gooni" use case lives here: Daniel
+  types a chore into the note composer expecting it to land on his todo
+  list, NOT the engineering backlog. Without `todos`, those route to
+  feature_requests and confuse the surfaces.
+- SURFACE RULE: when `prev_assistant` is non-empty (chat surface), prefer
+  soft_promises for "imma X" / "i'll X" / "i'm gonna X" — those go
+  through accountability tracking. Emit todos on chat ONLY when text is
+  explicit: "add to todos: X", "remind me to X", "todo: X".
+- When prev_assistant is empty (note save), emit todos freely for chore-
+  shaped imperatives: "call mom", "buy milk", "create demo for gooni",
+  "fix the auth bug".
+- Skip when text is pure capture (groceries lists, design ideas, journal
+  entries) — let the prefilter handle those.
+- Examples (note-save context, fires):
+    Text "i need to create a demo for gooni" → [{{text:"create demo for gooni", due_hint:"null"}}]
+    Text "call dentist tomorrow" → [{{text:"call dentist", due_hint:"tomorrow"}}]
+    Text "buy milk + eggs" → [{{text:"buy milk + eggs", due_hint:"null"}}]
+- Examples (chat context, skip → emits as soft_promise instead):
+    Text "imma call mom tomorrow" → soft_promises, NOT todos
+    Text "i'll fix the auth bug tonight" → soft_promises, NOT todos
+- Empty when nothing chore-shaped fires.
+
+reply_intent:
+- One-of: "answer" | "acknowledge" | "task_only" | "no_reply".
+- Tells the orchestrator how much reply the user actually wants/needs.
+  Phase 5: future-Gooni uses this to gate the LLM-reply step (skip the
+  full generation for task_only/no_reply intents — just persist signals).
+- "answer": Daniel asked a question or expects a substantive reply.
+  Default for question-shaped text.
+- "acknowledge": Daniel made a statement/commitment; a brief ack is
+  appropriate. "Imma call mom tonight" → acknowledge.
+- "task_only": Daniel dumped a chore/list/note with no expectation of a
+  conversational reply. "buy milk eggs bread" → task_only.
+- "no_reply": Pure context dump or rambling; even an ack would be noise.
+  "yo just thinking out loud about hardware design ideas" → no_reply.
+- Default to "answer" when uncertain.
+
 memories:
 - Persistent facts about Daniel — same shape as before.
 - "preference" = stable like/dislike. "fact" = declarative truth (includes
@@ -475,6 +524,43 @@ def _normalize_promises(items: Any) -> list[dict]:
     return out
 
 
+def _normalize_todos(items: Any) -> list[dict]:
+    out = []
+    if not isinstance(items, list):
+        return out
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        text = it.get("text")
+        if not (isinstance(text, str) and text.strip()):
+            continue
+        due_hint = it.get("due_hint")
+        out.append({
+            "text": text.strip()[:200],
+            "due_hint": (
+                due_hint.strip()[:40]
+                if isinstance(due_hint, str)
+                and due_hint.strip()
+                and due_hint.strip().lower() != "null"
+                else None
+            ),
+        })
+    return out
+
+
+def _normalize_reply_intent(value: Any) -> str:
+    """Single-of-four classification. Defaults to "answer" — phase 5's
+    "skip the LLM reply" gating only fires when we're confident the
+    intent is task_only / no_reply; conservative default keeps current
+    behavior intact."""
+    if not isinstance(value, str):
+        return "answer"
+    v = value.strip().lower()
+    if v in ("answer", "acknowledge", "task_only", "no_reply"):
+        return v
+    return "answer"
+
+
 # Regex pre-filter for extract_signals. If the text has NONE of these
 # trigger phrases, we skip the LLM call entirely (returns empty) — most
 # pure-capture notes ("groceries: milk eggs", "kitchen sink") carry no
@@ -525,6 +611,8 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "tone_corrections": [],
         "feature_requests": [],
         "soft_promises": [],
+        "todos": [],
+        "reply_intent": "answer",
         "memories": [],
     }
     if not text or not text.strip():
@@ -562,6 +650,8 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "tone_corrections": _normalize_tone(parsed.get("tone_corrections")),
         "feature_requests": _normalize_features(parsed.get("feature_requests")),
         "soft_promises":    _normalize_promises(parsed.get("soft_promises")),
+        "todos":            _normalize_todos(parsed.get("todos")),
+        "reply_intent":     _normalize_reply_intent(parsed.get("reply_intent")),
         "memories":         _normalize_memories(parsed.get("memories")),
     }
 

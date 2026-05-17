@@ -55,6 +55,12 @@ class RouterResult:
     captured_features: list[dict] = field(default_factory=list)
     tone_rules: list[str] = field(default_factory=list)
     captured_promises: list[dict] = field(default_factory=list)
+    # Phase 5: extractor's classification of how much reply the user
+    # wants. One of "answer" | "acknowledge" | "task_only" | "no_reply".
+    # Defaults to "answer" — conservative; callers gate the LLM reply
+    # step on this only when they're confident the intent is task_only
+    # or no_reply.
+    reply_intent: str = "answer"
     tools_used: list[str] = field(default_factory=list)
 
 
@@ -62,9 +68,16 @@ def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
     """Fan out signals to per-type handlers. Each handler is wrapped so
     a single handler failure doesn't kill the rest of the routing.
     """
-    from .intent_handlers import features, memories, promises, tones
+    from .intent_handlers import features, memories, promises, todos, tones
 
     result = RouterResult()
+    # Pass through reply_intent (phase 5) — extractor classifies, caller
+    # uses it to gate the LLM reply step.
+    intent = signals.get("reply_intent")
+    if isinstance(intent, str) and intent in (
+        "answer", "acknowledge", "task_only", "no_reply"
+    ):
+        result.reply_intent = intent
 
     # Order matters slightly: tone_corrections need to look at
     # prev_assistant to set feedback_for_message_id on the user message,
@@ -83,6 +96,11 @@ def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
         promises.handle(signals.get("soft_promises") or [], ctx, result)
     except Exception as e:
         print(f"[intent_router] promise handler error: {e}")
+
+    try:
+        todos.handle(signals.get("todos") or [], ctx, result)
+    except Exception as e:
+        print(f"[intent_router] todo handler error: {e}")
 
     try:
         memories.handle(signals.get("memories") or [], ctx, result)
