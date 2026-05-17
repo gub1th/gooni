@@ -514,9 +514,33 @@ function NotesLink({ visible }: { visible: boolean }) {
           boxShadow: "0 0 0 3px rgba(74,222,128,0.20)",
         }}
       />
+      <span
+        aria-hidden
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: "50%",
+          background: "#E1F5EE",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <NotebookIcon />
+      </span>
       <span>read my notes</span>
       <span style={{ fontSize: 14, lineHeight: 1, marginLeft: 1, color: "#555" }}>→</span>
     </a>
+  );
+}
+
+function NotebookIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <rect x="3.5" y="2" width="9" height="12" rx="1.2" stroke="#1D9E75" strokeWidth="1.3" />
+      <path d="M3.5 5h9M3.5 8h6M3.5 11h6" stroke="#1D9E75" strokeWidth="1.1" strokeLinecap="round" />
+    </svg>
   );
 }
 

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
+import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { PublicNote } from "../../services/api";
+import { displayTitle } from "../../utils/notePreview";
 import { getToonGradient } from "./toonGradient";
 import { subscribeTileState } from "./useDanielControls";
 import { useReducedMotion } from "./useReducedMotion";
@@ -21,31 +23,37 @@ import type { BaseTile } from "./tileGrid";
 // (Pokemon-coin lifecycle). Peek + expand UI lives in NoteCoins (a
 // fixed bottom DOM bar) — this component is the visual marker only.
 
+// ~30% smaller than the original gold-coin pass — these read as
+// floating notes, not collectibles.
 const COIN_BASE_Y = 1.30;       // height above tile top
-const COIN_RADIUS = 0.45;
-const COIN_THICKNESS = 0.10;
-const SPIN_SPEED = 2.2;         // rad/s — around world-Y
+const COIN_RADIUS = 0.315;
+const COIN_THICKNESS = 0.07;
+const SPIN_SPEED = (2 * Math.PI) / 4.5;  // ~4.5s per revolution
 const BOB_AMP = 0.10;
-const BOB_FREQ = 1.2;           // rad/s
-const BEAM_HEIGHT = 1.1;
-const BEAM_RADIUS = 0.18;
+const BOB_FREQ = (2 * Math.PI) / 3.0;    // 3s bob cycle
+const BEAM_HEIGHT = 0.85;
+const BEAM_RADIUS = 0.14;
+const COIN_OPACITY = 0.80;
+// Tilt the disc ~17° off vertical so it reads as a floating page,
+// not a perfect coin face.
+const COIN_TILT_Z = (17 * Math.PI) / 180;
 
-// Gold coin (regular public note).
-const COIN_COLOR = "#ffd56b";
-const COIN_EMISSIVE = "#ffaa1f";
-const BEAM_COLOR = "#fff1c2";
+// Cream paper (regular public note) with a faint teal-tinged emissive
+// edge for warmth.
+const COIN_COLOR = "#F5F0E8";
+const COIN_EMISSIVE = "#9FE1CB";
+const BEAM_COLOR = "#E7F4EE";
 
-// Rose-magenta coin (pinned public note) — distinct silhouette from
-// across the plaza so a YC-reviewer-style "start here" reads at a
-// glance.
-const PINNED_COIN_COLOR = "#ff7ab8";
-const PINNED_COIN_EMISSIVE = "#ff3d8c";
-const PINNED_BEAM_COLOR = "#ffd6ea";
+// Pinned: same paper body, a slightly warmer cream + warmer beam so
+// the "start here" reads as gentle priority, not Vegas.
+const PINNED_COIN_COLOR = "#FBF0DE";
+const PINNED_COIN_EMISSIVE = "#F0CDA0";
+const PINNED_BEAM_COLOR = "#F6E4C9";
 
-// "Read" state desaturates the coin so visited notes recede.
-const READ_COIN_COLOR = "#b0a48a";
-const READ_COIN_EMISSIVE = "#6e6650";
-const READ_BEAM_COLOR = "#b8b0a0";
+// Read state: drained warmth — visited notes recede further.
+const READ_COIN_COLOR = "#D7D2CA";
+const READ_COIN_EMISSIVE = "#9C9A93";
+const READ_BEAM_COLOR = "#CFCBC3";
 
 type Props = {
   note: PublicNote;
@@ -71,16 +79,18 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
   const coinEmissive = isRead ? READ_COIN_EMISSIVE : isPinned ? PINNED_COIN_EMISSIVE : COIN_EMISSIVE;
   const beamColor = isRead ? READ_BEAM_COLOR : isPinned ? PINNED_BEAM_COLOR : BEAM_COLOR;
 
-  // Emissive intensity: base by state, boosted on hover or proximity.
-  const baseEmissive = isRead ? 0.08 : isPinned ? 0.45 : 0.30;
-  const hoverEmissive = isRead ? 0.20 : isPinned ? 0.85 : 0.65;
-  const nearBoost = isRead ? 0.0 : 0.20;  // read coins stay dim — don't re-attract
+  // Emissive intensity: paper-quiet by default. Hover/proximity warms
+  // the edge slightly, never bright. Numbers tuned to keep the coin
+  // from outshining the mushrooms + trees.
+  const baseEmissive = isRead ? 0.04 : isPinned ? 0.18 : 0.10;
+  const hoverEmissive = isRead ? 0.10 : isPinned ? 0.32 : 0.24;
+  const nearBoost = isRead ? 0.0 : 0.08;
   const activeEmissive = (hovered ? hoverEmissive : baseEmissive) + (isNear ? nearBoost : 0);
 
-  const spinSpeed = reduceMotion ? 0.2 : isRead ? SPIN_SPEED * 0.4 : SPIN_SPEED;
+  const spinSpeed = reduceMotion ? 0.2 : isRead ? SPIN_SPEED * 0.5 : SPIN_SPEED;
   const bobAmp = reduceMotion || isRead ? 0 : BOB_AMP;
-  const beamOpacityBase = isRead ? 0.08 : 0.20;
-  const beamOpacityBoost = isRead ? 0 : (isNear ? 0.14 : 0);
+  const beamOpacityBase = isRead ? 0.04 : 0.10;
+  const beamOpacityBoost = isRead ? 0 : (isNear ? 0.06 : 0);
 
   useEffect(() => {
     return subscribeTileState((e) => {
@@ -131,9 +141,16 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
 
   if (!tileAlive) return null;
 
+  // Title label appears only when the player is on an adjacent tile
+  // (proximity-only) AND we have a real title to show. Same dark pill
+  // styling as the avatar nametag so the plaza UI reads as one family.
+  const labelTitle = displayTitle(note, "");
+  const showLabel = isNear && labelTitle.length > 0;
+
   return (
     <group position={[tile.x, 0, tile.z]}>
-      {/* Vertical beam — visible-from-far marker */}
+      {/* Vertical beam — visible-from-far marker, dialed way down so it
+          ambient-glows the tile instead of advertising. */}
       <mesh ref={beamRef} position={[0, BEAM_HEIGHT / 2 + 0.15, 0]}>
         <cylinderGeometry args={[BEAM_RADIUS, BEAM_RADIUS * 0.6, BEAM_HEIGHT, 16, 1, true]} />
         <meshBasicMaterial
@@ -145,11 +162,13 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
         />
       </mesh>
 
-      {/* Spinner group rotates around world-Y. Inner mesh has the tilt
-          so the coin face stands vertical. */}
+      {/* Spinner group rotates around world-Y. Inner mesh keeps the
+          [PI/2, 0, 0] tilt that stands the face vertical, plus a small
+          Z tilt so the page sits ~17° off-axis (floating leaf, not
+          coin face). */}
       <group ref={spinnerRef} position={[0, COIN_BASE_Y, 0]}>
         <mesh
-          rotation={[Math.PI / 2, 0, 0]}
+          rotation={[Math.PI / 2, 0, COIN_TILT_Z]}
           onClick={handleClick}
           onPointerEnter={handlePointerEnter}
           onPointerLeave={handlePointerLeave}
@@ -161,9 +180,47 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
             emissive={coinEmissive}
             emissiveIntensity={activeEmissive}
             gradientMap={toonGradient}
+            transparent
+            opacity={COIN_OPACITY}
+            depthWrite={false}
           />
         </mesh>
       </group>
+
+      {showLabel && (
+        <Html
+          position={[0, COIN_BASE_Y + 0.55, 0]}
+          center
+          distanceFactor={8}
+          pointerEvents="none"
+          zIndexRange={[35, 45]}
+          style={{ pointerEvents: "none" }}
+        >
+          <div
+            style={{
+              background: "rgba(20,22,28,0.72)",
+              color: "#ffffff",
+              padding: "4px 10px",
+              borderRadius: 999,
+              fontSize: 12,
+              lineHeight: 1.1,
+              fontFamily: "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+              fontWeight: 500,
+              letterSpacing: "0.02em",
+              whiteSpace: "nowrap",
+              maxWidth: 220,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              userSelect: "none",
+              backdropFilter: "blur(6px) saturate(140%)",
+              WebkitBackdropFilter: "blur(6px) saturate(140%)",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.30), 0 0 0 1px rgba(255,255,255,0.10) inset",
+            }}
+          >
+            {labelTitle}
+          </div>
+        </Html>
+      )}
     </group>
   );
 }
