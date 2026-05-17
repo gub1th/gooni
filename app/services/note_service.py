@@ -152,8 +152,6 @@ def classify_note(note_id: int) -> None:
     """
     from ..db.database import SessionLocal
     from .memory_extraction import extract_signals
-    from .memory_service import memory_service
-    from ..tools.feature_request_tool import feature_request_tool
 
     db = SessionLocal()
     try:
@@ -181,38 +179,26 @@ def classify_note(note_id: int) -> None:
         text_for_llm = f"{(note.title or '').strip()}\n\n{plaintext}".strip()
         signals = extract_signals(text_for_llm, prev_assistant=None)
 
-        # Memories: route through the same reconciler as chat. Tag each
-        # written row with source_note_id so the editor disclosure can
-        # surface "this note created N memories".
-        memories_written: list = []
-        if signals["memories"]:
-            memories_written = memory_service.apply_memory_candidates(
-                signals["memories"], db=db, source_note_id=note.id,
-            )
+        # Unified routing via intent_router — same dispatch point chat
+        # uses, eliminates the two-layer drift that caused the
+        # "demo for gooni" bug (note #258 phase 2). Tone + promise
+        # handlers self-skip without prev_assistant / source_message.
+        from . import intent_router
+        ctx = intent_router.RouterContext(
+            db=db,
+            source_note_id=note.id,
+        )
+        routed = intent_router.dispatch(signals, ctx)
+        memories_written = routed.memories_written
 
-        # Feature requests: write items to the canonical Backlog List. Each
-        # ListItem carries source_note_id back to this note. We capture the
-        # ids so the editor disclosure can deep-link to each new item.
-        feature_summaries: list[dict] = []
-        for fr in signals["feature_requests"]:
-            try:
-                result = feature_request_tool.execute(
-                    db=db,
-                    title=fr["title"],
-                    why=fr.get("why")
-                        or f"From note #{note.id}: {plaintext[:200]}",
-                    source_note_id=note.id,
-                )
-                # Tool returns "Logged feature request #N: title" — extract id
-                import re as _re
-                m = _re.search(r"#(\d+)", result or "")
-                if m:
-                    feature_summaries.append({
-                        "title": fr["title"],
-                        "list_item_id": int(m.group(1)),
-                    })
-            except Exception as e:
-                print(f"classify_note feature_request error: {e}")
+        # Map router's captured_features (title + ticket_id) into the
+        # note's signals_summary shape. list_item_id stays as the
+        # historical key name so the FE disclosure renders unchanged.
+        feature_summaries = [
+            {"title": f["title"], "list_item_id": f["ticket_id"]}
+            for f in routed.captured_features
+            if f.get("ticket_id") is not None
+        ]
 
         # Persist the signals snapshot so the editor can render a "Routed:"
         # disclosure mirroring the chat bubble. Empty payload still writes

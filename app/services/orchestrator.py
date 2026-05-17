@@ -10,9 +10,7 @@ from .item_service import item_service
 from .memory_extraction import extract_signals
 from .memory_service import memory_service
 from .list_service import list_service
-from . import promise_service
 from .trace_builder import TraceBuilder
-from ..tools.feature_request_tool import feature_request_tool
 
 
 # Cheap regex for the explicit "undo" command. Runs before the detector so
@@ -311,93 +309,47 @@ class Orchestrator:
                 }
                 tb.extracted_signals(saved_message, signals)
 
-                if signals["tone_corrections"] and prev_assistant is not None:
+                # Unified routing: one dispatch point fans signals out to
+                # the per-type handlers in app/services/intent_handlers/.
+                # Replaces three copy-pasted if-blocks (tone, feature,
+                # promise) that drifted between chat + note-save paths.
+                # Memory candidates are reconciled later off-thread or in
+                # the short-circuit path — we don't route them through the
+                # router here so the existing background-thread shape
+                # survives.
+                from . import intent_router
+                ctx = intent_router.RouterContext(
+                    db=db,
+                    source_message_id=user_msg.id,
+                    prev_assistant_text=prev_assistant.content if prev_assistant is not None else None,
+                    prev_assistant_id=prev_assistant.id if prev_assistant is not None else None,
+                    on_tool_call=tb.tool_call,
+                )
+                routed = intent_router.dispatch(
+                    {
+                        "tone_corrections": signals["tone_corrections"],
+                        "feature_requests": signals["feature_requests"],
+                        "soft_promises": soft_promises,
+                        # memory_candidates routed separately (off-thread).
+                        "memories": [],
+                    },
+                    ctx,
+                )
+                tone_rules.extend(routed.tone_rules)
+                feature_titles.extend(routed.feature_titles)
+                captured_promises.extend(routed.captured_promises)
+                feedback_tools.extend(routed.tools_used)
+
+                # Stamp the user message as feedback when either a tone
+                # correction OR a feature request fired AND we have a
+                # prior assistant turn to attribute the correction to.
+                if (
+                    (routed.tone_rules or routed.feature_titles)
+                    and prev_assistant is not None
+                ):
                     user_msg.feedback_for_message_id = prev_assistant.id
                     user_msg.is_feedback = True
                     db.commit()
-                    feedback_tools.append("router:tone")
-                    for t in signals["tone_corrections"]:
-                        rule = t["rule"]
-                        evidence = t.get("evidence", "")
-                        anti_pattern = t.get("anti_pattern", "")
-                        tone_rules.append(rule)
-                        tb.tool_call(
-                            "router:tone",
-                            label="Captured tone correction",
-                            args={
-                                "rule": rule,
-                                "evidence": evidence,
-                                "anti_pattern": anti_pattern,
-                            },
-                        )
-                        threading.Thread(
-                            target=memory_service.add_feedback_preference,
-                            args=(rule, prev_assistant.content),
-                            kwargs={"anti_pattern": anti_pattern},
-                            daemon=True,
-                        ).start()
-
-                for fr in signals["feature_requests"]:
-                    try:
-                        feature_request_tool.execute(
-                            db=db,
-                            title=fr["title"],
-                            why=fr.get("why") or saved_message[:300],
-                        )
-                        feature_titles.append(fr["title"])
-                        feedback_tools.append("router:feature_request")
-                        tb.tool_call(
-                            "router:feature_request",
-                            label="Logged feature request",
-                            args={"title": fr["title"], "why": fr.get("why") or ""},
-                        )
-                    except Exception as e:
-                        print(f"feature_request via router error: {e}")
-                    if prev_assistant is not None:
-                        user_msg.feedback_for_message_id = prev_assistant.id
-                        user_msg.is_feedback = True
-                        db.commit()
-
-                # Soft-promise capture — distinct from feature_request (which
-                # targets Gooni). Promise = Daniel committing to himself.
-                # Persisted as Promise rows w/ utters edge from source Message
-                # + supports edge to closest active Focus if cosine match.
-                for sp in soft_promises:
-                    try:
-                        time_hint = sp.get("time_hint") or ""
-                        # Compose utterance + time_hint so the regex parser
-                        # in promise_service has a fighting chance at finding
-                        # the anchor (LLM may have stripped it from the verb
-                        # phrase when summarizing the utterance).
-                        utter_for_parse = sp["utterance"]
-                        if time_hint and time_hint not in utter_for_parse.lower():
-                            utter_for_parse = f"{utter_for_parse} {time_hint}"
-                        try:
-                            from .promise_service import _infer_due_from_text
-                            inferred = _infer_due_from_text(utter_for_parse)
-                        except Exception:
-                            inferred = None
-                        p = promise_service.create(
-                            db,
-                            utterance=sp["utterance"],
-                            summary=sp.get("summary"),
-                            source_message_id=user_msg.id,
-                            inferred_due=inferred,
-                        )
-                        captured_promises.append(promise_service.serialize(p))
-                        feedback_tools.append("router:promise")
-                        tb.tool_call(
-                            "router:promise",
-                            label="Captured promise",
-                            args={
-                                "utterance": sp["utterance"],
-                                "time_hint": time_hint or None,
-                                "inferred_due": p.inferred_due.isoformat() if p.inferred_due else None,
-                                "slip_count": p.slip_count,
-                            },
-                        )
-                    except Exception as e:
-                        print(f"promise capture error: {e}")
 
                 # Build the Jarvis-voice ack from whichever signals fired.
                 # No structured receipts ("Feedback detected:", "Logged
