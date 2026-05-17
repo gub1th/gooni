@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { PublicNote } from "../../services/api";
-import { displayTitle } from "../../utils/notePreview";
 import { getToonGradient } from "./toonGradient";
 import { subscribeTileState } from "./useDanielControls";
 import { useReducedMotion } from "./useReducedMotion";
@@ -141,12 +139,6 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
 
   if (!tileAlive) return null;
 
-  // Title label appears only when the player is on an adjacent tile
-  // (proximity-only) AND we have a real title to show. Same dark pill
-  // styling as the avatar nametag so the plaza UI reads as one family.
-  const labelTitle = displayTitle(note, "");
-  const showLabel = isNear && labelTitle.length > 0;
-
   return (
     <group position={[tile.x, 0, tile.z]}>
       {/* Vertical beam — visible-from-far marker, dialed way down so it
@@ -187,40 +179,6 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
         </mesh>
       </group>
 
-      {showLabel && (
-        <Html
-          position={[0, COIN_BASE_Y + 0.55, 0]}
-          center
-          distanceFactor={8}
-          pointerEvents="none"
-          zIndexRange={[35, 45]}
-          style={{ pointerEvents: "none" }}
-        >
-          <div
-            style={{
-              background: "rgba(20,22,28,0.72)",
-              color: "#ffffff",
-              padding: "4px 10px",
-              borderRadius: 999,
-              fontSize: 12,
-              lineHeight: 1.1,
-              fontFamily: "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-              fontWeight: 500,
-              letterSpacing: "0.02em",
-              whiteSpace: "nowrap",
-              maxWidth: 220,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              userSelect: "none",
-              backdropFilter: "blur(6px) saturate(140%)",
-              WebkitBackdropFilter: "blur(6px) saturate(140%)",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.30), 0 0 0 1px rgba(255,255,255,0.10) inset",
-            }}
-          >
-            {labelTitle}
-          </div>
-        </Html>
-      )}
     </group>
   );
 }
