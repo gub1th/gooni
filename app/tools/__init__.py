@@ -13,6 +13,7 @@ from .todo_tools import AddTodoTool, ListTodosTool, SetTodoStateTool
 from .focus_tools import AddFocusTool, ListFocusesTool
 from .habit_tools import LogHabitTool
 from .feature_request_tool import RequestFeatureTool
+from .activity_tools import ReadRecentCommitsTool, ReadRecentBacklogTool
 from .update_capability_tool import UpdateCapabilityFacetTool
 from .calendar_tools import (
     CreateCalendarEventTool,
@@ -49,6 +50,9 @@ registry = [
     LogHabitTool(),
     # Feature requests + calendar
     RequestFeatureTool(),
+    # Recent activity (read-only)
+    ReadRecentCommitsTool(),
+    ReadRecentBacklogTool(),
     # Self-improvement
     UpdateCapabilityFacetTool(),
     CreateCalendarEventTool(),
