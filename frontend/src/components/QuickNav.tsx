@@ -63,7 +63,7 @@ export function QuickNav() {
         label: "Home",
         hint: "dashboard",
         icon: <Home size={14} strokeWidth={1.7} />,
-        onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined, audit: undefined } }),
+        onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined, audit: undefined, segment: undefined } }),
       },
       {
         key: "memories",
@@ -77,7 +77,7 @@ export function QuickNav() {
         label: "Eval / Audit",
         hint: "review chat segments",
         icon: <FileSearch size={14} strokeWidth={1.7} />,
-        onSelect: () => navigate({ to: "/", search: { audit: true, note: undefined, conv: undefined, list: undefined } }),
+        onSelect: () => navigate({ to: "/", search: { audit: true, note: undefined, conv: undefined, list: undefined, segment: undefined } }),
       },
       {
         key: "stats",
@@ -86,7 +86,7 @@ export function QuickNav() {
         icon: <BarChart3 size={14} strokeWidth={1.7} />,
         // No deep-link URL for stats today — go home first; the sidebar
         // handler picks it up. Acceptable trade-off vs adding new search params.
-        onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined, audit: undefined } }),
+        onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined, audit: undefined, segment: undefined } }),
       },
       {
         key: "public",
@@ -108,7 +108,7 @@ export function QuickNav() {
       label: l.name,
       hint: `list · ${l.type}`,
       icon: <ListIcon emoji={l.emoji ?? null} type={l.type as "todo" | "backlog" | "focus" | "generic"} size={14} />,
-      onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, list: l.id, audit: undefined } }),
+      onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, list: l.id, audit: undefined, segment: undefined } }),
     }));
     return [...base, ...listTargets];
   }, [navigate, lists]);

@@ -58,7 +58,12 @@ const RATING_OPTIONS: { value: 1 | 2 | 3; label: string; emoji: string }[] = [
 // the legacy /chat-audit route for power-user use. See PR #259 ticket.
 type Tab = "convos" | "runs";
 
-export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void } = {}) {
+export function EvalView({ onOpenNote, initialSegmentId = null }: {
+  onOpenNote?: (noteId: number) => void;
+  // When the user deep-links via ?segment=N (e.g. from the Ops eval section's
+  // "open full" button), pre-open that segment's drilldown on mount.
+  initialSegmentId?: number | null;
+} = {}) {
   const [tab, setTab] = useState<Tab>("convos");
   const [segments, setSegments] = useState<EvalSegmentSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -103,7 +108,13 @@ export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void
   }, [hideRated]);
   const [search, setSearch] = useState("");
 
-  const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(null);
+  const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(initialSegmentId);
+
+  // Honor a fresh ?segment=N navigation after mount too — e.g. user clicks
+  // "open full" on an Ops drilldown while already on /audit.
+  useEffect(() => {
+    if (initialSegmentId != null) setSelectedSegmentId(initialSegmentId);
+  }, [initialSegmentId]);
 
   async function loadSegments() {
     setLoading(true);

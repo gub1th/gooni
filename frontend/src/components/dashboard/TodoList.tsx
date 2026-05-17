@@ -165,36 +165,36 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           100% { stroke-dashoffset: -2400; }
         }
         @keyframes gooni-primary-race-fade {
-          0%, 85% { opacity: 1; }
+          0%, 88% { opacity: 1; }
           100%    { opacity: 0; }
         }
         .gooni-primary-race {
-          /* SVG is a CSS replaced element — \`inset: -10\` alone won't
-             stretch it (auto width/height falls back to intrinsic
-             300x150 per the CSS spec). Set width/height explicitly via
-             calc so the box reliably extends 10px outside the card on
-             every side. */
+          /* Rides the card border itself (rect rx matches the card's
+             border-radius). Explicit width/height — SVG is a CSS
+             replaced element so 'inset: 0' alone wouldn't reliably
+             stretch it. */
           position: absolute;
-          top: -10px;
-          left: -10px;
-          width: calc(100% + 20px);
-          height: calc(100% + 20px);
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
           pointer-events: none;
           overflow: visible;
-          animation: gooni-primary-race-fade 1300ms ease forwards;
+          animation: gooni-primary-race-fade 2400ms ease forwards;
         }
         .gooni-primary-race rect {
           fill: none;
           stroke: #F5C849;
           stroke-width: 2;
           stroke-linecap: round;
-          /* 44px visible bullet + huge gap so only one segment shows
-             at a time. Slightly longer than before since the perimeter
-             grew with the outset. */
-          stroke-dasharray: 44 2400;
+          /* 36px visible bullet + huge gap so only one segment shows
+             at a time. */
+          stroke-dasharray: 36 2400;
           stroke-dashoffset: 0;
-          filter: drop-shadow(0 0 6px rgba(245, 200, 73, 0.85));
-          animation: gooni-primary-race-offset 1100ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+          filter: drop-shadow(0 0 5px rgba(245, 200, 73, 0.7));
+          /* Slower lap so the eye can track the bullet around the
+             border without it feeling like a hurry. */
+          animation: gooni-primary-race-offset 2200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
         }
       `}</style>
 
@@ -341,7 +341,7 @@ function PrimaryCard({
   const [racing, setRacing] = useState(true);
   useEffect(() => {
     setRacing(true);
-    const id = window.setTimeout(() => setRacing(false), 1200);
+    const id = window.setTimeout(() => setRacing(false), 2500);
     return () => clearTimeout(id);
   }, [t.id]);
 
@@ -369,10 +369,10 @@ function PrimaryCard({
           preserveAspectRatio="none"
           xmlns="http://www.w3.org/2000/svg"
         >
-          {/* Rect fills the outset SVG box (inset: -10 on the parent),
-              so the stroke rides around the soft halo rather than the
-              card border. rx 22 = card rx 12 + 10px outset. */}
-          <rect x="0" y="0" width="100%" height="100%" rx="22" ry="22" />
+          {/* Rect rides the card edge itself; rx 12 matches the card's
+              borderRadius. Stroke is centered on the path so half sits
+              just outside the border (overflow:visible on the parent). */}
+          <rect x="0" y="0" width="100%" height="100%" rx="12" ry="12" />
         </svg>
       )}
       <button
