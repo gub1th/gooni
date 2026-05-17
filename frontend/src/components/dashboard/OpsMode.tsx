@@ -231,8 +231,31 @@ function EvalDrilldown({ segment, onSkip, onDone, remaining }: {
             textTransform: "uppercase",
             color: "var(--gooni-muted, #8E8E93)",
             marginBottom: 2,
+            display: "inline-flex", alignItems: "center", gap: 8,
           }}>
-            {segment.source} · {segment.message_count} msgs · {fmtAgo(segment.last_message_at)}
+            <span>{segment.source} · {segment.message_count} msgs · {fmtAgo(segment.last_message_at)}</span>
+            {segment.is_active && (
+              <span
+                title="Active conversation — last message <30 min ago"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  color: "#0F6E56",
+                }}
+              >
+                <style>{`
+                  @keyframes gooni-active-pulse-ops {
+                    0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); }
+                    50%      { box-shadow: 0 0 0 4px rgba(34,197,94,0); }
+                  }
+                `}</style>
+                <span style={{
+                  width: 6, height: 6, borderRadius: "50%",
+                  background: "#22C55E",
+                  animation: "gooni-active-pulse-ops 1.6s ease-out infinite",
+                }} />
+                live
+              </span>
+            )}
           </div>
           <div style={{
             fontSize: 12, color: "var(--gooni-text, #1C1C1E)",
