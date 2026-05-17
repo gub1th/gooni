@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.82.0 — 2026-05-17 (minor)
+
+- feat(ops): calm Claude-app theme + open-full deeplink, slow race on card border (#218)
+
 ## 0.81.0 — 2026-05-17 (minor)
 
 - feat(audit): merge Eval + Chat audit into single Conversations tab (#217)
