@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as PublicRouteImport } from './routes/public'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as MemoriesRouteImport } from './routes/memories'
+import { Route as CreativeRouteImport } from './routes/creative'
 import { Route as ChatAuditRouteImport } from './routes/chat-audit'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PublicIndexRouteImport } from './routes/public.index'
@@ -31,6 +32,11 @@ const PrivacyRoute = PrivacyRouteImport.update({
 const MemoriesRoute = MemoriesRouteImport.update({
   id: '/memories',
   path: '/memories',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CreativeRoute = CreativeRouteImport.update({
+  id: '/creative',
+  path: '/creative',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatAuditRoute = ChatAuditRouteImport.update({
@@ -62,6 +68,7 @@ const PublicNoteIdRoute = PublicNoteIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/chat-audit': typeof ChatAuditRoute
+  '/creative': typeof CreativeRoute
   '/memories': typeof MemoriesRoute
   '/privacy': typeof PrivacyRoute
   '/public': typeof PublicRouteWithChildren
@@ -72,6 +79,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/chat-audit': typeof ChatAuditRoute
+  '/creative': typeof CreativeRoute
   '/memories': typeof MemoriesRoute
   '/privacy': typeof PrivacyRoute
   '/public/$noteId': typeof PublicNoteIdRoute
@@ -82,6 +90,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/chat-audit': typeof ChatAuditRoute
+  '/creative': typeof CreativeRoute
   '/memories': typeof MemoriesRoute
   '/privacy': typeof PrivacyRoute
   '/public': typeof PublicRouteWithChildren
@@ -94,6 +103,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/chat-audit'
+    | '/creative'
     | '/memories'
     | '/privacy'
     | '/public'
@@ -104,6 +114,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/chat-audit'
+    | '/creative'
     | '/memories'
     | '/privacy'
     | '/public/$noteId'
@@ -113,6 +124,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/chat-audit'
+    | '/creative'
     | '/memories'
     | '/privacy'
     | '/public'
@@ -124,6 +136,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChatAuditRoute: typeof ChatAuditRoute
+  CreativeRoute: typeof CreativeRoute
   MemoriesRoute: typeof MemoriesRoute
   PrivacyRoute: typeof PrivacyRoute
   PublicRoute: typeof PublicRouteWithChildren
@@ -150,6 +163,13 @@ declare module '@tanstack/react-router' {
       path: '/memories'
       fullPath: '/memories'
       preLoaderRoute: typeof MemoriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/creative': {
+      id: '/creative'
+      path: '/creative'
+      fullPath: '/creative'
+      preLoaderRoute: typeof CreativeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat-audit': {
@@ -208,6 +228,7 @@ const PublicRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatAuditRoute: ChatAuditRoute,
+  CreativeRoute: CreativeRoute,
   MemoriesRoute: MemoriesRoute,
   PrivacyRoute: PrivacyRoute,
   PublicRoute: PublicRouteWithChildren,
