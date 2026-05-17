@@ -169,12 +169,16 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           100%    { opacity: 0; }
         }
         .gooni-primary-race {
-          /* Negative inset pushes the SVG box outside the card so the
-             stroke runs around the soft yellow halo, not the card
-             border. 10px outset + rect rx 22 (= card rx 12 + outset)
-             keeps corners proportional. */
+          /* SVG is a CSS replaced element — \`inset: -10\` alone won't
+             stretch it (auto width/height falls back to intrinsic
+             300x150 per the CSS spec). Set width/height explicitly via
+             calc so the box reliably extends 10px outside the card on
+             every side. */
           position: absolute;
-          inset: -10px;
+          top: -10px;
+          left: -10px;
+          width: calc(100% + 20px);
+          height: calc(100% + 20px);
           pointer-events: none;
           overflow: visible;
           animation: gooni-primary-race-fade 1300ms ease forwards;
