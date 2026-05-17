@@ -125,7 +125,21 @@ def _walk_gap_windows(
 # ── List + serialize ─────────────────────────────────────────────────────────
 
 
+# Recency window for the live "currently active" badge on segment cards.
+# Tuned so a segment Daniel is mid-conversation in stays lit while ambient
+# bot replies don't keep stale threads "active". 30 min ≈ a single phone
+# session; bump if the bot replies feel like they keep tripping it.
+_ACTIVE_RECENT_MINUTES = 30
+
+
 def _serialize_segment(seg: EvalSegment, conv: Conversation, preview: str | None) -> dict:
+    is_active = False
+    if seg.last_message_at is not None:
+        last = seg.last_message_at
+        # last_message_at is stored naive UTC; compare against naive utcnow.
+        if last.tzinfo is not None:
+            last = last.replace(tzinfo=None)
+        is_active = (datetime.utcnow() - last) < timedelta(minutes=_ACTIVE_RECENT_MINUTES)
     return {
         "id": seg.id,
         "conversation_id": seg.conversation_id,
@@ -143,6 +157,7 @@ def _serialize_segment(seg: EvalSegment, conv: Conversation, preview: str | None
         ),
         "dispatched_note_id": seg.dispatched_note_id,
         "preview": preview,
+        "is_active": is_active,
     }
 
 

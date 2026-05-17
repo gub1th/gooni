@@ -540,7 +540,10 @@ function SegmentCard({
           <Dot color={sourceStyle.accent} />
           {sourceStyle.label}
         </span>
-        <StatusPill status={seg.eval_status} />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          {seg.is_active && <ActiveBadge />}
+          <StatusPill status={seg.eval_status} />
+        </span>
       </div>
       <div style={{ fontSize: 13, color: "#1C1C1E", lineHeight: 1.45, flex: 1 }}>
         {seg.preview
@@ -870,6 +873,7 @@ function EvalDetailView({
               <Dot color={SOURCE_STYLE[seg.source]?.accent ?? "#8E8E93"} />
               {SOURCE_STYLE[seg.source]?.label}
             </span>
+            {seg.is_active && <ActiveBadge />}
             <StatusPill status={seg.eval_status} />
           </>
         )}
@@ -2192,6 +2196,35 @@ function Dot({ color }: { color: string }) {
         background: color,
       }}
     />
+  );
+}
+
+// Pulsing green badge that signals "this convo is currently active" —
+// last_message_at < 30 min ago, server-derived. Halo ring uses keyframes
+// so the dot reads as alive without being loud.
+function ActiveBadge() {
+  return (
+    <span
+      title="Active conversation — last message <30 min ago"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        fontSize: 10, color: "#0F6E56", fontWeight: 600,
+        letterSpacing: 0.4, textTransform: "uppercase",
+      }}
+    >
+      <style>{`
+        @keyframes gooni-active-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); }
+          50%      { box-shadow: 0 0 0 5px rgba(34,197,94,0); }
+        }
+      `}</style>
+      <span style={{
+        width: 7, height: 7, borderRadius: "50%",
+        background: "#22C55E",
+        animation: "gooni-active-pulse 1.6s ease-out infinite",
+      }} />
+      live
+    </span>
   );
 }
 

@@ -1817,6 +1817,9 @@ export interface EvalSegmentSummary {
   dispatched_note_id: number | null;
   preview: string | null;
   flag_count: number;
+  // True when last_message_at < 30 min ago. Derived server-side so the
+  // FE can render a "currently active" pulsing dot without polling time.
+  is_active?: boolean;
 }
 
 export interface EvalSegmentList {
@@ -2275,6 +2278,7 @@ export interface ApiEvalSegment {
   overall_comment: string | null;
   preview?: string;
   title?: string | null;
+  is_active?: boolean;
 }
 
 export async function fetchEvalSegments(
