@@ -206,10 +206,21 @@ function EvalDrilldown({ segment, onSkip, onDone, remaining }: {
   onDone: () => Promise<void>;
   remaining: number;
 }) {
+  const navigate = useNavigate();
   const { data: full, isLoading } = useQuery<EvalSegmentFull>({
     queryKey: ["eval-segment-full", segment.id],
     queryFn: () => fetchEvalSegmentFull(segment.id),
   });
+
+  const openFullEval = () => {
+    navigate({
+      to: "/",
+      search: {
+        note: undefined, conv: undefined, list: undefined,
+        audit: true, segment: segment.id,
+      },
+    });
+  };
 
   return (
     <div style={{
@@ -265,6 +276,16 @@ function EvalDrilldown({ segment, onSkip, onDone, remaining }: {
           </div>
         </div>
         <button
+          onClick={openFullEval}
+          title="Open this segment in the full audit view"
+          style={{
+            ...navButton,
+            color: "#5C5953",
+          }}
+        >
+          open full <ExternalLink size={11} />
+        </button>
+        <button
           onClick={onSkip}
           title="Skip to next unrated convo"
           style={navButton}
@@ -281,11 +302,12 @@ function EvalDrilldown({ segment, onSkip, onDone, remaining }: {
       </div>
 
       {/* Transcript — scrollable, chat-bubble layout. Mirrors ChatView so the
-          eval surface reads as the same conversation the user actually saw. */}
+          eval surface reads as the same conversation the user actually saw.
+          Warm cream bg + soft borders for a Claude-app-like calm tone. */}
       <div style={{
         maxHeight: 520, overflowY: "auto",
         padding: "14px 18px",
-        background: "var(--gooni-bg, #fafafa)",
+        background: "#FBF8F2",
       }}>
         {isLoading || !full ? (
           <div style={{
@@ -390,8 +412,13 @@ function MessageBlock({ segmentId, msg }: {
                 style={{
                   padding: "10px 14px",
                   borderRadius,
-                  background: isAssistant ? "#F2F2F7" : "#1C1C1E",
-                  color: isAssistant ? "#1C1C1E" : "#FFFFFF",
+                  // Calm/warm palette — Claude-app inspired. User bubble is
+                  // a soft cream tint (not stark black) so the surface reads
+                  // restrained on the Ops console. Assistant stays neutral
+                  // off-white.
+                  background: isAssistant ? "#F7F5F1" : "#EFE5D6",
+                  color: "#2C2A26",
+                  border: isAssistant ? "0.5px solid rgba(0,0,0,0.05)" : "0.5px solid rgba(180,150,100,0.18)",
                   fontSize: 14,
                   fontFamily: FONT,
                   lineHeight: 1.5,
@@ -580,7 +607,7 @@ function BacklogSection() {
         <button
           onClick={() => navigate({
             to: "/",
-            search: { note: undefined, conv: undefined, list: backlogList.id, audit: undefined },
+            search: { note: undefined, conv: undefined, list: backlogList.id, audit: undefined, segment: undefined },
           })}
           style={{
             background: "transparent", border: "none", cursor: "pointer",
@@ -719,8 +746,10 @@ const primaryButton: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 4,
   padding: "5px 10px", borderRadius: 6,
   border: "none",
-  background: "var(--gooni-text, #1C1C1E)",
-  color: "var(--gooni-card, #fff)",
+  // Warm dark instead of pure black — softer Claude-app palette so the
+  // primary action doesn't feel stark on the Ops console.
+  background: "#3A3733",
+  color: "#FBF8F2",
   fontSize: 11, fontWeight: 500, cursor: "pointer",
   fontFamily: FONT,
 };

@@ -1216,7 +1216,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
                 }
                 navigate({
                   to: "/",
-                  search: { audit: true, note: undefined, conv: undefined, list: undefined },
+                  search: { audit: true, note: undefined, conv: undefined, list: undefined, segment: undefined },
                 });
               }}
               title="Audit — score Gooni's replies + dispatch to Claude Code"
