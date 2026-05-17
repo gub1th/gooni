@@ -17,6 +17,7 @@ pile up forever and confidence numbers stop meaning anything.
 """
 
 import json
+import re
 from typing import Any
 
 from ..llm.client import llm_client
@@ -474,6 +475,31 @@ def _normalize_promises(items: Any) -> list[dict]:
     return out
 
 
+# Regex pre-filter for extract_signals. If the text has NONE of these
+# trigger phrases, we skip the LLM call entirely (returns empty) — most
+# pure-capture notes ("groceries: milk eggs", "kitchen sink") carry no
+# signal but still cost ~$0.0003/note today. Conservative trigger set:
+# only phrases that overwhelmingly correlate with at least one signal
+# type. False negatives (signal missed because phrasing didn't trip the
+# regex) re-fire on the next save once the trigger landed in the text.
+_PREFILTER_TRIGGERS = re.compile(
+    r"\b("
+    r"need to|needs to|want to|wanna|gotta|"
+    r"should(?!\s+have)|must|have to|"
+    r"imma|i'?ll|i am going to|i'?m going to|going to|"
+    r"remind|reminder|"
+    r"prefer|like better|hate|"
+    r"feature|broken|bug|fix this|"
+    r"track|log|"
+    r"feedback|annoying|too\s+\w+|don'?t\s+\w+|"
+    r"todo|to-?do|"
+    r"add (a|to|that)|save (this|a)|"
+    r"call|text|email|message|book|schedule"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, Any]:
     """Single LLM call that emits all signal types from one input.
 
@@ -481,12 +507,19 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
       {
         "tone_corrections": [{"rule": str}],
         "feature_requests": [{"title": str, "why": str}],
+        "soft_promises":    [{"utterance": str, ...}],
         "memories":         [memory candidate dicts],
       }
 
     All-empty on parse failure or no signal — never raises.
     Pass prev_assistant when this text is a chat reply (helps tone detection);
     leave None for note saves (tone usually empty for those).
+
+    Cost optimization (phase 4): regex pre-filter skips the LLM entirely
+    when text contains no signal-trigger phrases. Pure-capture text
+    ("groceries: milk eggs") returns empty without burning an API call.
+    Chat surfaces bypass the prefilter when prev_assistant is set — tone
+    corrections often phrased as "less of that" without trigger words.
     """
     empty = {
         "tone_corrections": [],
@@ -496,12 +529,19 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
     }
     if not text or not text.strip():
         return empty
+
+    # Prefilter on note saves only. Chat turns always run extraction —
+    # tone corrections ("less of that", "be terser") often lack trigger
+    # phrases but are critical to capture.
+    if prev_assistant is None and not _PREFILTER_TRIGGERS.search(text):
+        return empty
+
     prompt = _SIGNALS_PROMPT.format(
         prev_assistant=(prev_assistant or "")[:1200],
         text=text[:2000],
     )
     try:
-        raw = llm_client.generate_simple_completion(prompt, max_tokens=700, temperature=0.0)
+        raw = llm_client.generate_simple_completion(prompt, max_tokens=500, temperature=0.0)
     except Exception as e:
         print(f"extract_signals LLM error: {e}")
         return empty
