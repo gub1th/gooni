@@ -145,6 +145,38 @@ export function playInvalidMove() {
   playTone(280, 0.05, 0.12, 0.07);
 }
 
+// Rising 3-note arpeggio — note-coin pickup chime. Gold-bell timbre
+// (sine + 2nd-harmonic triangle) ascends C6 → E6 → G6 over ~0.18s for
+// a "got one" reward feel.
+export function playCoinPickup() {
+  if (muted) return;
+  const c = ensureCtx();
+  if (!c || c.state === "suspended") return;
+  const t = c.currentTime;
+  const playTone = (freq: number, when: number, dur: number, gain: number) => {
+    const osc = c.createOscillator();
+    const harm = c.createOscillator();
+    const g = c.createGain();
+    osc.type = "sine";
+    harm.type = "triangle";
+    osc.frequency.setValueAtTime(freq, t + when);
+    harm.frequency.setValueAtTime(freq * 2, t + when);
+    g.gain.setValueAtTime(0, t + when);
+    g.gain.linearRampToValueAtTime(gain, t + when + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.001, t + when + dur);
+    osc.connect(g);
+    harm.connect(g);
+    g.connect(c.destination);
+    osc.start(t + when);
+    harm.start(t + when);
+    osc.stop(t + when + dur + 0.02);
+    harm.stop(t + when + dur + 0.02);
+  };
+  playTone(1046, 0.00, 0.10, 0.07);  // C6
+  playTone(1318, 0.05, 0.12, 0.07);  // E6
+  playTone(1568, 0.10, 0.20, 0.09);  // G6
+}
+
 // "Oof" + slide down — fall-off-the-map noise.
 export function playFallOff() {
   if (muted) return;

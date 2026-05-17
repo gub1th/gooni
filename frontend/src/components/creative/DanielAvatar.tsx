@@ -549,6 +549,7 @@ export const DanielAvatar = forwardRef<DanielHandle, Props>(function DanielAvata
             fellOff: true,
             impactVel: 0,
             breaksTile: h.breaksTile,
+            actor: "player",
           });
         } else {
           gridRef.current = { gx: h.toGx, gz: h.toGz };
@@ -569,6 +570,7 @@ export const DanielAvatar = forwardRef<DanielHandle, Props>(function DanielAvata
             fellOff: false,
             impactVel: HOP_HEIGHT * 6,
             breaksTile: h.breaksTile,
+            actor: "player",
           });
           fireVfx({
             kind: "dust",

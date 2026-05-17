@@ -22,6 +22,10 @@ export type LandingEvent = {
   // (it was stacked on top of someone, not on the actual tile). Default
   // is undefined → treated as true by TileFloor.
   breaksTile?: boolean;
+  // Who landed: the human player vs an autonomous NPC. Consumers that
+  // care about user intent (e.g. note-coin peek) filter to "player";
+  // tile lifecycle (break/heal) treats both the same.
+  actor: "player" | "npc";
 };
 
 type LandingListener = (e: LandingEvent) => void;
