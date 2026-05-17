@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChatAuditPanel } from "./ChatAuditPanel";
+import { ActiveRulesCard } from "./ActiveRulesCard";
 import {
   BASE,
   deleteMessageRating,
@@ -53,10 +53,13 @@ const RATING_OPTIONS: { value: 1 | 2 | 3; label: string; emoji: string }[] = [
   { value: 3, label: "Good", emoji: "👍" },
 ];
 
-type Tab = "eval" | "audit" | "runs";
+// "audit" tab merged into "convos" — active feedback rules now render at
+// the top of the convos surface and the chat-audit feed is reachable via
+// the legacy /chat-audit route for power-user use. See PR #259 ticket.
+type Tab = "convos" | "runs";
 
 export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void } = {}) {
-  const [tab, setTab] = useState<Tab>("eval");
+  const [tab, setTab] = useState<Tab>("convos");
   const [segments, setSegments] = useState<EvalSegmentSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -276,7 +279,7 @@ export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "#1C1C1E" }}>Audit</h1>
-          {tab === "eval" && (
+          {tab === "convos" && (
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <span
                 style={{ fontSize: 11, color: "#8E8E93" }}
@@ -292,22 +295,20 @@ export function EvalView({ onOpenNote }: { onOpenNote?: (noteId: number) => void
           )}
         </div>
         <div style={{ display: "flex", gap: 0, marginTop: 14 }}>
-          <TabButton active={tab === "eval"} onClick={() => setTab("eval")}>Eval</TabButton>
-          <TabButton active={tab === "audit"} onClick={() => setTab("audit")}>Chat audit</TabButton>
-          <TabButton active={tab === "runs"} onClick={() => setTab("runs")}>Eval runs</TabButton>
+          <TabButton active={tab === "convos"} onClick={() => setTab("convos")}>Conversations</TabButton>
+          <TabButton active={tab === "runs"} onClick={() => setTab("runs")}>Runs</TabButton>
         </div>
       </div>
 
-      {tab === "audit" ? (
-        // Inline the chat-audit content so the tab is the actual thing, not a
-        // jump-link. Same component is reused by the legacy /chat-audit route.
-        <div style={{ flex: 1, overflow: "auto", background: "#FAFAFA" }}>
-          <ChatAuditPanel />
-        </div>
-      ) : tab === "runs" ? (
+      {tab === "runs" ? (
         <EvalRunsPanel />
       ) : (
         <>
+          {/* Active feedback rules — moved up from the old Chat audit tab.
+              Renders at most ~8 rules (320px scroll cap) so the segment
+              list stays the primary surface. */}
+          <ActiveRulesCard />
+
           {/* Filter rail */}
           <div
             style={{
