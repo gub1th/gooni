@@ -241,6 +241,11 @@ ANTI-PATTERNS:
   "created" unless the [just extracted] block this turn names that kind
   + id. If no such confirmation exists, say what WOULD happen ("i'd log
   that as a backlog ticket") — never narrate a write that didn't land.
+- The kind + id pairs in [just extracted] are INTERNAL anchors — they
+  tell you the write is real so you can confirm it. Do NOT recite the
+  raw id ("ticket #281", "Promise #42") in your user-facing reply. Speak
+  plainly: "noted that one", "on the pile", "tracked." Alfred doesn't
+  read out database row numbers.
 - Don't stack 3+ action recommendations in one reply. Pick one or two
   matched to Daniel's current capacity. Expand only if he asks.
 
@@ -307,58 +312,45 @@ def _build_ack(
     captured_promises: list[dict],
     captured_todos: list[dict],
 ) -> str | None:
-    """Alfred-voice ack — terse, ID-grounded.
+    """Alfred-voice ack — terse, casual, no clinical receipts.
 
-    Every persisted-object branch demands a structured dict carrying the
-    real DB id; raw-title acks ("backlog: X") used to leak without any
-    backing row when the extractor over-fired. User-facing render stays
-    casual — id only surfaces for features (ticket #N is verifiable in
-    OpsMode); promises + todos stay implicit since their summary text is
-    the recognizable anchor. Multi-feature turns surface comma-joined
-    ids instead of the opaque "(+N)" syntax that confused Daniel in the
-    Cluster A bug report.
+    Contract:
+      - Every persisted-object arg is a structured dict carrying the real
+        DB id. The id is the INTERNAL grounding contract (so the ack helper
+        can't be called for a write that didn't land) — it is NOT rendered
+        to the user. Daniel called the prior "ticket #281 logged" /
+        "backlog: X" formats clinical; Alfred speaks plainly, not in jira-
+        bot syntax. The id flows into just_extracted_block so the next-
+        turn LLM has a verifiable anchor for "did this land?" reasoning,
+        but the user-facing bubble stays warm.
+      - One bubble. Multi-signal turns chain w/ " · " for compactness.
+      - Multi-feature uses "+N more" with the category tag instead of the
+        opaque "(+N)" suffix Daniel flagged.
 
     Returns None when no signals fired (caller falls through to LLM).
     """
+    def _trim(s: str, n: int = 60) -> str:
+        s = (s or "").strip()
+        return s if len(s) <= n else s[:n].rstrip() + "…"
+
     parts: list[str] = []
     if tone_rules:
         if len(tone_rules) > 1:
             parts.append(f"{len(tone_rules)} rules sharpened")
         else:
-            rule = tone_rules[0]
-            quoted = rule if len(rule) <= 60 else rule[:60].rstrip() + "…"
-            parts.append(quoted.lower().rstrip("."))
+            parts.append(_trim(tone_rules[0]).lower().rstrip("."))
     if captured_features:
+        title = _trim(captured_features[0].get("title"))
         if len(captured_features) == 1:
-            f = captured_features[0]
-            title = (f.get("title") or "").strip()
-            ticket_id = f.get("ticket_id")
-            if ticket_id is not None:
-                parts.append(f"ticket #{ticket_id} logged: \"{title}\"")
-            else:
-                parts.append(f"backlog: \"{title}\"")
+            parts.append(f"noted \"{title}\" — backlog")
         else:
-            ids = [
-                f.get("ticket_id") for f in captured_features
-                if f.get("ticket_id") is not None
-            ]
-            if ids:
-                ids_str = ", ".join(f"#{i}" for i in ids)
-                parts.append(
-                    f"{len(captured_features)} tickets logged: {ids_str}"
-                )
-            else:
-                head = (captured_features[0].get("title") or "").strip()
-                parts.append(
-                    f"backlog: \"{head}\" (+{len(captured_features) - 1})"
-                )
+            extra = len(captured_features) - 1
+            parts.append(f"noted \"{title}\" + {extra} more — backlog")
     if captured_promises:
         if len(captured_promises) == 1:
             p = captured_promises[0]
             slip = p.get("slip_count", 0) or 0
-            summary = p.get("summary") or p.get("utterance") or ""
-            if summary and len(summary) > 60:
-                summary = summary[:60].rstrip() + "…"
+            summary = _trim(p.get("summary") or p.get("utterance") or "")
             if slip > 0:
                 parts.append(f"\"{summary}\" — slip #{slip + 1}")
             else:
@@ -367,13 +359,9 @@ def _build_ack(
             parts.append(f"{len(captured_promises)} promises tracked")
     if captured_todos:
         if len(captured_todos) == 1:
-            t = captured_todos[0]
-            text = (t.get("text") or "").strip()
-            if text and len(text) > 60:
-                text = text[:60].rstrip() + "…"
-            parts.append(f"todo added: \"{text}\"")
+            parts.append(f"\"{_trim(captured_todos[0].get('text'))}\" — todo")
         else:
-            parts.append(f"{len(captured_todos)} todos added")
+            parts.append(f"{len(captured_todos)} todos noted")
     if not parts:
         return None
     return " · ".join(parts)
@@ -527,7 +515,11 @@ def _build_just_extracted_block(
     if not lines:
         return ""
     return (
-        "[just extracted from this message — already routed, don't re-announce]\n"
+        "[just extracted from this message — already routed, don't "
+        "re-announce. kind+id pairs below are INTERNAL anchors so you "
+        "know the write is real; never recite the raw id number in your "
+        "user-facing reply — speak plainly (\"noted that\", \"on the "
+        "pile\", \"tracked\").]\n"
         + "\n".join(lines)
     )
 
