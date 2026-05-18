@@ -1889,6 +1889,10 @@ export interface EvalSegmentSummary {
   // True when last_message_at < 30 min ago. Derived server-side so the
   // FE can render a "currently active" pulsing dot without polling time.
   is_active?: boolean;
+  // Sum of chat-call cost (USD) across all assistant messages in segment.
+  // Underestimates by ~$0.001-0.002 per turn (excludes extract/reflect/
+  // plan/verify sub-calls — those don't yet stamp usage onto Message.trace).
+  cost_usd?: number | null;
 }
 
 export interface EvalSegmentList {

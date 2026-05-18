@@ -108,4 +108,13 @@ Respond with JSON only:
         parsed = {"scores": {}, "notes": "judge returned invalid JSON"}
     parsed["raw"] = raw
     parsed["judge_model"] = judge_model
+    # Capture token usage so the eval runner can roll up actual cost
+    # across all judge calls. Without this, baseline cost was missing
+    # the gpt-5.4 judge spend on multi-hop cases.
+    u = getattr(resp, "usage", None)
+    if u is not None:
+        parsed["usage"] = {
+            "input_tokens": getattr(u, "prompt_tokens", 0) or 0,
+            "output_tokens": getattr(u, "completion_tokens", 0) or 0,
+        }
     return parsed

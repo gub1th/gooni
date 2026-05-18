@@ -352,6 +352,16 @@ def _run_case(orch, case: dict, verbose: bool, use_cache: bool = True) -> dict[s
             cached["cached"] = True
             return cached
 
+    # Open a cost session so EVERY llm call inside this case (chat, extract,
+    # reflect, plan, verify, sub-tool-loops) folds into one bucket. Judge
+    # cost gets added manually below since it bypasses UsageTracker.
+    from app.llm.pricing import (
+        start_cost_session,
+        end_cost_session,
+        cost_session_add,
+    )
+    start_cost_session(f"case:{cid}")
+
     db = SessionLocal()
     teardown: Callable[[], None] | None = None
     trace: list[dict] = []
@@ -445,6 +455,18 @@ def _run_case(orch, case: dict, verbose: bool, use_cache: bool = True) -> dict[s
     scores = judged.get("scores", {})
     notes = judged.get("notes", "")
     judge_model_used = judged.get("judge_model", "")
+    # Fold judge token usage into the case cost session. Judge bypasses
+    # UsageTracker (direct OpenAI client call in evals/judge.py).
+    _judge_usage = judged.get("usage") or {}
+    if _judge_usage and judge_model_used:
+        cost_session_add(
+            judge_model_used,
+            _judge_usage.get("input_tokens", 0),
+            _judge_usage.get("output_tokens", 0),
+        )
+    # Close the cost session and attach summary to the result dict so the
+    # baseline JSON shows actual $$ per case.
+    cost_summary = end_cost_session()
 
     floor_fails = [
         f"{dim} = {scores.get(dim, '?')} < {threshold}"
@@ -470,6 +492,7 @@ def _run_case(orch, case: dict, verbose: bool, use_cache: bool = True) -> dict[s
         "judge_model": judge_model_used,
         "tools_called": tools_called,
         "master_prompt_chars": master_prompt_chars,
+        "cost": cost_summary,
         "context_summary": {
             "seed_focuses": case.get("seed_focuses") or [],
             "seed_memories": case.get("seed_memories") or [],
@@ -694,6 +717,17 @@ def run(
     timestamp = datetime.utcnow().isoformat() + "Z"
     judges_used = sorted({r["judge_model"] for r in results if r.get("judge_model")})
 
+    # Roll up total cost across cases. Each result has a `cost` dict from the
+    # per-case cost session (chat + extract + reflect + plan + verify + judge).
+    total_cost_usd = round(
+        sum((r.get("cost") or {}).get("total_cost_usd", 0.0) for r in results),
+        4,
+    )
+    cost_per_case_avg = round(
+        total_cost_usd / len(results) if results else 0.0, 4
+    )
+    print(f"cost: ${total_cost_usd:.4f} total · ${cost_per_case_avg:.4f}/case")
+
     # HTML scorecard — always written for any run with ≥1 case so you have a
     # browsable artifact. Per-run filename (timestamp-stamped) so history
     # accumulates rather than overwrites — diff scorecards across runs.
@@ -736,6 +770,8 @@ def run(
             "failed": failed,
             "composite_score": composite_score,
             "means": means,
+            "total_cost_usd": total_cost_usd,
+            "cost_per_case_usd": cost_per_case_avg,
             "results": [
                 {k: v for k, v in r.items() if k != "reply"}  # replies = noisy, skip
                 for r in results
