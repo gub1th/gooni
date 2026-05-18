@@ -28,6 +28,77 @@ _UNDO_FEEDBACK_RE = re.compile(
 ENTRY_SUMMARIZE_THRESHOLD = 2000
 
 
+_PLAN_PROMPT = """You are Gooni's pre-action planner. Read the user's message + state and decide what should happen this turn.
+
+USER MESSAGE: {user_msg}
+
+YOUR CURRENT STATE:
+{state}
+
+CHAT-SURFACE TOOLS AVAILABLE: {tools_list}
+
+ROUTER SIGNALS (auto-extracted upstream BEFORE the chat model runs — these
+fire whether or not the chat model calls a tool):
+  router:promise, router:todo, router:feature_request, router:tone_correction
+
+Return strict JSON. No prose, no markdown fence.
+
+{{
+  "goal": "<one short sentence — what does Daniel actually want this turn>",
+  "intended_tools": ["tool_name", ...] or [],
+  "minimum_action": "<one sentence — smallest sufficient response>",
+  "reasoning": "<one sentence — why this plan>"
+}}
+
+Rules:
+- Venting / thinking-aloud / vague intent → intended_tools=[], minimum_action="terse empathic response, push back if commitment is fuzzy"
+- Commitment statements ("i won't smoke for a week" / "imma X tonight") → router:promise fires upstream; chat reply acknowledges, optional add_focus if arc
+- "remember/track Y" → save_memory or appropriate persistent tool
+- "what did I commit to / show my X" → READ tool (show_list, list_todos, list_focuses, search_notes)
+- Recurring-reminder asks ("remind me daily") → request_feature (capability gap)
+- Don't propose tools not in TOOLS AVAILABLE
+- Plan is allowed to be empty if no action is required."""
+
+
+def _run_plan(
+    user_msg: str,
+    state_summary: str,
+    tools_list: list[str],
+) -> dict | None:
+    """Pre-reply plan step. Returns parsed dict or None on failure.
+    Single gpt-4o-mini call (~$0.0001). Fail-open."""
+    if not user_msg:
+        return None
+    try:
+        prompt = _PLAN_PROMPT.format(
+            user_msg=user_msg[:600],
+            state=state_summary[:500] or "(no state)",
+            tools_list=", ".join(tools_list[:50]),
+        )
+        raw = llm_client.generate_simple_completion(
+            prompt, max_tokens=300, temperature=0.0, model="gpt-4o-mini",
+        )
+        s = (raw or "").strip()
+        if s.startswith("```"):
+            s = re.sub(r"^```(?:json)?\s*", "", s).rstrip("`").rstrip()
+        parsed = json.loads(s)
+        if not isinstance(parsed, dict):
+            return None
+        return {
+            "goal": str(parsed.get("goal") or "").strip()[:200],
+            "intended_tools": [
+                str(t).strip()
+                for t in (parsed.get("intended_tools") or [])
+                if isinstance(t, str)
+            ][:8],
+            "minimum_action": str(parsed.get("minimum_action") or "").strip()[:240],
+            "reasoning": str(parsed.get("reasoning") or "").strip()[:200],
+        }
+    except Exception as e:
+        print(f"[plan] failed: {e}")
+        return None
+
+
 _VERIFY_PROMPT = """Compare this assistant reply against the actual tool audit. Did the reply claim any state-changing action that the audit doesn't back?
 
 USER ASKED: {user_msg}
@@ -686,6 +757,32 @@ class Orchestrator:
             except Exception as e:
                 print(f"[time_block] build failed: {e}")
 
+        # ── ReAct PLAN step ────────────────────────────────────────────
+        # Pre-reply LLM call that emits an explicit goal + minimum_action +
+        # intended_tools. Injected back into the chat prompt so the model
+        # sees its own pre-derived plan instead of ad-hoc reasoning, AND
+        # logged to the trace so eval can see what Gooni "decided" before
+        # responding. Pairs w/ the post-reply Verify step (already shipped).
+        plan_block = ""
+        try:
+            from ..tools import registry as _tools_registry
+            _tool_names = [t.name for t in _tools_registry]
+            _plan_state = intention_block or ""
+            _plan = _run_plan(message, _plan_state, _tool_names)
+            if _plan:
+                tb.step("plan", _plan.get("goal") or "(plan)", meta=_plan)
+                _goal = _plan.get("goal") or ""
+                _action = _plan.get("minimum_action") or ""
+                if _goal or _action:
+                    plan_block = (
+                        "YOUR PLAN THIS TURN (self-derived — follow it, "
+                        "don't echo it back):\n"
+                        + (f"- Goal: {_goal}\n" if _goal else "")
+                        + (f"- Action: {_action}" if _action else "")
+                    )
+        except Exception as e:
+            print(f"[plan_block] failed: {e}")
+
         # Conv-level rollup of recent self-reflections — one compressed
         # paragraph of recurring failure modes in THIS conversation. Built
         # offline by reflexion_service.rollup_conversation (manual trigger
@@ -711,6 +808,7 @@ class Orchestrator:
         full_context = "\n\n".join(filter(None, [
             PERSONA_BLOCK,
             intention_block,
+            plan_block,
             cadence_block,
             time_block,
             state_block,
