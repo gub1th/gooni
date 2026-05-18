@@ -2564,6 +2564,43 @@ def _note_excerpt(n: Note) -> str | None:
     return _excerpt_from_html(n.content)
 
 
+def _parse_tags(raw: str | None) -> list[str]:
+    """Return the JSON-list of tags stored on a Note, falling back to an
+    empty list when the column is null or malformed. Tag strings are
+    normalized to lowercase elsewhere; this helper doesn't re-normalize."""
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(t) for t in parsed if isinstance(t, (str, int)) and str(t).strip()]
+
+
+def _normalize_tags(values) -> list[str]:
+    """Accept the wire shape (list[str]) and return a deduped, lowercased,
+    sorted, length-capped tag list. Empty strings dropped. Used on every
+    PATCH so the DB never ends up with whitespace-or-case duplicates."""
+    if not isinstance(values, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for v in values:
+        if not isinstance(v, (str, int)):
+            continue
+        # Tags are short labels — strip whitespace, lowercase, cap at 60
+        # chars so a stray paste of an entire paragraph can't bloat the
+        # JSON column.
+        cleaned = str(v).strip().lower()[:60]
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        out.append(cleaned)
+    return out
+
+
 def _serialize_note(n: Note) -> dict:
     # Parse the JSON signals snapshot so the frontend gets a structured
     # object, not a string blob. None when classify_note hasn't run yet.
@@ -2593,6 +2630,7 @@ def _serialize_note(n: Note) -> dict:
         "classify_signals": signals,
         "parent_note_id": n.parent_note_id,
         "excerpt_anchor": n.excerpt_anchor,
+        "tags": _parse_tags(n.tags),
     }
 
 
@@ -2619,6 +2657,7 @@ def _serialize_note_lite(n: Note) -> dict:
         "classify_signals": None,
         "parent_note_id": n.parent_note_id,
         "excerpt_anchor": n.excerpt_anchor,
+        "tags": _parse_tags(n.tags),
     }
 
 
@@ -2659,6 +2698,7 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
 
     numeric_id = None if space_id == "general" else int(space_id)
     initial_content = body.get("content") or ""
+    initial_tags = _normalize_tags(body.get("tags") or [])
     note = Note(
         title=body.get("title") or "",
         content=initial_content,
@@ -2666,6 +2706,7 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
         space_id=numeric_id,
         is_draft=bool(body.get("is_draft", False)),
         is_pinned=bool(body.get("is_pinned", False)),
+        tags=json.dumps(initial_tags) if initial_tags else None,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -2754,6 +2795,9 @@ def update_note(
         note.is_public_pinned = bool(body["is_public_pinned"])
     if "is_draft" in body:
         note.is_draft = bool(body["is_draft"])
+    if "tags" in body:
+        normalized = _normalize_tags(body["tags"])
+        note.tags = json.dumps(normalized) if normalized else None
     db.commit()
     db.refresh(note)
     return _serialize_note(note)
@@ -2783,6 +2827,30 @@ def extract_to_child_note(note_id: int, body: dict, db: Session = Depends(get_db
     # that need it without parsing the child's HTML.
     plain = re.sub(r"<[^>]+>", " ", selected_html).strip()
     anchor = plain[:40].strip() if plain else None
+
+    # Dedup window: if the same parent already produced a child with this
+    # exact HTML in the last 30 seconds, return that child instead of
+    # creating a duplicate. Protects against the click-spam Daniel hit in
+    # PR #244 (latency + no loading state → flood of POSTs → 4 junk
+    # children). Idempotency on (parent_id, content). 30s is generous —
+    # long enough to swallow the worst latency spike, short enough that
+    # an intentional re-extract of the same paragraph an hour later still
+    # creates a fresh child.
+    from datetime import timedelta as _td
+    cutoff = datetime.utcnow() - _td(seconds=30)
+    existing = (
+        db.query(Note)
+        .filter(
+            Note.parent_note_id == parent.id,
+            Note.content == selected_html,
+            Note.created_at >= cutoff,
+        )
+        .order_by(Note.created_at.desc())
+        .first()
+    )
+    if existing is not None:
+        return _serialize_note(existing)
+
     child = Note(
         title=title,
         content=selected_html,
@@ -3066,12 +3134,45 @@ def memorize_note(note_id: int, db: Session = Depends(get_db)):
 
 @app.delete("/notes/{note_id}")
 def delete_note(note_id: int, db: Session = Depends(get_db)):
+    from datetime import datetime
+
     note = db.query(Note).filter(Note.id == note_id).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
+    # Sweep parent notes for any NoteLink chip pointing at this id and
+    # replace it with its label as plain text — otherwise the parent
+    # carries a dead chip that 404s when Daniel clicks it.
+    # The chip HTML shape is:
+    #   <a data-note-link="true" data-note-id="<id>" data-label="<label>"
+    #      class="gooni-note-link" href="#" target="_self">label</a>
+    # We match by `data-note-id="<id>"` to avoid touching unrelated chips.
+    # Regex is the lightest tool — DOM parsing in BS4 here would add a
+    # ~50ms tax on a high-traffic route, and the chip syntax is stable.
+    pattern = re.compile(
+        r'<a\b[^>]*\bdata-note-link="true"[^>]*\bdata-note-id="'
+        + str(note.id)
+        + r'"[^>]*>(.*?)</a>',
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    affected_parents = (
+        db.query(Note)
+        .filter(Note.content.like(f'%data-note-id="{note.id}"%'))
+        .all()
+    )
+    for p in affected_parents:
+        if not p.content:
+            continue
+        # Replace the chip with its inner text. We could also pull the
+        # data-label attr; the inner text is identical post-#renderHTML so
+        # it's the same string either way.
+        rewritten = pattern.sub(lambda m: m.group(1), p.content)
+        if rewritten != p.content:
+            p.content = rewritten
+            p.excerpt = _excerpt_from_html(rewritten)
+            p.updated_at = datetime.utcnow()
     db.delete(note)
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "orphan_links_rewritten": len(affected_parents)}
 
 
 @app.get("/notes/{note_id}/memories")
@@ -3087,6 +3188,69 @@ def get_note_memories(note_id: int, limit: int = 6, db: Session = Depends(get_db
         .all()
     )
     return [_memory_to_dashboard(m) for m in rows]
+
+
+# ── Promises ───────────────────────────────────────────────────────────────
+
+
+def _serialize_promise(p) -> dict:
+    return {
+        "id": p.id,
+        "utterance": p.utterance,
+        "summary": p.summary,
+        "state": p.state,
+        "inferred_due": p.inferred_due.isoformat() if p.inferred_due else None,
+        "slip_count": p.slip_count,
+        "resolved_at": p.resolved_at.isoformat() if p.resolved_at else None,
+        "source_message_id": p.source_message_id,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+    }
+
+
+@app.get("/promises")
+def list_promises(
+    state: str | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """List promises. Default returns the most recent N regardless of state
+    so the dashboard drawer can show history alongside active commitments.
+    Pass `state=pending` for just the active slate.
+    """
+    from .db.models import Promise as _Promise
+
+    q = db.query(_Promise)
+    if state:
+        if state not in ("pending", "kept", "broken", "abandoned"):
+            raise HTTPException(status_code=400, detail="invalid state")
+        q = q.filter(_Promise.state == state)
+    # Pending sorts by deadline-first (asc nullslast), so the closest due
+    # promises bubble up; other states sort by recency.
+    if state == "pending":
+        q = q.order_by(
+            _Promise.inferred_due.asc().nullslast(), _Promise.created_at.desc()
+        )
+    else:
+        q = q.order_by(_Promise.created_at.desc())
+    rows = q.limit(limit).all()
+    return [_serialize_promise(p) for p in rows]
+
+
+@app.patch("/promises/{promise_id}")
+def patch_promise(promise_id: int, body: dict, db: Session = Depends(get_db)):
+    """State transition only — kept | broken | abandoned | pending. Mirrors
+    `promise_service.transition` so the same idempotency + resolved_at
+    bookkeeping fires regardless of caller."""
+    from .services import promise_service
+
+    new_state = body.get("state")
+    if new_state not in ("pending", "kept", "broken", "abandoned"):
+        raise HTTPException(status_code=400, detail="state required (pending|kept|broken|abandoned)")
+    p = promise_service.transition(db, promise_id, new_state)
+    if p is None:
+        raise HTTPException(status_code=404, detail="Promise not found")
+    return _serialize_promise(p)
 
 
 # ── Note comments (Confluence-style) ───────────────────────────────────────────
@@ -5207,6 +5371,122 @@ def get_eval_run(filename: str):
     if not p.exists():
         raise HTTPException(404, "report not found")
     return HTMLResponse(content=p.read_text())
+
+
+# Module-level flag so we don't fire two evals at once on the same machine.
+# Single-process only — fine for the current 1-machine Fly deploy. Real
+# concurrency control would need Redis or a DB lock if we scale horizontally.
+_EVAL_RUN_LOCK: bool = False
+
+
+@app.post("/eval/run-prod-snapshot")
+def run_eval_against_live_snapshot():
+    """Snapshot the live DB to /tmp, run the eval harness against it, SSE-stream
+    per-line stdout. Emits structured frames the FE renders as a progress drawer:
+
+      {"type":"status", "message":"copying snapshot"}
+      {"type":"line",   "data":"[PASS] 001_smoke_basic_question ..."}
+      {"type":"done",   "exit_code":0}
+      {"type":"error",  "message":"..."}
+
+    Why snapshot instead of pointing the eval at the live DB: the orchestrator
+    creates synthetic Conversation/Message rows per fixture case. Running
+    against live prod would pollute the real conv list. Snapshot = full prod
+    state for reads, scratch for writes, deleted on exit.
+    """
+    from fastapi.responses import StreamingResponse
+    from threading import Thread
+    from queue import Queue, Empty
+    import shutil, subprocess, uuid, sys
+
+    global _EVAL_RUN_LOCK
+    if _EVAL_RUN_LOCK:
+        raise HTTPException(409, "an eval is already running on this machine")
+
+    # Derive live DB path from DATABASE_URL. Works locally (./db/gooni.db) and
+    # on Fly (/app/db/gooni.db) — same code, different env.
+    live_url = os.environ.get("DATABASE_URL", "sqlite:///./db/gooni.db")
+    if not live_url.startswith("sqlite:///"):
+        raise HTTPException(400, "live DB is not sqlite — snapshot path not implemented for other engines")
+    live_path = live_url.removeprefix("sqlite:///")
+    if not os.path.exists(live_path):
+        raise HTTPException(500, f"live DB not found at {live_path}")
+
+    snap_id = uuid.uuid4().hex[:8]
+    snap_path = f"/tmp/eval-snap-{snap_id}.db"
+
+    queue: Queue = Queue()
+    SENTINEL = object()
+
+    def _worker():
+        global _EVAL_RUN_LOCK
+        proc = None
+        try:
+            queue.put({"type": "status", "message": f"copying snapshot → {snap_path}"})
+            shutil.copy(live_path, snap_path)
+            queue.put({"type": "status", "message": "starting eval subprocess"})
+
+            env = {
+                **os.environ,
+                "EVAL_DATABASE_URL": f"sqlite:///{snap_path}",
+                # Force unbuffered so we get line-by-line progress instead of
+                # everything dumping at the end.
+                "PYTHONUNBUFFERED": "1",
+            }
+            proc = subprocess.Popen(
+                [
+                    sys.executable, "-m", "evals.run_orchestrator",
+                    "--no-cache", "--baseline", "--label", f"live_{snap_id}",
+                ],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                queue.put({"type": "line", "data": line.rstrip()})
+            proc.wait()
+            queue.put({"type": "done", "exit_code": proc.returncode})
+        except Exception as e:
+            queue.put({"type": "error", "message": f"eval failed: {e}"})
+        finally:
+            if proc and proc.poll() is None:
+                proc.terminate()
+            if os.path.exists(snap_path):
+                try:
+                    os.remove(snap_path)
+                except OSError:
+                    pass
+            queue.put(SENTINEL)
+            _EVAL_RUN_LOCK = False
+
+    _EVAL_RUN_LOCK = True
+    Thread(target=_worker, daemon=True).start()
+
+    def _event_source():
+        while True:
+            try:
+                # 15s heartbeat matches the chat-stream pattern so Fly's edge
+                # proxy doesn't idle-kill the connection during the long cases.
+                evt = queue.get(timeout=15.0)
+            except Empty:
+                yield ": heartbeat\n\n"
+                continue
+            if evt is SENTINEL:
+                break
+            yield f"data: {json.dumps(evt, default=str)}\n\n"
+
+    return StreamingResponse(
+        _event_source(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # ── Capability profile + Reflection routes ────────────────────────────────────

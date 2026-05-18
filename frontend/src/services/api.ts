@@ -116,6 +116,9 @@ export interface ApiNote {
   // place of the selection; `excerpt_anchor` is the chip label.
   parent_note_id?: number | null;
   excerpt_anchor?: string | null;
+  // Free-form labels (lowercase, ≤60 chars each, deduped server-side).
+  // Always present in responses — empty array when no tags.
+  tags: string[];
   // Distinct visitors that hit /public/notes/{id}. Only present on the
   // single-note GET (`/notes/{id}`), not on space-list responses — the
   // count requires a per-note Visit query that isn't worth running for
@@ -540,7 +543,7 @@ export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: numbe
 
 export async function patchNote(
   id: number,
-  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string },
+  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string; tags?: string[] },
 ): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
@@ -2071,6 +2074,43 @@ export async function uploadImage(file: File): Promise<ImageUploadResult> {
     // body wasn't JSON — keep status text
   }
   return { kind: "error", status: res.status, message };
+}
+
+// ── Promises ────────────────────────────────────────────────────────────
+
+export type PromiseState = "pending" | "kept" | "broken" | "abandoned";
+
+export interface ApiPromise {
+  id: number;
+  utterance: string;
+  summary: string | null;
+  state: PromiseState;
+  inferred_due: string | null;
+  slip_count: number;
+  resolved_at: string | null;
+  source_message_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export async function fetchPromises(opts: { state?: PromiseState; limit?: number } = {}): Promise<ApiPromise[]> {
+  const params = new URLSearchParams();
+  if (opts.state) params.set("state", opts.state);
+  if (opts.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const res = await apiFetch(`${BASE}/promises${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch promises");
+  return res.json();
+}
+
+export async function patchPromiseState(id: number, state: PromiseState): Promise<ApiPromise> {
+  const res = await apiFetch(`${BASE}/promises/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state }),
+  });
+  if (!res.ok) throw new Error("Failed to update promise");
+  return res.json();
 }
 
 // ── Open Graph link previews ──────────────────────────────────────────────
