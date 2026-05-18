@@ -95,6 +95,41 @@ def _safe_extension(content_type: str, filename: Optional[str]) -> str:
     return ""
 
 
+def upload_file(
+    data: bytes,
+    content_type: str,
+    filename: Optional[str] = None,
+    *,
+    prefix: str = "attachments",
+) -> dict[str, str]:
+    """Generic R2 upload — used by /uploads/file for note attachments. Same
+    semantics as upload_image() but with a configurable key prefix and no
+    image-only extension whitelist. Returns {url, key, ext}."""
+    cfg = _config()
+    client = _get_client(cfg)
+
+    ext = _safe_extension(content_type, filename) or "bin"
+    today = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+    rand = secrets.token_urlsafe(12)[:16]
+    key = f"{prefix}/{today}/{rand}.{ext}"
+
+    client.put_object(
+        Bucket=cfg["R2_BUCKET"],
+        Key=key,
+        Body=data,
+        ContentType=content_type or "application/octet-stream",
+        CacheControl="public, max-age=31536000, immutable",
+    )
+
+    host = cfg["R2_PUBLIC_HOST"].rstrip("/")
+    for prefix_str in ("https://", "http://", "https//", "http//"):
+        if host.startswith(prefix_str):
+            host = host[len(prefix_str):]
+            break
+    url = f"https://{host}/{key}"
+    return {"url": url, "key": key, "ext": ext}
+
+
 def upload_image(
     data: bytes,
     content_type: str,

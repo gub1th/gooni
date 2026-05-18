@@ -7,12 +7,14 @@ export interface AppSpace {
   id: SpaceId;
   name: string;
   emoji: string | null;
+  is_pinned: boolean;
 }
 
 const GENERAL_SPACE: AppSpace = {
   id: "general",
   name: "General",
   emoji: null,
+  is_pinned: false,
 };
 
 interface SpacesStore {
@@ -20,7 +22,7 @@ interface SpacesStore {
   loading: boolean;
   fetch: () => Promise<void>;
   createSpace: (name: string, emoji?: string) => Promise<AppSpace>;
-  updateSpace: (id: number, patch: { name?: string; emoji?: string | null }) => Promise<void>;
+  updateSpace: (id: number, patch: { name?: string; emoji?: string | null; is_pinned?: boolean }) => Promise<void>;
   deleteSpace: (id: number) => Promise<void>;
 }
 
@@ -32,7 +34,14 @@ export const useSpacesStore = create<SpacesStore>((set) => ({
     set({ loading: true });
     try {
       const fetched: ApiSpace[] = await fetchSpaces();
-      set({ spaces: [GENERAL_SPACE, ...fetched] });
+      // Backend orders pinned-first already; preserve that here.
+      const mapped: AppSpace[] = fetched.map((sp) => ({
+        id: sp.id,
+        name: sp.name,
+        emoji: sp.emoji,
+        is_pinned: sp.is_pinned,
+      }));
+      set({ spaces: [GENERAL_SPACE, ...mapped] });
     } catch (e) {
       console.error("fetchSpaces error:", e);
     } finally {
@@ -42,18 +51,28 @@ export const useSpacesStore = create<SpacesStore>((set) => ({
 
   createSpace: async (name, emoji) => {
     const created = await apiCreateSpace(name, emoji);
-    const space: AppSpace = { id: created.id, name: created.name, emoji: created.emoji };
+    const space: AppSpace = { id: created.id, name: created.name, emoji: created.emoji, is_pinned: created.is_pinned };
     set((s) => ({ spaces: [...s.spaces, space] }));
     return space;
   },
 
   updateSpace: async (id, patch) => {
     const updated = await apiUpdateSpace(id, patch);
-    set((s) => ({
-      spaces: s.spaces.map((sp) =>
-        sp.id === id ? { ...sp, name: updated.name, emoji: updated.emoji } : sp
-      ),
-    }));
+    set((s) => {
+      // Resort so a freshly-pinned space jumps to the top without a refetch.
+      const next = s.spaces.map((sp) =>
+        sp.id === id
+          ? { ...sp, name: updated.name, emoji: updated.emoji, is_pinned: updated.is_pinned }
+          : sp,
+      );
+      next.sort((a, b) => {
+        if (a.id === "general") return -1;
+        if (b.id === "general") return 1;
+        if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
+        return (a.id as number) - (b.id as number);
+      });
+      return { spaces: next };
+    });
   },
 
   deleteSpace: async (id) => {

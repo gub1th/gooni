@@ -401,15 +401,21 @@ def upsert_message_rating(
     *,
     segment_id: int,
     message_id: int,
-    rating: int,
+    rating: int | None,
     comment: str | None,
 ) -> EvalMessageRating:
     """Insert or update the single rating row for an assistant message.
     Validates message belongs to the segment so a stray PUT can't pin a
     rating onto an unrelated thread.
+
+    `rating` may be NULL to support comment-only saves — the row exists
+    purely to anchor the reviewer's note. Empty rows (no rating + no
+    comment) are rejected.
     """
-    if rating not in (1, 2, 3):
-        raise ValueError("rating must be 1, 2, or 3")
+    if rating is not None and rating not in (1, 2, 3):
+        raise ValueError("rating must be 1, 2, or 3 (or null)")
+    if rating is None and not (comment or "").strip():
+        raise ValueError("at least a rating or a comment is required")
     seg = db.query(EvalSegment).filter(EvalSegment.id == segment_id).first()
     if not seg:
         raise ValueError(f"segment {segment_id} not found")

@@ -289,8 +289,20 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
   const [drag, setDrag] = useState<{ kind: "space" | "pinned"; fromId: number; overId: number | null } | null>(null);
 
   const orderedSpaces = useMemo(() => {
-    const nonGeneral = spaces.filter((s) => s.id !== "general") as { id: number; name: string; emoji: string | null }[];
-    return applyOrder(nonGeneral, spaceOrder);
+    const nonGeneral = spaces.filter((s) => s.id !== "general") as {
+      id: number;
+      name: string;
+      emoji: string | null;
+      is_pinned: boolean;
+    }[];
+    const userOrdered = applyOrder(nonGeneral, spaceOrder);
+    // Pinned spaces always float above unpinned ones; within each group
+    // the user's manual drag-order is preserved (so pinning doesn't blow
+    // away custom ordering they've built up).
+    return [
+      ...userOrdered.filter((s) => s.is_pinned),
+      ...userOrdered.filter((s) => !s.is_pinned),
+    ];
   }, [spaces, spaceOrder]);
 
   const orderedPinnedNotes = useMemo(
@@ -999,6 +1011,30 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
                       <span style={{ flex: 1, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {space.name}
                       </span>
+                      {/* Pin toggle — stays visible when pinned so the
+                          state is glanceable; fades in on hover otherwise.
+                          Click bubbling is killed so we don't open the
+                          space at the same time. */}
+                      <button
+                        className="space-action"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void updateSpace(space.id as number, { is_pinned: !space.is_pinned });
+                        }}
+                        title={space.is_pinned ? "Unpin space" : "Pin space"}
+                        style={{
+                          opacity: space.is_pinned ? 1 : 0,
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: space.is_pinned ? "#0A84FF" : "var(--gooni-muted, #8E8E93)",
+                          fontSize: 11,
+                          padding: "0 2px",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {space.is_pinned ? "★" : "☆"}
+                      </button>
                       {isDelConfirm ? (
                         <button className="space-action" onClick={(e) => { e.stopPropagation(); confirmDelete(space.id as number); }}
                           style={{ opacity: 1, background: "none", border: "none", cursor: "pointer", color: "#FF3B30", fontSize: 10.5, padding: "0 3px", flexShrink: 0, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>

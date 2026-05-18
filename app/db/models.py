@@ -27,6 +27,10 @@ class Space(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(Text, nullable=False)
     emoji = Column(String, nullable=True)
+    # Pinned spaces sort to the top of the sidebar — same UX shape as the
+    # per-note pin. Default false so existing rows continue to sort by
+    # whatever the list endpoint orders by.
+    is_pinned = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -765,9 +769,11 @@ class EvalMessageRating(Base):
     id = Column(Integer, primary_key=True, index=True)
     segment_id = Column(Integer, ForeignKey("eval_segments.id"), nullable=False, index=True)
     message_id = Column(Integer, ForeignKey("messages.id"), nullable=False, unique=True, index=True)
-    # 1 = bad, 2 = meh, 3 = good. Mirrors EvalStepFeedback so eval surfaces
-    # can render the same picker shape regardless of layer.
-    rating = Column(Integer, nullable=False)
+    # 1 = bad, 2 = meh, 3 = good. NULL allowed so reviewers can save a
+    # standalone note without picking a thumbs (Daniel kept losing notes
+    # when the Save button gated on rating). Caller must supply rating OR
+    # comment — empty rows are rejected at the route layer.
+    rating = Column(Integer, nullable=True)
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
@@ -1262,5 +1268,25 @@ class Edge(Base):
         Index("ix_edges_src", "src_kind", "src_id"),
         Index("ix_edges_dst", "dst_kind", "dst_id"),
     )
+
+
+class Attachment(Base):
+    """File attached to a Note (PDF, doc, archive, etc.). Stored on R2; the
+    DB row carries metadata + the public URL. Distinct from inline <img>
+    figures, which live in note HTML."""
+
+    __tablename__ = "attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
+    filename = Column(Text, nullable=False)
+    mime_type = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False, default=0)
+    # R2 object key (e.g. "attachments/2026/05/17/abc123.pdf"). Kept so we
+    # can later delete the underlying object if the note is deleted.
+    storage_key = Column(Text, nullable=False)
+    # Public R2 URL — what the frontend renders / downloads from.
+    public_url = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
