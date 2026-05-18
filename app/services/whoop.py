@@ -224,8 +224,12 @@ def connection_status(db: Session) -> dict[str, Any]:
 
 
 def fetch_profile(access_token: str) -> dict[str, Any]:
+    # WHOOP migrated the public developer API from v1 → v2 in 2025; v1
+    # endpoints fully sunset and now return 404. Migration kept the same
+    # response shapes for the records we read, so only the URL prefix
+    # changed.
     resp = httpx.get(
-        f"{API_BASE}/v1/user/profile/basic",
+        f"{API_BASE}/v2/user/profile/basic",
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=15,
     )
@@ -260,9 +264,9 @@ def fetch_today_snapshot(db: Session) -> dict[str, Any] | None:
     start = end - timedelta(days=4)
     params = {"start": start.isoformat(), "end": end.isoformat(), "limit": 10}
 
-    recovery_records = _get(token, "/v1/recovery", params).get("records", [])
-    cycle_records = _get(token, "/v1/cycle", params).get("records", [])
-    sleep_records = _get(token, "/v1/activity/sleep", params).get("records", [])
+    recovery_records = _get(token, "/v2/recovery", params).get("records", [])
+    cycle_records = _get(token, "/v2/cycle", params).get("records", [])
+    sleep_records = _get(token, "/v2/activity/sleep", params).get("records", [])
 
     # Pick the newest record whose score field is actually populated. Whoop
     # returns in-progress / pending records with `score: null` or an empty
