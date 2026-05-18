@@ -288,6 +288,14 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
   // drag state: { kind: "space"|"pinned", fromId: number, overId: number | null }
   const [drag, setDrag] = useState<{ kind: "space" | "pinned"; fromId: number; overId: number | null } | null>(null);
 
+  // Sidebar scroll-position persistence across route changes. The
+  // Sidebar component is re-mounted on /, /memories, /chat-audit, so
+  // without a sessionStorage round-trip the scrollTop resets to 0 every
+  // time the user clicks a top-level destination — Daniel called this
+  // "the sidebar autoscrolls after I click."
+  const sidebarScrollRef = useRef<HTMLDivElement | null>(null);
+  const scrollRestoredRef = useRef(false);
+
   const orderedSpaces = useMemo(() => {
     const nonGeneral = spaces.filter((s) => s.id !== "general") as {
       id: number;
@@ -636,7 +644,33 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
           .gooni-sidebar-scroll:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.22); }
           .gooni-sidebar-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.36); }
         `}</style>
-        <div className="gooni-sidebar-scroll" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}>
+        <div
+          ref={(el) => {
+            sidebarScrollRef.current = el;
+            // Restore on mount — the Sidebar component is mounted
+            // separately on /, /memories, /chat-audit; without this the
+            // scroll position resets every time the user clicks a top-
+            // level destination ("Memories", "New chat"), which Daniel
+            // perceives as the sidebar "auto-scrolling" to the top.
+            if (el && !scrollRestoredRef.current) {
+              try {
+                const saved = window.sessionStorage.getItem("gooni-sidebar-scroll");
+                if (saved) el.scrollTop = parseInt(saved, 10) || 0;
+              } catch {}
+              scrollRestoredRef.current = true;
+            }
+          }}
+          onScroll={(e) => {
+            try {
+              window.sessionStorage.setItem(
+                "gooni-sidebar-scroll",
+                String((e.currentTarget as HTMLDivElement).scrollTop),
+              );
+            } catch {}
+          }}
+          className="gooni-sidebar-scroll"
+          style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}
+        >
           {/* Top-level shortcuts: Todos + Backlog. Resolves to the canonical
               first list of each type (multiple todo/backlog lists are rare —
               the rest are reachable via the LISTS section below). Hidden when
