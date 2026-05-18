@@ -14,8 +14,10 @@ import {
   patchEvalSummary,
   postEvalFeedback,
   putMessageRating,
+  runProdSnapshotEval,
   type EvalMessage,
   type EvalMessageRating,
+  type EvalRunEvent,
   type EvalSegmentFull,
   type EvalSegmentSummary,
   type EvalStatus,
@@ -2695,6 +2697,13 @@ function EvalRunsPanel() {
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Run-Now state: tail-style log of the eval subprocess stdout. Cleared
+  // each press. evalRunning gates the button so we don't double-fire.
+  const [evalRunning, setEvalRunning] = useState(false);
+  const [evalLog, setEvalLog] = useState<string[]>([]);
+  const [evalError, setEvalError] = useState<string | null>(null);
+  // Bump to force a refetch of /eval/runs after a fresh baseline lands.
+  const [refreshTick, setRefreshTick] = useState(0);
   // Report HTML loaded via apiFetch (carries Bearer token). Iframes can't
   // attach Authorization headers, so on prod (AUTH_PASSWORD set) the iframe
   // approach 401'd. We fetch the HTML and render it inline via srcDoc, which
@@ -2728,7 +2737,33 @@ function EvalRunsPanel() {
     load();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshTick]);
+
+  async function handleRunProdEval() {
+    if (evalRunning) return;
+    setEvalRunning(true);
+    setEvalLog([]);
+    setEvalError(null);
+    try {
+      await runProdSnapshotEval((evt: EvalRunEvent) => {
+        if (evt.type === "status") {
+          setEvalLog((prev) => [...prev, `· ${evt.message}`]);
+        } else if (evt.type === "line") {
+          setEvalLog((prev) => [...prev, evt.data]);
+        } else if (evt.type === "error") {
+          setEvalError(evt.message);
+        } else if (evt.type === "done") {
+          setEvalLog((prev) => [...prev, `· done (exit_code=${evt.exit_code})`]);
+          // Trigger /eval/runs refetch so the new baseline shows up.
+          setRefreshTick((n) => n + 1);
+        }
+      });
+    } catch (e) {
+      setEvalError(e instanceof Error ? e.message : "stream failed");
+    } finally {
+      setEvalRunning(false);
+    }
+  }
 
   useEffect(() => {
     if (!selected) {
@@ -2760,6 +2795,59 @@ function EvalRunsPanel() {
     <div style={{ flex: 1, display: "flex", overflow: "hidden", background: "#FAFAFA" }}>
       {/* Left rail: run list */}
       <div style={{ width: 320, borderRight: "1px solid rgba(0,0,0,0.06)", overflowY: "auto", padding: "12px 0", flexShrink: 0 }}>
+        {/* Run-against-live-prod-snapshot button. Triggers a backend subprocess
+            that copies the live DB and runs the eval harness against the copy.
+            Streams stdout SSE so we render per-case progress in the log box. */}
+        <div style={{ padding: "0 16px 12px" }}>
+          <button
+            type="button"
+            onClick={handleRunProdEval}
+            disabled={evalRunning}
+            style={{
+              width: "100%",
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid rgba(0,0,0,0.08)",
+              background: evalRunning ? "#f0f0f0" : "#111",
+              color: evalRunning ? "#999" : "#fff",
+              fontSize: 12.5,
+              fontWeight: 600,
+              cursor: evalRunning ? "wait" : "pointer",
+              fontFamily: FONT,
+              letterSpacing: 0.2,
+              boxShadow: evalRunning ? "none" : "0 1px 2px rgba(0,0,0,0.06)",
+            }}
+          >
+            {evalRunning ? "running eval…" : "▶ Run eval on prod snapshot"}
+          </button>
+          {evalError && (
+            <div style={{ marginTop: 8, fontSize: 11, color: "#b3261e" }}>
+              error: {evalError}
+            </div>
+          )}
+          {evalLog.length > 0 && (
+            <div
+              style={{
+                marginTop: 8,
+                maxHeight: 180,
+                overflowY: "auto",
+                padding: "8px 10px",
+                background: "#1a1a1a",
+                color: "#dcdcdc",
+                borderRadius: 6,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontSize: 10.5,
+                lineHeight: 1.45,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {evalLog.slice(-200).map((line, i) => (
+                <div key={i}>{line}</div>
+              ))}
+            </div>
+          )}
+        </div>
         <div style={{ padding: "0 16px 8px", fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
           Latest baselines
         </div>
