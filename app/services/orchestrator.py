@@ -236,7 +236,11 @@ ANTI-PATTERNS:
 - Never speculate about prior tool calls — call the read tool, answer
   from output.
 - Never claim absence of a capability without checking the capability
-  block first.
+  block + the OBJECT KINDS line first.
+- Never say something was "tracked", "logged", "saved", "added", or
+  "created" unless the [just extracted] block this turn names that kind
+  + id. If no such confirmation exists, say what WOULD happen ("i'd log
+  that as a backlog ticket") — never narrate a write that didn't land.
 - Don't stack 3+ action recommendations in one reply. Pick one or two
   matched to Daniel's current capacity. Expand only if he asks.
 
@@ -244,20 +248,77 @@ This block overrides any contradicting memory preference. Memory is for
 facts; this is identity."""
 
 
+# ── OBJECT KINDS — anti-hallucination anchor ──────────────────────────
+# Auto-derived list of every object kind Gooni can actually create.
+# Built once at module import by walking the tool registry for creation-
+# shaped tool names plus the kinds spawned by the intent router (Promise
+# isn't a tool — it's extracted from utterances). The cadence rule above
+# tells the LLM never to narrate "tracked"/"logged"/"created" for
+# anything not on this list — without this list the LLM cheerfully
+# invents object kinds ("set a recurring alert", "saved a draft of") that
+# have no backing row.
+#
+# Adding a new creation-shaped tool? Add its name → kind mapping below.
+# The build helper drops any entry whose tool isn't actually registered
+# so stale entries don't bloat the prompt.
+_CREATE_TOOL_KINDS: dict[str, str] = {
+    "save_memory": "Memory",
+    "add_to_list": "ListItem",
+    "add_note": "Note",
+    "add_todo": "Todo",
+    "add_focus": "Focus",
+    "log_habit": "HabitEntry",
+    "request_feature": "BacklogTicket",
+    "create_calendar_event": "CalendarEvent",
+}
+_ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise",)
+
+
+def _build_object_kinds_block() -> str:
+    try:
+        from ..tools import registry as _tool_registry
+    except Exception as e:
+        print(f"[object_kinds_block] tool registry import failed: {e}")
+        return ""
+    tool_names = {t.name for t in _tool_registry}
+    kinds: list[str] = []
+    for name, kind in _CREATE_TOOL_KINDS.items():
+        if name in tool_names and kind not in kinds:
+            kinds.append(kind)
+    for kind in _ROUTER_CREATED_KINDS:
+        if kind not in kinds:
+            kinds.append(kind)
+    if not kinds:
+        return ""
+    return (
+        "OBJECT KINDS I CAN CREATE: " + ", ".join(kinds) + ". Nothing "
+        "else. If asked to create or 'track' anything not on this list, "
+        "say it's not a current capability — never pretend it landed."
+    )
+
+
+OBJECT_KINDS_BLOCK = _build_object_kinds_block()
+
+
 def _build_ack(
     *,
     tone_rules: list[str],
-    feature_titles: list[str],
-    promises: list[dict],
+    captured_features: list[dict],
+    captured_promises: list[dict],
+    captured_todos: list[dict],
 ) -> str | None:
-    """Alfred-voice ack — terse, no preface, action > announcement.
+    """Alfred-voice ack — terse, ID-grounded.
 
-    Rules:
-      - One bubble. No "noted —" prefixes, no "got it:". The phrase itself
-        carries the signal that it landed.
-      - Reference history when natural (slip_count surfaces as "#N").
-      - Multi-signal turns chain with " · " for compactness.
-      - Return None when no signals fired (caller falls through to LLM).
+    Every persisted-object branch demands a structured dict carrying the
+    real DB id; raw-title acks ("backlog: X") used to leak without any
+    backing row when the extractor over-fired. User-facing render stays
+    casual — id only surfaces for features (ticket #N is verifiable in
+    OpsMode); promises + todos stay implicit since their summary text is
+    the recognizable anchor. Multi-feature turns surface comma-joined
+    ids instead of the opaque "(+N)" syntax that confused Daniel in the
+    Cluster A bug report.
+
+    Returns None when no signals fired (caller falls through to LLM).
     """
     parts: list[str] = []
     if tone_rules:
@@ -267,17 +328,33 @@ def _build_ack(
             rule = tone_rules[0]
             quoted = rule if len(rule) <= 60 else rule[:60].rstrip() + "…"
             parts.append(quoted.lower().rstrip("."))
-    if feature_titles:
-        if len(feature_titles) == 1:
-            parts.append(f"backlog: \"{feature_titles[0]}\"")
+    if captured_features:
+        if len(captured_features) == 1:
+            f = captured_features[0]
+            title = (f.get("title") or "").strip()
+            ticket_id = f.get("ticket_id")
+            if ticket_id is not None:
+                parts.append(f"ticket #{ticket_id} logged: \"{title}\"")
+            else:
+                parts.append(f"backlog: \"{title}\"")
         else:
-            head = feature_titles[0]
-            parts.append(
-                f"backlog: \"{head}\" (+{len(feature_titles) - 1})"
-            )
-    if promises:
-        if len(promises) == 1:
-            p = promises[0]
+            ids = [
+                f.get("ticket_id") for f in captured_features
+                if f.get("ticket_id") is not None
+            ]
+            if ids:
+                ids_str = ", ".join(f"#{i}" for i in ids)
+                parts.append(
+                    f"{len(captured_features)} tickets logged: {ids_str}"
+                )
+            else:
+                head = (captured_features[0].get("title") or "").strip()
+                parts.append(
+                    f"backlog: \"{head}\" (+{len(captured_features) - 1})"
+                )
+    if captured_promises:
+        if len(captured_promises) == 1:
+            p = captured_promises[0]
             slip = p.get("slip_count", 0) or 0
             summary = p.get("summary") or p.get("utterance") or ""
             if summary and len(summary) > 60:
@@ -287,7 +364,16 @@ def _build_ack(
             else:
                 parts.append(f"\"{summary}\" tracked")
         else:
-            parts.append(f"{len(promises)} promises tracked")
+            parts.append(f"{len(captured_promises)} promises tracked")
+    if captured_todos:
+        if len(captured_todos) == 1:
+            t = captured_todos[0]
+            text = (t.get("text") or "").strip()
+            if text and len(text) > 60:
+                text = text[:60].rstrip() + "…"
+            parts.append(f"todo added: \"{text}\"")
+        else:
+            parts.append(f"{len(captured_todos)} todos added")
     if not parts:
         return None
     return " · ".join(parts)
@@ -392,25 +478,52 @@ def _build_time_block(db) -> str:
 def _build_just_extracted_block(
     *,
     tone_rules: list[str],
-    feature_titles: list[str],
-    promises: list[dict],
+    captured_features: list[dict],
+    captured_promises: list[dict],
+    captured_todos: list[dict],
 ) -> str:
     """Tells the LLM what already got routed this turn. Without this the
     LLM either re-announces ("Logged feature request:…") or doesn't know
     its work was redundant. Used as injected master-prompt context.
+
+    IDs are surfaced explicitly here so the PERSONA "never say 'tracked'
+    without an id this turn" rule has something concrete to cite. Every
+    kind+id pair printed here is a write the LLM is licensed to confirm.
     """
     lines: list[str] = []
     if tone_rules:
         lines.append(f"- {len(tone_rules)} tone rule(s) logged")
-    for ft in feature_titles[:3]:
-        lines.append(f"- backlog ticket created: \"{ft}\"")
-    for p in promises[:3]:
+    for f in captured_features[:3]:
+        title = (f.get("title") or "").strip()
+        ticket_id = f.get("ticket_id")
+        if ticket_id is not None:
+            lines.append(
+                f"- BacklogTicket #{ticket_id} created: \"{title}\""
+            )
+        else:
+            lines.append(f"- BacklogTicket created (id unknown): \"{title}\"")
+    for p in captured_promises[:3]:
         summary = p.get("summary") or p.get("utterance") or ""
         if len(summary) > 60:
             summary = summary[:60].rstrip() + "…"
         slip = p.get("slip_count", 0) or 0
         slip_tail = f" (slip #{slip + 1})" if slip > 0 else ""
-        lines.append(f"- promise tracked: \"{summary}\"{slip_tail}")
+        pid = p.get("id")
+        if pid is not None:
+            lines.append(
+                f"- Promise #{pid} tracked: \"{summary}\"{slip_tail}"
+            )
+        else:
+            lines.append(f"- Promise tracked: \"{summary}\"{slip_tail}")
+    for t in captured_todos[:3]:
+        text = (t.get("text") or "").strip()
+        if len(text) > 60:
+            text = text[:60].rstrip() + "…"
+        tid = t.get("todo_id")
+        if tid is not None:
+            lines.append(f"- Todo #{tid} added: \"{text}\"")
+        else:
+            lines.append(f"- Todo added (id unknown): \"{text}\"")
     if not lines:
         return ""
     return (
@@ -503,8 +616,9 @@ class Orchestrator:
         }
         memory_candidates: list[dict] = []
         captured_promises: list[dict] = []
+        captured_features: list[dict] = []
+        captured_todos: list[dict] = []
         tone_rules: list[str] = []
-        feature_titles: list[str] = []
         skip_normal_reply = False
 
         if not image_url and saved_message.strip():
@@ -592,15 +706,16 @@ class Orchestrator:
                     ctx,
                 )
                 tone_rules.extend(routed.tone_rules)
-                feature_titles.extend(routed.feature_titles)
+                captured_features.extend(routed.captured_features)
                 captured_promises.extend(routed.captured_promises)
+                captured_todos.extend(routed.captured_todos)
                 feedback_tools.extend(routed.tools_used)
 
                 # Stamp the user message as feedback when either a tone
                 # correction OR a feature request fired AND we have a
                 # prior assistant turn to attribute the correction to.
                 if (
-                    (routed.tone_rules or routed.feature_titles)
+                    (routed.tone_rules or routed.captured_features)
                     and prev_assistant is not None
                 ):
                     user_msg.feedback_for_message_id = prev_assistant.id
@@ -615,8 +730,9 @@ class Orchestrator:
                 # read like one breath.
                 feedback_ack = _build_ack(
                     tone_rules=tone_rules,
-                    feature_titles=feature_titles,
-                    promises=captured_promises,
+                    captured_features=captured_features,
+                    captured_promises=captured_promises,
+                    captured_todos=captured_todos,
                 )
                 if feedback_ack is not None:
                     # Skip the LLM reply ONLY when the extractor explicitly
@@ -761,8 +877,9 @@ class Orchestrator:
             try:
                 just_extracted_block = _build_just_extracted_block(
                     tone_rules=tone_rules,
-                    feature_titles=feature_titles,
-                    promises=captured_promises,
+                    captured_features=captured_features,
+                    captured_promises=captured_promises,
+                    captured_todos=captured_todos,
                 )
             except Exception as e:
                 print(f"[just_extracted_block] build failed: {e}")
@@ -789,6 +906,7 @@ class Orchestrator:
             or ((signals_summary or {}).get("memory_count") or 0)
             or (signals_summary or {}).get("soft_promises")
             or captured_promises
+            or captured_todos
         )
         _should_plan = (
             len(message) > 80
@@ -838,6 +956,7 @@ class Orchestrator:
         # appended via filter(None, ...) when empty on web.
         full_context = "\n\n".join(filter(None, [
             PERSONA_BLOCK,
+            OBJECT_KINDS_BLOCK,
             intention_block,
             plan_block,
             cadence_block,
