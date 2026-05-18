@@ -2852,8 +2852,8 @@ function EvalRunsPanel() {
           Latest baselines
         </div>
         {baselineList.length === 0 ? (
-          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93" }}>
-            no baselines yet — run <code>python -m evals.run_orchestrator --baseline</code>
+          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93", lineHeight: 1.5 }}>
+            no baselines yet — click <strong>▶ Run eval on prod snapshot</strong> above to generate one (or run <code>python -m evals.run_orchestrator --baseline</code> locally).
           </div>
         ) : (
           baselineList.map((b, i) => (
@@ -2878,8 +2878,8 @@ function EvalRunsPanel() {
         ) : error ? (
           <div style={{ padding: "0 16px", fontSize: 12, color: "#FF3B30" }}>error: {error}</div>
         ) : runs.length === 0 ? (
-          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93" }}>
-            no reports — local artifact, only on the machine that ran the eval
+          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93", lineHeight: 1.5 }}>
+            no reports yet — HTML scorecards are per-run artifacts. Click <strong>▶ Run eval on prod snapshot</strong> to generate one.
           </div>
         ) : (
           runs.map((r) => (

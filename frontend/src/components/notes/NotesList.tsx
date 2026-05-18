@@ -358,6 +358,9 @@ function SectionHeader({ label }: { label: string }) {
 export function NotesList() {
   const { selectedSpaceId, notes, activeNoteId, createNote, selectNote, deleteNote, loadNotes } = useNotesContentStore();
   const spaces = useSpacesStore((s) => s.spaces);
+  const updateSpaceStore = useSpacesStore((s) => s.updateSpace);
+  const [descEditing, setDescEditing] = useState(false);
+  const [descDraft, setDescDraft] = useState("");
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [cleanConfirm, setCleanConfirm] = useState(false);
@@ -529,6 +532,84 @@ export function NotesList() {
           </svg>
         </button>
       </div>
+
+      {/* Space header — description + cover. Hidden for All Notes since
+          there's no underlying space row to attach metadata to. Click
+          description to edit; empty state shows "Add description". */}
+      {!isAllNotes && currentSpace && (
+        <div
+          style={{
+            padding: "10px 12px",
+            borderBottom: "1px solid rgba(0,0,0,0.06)",
+            flexShrink: 0,
+            background: currentSpace.cover_image_url
+              ? `linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.95)), url(${JSON.stringify(currentSpace.cover_image_url).slice(1, -1)}) center/cover`
+              : "transparent",
+          }}
+        >
+          {descEditing ? (
+            <textarea
+              autoFocus
+              value={descDraft}
+              onChange={(e) => setDescDraft(e.target.value)}
+              onBlur={async () => {
+                const next = descDraft.trim();
+                const current = (currentSpace.description ?? "").trim();
+                if (next !== current && typeof currentSpace.id === "number") {
+                  try {
+                    await updateSpaceStore(currentSpace.id, { description: next || null });
+                  } catch (e) {
+                    console.error("updateSpace description failed", e);
+                  }
+                }
+                setDescEditing(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setDescDraft(currentSpace.description ?? "");
+                  setDescEditing(false);
+                }
+              }}
+              placeholder="What's this space for?"
+              rows={3}
+              style={{
+                width: "100%",
+                fontSize: 12,
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                color: "var(--gooni-text, #1C1C1E)",
+                background: "rgba(255,255,255,0.7)",
+                border: "1px solid rgba(0,0,0,0.10)",
+                borderRadius: 6,
+                padding: "6px 8px",
+                resize: "vertical",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+          ) : (
+            <div
+              onClick={() => {
+                setDescDraft(currentSpace.description ?? "");
+                setDescEditing(true);
+              }}
+              title="Click to edit description"
+              style={{
+                fontSize: 12,
+                color: currentSpace.description ? "#475569" : "rgba(142,142,147,0.85)",
+                lineHeight: 1.4,
+                cursor: "pointer",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontStyle: currentSpace.description ? "normal" : "italic",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {currentSpace.description || "+ add description"}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Search row — compact, always visible */}
       <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>

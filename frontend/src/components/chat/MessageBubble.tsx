@@ -19,6 +19,10 @@ const TRACE_ICON: Record<MessageTraceStep["type"], string> = {
   master_prompt: "▤",
   extracted_signals: "⌖",
   memories_applied: "★",
+  // ReAct loop (v6+). Plan = pre-reply intent. Verify = post-reply audit
+  // check. Like Claude's reasoning UI — surfaces in the collapsible.
+  plan: "◎",
+  verify: "✓",
 };
 
 interface MessageBubbleProps {
@@ -85,7 +89,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               fontWeight: 500,
             }}
           >
-            <span>Orchestrated reply</span>
+            <span>Reasoning</span>
             <span style={{ fontSize: 10 }}>{traceExpanded ? "▾" : "▸"}</span>
             <span style={{ fontSize: 11, color: "#9CA3AF" }}>
               · {trace.length} step{trace.length === 1 ? "" : "s"}

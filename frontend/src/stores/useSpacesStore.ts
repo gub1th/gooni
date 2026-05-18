@@ -8,6 +8,8 @@ export interface AppSpace {
   name: string;
   emoji: string | null;
   is_pinned: boolean;
+  description: string | null;
+  cover_image_url: string | null;
 }
 
 const GENERAL_SPACE: AppSpace = {
@@ -15,6 +17,8 @@ const GENERAL_SPACE: AppSpace = {
   name: "General",
   emoji: null,
   is_pinned: false,
+  description: null,
+  cover_image_url: null,
 };
 
 interface SpacesStore {
@@ -22,7 +26,7 @@ interface SpacesStore {
   loading: boolean;
   fetch: () => Promise<void>;
   createSpace: (name: string, emoji?: string) => Promise<AppSpace>;
-  updateSpace: (id: number, patch: { name?: string; emoji?: string | null; is_pinned?: boolean }) => Promise<void>;
+  updateSpace: (id: number, patch: { name?: string; emoji?: string | null; is_pinned?: boolean; description?: string | null; cover_image_url?: string | null }) => Promise<void>;
   deleteSpace: (id: number) => Promise<void>;
 }
 
@@ -40,6 +44,8 @@ export const useSpacesStore = create<SpacesStore>((set) => ({
         name: sp.name,
         emoji: sp.emoji,
         is_pinned: sp.is_pinned,
+        description: sp.description,
+        cover_image_url: sp.cover_image_url,
       }));
       set({ spaces: [GENERAL_SPACE, ...mapped] });
     } catch (e) {
@@ -51,7 +57,14 @@ export const useSpacesStore = create<SpacesStore>((set) => ({
 
   createSpace: async (name, emoji) => {
     const created = await apiCreateSpace(name, emoji);
-    const space: AppSpace = { id: created.id, name: created.name, emoji: created.emoji, is_pinned: created.is_pinned };
+    const space: AppSpace = {
+      id: created.id,
+      name: created.name,
+      emoji: created.emoji,
+      is_pinned: created.is_pinned,
+      description: created.description,
+      cover_image_url: created.cover_image_url,
+    };
     set((s) => ({ spaces: [...s.spaces, space] }));
     return space;
   },
@@ -62,7 +75,14 @@ export const useSpacesStore = create<SpacesStore>((set) => ({
       // Resort so a freshly-pinned space jumps to the top without a refetch.
       const next = s.spaces.map((sp) =>
         sp.id === id
-          ? { ...sp, name: updated.name, emoji: updated.emoji, is_pinned: updated.is_pinned }
+          ? {
+              ...sp,
+              name: updated.name,
+              emoji: updated.emoji,
+              is_pinned: updated.is_pinned,
+              description: updated.description,
+              cover_image_url: updated.cover_image_url,
+            }
           : sp,
       );
       next.sort((a, b) => {
