@@ -42,6 +42,11 @@ export interface ApiSpace {
   name: string;
   emoji: string | null;
   is_pinned: boolean;
+  // Long-form prose about what this space is for. Renders as the header
+  // on the space view. Sanitized at render time, same as note content.
+  description: string | null;
+  // R2 URL for an optional cover banner image.
+  cover_image_url: string | null;
 }
 
 export async function fetchSpaces(): Promise<ApiSpace[]> {
@@ -60,7 +65,7 @@ export async function createSpace(name: string, emoji?: string): Promise<ApiSpac
   return res.json();
 }
 
-export async function updateSpace(id: number, patch: { name?: string; emoji?: string | null; is_pinned?: boolean }): Promise<ApiSpace> {
+export async function updateSpace(id: number, patch: { name?: string; emoji?: string | null; is_pinned?: boolean; description?: string | null; cover_image_url?: string | null }): Promise<ApiSpace> {
   const res = await apiFetch(`${BASE}/spaces/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -1485,7 +1490,9 @@ export interface MessageTraceStep {
     | "pipeline_version"
     | "master_prompt"
     | "extracted_signals"
-    | "memories_applied";
+    | "memories_applied"
+    | "plan"
+    | "verify";
   label: string;
   detail?: string | null;
   args?: Record<string, unknown> | null;

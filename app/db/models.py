@@ -20,7 +20,14 @@ from .database import Base
 
 
 class Space(Base):
-    """A container for organizing notes and conversations."""
+    """A container for organizing notes and conversations.
+
+    Distinct from `Focus`: a space is an evergreen container ("Journal",
+    "Dev", "Claude Code") — no endgoal, no drift detection. Focus is
+    time-bound commitment. Notes live in a space; they can also link to
+    a focus. See discussion note "Discussion: converge spaces + focuses?"
+    for why we kept them separate.
+    """
 
     __tablename__ = "spaces"
 
@@ -31,6 +38,16 @@ class Space(Base):
     # per-note pin. Default false so existing rows continue to sort by
     # whatever the list endpoint orders by.
     is_pinned = Column(Boolean, default=False, nullable=False, server_default="0")
+    # User-written prose about what this space is for. Renders in the
+    # space-view header so Daniel can give Journal / Dev / Claude Code
+    # actual identity beyond a name + emoji. Markdown/HTML allowed —
+    # sanitized at render time same as note content.
+    description = Column(Text, nullable=True)
+    # R2 URL for an optional cover image. Used as a banner / page-header
+    # background tint in the space view. Nullable — most spaces will
+    # never set one. Same R2 path as note attachments / public profile
+    # avatars.
+    cover_image_url = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

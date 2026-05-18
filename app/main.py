@@ -2424,6 +2424,8 @@ def _serialize_space(s: Space) -> dict:
         "name": s.name,
         "emoji": s.emoji,
         "is_pinned": bool(s.is_pinned),
+        "description": s.description,
+        "cover_image_url": s.cover_image_url,
     }
 
 
@@ -2466,6 +2468,15 @@ def update_space(space_id: int, body: dict, db: Session = Depends(get_db)):
         space.emoji = body["emoji"] or None
     if "is_pinned" in body:
         space.is_pinned = bool(body["is_pinned"])
+    if "description" in body:
+        # Trim trailing whitespace; collapse empty-string to NULL so the
+        # serializer reports `null` instead of "" (saves the frontend a
+        # special-case check for "is this really set?").
+        desc = body["description"]
+        space.description = (desc or "").strip() or None
+    if "cover_image_url" in body:
+        url = body["cover_image_url"]
+        space.cover_image_url = (url or "").strip() or None
     db.commit()
     db.refresh(space)
     return _serialize_space(space)
@@ -5344,20 +5355,25 @@ def _safe_eval_filename(filename: str, prefix: str, suffix: str) -> bool:
 @app.get("/eval/runs")
 def list_eval_runs():
     """List local eval runs (HTML reports) with metadata extracted from the
-    matching baseline JSON when available. Sorted newest first by mtime."""
-    if not _EVAL_REPORTS_DIR.exists():
-        return {"runs": []}
+    matching baseline JSON when available. Sorted newest first by mtime.
+
+    Reports are gitignored (ephemeral per-run HTML), but baselines ARE
+    committed — so on prod the reports dir is empty but baselines still
+    populate. Don't short-circuit on missing reports dir; surface
+    baselines regardless.
+    """
     runs: list[dict] = []
-    for report in sorted(
-        _EVAL_REPORTS_DIR.glob("report_*.html"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    ):
-        runs.append({
-            "filename": report.name,
-            "size_bytes": report.stat().st_size,
-            "mtime": report.stat().st_mtime,
-        })
+    if _EVAL_REPORTS_DIR.exists():
+        for report in sorted(
+            _EVAL_REPORTS_DIR.glob("report_*.html"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        ):
+            runs.append({
+                "filename": report.name,
+                "size_bytes": report.stat().st_size,
+                "mtime": report.stat().st_mtime,
+            })
     # Pair with the latest baseline metadata so the UI shows scores w/o
     # opening each report. Baselines aren't 1:1 with reports (baselines
     # overwrite per pipeline_version+model; reports keep history) — best we
