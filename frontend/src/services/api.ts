@@ -41,6 +41,7 @@ export interface ApiSpace {
   id: number;
   name: string;
   emoji: string | null;
+  is_pinned: boolean;
 }
 
 export async function fetchSpaces(): Promise<ApiSpace[]> {
@@ -59,7 +60,7 @@ export async function createSpace(name: string, emoji?: string): Promise<ApiSpac
   return res.json();
 }
 
-export async function updateSpace(id: number, patch: { name?: string; emoji?: string | null }): Promise<ApiSpace> {
+export async function updateSpace(id: number, patch: { name?: string; emoji?: string | null; is_pinned?: boolean }): Promise<ApiSpace> {
   const res = await apiFetch(`${BASE}/spaces/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -1838,7 +1839,10 @@ export interface EvalStepFeedback {
 
 export interface EvalMessageRating {
   id: number;
-  rating: 1 | 2 | 3;
+  // null when the row exists purely to anchor a reviewer comment with no
+  // thumbs picked yet — see PUT /eval/.../rating which accepts rating=null
+  // as long as the comment is non-empty.
+  rating: 1 | 2 | 3 | null;
   comment: string | null;
   updated_at: string | null;
 }
@@ -1943,7 +1947,7 @@ export async function deleteEvalFeedback(id: number): Promise<void> {
 export async function putMessageRating(
   segmentId: number,
   messageId: number,
-  payload: { rating: 1 | 2 | 3; comment?: string | null }
+  payload: { rating: 1 | 2 | 3 | null; comment?: string | null }
 ): Promise<EvalMessageRating & { message_id: number }> {
   const res = await apiFetch(
     `${BASE}/eval/segments/${segmentId}/messages/${messageId}/rating`,
@@ -2055,6 +2059,73 @@ export async function uploadImage(file: File): Promise<ImageUploadResult> {
   if (res.ok) {
     const data = await res.json();
     return { kind: "url", url: data.url, key: data.key };
+  }
+  if (res.status === 503) {
+    return { kind: "fallback", reason: "R2 not configured" };
+  }
+  let message = res.statusText || "upload failed";
+  try {
+    const body = await res.json();
+    if (body?.detail) message = String(body.detail);
+  } catch {
+    // body wasn't JSON — keep status text
+  }
+  return { kind: "error", status: res.status, message };
+}
+
+// ── Open Graph link previews ──────────────────────────────────────────────
+
+export interface OgMetadata {
+  url: string;
+  title: string;
+  description: string | null;
+  image: string | null;
+  site_name: string | null;
+  fetch_error?: string;
+}
+
+export async function fetchOgMetadata(url: string): Promise<OgMetadata> {
+  const res = await apiFetch(`${BASE}/uploads/og?url=${encodeURIComponent(url)}`);
+  if (!res.ok) throw new Error("Failed to fetch link preview");
+  return res.json();
+}
+
+// ── File attachments ──────────────────────────────────────────────────────
+
+export interface FileUploadOk {
+  kind: "url";
+  url: string;
+  key: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  attachment_id: number | null;
+}
+
+export type FileUploadResult =
+  | FileUploadOk
+  | { kind: "fallback"; reason: string }
+  | { kind: "error"; status: number; message: string };
+
+export async function uploadAttachment(
+  file: File,
+  noteId?: number,
+): Promise<FileUploadResult> {
+  const form = new FormData();
+  form.append("file", file, file.name || "attachment");
+  if (noteId != null) form.append("note_id", String(noteId));
+  const res = await apiFetch(`${BASE}/uploads/file`, { method: "POST", body: form });
+  if (res.ok) {
+    const data = await res.json();
+    return {
+      kind: "url",
+      url: data.url,
+      key: data.key,
+      filename: data.filename,
+      mime_type: data.mime_type,
+      size_bytes: data.size_bytes,
+      attachment_id: data.attachment_id ?? null,
+    };
   }
   if (res.status === 503) {
     return { kind: "fallback", reason: "R2 not configured" };

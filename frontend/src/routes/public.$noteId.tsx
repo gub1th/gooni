@@ -1,10 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { sanitizeHtml } from "../utils/sanitize";
 import { displayTitle } from "../utils/notePreview";
 import { NoteLoadingState } from "../components/NoteLoadingState";
 import { publicNoteQueryOptions } from "../utils/publicQueries";
 import { fetchPublicNoteComments, type ApiNoteComment } from "../services/api";
+import { AttachmentModal } from "../components/notes/AttachmentModal";
 
 export const Route = createFileRoute("/public/$noteId")({
   component: PublicNotePage,
@@ -36,11 +38,44 @@ function showUpdated(createdAt: string, updatedAt: string): boolean {
   return gapMs > 12 * 60 * 60 * 1000;
 }
 
+interface AttachmentPreviewState {
+  url: string;
+  filename: string;
+  mime: string;
+  size: number;
+}
+
 function PublicNotePage() {
   const { noteId } = Route.useParams();
   const id = Number(noteId);
   const { data: note, isLoading, isError } = useQuery(publicNoteQueryOptions(id));
   const notFound = isError;
+  const proseRef = useRef<HTMLDivElement | null>(null);
+  const [preview, setPreview] = useState<AttachmentPreviewState | null>(null);
+
+  // Intercept clicks on attachment cards rendered inside the sanitized HTML
+  // so they open the inline modal preview instead of navigating to the raw
+  // R2 URL. Falls back gracefully (default <a> navigation) if the modal
+  // hasn't mounted yet.
+  useEffect(() => {
+    const container = proseRef.current;
+    if (!container) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const card = target.closest("[data-attachment]") as HTMLElement | null;
+      if (!card) return;
+      e.preventDefault();
+      const url = card.getAttribute("data-url") || "";
+      const filename = card.getAttribute("data-filename") || "attachment";
+      const mime = card.getAttribute("data-mime") || "application/octet-stream";
+      const size = parseInt(card.getAttribute("data-size") || "0", 10) || 0;
+      if (!url) return;
+      setPreview({ url, filename, mime, size });
+    };
+    container.addEventListener("click", handler);
+    return () => container.removeEventListener("click", handler);
+  }, [note?.content]);
 
   return (
     <div
@@ -173,10 +208,80 @@ function PublicNotePage() {
                   min-width: 80px; vertical-align: top; }
               .public-prose table th { background: rgba(0,0,0,0.04); font-weight: 600;
                                        text-align: left; }
+              /* Attachment cards — mirror the editor NodeView styling so
+                 public + private renders look identical. The inner <a>
+                 still has a real href, so any non-JS click falls back to
+                 a new-tab open of the R2 URL. */
+              .public-prose .gooni-attachment-card {
+                  display: block; border: 1px solid rgba(0,0,0,0.12);
+                  border-radius: 10px; background: #FAFAFA;
+                  padding: 10px; margin: 14px 0; cursor: pointer;
+                  transition: background 120ms ease;
+              }
+              .public-prose .gooni-attachment-card:hover { background: #F2F2F4; }
+              .public-prose .gooni-attachment-card .gooni-attachment-link {
+                  display: flex; align-items: center; gap: 10px;
+                  text-decoration: none; color: inherit;
+              }
+              .public-prose .gooni-attachment-card .gooni-attachment-icon {
+                  display: inline-flex; align-items: center; justify-content: center;
+                  width: 38px; height: 38px; border-radius: 8px;
+                  background: rgba(45,125,255,0.10); color: #2D7DFF;
+                  font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+                  flex-shrink: 0;
+              }
+              .public-prose .gooni-attachment-card .gooni-attachment-meta {
+                  display: flex; flex-direction: column; min-width: 0; gap: 2px;
+              }
+              .public-prose .gooni-attachment-card .gooni-attachment-name {
+                  font-size: 14px; font-weight: 500; color: #1C1C1E;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+              }
+              .public-prose .gooni-attachment-card .gooni-attachment-sub {
+                  font-size: 12px; color: #8E8E93;
+              }
+              /* Confluence-style external-link cards — short wide layout
+                 with title + description on the left and an optional og:image
+                 thumbnail on the right. Whole card is the <a>, so clicking
+                 anywhere opens the URL in a new tab. */
+              .public-prose a.gooni-link-card {
+                  display: flex; align-items: stretch;
+                  border: 1px solid rgba(0,0,0,0.12); border-radius: 8px;
+                  margin: 12px 0; background: #FAFAFA;
+                  text-decoration: none; color: inherit;
+                  overflow: hidden; min-height: 72px;
+                  transition: background 120ms;
+              }
+              .public-prose a.gooni-link-card:hover { background: #F2F2F4; }
+              .public-prose a.gooni-link-card .gooni-link-card-body {
+                  flex: 1; min-width: 0;
+                  padding: 10px 14px;
+                  display: flex; flex-direction: column; gap: 4px;
+              }
+              .public-prose a.gooni-link-card .gooni-link-card-site {
+                  font-size: 11px; color: #8E8E93; letter-spacing: 0.2px;
+                  text-transform: uppercase; font-weight: 600;
+              }
+              .public-prose a.gooni-link-card .gooni-link-card-title {
+                  font-size: 14px; font-weight: 600; color: #1C1C1E;
+                  line-height: 1.3;
+                  overflow: hidden; text-overflow: ellipsis;
+                  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+              }
+              .public-prose a.gooni-link-card .gooni-link-card-desc {
+                  font-size: 12.5px; color: #6E6E73; line-height: 1.4;
+                  overflow: hidden; text-overflow: ellipsis;
+                  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+              }
+              .public-prose a.gooni-link-card .gooni-link-card-thumb {
+                  flex-shrink: 0; width: 110px;
+                  background-size: cover; background-position: center;
+              }
               /* First heading in content shouldn't double-space against the meta line. */
               .public-prose > :first-child { margin-top: 0; }
             `}</style>
             <div
+              ref={proseRef}
               className="public-prose"
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(note.content || "") }}
             />
@@ -184,6 +289,15 @@ function PublicNotePage() {
           </>
         )}
       </div>
+      {preview && (
+        <AttachmentModal
+          url={preview.url}
+          filename={preview.filename}
+          mime={preview.mime}
+          size={preview.size}
+          onClose={() => setPreview(null)}
+        />
+      )}
     </div>
   );
 }

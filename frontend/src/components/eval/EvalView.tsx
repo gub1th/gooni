@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { ActiveRulesCard } from "./ActiveRulesCard";
 import {
   BASE,
@@ -14,6 +15,7 @@ import {
   postEvalFeedback,
   putMessageRating,
   type EvalMessage,
+  type EvalMessageRating,
   type EvalSegmentFull,
   type EvalSegmentSummary,
   type EvalStatus,
@@ -104,6 +106,24 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
   const [search, setSearch] = useState("");
 
   const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(initialSegmentId);
+
+  // Mirror selection ↔ ?segment so the eval page is deep-linkable. Without
+  // this Cmd+L returns gooni.com/ for any segment drilldown, and refresh
+  // bounces back to the segment list.
+  const navigate = useNavigate({ from: "/" });
+  const selectSegment = (id: number | null) => {
+    setSelectedSegmentId(id);
+    navigate({
+      search: {
+        note: undefined,
+        conv: undefined,
+        list: undefined,
+        audit: true,
+        segment: id ?? undefined,
+      },
+      replace: true,
+    });
+  };
 
   // Honor a fresh ?segment=N navigation after mount too — e.g. user clicks
   // "open full" on an Ops drilldown while already on /audit.
@@ -238,7 +258,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
       } else if (e.key === "Enter") {
         if (cursor >= 0 && cursor < visible.length) {
           e.preventDefault();
-          setSelectedSegmentId(visible[cursor].id);
+          selectSegment(visible[cursor].id);
         }
       } else if (e.key === "Escape") {
         setCursor(-1);
@@ -254,7 +274,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
       <EvalDetailView
         segmentId={selectedSegmentId}
         onClose={() => {
-          setSelectedSegmentId(null);
+          selectSegment(null);
           loadSegments();
         }}
         onOpenNote={onOpenNote}
@@ -449,7 +469,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                     focused={i === cursor}
                     onClick={() => {
                       setCursor(i);
-                      setSelectedSegmentId(seg.id);
+                      selectSegment(seg.id);
                     }}
                   />
                 ))}
@@ -851,6 +871,7 @@ function EvalDetailView({
 
   return (
     <div
+      id="eval-print-root"
       style={{
         flex: 1,
         display: "flex",
@@ -861,6 +882,23 @@ function EvalDetailView({
         overflow: "hidden",
       }}
     >
+      {/* Print stylesheet — hides app chrome (sidebars, header buttons,
+          dispatch / legend / status pill cycle hint) and lets the segment
+          body flow into the printable page. window.print() → "Save as PDF"
+          captures whatever's left visible. The button itself is marked
+          eval-no-print so it doesn't shimmer into the saved PDF. */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          #eval-print-root, #eval-print-root * { visibility: visible !important; }
+          #eval-print-root { position: absolute !important; inset: 0 !important;
+                             overflow: visible !important; background: #fff !important;
+                             padding: 24px !important; }
+          .eval-no-print { display: none !important; }
+          /* StatusPill cursor hint isn't useful in a static PDF. */
+          #eval-print-root button[disabled] { opacity: 1 !important; }
+        }
+      `}</style>
       {/* Header */}
       <div
         style={{
@@ -875,6 +913,7 @@ function EvalDetailView({
       >
         <button
           onClick={onClose}
+          className="eval-no-print"
           style={{
             background: "none",
             border: "none",
@@ -897,9 +936,10 @@ function EvalDetailView({
             </span>
             {seg.is_active && <ActiveBadge />}
             <StatusPill status={seg.eval_status} onCycle={cycleStatus} />
+            {data && <RatedProgressBadge data={data} />}
           </>
         )}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="eval-no-print" style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           <button
             onClick={() => setLegendOpen((v) => !v)}
             title="Tool legend — what each step means"
@@ -914,6 +954,23 @@ function EvalDetailView({
             }}
           >
             ⓘ Legend
+          </button>
+          <button
+            onClick={() => window.print()}
+            title="Save this segment as a PDF (Cmd/Ctrl-P · Save as PDF)"
+            style={{
+              background: "transparent",
+              color: "#0A84FF",
+              border: "1px solid rgba(10,132,255,0.30)",
+              borderRadius: 6,
+              padding: "5px 12px",
+              cursor: "pointer",
+              fontSize: 12,
+              fontWeight: 600,
+              fontFamily: FONT,
+            }}
+          >
+            Export PDF
           </button>
           <button
             onClick={handleDispatch}
@@ -950,7 +1007,11 @@ function EvalDetailView({
             <SummaryEditor
               segmentId={segmentId}
               initial={data.segment}
-              onUpdated={reload}
+              onSummaryPatched={(patch) =>
+                setData((prev) =>
+                  prev ? { ...prev, segment: { ...prev.segment, ...patch } } : prev,
+                )
+              }
             />
             <h3 style={{ marginTop: 24, marginBottom: 12, fontSize: 14, fontWeight: 600 }}>
               Transcript ({data.messages.length} messages)
@@ -962,6 +1023,18 @@ function EvalDetailView({
                   segmentId={segmentId}
                   msg={m}
                   onFeedbackChanged={reload}
+                  onRatingPatched={(mid, rating) =>
+                    setData((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            messages: prev.messages.map((mm) =>
+                              mm.id === mid ? { ...mm, rating } : mm,
+                            ),
+                          }
+                        : prev,
+                    )
+                  }
                 />
               ))}
             </div>
@@ -1131,11 +1204,13 @@ function ModalButton({
 function SummaryEditor({
   segmentId,
   initial,
-  onUpdated,
+  onSummaryPatched,
 }: {
   segmentId: number;
   initial: EvalSegmentSummary;
-  onUpdated: () => void;
+  // Patch the segment summary into the parent's local state — same
+  // "no full refetch" rule as MessageRatingRow.
+  onSummaryPatched: (patch: Partial<EvalSegmentSummary>) => void;
 }) {
   const [rating, setRating] = useState<number | null>(initial.overall_rating);
   const [comment, setComment] = useState(initial.overall_comment ?? "");
@@ -1148,11 +1223,15 @@ function SummaryEditor({
   async function save() {
     setSaving(true);
     try {
-      await patchEvalSummary(segmentId, {
+      const updated = await patchEvalSummary(segmentId, {
         overall_rating: rating,
         overall_comment: comment,
       });
-      onUpdated();
+      onSummaryPatched({
+        overall_rating: updated.overall_rating,
+        overall_comment: updated.overall_comment,
+        eval_status: updated.eval_status,
+      });
     } catch (err) {
       alert(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -1220,10 +1299,12 @@ function MessageCard({
   segmentId,
   msg,
   onFeedbackChanged,
+  onRatingPatched,
 }: {
   segmentId: number;
   msg: EvalMessage;
   onFeedbackChanged: () => void;
+  onRatingPatched: (messageId: number, rating: EvalMessageRating | null) => void;
 }) {
   // Trace defaults to collapsed — flipped from the previous "expanded for
   // assistant" default because the wall-of-JSON was the #1 friction source
@@ -1305,7 +1386,7 @@ function MessageCard({
           segmentId={segmentId}
           messageId={msg.id}
           existing={msg.rating}
-          onChanged={onFeedbackChanged}
+          onRatingPatched={onRatingPatched}
         />
       )}
 
@@ -1600,49 +1681,85 @@ function MessageRatingRow({
   segmentId,
   messageId,
   existing,
-  onChanged,
+  onRatingPatched,
 }: {
   segmentId: number;
   messageId: number;
   existing: EvalMessage["rating"];
-  onChanged: () => void;
+  // Patch-style callback: merges a single message's rating into the
+  // parent's local state instead of triggering a full segment refetch
+  // (Daniel's "why fetch full on every save" gripe). Pass null to clear
+  // the rating row.
+  onRatingPatched: (messageId: number, rating: EvalMessageRating | null) => void;
 }) {
   const [comment, setComment] = useState(existing?.comment ?? "");
   const [pending, setPending] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setComment(existing?.comment ?? "");
   }, [existing?.comment, messageId]);
 
+  // Auto-grow up to 3× the rows={3} default so a long rationale doesn't
+  // hide behind a 3-line viewport. Caller-driven changes (the effect
+  // above) also trip this via the comment dep.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const baseHeight = el.clientHeight || 60;
+    const next = Math.min(el.scrollHeight, baseHeight * 3 + 40);
+    el.style.height = `${next}px`;
+  }, [comment]);
+
   const dirty = (existing?.comment ?? "") !== comment;
-  const canSave = !!existing?.rating && dirty && !pending;
+  // Save when there's any pending change AND we have something to save:
+  // a rating, OR a non-empty comment. Empty rows are rejected by the
+  // backend, so leaving both blank doesn't even need to round-trip.
+  const hasContent = !!existing?.rating || comment.trim().length > 0;
+  const canSave = dirty && hasContent && !pending;
 
   async function setRating(rating: 1 | 2 | 3) {
     setPending(true);
     try {
       if (existing?.rating === rating) {
         await deleteMessageRating(messageId);
+        // Deletion clears the row entirely — but if there was a comment
+        // we want to keep it, so re-put with rating=null. Simpler path:
+        // delete clears everything (matches the historical UX where the
+        // thumbs was the only thing). Comment goes with it.
+        onRatingPatched(messageId, null);
       } else {
-        await putMessageRating(segmentId, messageId, {
+        const updated = await putMessageRating(segmentId, messageId, {
           rating,
           comment: existing?.comment ?? null,
         });
+        onRatingPatched(messageId, {
+          id: updated.id,
+          rating: updated.rating,
+          comment: updated.comment,
+          updated_at: updated.updated_at,
+        });
       }
-      onChanged();
     } finally {
       setPending(false);
     }
   }
 
   async function saveComment() {
-    if (!existing?.rating) return;
+    if (!canSave) return;
     setPending(true);
     try {
-      await putMessageRating(segmentId, messageId, {
-        rating: existing.rating,
+      const updated = await putMessageRating(segmentId, messageId, {
+        rating: existing?.rating ?? null,
         comment: comment.trim() || null,
       });
-      onChanged();
+      onRatingPatched(messageId, {
+        id: updated.id,
+        rating: updated.rating,
+        comment: updated.comment,
+        updated_at: updated.updated_at,
+      });
     } finally {
       setPending(false);
     }
@@ -1694,9 +1811,10 @@ function MessageRatingRow({
       {/* Full-width comment textbox always visible. Manual save — no autosave.
           Save button enables only when there's a rating + a buffer change. */}
       <textarea
+        ref={textareaRef}
         value={comment}
         onChange={(e) => setComment(e.target.value)}
-        placeholder={existing?.rating ? "why this rating?" : "pick a rating above to save a note"}
+        placeholder={existing?.rating ? "why this rating?" : "note (rating optional)"}
         rows={3}
         style={{
           width: "100%",
@@ -1710,6 +1828,7 @@ function MessageRatingRow({
           outline: "none",
           background: "#fff",
           color: "#1C1C1E",
+          overflow: "hidden",
         }}
       />
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
@@ -1730,7 +1849,7 @@ function MessageRatingRow({
         <button
           onClick={saveComment}
           disabled={!canSave}
-          title={!existing?.rating ? "pick a rating first" : !dirty ? "no changes" : "save note"}
+          title={!dirty ? "no changes" : !hasContent ? "type a note or pick a rating" : "save note"}
           style={{
             padding: "5px 12px", borderRadius: 6,
             border: "none",
@@ -2259,6 +2378,40 @@ function StatusPill({ status, onCycle }: { status: EvalStatus; onCycle?: () => v
     >
       {s.label}
     </button>
+  );
+}
+
+// Tiny "N/M rated" badge in the eval detail header — gives the reviewer
+// a quick sense of how far through a long segment they are without
+// having to scroll. Counts only assistant messages (those are the ones
+// that can carry a rating). A non-null rating (1/2/3) OR a non-empty
+// comment counts the row as touched.
+function RatedProgressBadge({ data }: { data: EvalSegmentFull }) {
+  const assistantMsgs = data.messages.filter((m) => m.role === "assistant");
+  const total = assistantMsgs.length;
+  if (total === 0) return null;
+  const rated = assistantMsgs.filter(
+    (m) => m.rating && (m.rating.rating != null || (m.rating.comment ?? "").trim() !== ""),
+  ).length;
+  const pct = total === 0 ? 0 : Math.round((rated / total) * 100);
+  const done = rated === total;
+  return (
+    <span
+      title={`${rated} of ${total} assistant replies have a rating or note (${pct}%)`}
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 10,
+        background: done ? "rgba(34,197,94,0.12)" : "rgba(10,132,255,0.10)",
+        color: done ? "#15803D" : "#0A84FF",
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: 0.3,
+        fontFamily: FONT,
+      }}
+    >
+      {rated}/{total} rated
+    </span>
   );
 }
 

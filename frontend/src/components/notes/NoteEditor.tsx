@@ -1,4 +1,6 @@
 import { Figure } from "./FigureExtension";
+import { Attachment } from "./AttachmentExtension";
+import { LinkCard } from "./LinkCardExtension";
 import { Table } from "@tiptap/extension-table";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
@@ -20,7 +22,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
 import { NoteComments } from "./NoteComments";
 import { DOMSerializer } from "@tiptap/pm/model";
@@ -100,6 +102,48 @@ async function uploadAndInsertImage(
     reader.onerror = () => resolve();
     reader.readAsDataURL(file);
   });
+}
+
+// Upload a non-image file to R2 and insert an AttachmentNode pointing at
+// it. No base64 fallback — opaque files don't render inline. We bail and
+// surface the error instead of dirtying the note with a broken URL.
+async function uploadAndInsertAttachment(
+  editor: Editor,
+  file: File,
+  noteId: number | undefined,
+  notify?: (msg: string) => void,
+): Promise<void> {
+  let result;
+  try {
+    result = await apiUploadAttachment(file, noteId);
+  } catch (e) {
+    console.error("[NoteEditor] file upload network error:", e);
+    notify?.("Attachment upload failed (network)");
+    return;
+  }
+  if (result.kind !== "url") {
+    const reason = result.kind === "fallback" ? result.reason : `${result.status}: ${result.message}`;
+    console.warn(`[NoteEditor] attachment upload failed: ${reason}`);
+    notify?.(`Attachment upload failed (${reason})`);
+    return;
+  }
+  editor
+    .chain()
+    .focus()
+    .insertContent([
+      {
+        type: "attachment",
+        attrs: {
+          url: result.url,
+          filename: result.filename,
+          mime: result.mime_type,
+          size: result.size_bytes,
+          attachmentId: result.attachment_id,
+        },
+      },
+      { type: "paragraph" },
+    ])
+    .run();
 }
 
 function useEditorStyles() {
@@ -540,6 +584,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         // outline depth and the bubble-menu surface only exposes these two.
         StarterKit.configure({ heading: { levels: [1, 2] } }),
         Figure,
+        Attachment,
+        LinkCard,
         TaskList,
         TaskItem.configure({ nested: true }),
         Table.configure({ resizable: true }),
@@ -1536,30 +1582,36 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
             <div
               style={{ position: "relative", zIndex: 1 }}
               onDrop={async (e) => {
-                const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
-                  f.type.startsWith("image/")
-                );
-                if (!files.length || !editor) return;
+                const all = Array.from(e.dataTransfer?.files ?? []);
+                if (!all.length || !editor) return;
                 e.preventDefault();
-                for (const file of files) {
-                  await uploadAndInsertImage(editor, file);
+                const noteIdForUpload = activeNoteId && activeNoteId > 0 ? activeNoteId : undefined;
+                for (const file of all) {
+                  if (file.type.startsWith("image/")) {
+                    await uploadAndInsertImage(editor, file);
+                  } else {
+                    await uploadAndInsertAttachment(editor, file, noteIdForUpload);
+                  }
                   hasChanges.current = true;
                   scheduleSave();
                 }
               }}
               onDragOver={(e) => {
-                if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
+                if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.kind === "file")) {
                   e.preventDefault();
                 }
               }}
               onPaste={async (e) => {
-                const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
-                  f.type.startsWith("image/")
-                );
-                if (!files.length || !editor) return;
+                const all = Array.from(e.clipboardData?.files ?? []);
+                if (!all.length || !editor) return;
                 e.preventDefault();
-                for (const file of files) {
-                  await uploadAndInsertImage(editor, file);
+                const noteIdForUpload = activeNoteId && activeNoteId > 0 ? activeNoteId : undefined;
+                for (const file of all) {
+                  if (file.type.startsWith("image/")) {
+                    await uploadAndInsertImage(editor, file);
+                  } else {
+                    await uploadAndInsertAttachment(editor, file, noteIdForUpload);
+                  }
                   hasChanges.current = true;
                   scheduleSave();
                 }
@@ -1948,30 +2000,36 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
 
                 <div
                   onDrop={async (e) => {
-                    const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
-                      f.type.startsWith("image/")
-                    );
-                    if (!files.length || !editor) return;
+                    const all = Array.from(e.dataTransfer?.files ?? []);
+                    if (!all.length || !editor) return;
                     e.preventDefault();
-                    for (const file of files) {
-                      await uploadAndInsertImage(editor, file);
+                    const noteIdForUpload = activeNoteId && activeNoteId > 0 ? activeNoteId : undefined;
+                    for (const file of all) {
+                      if (file.type.startsWith("image/")) {
+                        await uploadAndInsertImage(editor, file);
+                      } else {
+                        await uploadAndInsertAttachment(editor, file, noteIdForUpload);
+                      }
                       hasChanges.current = true;
                       scheduleSave();
                     }
                   }}
                   onDragOver={(e) => {
-                    if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
+                    if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.kind === "file")) {
                       e.preventDefault();
                     }
                   }}
                   onPaste={async (e) => {
-                    const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
-                      f.type.startsWith("image/")
-                    );
-                    if (!files.length || !editor) return;
+                    const all = Array.from(e.clipboardData?.files ?? []);
+                    if (!all.length || !editor) return;
                     e.preventDefault();
-                    for (const file of files) {
-                      await uploadAndInsertImage(editor, file);
+                    const noteIdForUpload = activeNoteId && activeNoteId > 0 ? activeNoteId : undefined;
+                    for (const file of all) {
+                      if (file.type.startsWith("image/")) {
+                        await uploadAndInsertImage(editor, file);
+                      } else {
+                        await uploadAndInsertAttachment(editor, file, noteIdForUpload);
+                      }
                       hasChanges.current = true;
                       scheduleSave();
                     }

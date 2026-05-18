@@ -6,7 +6,9 @@ import {
   Heading1, Heading2,
   List, ListOrdered, ListChecks,
   Quote, Code2, Minus, Table as TableIcon,
+  Link as LinkIcon,
 } from "lucide-react";
+import { fetchOgMetadata } from "../../services/api";
 
 import { SlashMenu, type SlashItem, type SlashMenuRef } from "./SlashMenu";
 
@@ -85,6 +87,74 @@ const ITEMS: SlashItem[] = [
     keywords: ["table", "grid"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+  },
+  {
+    title: "Link card",
+    description: "Paste a URL → Confluence-style preview",
+    Icon: LinkIcon,
+    keywords: ["link", "url", "card", "embed", "preview", "confluence"],
+    command: ({ editor, range }) => {
+      const url = window.prompt("Paste a URL:");
+      if (!url || !url.trim()) return;
+      const trimmed = url.trim();
+      // Optimistic insert with a placeholder, then patch the node attrs
+      // when the OG fetch resolves. Keeps the editor responsive — the
+      // user sees the card immediately and the meta hydrates in place.
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .insertContent([
+          {
+            type: "linkCard",
+            attrs: {
+              url: trimmed,
+              title: trimmed,
+              description: null,
+              image: null,
+              siteName: null,
+            },
+          },
+          { type: "paragraph" },
+        ])
+        .run();
+      fetchOgMetadata(trimmed)
+        .then((meta) => {
+          // Walk the doc to find the inserted node by url and patch.
+          // `descendants` gives us nodes + positions; setNodeAttribute
+          // expects a position so we can target the right one even if
+          // there are multiple cards in the doc.
+          const { state } = editor;
+          let targetPos: number | null = null;
+          state.doc.descendants((node, pos) => {
+            if (
+              node.type.name === "linkCard" &&
+              node.attrs.url === trimmed &&
+              !node.attrs.siteName
+            ) {
+              targetPos = pos;
+              return false;
+            }
+            return true;
+          });
+          if (targetPos != null) {
+            editor
+              .chain()
+              .command(({ tr }) => {
+                tr.setNodeMarkup(targetPos as number, undefined, {
+                  url: meta.url,
+                  title: meta.title,
+                  description: meta.description,
+                  image: meta.image,
+                  siteName: meta.site_name,
+                });
+                return true;
+              })
+              .run();
+          }
+        })
+        .catch((e) => console.warn("[link-card] OG fetch failed:", e));
+    },
   },
 ];
 

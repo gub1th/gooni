@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from typing import Optional
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import bindparam, text
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session, aliased
 from .db.database import engine, get_db
 from .db.database import SessionLocal
 from .db.models import (
+    Attachment,
     CapabilityFacet,
     Conversation,
     GooniTake,
@@ -2421,12 +2423,20 @@ def _serialize_space(s: Space) -> dict:
         "id": s.id,
         "name": s.name,
         "emoji": s.emoji,
+        "is_pinned": bool(s.is_pinned),
     }
 
 
 @app.get("/spaces")
 def get_spaces(db: Session = Depends(get_db)):
-    spaces = db.query(Space).order_by(Space.id).all()
+    # Pinned spaces sort to the top — within each pinned/un-pinned group,
+    # keep the historical id-asc order so existing sidebar muscle memory
+    # stays intact.
+    spaces = (
+        db.query(Space)
+        .order_by(Space.is_pinned.desc(), Space.id.asc())
+        .all()
+    )
     return [_serialize_space(s) for s in spaces]
 
 
@@ -2454,6 +2464,8 @@ def update_space(space_id: int, body: dict, db: Session = Depends(get_db)):
         space.name = name
     if "emoji" in body:
         space.emoji = body["emoji"] or None
+    if "is_pinned" in body:
+        space.is_pinned = bool(body["is_pinned"])
     db.commit()
     db.refresh(space)
     return _serialize_space(space)
@@ -3133,13 +3145,17 @@ def delete_note_comment(comment_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-# ── Image uploads (Cloudflare R2) ──────────────────────────────────────────────
+# ── Image / file uploads (Cloudflare R2) ──────────────────────────────────────
 
 
 # 10 MB per upload. TipTap pastes single images so we don't need bigger;
 # a hard cap protects the FastAPI worker (UploadFile reads into memory)
 # from someone pasting a screenshot of a screenshot of a screenshot.
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+# 25 MB cap for generic file attachments — bigger than image cap because
+# PDFs and design exports run heavier, still small enough to fit in a
+# single worker memory budget without paging.
+_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 _ALLOWED_IMAGE_PREFIX = "image/"
 
 
@@ -3189,6 +3205,184 @@ async def upload_image_route(file: UploadFile = File(...)):
         raise HTTPException(status_code=502, detail="upload failed")
 
     return result
+
+
+@app.post("/uploads/file")
+async def upload_file_route(
+    file: UploadFile = File(...),
+    note_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Upload an arbitrary file (PDF, doc, archive, etc.) to R2 and return
+    its public URL + metadata. Frontend inserts a TipTap `attachment` node
+    carrying the URL/mime/filename so the note body itself is the source
+    of truth for what's attached.
+
+    When `note_id` is supplied we also persist an `attachments` row so the
+    backend has a directory for later cleanup / listing. v1 doesn't enforce
+    a foreign-key match yet — the row is informational. Returns 503 when
+    R2 isn't configured (frontend can decide whether to fall back)."""
+    from .services import image_storage
+
+    content_type = (file.content_type or "application/octet-stream").lower()
+    data = await file.read()
+    if len(data) == 0:
+        raise HTTPException(status_code=400, detail="empty upload")
+    if len(data) > _MAX_ATTACHMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"file too large: {len(data)} bytes (max {_MAX_ATTACHMENT_BYTES})",
+        )
+
+    if not image_storage.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="R2 storage not configured (R2_ACCOUNT_ID etc unset)",
+        )
+
+    try:
+        result = image_storage.upload_file(data, content_type, file.filename)
+    except image_storage.R2NotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        print(f"R2 upload failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="upload failed")
+
+    filename = (file.filename or "").strip() or f"attachment.{result['ext']}"
+    payload = {
+        "url": result["url"],
+        "key": result["key"],
+        "filename": filename,
+        "mime_type": content_type,
+        "size_bytes": len(data),
+    }
+
+    if note_id is not None:
+        note = db.query(Note).filter(Note.id == note_id).first()
+        if note is None:
+            # Don't fail the upload — the bytes are already in R2. Just skip
+            # the DB row and let the caller insert the node anyway.
+            payload["attachment_id"] = None
+        else:
+            row = Attachment(
+                note_id=note_id,
+                filename=filename,
+                mime_type=content_type,
+                size_bytes=len(data),
+                storage_key=result["key"],
+                public_url=result["url"],
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            payload["attachment_id"] = row.id
+
+    return payload
+
+
+@app.get("/uploads/og")
+async def fetch_og_metadata(url: str):
+    """Fetch an HTML page and extract Open Graph / basic meta tags so the
+    frontend can render a Confluence-style link card without exposing
+    Gooni's IP to direct page fetches in the browser.
+
+    No DB row — caller's TipTap LinkCard node persists the metadata
+    inline in the note body. Network errors / non-HTML responses degrade
+    gracefully to {url, title: url} so insertion still succeeds.
+    """
+    import httpx
+    from urllib.parse import urlparse
+    from bs4 import BeautifulSoup
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="only http(s) URLs supported")
+
+    headers = {
+        # Some sites (Twitter/X, LinkedIn) gate OG tags behind a UA check —
+        # plain httpx UA gets a redirect to a login page. Pretend to be a
+        # browser bot so we land on the public OG-tagged HTML.
+        "User-Agent": "Mozilla/5.0 (compatible; GooniLinkPreview/1.0)",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=8.0) as client:
+            resp = await client.get(url, headers=headers)
+    except Exception as e:
+        return {"url": url, "title": url, "description": None, "image": None, "site_name": parsed.netloc, "fetch_error": f"{type(e).__name__}"}
+
+    ctype = (resp.headers.get("content-type") or "").lower()
+    if "html" not in ctype:
+        return {"url": url, "title": url, "description": None, "image": None, "site_name": parsed.netloc, "fetch_error": f"non-html content-type: {ctype}"}
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    def _meta(name: str) -> str | None:
+        # Match both <meta property="og:title"> and <meta name="og:title">.
+        for attr in ("property", "name"):
+            tag = soup.find("meta", attrs={attr: name})
+            if tag and tag.get("content"):
+                v = tag["content"].strip()
+                if v:
+                    return v
+        return None
+
+    title = _meta("og:title") or (soup.title.text.strip() if soup.title and soup.title.text else url)
+    description = _meta("og:description") or _meta("description")
+    image = _meta("og:image") or _meta("twitter:image")
+    site_name = _meta("og:site_name") or parsed.netloc
+
+    # Resolve protocol-relative / relative og:image URLs against the
+    # destination origin so the frontend can render them without further
+    # rewriting. Plain absolute URLs pass through unchanged.
+    if image:
+        if image.startswith("//"):
+            image = f"{parsed.scheme}:{image}"
+        elif image.startswith("/"):
+            image = f"{parsed.scheme}://{parsed.netloc}{image}"
+
+    return {
+        "url": str(resp.url),
+        "title": (title or url)[:300],
+        "description": (description or "")[:400] if description else None,
+        "image": image,
+        "site_name": site_name,
+    }
+
+
+@app.get("/notes/{note_id}/attachments")
+def list_note_attachments(note_id: int, db: Session = Depends(get_db)):
+    if not db.query(Note).filter(Note.id == note_id).first():
+        raise HTTPException(status_code=404, detail="Note not found")
+    rows = (
+        db.query(Attachment)
+        .filter(Attachment.note_id == note_id)
+        .order_by(Attachment.created_at.asc(), Attachment.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "filename": a.filename,
+            "mime_type": a.mime_type,
+            "size_bytes": a.size_bytes,
+            "url": a.public_url,
+            "created_at": a.created_at,
+        }
+        for a in rows
+    ]
+
+
+@app.delete("/attachments/{attachment_id}")
+def delete_attachment(attachment_id: int, db: Session = Depends(get_db)):
+    """Remove the DB row only — leaves the R2 object behind. A future
+    sweeper can reconcile orphan keys against the table."""
+    row = db.query(Attachment).filter(Attachment.id == attachment_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
 
 
 # ── Serializers ────────────────────────────────────────────────────────────────
@@ -4858,8 +5052,8 @@ def eval_put_message_rating(
     from .services import eval_service
 
     rating = body.get("rating")
-    if rating not in (1, 2, 3):
-        raise HTTPException(status_code=400, detail="rating must be 1, 2, or 3")
+    if rating is not None and rating not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="rating must be 1, 2, or 3 (or null)")
     try:
         row = eval_service.upsert_message_rating(
             db,
