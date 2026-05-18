@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.97.0 — 2026-05-18 (minor)
+
+- feat(eval): v3 pipeline cutover — kill pure_signal + time block + 401 fix (#244)
+
 ## 0.96.0 — 2026-05-18 (minor)
 
 - feat(dashboard): primary-todo border draws + breathes instead of zooming (#243)
