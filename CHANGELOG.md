@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.106.0 — 2026-05-18 (minor)
+
+- feat(orchestrator): ReAct verify step against ToolCall audit (v6) (#257)
+
 ## 0.105.0 — 2026-05-18 (minor)
 
 - feat(reflexion): conv-rollup + reflection FK + quality score (v5) (#256)
