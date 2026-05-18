@@ -430,18 +430,10 @@ export function NotesList() {
   const currentSpace = isAllNotes ? null : spaces.find((s) => String(s.id) === spaceId);
   const headerName = isAllNotes ? "All Notes" : (currentSpace?.name ?? "Notes");
 
-  // ⌘F / Ctrl-F focuses the search input when the notes pane is visible.
-  useEffect(() => {
-    function handler(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
-    }
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+  // Cmd/Ctrl-F stays as native browser find. Daniel asked for the
+  // standard shortcut back — hijacking it for the notes-rail search
+  // ate every page-level find-in-text use, which mattered more once
+  // notes started carrying long pasted transcripts.
 
   // Dismiss context menu on outside click
   useEffect(() => {
