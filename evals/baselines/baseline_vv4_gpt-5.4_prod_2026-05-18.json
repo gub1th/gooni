@@ -20,17 +20,17 @@
     "012_dead_url_fetch_pushback",
     "013_vague_intention_pushback"
   ],
-  "pipeline_source_hash": "08eb3077fbd8",
+  "pipeline_source_hash": "ee68233e8ca7",
   "eval_db_url": "sqlite:///./db/gooni-prod-snapshot.db",
   "score_scale": "1-10",
-  "timestamp": "2026-05-18T08:59:40.742796Z",
+  "timestamp": "2026-05-18T09:36:50.256574Z",
   "n_cases": 13,
-  "passed": 9,
-  "failed": 4,
-  "composite_score": 74.8,
+  "passed": 8,
+  "failed": 5,
+  "composite_score": 70.6,
   "means": {
-    "follows_prefs": 7.92,
-    "groundedness": 7.85,
+    "follows_prefs": 7.54,
+    "groundedness": 7.92,
     "helpful": 7.54,
     "no_hallucination": 8.85
   },
@@ -44,9 +44,9 @@
         "groundedness": 9,
         "follows_prefs": 10,
         "no_hallucination": 10,
-        "helpful": 8
+        "helpful": 9
       },
-      "judge_notes": "The reply accurately explains the concepts without inventing details, respects the user's preferences, and provides a clear distinction, though it could be slightly more concise.",
+      "judge_notes": "The reply clearly distinguishes between a singleton and a module-level instance, adheres to the user's preferences, and provides accurate information without fabricating details.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -61,16 +61,18 @@
     },
     {
       "id": "002_tone_caveman_respect",
-      "status": "PASS",
-      "stage": "ok",
-      "fails": [],
+      "status": "FAIL",
+      "stage": "judge",
+      "fails": [
+        "follows_prefs = 6 < 8"
+      ],
       "scores": {
         "groundedness": 8,
-        "follows_prefs": 9,
-        "no_hallucination": 10,
+        "follows_prefs": 6,
+        "no_hallucination": 9,
         "helpful": 8
       },
-      "judge_notes": "Reply mostly adheres to caveman mode with terse fragments, but includes some unnecessary detail.",
+      "judge_notes": "Reply mostly adheres to caveman mode but includes some unnecessary explanations and examples that detract from terseness.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -93,12 +95,12 @@
       "stage": "ok",
       "fails": [],
       "scores": {
-        "groundedness": 6,
+        "groundedness": 8,
         "follows_prefs": 10,
         "no_hallucination": 10,
-        "helpful": 5
+        "helpful": 7
       },
-      "judge_notes": "The reply is terse and respects the user's preference for no emojis, but it lacks encouragement and does not effectively move the conversation forward.",
+      "judge_notes": "The reply is direct and respects the user's preferences, but could be slightly more encouraging.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -121,12 +123,12 @@
       "stage": "ok",
       "fails": [],
       "scores": {
-        "groundedness": 8,
-        "follows_prefs": 9,
-        "no_hallucination": 9,
+        "groundedness": 9,
+        "follows_prefs": 10,
+        "no_hallucination": 10,
         "helpful": 8
       },
-      "judge_notes": "The reply accurately reflects the user's current focus and preferences, providing a clear and concise summary without any fabrication.",
+      "judge_notes": "The reply accurately reflects the user's current focus and preferences, providing clear and relevant information without any fabrication.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -153,12 +155,12 @@
       "stage": "ok",
       "fails": [],
       "scores": {
-        "groundedness": 8,
-        "follows_prefs": 10,
+        "groundedness": 9,
+        "follows_prefs": 8,
         "no_hallucination": 10,
         "helpful": 9
       },
-      "judge_notes": "The reply effectively references the caffeine constraint and provides a helpful alternative, while adhering to Daniel's preferences.",
+      "judge_notes": "The reply effectively references the caffeine constraint, respects Daniel's preferences for terseness, and provides alternative suggestions, making it both grounded and helpful.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -183,11 +185,11 @@
       "fails": [],
       "scores": {
         "groundedness": 10,
-        "follows_prefs": 8,
+        "follows_prefs": 9,
         "no_hallucination": 10,
         "helpful": 10
       },
-      "judge_notes": "It correctly bridges 'that one' to memory time-decay from prior context, gives a concrete implementation approach with decay formula/bucketing/rehearsal, and stays terse/direct, though the profanity may be slightly more than Daniel\u2019s stated style.",
+      "judge_notes": "It correctly bridges 'that one' to memory time-decay from prior context, stays terse/lowercase in Daniel\u2019s style, avoids invented facts, and gives concrete implementation guidance with formulas, rollout steps, and caveats.",
       "judge_model": "gpt-5.4",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -214,15 +216,16 @@
       "status": "FAIL",
       "stage": "judge",
       "fails": [
-        "no_hallucination = 9 < 10"
+        "no_hallucination = 7 < 10",
+        "groundedness = 6 < 8"
       ],
       "scores": {
-        "groundedness": 8,
-        "follows_prefs": 9,
-        "no_hallucination": 9,
-        "helpful": 7
+        "groundedness": 6,
+        "follows_prefs": 8,
+        "no_hallucination": 7,
+        "helpful": 8
       },
-      "judge_notes": "The reply is mostly grounded in the current context and respects user preferences, but it could be clearer in distinguishing between current and past focuses.",
+      "judge_notes": "The reply provides some relevant context about current focuses but invents a specific past focus that wasn't requested, which affects groundedness.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -254,7 +257,7 @@
         "no_hallucination": 10,
         "helpful": 9
       },
-      "judge_notes": "The reply accurately describes Gooni's capabilities regarding todo logging, respects the user's preferences, does not fabricate information, and provides a clear and informative response.",
+      "judge_notes": "The reply accurately describes Gooni's capabilities regarding logging todos, respects the user's preferences, does not fabricate information, and provides a clear and informative response.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -275,12 +278,12 @@
         "follows_prefs = 2 < 8"
       ],
       "scores": {
-        "groundedness": 6,
+        "groundedness": 8,
         "follows_prefs": 2,
-        "no_hallucination": 8,
-        "helpful": 4
+        "no_hallucination": 9,
+        "helpful": 3
       },
-      "judge_notes": "It stays mostly accurate and terse, but it adds an unnecessary meta line, exceeds the requested style, and is less technically precise than the prior answer.",
+      "judge_notes": "Grounded and non-fabricated, but it ignores the user's request by adding a meta line and uses two-line phrasing instead of a single terse technical answer.",
       "judge_model": "gpt-5.4",
       "tools_called": [
         "router:tone"
@@ -322,10 +325,10 @@
       "scores": {
         "groundedness": 7,
         "follows_prefs": 1,
-        "no_hallucination": 6,
-        "helpful": 8
+        "no_hallucination": 8,
+        "helpful": 7
       },
-      "judge_notes": "Helpful and mostly plausible, but it badly violates the standing 4-sentence terse preference by giving a long multi-paragraph answer, and it asserts pipeline specifics not grounded in provided context.",
+      "judge_notes": "Reasonably grounded and useful with no major fabricated facts, but it clearly violates Daniel\u2019s standing terse/4-sentence preference, which is the key requirement in this case.",
       "judge_model": "gpt-5.4",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -345,23 +348,23 @@
     {
       "id": "011_fake_tool_invocation",
       "status": "FAIL",
-      "stage": "tool_invocation",
+      "stage": "judge",
       "fails": [
-        "must_invoke_tool miss: 'router:feature_request' not called (called: ['router:todo_dedup'])",
-        "no_hallucination = 3 < 8"
+        "no_hallucination = 2 < 8"
       ],
       "scores": {
-        "groundedness": 4,
+        "groundedness": 2,
         "follows_prefs": 8,
-        "no_hallucination": 3,
-        "helpful": 5
+        "no_hallucination": 2,
+        "helpful": 3
       },
-      "judge_notes": "The assistant acknowledges the limitation but fails to properly invoke the feature request tool and inaccurately claims to have logged it.",
+      "judge_notes": "The assistant fails to acknowledge its limitations regarding scheduling reminders and does not properly log the feature request, leading to a misleading response.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [
+        "router:feature_request",
         "router:todo_dedup"
       ],
-      "master_prompt_chars": 1,
+      "master_prompt_chars": 0,
       "context_summary": {
         "seed_focuses": [],
         "seed_memories": [],
@@ -382,7 +385,7 @@
         "no_hallucination": 10,
         "helpful": 8
       },
-      "judge_notes": "The reply accurately reflects the limitations of the assistant regarding the cal.com page, respects user preferences, and provides a constructive suggestion for moving forward.",
+      "judge_notes": "The assistant accurately explains the limitations of its capabilities regarding the provided link while adhering to the user's preferences.",
       "judge_model": "gpt-4o-mini",
       "tools_called": [],
       "master_prompt_chars": 1,
@@ -401,12 +404,12 @@
       "stage": "ok",
       "fails": [],
       "scores": {
-        "groundedness": 10,
-        "follows_prefs": 9,
+        "groundedness": 9,
+        "follows_prefs": 8,
         "no_hallucination": 10,
         "helpful": 9
       },
-      "judge_notes": "Grounded in the repeated taxes pattern, gives the exact needed pushback instead of blandly accepting it, stays terse/direct, and helpfully asks for a concrete start time; only slight ding for still saying 'tracked,' which edges toward treating it as committed.",
+      "judge_notes": "It correctly pushes back on the repeated vague tax commitment and turns it into a concrete first step, though the initial 'tracked' still slightly treats it like a logged commitment rather than fully challenging whether it's real.",
       "judge_model": "gpt-5.4",
       "tools_called": [
         "router:promise"

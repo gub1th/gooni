@@ -23,7 +23,7 @@ from typing import Any
 from ..llm.client import llm_client
 
 
-VALID_TYPES = {"preference", "fact", "routine", "constraint", "episode"}
+VALID_TYPES = {"fact", "routine", "constraint", "episode"}
 
 
 _EXTRACTION_PROMPT = """Extract structured user-profile updates from this chat exchange.
@@ -35,7 +35,7 @@ Return ONLY a JSON array. No preamble, no markdown fence.
 
 Schema per item:
 {{
-  "type": "preference" | "fact" | "routine" | "constraint" | "episode",
+  "type": "fact" | "routine" | "constraint" | "episode",
   "key": "snake_case_key" | null,
   "content": "natural-language description of the memory",
   "context": {{"time": null|str, "location": null|str, "scope": "global"|"contextual"}},
@@ -44,39 +44,47 @@ Schema per item:
 
 Rules:
 - Only extract PERSISTENT info — not temporary states or one-off remarks
-- "preference" = stable likes/dislikes (e.g. "prefers dark mode IDE").
-  HIGH BAR: only use this when Daniel is explicitly stating a stable
-  taste / style rule. Do NOT use it for chat transcripts, todo lists,
-  in-progress thoughts, or summaries of what the assistant just said.
-- "fact" = declarative truth about Daniel (includes long-term aspirations
-  expressed as identity, e.g. "Daniel wants to be a thoughtful engineer")
+- "fact" = declarative truth about Daniel. Includes long-term aspirations
+  expressed as identity ("Daniel wants to be a thoughtful engineer"), AND
+  stable interests / tastes / dislikes ("Daniel prefers hot coffee",
+  "Daniel is interested in robotics perception"). Use cosine retrieval to
+  surface these when conversation context matches.
 - "routine" = recurring habit/pattern
 - "constraint" = hard limit (allergies, schedule blockers, dealbreakers)
 - "episode" = a notable moment from the chat itself (no key, just content)
+- DO NOT extract behavioral rules about how Gooni should ACT (tone, length,
+  format, voice, "be more concise", "don't use emojis"). Those belong in
+  the locked PERSONA prompt, not in memory. The "preference" type used to
+  catch these — it's been removed for that reason. If the candidate is a
+  behavior-shaping rule for the assistant, emit [] and let the user's
+  feedback flow into tone_corrections separately.
+- DO NOT extract feature requests (UI changes, keyboard shortcuts,
+  capability gaps). Those route to feature_requests in extract_signals,
+  not into memory.
 - DO NOT emit "goal" — action-shaped aspirations belong in the focuses
   list (list_items), not memory. If Daniel says "I want to ship X this
   week" / "I'm going to learn Y" with action + timeframe, skip extraction
   entirely — that's focus material, surfaced separately.
-- key is snake_case (e.g. "ide_theme_preference"); null for episodes
+- key is snake_case (e.g. "coffee_temperature"); null for episodes
 - scope: "global" = always applies; "contextual" = situation-specific
 - confidence: 0.85+ for explicit statements; 0.6-0.7 for inferences
 - Return [] if nothing extractable
 
-Anti-examples — DO NOT extract these as preferences:
-- A chat transcript snippet recapping the assistant's reply ("The user
-  inquired about X, the assistant said Y…") — that's an episode at best,
-  often nothing. Never a preference.
-- A todo list / planning bullet ("Finish resume / Email George / Buy X").
-  Never a preference. Skip entirely or treat as episode if notable.
+Anti-examples — DO NOT extract these:
+- A chat transcript snippet recapping the assistant's reply. Skip.
+- A todo list / planning bullet ("Finish resume / Email George"). Skip.
 - The assistant restating its own behavior ("I will adjust as needed"). Skip.
-- "User wants Gooni to handle Markdown formatting" when this is just the
-  assistant agreeing to a one-off ask — preference only if Daniel asserts
-  a stable style.
+- "User wants Gooni to handle Markdown formatting" — behavior rule for the
+  assistant. Skip (it'll get caught by tone_corrections / feature_requests
+  upstream if it's a real ask).
+- "Daniel wants the Publish button to be the primary CTA" — feature
+  request, not a memory. Skip.
 
 Examples:
-- "I prefer hot coffee" → preference, coffee_temperature, hot, global, 0.9
+- "I prefer hot coffee" → fact, coffee_temperature, "prefers hot coffee", global, 0.9
 - "I work from home Tuesdays" → routine, tuesday_location, home, contextual, 0.85
 - "Just shipped Gooni v2!" → episode, null, "shipped Gooni v2", global, 0.9
+- "I'm into robotics perception" → fact, robotics_focus, "interested in robotics perception", global, 0.9
 
 JSON array:"""
 
@@ -223,7 +231,7 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
   "reply_intent": "answer|acknowledge|task_only|no_reply",
   "memories": [
     {{
-      "type": "preference" | "fact" | "routine" | "constraint" | "episode",
+      "type": "fact" | "routine" | "constraint" | "episode",
       "key":  "snake_case_key" | null,
       "content": "natural-language description of the memory",
       "context": {{"time": null|str, "location": null|str, "scope": "global"|"contextual"}},
@@ -406,11 +414,17 @@ reply_intent:
 - Default to "answer" when uncertain.
 
 memories:
-- Persistent facts about Daniel — same shape as before.
-- "preference" = stable like/dislike. "fact" = declarative truth (includes
-  identity-shaped aspirations, relationships, family). "routine" = recurring
-  habit. "constraint" = hard limit OR a self-named recurring pattern Daniel
-  has flagged about himself. "episode" = notable moment.
+- Persistent facts about Daniel — cosine-retrieved when relevant.
+- "fact" = declarative truth (includes identity-shaped aspirations,
+  relationships, family, stable interests/tastes like "prefers hot coffee").
+  "routine" = recurring habit. "constraint" = hard limit OR a self-named
+  recurring pattern Daniel has flagged about himself. "episode" = notable
+  moment.
+- DO NOT emit type "preference" — that type has been retired. Anything that
+  used to be a preference becomes either: (a) a behavioral rule (skip it
+  here, let tone_corrections catch it), (b) a feature request (skip here,
+  feature_requests catches it), or (c) a stable taste/interest about Daniel
+  → emit as "fact".
 - DO NOT emit "goal" — action-shaped aspirations belong in focuses list
   (list_items), not memory. Skip extraction; focus pipeline handles them.
 - key is snake_case for typed memories; null for episodes.
