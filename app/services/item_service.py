@@ -180,8 +180,13 @@ class ItemService:
 
     # ── Orchestrator context ────────────────────────────────────────────
 
-    def get_active_context(self, db: Session) -> str:
-        return focus_service.get_active_context(db)
+    def get_active_context(
+        self,
+        db: Session,
+        query_text: str | None = None,
+        top_k: int = 2,
+    ) -> str:
+        return focus_service.get_active_context(db, query_text=query_text, top_k=top_k)
 
 
 def _focus_tree_node(db: Session, f: Focus) -> dict[str, Any]:
