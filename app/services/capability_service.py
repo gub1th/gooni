@@ -342,26 +342,60 @@ class CapabilityService:
         }
 
     # ── Master-prompt injection helper ───────────────────────────────────
+    # Per-layer caps stop one layer from drowning out the others. Behavioral
+    # was the offender on prod — reflexion-promoted facets cluster on
+    # near-duplicate gap text and stack 6× ("I tend to: lack support" repeated
+    # almost verbatim). Real fix is cosine-dedup at promotion time; this is
+    # the render-time guard until that ships.
+    _LAYER_CAPS = {
+        "architectural": 5,
+        "functional": 12,
+        "behavioral": 2,
+    }
+
     def build_prompt_block(self, db: Session, max_lines: int = 30) -> str:
         """Compact 'Who I am right now' block for master prompt injection.
 
         Strategy: pull verified+claimed facets across functional/behavioral/
         architectural layers; mechanical layer is implicit in the tool
-        schemas the LLM already sees so we don't repeat it here. Cap to
-        max_lines so the prompt doesn't drift over time.
+        schemas the LLM already sees so we don't repeat it here. Each layer
+        capped via _LAYER_CAPS; behavioral takes the 2 MOST-RECENT (by
+        updated_at desc) to surface the freshest patterns rather than the
+        oldest clusters.
         """
-        rows = (
+        # Pull behavioral separately so we can sort by updated_at desc.
+        # The other layers stay in id order — they're hand-curated, so id
+        # already reflects intentional ordering.
+        behavioral_rows = (
             db.query(CapabilityFacet)
             .filter(
-                CapabilityFacet.layer.in_(
-                    ["functional", "behavioral", "architectural"]
-                ),
+                CapabilityFacet.layer == "behavioral",
+                CapabilityFacet.status.in_(["verified", "claimed"]),
+            )
+            .order_by(CapabilityFacet.updated_at.desc())
+            .limit(self._LAYER_CAPS["behavioral"])
+            .all()
+        )
+        other_rows = (
+            db.query(CapabilityFacet)
+            .filter(
+                CapabilityFacet.layer.in_(["functional", "architectural"]),
                 CapabilityFacet.status.in_(["verified", "claimed"]),
             )
             .order_by(CapabilityFacet.layer, CapabilityFacet.id)
-            .limit(max_lines)
             .all()
         )
+        # Per-layer caps on the rest.
+        capped: list[CapabilityFacet] = []
+        seen: dict[str, int] = {}
+        for r in other_rows:
+            seen[r.layer] = seen.get(r.layer, 0) + 1
+            if seen[r.layer] > self._LAYER_CAPS.get(r.layer, max_lines):
+                continue
+            capped.append(r)
+
+        rows = capped + behavioral_rows
+        rows = rows[:max_lines]
         if not rows:
             return ""
 
