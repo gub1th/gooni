@@ -629,6 +629,7 @@ def run(
     verbose: bool = False,
     case_filter: str | None = None,
     save_baseline: bool = False,
+    baseline_label: str | None = None,
     use_cache: bool = True,
 ) -> int:
     _ensure_scratch_db_ready()
@@ -717,7 +718,10 @@ def run(
         # Filename includes pipeline version + model so multiple snapshots
         # coexist (e.g. baseline_v2_gpt-5.4.json vs baseline_v2_gpt-5.5.json).
         # Lets you A/B model swaps without overwriting prior numbers.
-        baseline_path = BASELINE_DIR / f"baseline_v{PROMPT_VERSION}_{safe_model}.json"
+        # Optional label suffix (e.g. "prod_2026-05-18") distinguishes runs
+        # against different EVAL_DATABASE_URLs (scratch vs prod snapshot).
+        label_suffix = f"_{baseline_label}" if baseline_label else ""
+        baseline_path = BASELINE_DIR / f"baseline_v{PROMPT_VERSION}_{safe_model}{label_suffix}.json"
         baseline_path.write_text(json.dumps({
             "pipeline_version": PROMPT_VERSION,
             "pipeline_model": pipeline_model,
@@ -748,7 +752,10 @@ def main() -> int:
                     help="print replies + judge notes")
     ap.add_argument("--case", default=None, help="run a single case by id")
     ap.add_argument("--baseline", action="store_true",
-                    help="save run as baselines/baseline_v<PROMPT_VERSION>_<model>.json")
+                    help="save run as baselines/baseline_v<PROMPT_VERSION>_<model>[_<label>].json")
+    ap.add_argument("--label", default=None,
+                    help="filename suffix for the baseline (e.g. 'prod_2026-05-18'). "
+                         "Distinguishes runs against different EVAL_DATABASE_URLs.")
     ap.add_argument("--no-cache", action="store_true",
                     help="ignore per-case cache; rerun every case fresh (still writes cache)")
     args = ap.parse_args()
@@ -756,6 +763,7 @@ def main() -> int:
         verbose=args.verbose,
         case_filter=args.case,
         save_baseline=args.baseline,
+        baseline_label=args.label,
         use_cache=not args.no_cache,
     )
 
