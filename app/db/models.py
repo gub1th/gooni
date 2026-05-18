@@ -186,6 +186,14 @@ class Note(Base):
     # extracted text) shown on that chip so the parent stays readable.
     parent_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
     excerpt_anchor = Column(Text, nullable=True)
+    # Free-form user/agent tags. JSON array of lowercase short strings
+    # (e.g. ["from-claude", "feedback", "session-2026-05-17"]).
+    # Stored as JSON text so a fast LIKE check can answer "does this note
+    # carry tag X" without a join — sidebar filtering is the main use
+    # case, and tag cardinality is low per-note (typically 1-3). When a
+    # M2M `note_tags` table is needed (cross-cutting analytics across
+    # the whole corpus) we can derive it from this column.
+    tags = Column(Text, nullable=True)
 
 
 class PublicProfile(Base):

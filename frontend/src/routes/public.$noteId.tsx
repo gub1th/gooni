@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { sanitizeHtml } from "../utils/sanitize";
@@ -52,17 +52,27 @@ function PublicNotePage() {
   const notFound = isError;
   const proseRef = useRef<HTMLDivElement | null>(null);
   const [preview, setPreview] = useState<AttachmentPreviewState | null>(null);
+  const navigate = useNavigate();
 
   // Intercept clicks on attachment cards rendered inside the sanitized HTML
   // so they open the inline modal preview instead of navigating to the raw
-  // R2 URL. Falls back gracefully (default <a> navigation) if the modal
-  // hasn't mounted yet.
+  // R2 URL. Also intercept NoteLink chips so they route in-app via the
+  // public/:noteId page rather than triggering the href="#" anchor jump.
   useEffect(() => {
     const container = proseRef.current;
     if (!container) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
+      const noteChip = target.closest("a[data-note-link]") as HTMLAnchorElement | null;
+      if (noteChip) {
+        e.preventDefault();
+        const childId = Number(noteChip.getAttribute("data-note-id") || "");
+        if (childId) {
+          navigate({ to: "/public/$noteId", params: { noteId: String(childId) } });
+        }
+        return;
+      }
       const card = target.closest("[data-attachment]") as HTMLElement | null;
       if (!card) return;
       e.preventDefault();
@@ -75,7 +85,7 @@ function PublicNotePage() {
     };
     container.addEventListener("click", handler);
     return () => container.removeEventListener("click", handler);
-  }, [note?.content]);
+  }, [note?.content, navigate]);
 
   return (
     <div
