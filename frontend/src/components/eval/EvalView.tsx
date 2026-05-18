@@ -1051,11 +1051,31 @@ function EvalDetailView({
           eval-no-print so it doesn't shimmer into the saved PDF. */}
       <style>{`
         @media print {
+          /* Let the page grow past viewport — ancestors have overflow:hidden
+             + fixed heights in normal use, both must release for paged media
+             or the printed content gets clipped to page 1. */
+          html, body { height: auto !important; overflow: visible !important; }
           body * { visibility: hidden !important; }
           #eval-print-root, #eval-print-root * { visibility: visible !important; }
-          #eval-print-root { position: absolute !important; inset: 0 !important;
-                             overflow: visible !important; background: #fff !important;
-                             padding: 24px !important; }
+          /* Pull print-root to top of page and let height flow naturally.
+             inset:0 locked us to viewport size → only first page rendered. */
+          #eval-print-root {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            height: auto !important;
+            max-height: none !important;
+            overflow: visible !important;
+            background: #fff !important;
+            padding: 24px !important;
+          }
+          /* Neutralize inner scroll containers (transcript body, code blocks)
+             so their content paginates instead of being trapped in a scroller. */
+          #eval-print-root * {
+            overflow: visible !important;
+            max-height: none !important;
+          }
           .eval-no-print { display: none !important; }
           /* StatusPill cursor hint isn't useful in a static PDF. */
           #eval-print-root button[disabled] { opacity: 1 !important; }
