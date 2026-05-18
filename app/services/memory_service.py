@@ -80,6 +80,11 @@ RETRIEVAL_PER_TYPE: dict[str, dict[str, float | int]] = {
     "constraint": {"top_k": 2, "floor": 0.30},
     "goal":       {"top_k": 2, "floor": 0.30},
     "episode":    {"top_k": 3, "floor": 0.35},
+    # Preferences are no longer always-inject. After the audit/cleanup pass
+    # via MCP, the survivors get cosine-retrieved like any other memory.
+    # Lower floor than fact/episode because preferences paraphrase (same
+    # idea, different wording → moderate cosine sim is enough).
+    "preference": {"top_k": 3, "floor": 0.22},
 }
 
 # Cap on feedback-derived preferences (key prefixed with `feedback__`) that
@@ -503,16 +508,22 @@ class MemoryService:
         """
         sess, owns = self._scoped(db)
         try:
+            # Prefs are still always-injected, but the surface area is now
+            # bounded: extraction won't produce new ones (memory_extraction
+            # VALID_TYPES drops 'preference'), and the prod pref table has
+            # been MCP-audited (drop trash / send features to backlog / keep
+            # genuine facts + Alfred-voice nuance). 56 → 24 active prefs.
+            #
+            # The audited survivors all earn their always-inject slot, so we
+            # don't hard-cap them here. If pref count creeps back up due to
+            # legacy feedback flows still firing, the FEEDBACK_PREF_CAP still
+            # bounds the feedback-prefixed ones at 8.
             all_prefs = (
                 sess.query(Memory)
                 .filter(Memory.type == "preference", Memory.is_active == True)
                 .order_by(Memory.created_at.desc())
                 .all()
             )
-            # Manually-curated prefs (no feedback prefix) always inject.
-            # Feedback-derived prefs (auto-written from tone corrections) are
-            # capped at FEEDBACK_PREF_CAP most-recent so the prompt doesn't
-            # bloat to 50+ rules over time.
             curated: list[Memory] = []
             feedback: list[Memory] = []
             for m in all_prefs:
