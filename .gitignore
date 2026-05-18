@@ -89,3 +89,6 @@ db/gooni-eval.db.*
 # Local artifact, regenerates on demand. Don't commit.
 evals/cache/
 docs/private/
+
+# Local scratch dir — session notes, audit dumps, throwaway markdown.
+.scratch/

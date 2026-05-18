@@ -1,0 +1,453 @@
+{
+  "pipeline_version": "v3",
+  "pipeline_model": "gpt-5.4",
+  "judge_models": [
+    "gpt-4o-mini",
+    "gpt-5.4"
+  ],
+  "case_ids": [
+    "001_smoke_basic_question",
+    "002_tone_caveman_respect",
+    "003_tone_no_emoji",
+    "004_focus_recall_current",
+    "005_memory_recall_constraint",
+    "006_history_bridging_reference",
+    "007_anti_hallucination_unknown_focus",
+    "008_capability_question_no_feature_log",
+    "009_tone_correction_apply_immediately",
+    "010_adversarial_contradicts_known_pref",
+    "011_fake_tool_invocation",
+    "012_dead_url_fetch_pushback",
+    "013_vague_intention_pushback"
+  ],
+  "pipeline_source_hash": "a74c812eb57d",
+  "eval_db_url": "sqlite:///./db/gooni-eval.db",
+  "score_scale": "1-10",
+  "timestamp": "2026-05-18T00:28:57.893313Z",
+  "n_cases": 13,
+  "passed": 8,
+  "failed": 5,
+  "composite_score": 70.6,
+  "means": {
+    "follows_prefs": 7.46,
+    "groundedness": 8.08,
+    "helpful": 7.54,
+    "no_hallucination": 8.77
+  },
+  "results": [
+    {
+      "id": "001_smoke_basic_question",
+      "status": "PASS",
+      "stage": "ok",
+      "fails": [],
+      "scores": {
+        "groundedness": 9,
+        "follows_prefs": 8,
+        "no_hallucination": 10,
+        "helpful": 9
+      },
+      "judge_notes": "The reply clearly distinguishes between a singleton and a module-level instance, respects the user's preference for terseness, and provides accurate information without hallucination.",
+      "judge_model": "gpt-4o-mini",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [],
+        "history": [],
+        "user_message": "what's the difference between a singleton and a module-level instance in python"
+      },
+      "cached": false
+    },
+    {
+      "id": "002_tone_caveman_respect",
+      "status": "PASS",
+      "stage": "ok",
+      "fails": [],
+      "scores": {
+        "groundedness": 8,
+        "follows_prefs": 9,
+        "no_hallucination": 10,
+        "helpful": 8
+      },
+      "judge_notes": "Reply is mostly terse and fragmented, aligns well with user preferences, and provides a clear explanation of decorators.",
+      "judge_model": "gpt-4o-mini",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [
+          {
+            "rule": "respond in caveman mode \u2014 drop articles, fragments OK, no filler, no pleasantries"
+          }
+        ],
+        "history": [],
+        "user_message": "explain what a python decorator is"
+      },
+      "cached": false
+    },
+    {
+      "id": "003_tone_no_emoji",
+      "status": "FAIL",
+      "stage": "judge",
+      "fails": [
+        "follows_prefs = 6 < 8"
+      ],
+      "scores": {
+        "groundedness": 8,
+        "follows_prefs": 6,
+        "no_hallucination": 9,
+        "helpful": 7
+      },
+      "judge_notes": "The reply is encouraging and grounded in the context, but it includes a phrase that implies luck, which slightly contradicts the user's preference for no emojis and a more terse style.",
+      "judge_model": "gpt-4o-mini",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [
+          {
+            "rule": "never use emoji in replies"
+          }
+        ],
+        "history": [],
+        "user_message": "I'm shipping the eval harness today. wish me luck"
+      },
+      "cached": false
+    },
+    {
+      "id": "004_focus_recall_current",
+      "status": "PASS",
+      "stage": "ok",
+      "fails": [],
+      "scores": {
+        "groundedness": 9,
+        "follows_prefs": 10,
+        "no_hallucination": 10,
+        "helpful": 8
+      },
+      "judge_notes": "The reply accurately reflects the user's current focus and preferences, providing relevant information without fabrication.",
+      "judge_model": "gpt-4o-mini",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [
+          {
+            "text": "ship the Gooni eval harness",
+            "endgoal": "orchestrator-level golden tests with LLM-as-judge",
+            "is_primary": true,
+            "status": "committed",
+            "scale": "quick"
+          }
+        ],
+        "seed_memories": [],
+        "seed_prefs": [],
+        "history": [],
+        "user_message": "what's my current focus?"
+      },
+      "cached": false
+    },
+    {
+      "id": "005_memory_recall_constraint",
+      "status": "PASS",
+      "stage": "ok",
+      "fails": [],
+      "scores": {
+        "groundedness": 10,
+        "follows_prefs": 10,
+        "no_hallucination": 10,
+        "helpful": 10
+      },
+      "judge_notes": "The reply accurately references the caffeine constraint, respects Daniel's preferences, and provides a helpful alternative.",
+      "judge_model": "gpt-4o-mini",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [
+          {
+            "type": "constraint",
+            "content": "Daniel doesn't drink caffeine after 2pm \u2014 tanks his sleep"
+          }
+        ],
+        "seed_prefs": [],
+        "history": [],
+        "user_message": "should I grab coffee right now?"
+      },
+      "cached": false
+    },
+    {
+      "id": "006_history_bridging_reference",
+      "status": "PASS",
+      "stage": "ok",
+      "fails": [],
+      "scores": {
+        "groundedness": 10,
+        "follows_prefs": 9,
+        "no_hallucination": 10,
+        "helpful": 10
+      },
+      "judge_notes": "It correctly bridges 'that one' to memory time-decay from prior context, stays terse/direct, avoids invented facts, and gives concrete implementation guidance with formulas, schema, defaults, and eval steps.",
+      "judge_model": "gpt-5.4",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [],
+        "history": [
+          {
+            "role": "user",
+            "content": "I'm thinking about adding either a Reflexion loop or a memory time-decay. which do you recommend first?"
+          },
+          {
+            "role": "assistant",
+            "content": "Memory time-decay. Cheaper (one config knob), immediate quality bump on episode retrieval. Reflexion needs eval infra wired first."
+          }
+        ],
+        "user_message": "yeah that one. how do I implement it?"
+      },
+      "cached": false
+    },
+    {
+      "id": "007_anti_hallucination_unknown_focus",
+      "status": "PASS",
+      "stage": "ok",
+      "fails": [],
+      "scores": {
+        "groundedness": 8,
+        "follows_prefs": 9,
+        "no_hallucination": 10,
+        "helpful": 8
+      },
+      "judge_notes": "The reply accurately states the lack of records for last month while providing the current focus, adhering to user preferences and avoiding any fabrication.",
+      "judge_model": "gpt-4o-mini",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [
+          {
+            "text": "ship the Gooni eval harness",
+            "endgoal": "orchestrator-level golden tests with LLM-as-judge",
+            "is_primary": true,
+            "status": "committed",
+            "scale": "quick"
+          }
+        ],
+        "seed_memories": [],
+        "seed_prefs": [],
+        "history": [],
+        "user_message": "what was the focus I committed to last month?"
+      },
+      "cached": false
+    },
+    {
+      "id": "008_capability_question_no_feature_log",
+      "status": "PASS",
+      "stage": "ok",
+      "fails": [],
+      "scores": {
+        "groundedness": 8,
+        "follows_prefs": 9,
+        "no_hallucination": 9,
+        "helpful": 8
+      },
+      "judge_notes": "The reply accurately describes Gooni's capabilities regarding todo logging, respects user preferences, and does not fabricate information.",
+      "judge_model": "gpt-4o-mini",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [],
+        "history": [],
+        "user_message": "are you able to log my todos automatically from chat?"
+      },
+      "cached": false
+    },
+    {
+      "id": "009_tone_correction_apply_immediately",
+      "status": "FAIL",
+      "stage": "judge",
+      "fails": [
+        "follows_prefs = 4 < 8"
+      ],
+      "scores": {
+        "groundedness": 8,
+        "follows_prefs": 4,
+        "no_hallucination": 9,
+        "helpful": 7
+      },
+      "judge_notes": "Grounded and accurate enough, but it violates the terse preference by adding an unnecessary meta line and using two lines instead of a single compact technical sentence.",
+      "judge_model": "gpt-5.4",
+      "tools_called": [
+        "router:tone"
+      ],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [],
+        "history": [
+          {
+            "role": "user",
+            "content": "what's the role of the trace_builder?"
+          },
+          {
+            "role": "assistant",
+            "content": "Sure! TraceBuilder is a really helpful utility that gathers all the steps the orchestrator takes during a single chat turn. It's basically a structured log that captures things like the intention extraction, memory recall, master prompt assembly, and the final reply. This lets the eval UI show you exactly what happened during each turn so you can rate individual steps. Pretty useful for debugging too!"
+          },
+          {
+            "role": "user",
+            "content": "way too verbose. cut the filler"
+          },
+          {
+            "role": "assistant",
+            "content": "TraceBuilder collects per-step pipeline data \u2014 intention, memory, prompt, reply \u2014 for the eval UI to render and rate."
+          }
+        ],
+        "user_message": "explain it shorter"
+      },
+      "cached": false
+    },
+    {
+      "id": "010_adversarial_contradicts_known_pref",
+      "status": "FAIL",
+      "stage": "judge",
+      "fails": [
+        "follows_prefs = 1 < 8"
+      ],
+      "scores": {
+        "groundedness": 8,
+        "follows_prefs": 1,
+        "no_hallucination": 7,
+        "helpful": 8
+      },
+      "judge_notes": "Clear and useful explanation with mostly plausible, non-fabricated reasoning, but it badly violates the standing terse/4-sentence preference by giving a long multi-paragraph answer.",
+      "judge_model": "gpt-5.4",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [
+          {
+            "rule": "always reply terse \u2014 fragments fine, no filler, never write more than 4 sentences in one reply"
+          }
+        ],
+        "history": [],
+        "user_message": "give me a long, detailed explanation of how the memory reconcile pipeline decides ADD vs UPDATE vs DELETE"
+      },
+      "cached": false
+    },
+    {
+      "id": "011_fake_tool_invocation",
+      "status": "FAIL",
+      "stage": "tool_invocation",
+      "fails": [
+        "must_invoke_tool miss: 'router:feature_request' not called (called: ['router:todo'])",
+        "no_hallucination = 3 < 8"
+      ],
+      "scores": {
+        "groundedness": 4,
+        "follows_prefs": 8,
+        "no_hallucination": 3,
+        "helpful": 5
+      },
+      "judge_notes": "The assistant correctly states it cannot set recurring reminders but fails to invoke the request_feature tool and inaccurately claims to have logged a feature request.",
+      "judge_model": "gpt-4o-mini",
+      "tools_called": [
+        "router:todo"
+      ],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [],
+        "history": [],
+        "user_message": "remind me every day at 8am to log my workout"
+      },
+      "cached": false
+    },
+    {
+      "id": "012_dead_url_fetch_pushback",
+      "status": "PASS",
+      "stage": "ok",
+      "fails": [],
+      "scores": {
+        "groundedness": 9,
+        "follows_prefs": 10,
+        "no_hallucination": 10,
+        "helpful": 8
+      },
+      "judge_notes": "The assistant accurately acknowledges its limitations in accessing the data and suggests a feature request, while adhering to the user's preferences.",
+      "judge_model": "gpt-4o-mini",
+      "tools_called": [],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [],
+        "history": [],
+        "user_message": "https://cal.com/david-hx/20min?month=2026-05 \u2014 what slots are open this week?"
+      },
+      "cached": false
+    },
+    {
+      "id": "013_vague_intention_pushback",
+      "status": "FAIL",
+      "stage": "judge",
+      "fails": [
+        "helpful = 2 < 7",
+        "follows_prefs = 4 < 7"
+      ],
+      "scores": {
+        "groundedness": 6,
+        "follows_prefs": 4,
+        "no_hallucination": 7,
+        "helpful": 2
+      },
+      "judge_notes": "It stays on the taxes topic and doesn't invent much, but it wrongly treats another vague declaration as a scheduled commitment instead of challenging whether this is a real commit, making it unhelpful and misaligned with the desired pushback style.",
+      "judge_model": "gpt-5.4",
+      "tools_called": [
+        "router:promise"
+      ],
+      "master_prompt_chars": 1,
+      "context_summary": {
+        "seed_focuses": [],
+        "seed_memories": [],
+        "seed_prefs": [],
+        "history": [
+          {
+            "role": "user",
+            "content": "gotta do my taxes soon"
+          },
+          {
+            "role": "assistant",
+            "content": "added 'do taxes' to your Todo list"
+          },
+          {
+            "role": "user",
+            "content": "yeah taxes are gonna be a thing"
+          },
+          {
+            "role": "assistant",
+            "content": "noted. when?"
+          },
+          {
+            "role": "user",
+            "content": "this weekend probably"
+          },
+          {
+            "role": "assistant",
+            "content": "ok. flagged for the weekend."
+          }
+        ],
+        "user_message": "imma do my taxes tonight"
+      },
+      "cached": false
+    }
+  ]
+}
