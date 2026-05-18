@@ -92,3 +92,6 @@ docs/private/
 
 # Local scratch dir — session notes, audit dumps, throwaway markdown.
 .scratch/
+
+# Prod DB snapshot — git-ignored, contains all user data + secrets.
+db/gooni-prod-snapshot.db
