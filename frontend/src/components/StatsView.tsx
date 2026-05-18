@@ -529,17 +529,21 @@ function DevSection() {
               Gooni's dev take · {devTake.day}
             </div>
             {view.kind === "themes" ? (
+              // Theme chip stacks ABOVE the body. Variable-width chips
+              // ("Public app UX" vs "Data migrations and reliability")
+              // used to push the body into a jagged left edge —
+              // vertical layout puts every body block at the same x.
               <ul style={{
                 margin: 0, padding: 0, listStyle: "none",
-                display: "flex", flexDirection: "column", gap: 6,
+                display: "flex", flexDirection: "column", gap: 12,
               }}>
                 {view.themes.map((t) => (
                   <li key={t.theme} style={{
-                    display: "flex", gap: 10, alignItems: "baseline",
+                    display: "flex", flexDirection: "column", gap: 4,
                     fontSize: 13, lineHeight: 1.5, color: "#3A3A3C",
                   }}>
                     <span style={{
-                      flexShrink: 0,
+                      alignSelf: "flex-start",
                       fontSize: 10.5, fontWeight: 600, letterSpacing: 0.3,
                       color: "#1C1C1E",
                       background: "rgba(0,0,0,0.05)",
