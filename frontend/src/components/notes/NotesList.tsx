@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
-import { cleanupEmptyNotes, patchNote, type ApiNote } from "../../services/api";
+import {
+  cleanupEmptyNotes,
+  fetchSpaceStats,
+  patchNote,
+  uploadImage,
+  type ApiNote,
+  type ApiSpaceStats,
+} from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { SpaceIcon } from "./SpaceIcon";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
@@ -13,6 +20,22 @@ function parseDate(iso: string | null): Date | null {
   if (!iso) return null;
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
   return new Date(hasOffset ? iso : iso + "Z");
+}
+
+// Compact "Xd ago" / "Xh ago" stamp for the space header. Falls back to
+// the localized date when the gap is older than ~30 days.
+function formatRelative(iso: string | null): string {
+  const d = parseDate(iso);
+  if (!d) return "—";
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 60_000) return "just now";
+  const min = Math.floor(diffMs / 60_000);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function formatTime(iso: string | null): string {
@@ -361,6 +384,9 @@ export function NotesList() {
   const updateSpaceStore = useSpacesStore((s) => s.updateSpace);
   const [descEditing, setDescEditing] = useState(false);
   const [descDraft, setDescDraft] = useState("");
+  const [spaceStats, setSpaceStats] = useState<ApiSpaceStats | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const coverInputRef = useRef<HTMLInputElement | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [cleanConfirm, setCleanConfirm] = useState(false);
@@ -395,6 +421,25 @@ export function NotesList() {
       setSpaceMenuOpen(false);
     }
   }, [isAllNotes]);
+
+  // Fetch space stats for the header (note count, last touched, top tags).
+  // Re-runs when notes mutate so a freshly-created note bumps the count
+  // without requiring a manual refresh.
+  const allNotesForCount = notes[spaceId] ?? [];
+  const allNotesLen = allNotesForCount.length;
+  useEffect(() => {
+    if (isAllNotes || spaceId === "general") {
+      setSpaceStats(null);
+      return;
+    }
+    const idNum = Number(spaceId);
+    if (!Number.isFinite(idNum)) return;
+    let cancelled = false;
+    fetchSpaceStats(idNum)
+      .then((s) => { if (!cancelled) setSpaceStats(s); })
+      .catch((e) => console.warn("space stats fetch failed", e));
+    return () => { cancelled = true; };
+  }, [spaceId, isAllNotes, allNotesLen]);
 
   // Dismiss space-filter dropdown on outside click.
   useEffect(() => {
@@ -533,18 +578,46 @@ export function NotesList() {
         </button>
       </div>
 
-      {/* Space header — description + cover. Hidden for All Notes since
-          there's no underlying space row to attach metadata to. Click
-          description to edit; empty state shows "Add description". */}
+      {/* Space header — description + cover + stats. Hidden for All
+          Notes since there's no underlying space row to attach metadata
+          to. */}
       {!isAllNotes && currentSpace && (
         <div
           style={{
-            padding: "10px 12px",
+            position: "relative",
+            padding: "10px 12px 8px",
             borderBottom: "1px solid rgba(0,0,0,0.06)",
             flexShrink: 0,
             background: currentSpace.cover_image_url
               ? `linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.95)), url(${JSON.stringify(currentSpace.cover_image_url).slice(1, -1)}) center/cover`
               : "transparent",
+          }}
+          onDragOver={(e) => {
+            if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
+              e.preventDefault();
+            }
+          }}
+          onDrop={async (e) => {
+            const file = Array.from(e.dataTransfer?.files ?? []).find((f) =>
+              f.type.startsWith("image/"),
+            );
+            if (!file || typeof currentSpace.id !== "number") return;
+            e.preventDefault();
+            setCoverUploading(true);
+            try {
+              const result = await uploadImage(file);
+              if (result.kind === "url") {
+                await updateSpaceStore(currentSpace.id as number, {
+                  cover_image_url: result.url,
+                });
+              } else if (result.kind === "fallback") {
+                console.warn("cover upload: R2 unconfigured, skipping");
+              } else {
+                console.warn("cover upload failed:", result.message);
+              }
+            } finally {
+              setCoverUploading(false);
+            }
           }}
         >
           {descEditing ? (
@@ -608,6 +681,111 @@ export function NotesList() {
               {currentSpace.description || "+ add description"}
             </div>
           )}
+
+          {/* Hidden file input that the cover-upload button trips. Click
+              the camera icon → native file picker → R2 upload → PATCH
+              cover_image_url. Drag-drop on the whole header also works
+              (see the wrapping div's onDrop). */}
+          <input
+            ref={coverInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file || typeof currentSpace.id !== "number") return;
+              setCoverUploading(true);
+              try {
+                const result = await uploadImage(file);
+                if (result.kind === "url") {
+                  await updateSpaceStore(currentSpace.id as number, {
+                    cover_image_url: result.url,
+                  });
+                }
+              } finally {
+                setCoverUploading(false);
+                if (coverInputRef.current) coverInputRef.current.value = "";
+              }
+            }}
+          />
+
+          {/* Footer row — stats + cover-edit affordance. Stats are
+              best-effort; nothing if the fetch hasn't resolved yet. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginTop: 6,
+              fontSize: 11,
+              color: "rgba(71,85,105,0.85)",
+              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+            }}
+          >
+            {spaceStats && (
+              <>
+                <span>{spaceStats.note_count} note{spaceStats.note_count === 1 ? "" : "s"}</span>
+                {spaceStats.last_touched && (
+                  <span style={{ color: "rgba(142,142,147,0.85)" }}>
+                    · last touched {formatRelative(spaceStats.last_touched)}
+                  </span>
+                )}
+                {spaceStats.top_tags.length > 0 && (
+                  <span style={{ color: "rgba(142,142,147,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    · {spaceStats.top_tags.map((t) => `#${t.tag}`).join(" ")}
+                  </span>
+                )}
+              </>
+            )}
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={() => coverInputRef.current?.click()}
+              disabled={coverUploading}
+              title={
+                coverUploading
+                  ? "Uploading cover…"
+                  : currentSpace.cover_image_url
+                    ? "Change cover image"
+                    : "Add cover image (or drag/drop here)"
+              }
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: coverUploading ? "wait" : "pointer",
+                padding: "0 2px",
+                color: "rgba(71,85,105,0.65)",
+                fontSize: 11,
+                lineHeight: 1,
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#0F172A")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "rgba(71,85,105,0.65)")}
+            >
+              {coverUploading ? "uploading…" : currentSpace.cover_image_url ? "change cover" : "+ cover"}
+            </button>
+            {currentSpace.cover_image_url && !coverUploading && (
+              <button
+                onClick={() => {
+                  if (typeof currentSpace.id === "number") {
+                    void updateSpaceStore(currentSpace.id as number, { cover_image_url: null });
+                  }
+                }}
+                title="Remove cover image"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: "0 2px",
+                  color: "rgba(239,68,68,0.55)",
+                  fontSize: 11,
+                  lineHeight: 1,
+                }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#EF4444")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "rgba(239,68,68,0.55)")}
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
       )}
 
