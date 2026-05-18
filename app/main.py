@@ -5604,6 +5604,21 @@ def trigger_capability_boot_scan(db: Session = Depends(get_db)):
     return capability_service.refresh_mechanical_layer(db)
 
 
+@app.post("/capabilities/dedup-behavioral")
+def trigger_capability_dedup_behavioral(db: Session = Depends(get_db)):
+    """One-shot cleanup over existing behavioral facets — cosine-clusters them
+    and merges semantic dups into the oldest canonical row. Use after the
+    cosine-dedup-at-promotion-time fix lands to clean the historical bloat
+    (prod was carrying ~6 near-identical "I tend to: lack support" facets
+    because the old promote path keyed on text hash, not embedding).
+
+    Returns {scanned, kept, merged, clusters} — clusters lists the canon
+    row + merged ids so the audit is auditable.
+    """
+    from .services.capability_service import capability_service
+    return capability_service.dedup_existing_behavioral(db)
+
+
 def _serialize_reflection(r: Reflection) -> dict:
     return {
         "id": r.id,

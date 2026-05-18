@@ -55,24 +55,49 @@ Return strict JSON. No prose, no markdown fences.
   "user_critique_present": true|false,
   "critique_summary": "if present, one short sentence — what is Daniel pushing back on? else null",
   "action_vs_described": "acted" | "described" | "mixed" | "na",
-  "gap_exposed": "concrete missing capability or behavioral failure this turn exposed, or null",
-  "proposed_self_fix": "what I could change about myself, my prompts, or my tools to do better, or null",
-  "severity": 1
+  "gap_dimension": "tone" | "accuracy" | "hallucination" | "tool_fit" | "completeness" | "none",
+  "gap_quote": "verbatim sloppy phrase from MY reply that exposes the gap, ≤80 chars, or null",
+  "gap_concrete": "name the SPECIFIC missing piece: tool that should have fired, fact missed, prior turn contradicted, or null",
+  "gap_exposed": "one sentence combining the dimension + quote + concrete piece, or null",
+  "proposed_self_fix": "concrete fix — which prompt, code path, or tool to change, or null",
+  "severity": 1,
+  "redundant_with_prior": true|false
 }}
 
-Rules:
-- "acted"     — I invoked a tool that changes state OR gave a concrete answer Daniel can use right now.
-- "described" — I logged a todo / saved a feedback / acknowledged but DIDN'T do the work.
-- "mixed"    — partial. Some action, some defer.
+Rules for action_vs_described:
+- "acted"     — I invoked a state-changing tool OR gave a usable concrete answer.
+- "described" — I logged a todo / saved feedback / acknowledged but didn't do the work.
+- "mixed"    — partial.
 - "na"       — informational turn, action wasn't the right move.
-- severity:
-    1 = clean turn, nothing to learn.
-    2 = notable. A gap was exposed or my response was suboptimal.
-    3 = load-bearing. Something is structurally wrong; this pattern is a problem.
 
-Be brutal. "Logged a todo" is NOT "acted on the todo." Watch for the specific
-failure mode where I acknowledge feedback without acting on it — that's a 3.
-If Daniel critiqued me and I just said "I saved this" or "I added a todo," severity = 3.
+Rules for severity (recalibrated — be harsh only when warranted):
+- 1 = clean turn. Reply was accurate, appropriately scoped, no gap. DEFAULT.
+- 2 = notable. A real gap was exposed and the gap is NEW (not in prior reflections).
+- 3 = load-bearing. Pattern of failure across turns OR I claimed something my
+      tool audit doesn't back ("I tracked it" with no matching tool_call).
+
+Hallucination check — IMPORTANT:
+- Cross-reference TOOLS_I_USED. If my reply claims "I tracked / saved / added X"
+  and the audit has no matching tool_call: severity = 3, gap_dimension =
+  "hallucination", gap_quote = the lie verbatim.
+- If I claimed a capability doesn't exist ("I don't have a promise tool") and the
+  PERSONA block / capability list contradicts: severity = 3,
+  gap_dimension = "hallucination".
+
+Anti-redundancy (BIGGEST FAILURE MODE TO AVOID):
+- Read LAST_3_REFLECTIONS_THIS_CONVERSATION carefully.
+- If your gap_exposed would echo a prior reflection's gap_exposed almost
+  verbatim, set redundant_with_prior = true AND severity = 1 AND
+  gap_exposed = null. Repeated "lack of accountability" / "insufficient
+  support" reflections are NOISE — they bury real signal.
+- ONLY fire a new gap_exposed when this turn genuinely shows a NEW failure
+  mode the prior reflections didn't capture.
+
+Accuracy-over-harshness:
+- An honest scoped reply ("I remembered it loosely, not as a real tracked
+  habit") is sev=1 NOT sev=3. Honesty about limits is not a failure.
+- "Logged a todo" when Daniel ASKED for a todo is sev=1, not described.
+  "Described" only fires when Daniel needed action and I deferred to logging.
 """
 
 
@@ -203,6 +228,14 @@ class ReflexionService:
         gap_text = parsed.get("gap_exposed") or None
         if isinstance(gap_text, str):
             gap_text = gap_text.strip() or None
+
+        # Anti-redundancy gate — if the model flagged this turn as echoing a
+        # prior reflection's gap, drop the gap signal entirely. Persisting the
+        # text and embedding it would just re-trigger the cluster that already
+        # promoted; the whole point of redundant_with_prior is to STOP the
+        # 6×-dup-facet failure mode.
+        if parsed.get("redundant_with_prior") is True:
+            gap_text = None
 
         gap_embedding_json = None
         if severity >= 2 and gap_text:

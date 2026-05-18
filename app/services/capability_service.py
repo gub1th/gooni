@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from datetime import datetime, timedelta
 from typing import Iterable
@@ -41,6 +42,19 @@ from typing import Iterable
 from sqlalchemy.orm import Session
 
 from ..db.models import CapabilityFacet, ToolCall
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    """Local cosine helper. Mirrors reflexion_service._cosine — kept here to
+    avoid a circular import (reflexion_service imports capability_service)."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
 
 
 # Files whose contents define mechanical-layer facets. Hashing them at boot
@@ -243,6 +257,13 @@ class CapabilityService:
         }
 
     # ── Reflection-cluster behavioral promotion ──────────────────────────
+    # Cosine floor for considering an existing behavioral facet a semantic
+    # duplicate of the incoming centroid. Picked empirically: 0.85+ is
+    # "same idea, different phrasing" (the 6× "lack of support" cluster on
+    # prod sat in [0.86, 0.94]); 0.80-0.85 is risky overlap; <0.80 is
+    # clearly different gap.
+    _BEHAVIORAL_DEDUP_COS = 0.85
+
     def promote_behavioral_facet(
         self,
         db: Session,
@@ -251,13 +272,71 @@ class CapabilityService:
         evidence_reflection_ids: list[int],
     ) -> CapabilityFacet:
         """Called by ReflexionService when a gap-cluster crosses the
-        threshold. The facet_key is derived from a hash of the centroid so
-        re-firing on the same cluster idempotently updates the same row.
+        threshold. Idempotent in two ways:
+
+        1. Exact-text dedup via facet_key = sha1(centroid_text)[:12]. Re-firing
+           on the literal same text updates that row.
+        2. Semantic dedup via cosine match against existing behavioral
+           facet_texts. If any is sim ≥ _BEHAVIORAL_DEDUP_COS to the
+           incoming centroid, update THAT row instead of inserting a new
+           one — fixes the prod bug where six near-identical "I tend to:
+           lack support" facets accumulated because each promotion text
+           was a different phrasing of the same cluster.
 
         Evidence list grows over time — caller passes the full set, we
         store the latest IDs. Status starts at 'claimed'; PR-audit or
         manual edit can promote to 'verified' once Daniel agrees.
         """
+        # Local import — embedding generation is on the heavy `llm_client`
+        # which top-level-imports the OpenAI SDK; keep this module light.
+        from ..llm.client import llm_client
+
+        new_emb, _ = llm_client.generate_embedding(centroid_text)
+
+        # Semantic-dedup pass: compare against existing behavioral facets.
+        # Limit to a sane cap so this doesn't grow O(N) with N behavioral
+        # facets — most-recent 50 is plenty since dups cluster temporally.
+        if new_emb:
+            existing = (
+                db.query(CapabilityFacet)
+                .filter(
+                    CapabilityFacet.layer == "behavioral",
+                    CapabilityFacet.status != "removed",
+                )
+                .order_by(CapabilityFacet.updated_at.desc())
+                .limit(50)
+                .all()
+            )
+            best_row: CapabilityFacet | None = None
+            best_sim = 0.0
+            for r in existing:
+                # Re-embed the existing facet_text on demand. Cheap (~$0.00002
+                # per text). Could cache on the row but it would require a
+                # schema column; not worth it yet.
+                r_emb, _ = llm_client.generate_embedding(r.facet_text)
+                if not r_emb:
+                    continue
+                sim = _cosine(new_emb, r_emb)
+                if sim > best_sim:
+                    best_sim = sim
+                    best_row = r
+            if best_row is not None and best_sim >= self._BEHAVIORAL_DEDUP_COS:
+                # Merge into the existing row rather than creating a near-dup.
+                # Keep the older text (don't churn the prompt block on every
+                # rephrasing); just refresh evidence + updated_at.
+                merged_ids = list(
+                    dict.fromkeys(
+                        (json.loads(best_row.evidence_json or "{}").get("reflection_ids", []))
+                        + evidence_reflection_ids
+                    )
+                )[-20:]
+                best_row.evidence_json = json.dumps({"reflection_ids": merged_ids})
+                best_row.updated_at = datetime.utcnow()
+                db.commit()
+                db.refresh(best_row)
+                return best_row
+
+        # No semantic match — fall through to the exact-text upsert path.
         key = "behavioral." + hashlib.sha1(
             centroid_text.encode("utf-8")
         ).hexdigest()[:12]
@@ -271,6 +350,94 @@ class CapabilityService:
         )
         db.commit()
         return row
+
+    def dedup_existing_behavioral(self, db: Session) -> dict:
+        """One-shot cleanup pass over existing behavioral facets. Embeds each
+        active row, clusters by cosine ≥ _BEHAVIORAL_DEDUP_COS, picks the
+        OLDEST facet in each cluster as canonical (most stable id, longest
+        evidence history), marks the rest status='removed' with a merge note.
+
+        Returns {scanned, kept, merged, clusters}. Exposed via
+        POST /capabilities/dedup-behavioral so prod can clean its own bloat
+        without a redeploy.
+        """
+        from ..llm.client import llm_client
+
+        rows = (
+            db.query(CapabilityFacet)
+            .filter(
+                CapabilityFacet.layer == "behavioral",
+                CapabilityFacet.status != "removed",
+            )
+            .order_by(CapabilityFacet.id.asc())
+            .all()
+        )
+        if not rows:
+            return {"scanned": 0, "kept": 0, "merged": 0, "clusters": []}
+
+        # Pre-embed everything once so we don't redo it per pair.
+        embeds: dict[int, list[float] | None] = {}
+        for r in rows:
+            emb, _ = llm_client.generate_embedding(r.facet_text)
+            embeds[r.id] = emb or None
+
+        # Greedy clustering: walk in id order, each row joins the first
+        # cluster whose canonical row matches sim ≥ floor, else starts a
+        # new cluster. Canonical = first row added (lowest id).
+        clusters: list[list[CapabilityFacet]] = []
+        for r in rows:
+            r_emb = embeds.get(r.id)
+            if not r_emb:
+                clusters.append([r])
+                continue
+            joined = False
+            for cluster in clusters:
+                canon = cluster[0]
+                c_emb = embeds.get(canon.id)
+                if not c_emb:
+                    continue
+                if _cosine(r_emb, c_emb) >= self._BEHAVIORAL_DEDUP_COS:
+                    cluster.append(r)
+                    joined = True
+                    break
+            if not joined:
+                clusters.append([r])
+
+        merged = 0
+        cluster_summary: list[dict] = []
+        for cluster in clusters:
+            if len(cluster) == 1:
+                continue
+            canon = cluster[0]
+            merged_ids = json.loads(canon.evidence_json or "{}").get("reflection_ids", [])
+            for dup in cluster[1:]:
+                dup_ids = json.loads(dup.evidence_json or "{}").get("reflection_ids", [])
+                merged_ids = list(dict.fromkeys(merged_ids + dup_ids))
+                dup.status = "removed"
+                dup.evidence_json = json.dumps(
+                    {
+                        "reflection_ids": dup_ids,
+                        "merged_into": canon.id,
+                        "merged_at": datetime.utcnow().isoformat(),
+                    }
+                )
+                dup.updated_at = datetime.utcnow()
+                merged += 1
+            canon.evidence_json = json.dumps({"reflection_ids": merged_ids[-20:]})
+            canon.updated_at = datetime.utcnow()
+            cluster_summary.append({
+                "canon_id": canon.id,
+                "canon_text": canon.facet_text[:120],
+                "merged_ids": [d.id for d in cluster[1:]],
+            })
+
+        db.commit()
+        return {
+            "scanned": len(rows),
+            "kept": len(rows) - merged,
+            "merged": merged,
+            "clusters": cluster_summary,
+        }
 
     # ── Runtime telemetry rollup ─────────────────────────────────────────
     def run_telemetry_rollup(self, db: Session) -> dict:
