@@ -2493,6 +2493,51 @@ def delete_space(space_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@app.get("/spaces/{space_id}/stats")
+def get_space_stats(space_id: int, db: Session = Depends(get_db)):
+    """Lightweight stats for a space's header — note count, most-recent
+    touch, top-3 tags. One query per metric, all unindexed columns are
+    fine at our note volume."""
+    from sqlalchemy import func as sqlfunc
+
+    space = db.query(Space).filter(Space.id == space_id).first()
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+    note_count = (
+        db.query(sqlfunc.count(Note.id))
+        .filter(Note.space_id == space_id)
+        .scalar()
+    ) or 0
+    last_touched = (
+        db.query(
+            sqlfunc.max(
+                sqlfunc.coalesce(Note.updated_at, Note.last_opened_at, Note.created_at)
+            )
+        )
+        .filter(Note.space_id == space_id)
+        .scalar()
+    )
+    # Top-3 tags by frequency — read raw `tags` JSON-text and tally. Note
+    # cardinality per space stays small enough that we don't need a
+    # materialized rollup table; a Python tally is fine.
+    tag_rows = (
+        db.query(Note.tags)
+        .filter(Note.space_id == space_id, Note.tags.is_not(None))
+        .all()
+    )
+    counts: dict[str, int] = {}
+    for (raw,) in tag_rows:
+        for t in _parse_tags(raw):
+            counts[t] = counts.get(t, 0) + 1
+    top_tags = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+    return {
+        "space_id": space_id,
+        "note_count": note_count,
+        "last_touched": last_touched.isoformat() if last_touched else None,
+        "top_tags": [{"tag": t, "count": c} for t, c in top_tags],
+    }
+
+
 # ── Notes ─────────────────────────────────────────────────────────────────────
 
 

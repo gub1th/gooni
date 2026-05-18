@@ -80,6 +80,19 @@ export async function deleteSpace(id: number): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete space");
 }
 
+export interface ApiSpaceStats {
+  space_id: number;
+  note_count: number;
+  last_touched: string | null;
+  top_tags: { tag: string; count: number }[];
+}
+
+export async function fetchSpaceStats(id: number): Promise<ApiSpaceStats> {
+  const res = await apiFetch(`${BASE}/spaces/${id}/stats`);
+  if (!res.ok) throw new Error("Failed to fetch space stats");
+  return res.json();
+}
+
 
 // ── Notes ──────────────────────────────────────────────────────────────────────
 
