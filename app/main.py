@@ -4332,12 +4332,35 @@ def delete_memory(memory_id: int, db: Session = Depends(get_db)):
 
 @app.patch("/memories/{memory_id}")
 def edit_memory(memory_id: int, body: dict, db: Session = Depends(get_db)):
-    """Update content via supersede chain (preserves audit history)."""
-    content = body.get("content", "").strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="content is required")
-    if not memory_service.update_memory(memory_id, content, db=db):
-        raise HTTPException(status_code=404, detail="memory not found")
+    """Update content (supersede chain, preserves audit history) and/or
+    type. Type change is in-place — no new row — since type taxonomy
+    shifts are a metadata correction rather than a content change.
+    Pass `content` to update text, `type` to change taxonomy, or both.
+    """
+    from .db.models import Memory
+    content = (body.get("content") or "").strip()
+    new_type = (body.get("type") or "").strip().lower() or None
+    if not content and not new_type:
+        raise HTTPException(status_code=400, detail="content or type is required")
+    if content:
+        if not memory_service.update_memory(memory_id, content, db=db):
+            raise HTTPException(status_code=404, detail="memory not found")
+    if new_type:
+        from .services.memory_extraction import VALID_TYPES
+        # `preference` is no longer in VALID_TYPES (extraction was disabled
+        # there), but we still need to accept it as a target type for
+        # legacy rows. Add it back to the allowed set just for this PATCH.
+        allowed = VALID_TYPES | {"preference"}
+        if new_type not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"type must be one of {sorted(allowed)}",
+            )
+        row = db.query(Memory).filter(Memory.id == memory_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="memory not found")
+        row.type = new_type
+        db.commit()
     return {"ok": True, "id": memory_id}
 
 
