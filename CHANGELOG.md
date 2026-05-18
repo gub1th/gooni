@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.95.0 — 2026-05-18 (minor)
+
+- feat(auth): refresh PasswordGate to match the /public theme (#242)
+
 ## 0.94.0 — 2026-05-18 (minor)
 
 - feat(public): add gooni link next to mcp in header meta line (#241)
