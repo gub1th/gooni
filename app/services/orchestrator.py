@@ -545,8 +545,18 @@ class Orchestrator:
                 entry_context = f"Note the user wrote:\n\"\"\"{entry_content}\"\"\""
         else:
             entry_context = ""
-        list_context = list_service.get_list_context(db)
-        focus_context = item_service.get_active_context(db)
+        # list_context dump REMOVED — model fetches list contents on demand
+        # via show_list tool. Was burning ~80 tokens/turn dumping titles even
+        # when no list was relevant to the conversation. Tool surface already
+        # covers it (app/tools/list_tools.py: ShowListTool).
+        list_context = ""
+        # Cosine-rank active focuses against the user's current message so we
+        # only inject the top 2 most-relevant instead of dumping all 5. Avoids
+        # the "every focus visible every turn" bloat that confuses multi-focus
+        # cases like eval 007.
+        focus_context = item_service.get_active_context(
+            db, query_text=message, top_k=2
+        )
         # Promote intention into the prompt so the LLM knows what Daniel is
         # trying to do right now. Previously this was computed and discarded.
         intention_block = (

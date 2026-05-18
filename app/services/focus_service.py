@@ -153,21 +153,82 @@ class FocusService:
             .all()
         )
 
-    def get_active_context(self, db: Session) -> str:
+    def get_active_context(
+        self,
+        db: Session,
+        query_text: str | None = None,
+        top_k: int = 2,
+    ) -> str:
         """Plain-text block for system-prompt injection — committed focuses
         with their endgoals.
+
+        Behavior:
+          - With query_text + focuses that have `current_signature`: rank by
+            cosine to the embedded query, return the top_k most relevant.
+            Falls back to the natural order for any focus missing a cached
+            signature.
+          - Without query_text: return the first top_k by sort_order.
+
+        Pre-trim feedback: prod was dumping all 5 active focuses flat every
+        turn even when only one was contextually relevant. That bloats the
+        prompt AND confuses the model on multi-focus turns (e.g. eval case
+        007 anti_hallucination_unknown_focus). Cosine-rank fixes both.
         """
+        # Pull a wider pool so cosine-rank has room to reorder. We still
+        # only emit top_k lines.
         rows = (
             db.query(Focus)
             .filter(Focus.done.is_(False), Focus.committed.is_(True))
             .order_by(Focus.sort_order, Focus.id)
-            .limit(5)
+            .limit(10)
             .all()
         )
         if not rows:
             return ""
-        lines = ["Daniel's active focuses:"]
-        for f in rows:
+
+        ranked = rows
+        if query_text and len(query_text.strip()) >= 5:
+            try:
+                from ..llm.client import llm_client
+                import math
+                q_emb, _ = llm_client.generate_embedding(query_text)
+                if q_emb:
+                    def _cos(a: list[float], b: list[float]) -> float:
+                        if not a or not b or len(a) != len(b):
+                            return 0.0
+                        dot = sum(x * y for x, y in zip(a, b))
+                        na = math.sqrt(sum(x * x for x in a))
+                        nb = math.sqrt(sum(y * y for y in b))
+                        return dot / (na * nb) if na and nb else 0.0
+
+                    # Score using current_signature (deferred col — explicit
+                    # access loads it). Focuses without a signature get 0
+                    # so they sort to the bottom but aren't lost; a primary
+                    # todo's focus etc still surfaces via the fallback.
+                    scored: list[tuple[float, Focus]] = []
+                    for f in rows:
+                        sig_json = f.current_signature
+                        if sig_json:
+                            try:
+                                sig = json.loads(sig_json)
+                                scored.append((_cos(q_emb, sig), f))
+                                continue
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                        scored.append((0.0, f))
+                    scored.sort(key=lambda t: t[0], reverse=True)
+                    ranked = [f for _, f in scored]
+            except Exception as e:
+                # Never break chat — fall through to natural order on any
+                # embedding / sig parse failure.
+                print(f"[focus_service.get_active_context] rank failed: {e}")
+                ranked = rows
+
+        chosen = ranked[:top_k]
+        if not chosen:
+            return ""
+        lines = ["Daniel's active focuses (top by relevance):"]
+        for f in chosen:
             endgoal = f.endgoal or ""
             lines.append(f"- {f.text}" + (f": {endgoal}" if endgoal else ""))
         return "\n".join(lines)
