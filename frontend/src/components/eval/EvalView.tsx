@@ -2684,6 +2684,7 @@ interface EvalRun {
 }
 
 interface EvalBaselineMeta {
+  filename?: string;
   composite_score: number | null;
   passed: number | null;
   n_cases: number | null;
@@ -2694,6 +2695,31 @@ interface EvalBaselineMeta {
   timestamp: string | null;
   total_cost_usd?: number | null;
   cost_per_case_usd?: number | null;
+}
+
+interface EvalBaselineDetail extends EvalBaselineMeta {
+  case_ids?: string[];
+  failed?: number;
+  results?: Array<{
+    id: string;
+    status: string;
+    stage: string;
+    fails: string[];
+    scores: Record<string, number>;
+    judge_notes: string;
+    judge_model: string;
+    tools_called: (string | null)[];
+    master_prompt_chars: number;
+    cached?: boolean;
+    cost?: { total_cost_usd?: number; by_model?: Record<string, { input_tokens: number; output_tokens: number; cost_usd: number }> };
+    context_summary?: {
+      user_message?: string;
+      seed_focuses?: unknown[];
+      seed_memories?: unknown[];
+      seed_prefs?: unknown[];
+      history?: unknown[];
+    };
+  }>;
 }
 
 function EvalRunsPanel() {
@@ -2707,6 +2733,12 @@ function EvalRunsPanel() {
   const [evalRunning, setEvalRunning] = useState(false);
   const [evalLog, setEvalLog] = useState<string[]>([]);
   const [evalError, setEvalError] = useState<string | null>(null);
+  // Click-a-baseline → fetch full JSON → render per-case detail in right panel.
+  // When set, takes over the right panel (reports iframe gets cleared).
+  const [selectedBaselineFile, setSelectedBaselineFile] = useState<string | null>(null);
+  const [baselineDetail, setBaselineDetail] = useState<EvalBaselineDetail | null>(null);
+  const [baselineDetailLoading, setBaselineDetailLoading] = useState(false);
+  const [baselineDetailError, setBaselineDetailError] = useState<string | null>(null);
   // Bump to force a refetch of /eval/runs after a fresh baseline lands.
   const [refreshTick, setRefreshTick] = useState(0);
   // Report HTML loaded via apiFetch (carries Bearer token). Iframes can't
@@ -2794,6 +2826,33 @@ function EvalRunsPanel() {
     return () => { cancelled = true; };
   }, [selected]);
 
+  // Click baseline → fetch full JSON.
+  useEffect(() => {
+    if (!selectedBaselineFile) {
+      setBaselineDetail(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadBaseline() {
+      setBaselineDetailLoading(true);
+      setBaselineDetailError(null);
+      try {
+        const res = await apiFetch(
+          `${BASE}/eval/baselines/${encodeURIComponent(selectedBaselineFile!)}`
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) setBaselineDetail(data);
+      } catch (e) {
+        if (!cancelled) setBaselineDetailError(e instanceof Error ? e.message : "load failed");
+      } finally {
+        if (!cancelled) setBaselineDetailLoading(false);
+      }
+    }
+    loadBaseline();
+    return () => { cancelled = true; };
+  }, [selectedBaselineFile]);
+
   const baselineList = Object.values(baselines);
 
   return (
@@ -2861,25 +2920,50 @@ function EvalRunsPanel() {
             no baselines yet — click <strong>▶ Run eval on prod snapshot</strong> above to generate one (or run <code>python -m evals.run_orchestrator --baseline</code> locally).
           </div>
         ) : (
-          baselineList.map((b, i) => (
-            <div key={i} style={{ padding: "8px 16px", borderBottom: "1px solid rgba(0,0,0,0.04)", fontFamily: FONT, fontSize: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span style={{ fontWeight: 600 }}>{b.pipeline_model}</span>
-                <span style={{ fontSize: 18, fontWeight: 700, color: (b.composite_score ?? 0) >= 75 ? "#0a8a3a" : (b.composite_score ?? 0) >= 60 ? "#9a7a00" : "#b3261e" }}>
-                  {b.composite_score ?? "?"}
-                </span>
-              </div>
-              <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
-                {b.passed}/{b.n_cases} passed · v{b.pipeline_version} · src={b.pipeline_source_hash?.slice(0, 6)}
-              </div>
-              {(b.total_cost_usd != null) && (
-                <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
-                  💰 ${b.total_cost_usd.toFixed(4)} total
-                  {(b.cost_per_case_usd != null) && ` · $${b.cost_per_case_usd.toFixed(4)}/case`}
+          baselineList.map((b, i) => {
+            const isSelected = b.filename && b.filename === selectedBaselineFile;
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={!b.filename}
+                onClick={() => {
+                  if (!b.filename) return;
+                  // Clicking a baseline takes over the right panel.
+                  setSelectedBaselineFile(b.filename);
+                  setSelected(null);
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "8px 16px",
+                  border: "none",
+                  borderBottom: "1px solid rgba(0,0,0,0.04)",
+                  background: isSelected ? "rgba(0,0,0,0.04)" : "transparent",
+                  cursor: b.filename ? "pointer" : "default",
+                  fontFamily: FONT,
+                  fontSize: 12,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <span style={{ fontWeight: 600 }}>{b.pipeline_model}</span>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: (b.composite_score ?? 0) >= 75 ? "#0a8a3a" : (b.composite_score ?? 0) >= 60 ? "#9a7a00" : "#b3261e" }}>
+                    {b.composite_score ?? "?"}
+                  </span>
                 </div>
-              )}
-            </div>
-          ))
+                <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
+                  {b.passed}/{b.n_cases} passed · v{b.pipeline_version} · src={b.pipeline_source_hash?.slice(0, 6)}
+                </div>
+                {(b.total_cost_usd != null) && (
+                  <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
+                    💰 ${b.total_cost_usd.toFixed(4)} total
+                    {(b.cost_per_case_usd != null) && ` · $${b.cost_per_case_usd.toFixed(4)}/case`}
+                  </div>
+                )}
+              </button>
+            );
+          })
         )}
         <div style={{ padding: "16px 16px 8px", fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
           Reports ({runs.length})
@@ -2896,7 +2980,10 @@ function EvalRunsPanel() {
           runs.map((r) => (
             <button
               key={r.filename}
-              onClick={() => setSelected(r.filename)}
+              onClick={() => {
+                setSelected(r.filename);
+                setSelectedBaselineFile(null);
+              }}
               style={{
                 display: "block",
                 width: "100%",
@@ -2920,11 +3007,23 @@ function EvalRunsPanel() {
           ))
         )}
       </div>
-      {/* Right pane: iframe (srcDoc carries the auth-fetched HTML) */}
-      <div style={{ flex: 1, overflow: "hidden", background: "#FFFFFF" }}>
-        {!selected ? (
+      {/* Right pane: baseline-detail (priority) OR report iframe (fallback). */}
+      <div style={{ flex: 1, overflow: "auto", background: "#FFFFFF" }}>
+        {selectedBaselineFile ? (
+          baselineDetailLoading ? (
+            <div style={{ padding: 24, color: "#8E8E93", fontSize: 13, fontFamily: FONT }}>
+              loading baseline…
+            </div>
+          ) : baselineDetailError ? (
+            <div style={{ padding: 24, color: "#FF3B30", fontSize: 13, fontFamily: FONT }}>
+              error: {baselineDetailError}
+            </div>
+          ) : baselineDetail ? (
+            <BaselineDetailPanel detail={baselineDetail} filename={selectedBaselineFile} />
+          ) : null
+        ) : !selected ? (
           <div style={{ padding: 24, color: "#8E8E93", fontSize: 13, fontFamily: FONT }}>
-            Select a run on the left.
+            Select a baseline or run on the left.
           </div>
         ) : reportLoading ? (
           <div style={{ padding: 24, color: "#8E8E93", fontSize: 13, fontFamily: FONT }}>
@@ -2943,6 +3042,143 @@ function EvalRunsPanel() {
             sandbox="allow-same-origin"
           />
         )}
+      </div>
+    </div>
+  );
+}
+
+
+function BaselineDetailPanel({
+  detail,
+  filename,
+}: {
+  detail: EvalBaselineDetail;
+  filename: string;
+}) {
+  const results = detail.results || [];
+  const passedColor = "#0a8a3a";
+  const failedColor = "#b3261e";
+  return (
+    <div style={{ padding: "20px 24px", fontFamily: FONT, color: "#1C1C1E" }}>
+      <div style={{ fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
+        Baseline
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4, wordBreak: "break-all" }}>
+        {filename}
+      </div>
+      <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>Composite</div>
+          <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2, color: (detail.composite_score ?? 0) >= 75 ? passedColor : (detail.composite_score ?? 0) >= 60 ? "#9a7a00" : failedColor }}>
+            {detail.composite_score ?? "?"}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>Pass / total</div>
+          <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{detail.passed}/{detail.n_cases}</div>
+        </div>
+        {detail.total_cost_usd != null && (
+          <div>
+            <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>Total cost</div>
+            <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>${detail.total_cost_usd.toFixed(4)}</div>
+            {detail.cost_per_case_usd != null && (
+              <div style={{ fontSize: 11, color: "#8E8E93", marginTop: 1 }}>
+                ${detail.cost_per_case_usd.toFixed(4)}/case
+              </div>
+            )}
+          </div>
+        )}
+        <div>
+          <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>Pipeline</div>
+          <div style={{ fontSize: 14, marginTop: 2 }}>
+            v{detail.pipeline_version} · {detail.pipeline_model}
+          </div>
+          <div style={{ fontSize: 11, color: "#8E8E93" }}>src={detail.pipeline_source_hash?.slice(0, 8)}</div>
+        </div>
+      </div>
+
+      {detail.means && Object.keys(detail.means).length > 0 && (
+        <div style={{ marginTop: 18, padding: "10px 12px", background: "rgba(0,0,0,0.03)", borderRadius: 8, fontSize: 12.5 }}>
+          <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
+            Means
+          </div>
+          {Object.entries(detail.means).map(([k, v]) => (
+            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+              <span style={{ color: "#636366" }}>{k}</span>
+              <span style={{ fontWeight: 600 }}>{Number(v).toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ marginTop: 22, fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
+        Per-case results ({results.length})
+      </div>
+      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+        {results.map((r) => {
+          const ok = r.status === "PASS";
+          return (
+            <div
+              key={r.id}
+              style={{
+                border: `1px solid ${ok ? "rgba(10,138,58,0.18)" : "rgba(179,38,30,0.20)"}`,
+                background: ok ? "rgba(10,138,58,0.04)" : "rgba(179,38,30,0.04)",
+                borderRadius: 8,
+                padding: "10px 12px",
+                fontSize: 12.5,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                  <span style={{
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    background: ok ? passedColor : failedColor,
+                    color: "#fff",
+                  }}>
+                    {r.status}
+                  </span>
+                  <span style={{ fontWeight: 600, wordBreak: "break-all" }}>{r.id}</span>
+                  {r.cached && (
+                    <span style={{ fontSize: 10.5, color: "#8E8E93" }}>(cached)</span>
+                  )}
+                </div>
+                <span style={{ fontSize: 11, color: "#8E8E93", flexShrink: 0 }}>
+                  {r.judge_model || ""}
+                  {r.cost?.total_cost_usd != null && ` · $${r.cost.total_cost_usd.toFixed(4)}`}
+                </span>
+              </div>
+              {Object.keys(r.scores || {}).length > 0 && (
+                <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  {Object.entries(r.scores).map(([dim, score]) => (
+                    <span key={dim} style={{ fontSize: 11.5, color: "#636366" }}>
+                      {dim}: <strong>{score}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {r.fails && r.fails.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  {r.fails.map((f, i) => (
+                    <div key={i} style={{ fontSize: 11.5, color: failedColor }}>· {f}</div>
+                  ))}
+                </div>
+              )}
+              {r.judge_notes && (
+                <div style={{ marginTop: 6, fontSize: 11.5, color: "#636366", lineHeight: 1.45 }}>
+                  {r.judge_notes}
+                </div>
+              )}
+              {r.tools_called && r.tools_called.length > 0 && (
+                <div style={{ marginTop: 6, fontSize: 11, color: "#8E8E93", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                  tools: {r.tools_called.filter(Boolean).join(", ")}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
