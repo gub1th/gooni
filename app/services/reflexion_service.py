@@ -121,6 +121,35 @@ def _format_priors(rows: list[Reflection]) -> str:
     return "\n".join(lines)
 
 
+# Score lookup. Composite of gap_dimension severity-weight + clean-bonus.
+# Tuned conservatively — better to under-score a real failure than to inflate
+# easy turns. Aggregated per-conv on dashboards.
+_GAP_DIMENSION_PENALTY = {
+    "none":           0,   # clean turn — full 10
+    "tone":           2,
+    "completeness":   2,
+    "tool_fit":       3,
+    "accuracy":       4,
+    "hallucination":  5,   # most damaging — caps score even at sev 1
+}
+_SEVERITY_PENALTY = {1: 0, 2: 2, 3: 4}
+
+
+def _derive_score(gap_dimension: str, severity: int) -> float:
+    """Map (gap_dimension, severity) → 1-10 quality score. Used for
+    dashboard aggregation + as eval-between-evals signal.
+
+    Floor at 1 so the worst-case sev=3 + hallucination still produces a
+    finite number rather than 0 or negative (which would skew averages).
+    """
+    dim_penalty = _GAP_DIMENSION_PENALTY.get(
+        (gap_dimension or "none").lower(), 2
+    )
+    sev_penalty = _SEVERITY_PENALTY.get(severity, 2)
+    score = 10.0 - dim_penalty - sev_penalty
+    return max(1.0, min(10.0, score))
+
+
 def _cosine(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):
         return 0.0
@@ -243,6 +272,15 @@ class ReflexionService:
             if emb:
                 gap_embedding_json = json.dumps(emb)
 
+        # FK to the most recent prior reflection in this conversation. Lets
+        # downstream consumers walk the chain without re-querying. `prior` was
+        # populated above (last 3 in this conv, id desc) — head is the latest.
+        prev_reflection_id = prior[0].id if prior else None
+
+        # Quality score from gap_dimension + severity. Heuristic; refine as
+        # we learn more. Higher = better turn.
+        score = _derive_score(parsed.get("gap_dimension") or "none", severity)
+
         row = Reflection(
             message_id=message_id,
             conversation_id=conversation_id,
@@ -254,6 +292,9 @@ class ReflexionService:
             proposed_self_fix=parsed.get("proposed_self_fix") or None,
             severity=severity,
             model=model,
+            kind="turn",
+            prev_reflection_id=prev_reflection_id,
+            score=score,
         )
         db.add(row)
         db.commit()
@@ -305,6 +346,139 @@ class ReflexionService:
                 )
         except Exception as e:
             print(f"[reflexion] behavioral promotion failed: {e}")
+
+
+    # ── Conversation-level rollup ────────────────────────────────────────
+    # Periodic batch op: cluster the last N turn-reflections in a conv into
+    # one rollup summary so the master prompt can inject a compressed
+    # "what patterns are emerging this convo" line instead of raw turn
+    # spam. The rollup itself is persisted as a Reflection row with
+    # kind='conv_rollup' so the audit trail stays uniform.
+    _ROLLUP_LOOKBACK = 20  # last N turn-reflections to summarize
+    _ROLLUP_MIN_TURNS = 5  # below this, the rollup is mostly noise — skip
+
+    _ROLLUP_PROMPT = """You are summarizing your recent self-reflections in a conversation into ONE compressed paragraph.
+
+Input: a list of per-turn reflections. Each has severity (1-3), action_vs_described, gap_dimension, and gap_exposed.
+
+Goal: surface the 2-3 LOAD-BEARING failure modes that keep recurring, so a future system prompt can show this to Gooni as "what you tend to miss in this conv" instead of dumping all turns.
+
+Rules:
+- Be SPECIFIC. "Lack of accountability" is useless. "Claims to track commitments without firing a tool" is useful.
+- Cluster paraphrases. If 4 reflections all say variants of "didn't push back on vague intent," compress to one line.
+- Skip clean turns (severity 1) — they're not the pattern.
+- 3 sentences max. Each sentence = one distinct recurring pattern.
+- Reference dimension ("hallucination", "tool_fit") when it adds signal.
+- No preamble. Just the prose.
+
+REFLECTIONS:
+{reflections_block}
+
+Output: 3 sentences max. Plain prose, no markdown, no list."""
+
+    def rollup_conversation(
+        self,
+        db: Session,
+        conversation_id: int,
+    ) -> "Reflection | None":
+        """Summarize recent turn-reflections in this conv into a single
+        conv_rollup Reflection row. Returns the new row, or None if there
+        aren't enough turn reflections yet (< _ROLLUP_MIN_TURNS) or the LLM
+        call failed.
+
+        Idempotent in the loose sense: re-running just creates a fresh
+        rollup row pointing at the latest message. The latest rollup wins
+        for prompt injection; older rollups stay for audit.
+        """
+        from ..db.models import Message as MessageModel
+
+        turn_rows = (
+            db.query(Reflection)
+            .filter(
+                Reflection.conversation_id == conversation_id,
+                Reflection.kind == "turn",
+                Reflection.severity >= 2,
+            )
+            .order_by(Reflection.created_at.desc())
+            .limit(self._ROLLUP_LOOKBACK)
+            .all()
+        )
+        if len(turn_rows) < self._ROLLUP_MIN_TURNS:
+            return None
+
+        lines = []
+        for r in turn_rows:
+            gap = (r.gap_exposed or "").strip()[:200]
+            if not gap:
+                continue
+            lines.append(
+                f"- sev{r.severity} {r.action_vs_described} :: {gap}"
+            )
+        if len(lines) < self._ROLLUP_MIN_TURNS:
+            return None
+
+        prompt = self._ROLLUP_PROMPT.format(
+            reflections_block="\n".join(lines)
+        )
+        model = "gpt-4o-mini"
+        try:
+            summary = llm_client.generate_simple_completion(
+                prompt, max_tokens=400, temperature=0.2, model=model,
+            )
+        except Exception as e:
+            print(f"[reflexion] rollup llm call failed: {e}")
+            return None
+        summary = (summary or "").strip()
+        if not summary:
+            return None
+
+        # Anchor the rollup to the latest message in the conv so the audit
+        # row has a non-null message_id (it's NOT NULL on the schema).
+        latest_msg = (
+            db.query(MessageModel)
+            .filter(MessageModel.conversation_id == conversation_id)
+            .order_by(MessageModel.id.desc())
+            .first()
+        )
+        if latest_msg is None:
+            return None
+
+        row = Reflection(
+            message_id=latest_msg.id,
+            conversation_id=conversation_id,
+            user_critique_present=False,
+            critique_summary=None,
+            action_vs_described="na",
+            gap_exposed=summary,
+            gap_embedding=None,
+            proposed_self_fix=None,
+            severity=2,
+            model=model,
+            kind="conv_rollup",
+            prev_reflection_id=turn_rows[0].id if turn_rows else None,
+            score=None,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+    def latest_rollup_for(
+        self, db: Session, conversation_id: int
+    ) -> "Reflection | None":
+        """Return the most recent conv_rollup for this conversation, or
+        None. Used by master-prompt assembly to inject one compressed line
+        instead of dumping raw turns.
+        """
+        return (
+            db.query(Reflection)
+            .filter(
+                Reflection.conversation_id == conversation_id,
+                Reflection.kind == "conv_rollup",
+            )
+            .order_by(Reflection.created_at.desc())
+            .first()
+        )
 
 
 reflexion_service = ReflexionService()

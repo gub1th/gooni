@@ -1116,6 +1116,27 @@ class Reflection(Base):
     severity = Column(Integer, nullable=False, default=1)
     # 1 = clean, 2 = notable, 3 = load-bearing
     model = Column(String, nullable=False)
+    # Discriminator. 'turn' = standard per-message reflection (the original
+    # use case). 'conv_rollup' = an aggregated summary written by a periodic
+    # rollup job that clusters recent turn-reflections in a conversation
+    # into one paragraph of recurring patterns. Rollups inject INTO the
+    # master prompt's capability block instead of raw turn reflections so
+    # the prompt doesn't drift over time.
+    kind = Column(String, nullable=False, default="turn", index=True)
+    # FK to the prior Reflection in the same conversation. Lets each new
+    # reflection see its own lineage during anti-redundancy checks ("am I
+    # repeating the same gap_exposed as my predecessor?"). Nullable —
+    # first reflection in a conv has no prior.
+    prev_reflection_id = Column(
+        Integer,
+        ForeignKey("reflections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # 1-10 quality score derived from gap_dimension + severity (and other
+    # signals as we add them). Nullable so legacy rows / parse-failed
+    # reflections don't break aggregations. Higher = better turn.
+    score = Column(Float, nullable=True)
     created_at = Column(
         DateTime, default=datetime.utcnow, nullable=False, index=True
     )
