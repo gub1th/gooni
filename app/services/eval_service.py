@@ -132,7 +132,63 @@ def _walk_gap_windows(
 _ACTIVE_RECENT_MINUTES = 30
 
 
-def _serialize_segment(seg: EvalSegment, conv: Conversation, preview: str | None) -> dict:
+def _segment_cost_usd(seg: EvalSegment, db: Session) -> float:
+    """Sum the chat-call cost across all assistant messages in this segment.
+
+    Reads per-message usage from Message.trace[step.key='reply'].meta.usage
+    — that's the UsageTracker output the orchestrator stamps onto every
+    reply. Returns USD float, 0.0 if no usage data found.
+
+    Limitation: covers the main chat call only. Sub-calls (extract,
+    reflect, plan, verify) aren't yet stamped on Message.trace — they
+    happen in separate llm_client calls without per-message usage capture
+    on the audit row. Underestimates by ~$0.001-0.002/turn.
+    """
+    import json as _j
+    from ..llm.pricing import calculate_chat_cost
+
+    rows = (
+        db.query(Message.trace)
+        .filter(
+            Message.conversation_id == seg.conversation_id,
+            Message.id >= seg.start_message_id,
+            Message.id <= seg.end_message_id,
+            Message.role == "assistant",
+            Message.trace.isnot(None),
+        )
+        .all()
+    )
+    total = 0.0
+    for (trace_json,) in rows:
+        if not trace_json:
+            continue
+        try:
+            steps = _j.loads(trace_json)
+        except (_j.JSONDecodeError, TypeError):
+            continue
+        for s in steps:
+            if (s.get("key") or s.get("type")) != "reply":
+                continue
+            usage = (s.get("meta") or {}).get("usage") or {}
+            model = (
+                usage.get("model")
+                or usage.get("pipeline_model")
+                or "gpt-4o-mini"
+            )
+            inp = usage.get("input_tokens") or 0
+            out = usage.get("output_tokens") or 0
+            if inp or out:
+                total += calculate_chat_cost(model, inp, out)["total_cost"]
+            break  # one reply step per trace
+    return round(total, 6)
+
+
+def _serialize_segment(
+    seg: EvalSegment,
+    conv: Conversation,
+    preview: str | None,
+    cost_usd: float | None = None,
+) -> dict:
     is_active = False
     if seg.last_message_at is not None:
         last = seg.last_message_at
@@ -158,6 +214,7 @@ def _serialize_segment(seg: EvalSegment, conv: Conversation, preview: str | None
         "dispatched_note_id": seg.dispatched_note_id,
         "preview": preview,
         "is_active": is_active,
+        "cost_usd": cost_usd,
     }
 
 
@@ -227,7 +284,7 @@ def list_segments(
             ])).lower()
             if search.lower() not in haystack:
                 continue
-        item = _serialize_segment(seg, conv, preview)
+        item = _serialize_segment(seg, conv, preview, cost_usd=_segment_cost_usd(seg, db))
         item["flag_count"] = flag_counts.get(seg.id, 0)
         segments_out.append(item)
     return {"segments": segments_out, "total": total}
@@ -271,7 +328,7 @@ def get_segment_full(db: Session, segment_id: int) -> dict | None:
     tool_calls_by_msg = _tool_calls_by_message(db, message_ids)
     reflections_by_msg = _reflections_by_message(db, message_ids)
     return {
-        "segment": _serialize_segment(seg, conv, None),
+        "segment": _serialize_segment(seg, conv, None, cost_usd=_segment_cost_usd(seg, db)),
         "messages": [
             {
                 "id": m.id,

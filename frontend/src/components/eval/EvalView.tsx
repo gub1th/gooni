@@ -760,6 +760,9 @@ function SegmentCard({
       >
         <span>
           {seg.message_count} msg{when ? ` · ${formatDate(when)}` : ""}
+          {seg.cost_usd != null && seg.cost_usd > 0 && (
+            <span style={{ color: "#8E8E93" }}> · ${seg.cost_usd.toFixed(4)}</span>
+          )}
         </span>
         <span style={{ display: "flex", gap: 8 }}>
           {seg.flag_count > 0 && (
@@ -2689,6 +2692,8 @@ interface EvalBaselineMeta {
   pipeline_version: string | null;
   pipeline_source_hash: string | null;
   timestamp: string | null;
+  total_cost_usd?: number | null;
+  cost_per_case_usd?: number | null;
 }
 
 function EvalRunsPanel() {
@@ -2867,6 +2872,12 @@ function EvalRunsPanel() {
               <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
                 {b.passed}/{b.n_cases} passed · v{b.pipeline_version} · src={b.pipeline_source_hash?.slice(0, 6)}
               </div>
+              {(b.total_cost_usd != null) && (
+                <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
+                  💰 ${b.total_cost_usd.toFixed(4)} total
+                  {(b.cost_per_case_usd != null) && ` · $${b.cost_per_case_usd.toFixed(4)}/case`}
+                </div>
+              )}
             </div>
           ))
         )}

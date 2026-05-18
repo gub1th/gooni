@@ -5440,6 +5440,8 @@ def list_eval_runs():
                 "pipeline_version": data.get("pipeline_version"),
                 "pipeline_source_hash": data.get("pipeline_source_hash"),
                 "timestamp": data.get("timestamp"),
+                "total_cost_usd": data.get("total_cost_usd"),
+                "cost_per_case_usd": data.get("cost_per_case_usd"),
             }
     return {"runs": runs, "baselines_by_key": baselines_by_key}
 
