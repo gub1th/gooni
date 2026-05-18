@@ -190,6 +190,14 @@ function ClockIcon() {
   );
 }
 
+function SparkleIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+      <path d="M8 1.6 L9.1 6.2 L13.7 7.3 L9.1 8.4 L8 13 L6.9 8.4 L2.3 7.3 L6.9 6.2 Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" fill="none" />
+    </svg>
+  );
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
@@ -467,6 +475,20 @@ function PublicPage() {
                 )}
               </>
             )}
+            <a
+              href="/"
+              style={{
+                fontSize: 13, color: "#8a8a8a", textDecoration: "none",
+                fontFamily: FONT,
+                display: "inline-flex", alignItems: "center", gap: 5,
+                borderBottom: "1px dashed rgba(0,0,0,0.18)",
+                paddingBottom: 1,
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#111")}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#8a8a8a")}
+            >
+              <SparkleIcon /> gooni
+            </a>
             <Link
               to="/public/mcp"
               style={{
