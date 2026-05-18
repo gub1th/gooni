@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { ArrowUp } from "lucide-react";
 import {
   fetchNoteComments,
   createNoteComment,
@@ -85,7 +86,11 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
         ].join("; "),
       },
       handleKeyDown: (_view, event) => {
-        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        // iMessage cadence: bare Enter submits; Shift+Enter (or Cmd+Enter)
+        // inserts a newline so multi-line comments still work. Matches
+        // chat composer ergonomics so muscle memory is consistent across
+        // chat / comments.
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
           event.preventDefault();
           void submitFromEditor();
           return true;
@@ -221,183 +226,182 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
 
       {comments.length === 0 && (
         <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 18 }}>
-          No comments yet. Add the first one below — Claude can also drop comments here via MCP.
+          No comments.
         </div>
       )}
 
-      {/* Comment list — Confluence row layout: avatar on the left, header
-          (name + timestamp) on top of body in the right column. */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 18, marginBottom: 22 }}>
+      {/* Chat-bubble thread — iMessage shape. Owner (Daniel) right-aligns
+          with a blue bubble; everyone else left-aligns with a per-identity
+          tint. No hard borders — just rounded bg pills + avatar on the
+          outside corner. Delete handle is invisible until hover. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 22 }}>
         {comments.map((c) => {
           const identity = identityFor(c.author);
           const isHtml = HTML_TAG_RE.test(c.content);
+          const isOwner = identity.kind === "owner";
+          const tint = bubbleTintFor(identity);
           return (
             <div
               key={c.id}
+              className="gooni-comment-row"
               style={{
                 display: "flex",
-                gap: 12,
-                alignItems: "flex-start",
+                gap: 8,
+                alignItems: "flex-end",
+                flexDirection: isOwner ? "row-reverse" : "row",
               }}
             >
-              <CommentAvatar identity={identity} avatarUrl={avatarFor(identity)} size={36} />
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <CommentAvatar identity={identity} avatarUrl={avatarFor(identity)} size={28} />
+              <div
+                style={{
+                  maxWidth: "78%",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: isOwner ? "flex-end" : "flex-start",
+                  gap: 2,
+                }}
+              >
+                <div
+                  className="gooni-comment-bubble"
+                  style={{
+                    background: tint.bg,
+                    color: tint.fg,
+                    padding: "8px 13px",
+                    borderRadius: 18,
+                    // Asymmetric corner — same shape as iMessage thread:
+                    // pointy corner toward the sender's side.
+                    borderBottomRightRadius: isOwner ? 4 : 18,
+                    borderBottomLeftRadius: isOwner ? 18 : 4,
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {isHtml ? (
+                    <div
+                      className="gooni-comment-body"
+                      dangerouslySetInnerHTML={{ __html: c.content }}
+                    />
+                  ) : (
+                    <div
+                      className="gooni-comment-body"
+                      style={{ whiteSpace: "pre-wrap" }}
+                    >
+                      {renderMarkdown(c.content)}
+                    </div>
+                  )}
+                </div>
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "baseline",
-                    gap: 8,
-                    marginBottom: 4,
+                    alignItems: "center",
+                    gap: 6,
+                    paddingLeft: isOwner ? 0 : 4,
+                    paddingRight: isOwner ? 4 : 0,
                   }}
                 >
-                  <span
-                    style={{
-                      fontSize: 13.5,
-                      fontWeight: 600,
-                      color: "#0F172A",
-                    }}
-                  >
-                    {identity.display}
-                  </span>
-                  <span style={{ fontSize: 11.5, color: "#94A3B8" }}>
+                  {!isOwner && (
+                    <span style={{ fontSize: 11, color: "#94A3B8", fontWeight: 500 }}>
+                      {identity.display}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 11, color: "#94A3B8" }}>
                     {formatTime(c.created_at)}
                   </span>
                   <button
                     onClick={() => handleDelete(c.id)}
+                    className="gooni-comment-del"
                     style={{
-                      marginLeft: "auto",
+                      opacity: 0,
                       border: "none",
                       background: "transparent",
                       color: "#CBD5E1",
-                      fontSize: 13,
+                      fontSize: 12,
                       cursor: "pointer",
-                      padding: "2px 6px",
-                      borderRadius: 4,
-                      transition: "color 0.12s, background 0.12s",
+                      padding: "0 4px",
+                      transition: "opacity 0.15s, color 0.12s",
                     }}
                     title="Delete comment"
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.color = "#EF4444";
-                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.06)";
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.color = "#CBD5E1";
-                      (e.currentTarget as HTMLButtonElement).style.background = "transparent";
                     }}
                   >
                     ×
                   </button>
                 </div>
-                {/* Two render paths: HTML-shaped content (TipTap composer
-                    output + MCP add_comment HTML) goes through
-                    dangerouslySetInnerHTML; legacy plain-text rows still
-                    work via the markdown renderer. Trusted source: single-
-                    user app, MCP auth-gated, no foreign authors. */}
-                {isHtml ? (
-                  <div
-                    className="gooni-comment-body"
-                    style={{
-                      fontSize: 14,
-                      lineHeight: 1.55,
-                      color: "#1E293B",
-                      wordBreak: "break-word",
-                    }}
-                    dangerouslySetInnerHTML={{ __html: c.content }}
-                  />
-                ) : (
-                  <div
-                    className="gooni-comment-body"
-                    style={{
-                      fontSize: 14,
-                      lineHeight: 1.55,
-                      color: "#1E293B",
-                      wordBreak: "break-word",
-                      whiteSpace: "pre-wrap",
-                    }}
-                  >
-                    {renderMarkdown(c.content)}
-                  </div>
-                )}
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Composer — Confluence shape: avatar on the left, TipTap editor
-          card on the right with a Cmd+Enter helper line + Comment button. */}
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-        <CommentAvatar identity={myIdentity} avatarUrl={avatarUrl} size={36} />
+      <style>{`
+        .gooni-comment-row:hover .gooni-comment-del { opacity: 1; }
+      `}</style>
+
+      {/* Composer — iMessage capsule. Avatar on the left, rounded input
+          card on the right, send icon inline at right edge. Bare Enter
+          submits; Shift+Enter inserts a newline (handled in editor
+          handleKeyDown above). No bulky "Comment" button. */}
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <CommentAvatar identity={myIdentity} avatarUrl={avatarUrl} size={28} />
         <div
           style={{
             flex: 1,
-            background: "var(--gooni-card, #FFFFFF)",
-            border: hasContent
-              ? "1px solid rgba(15,23,42,0.20)"
-              : "1px solid rgba(15,23,42,0.10)",
-            borderRadius: 10,
-            padding: "10px 14px 10px",
-            transition: "border-color 0.15s, box-shadow 0.15s",
-            boxShadow: hasContent ? "0 1px 3px rgba(15,23,42,0.06)" : "none",
+            display: "flex",
+            alignItems: "flex-end",
+            background: "rgba(15,23,42,0.04)",
+            borderRadius: 18,
+            padding: "8px 8px 8px 14px",
+            transition: "background 0.15s",
           }}
         >
-          <EditorContent editor={editor} />
-          <div
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <EditorContent editor={editor} />
+          </div>
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={submitFromEditor}
+            disabled={!hasContent || posting}
+            title="Send (Enter)"
             style={{
-              display: "flex",
+              width: 28,
+              height: 28,
+              borderRadius: "50%",
+              border: "none",
+              background: !hasContent || posting ? "rgba(15,23,42,0.08)" : "#0A84FF",
+              color: !hasContent || posting ? "#94A3B8" : "#FFFFFF",
+              display: "inline-flex",
               alignItems: "center",
-              justifyContent: "space-between",
-              marginTop: 10,
-              gap: 8,
+              justifyContent: "center",
+              padding: 0,
+              cursor: !hasContent || posting ? "default" : "pointer",
+              transition: "background 0.12s, color 0.12s",
+              flexShrink: 0,
             }}
           >
-            <span style={{ fontSize: 11, color: "#94A3B8" }}>
-              ⌘↵ to post
-            </span>
-            <div style={{ display: "flex", gap: 6 }}>
-              {hasContent && (
-                <button
-                  onClick={() => {
-                    editor?.commands.clearContent();
-                    setHasContent(false);
-                  }}
-                  style={{
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "transparent",
-                    color: "#64748B",
-                    fontFamily: FONT,
-                    fontSize: 13,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-              )}
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={submitFromEditor}
-                disabled={!hasContent || posting}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: !hasContent || posting ? "#CBD5E1" : "#0F172A",
-                  color: "white",
-                  fontFamily: FONT,
-                  fontSize: 13,
-                  fontWeight: 500,
-                  cursor: !hasContent || posting ? "default" : "pointer",
-                  transition: "background 0.12s",
-                }}
-              >
-                {posting ? "Posting…" : "Comment"}
-              </button>
-            </div>
-          </div>
+            <ArrowUp size={15} strokeWidth={2.6} />
+          </button>
         </div>
       </div>
     </div>
   );
+}
+
+// Per-identity bubble palette. Daniel = iMessage blue; Claude / Gooni get
+// brand-leaning tints so the author is glanceable without a label.
+function bubbleTintFor(identity: Identity): { bg: string; fg: string } {
+  switch (identity.kind) {
+    case "owner":
+      return { bg: "#0A84FF", fg: "#FFFFFF" };
+    case "claude":
+      return { bg: "rgba(168,85,247,0.14)", fg: "#3B0764" };
+    case "gooni":
+      return { bg: "rgba(16,185,129,0.16)", fg: "#064E3B" };
+    default:
+      return { bg: "rgba(15,23,42,0.06)", fg: "#0F172A" };
+  }
 }

@@ -54,6 +54,7 @@ See `docs/TODO.md` (gitignored — local only).
   - `Edge` — graph layer for semantic many-to-many. UNIQUE on `(src_kind, src_id, dst_kind, dst_id, kind)`; bidirectional indexes. v1 kinds: `utters` / `supports` / `closes` / `derives_from` / `mentions`. Ownership FKs stay (Comment.note_id, Memory.source_note_id, Todo.focus_id) — this table handles links that would M²-explode the schema as FK columns.
   - `WaProcessedId` — wamid idempotency for WhatsApp retries.
   - `Attachment` — generic file attached to a Note (PDF, doc, archive, etc.). Stored on R2 under `attachments/`; row holds `filename`, `mime_type`, `size_bytes`, `storage_key`, `public_url`. Distinct from inline images (which live as `<figure>` nodes in note HTML). Inline-card UX via TipTap `attachment` node — same DOM rendered on editor + public view; click opens AttachmentModal (image lightbox / PDF iframe / video / fallback download).
+  - `Note.tags` — JSON-text list of free-form labels (lowercase, ≤60 chars each, deduped server-side). Powers cross-cutting views ("from-claude", "feedback", session tags). MCP `add_note` auto-injects `from-claude`. Rendered as small-caps muted chips above the title.
   - `Space.is_pinned` — sidebar pin. Pinned spaces float to top of the spaces list within the user's manual drag-order.
   - `EvalMessageRating.rating` is now nullable — reviewers can save a comment-only row (rating=null + non-empty comment). Empty rows (rating=null AND no comment) are rejected at the route layer. Decoupling fixed the "Daniel typed a note then it disappeared when he picked a rating after" data-loss bug.
   - Singletons: `Space`, `List`, `ListItem`, `PublicProfile`, `Visit`, `OAuthToken`, `TrackedRepo`, `McpCall`, `ClaudeUsageTurn`, `EvalSegment`, `EvalStepFeedback`, `EvalMessageRating`, `WhoopSnapshot`, `LeetcodeSnapshot`, `GooniTake`, `NoteComment`, `Habit`, `HabitEntry`.
@@ -182,6 +183,8 @@ DELETE /comments/{id}
 # Uploads
 POST   /uploads/image                 → multipart → R2 → { url, key }. 503 when R2 env unset → FE falls back to inline base64. 10 MB, image/* only.
 POST   /uploads/file                  → multipart → R2 (`attachments/YYYY/MM/DD/...`) → { url, key, filename, mime_type, size_bytes, attachment_id? }. Optional `note_id` form field creates an `attachments` row (else upload is orphan-tolerable). 25 MB cap, any MIME. 503 when R2 env unset (no base64 fallback for opaque files).
+GET    /promises?state=pending&limit=50 → list w/ deadline-asc sort for pending, recency for everything else
+PATCH  /promises/{id}                  → { state: pending|kept|broken|abandoned }. Idempotent — re-sending current state is a no-op.
 GET    /uploads/og?url=...            → server-side Open Graph scraper (og:title/description/image/site_name + fallbacks). Used by TipTap LinkCard node so the browser doesn't expose its IP. Graceful degrade to { url, title:url } on any fetch error.
 GET    /notes/{id}/attachments        → list rows for that note
 DELETE /attachments/{id}              → drops DB row (R2 object kept; future sweeper reconciles)

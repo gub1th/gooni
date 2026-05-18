@@ -32,9 +32,20 @@ function relativeTime(iso: string | null): string {
   return `${Math.floor(mo / 12)}y ago`;
 }
 
-export function ActiveRulesCard() {
+interface ActiveRulesCardProps {
+  // When true, render the collapsed-by-default control shell — header
+  // shows the count + expand chevron, body only renders when `open`.
+  // Caller owns `open` so the state persists in localStorage at the
+  // EvalView level.
+  collapsedDefault?: boolean;
+  open?: boolean;
+  onToggle?: () => void;
+}
+
+export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: ActiveRulesCardProps = {}) {
   const [rules, setRules] = useState<ChatAuditActiveRule[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const open = openProp ?? !collapsedDefault;
 
   useEffect(() => {
     let cancelled = false;
@@ -66,18 +77,40 @@ export function ActiveRulesCard() {
       background: "#fff",
       border: "1px solid rgba(0,0,0,0.08)",
       borderRadius: 12,
-      padding: "14px 16px",
+      padding: "12px 16px",
       margin: "16px 24px 0",
       fontFamily: FONT,
     }}>
-      <div style={{
-        fontSize: 11, fontWeight: 600, letterSpacing: 0.4,
-        textTransform: "uppercase", color: "#8E8E93", marginBottom: 10,
-      }}>
-        Active feedback rules ({rules.length})
-      </div>
-      {rules.length === 0 ? (
-        <div style={{ fontSize: 13, color: "#AEAEB2" }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          cursor: onToggle ? "pointer" : "default",
+          fontFamily: FONT,
+          color: "#1C1C1E",
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600 }}>
+          Active feedback rules
+        </span>
+        <span style={{ fontSize: 12, color: "#8E8E93", fontWeight: 500 }}>
+          ({rules.length})
+        </span>
+        {onToggle && (
+          <span style={{ marginLeft: "auto", fontSize: 11, color: "#8E8E93" }}>
+            {open ? "collapse ▴" : "expand ▾"}
+          </span>
+        )}
+      </button>
+      {!open ? null : rules.length === 0 ? (
+        <div style={{ fontSize: 13, color: "#AEAEB2", marginTop: 10 }}>
           No active rules. Reply to a Gooni message with a correction (e.g. "less teacher-y") to add one.
         </div>
       ) : (
@@ -85,6 +118,7 @@ export function ActiveRulesCard() {
           display: "flex", flexDirection: "column", gap: 6,
           maxHeight: 320, overflowY: "auto",
           paddingRight: 4,
+          marginTop: 10,
         }}>
           {rules.map((r) => (
             <div

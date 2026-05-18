@@ -48,9 +48,15 @@ export const NoteLink = Node.create({
       mergeAttributes(HTMLAttributes, {
         "data-note-link": "true",
         class: "gooni-note-link",
+        // href is intentionally a no-target route fragment — the editor's
+        // click delegation captures the click and routes via Zustand. We
+        // explicitly drop target so clicks never escape to a new tab.
         href: "#",
+        target: "_self",
       }),
-      `↗ ${label}`,
+      // Label only, no "↗" glyph. The marker should read like a normal
+      // hyperlink in flowing prose — Daniel called the pill chrome ugly.
+      label,
     ];
   },
 });

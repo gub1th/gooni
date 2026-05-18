@@ -188,6 +188,7 @@ function useEditorStyles() {
       .gooni-note-editor ul { list-style-type: disc; }
       .gooni-note-editor ul ul { list-style-type: circle; }
       .gooni-note-editor ul ul ul { list-style-type: square; }
+      @keyframes gooni-spin { to { transform: rotate(360deg); } }
       .gooni-note-editor.is-empty > p:first-child { position: relative; }
       .gooni-note-editor.is-empty > p:first-child::before {
         content: "Start writing — press '/' for blocks";
@@ -217,29 +218,25 @@ function useEditorStyles() {
         display: block;
         margin: 8px 0;
       }
-      /* Extracted-to-child note chip — inline pill, click navigates to child. */
+      /* Extracted-to-child note chip — inline-flow link styling (no pill
+         chrome). Stays in the text line so the parent reads as normal
+         prose with a single colored hyperlink, not "look here's a UI
+         widget". Same color family as the public-prose anchor. */
       .gooni-note-editor a.gooni-note-link {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        padding: 1px 8px;
-        margin: 0 2px;
-        background: rgba(74,222,128,0.10);
-        color: #16803C;
-        border: 0.5px solid rgba(22,128,60,0.25);
-        border-radius: 12px;
-        font-size: 0.88em;
-        text-decoration: none;
+        color: #2563EB;
+        text-decoration: underline;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
         cursor: pointer;
-        transition: background 0.12s, border-color 0.12s;
+        font-size: inherit;
+        font-weight: inherit;
       }
       .gooni-note-editor a.gooni-note-link:hover {
-        background: rgba(74,222,128,0.18);
-        border-color: rgba(22,128,60,0.45);
+        color: #1D4ED8;
       }
       .gooni-note-editor a.gooni-note-link.ProseMirror-selectednode {
-        outline: 2px solid #007AFF;
-        outline-offset: 1px;
+        background: rgba(37,99,235,0.10);
+        border-radius: 2px;
       }
       .gooni-note-editor img.ProseMirror-selectednode {
         outline: 2px solid #007AFF;
@@ -383,6 +380,18 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
   // notes doesn't carry the green-checked state across.
   const [taggedNoteId, setTaggedNoteId] = useState<number | null>(null);
   const [taggingInFlight, setTaggingInFlight] = useState(false);
+  // Local working copy of the note's tag set — patched through to the
+  // backend on each add/remove. Decoupled from activeNote.tags so we can
+  // show optimistic updates without waiting for the server round-trip.
+  const [localTags, setLocalTags] = useState<string[]>(activeNote?.tags ?? []);
+  const [newTagDraft, setNewTagDraft] = useState("");
+  const [tagInputOpen, setTagInputOpen] = useState(false);
+  // Guard against extract-spam — Daniel clicked Extract 6× during a
+  // network stall and got 4 dupe children (PR #244 postmortem). Backend
+  // also dedups within 30s, but the UI lock prevents the cascade of
+  // dependent fetches (notes / pinned / drafts / children) that the
+  // duplicate clicks triggered.
+  const [extractInFlight, setExtractInFlight] = useState(false);
   // Parent note title cache — populated when the active note has a
   // parent_note_id so the back-pill can render the actual title instead
   // of "↑ from #42". Keyed by parent id so switching notes doesn't show
@@ -457,6 +466,9 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     setNoteMemories([]);
     setDeleteConfirm(false);
     setLocalIsPublic(activeNote?.is_public ?? false);
+    setLocalTags(activeNote?.tags ?? []);
+    setNewTagDraft("");
+    setTagInputOpen(false);
     hasChanges.current = false;
   }, [activeNoteId]);
 
@@ -741,6 +753,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
   async function handleExtractToChildNote() {
     if (!editor || editor.isDestroyed) return;
     if (!activeNoteId || activeNoteId <= 0) return;
+    if (extractInFlight) return; // ignore re-clicks while the network call is pending
     const parentId = activeNoteId;
     const { from, to } = editor.state.selection;
     if (from === to) return;
@@ -750,13 +763,18 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     tmp.appendChild(fragment);
     const selectedHtml = tmp.innerHTML.trim();
     if (!selectedHtml) return;
+    setExtractInFlight(true);
     let child: ApiNote | null = null;
     try {
       child = await apiExtractToChildNote(parentId, selectedHtml);
     } catch {
+      setExtractInFlight(false);
       return; // silent — selection stays intact
     }
-    if (!child) return;
+    if (!child) {
+      setExtractInFlight(false);
+      return;
+    }
     const labelSource = (child.excerpt_anchor || child.title || tmp.textContent || "note").trim();
     const label = labelSource.length > 40 ? labelSource.slice(0, 40) + "…" : labelSource;
     editor
@@ -777,6 +795,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     await refetchNote(child.id).catch(() => {});
     selectNote(child.id);
     navigate({ to: "/", search: { note: child.id, conv: undefined, list: undefined, audit: undefined, segment: undefined } });
+    setExtractInFlight(false);
   }
 
   async function handleSubmit() {
@@ -1060,6 +1079,52 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       emoji: s.id === "general" ? "lucide:Inbox" : s.emoji,
     }))
     .filter((s) => s.id !== currentSpaceId);
+
+  // Commit the local tag set to the server. Same optimistic pattern as
+  // pin/draft toggles — patch the cached note in every space list so the
+  // chips row stays in sync without a refetch.
+  async function commitTags(next: string[]) {
+    if (!activeNoteId || activeNoteId < 0) return;
+    setLocalTags(next);
+    try {
+      const updated = await apiPatchNote(activeNoteId, { tags: next });
+      // Server normalizes (lowercase / dedup / cap-60). Adopt its shape so
+      // a user typing "FROM-Claude" doesn't keep that casing client-side.
+      setLocalTags(updated.tags ?? next);
+      useNotesContentStore.setState((s) => {
+        const updatedNotes: Record<string, ApiNote[]> = {};
+        for (const [k, list] of Object.entries(s.notes)) {
+          updatedNotes[k] = list.map((n) =>
+            n.id === activeNoteId ? { ...n, tags: updated.tags ?? next } : n,
+          );
+        }
+        return { notes: updatedNotes };
+      });
+    } catch (e) {
+      console.error("commitTags failed", e);
+    }
+  }
+
+  function addTagFromDraft() {
+    const raw = newTagDraft.trim();
+    if (!raw) {
+      setTagInputOpen(false);
+      return;
+    }
+    const cleaned = raw.toLowerCase().slice(0, 60);
+    if (localTags.includes(cleaned)) {
+      setNewTagDraft("");
+      return;
+    }
+    const next = [...localTags, cleaned];
+    void commitTags(next);
+    setNewTagDraft("");
+  }
+
+  function removeTag(tag: string) {
+    const next = localTags.filter((t) => t !== tag);
+    void commitTags(next);
+  }
 
   async function handleTogglePin() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
@@ -1778,6 +1843,104 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 >
                   {formatNoteDate(activeNote.updated_at)}
                 </div>
+                {/* Tag row — small-caps low-contrast chips above the title.
+                    Click chip → remove. "+ tag" enters inline input mode.
+                    Daniel asked for "subtle" — hence the small font / muted
+                    color, no rounded background unless hovered. */}
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    alignItems: "center",
+                    marginBottom: 8,
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                  }}
+                >
+                  {localTags.map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => removeTag(tag)}
+                      title={`Remove tag "${tag}"`}
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                        color: "var(--gooni-muted, #8E8E93)",
+                        background: "transparent",
+                        border: "none",
+                        padding: "1px 6px",
+                        borderRadius: 4,
+                        cursor: "pointer",
+                        transition: "background 0.12s, color 0.12s",
+                      }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.05)";
+                        (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                        (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)";
+                      }}
+                    >
+                      #{tag}
+                    </button>
+                  ))}
+                  {tagInputOpen ? (
+                    <input
+                      autoFocus
+                      value={newTagDraft}
+                      onChange={(e) => setNewTagDraft(e.target.value)}
+                      onBlur={addTagFromDraft}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addTagFromDraft();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          setNewTagDraft("");
+                          setTagInputOpen(false);
+                        }
+                      }}
+                      placeholder="add tag"
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                        color: "var(--gooni-text, #1C1C1E)",
+                        background: "rgba(15,23,42,0.05)",
+                        border: "none",
+                        outline: "none",
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        width: 90,
+                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                      }}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setTagInputOpen(true)}
+                      title="Add tag"
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 600,
+                        letterSpacing: 0.6,
+                        textTransform: "uppercase",
+                        color: "rgba(142,142,147,0.55)",
+                        background: "transparent",
+                        border: "none",
+                        padding: "1px 4px",
+                        cursor: "pointer",
+                      }}
+                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)")}
+                      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "rgba(142,142,147,0.55)")}
+                    >
+                      + tag
+                    </button>
+                  )}
+                </div>
                 <input
                   ref={titleInputRef}
                   value={localTitle}
@@ -1971,8 +2134,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       <>
                         <span style={{ width: 1, height: 18, background: "rgba(15,23,42,0.10)", margin: "0 4px" }} />
                         <button
-                          title="Extract to new linked note"
-                          onMouseDown={(e) => { e.preventDefault(); void handleExtractToChildNote(); }}
+                          title={extractInFlight ? "Extracting…" : "Extract to new linked note"}
+                          disabled={extractInFlight}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            if (extractInFlight) return;
+                            void handleExtractToChildNote();
+                          }}
                           style={{
                             display: "flex", alignItems: "center", justifyContent: "center",
                             gap: 4,
@@ -1981,17 +2149,40 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                             borderRadius: 8,
                             border: "none",
                             background: "transparent",
-                            color: "#475569",
-                            cursor: "pointer",
+                            color: extractInFlight ? "#94A3B8" : "#475569",
+                            cursor: extractInFlight ? "wait" : "pointer",
                             fontSize: 12,
                             fontWeight: 500,
                             transition: "background 0.12s, color 0.12s",
+                            opacity: extractInFlight ? 0.7 : 1,
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(15,23,42,0.05)"; e.currentTarget.style.color = "#0F172A"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#475569"; }}
+                          onMouseEnter={(e) => {
+                            if (extractInFlight) return;
+                            e.currentTarget.style.background = "rgba(15,23,42,0.05)";
+                            e.currentTarget.style.color = "#0F172A";
+                          }}
+                          onMouseLeave={(e) => {
+                            if (extractInFlight) return;
+                            e.currentTarget.style.background = "transparent";
+                            e.currentTarget.style.color = "#475569";
+                          }}
                         >
-                          <CornerUpRight size={13} strokeWidth={1.9} />
-                          Extract
+                          {extractInFlight ? (
+                            // CSS-only spinner — matches the rest of the editor
+                            // chrome's no-extra-deps rule. Border-top animates
+                            // around a transparent rest of the ring.
+                            <span
+                              style={{
+                                width: 12, height: 12, borderRadius: "50%",
+                                border: "1.5px solid rgba(15,23,42,0.15)",
+                                borderTopColor: "rgba(15,23,42,0.55)",
+                                animation: "gooni-spin 0.7s linear infinite",
+                              }}
+                            />
+                          ) : (
+                            <CornerUpRight size={13} strokeWidth={1.9} />
+                          )}
+                          {extractInFlight ? "Extracting…" : "Extract"}
                         </button>
                       </>
                     )}

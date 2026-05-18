@@ -227,6 +227,7 @@ def add_note(
     space_name: str = "Claude Code",
     is_draft: bool = False,
     is_pinned: bool = False,
+    tags: list[str] | None = None,
 ) -> str:
     """Create a new note in Gooni.
 
@@ -237,6 +238,10 @@ def add_note(
     The space is resolved by name and auto-created if missing, so this
     tool stays correct even after DB rebuilds where IDs shift.
 
+    Every Claude-authored note is auto-tagged `from-claude` (merged with
+    any caller-supplied tags) so Daniel can filter the corpus by author.
+    Override by passing `tags=["from-claude", "foo", "bar"]` etc.
+
     Args:
         title: short note title
         content: note body (plain text or HTML)
@@ -244,9 +249,14 @@ def add_note(
         is_draft: surface in the Drafts sidebar (default False). Use when
             you're seeding a half-written note Daniel should finish.
         is_pinned: pin the note (default False).
+        tags: free-form labels (lowercase, ≤60 chars each, deduped). Always
+            merged with `from-claude` so the author tag is never lost.
     """
     space_id = _resolve_space_id(space_name, emoji="🤖" if space_name == "Claude Code" else None)
-    payload: dict = {"title": title, "content": content}
+    # Merge caller tags with the author-stamp. Lowercase + dedup happens
+    # server-side; we just prepend the marker.
+    merged_tags = ["from-claude", *(tags or [])]
+    payload: dict = {"title": title, "content": content, "tags": merged_tags}
     if is_draft:
         payload["is_draft"] = True
     if is_pinned:
@@ -264,8 +274,9 @@ def add_note(
     if is_pinned:
         flags.append("pinned")
     suffix = f" [{', '.join(flags)}]" if flags else ""
+    tag_part = f" tags={merged_tags}" if merged_tags else ""
     url = f"{FRONTEND_URL}/?note={n['id']}"
-    return f"Created note #{n['id']} in {space_name}: {n['title']}{suffix} ({url})"
+    return f"Created note #{n['id']} in {space_name}: {n['title']}{suffix}{tag_part} ({url})"
 
 
 @mcp.tool()
@@ -637,6 +648,7 @@ def edit_note(
     content: str = None,
     is_draft: bool = None,
     is_pinned: bool = None,
+    tags: list[str] | None = None,
 ) -> str:
     """Edit an existing note in Gooni. Use this to update progress notes or
     evolving docs, or to flip the draft/pinned flags on an existing note.
@@ -650,6 +662,10 @@ def edit_note(
             wasn't initially marked draft.
         is_pinned: set/clear the pinned flag (optional — omit to leave
             unchanged).
+        tags: replace the tag set (optional). Pass an explicit list to
+            overwrite; omit to keep current. To add `from-claude` without
+            blowing away existing tags, fetch the note first via
+            `read_note` / `find_note`, merge, then pass the merged list.
     """
     patch: dict = {}
     if title is not None:
@@ -660,6 +676,8 @@ def edit_note(
         patch["is_draft"] = bool(is_draft)
     if is_pinned is not None:
         patch["is_pinned"] = bool(is_pinned)
+    if tags is not None:
+        patch["tags"] = list(tags)
     if not patch:
         return "Nothing to update."
     resp = _session.patch(f"{BASE_URL}/notes/{note_id}", json=patch, timeout=10)
@@ -670,6 +688,8 @@ def edit_note(
         flags.append(f"draft={bool(is_draft)}")
     if is_pinned is not None:
         flags.append(f"pinned={bool(is_pinned)}")
+    if tags is not None:
+        flags.append(f"tags={n.get('tags') or []}")
     suffix = f" [{', '.join(flags)}]" if flags else ""
     return f"Updated note #{n['id']}: {n['title']}{suffix}"
 
@@ -713,7 +733,8 @@ def list_notes(space: str = "general", limit: int = 20) -> str:
     lines = []
     for n in notes:
         snippet = (n.get("content") or "")[:80].replace("\n", " ")
-        lines.append(f"#{n['id']} {n['title'] or '(untitled)'} — {snippet}")
+        tag_part = f" {n['tags']}" if n.get("tags") else ""
+        lines.append(f"#{n['id']} {n['title'] or '(untitled)'}{tag_part} — {snippet}")
     return "\n".join(lines)
 
 
@@ -1599,7 +1620,8 @@ def find_note(match: str, limit: int = 5) -> str:
     lines = []
     for n in hits:
         snippet = (n.get("content") or "")[:120].replace("\n", " ")
-        lines.append(f"#{n['id']} {n['title'] or '(untitled)'} — {snippet}")
+        tag_part = f" {n['tags']}" if n.get("tags") else ""
+        lines.append(f"#{n['id']} {n['title'] or '(untitled)'}{tag_part} — {snippet}")
     return "\n".join(lines)
 
 
