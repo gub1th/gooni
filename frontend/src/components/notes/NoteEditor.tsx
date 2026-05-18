@@ -948,6 +948,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         // restore-from-local-draft case.
         editor.commands.setContent(desired, { emitUpdate: false });
         bodyRef.current = desired;
+        // Re-sync editorEmpty since emitUpdate=false skips onUpdate.
+        // Without this, MCP/auto-generated notes open with editorEmpty
+        // stuck at its previous `true` value — the `.is-empty` class
+        // stays on the editor DOM and the `::before` placeholder
+        // renders ON TOP of the real content (Daniel's screenshot
+        // 2026-05-18).
+        setEditorEmpty(editor.isEmpty);
       }
       titleRef.current = desiredTitle;
       hydratedNoteId.current = activeNoteId;
