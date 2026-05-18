@@ -2,19 +2,16 @@ import { useDashboardStore, type DashboardMode } from "../../stores/useDashboard
 
 // ModeToggle — top-tier dashboard toggle. Three modes:
 //   Today  — current dashboard (todos/focuses/habits/take)
-//   Build  — Gooni health (6-axis composite scores)
-//   Pulse  — life stats (Whoop/LeetCode/GitHub/etc)
-//
-// Border-radius matches todo/focus card chrome (12) so the dashboard reads
-// as one coherent layout. No per-mode background tint — global theme bg
-// owns the page surface (Settings → Appearance).
+//   Ops    — Gooni health + backlog + capability profile
+//   Stats  — life stats (Whoop/LeetCode/Dev/Usage/Activity), merged from
+//            the old Pulse mode + the now-removed Stats sidebar page
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const MODES: { id: DashboardMode; label: string }[] = [
   { id: "today", label: "Today" },
   { id: "ops", label: "Ops" },
-  { id: "pulse", label: "Pulse" },
+  { id: "stats", label: "Stats" },
 ];
 
 export function ModeToggle() {

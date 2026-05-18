@@ -1658,34 +1658,58 @@ function SelfTakePanel({ messageId }: { messageId: number }) {
   // the DB for classifier eval, just don't clutter the UI per-message.
   if (reflection.severity < 2) return null;
 
-  const palette = (
-    reflection.severity === 3
-      ? { bg: "#FFF5F5", border: "#FFD3D3", accent: "#FF3B30", label: "load-bearing" }
-      : { bg: "#FFFBEA", border: "#FFE6A6", accent: "#FF9500", label: "notable" }
-  );
+  // Standard card chrome — the old palette had a warm orange/red shell
+  // that didn't exist anywhere else in the app. Now: white card matching
+  // the eval message bubbles, with severity expressed as a small pill in
+  // the header (green/amber for sev 2/3) instead of bleeding into the
+  // whole card surface.
+  const pill = reflection.severity === 3
+    ? { bg: "rgba(220,38,38,0.10)", color: "#B91C1C", label: "load-bearing" }
+    : { bg: "rgba(245,158,11,0.12)", color: "#92400E", label: "notable" };
 
   return (
     <div
       style={{
         marginTop: 12,
         padding: "10px 12px",
-        background: palette.bg,
-        border: `1px solid ${palette.border}`,
-        borderLeft: `3px solid ${palette.accent}`,
+        background: "#FFFFFF",
+        border: "1px solid #E5E5EA",
         borderRadius: 8,
       }}
     >
       <div
         style={{
-          fontSize: 11,
-          textTransform: "uppercase",
-          letterSpacing: 0.3,
-          color: palette.accent,
-          fontWeight: 600,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
           marginBottom: 6,
         }}
       >
-        Gooni's self-take · sev {reflection.severity} · {palette.label} · {reflection.action_vs_described}
+        <span
+          style={{
+            fontSize: 10.5,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+            color: "#8E8E93",
+            fontWeight: 600,
+          }}
+        >
+          Gooni's self-take
+        </span>
+        <span
+          style={{
+            display: "inline-flex", alignItems: "center",
+            padding: "1px 6px", borderRadius: 999,
+            background: pill.bg, color: pill.color,
+            fontSize: 10, fontWeight: 600,
+            letterSpacing: 0.3, textTransform: "uppercase",
+          }}
+        >
+          sev {reflection.severity} · {pill.label}
+        </span>
+        <span style={{ fontSize: 11, color: "#8E8E93" }}>
+          · {reflection.action_vs_described}
+        </span>
       </div>
       {reflection.critique_summary && (
         <div style={{ fontSize: 13, color: "#1C1C1E", marginBottom: 4 }}>

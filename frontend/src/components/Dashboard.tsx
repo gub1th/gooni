@@ -17,7 +17,7 @@ import { TabToggle } from "./dashboard/TabToggle";
 import { FocusesView } from "./dashboard/FocusesView";
 import { ModeToggle } from "./dashboard/ModeToggle";
 import { OpsMode } from "./dashboard/OpsMode";
-import { PulseMode } from "./dashboard/PulseMode";
+import { StatsMode } from "./dashboard/StatsMode";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -26,7 +26,6 @@ const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export function Dashboard({ onOpenNote: _onOpenNote }: {
   onOpenNote: () => void;
-  onOpenStats?: () => void;
 }) {
   const queryClient = useQueryClient();
   // Cached + de-duped via React Query. Navigating back to the dashboard hits
@@ -172,10 +171,12 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
           <OpsMode />
         )}
 
-        {activeMode === "pulse" && (
-          /* Pulse mode = life-stats grid. Whoop / LeetCode / habits /
-             commits / engagement etc, in a consistent stat-card chrome. */
-          <PulseMode />
+        {activeMode === "stats" && (
+          /* Stats mode = merged life-stats + dev-activity surface. Absorbs
+             the old Pulse tab AND the standalone Stats sidebar page so
+             there's one place to look for Whoop / LeetCode / Dev Take /
+             usage / activity counters. */
+          <StatsMode />
         )}
 
         </div>

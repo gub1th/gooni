@@ -74,7 +74,7 @@ export function StatsView() {
 
 // ── Sections ──────────────────────────────────────────────────────────────
 
-function SectionShell({
+export function SectionShell({
   label, children, right,
 }: { label: string; children: React.ReactNode; right?: React.ReactNode }) {
   return (
@@ -102,7 +102,7 @@ function SectionShell({
   );
 }
 
-function WhoopSection() {
+export function WhoopSection() {
   // Hide whole section unless Whoop is configured AND connected. Avoids
   // rendering empty stubs for users without the integration.
   const { data: status } = useQuery<WhoopStatus>({
@@ -256,7 +256,7 @@ function RecoveryRing({ score, color }: { score: number | null; color: string })
   );
 }
 
-function LeetcodeSection() {
+export function LeetcodeSection() {
   const { data, isLoading, refetch, isFetching } = useQuery<LeetcodeToday>({
     queryKey: ["leetcode-today"],
     queryFn: () => fetchLeetcodeToday(),
@@ -458,7 +458,7 @@ function Heatmap({ calendar }: { calendar: Record<string, number> }) {
 }
 
 
-function DevSection() {
+export function DevSection() {
   const { data: dev, isLoading } = useQuery<DevActivity | null>({
     queryKey: ["dev-activity"],
     queryFn: () => fetchDevActivity().catch(() => null),
@@ -584,7 +584,7 @@ function DevSection() {
   );
 }
 
-function ActivitySection() {
+export function ActivitySection() {
   const { data: stats, isLoading } = useQuery<DashboardStats>({
     queryKey: ["dashboard-stats"],
     queryFn: fetchDashboardStats,
@@ -754,7 +754,7 @@ function ActivityTile({
 
 // ── Atoms ─────────────────────────────────────────────────────────────────
 
-function BigStat({
+export function BigStat({
   label, value, sub, delta,
 }: {
   label: string;
@@ -862,7 +862,7 @@ function RepoRow({ repo }: { repo: DevActivityRepo }) {
   );
 }
 
-function SkeletonRow() {
+export function SkeletonRow() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <Skeleton width="60%" height={16} />
@@ -872,12 +872,12 @@ function SkeletonRow() {
   );
 }
 
-function fmtInt(n: number | null | undefined): string {
+export function fmtInt(n: number | null | undefined): string {
   if (n == null) return "—";
   return n.toLocaleString();
 }
 
-function relTime(iso: string): string {
+export function relTime(iso: string): string {
   const t = new Date(iso).getTime();
   const diff = Date.now() - t;
   const min = Math.floor(diff / 60000);

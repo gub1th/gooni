@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { GripVertical, ExternalLink, ListChecks, X } from "lucide-react";
+import { GripVertical, ExternalLink, ListChecks, Plus, Search, X } from "lucide-react";
 import type { ApiBacklogTicket, BoardStatus } from "../../services/api";
 import { promoteBacklogTicket, demoteBacklogTicket } from "../../services/api";
 import { useBacklogStore } from "../../stores/useBacklogStore";
@@ -23,14 +23,18 @@ interface Column {
   tint: string;
 }
 
-// Three fixed columns. Order chosen so the eye reads left → right matching
-// the work flow direction: start in Todo, move right to In progress, finish
-// in Done.
 const COLUMNS: Column[] = [
   { status: "not_yet", label: "Todo",        hint: "Not yet picked up",   tint: "#94A3B8" },
   { status: "doing",   label: "In progress", hint: "Actively working",    tint: "#F59E0B" },
   { status: "done",    label: "Done",        hint: "Shipped or closed",   tint: "#16A34A" },
 ];
+
+// Auto-generated eval tickets carry a recognizable prefix. We mute them
+// visually so the human eye instantly distinguishes "real" feature work
+// from background eval triage rows.
+function isAutoEvalTicket(t: ApiBacklogTicket): boolean {
+  return /eval\s+segment/i.test(t.text);
+}
 
 // Map a stored ticket → which column it lands in. `done=true` always wins
 // over board_status so checking-off via the existing flow doesn't desync
@@ -41,10 +45,8 @@ function statusOf(t: ApiBacklogTicket): BoardStatus {
   return "not_yet";
 }
 
-// Click-vs-drag disambiguation: drag is initiated only on the GripVertical
-// handle (per-row), so the rest of the card is click-only. HTML5 native DnD
-// handles the lift; we only set/read the dragging item via local state +
-// ondragstart payload (item id as string).
+const TODO_PRIORITY_LIMIT = 6;
+const DONE_RECENT_LIMIT = 8;
 
 export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
   const tickets = useBacklogStore((s) => s.tickets);
@@ -54,10 +56,6 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
   const deleteTicket = useBacklogStore((s) => s.deleteTicket);
   const qc = useQueryClient();
 
-  // Promote/demote a backlog ticket to/from a Todo. Both endpoints are
-  // idempotent so re-clicking is safe; afterwards we kick the backlog
-  // refresh + the todos-bundle cache so the dashboard's TodoList picks
-  // up the new row.
   async function onPromote(ticketId: number) {
     try {
       await promoteBacklogTicket(ticketId);
@@ -77,21 +75,61 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
 
   const [dragId, setDragId] = useState<number | null>(null);
   const [hoverColumn, setHoverColumn] = useState<BoardStatus | null>(null);
-  // While dragging, an index hint per column where the drop will land.
-  // Null when the drag isn't over that column or the index isn't between
-  // items (drop-at-end).
   const [hoverIndex, setHoverIndex] = useState<{ status: BoardStatus; index: number } | null>(null);
   const [openItemId, setOpenItemId] = useState<number | null>(null);
+
+  // Debounced search across title + subtitle. 300ms keeps the input
+  // responsive without thrashing on every keystroke.
+  const [searchRaw, setSearchRaw] = useState("");
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(searchRaw.trim().toLowerCase()), 300);
+    return () => clearTimeout(id);
+  }, [searchRaw]);
+  const searching = search.length > 0;
+
+  // Per-column expansion toggles for the "show more" rows. Auto-flipped
+  // open while a search is active so matches don't hide inside the
+  // collapsed sections.
+  const [todoExpanded, setTodoExpanded] = useState(false);
+  const [doneExpanded, setDoneExpanded] = useState(false);
 
   const grouped = useMemo(() => {
     const m: Record<BoardStatus, ApiBacklogTicket[]> = { not_yet: [], doing: [], done: [] };
     for (const t of tickets) m[statusOf(t)].push(t);
-    // Within column, sort by sort_order asc (server-managed).
     for (const k of Object.keys(m) as BoardStatus[]) {
       m[k].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     }
     return m;
   }, [tickets]);
+
+  function applySearch(items: ApiBacklogTicket[]): ApiBacklogTicket[] {
+    if (!searching) return items;
+    return items.filter((t) =>
+      t.text.toLowerCase().includes(search) ||
+      (t.subtitle ?? "").toLowerCase().includes(search)
+    );
+  }
+
+  // Todo column is split into a small priority slice (real tickets, most
+  // recently created) + a collapsed rest. Auto-generated eval rows always
+  // land in the collapsed pile so they don't crowd the next-up section.
+  const todoFiltered = applySearch(grouped.not_yet);
+  const todoReal = todoFiltered.filter((t) => !isAutoEvalTicket(t));
+  const todoAuto = todoFiltered.filter(isAutoEvalTicket);
+  const todoPriority = todoReal.slice(0, TODO_PRIORITY_LIMIT);
+  const todoRest = [...todoReal.slice(TODO_PRIORITY_LIMIT), ...todoAuto];
+
+  const doneFiltered = applySearch(grouped.done);
+  const doneRecent = doneFiltered.slice(0, DONE_RECENT_LIMIT);
+  const doneRest = doneFiltered.slice(DONE_RECENT_LIMIT);
+
+  const doingFiltered = applySearch(grouped.doing);
+
+  // Empty In Progress collapses to a thin strip — saves a third of the
+  // board from being wasted on placeholder text. Search collapses it
+  // back open the moment a match lands here.
+  const doingEmpty = doingFiltered.length === 0 && !searching;
 
   const openItem = openItemId == null ? null : tickets.find((i) => i.id === openItemId) ?? null;
 
@@ -121,7 +159,6 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
     const sourceStatus = statusOf(moving);
     const statusChanged = sourceStatus !== targetStatus;
 
-    // Compute the post-drop item ids in the target column.
     const colItems = grouped[targetStatus].filter((i) => i.id !== movingId);
     const insertAt = targetIndex == null ? colItems.length : Math.max(0, Math.min(targetIndex, colItems.length));
     const beforeIds = colItems.slice(0, insertAt).map((i) => i.id);
@@ -129,9 +166,6 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
     const newColIds: number[] = [...beforeIds, movingId, ...afterIds];
 
     if (statusChanged) {
-      // Patch board_status first, then sort_order on each column. If the
-      // target was "done" we also need to flip done=true so checked rows
-      // stay coherent w/ the column they live in.
       const patch: { board_status: BoardStatus; done?: boolean } = { board_status: targetStatus };
       if (targetStatus === "done") patch.done = true;
       else if (moving.done) patch.done = false;
@@ -143,6 +177,16 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
       if (sourceIds.length) await reorder(sourceIds);
     }
   }
+
+  // Visible items per column drive the drop-target ordering. Hidden
+  // items (collapsed sections) keep their server-side order; dragging
+  // into the visible slice inserts at the visible index, which is
+  // computed against the same filtered list.
+  const visiblePerColumn: Record<BoardStatus, ApiBacklogTicket[]> = {
+    not_yet: todoExpanded || searching ? [...todoPriority, ...todoRest] : todoPriority,
+    doing: doingFiltered,
+    done: doneExpanded || searching ? [...doneRecent, ...doneRest] : doneRecent,
+  };
 
   return (
     <div
@@ -158,16 +202,55 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
     >
       <div
         style={{
-          padding: "20px 28px 12px",
+          padding: "16px 24px 12px",
           borderBottom: "1px solid rgba(0,0,0,0.06)",
           background: "var(--gooni-bg, #FFFFFF)",
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
         }}
       >
-        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--gooni-text, #1C1C1E)", letterSpacing: "-0.2px" }}>
-          Backlog board
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--gooni-text, #1C1C1E)", letterSpacing: "-0.2px" }}>
+            Backlog board
+          </div>
+          <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", marginTop: 2 }}>
+            Drag a card to move. Click to open.
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: "var(--gooni-muted, #8E8E93)", marginTop: 2 }}>
-          Drag a card to move or reorder. Click to open details.
+        <div style={{
+          marginLeft: "auto",
+          display: "flex", alignItems: "center", gap: 6,
+          background: "rgba(0,0,0,0.04)",
+          border: "1px solid rgba(0,0,0,0.06)",
+          borderRadius: 8,
+          padding: "5px 10px",
+          minWidth: 220,
+        }}>
+          <Search size={13} strokeWidth={1.8} color="#8E8E93" />
+          <input
+            value={searchRaw}
+            onChange={(e) => setSearchRaw(e.target.value)}
+            placeholder="Search tickets…"
+            style={{
+              flex: 1, minWidth: 0,
+              border: "none", outline: "none", background: "transparent",
+              fontFamily: FONT, fontSize: 12.5,
+              color: "var(--gooni-text, #1C1C1E)",
+            }}
+          />
+          {searchRaw && (
+            <button
+              onClick={() => setSearchRaw("")}
+              style={{
+                background: "transparent", border: "none", cursor: "pointer",
+                padding: 0, color: "#8E8E93", display: "inline-flex",
+              }}
+              title="Clear search"
+            >
+              <X size={12} strokeWidth={2} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -175,19 +258,25 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
         style={{
           flex: 1,
           minHeight: 0,
-          // Outer container no longer scrolls — each column owns its own
-          // scroll so DONE filling up doesn't drag TODO + IN PROGRESS along.
           overflow: "hidden",
-          padding: 20,
+          padding: 16,
           display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(260px, 1fr))",
-          gap: 14,
+          // Empty In Progress collapses to a thin column so Todo + Done get
+          // the breathing room. Stays a drop target — dragging onto it just
+          // expands it back to normal width.
+          gridTemplateColumns: doingEmpty
+            ? "minmax(260px, 1fr) 80px minmax(260px, 1fr)"
+            : "repeat(3, minmax(260px, 1fr))",
+          gap: 12,
           alignItems: "stretch",
+          transition: "grid-template-columns 160ms ease",
         }}
       >
         {COLUMNS.map((col) => {
-          const colItems = grouped[col.status];
+          const visible = visiblePerColumn[col.status];
           const isHover = hoverColumn === col.status;
+          const isDoingStrip = col.status === "doing" && doingEmpty;
+
           return (
             <div
               key={col.status}
@@ -198,8 +287,6 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
                 if (hoverColumn !== col.status) setHoverColumn(col.status);
               }}
               onDragLeave={(e) => {
-                // Only clear when leaving the column container itself, not
-                // when crossing inner card boundaries.
                 if ((e.target as HTMLElement).dataset.column === col.status) {
                   setHoverColumn((c) => (c === col.status ? null : c));
                   setHoverIndex(null);
@@ -212,80 +299,127 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
               data-column={col.status}
               style={{
                 background: "var(--gooni-card, #FFFFFF)",
-                borderRadius: 12,
-                padding: 12,
+                borderRadius: 10,
+                padding: isDoingStrip ? "10px 6px" : 10,
                 border: `1px solid ${isHover ? col.tint : "rgba(0,0,0,0.06)"}`,
                 boxShadow: isHover ? `0 0 0 2px ${col.tint}33` : "none",
-                transition: "border-color 0.12s, box-shadow 0.12s",
+                transition: "border-color 0.12s, box-shadow 0.12s, padding 160ms ease",
                 minHeight: 200,
-                // Match grid row height so each column scrolls inside itself.
                 height: "100%",
                 display: "flex",
                 flexDirection: "column",
-                gap: 8,
+                gap: 6,
                 overflow: "hidden",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 6, borderBottom: "1px solid rgba(0,0,0,0.05)", flexShrink: 0 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: col.tint }} />
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", textTransform: "uppercase", letterSpacing: 0.6 }}>
-                  {col.label}
-                </span>
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
-                  {colItems.length}
-                </span>
-              </div>
+              <ColumnHeader
+                col={col}
+                count={grouped[col.status].length}
+                compact={isDoingStrip}
+              />
 
-              {/* Inner scroll container — each column owns its scroll. */}
-              <div style={{
-                flex: 1, minHeight: 0, overflowY: "auto",
-                display: "flex", flexDirection: "column", gap: 8,
-                paddingRight: 4,
-              }}>
-                {colItems.length === 0 ? (
-                  <div style={{ padding: "20px 6px", color: "var(--gooni-muted, #B0B0B5)", fontSize: 12, textAlign: "center" }}>
-                    {col.hint}
-                  </div>
-                ) : (
-                  colItems.map((item, idx) => {
-                    const isDragging = dragId === item.id;
-                    return (
-                      <div key={item.id}>
-                        {/* Drop indicator above the card when hovering between items */}
-                        {hoverIndex?.status === col.status && hoverIndex.index === idx && dragId != null && dragId !== item.id && (
-                          <div style={{ height: 2, background: col.tint, borderRadius: 1, margin: "2px 4px" }} />
-                        )}
-                        <BacklogCard
-                          item={item}
-                          dragging={isDragging}
-                          onDragStart={(e) => handleDragStart(e, item.id)}
-                          onDragEnd={handleDragEnd}
-                          onCardDragOver={(e) => {
-                            if (dragId == null || dragId === item.id) return;
-                            e.preventDefault();
-                            // Decide insert-before vs insert-after based on Y midpoint.
-                            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                            const before = e.clientY < rect.top + rect.height / 2;
-                            const targetIdx = before ? idx : idx + 1;
-                            if (
-                              hoverIndex?.status !== col.status ||
-                              hoverIndex.index !== targetIdx
-                            ) {
-                              setHoverIndex({ status: col.status, index: targetIdx });
-                            }
-                          }}
-                          onClick={() => setOpenItemId(item.id)}
-                          onOpenPr={() => {
-                            if (item.pr_url) window.open(item.pr_url, "_blank", "noopener,noreferrer");
-                          }}
-                          onPromote={() => onPromote(item.id)}
-                          onDemote={() => onDemote(item.id)}
-                        />
-                      </div>
-                    );
-                  })
-                )}
-              </div>
+              {isDoingStrip ? (
+                // Strip mode: vertical dotted spine. Still a drop target via
+                // the parent div's onDragOver/onDrop, so dragging a card
+                // onto it expands the column (after the drop reflows the
+                // grouped data).
+                <div style={{
+                  flex: 1,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "var(--gooni-muted, #B0B0B5)",
+                  fontSize: 10,
+                  writingMode: "vertical-rl",
+                  textTransform: "uppercase",
+                  letterSpacing: 1.5,
+                  opacity: dragId != null ? 1 : 0.6,
+                }}>
+                  drop to start
+                </div>
+              ) : (
+                <div style={{
+                  flex: 1, minHeight: 0, overflowY: "auto",
+                  display: "flex", flexDirection: "column", gap: 6,
+                  paddingRight: 4,
+                }}>
+                  {col.status === "not_yet" ? (
+                    <TodoColumnBody
+                      priority={todoPriority}
+                      rest={todoRest}
+                      expanded={todoExpanded || searching}
+                      onToggle={() => setTodoExpanded((v) => !v)}
+                      searching={searching}
+                      onOpen={setOpenItemId}
+                      onPromote={onPromote}
+                      onDemote={onDemote}
+                      dragId={dragId}
+                      hoverIndex={hoverIndex?.status === col.status ? hoverIndex.index : null}
+                      onCardDragOver={(e, idx) => {
+                        if (dragId == null) return;
+                        e.preventDefault();
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const before = e.clientY < rect.top + rect.height / 2;
+                        const targetIdx = before ? idx : idx + 1;
+                        if (hoverIndex?.status !== col.status || hoverIndex.index !== targetIdx) {
+                          setHoverIndex({ status: col.status, index: targetIdx });
+                        }
+                      }}
+                      onDragStartCard={handleDragStart}
+                      onDragEndCard={handleDragEnd}
+                      colTint={col.tint}
+                    />
+                  ) : col.status === "done" ? (
+                    <DoneColumnBody
+                      recent={doneRecent}
+                      rest={doneRest}
+                      expanded={doneExpanded || searching}
+                      onToggle={() => setDoneExpanded((v) => !v)}
+                      searching={searching}
+                      onOpen={setOpenItemId}
+                      onPromote={onPromote}
+                      onDemote={onDemote}
+                      dragId={dragId}
+                      hoverIndex={hoverIndex?.status === col.status ? hoverIndex.index : null}
+                      onCardDragOver={(e, idx) => {
+                        if (dragId == null) return;
+                        e.preventDefault();
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const before = e.clientY < rect.top + rect.height / 2;
+                        const targetIdx = before ? idx : idx + 1;
+                        if (hoverIndex?.status !== col.status || hoverIndex.index !== targetIdx) {
+                          setHoverIndex({ status: col.status, index: targetIdx });
+                        }
+                      }}
+                      onDragStartCard={handleDragStart}
+                      onDragEndCard={handleDragEnd}
+                      colTint={col.tint}
+                    />
+                  ) : (
+                    <StandardColumnBody
+                      items={visible}
+                      hint={col.hint}
+                      searching={searching}
+                      onOpen={setOpenItemId}
+                      onPromote={onPromote}
+                      onDemote={onDemote}
+                      dragId={dragId}
+                      hoverIndex={hoverIndex?.status === col.status ? hoverIndex.index : null}
+                      onCardDragOver={(e, idx) => {
+                        if (dragId == null) return;
+                        e.preventDefault();
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const before = e.clientY < rect.top + rect.height / 2;
+                        const targetIdx = before ? idx : idx + 1;
+                        if (hoverIndex?.status !== col.status || hoverIndex.index !== targetIdx) {
+                          setHoverIndex({ status: col.status, index: targetIdx });
+                        }
+                      }}
+                      onDragStartCard={handleDragStart}
+                      onDragEndCard={handleDragEnd}
+                      colTint={col.tint}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -298,9 +432,6 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
           onOpenSourceNote={onOpenSourceNote}
           onClose={() => setOpenItemId(null)}
           onSave={async (patch) => {
-            // ItemModal exposes a wider patch shape than backlog tickets
-            // accept (it's shared w/ ListView); pluck only the relevant
-            // fields. due_date / actionable are silently dropped here.
             await updateTicket(openItem.id, {
               text: patch.text,
               subtitle: patch.subtitle,
@@ -316,6 +447,235 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
         />
       )}
     </div>
+  );
+}
+
+function ColumnHeader({ col, count, compact }: { col: Column; count: number; compact: boolean }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 6,
+      paddingBottom: 5, borderBottom: "1px solid rgba(0,0,0,0.05)", flexShrink: 0,
+      writingMode: compact ? "vertical-rl" : "horizontal-tb",
+      transform: compact ? "rotate(180deg)" : "none",
+      justifyContent: compact ? "center" : "flex-start",
+    }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: col.tint }} />
+      <span style={{
+        fontSize: 11, fontWeight: 600,
+        color: "var(--gooni-text, #1C1C1E)",
+        textTransform: "uppercase", letterSpacing: 0.6,
+      }}>
+        {col.label}
+      </span>
+      <span style={{
+        marginLeft: compact ? 0 : "auto",
+        fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)",
+      }}>
+        · {count}
+      </span>
+    </div>
+  );
+}
+
+// Render a single card with drag wiring + drop-indicator slot. Pulled out
+// so the three column-body variants don't re-implement the per-card
+// scaffolding.
+function CardRow({
+  item, idx, dragId, hoverIndex, colTint,
+  onOpen, onPromote, onDemote, onDragStartCard, onDragEndCard, onCardDragOver,
+}: {
+  item: ApiBacklogTicket;
+  idx: number;
+  dragId: number | null;
+  hoverIndex: number | null;
+  colTint: string;
+  onOpen: (id: number) => void;
+  onPromote: (id: number) => void;
+  onDemote: (id: number) => void;
+  onDragStartCard: (e: React.DragEvent, id: number) => void;
+  onDragEndCard: () => void;
+  onCardDragOver: (e: React.DragEvent, idx: number) => void;
+}) {
+  return (
+    <div>
+      {hoverIndex === idx && dragId != null && dragId !== item.id && (
+        <div style={{ height: 2, background: colTint, borderRadius: 1, margin: "1px 3px" }} />
+      )}
+      <BacklogCard
+        item={item}
+        dragging={dragId === item.id}
+        onDragStart={(e) => onDragStartCard(e, item.id)}
+        onDragEnd={onDragEndCard}
+        onCardDragOver={(e) => onCardDragOver(e, idx)}
+        onClick={() => onOpen(item.id)}
+        onOpenPr={() => {
+          if (item.pr_url) window.open(item.pr_url, "_blank", "noopener,noreferrer");
+        }}
+        onPromote={() => onPromote(item.id)}
+        onDemote={() => onDemote(item.id)}
+      />
+    </div>
+  );
+}
+
+type CommonColumnBodyProps = {
+  searching: boolean;
+  onOpen: (id: number) => void;
+  onPromote: (id: number) => void;
+  onDemote: (id: number) => void;
+  dragId: number | null;
+  hoverIndex: number | null;
+  onCardDragOver: (e: React.DragEvent, idx: number) => void;
+  onDragStartCard: (e: React.DragEvent, id: number) => void;
+  onDragEndCard: () => void;
+  colTint: string;
+};
+
+function StandardColumnBody({
+  items, hint, ...rest
+}: CommonColumnBodyProps & { items: ApiBacklogTicket[]; hint: string }) {
+  if (items.length === 0) {
+    return (
+      <div style={{ padding: "16px 6px", color: "var(--gooni-muted, #B0B0B5)", fontSize: 12, textAlign: "center" }}>
+        {rest.searching ? "no matches" : hint}
+      </div>
+    );
+  }
+  return (
+    <>
+      {items.map((item, idx) => (
+        <CardRow key={item.id} item={item} idx={idx} {...rest} />
+      ))}
+    </>
+  );
+}
+
+function TodoColumnBody({
+  priority, rest, expanded, onToggle, ...common
+}: CommonColumnBodyProps & {
+  priority: ApiBacklogTicket[];
+  rest: ApiBacklogTicket[];
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const showRest = expanded;
+  if (priority.length === 0 && rest.length === 0) {
+    return (
+      <div style={{ padding: "16px 6px", color: "var(--gooni-muted, #B0B0B5)", fontSize: 12, textAlign: "center" }}>
+        {common.searching ? "no matches" : "Not yet picked up"}
+      </div>
+    );
+  }
+  return (
+    <>
+      {priority.map((item, idx) => (
+        <CardRow key={item.id} item={item} idx={idx} {...common} />
+      ))}
+      {rest.length > 0 && (
+        <>
+          {!showRest && (
+            <button
+              onClick={onToggle}
+              style={{
+                marginTop: 2,
+                padding: "6px 8px", borderRadius: 6,
+                background: "transparent",
+                border: "1px dashed rgba(0,0,0,0.10)",
+                cursor: "pointer",
+                fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+                fontFamily: FONT, textAlign: "left",
+              }}
+            >
+              {rest.length} more →
+            </button>
+          )}
+          {showRest && rest.map((item, idx) => (
+            <CardRow
+              key={item.id}
+              item={item}
+              idx={priority.length + idx}
+              {...common}
+            />
+          ))}
+          {showRest && (
+            <button
+              onClick={onToggle}
+              style={{
+                marginTop: 2,
+                padding: "4px 8px",
+                background: "transparent", border: "none", cursor: "pointer",
+                fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)",
+                fontFamily: FONT, textAlign: "left",
+              }}
+            >
+              ↑ collapse
+            </button>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function DoneColumnBody({
+  recent, rest, expanded, onToggle, ...common
+}: CommonColumnBodyProps & {
+  recent: ApiBacklogTicket[];
+  rest: ApiBacklogTicket[];
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  if (recent.length === 0 && rest.length === 0) {
+    return (
+      <div style={{ padding: "16px 6px", color: "var(--gooni-muted, #B0B0B5)", fontSize: 12, textAlign: "center" }}>
+        {common.searching ? "no matches" : "Shipped or closed"}
+      </div>
+    );
+  }
+  return (
+    <>
+      {recent.map((item, idx) => (
+        <CardRow key={item.id} item={item} idx={idx} {...common} />
+      ))}
+      {rest.length > 0 && !expanded && (
+        <button
+          onClick={onToggle}
+          style={{
+            marginTop: 2,
+            padding: "6px 8px", borderRadius: 6,
+            background: "transparent",
+            border: "1px dashed rgba(0,0,0,0.10)",
+            cursor: "pointer",
+            fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+            fontFamily: FONT, textAlign: "left",
+          }}
+        >
+          Show all {recent.length + rest.length} completed →
+        </button>
+      )}
+      {rest.length > 0 && expanded && rest.map((item, idx) => (
+        <CardRow
+          key={item.id}
+          item={item}
+          idx={recent.length + idx}
+          {...common}
+        />
+      ))}
+      {rest.length > 0 && expanded && (
+        <button
+          onClick={onToggle}
+          style={{
+            marginTop: 2,
+            padding: "4px 8px",
+            background: "transparent", border: "none", cursor: "pointer",
+            fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)",
+            fontFamily: FONT, textAlign: "left",
+          }}
+        >
+          ↑ show recent only
+        </button>
+      )}
+    </>
   );
 }
 
@@ -341,114 +701,92 @@ function BacklogCard({
   onDemote: () => void;
 }) {
   const linkedToTodo = item.todo_id != null;
+  const isAuto = isAutoEvalTicket(item);
+
   return (
     <div
-      // Whole card is the drag source. Browser naturally suppresses the
-      // click event when a drag occurs, so click → modal and drag →
-      // reorder/move are exclusive without manual gating. Matches the
-      // pattern used by the existing ListView + PrimaryFocusCard.
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onCardDragOver}
       onClick={(e) => {
-        // Defensive: clicks on inner action elements (PR pill, source note
-        // link) should not open the modal.
         if ((e.target as HTMLElement).closest("[data-card-action]")) return;
         onClick();
       }}
       style={{
         position: "relative",
         background: dragging ? "rgba(0,0,0,0.02)" : "var(--gooni-bg, #FFFFFF)",
+        // Auto-generated eval tickets get a gray left border; real tickets
+        // get a faint teal accent so the eye instantly distinguishes them
+        // even before reading the title.
         border: "1px solid rgba(0,0,0,0.08)",
-        borderRadius: 10,
-        padding: "10px 12px 10px 32px",
+        borderLeft: `2px solid ${isAuto ? "#CBD5E1" : "#5EEAD4"}`,
+        borderRadius: 8,
+        padding: "6px 8px 6px 22px",
         cursor: dragging ? "grabbing" : "pointer",
-        opacity: dragging ? 0.5 : 1,
+        opacity: dragging ? 0.5 : isAuto ? 0.65 : 1,
         transition: "opacity 0.12s, border-color 0.12s, box-shadow 0.12s",
         userSelect: "none",
       }}
       onMouseEnter={(e) => {
         if (dragging) return;
         (e.currentTarget as HTMLElement).style.borderColor = "rgba(0,0,0,0.16)";
-        (e.currentTarget as HTMLElement).style.boxShadow = "0 2px 8px rgba(0,0,0,0.05)";
+        (e.currentTarget as HTMLElement).style.boxShadow = "0 1px 4px rgba(0,0,0,0.04)";
       }}
       onMouseLeave={(e) => {
         (e.currentTarget as HTMLElement).style.borderColor = "rgba(0,0,0,0.08)";
         (e.currentTarget as HTMLElement).style.boxShadow = "none";
       }}
     >
-      {/* Drag-affordance grip — purely visual now. Whole card is the
-          drag source (see `draggable` on the wrapper) which matches the
-          existing ListView/PrimaryFocusCard behavior. The grip is a hint
-          to the user that the card can be dragged. */}
       <span
         aria-hidden
         style={{
           position: "absolute",
-          left: 8,
-          top: 10,
-          width: 18,
-          height: 18,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
+          left: 4, top: 7,
+          width: 14, height: 14,
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
           color: "#B0B0B5",
           pointerEvents: "none",
         }}
       >
-        <GripVertical size={14} strokeWidth={1.7} />
+        <GripVertical size={12} strokeWidth={1.7} />
       </span>
 
-      <div style={{ fontSize: 13, fontWeight: 500, color: "var(--gooni-text, #1C1C1E)", lineHeight: 1.4 }}>
-        #{item.id} {item.text}
-      </div>
-      {item.subtitle && (
-        <div style={{ fontSize: 11.5, color: "var(--gooni-muted, #8E8E93)", marginTop: 4, lineHeight: 1.5,
-          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
-        }}>
-          {item.subtitle}
-        </div>
-      )}
-      {/* Inline meta row — PR pill + todo-link pill. The "from note #N"
-          ref previously rendered here was visually noisy on every card;
-          it now only shows in the modal (open by clicking the card),
-          where it's clickable to navigate to the source note. */}
       <div style={{
         display: "flex", alignItems: "center", gap: 6,
-        marginTop: 8, fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
-        flexWrap: "wrap",
+        minWidth: 0,
       }}>
-        {item.pr_url && (
-          <button
-            data-card-action
-            onClick={(e) => { e.stopPropagation(); onOpenPr(); }}
-            title={item.pr_url}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 4,
-              padding: "2px 6px", borderRadius: 4,
-              background: "rgba(22,163,74,0.10)", color: "#166534",
-              border: "1px solid rgba(22,163,74,0.25)",
-              cursor: "pointer", fontSize: 10.5, fontWeight: 600,
-            }}
-          >
-            <ExternalLink size={10} strokeWidth={1.7} />
-            PR
-          </button>
-        )}
+        <div style={{
+          flex: 1, minWidth: 0,
+          fontSize: isAuto ? 11.5 : 12.5,
+          fontWeight: isAuto ? 400 : 500,
+          color: "var(--gooni-text, #1C1C1E)",
+          lineHeight: 1.35,
+          // Single-line title — long titles truncate w/ ellipsis. Click
+          // the card to see the full text in the modal.
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}>
+          #{item.id} {item.text}
+        </div>
+        {/* Right-aligned action slot — single icon-only button. Promote
+            (+todo) is the common case; demote (X next to "todo" pill)
+            collapses into the same slot when already linked. */}
         {linkedToTodo ? (
           <span
             data-card-action
             title={`Linked to todo #${item.todo_id} — click X to unlink`}
             style={{
-              display: "inline-flex", alignItems: "center", gap: 4,
-              padding: "2px 6px", borderRadius: 4,
+              display: "inline-flex", alignItems: "center", gap: 2,
+              padding: "1px 5px", borderRadius: 4,
               background: "rgba(59,130,246,0.10)", color: "#1D4ED8",
               border: "1px solid rgba(59,130,246,0.25)",
-              fontSize: 10.5, fontWeight: 600,
+              fontSize: 9.5, fontWeight: 600,
+              flexShrink: 0,
             }}
           >
-            <ListChecks size={10} strokeWidth={1.7} /> todo
+            <ListChecks size={9} strokeWidth={1.7} />
             <button
               onClick={(e) => { e.stopPropagation(); onDemote(); }}
               title="Unlink (deletes the linked todo)"
@@ -458,7 +796,7 @@ function BacklogCard({
                 color: "#1D4ED8", cursor: "pointer", padding: 0,
               }}
             >
-              <X size={10} strokeWidth={2} />
+              <X size={9} strokeWidth={2} />
             </button>
           </span>
         ) : (
@@ -467,17 +805,47 @@ function BacklogCard({
             onClick={(e) => { e.stopPropagation(); onPromote(); }}
             title="Promote to todo on the dashboard"
             style={{
-              display: "inline-flex", alignItems: "center", gap: 4,
-              padding: "2px 6px", borderRadius: 4,
-              background: "transparent", color: "#6B7280",
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 18, height: 18, padding: 0, borderRadius: 4,
+              background: "transparent", color: "#9CA3AF",
               border: "1px dashed rgba(0,0,0,0.18)",
-              cursor: "pointer", fontSize: 10.5, fontWeight: 500,
+              cursor: "pointer",
+              flexShrink: 0,
             }}
           >
-            + todo
+            <Plus size={10} strokeWidth={2} />
+          </button>
+        )}
+        {item.pr_url && (
+          <button
+            data-card-action
+            onClick={(e) => { e.stopPropagation(); onOpenPr(); }}
+            title={item.pr_url}
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 18, height: 18, padding: 0, borderRadius: 4,
+              background: "rgba(22,163,74,0.10)", color: "#166534",
+              border: "1px solid rgba(22,163,74,0.25)",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            <ExternalLink size={10} strokeWidth={1.7} />
           </button>
         )}
       </div>
+      {item.subtitle && (
+        <div style={{
+          fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)",
+          marginTop: 2, lineHeight: 1.35,
+          // Single-line subtitle — modal owns the full body.
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}>
+          {item.subtitle}
+        </div>
+      )}
     </div>
   );
 }

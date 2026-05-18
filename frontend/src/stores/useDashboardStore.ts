@@ -4,9 +4,10 @@ import { persist } from "zustand/middleware";
 // Dashboard-level UI state.
 //
 //   activeTab — within-mode toggle for the Today view (Todos vs Focuses).
-//   activeMode — top-level mode toggle (Today vs Ops vs Pulse).
+//   activeMode — top-level mode toggle (Today vs Ops vs Stats).
 //     Each mode has its own full-body layout. Build was folded into Ops
-//     in PR #213 — health cards now live at the top of OpsMode.
+//     in PR #213; the sidebar Stats page + Pulse mode were merged into
+//     a single Stats mode (renamed from Pulse) in the dashboard restructure.
 //   composerFocused — transient flag set while the embedded NoteEditor
 //     ("start writing…") is focused. Used by Dashboard to dim/collapse
 //     surrounding chrome (TakeTabs, focuses row) so writing feels focused.
@@ -17,7 +18,7 @@ import { persist } from "zustand/middleware";
 // land users on a now-deleted tab.
 
 export type DashboardTab = "todos" | "focuses";
-export type DashboardMode = "today" | "ops" | "pulse";
+export type DashboardMode = "today" | "ops" | "stats";
 
 interface DashboardState {
   activeTab: DashboardTab;
@@ -47,6 +48,7 @@ export const useDashboardStore = create<DashboardState>()(
       migrate: (persisted: unknown) => {
         const s = (persisted ?? {}) as Record<string, unknown>;
         if (s.activeMode === "build") s.activeMode = "ops";
+        if (s.activeMode === "pulse") s.activeMode = "stats";
         return s as unknown as DashboardState;
       },
     },

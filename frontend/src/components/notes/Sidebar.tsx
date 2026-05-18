@@ -10,7 +10,7 @@ import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
-  PenLine, FileText, Pin, MessageSquare, Brain, ClipboardList, BarChart3, Settings as SettingsIcon,
+  PenLine, FileText, Pin, MessageSquare, Brain, ClipboardList, Settings as SettingsIcon,
   Globe, Plug, Pencil, Clock, ListChecks, Inbox,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
@@ -27,7 +27,6 @@ const ICON_TINT = {
   gooni:    "#A855F7",   // violet
   memories: "#0EA5E9",  // sky
   chatAudit: "#0891B2",  // cyan
-  stats:    "#EC4899",   // pink — distinct from chatAudit so the eye separates them
   settings: "#64748B",   // slate
   // Match the per-list-type tints used by ListIcon so the top shortcuts read
   // as the same surface as the Todo/Backlog rows under LISTS.
@@ -182,7 +181,6 @@ interface SidebarProps {
   isChat: boolean;
   isLists: boolean;
   isEval?: boolean;
-  isStats?: boolean;
   activeListId: number | null;
   showCompose: boolean;
   onLogoClick: () => void;
@@ -191,10 +189,9 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectList: (id: number) => void;
   onOpenEval?: () => void;
-  onOpenStats?: () => void;
 }
 
-export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList, onOpenEval, onOpenStats }: SidebarProps) {
+export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList, onOpenEval }: SidebarProps) {
   const navigate = useNavigate();
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId, removeSpace } = useNotesContentStore();
   const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
@@ -1328,30 +1325,9 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
             </button>
           </div>
 
-          {/* Stats — opens the activity / OpenAI usage / dev surface */}
-          <div style={{ padding: "0 6px 2px" }}>
-            <button
-              onClick={() => onOpenStats?.()}
-              title="Stats — usage + activity + dev"
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
-                border: "none",
-                background: isStats ? "rgba(0,0,0,0.09)" : "transparent",
-                cursor: "pointer",
-                textAlign: "left",
-                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontWeight: isStats ? 600 : 400,
-                fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (!isStats) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
-              onMouseLeave={(e) => { if (!isStats) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              <BarChart3 size={14} strokeWidth={1.7} color={ICON_TINT.stats} style={{ flexShrink: 0 }} />
-              Stats
-            </button>
-          </div>
+          {/* Stats sidebar entry removed in dashboard restructure — the
+              page's content (Whoop / LeetCode / Dev / Usage / Activity)
+              moved into the dashboard Stats tab. */}
 
           {/* Settings — stays at the bottom as a full row (icon + label) */}
           <div style={{ padding: "0 6px 10px" }}>
