@@ -5432,6 +5432,7 @@ def list_eval_runs():
                 continue
             key = f"v{data.get('pipeline_version','?')}_{data.get('pipeline_model','?')}"
             baselines_by_key[key] = {
+                "filename": b.name,
                 "composite_score": data.get("composite_score"),
                 "passed": data.get("passed"),
                 "n_cases": data.get("n_cases"),
@@ -5790,5 +5791,23 @@ def list_eval_baselines():
             "pipeline_source_hash": data.get("pipeline_source_hash"),
             "case_ids": data.get("case_ids"),
             "timestamp": data.get("timestamp"),
+            "total_cost_usd": data.get("total_cost_usd"),
+            "cost_per_case_usd": data.get("cost_per_case_usd"),
         })
     return {"baselines": out}
+
+
+@app.get("/eval/baselines/{filename}")
+def get_eval_baseline(filename: str):
+    """Return the full baseline JSON for a given file — used by the
+    eval-runs panel to drill into per-case results, scores, judge notes,
+    and tools_called for a committed baseline."""
+    if not _safe_eval_filename(filename, "baseline_", ".json"):
+        raise HTTPException(400, "invalid baseline filename")
+    p = _EVAL_BASELINES_DIR / filename
+    if not p.exists():
+        raise HTTPException(404, "baseline not found")
+    try:
+        return _json.loads(p.read_text())
+    except (_json.JSONDecodeError, OSError):
+        raise HTTPException(500, "baseline json invalid")
