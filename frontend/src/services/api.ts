@@ -27,7 +27,7 @@ export async function login(password: string): Promise<void> {
   setStoredToken(token);
 }
 
-function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+export function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const token = getStoredToken();
   if (token) {
     init.headers = { ...(init.headers ?? {}), Authorization: `Bearer ${token}` };

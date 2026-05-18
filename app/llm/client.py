@@ -171,7 +171,12 @@ class LLMClient:
                     model=active_model,
                     messages=messages,
                     temperature=0.7,
-                    max_completion_tokens=500,
+                    # 500 was truncating mid-sentence on longer technical
+                    # explanations (eval case 006 cut off explaining memory
+                    # decay). Bot channel split_for_bots still caps bubbles
+                    # at ≤320 char each so longer outputs degrade gracefully
+                    # rather than getting clipped at the API boundary.
+                    max_completion_tokens=900,
                     tools=tool_schemas,
                 )
                 tracker.add(response.usage)

@@ -142,6 +142,35 @@ def _build_state_block(db) -> str:
     return "[your state right now]\n" + "\n".join(lines)
 
 
+def _build_time_block(db) -> str:
+    """Inject Daniel's current local date+time into the master prompt for
+    bot channels. Fixes the WA failure mode where Gooni had no idea what
+    timezone Daniel was in and either defaulted to UTC or refused to commit
+    to a local time when asked.
+
+    Pulls Settings.nudge_tz (already zoneinfo-aware for the daily scheduler).
+    Caller wraps with try/except — never blocks the reply.
+    """
+    from ..db.models import Settings
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        return ""
+    from datetime import datetime
+
+    settings = db.query(Settings).first()
+    tz_name = settings.nudge_tz if settings and settings.nudge_tz else "America/Los_Angeles"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("America/Los_Angeles")
+    now = datetime.now(tz)
+    return (
+        "[current time]\n"
+        f"{now.strftime('%A %b %d %Y, %I:%M %p %Z')} (Daniel's local: {tz_name})"
+    )
+
+
 def _build_just_extracted_block(
     *,
     tone_rules: list[str],
@@ -372,20 +401,15 @@ class Orchestrator:
                     promises=captured_promises,
                 )
                 if feedback_ack is not None:
-                    # Skip the LLM reply when:
-                    #   - extractor classified the message as task_only or
-                    #     no_reply (phase 5 reply_intent), OR
-                    #   - message was *purely* signal — heuristic: no
-                    #     extracted memories AND short.
-                    # reply_intent is the more authoritative signal but
-                    # the pure_signal heuristic catches the long tail
-                    # where the extractor is conservative.
-                    pure_signal = (
-                        not memory_candidates
-                        and len(saved_message.split()) < 25
-                    )
-                    intent_skip = routed.reply_intent in ("task_only", "no_reply")
-                    skip_normal_reply = pure_signal or intent_skip
+                    # Skip the LLM reply ONLY when the extractor explicitly
+                    # classified the message as task_only or no_reply. The
+                    # legacy pure_signal heuristic (no memory + <25 words)
+                    # was over-firing — it skipped real answer-shaped turns
+                    # like "give me a detailed explanation of X" because the
+                    # extractor misrouted them as feature_requests. Trust
+                    # reply_intent; if it says "answer" or "acknowledge",
+                    # we run the full LLM reply.
+                    skip_normal_reply = routed.reply_intent in ("task_only", "no_reply")
 
         if skip_normal_reply and feedback_ack is not None:
             tb.reply(feedback_ack, usage={"short_circuit": True})
@@ -489,13 +513,24 @@ class Orchestrator:
                 "(slip count, prior promise, today's done count).\n"
                 "- For multi-bubble: separate bubbles with a BLANK LINE "
                 "(\\n\\n). Never pack thoughts into one paragraph with "
-                "internal single-line breaks."
+                "internal single-line breaks.\n"
+                "- TEMPORAL GROUNDING: if Daniel asks about a PAST time "
+                "(\"last month\", \"yesterday\", \"last week\") and you only "
+                "have current state, SAY SO. Never surface current state as "
+                "if it answers the past question. Pattern: \"no record of "
+                "[that timeframe]. current is X.\"\n"
+                "- BLOCK CONTENT IS PRIVATE: the [your state right now], "
+                "[current time], and [just extracted…] blocks are CONTEXT "
+                "for you, not lines to echo back. Never paste rule text "
+                "(\"make explanations shorter\") or block headers into your "
+                "reply. Use the info, don't copy it."
             )
         # State-grounded openers — fixes T1 of segment #209 where "Yo" got
         # a scolding guess instead of a state-grounded reply. Bot channels
         # only (web has its own UI showing this state).
         state_block = ""
         just_extracted_block = ""
+        time_block = ""
         if source != "web":
             try:
                 state_block = _build_state_block(db)
@@ -509,10 +544,15 @@ class Orchestrator:
                 )
             except Exception as e:
                 print(f"[just_extracted_block] build failed: {e}")
+            try:
+                time_block = _build_time_block(db)
+            except Exception as e:
+                print(f"[time_block] build failed: {e}")
 
         full_context = "\n\n".join(filter(None, [
             intention_block,
             cadence_block,
+            time_block,
             state_block,
             just_extracted_block,
             memory_context,

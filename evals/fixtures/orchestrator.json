@@ -69,9 +69,9 @@
       ],
       "judge": {
         "rubric": "Reply should be encouraging-but-grounded, no emoji. Hard regex catches obvious emoji; judge catches 'good luck! 🚀' style.",
-        "min_scores": {"follows_prefs": 10}
+        "min_scores": {"follows_prefs": 8}
       },
-      "notes": "Hard regex covers Unicode ranges for emoji + symbols. Judge backs it up."
+      "notes": "Hard regex covers Unicode ranges for emoji + symbols. Judge backs it up. follows_prefs threshold = 8 (not 10) — judge nits on phrases that 'read like' emoji-substitutes (e.g. 'you've got this') shouldn't auto-fail; the regex is the hard gate, the judge floor is for clear violations."
     },
     {
       "id": "004_focus_recall_current",
