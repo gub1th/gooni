@@ -2,6 +2,8 @@ import json
 import re
 import threading
 
+from ..db.models import ToolCall as ToolCallModel
+
 from ..db.database import SessionLocal
 from ..db.models import Conversation as ConvModel
 from ..llm.client import llm_client
@@ -24,6 +26,74 @@ _UNDO_FEEDBACK_RE = re.compile(
 # Above this length, raw note content is summarized before injection so the
 # system prompt doesn't balloon to 5K tokens for a single note.
 ENTRY_SUMMARIZE_THRESHOLD = 2000
+
+
+_VERIFY_PROMPT = """Compare this assistant reply against the actual tool audit. Did the reply claim any state-changing action that the audit doesn't back?
+
+USER ASKED: {user_msg}
+
+DRAFT REPLY: {draft}
+
+TOOLS ACTUALLY CALLED THIS TURN (status='done' = action succeeded):
+{audit}
+
+Return strict JSON. No prose, no markdown fence.
+
+{{"ok": true|false, "critique": "if not ok, name the SPECIFIC unbacked claim (one short sentence); else null"}}
+
+Rules:
+- ok = TRUE by default. Only flip to false on a CLEAR action-claim/audit mismatch.
+- Claim patterns that REQUIRE matching tool_call: "tracked", "saved", "added to your X list", "logged", "created a focus/todo/promise", "marked done", "noted in your X", "i wrote it down". If draft makes one of these and audit has no matching done tool, ok=false.
+- HONEST scoping is fine: "I can't track that yet", "I don't have a tool for X", "remembered loosely not formally tracked", "this is only in conversation context". ok=true even if no tools fired.
+- Tone, length, content quality, helpfulness are NOT in scope here. Only fact-of-tool-firing.
+- If audit is empty AND draft makes no action-claims, ok=true.
+- The "i can use this in conversation context but not durably" pattern is HONEST, ok=true."""
+
+
+def _run_verify(
+    draft: str,
+    user_msg: str,
+    tool_call_ids: list[int],
+    db,
+) -> tuple[bool, str]:
+    """Post-reply verify against ToolCall audit. Returns (ok, critique).
+    Fail-open on any error — never break the chat path. ok=True means
+    ship as-is; ok=False + critique means regenerate w/ correction.
+    """
+    if not draft:
+        return True, ""
+    try:
+        rows: list[ToolCallModel] = []
+        if tool_call_ids:
+            rows = (
+                db.query(ToolCallModel)
+                .filter(ToolCallModel.id.in_(tool_call_ids))
+                .all()
+            )
+        audit_lines = [
+            f"- {r.tool_name} [{r.status}]" + (f" error={r.error[:80]}" if r.error else "")
+            for r in rows
+        ]
+        audit_block = "\n".join(audit_lines) if audit_lines else "(no tools called)"
+        prompt = _VERIFY_PROMPT.format(
+            user_msg=(user_msg or "")[:600],
+            draft=(draft or "")[:1500],
+            audit=audit_block,
+        )
+        raw = llm_client.generate_simple_completion(
+            prompt, max_tokens=200, temperature=0.0, model="gpt-4o-mini",
+        )
+        # Strip code fences if any.
+        s = (raw or "").strip()
+        if s.startswith("```"):
+            s = re.sub(r"^```(?:json)?\s*", "", s).rstrip("`").rstrip()
+        parsed = json.loads(s)
+        ok = bool(parsed.get("ok", True))
+        critique = (parsed.get("critique") or "").strip()
+        return ok, critique
+    except Exception as e:
+        print(f"[verify_reply] failed: {e}")
+        return True, ""
 
 
 # Locked identity block. Always injected at the top of the master prompt
@@ -666,6 +736,53 @@ class Orchestrator:
                 conversation_id=conv.id,
                 event_cb=event_cb,
             )
+
+        # ── ReAct VERIFY step ──────────────────────────────────────────
+        # Catches the msg #999 / msg #1011 class: assistant claims an
+        # action ("tracked", "saved", "added") that no tool_call actually
+        # backs. Compare draft reply against ToolCall audit; if mismatch,
+        # regenerate ONCE with the critique embedded in the prompt so the
+        # model corrects itself. Image path skipped (no audit semantics
+        # on vision turns, and the regenerate cost is real).
+        if not image_url:
+            try:
+                verify_ok, verify_critique = _run_verify(
+                    response,
+                    user_msg=message,
+                    tool_call_ids=(usage or {}).get("tool_call_ids") or [],
+                    db=db,
+                )
+                tb.step(
+                    "verify",
+                    "OK" if verify_ok else f"REVISE: {verify_critique[:120]}",
+                    meta={"ok": verify_ok, "critique": verify_critique},
+                )
+                if not verify_ok and verify_critique:
+                    revised_context = (
+                        full_context
+                        + "\n\n[VERIFY CORRECTION — your draft reply claimed "
+                        + "something your tool calls didn't back. Be accurate:]\n"
+                        + f"- specific issue: {verify_critique}\n"
+                        + "- If you didn't actually call the tool, SAY so "
+                        + "honestly (\"only in convo context, not formally tracked\"). "
+                        + "Don't double down."
+                    )
+                    response2, usage2 = llm_client.generate_chat_response_with_memory(
+                        message, revised_context, recent_history,
+                        is_first_time=is_first_time, db=db, model=model,
+                        conversation_id=conv.id,
+                        event_cb=event_cb,
+                    )
+                    response = response2
+                    # Merge tool_call_ids across draft + revision.
+                    merged_ids = list(
+                        ((usage or {}).get("tool_call_ids") or [])
+                    ) + list(((usage2 or {}).get("tool_call_ids") or []))
+                    usage = (usage2 or {})
+                    usage["tool_call_ids"] = merged_ids
+            except Exception as e:
+                # Fail-open: never break chat on a verify failure.
+                print(f"[verify] step failed (ignored): {e}")
 
         # Mixed turn (feedback + new question): prepend the ack so Daniel
         # sees that the correction was logged before the actual answer.
