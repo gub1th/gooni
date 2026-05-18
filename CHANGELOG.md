@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.103.0 — 2026-05-18 (minor)
+
+- feat(prompt): cosine-rank focuses + drop list dump (items 3-4 of #282) (#252)
+
 ## 0.102.1 — 2026-05-18 (patch)
 
 - fix(notes): release Cmd/Ctrl-F to native browser find (#251)
