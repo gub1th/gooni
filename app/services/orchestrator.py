@@ -616,6 +616,24 @@ class Orchestrator:
             except Exception as e:
                 print(f"[time_block] build failed: {e}")
 
+        # Conv-level rollup of recent self-reflections — one compressed
+        # paragraph of recurring failure modes in THIS conversation. Built
+        # offline by reflexion_service.rollup_conversation (manual trigger
+        # or periodic), injected here as a "self-aware preamble" so Gooni
+        # can adapt mid-conv instead of repeating the same mistake.
+        rollup_block = ""
+        try:
+            from .reflexion_service import reflexion_service
+            rollup = reflexion_service.latest_rollup_for(db, conv.id)
+            if rollup and rollup.gap_exposed:
+                rollup_block = (
+                    "Recent patterns in this conversation "
+                    "(self-observed, don't echo back):\n"
+                    f"- {rollup.gap_exposed.strip()}"
+                )
+        except Exception as e:
+            print(f"[rollup_block] build failed: {e}")
+
         # PERSONA leads — locked identity, all channels, overrides memory prefs.
         # Intention next so the model frames action against the user's goal.
         # cadence_block (bot mechanics) only fires on bot channels and is
@@ -627,6 +645,7 @@ class Orchestrator:
             time_block,
             state_block,
             just_extracted_block,
+            rollup_block,
             memory_context,
             entry_context,
             list_context,

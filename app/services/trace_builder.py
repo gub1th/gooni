@@ -34,7 +34,7 @@ from typing import Any
 # Bump this when the chat pipeline changes in a way that should invalidate
 # (or at least segregate) prior eval ratings. Stays a manual constant rather
 # than a git SHA so unrelated commits don't churn the version.
-PROMPT_VERSION = "v4"
+PROMPT_VERSION = "v5"
 
 
 class TraceBuilder:
