@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
 import { EvalView } from "../components/eval/EvalView";
-import { StatsView } from "../components/StatsView";
 import { GooniLayer } from "../components/GooniLayer";
 import { BacklogBoard } from "../components/lists/BacklogBoard";
 import { ListView } from "../components/lists/ListView";
@@ -49,7 +48,7 @@ function NotesPage() {
   const search = Route.useSearch();
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
-  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "eval" | "stats">(() =>
+  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "eval">(() =>
     search.audit ? "eval" : search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
   );
   const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
@@ -180,7 +179,7 @@ function NotesPage() {
   }, [selectedSpaceId, view]);
 
   function setViewAndUrl(
-    v: "notes" | "dashboard" | "chat" | "lists" | "eval" | "stats",
+    v: "notes" | "dashboard" | "chat" | "lists" | "eval",
     noteId?: number,
     convId?: number,
     listId?: number,
@@ -241,7 +240,6 @@ function NotesPage() {
           isChat={view === "chat"}
           isLists={view === "lists"}
           isEval={view === "eval"}
-          isStats={view === "stats"}
           activeListId={view === "lists" ? activeListId : null}
           showCompose={view !== "notes"}
           onLogoClick={() => setViewAndUrl("dashboard")}
@@ -250,7 +248,6 @@ function NotesPage() {
           onNewChat={handleNewChat}
           onSelectList={handleSelectList}
           onOpenEval={() => setViewAndUrl("eval")}
-          onOpenStats={() => setView("stats")}
         />
       )}
 
@@ -258,7 +255,6 @@ function NotesPage() {
         {view === "dashboard" ? (
           <Dashboard
             onOpenNote={() => setView("notes")}
-            onOpenStats={() => setView("stats")}
           />
         ) : view === "chat" ? (
           <ChatView />
@@ -288,8 +284,6 @@ function NotesPage() {
             onOpenNote={(noteId) => setViewAndUrl("notes", noteId)}
             initialSegmentId={search.segment ?? null}
           />
-        ) : view === "stats" ? (
-          <StatsView />
         ) : (() => {
           // Notes view. When the user is in All Notes (no specific space
           // chosen) AND has no active note, swap the standard 2-column
