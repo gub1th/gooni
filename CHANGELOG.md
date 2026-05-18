@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.108.1 — 2026-05-18 (patch)
+
+- fix(whoop): migrate API URLs from v1 → v2 (v1 sunset) (#262)
+
 ## 0.108.0 — 2026-05-18 (minor)
 
 - feat(eval): clickable baselines + per-case detail panel (#261)
