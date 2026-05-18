@@ -1626,6 +1626,51 @@ export async function fetchConversationMessages(convId: number): Promise<ApiMess
   return res.json();
 }
 
+// ── Eval run (live prod) ──────────────────────────────────────────────────────
+
+export type EvalRunEvent =
+  | { type: "status"; message: string }
+  | { type: "line"; data: string }
+  | { type: "done"; exit_code: number }
+  | { type: "error"; message: string };
+
+// Triggers POST /eval/run-prod-snapshot. SSE-streams per-line stdout. Same
+// fetch + manual chunk-parse pattern as sendConversationMessageStream.
+export async function runProdSnapshotEval(
+  onEvent: (evt: EvalRunEvent) => void,
+): Promise<void> {
+  const res = await apiFetch(`${BASE}/eval/run-prod-snapshot`, {
+    method: "POST",
+    headers: { Accept: "text/event-stream" },
+  });
+  if (!res.ok || !res.body) {
+    if (res.status === 409) throw new Error("Another eval is already running");
+    throw new Error(`Eval stream failed: ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      if (frame.startsWith(":")) continue;
+      const dataLine = frame.split("\n").find((l) => l.startsWith("data: "));
+      if (!dataLine) continue;
+      try {
+        const evt = JSON.parse(dataLine.slice(6)) as EvalRunEvent;
+        onEvent(evt);
+      } catch (e) {
+        console.error("Bad eval SSE frame:", dataLine, e);
+      }
+    }
+  }
+}
+
 // ── Memories ──────────────────────────────────────────────────────────────────
 
 export type MemoryType = "preference" | "goal" | "fact" | "routine" | "constraint" | "episode";
