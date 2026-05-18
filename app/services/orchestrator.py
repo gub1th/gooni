@@ -340,12 +340,19 @@ def _build_ack(
         else:
             parts.append(_trim(tone_rules[0]).lower().rstrip("."))
     if captured_features:
-        title = _trim(captured_features[0].get("title"))
-        if len(captured_features) == 1:
-            parts.append(f"noted \"{title}\" — backlog")
+        titles = [
+            f"\"{_trim(f.get('title'))}\""
+            for f in captured_features[:3]
+        ]
+        n = len(captured_features)
+        if n == 1:
+            parts.append(f"noted. {titles[0]} for backlog")
+        elif n == 2:
+            parts.append(f"noted both. {titles[0]}, {titles[1]} for backlog")
         else:
-            extra = len(captured_features) - 1
-            parts.append(f"noted \"{title}\" + {extra} more — backlog")
+            parts.append(
+                f"noted all {n}. {', '.join(titles)} for backlog"
+            )
     if captured_promises:
         if len(captured_promises) == 1:
             p = captured_promises[0]
@@ -358,10 +365,17 @@ def _build_ack(
         else:
             parts.append(f"{len(captured_promises)} promises tracked")
     if captured_todos:
-        if len(captured_todos) == 1:
-            parts.append(f"\"{_trim(captured_todos[0].get('text'))}\" — todo")
+        texts = [
+            f"\"{_trim(t.get('text'))}\""
+            for t in captured_todos[:3]
+        ]
+        n = len(captured_todos)
+        if n == 1:
+            parts.append(f"noted. {texts[0]} for todos")
+        elif n == 2:
+            parts.append(f"noted both. {texts[0]}, {texts[1]} for todos")
         else:
-            parts.append(f"{len(captured_todos)} todos noted")
+            parts.append(f"noted all {n}. {', '.join(texts)} for todos")
     if not parts:
         return None
     return " · ".join(parts)
