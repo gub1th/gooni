@@ -624,8 +624,19 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
           )}
         </div>
 
-        {/* Scrollable content */}
-        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}>
+        {/* Scrollable content — thin overlay scrollbar that fades in only
+            when the user is scrolling. Static chunky scrollbar Daniel
+            flagged was a leftover platform default. */}
+        <style>{`
+          .gooni-sidebar-scroll { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0) transparent; transition: scrollbar-color 0.2s; }
+          .gooni-sidebar-scroll:hover { scrollbar-color: rgba(0,0,0,0.18) transparent; }
+          .gooni-sidebar-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+          .gooni-sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+          .gooni-sidebar-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; transition: background 0.2s; }
+          .gooni-sidebar-scroll:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.22); }
+          .gooni-sidebar-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.36); }
+        `}</style>
+        <div className="gooni-sidebar-scroll" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}>
           {/* Top-level shortcuts: Todos + Backlog. Resolves to the canonical
               first list of each type (multiple todo/backlog lists are rare —
               the rest are reachable via the LISTS section below). Hidden when
@@ -1016,21 +1027,28 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, isStats
                           Click bubbling is killed so we don't open the
                           space at the same time. */}
                       <button
-                        className="space-action"
                         onClick={(e) => {
                           e.stopPropagation();
                           void updateSpace(space.id as number, { is_pinned: !space.is_pinned });
                         }}
                         title={space.is_pinned ? "Unpin space" : "Pin space"}
                         style={{
-                          opacity: space.is_pinned ? 1 : 0,
+                          // Always visible — was previously hover-gated +
+                          // imperatively flipped, which fought React's
+                          // inline-style on every re-render and made the
+                          // star disappear most of the time. Daniel
+                          // explicitly couldn't find it.
+                          opacity: 1,
                           background: "none",
                           border: "none",
                           cursor: "pointer",
-                          color: space.is_pinned ? "#0A84FF" : "var(--gooni-muted, #8E8E93)",
-                          fontSize: 11,
-                          padding: "0 2px",
+                          color: space.is_pinned
+                            ? "#0A84FF"
+                            : "rgba(142,142,147,0.45)",
+                          fontSize: 12,
+                          padding: "0 3px",
                           flexShrink: 0,
+                          lineHeight: 1,
                         }}
                       >
                         {space.is_pinned ? "★" : "☆"}
