@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.105.0 — 2026-05-18 (minor)
+
+- feat(reflexion): conv-rollup + reflection FK + quality score (v5) (#256)
+
 ## 0.104.0 — 2026-05-18 (minor)
 
 - feat(memory): PATCH /memories supports type change + promote 19 prefs to facts (#255)
