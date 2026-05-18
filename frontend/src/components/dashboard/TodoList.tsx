@@ -154,25 +154,26 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         .gooni-todo-row:hover { background: rgba(0,0,0,0.025); }
         .gooni-todo-cascade { animation: gooni-todo-fade-out 600ms ease forwards; }
 
-        /* Primary-todo card: a single small yellow bullet that travels
-           around the card perimeter once then fades. Implemented as an
-           SVG <rect> with a tiny stroke-dasharray gap; we animate
-           stroke-dashoffset so the visible dash slides along the path.
-           The whole svg layer also fades out at the end so the soft
-           halo (box-shadow on the card) is what remains. */
-        @keyframes gooni-primary-race-offset {
-          0%   { stroke-dashoffset: 0;     }
-          100% { stroke-dashoffset: -2400; }
+        /* Primary-todo card border: a single soft yellow stroke draws
+           itself around the perimeter clockwise from the top-left,
+           carrying its own drop-shadow so the glow lights up the card
+           piece-by-piece as the line crosses — instead of the old
+           "bullet zooms across an already-lit halo" effect. Once
+           complete the stroke + halo persist as the card's signature
+           treatment, and a slow breathing pulse keeps it alive without
+           competing for attention.
+
+           Uses pathLength=1000 so dashoffset math is resolution-
+           independent on the rect, even with rx rounded corners. */
+        @keyframes gooni-primary-trace-draw {
+          0%   { stroke-dashoffset: 1000; }
+          100% { stroke-dashoffset: 0;    }
         }
-        @keyframes gooni-primary-race-fade {
-          0%, 88% { opacity: 1; }
-          100%    { opacity: 0; }
+        @keyframes gooni-primary-trace-breath {
+          0%, 100% { filter: drop-shadow(0 0 4px rgba(245,200,73,0.45)) drop-shadow(0 0 10px rgba(245,200,73,0.22)); }
+          50%      { filter: drop-shadow(0 0 6px rgba(245,200,73,0.60)) drop-shadow(0 0 14px rgba(245,200,73,0.32)); }
         }
-        .gooni-primary-race {
-          /* Rides the card border itself (rect rx matches the card's
-             border-radius). Explicit width/height — SVG is a CSS
-             replaced element so 'inset: 0' alone wouldn't reliably
-             stretch it. */
+        .gooni-primary-trace {
           position: absolute;
           top: 0;
           left: 0;
@@ -180,21 +181,21 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           height: 100%;
           pointer-events: none;
           overflow: visible;
-          animation: gooni-primary-race-fade 2400ms ease forwards;
         }
-        .gooni-primary-race rect {
+        .gooni-primary-trace rect {
           fill: none;
           stroke: #F5C849;
-          stroke-width: 2;
+          stroke-width: 1.4;
           stroke-linecap: round;
-          /* 36px visible bullet + huge gap so only one segment shows
-             at a time. */
-          stroke-dasharray: 36 2400;
-          stroke-dashoffset: 0;
-          filter: drop-shadow(0 0 5px rgba(245, 200, 73, 0.7));
-          /* Slower lap so the eye can track the bullet around the
-             border without it feeling like a hurry. */
-          animation: gooni-primary-race-offset 2200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+          stroke-dasharray: 1000;
+          stroke-dashoffset: 1000;
+          /* Draw once (forwards = stay drawn), then settle into a slow
+             breathing halo. Delay the breath so it doesn't fight the
+             draw mid-flight. */
+          animation:
+            gooni-primary-trace-draw 1800ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards,
+            gooni-primary-trace-breath 4200ms ease-in-out 1800ms infinite;
+          filter: drop-shadow(0 0 4px rgba(245,200,73,0.55)) drop-shadow(0 0 10px rgba(245,200,73,0.25));
         }
       `}</style>
 
@@ -335,15 +336,9 @@ function PrimaryCard({
   const age = ageHint(t.created_at);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
-  // Race-border one-shot — keyed on todo id so promoting another todo to
-  // primary re-fires the animation. Local state flips off after the
-  // animation duration so re-renders don't keep restarting it.
-  const [racing, setRacing] = useState(true);
-  useEffect(() => {
-    setRacing(true);
-    const id = window.setTimeout(() => setRacing(false), 2500);
-    return () => clearTimeout(id);
-  }, [t.id]);
+  // Trace-border lives forever once the card is primary, but we key it
+  // on todo id so promoting a different todo re-runs the draw animation
+  // from scratch (the React key flip forces a remount of the SVG layer).
 
   return (
     <div
@@ -353,28 +348,30 @@ function PrimaryCard({
       style={{
         position: "relative",
         background: "var(--gooni-card, #FFFFFF)",
-        border: "0.5px solid rgba(245,200,73,0.35)",
+        // No yellow border or glow at mount — the SVG trace paints both
+        // in as it draws. A whisper-faint elevation shadow keeps the
+        // card legible against the dashboard backdrop.
+        border: "0.5px solid rgba(0,0,0,0.05)",
         borderRadius: 12,
         padding: "12px 16px",
         display: "flex", alignItems: "center", gap: 12,
         marginBottom: 12,
         fontFamily: FONT,
-        boxShadow: "0 0 0 1px rgba(245,200,73,0.18), 0 6px 22px rgba(245,200,73,0.22), 0 2px 8px rgba(245,200,73,0.14)",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
       }}
     >
-      {racing && (
-        <svg
-          className="gooni-primary-race"
-          aria-hidden
-          preserveAspectRatio="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          {/* Rect rides the card edge itself; rx 12 matches the card's
-              borderRadius. Stroke is centered on the path so half sits
-              just outside the border (overflow:visible on the parent). */}
-          <rect x="0" y="0" width="100%" height="100%" rx="12" ry="12" />
-        </svg>
-      )}
+      <svg
+        key={t.id}
+        className="gooni-primary-trace"
+        aria-hidden
+        preserveAspectRatio="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        {/* Rect rides the card edge itself; rx 12 matches the card's
+            borderRadius. pathLength normalizes the rounded perimeter
+            so the dashoffset math is just "1000 → 0". */}
+        <rect x="0" y="0" width="100%" height="100%" rx="12" ry="12" pathLength={1000} />
+      </svg>
       <button
         onClick={onDemote}
         title="Demote — clear primary"
