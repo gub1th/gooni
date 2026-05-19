@@ -72,6 +72,14 @@ function NotesPage() {
   // subsequent navigations (e.g. clicking a node in the notes map while
   // already on /). Without this, navigate({ to: "/", search: { note } })
   // from elsewhere would silently no-op when the page is already mounted.
+  //
+  // All Zustand mutations land in ONE setState so no intermediate render
+  // observes `activeNoteId === null` between the selectSpace call (which
+  // internally clears activeNoteId via selectNote(null)) and the followup
+  // selectNote(note.id). The intermediate-null state used to cause the
+  // brain-modal flow to land on the All-Notes discovery view instead of
+  // the editor, because React would observe the cleared activeNoteId
+  // before the re-set landed.
   useEffect(() => {
     if (!search.note) return;
     fetchNote(search.note).then((note) => {
@@ -85,34 +93,21 @@ function NotesPage() {
       const current = useNotesContentStore.getState().selectedSpaceId;
       const stayOnAllNotes = current == null || current === "general";
       const targetSpace = stayOnAllNotes ? "general" : noteSpaceId;
-      if (!stayOnAllNotes && current !== noteSpaceId) {
-        selectSpace(noteSpaceId);
-      } else if (current == null) {
-        selectSpace("general");
-      }
-      // Seed the fetched note into the store so NoteEditor finds it on the
-      // very next render. Without this, selectNote sets activeNoteId but the
-      // editor's lookup `notes[spaceId].find(n => n.id === activeNoteId)`
-      // returns undefined until loadNotes resolves — leaving Daniel staring
-      // at an empty "All Notes" screen for the duration of that fetch.
-      //
-      // If the note is already in the list (the common click-from-rail
-      // case), update it in place to preserve sort position. Prepending it
-      // unconditionally caused a visible "jump to top, snap back" on every
-      // click as loadNotes restored the original order milliseconds later.
+
       useNotesContentStore.setState((s) => {
         const existing = s.notes[targetSpace] ?? [];
         const idx = existing.findIndex((n) => n.id === note.id);
-        if (idx >= 0) {
-          const next = existing.slice();
-          next[idx] = note;
-          return { notes: { ...s.notes, [targetSpace]: next } };
-        }
-        // Not in this list yet — prepend so the editor finds it immediately;
-        // loadNotes will reconcile order on its next pass.
-        return { notes: { ...s.notes, [targetSpace]: [note, ...existing] } };
+        // Seed/refresh the note in the target space's list so NoteEditor's
+        // `notes[spaceId].find(...)` resolves on the very next render.
+        const nextList = idx >= 0
+          ? existing.slice().map((n, i) => (i === idx ? note : n))
+          : [note, ...existing];
+        return {
+          notes: { ...s.notes, [targetSpace]: nextList },
+          selectedSpaceId: targetSpace,
+          activeNoteId: note.id,
+        };
       });
-      selectNote(note.id);
       loadNotes(targetSpace);
       setView("notes");
     }).catch(() => {
@@ -151,7 +146,14 @@ function NotesPage() {
   useEffect(() => {
     if (view === "notes") {
       const spaceId = selectedSpaceId ?? "general";
-      if (!selectedSpaceId) selectSpace("general");
+      // Setting selectedSpaceId via raw setState here instead of selectSpace()
+      // because selectSpace internally calls selectNote(null), which would
+      // wipe out a just-set activeNoteId from the search.note deep-link
+      // effect (e.g. brain-map node click). loadNotes still runs so the
+      // list refreshes.
+      if (!selectedSpaceId) {
+        useNotesContentStore.setState({ selectedSpaceId: "general" });
+      }
       loadNotes(spaceId);
     }
   }, [view]);

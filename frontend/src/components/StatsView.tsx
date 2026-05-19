@@ -74,6 +74,37 @@ export function StatsView() {
 
 // ── Sections ──────────────────────────────────────────────────────────────
 
+export function FreshnessActions({
+  updatedAt, isFetching, onRefresh,
+}: {
+  updatedAt: string | null | undefined;
+  isFetching: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 8,
+      fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+      fontFamily: FONT,
+    }}>
+      {updatedAt && <span>updated {relTime(updatedAt)}</span>}
+      {updatedAt && <span style={{ opacity: 0.5 }}>·</span>}
+      <button
+        onClick={onRefresh}
+        disabled={isFetching}
+        style={{
+          fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
+          background: "transparent", border: "none", cursor: "pointer",
+          padding: 0, fontFamily: FONT,
+          opacity: isFetching ? 0.5 : 1,
+        }}
+      >
+        {isFetching ? "refreshing…" : "refresh"}
+      </button>
+    </div>
+  );
+}
+
 export function SectionShell({
   label, children, right,
 }: { label: string; children: React.ReactNode; right?: React.ReactNode }) {
@@ -138,26 +169,19 @@ export function WhoopSection() {
     return `${h}h ${m}m`;
   }
 
-  const refreshButton = (
-    <button
-      onClick={() => fetchWhoopToday(true).then(() => refetch())}
-      disabled={isFetching}
-      style={{
-        fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
-        background: "transparent", border: "none", cursor: "pointer",
-        padding: 0, fontFamily: FONT,
-        opacity: isFetching ? 0.5 : 1,
-      }}
-    >
-      {isFetching ? "refreshing…" : "refresh"}
-    </button>
+  const headerActions = (
+    <FreshnessActions
+      updatedAt={data?.updated_at}
+      isFetching={isFetching}
+      onRefresh={() => fetchWhoopToday(true).then(() => refetch())}
+    />
   );
 
   const recovery = data?.recovery_score ?? null;
   const ringColor = recoveryColor(recovery);
 
   return (
-    <SectionShell label="Whoop — today" right={refreshButton}>
+    <SectionShell label="Whoop — today" right={headerActions}>
       {isLoading && !data ? (
         <SkeletonRow />
       ) : !data ? (
@@ -194,12 +218,6 @@ export function WhoopSection() {
               value={data.sleep_performance_pct != null ? `${Math.round(data.sleep_performance_pct)}%` : "—"}
             />
           </div>
-
-          {data.updated_at && (
-            <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
-              updated {relTime(data.updated_at)}
-            </div>
-          )}
         </div>
       )}
     </SectionShell>
@@ -264,24 +282,17 @@ export function LeetcodeSection() {
     retry: false,
   });
 
-  const refreshButton = (
-    <button
-      onClick={() => fetchLeetcodeToday(true).then(() => refetch())}
-      disabled={isFetching}
-      style={{
-        fontSize: 11, color: "var(--gooni-muted, #8E8E93)",
-        background: "transparent", border: "none", cursor: "pointer",
-        padding: 0, fontFamily: FONT,
-        opacity: isFetching ? 0.5 : 1,
-      }}
-    >
-      {isFetching ? "refreshing…" : "refresh"}
-    </button>
+  const headerActions = (
+    <FreshnessActions
+      updatedAt={data?.updated_at}
+      isFetching={isFetching}
+      onRefresh={() => fetchLeetcodeToday(true).then(() => refetch())}
+    />
   );
 
   if (isLoading && !data) {
     return (
-      <SectionShell label="LeetCode" right={refreshButton}>
+      <SectionShell label="LeetCode" right={headerActions}>
         <SkeletonRow />
       </SectionShell>
     );
@@ -289,7 +300,7 @@ export function LeetcodeSection() {
 
   if (!data?.available) {
     return (
-      <SectionShell label="LeetCode" right={refreshButton}>
+      <SectionShell label="LeetCode" right={headerActions}>
         <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>
           No snapshot yet. LeetCode may have rate-limited the public profile
           query — refresh later.
@@ -301,7 +312,7 @@ export function LeetcodeSection() {
   return (
     <SectionShell
       label={`LeetCode${data.username ? ` · ${data.username}` : ""}`}
-      right={refreshButton}
+      right={headerActions}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         <div style={{
@@ -334,12 +345,6 @@ export function LeetcodeSection() {
         )}
 
         <Heatmap calendar={data.calendar ?? {}} />
-
-        {data.updated_at && (
-          <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>
-            updated {relTime(data.updated_at)}
-          </div>
-        )}
       </div>
     </SectionShell>
   );
@@ -459,7 +464,7 @@ function Heatmap({ calendar }: { calendar: Record<string, number> }) {
 
 
 export function DevSection() {
-  const { data: dev, isLoading } = useQuery<DevActivity | null>({
+  const { data: dev, isLoading, refetch, isFetching } = useQuery<DevActivity | null>({
     queryKey: ["dev-activity"],
     queryFn: () => fetchDevActivity().catch(() => null),
   });
@@ -469,9 +474,17 @@ export function DevSection() {
     staleTime: 30 * 60_000,
   });
 
+  const headerActions = (
+    <FreshnessActions
+      updatedAt={dev?.fetched_at}
+      isFetching={isFetching}
+      onRefresh={() => fetchDevActivity(true).then(() => refetch())}
+    />
+  );
+
   if (isLoading && !dev) {
     return (
-      <SectionShell label="Dev activity">
+      <SectionShell label="Dev activity" right={headerActions}>
         <SkeletonRow />
       </SectionShell>
     );
@@ -479,7 +492,7 @@ export function DevSection() {
 
   if (!dev || !dev.connected || dev.repos.length === 0) {
     return (
-      <SectionShell label="Dev activity">
+      <SectionShell label="Dev activity" right={headerActions}>
         <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>
           GitHub not connected, or no repos tracked. Connect via Settings →
           Integrations.
@@ -493,7 +506,7 @@ export function DevSection() {
   const dels = dev.repos.reduce((s, r) => s + (r.today?.deletions ?? 0), 0);
 
   return (
-    <SectionShell label="Dev activity">
+    <SectionShell label="Dev activity" right={headerActions}>
       <div style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
