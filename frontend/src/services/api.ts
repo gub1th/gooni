@@ -2160,7 +2160,7 @@ export async function uploadImage(file: File): Promise<ImageUploadResult> {
 
 // ── Promises ────────────────────────────────────────────────────────────
 
-export type PromiseState = "pending" | "kept" | "broken" | "abandoned";
+export type PromiseState = "proposed" | "pending" | "kept" | "broken" | "abandoned";
 
 export interface ApiPromise {
   id: number;
@@ -2192,6 +2192,27 @@ export async function patchPromiseState(id: number, state: PromiseState): Promis
     body: JSON.stringify({ state }),
   });
   if (!res.ok) throw new Error("Failed to update promise");
+  return res.json();
+}
+
+export interface PromiseIntegrity {
+  // null when fewer than min_sample resolved promises exist — small-N
+  // noise distorts the score, so the backend asks the UI to render a
+  // "not enough data" placeholder.
+  score: number | null;
+  sample_size: number;
+  min_sample: number;
+  kept_streak: number;
+  last_broken_at: string | null;
+  last_broken_summary: string | null;
+  weights: { kept: number; broken: number; abandoned: number };
+  window: number;
+  note?: string;
+}
+
+export async function fetchPromiseIntegrity(): Promise<PromiseIntegrity> {
+  const res = await apiFetch(`${BASE}/promises/pis`);
+  if (!res.ok) throw new Error("Failed to fetch promise integrity");
   return res.json();
 }
 

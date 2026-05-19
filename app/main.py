@@ -3300,13 +3300,13 @@ def list_promises(
 ):
     """List promises. Default returns the most recent N regardless of state
     so the dashboard drawer can show history alongside active commitments.
-    Pass `state=pending` for just the active slate.
+    Pass `state=proposed|pending|kept|broken|abandoned` for one slate.
     """
     from .db.models import Promise as _Promise
 
     q = db.query(_Promise)
     if state:
-        if state not in ("pending", "kept", "broken", "abandoned"):
+        if state not in ("proposed", "pending", "kept", "broken", "abandoned"):
             raise HTTPException(status_code=400, detail="invalid state")
         q = q.filter(_Promise.state == state)
     # Pending sorts by deadline-first (asc nullslast), so the closest due
@@ -3321,16 +3321,106 @@ def list_promises(
     return [_serialize_promise(p) for p in rows]
 
 
+@app.get("/promises/pis")
+def promise_integrity_score(db: Session = Depends(get_db)):
+    """Promise Integrity Score — Daniel's accountability scoreboard.
+
+    Weighted aggregate over the last 20 resolved promises:
+      kept       → +1.0
+      broken     → -1.5  (asymmetric: breaking stings more than keeping helps)
+      abandoned  → -0.5  (you owned it vs ghosting)
+      pending    → 0  (not counted; resolution unknown)
+      proposed   → 0  (not a contract yet)
+
+    Normalized to 0..100 percentage. Plus current kept-streak (consecutive
+    `kept` walking back from most recent) and last_broken metadata.
+
+    Returns `{score: null, ...}` when fewer than 3 resolved promises exist
+    — small-N noise distorts the score, better to show "not enough data".
+
+    Algorithm notes for the curious:
+      score% = ((sum + theoretical_min_abs) / theoretical_range) * 100
+             = ((sum + 30) / 50) * 100        (when sample_size = 20)
+      kept rate alone would punish early breaks asymmetrically (1 of 3
+      broken = 33% feels catastrophic). Weighted-asymmetric form smooths
+      the punishment curve while still making broken weigh more than kept.
+    """
+    from .db.models import Promise as _Promise
+
+    RESOLVED = ("kept", "broken", "abandoned")
+    WEIGHTS = {"kept": 1.0, "broken": -1.5, "abandoned": -0.5}
+    MIN_SAMPLE = 3
+    WINDOW = 20
+
+    rows = (
+        db.query(_Promise)
+        .filter(_Promise.state.in_(RESOLVED))
+        .order_by(_Promise.resolved_at.desc().nullslast(), _Promise.id.desc())
+        .limit(WINDOW)
+        .all()
+    )
+    sample_size = len(rows)
+
+    if sample_size < MIN_SAMPLE:
+        return {
+            "score": None,
+            "sample_size": sample_size,
+            "min_sample": MIN_SAMPLE,
+            "kept_streak": 0,
+            "last_broken_at": None,
+            "last_broken_summary": None,
+            "weights": WEIGHTS,
+            "window": WINDOW,
+            "note": "need at least 3 resolved promises to compute",
+        }
+
+    total = sum(WEIGHTS[r.state] for r in rows)
+    # Theoretical range across the sample window.
+    theoretical_max = sample_size * 1.0          # all kept
+    theoretical_min = sample_size * -1.5         # all broken
+    range_ = theoretical_max - theoretical_min   # = sample_size * 2.5
+    pct = int(round(((total - theoretical_min) / range_) * 100))
+    pct = max(0, min(100, pct))
+
+    # Kept streak — walk recent-first until we hit a non-kept.
+    streak = 0
+    for r in rows:
+        if r.state == "kept":
+            streak += 1
+        else:
+            break
+
+    last_broken = next((r for r in rows if r.state == "broken"), None)
+
+    return {
+        "score": pct,
+        "sample_size": sample_size,
+        "min_sample": MIN_SAMPLE,
+        "kept_streak": streak,
+        "last_broken_at": (
+            last_broken.resolved_at.isoformat() if last_broken and last_broken.resolved_at else None
+        ),
+        "last_broken_summary": (
+            (last_broken.summary or last_broken.utterance)
+            if last_broken else None
+        ),
+        "weights": WEIGHTS,
+        "window": WINDOW,
+    }
+
+
 @app.patch("/promises/{promise_id}")
 def patch_promise(promise_id: int, body: dict, db: Session = Depends(get_db)):
-    """State transition only — kept | broken | abandoned | pending. Mirrors
-    `promise_service.transition` so the same idempotency + resolved_at
-    bookkeeping fires regardless of caller."""
+    """State transition only — proposed | pending | kept | broken |
+    abandoned. Mirrors `promise_service.transition` so the same
+    idempotency + resolved_at bookkeeping fires regardless of caller.
+    Lock-in flip (proposed → pending) auto-spawns a Habit when the
+    utterance is recurring-shaped (see promise_service)."""
     from .services import promise_service
 
     new_state = body.get("state")
-    if new_state not in ("pending", "kept", "broken", "abandoned"):
-        raise HTTPException(status_code=400, detail="state required (pending|kept|broken|abandoned)")
+    if new_state not in ("proposed", "pending", "kept", "broken", "abandoned"):
+        raise HTTPException(status_code=400, detail="state required (proposed|pending|kept|broken|abandoned)")
     p = promise_service.transition(db, promise_id, new_state)
     if p is None:
         raise HTTPException(status_code=404, detail="Promise not found")

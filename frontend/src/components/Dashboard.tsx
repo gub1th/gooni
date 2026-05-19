@@ -11,6 +11,7 @@ import { ExploreModal } from "./ExploreModal";
 import { TodoList } from "./dashboard/TodoList";
 import { HabitsStrip } from "./dashboard/HabitsStrip";
 import { PromiseDrawer } from "./dashboard/PromiseDrawer";
+import { PromiseIntegrityCard } from "./dashboard/PromiseIntegrityCard";
 import { TakeTabs } from "./dashboard/TakeTabs";
 import { DashboardHeader } from "./dashboard/DashboardHeader";
 import { TabToggle } from "./dashboard/TabToggle";
@@ -157,6 +158,9 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
               <TabToggle active={activeTab} onChange={setActiveTab} />
               {activeTab === "todos" ? <TodoList /> : <FocusesView />}
               <HabitsStrip />
+              <div style={{ marginTop: 14 }}>
+                <PromiseIntegrityCard />
+              </div>
               <div style={{ marginTop: 14 }}>
                 <PromiseDrawer />
               </div>
