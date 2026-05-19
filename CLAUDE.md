@@ -44,7 +44,7 @@ See `docs/TODO.md` (gitignored — local only).
   - `Note` — `excerpt` cached preview (≤240 char, HTML/img stripped) populated on save; lazy-backfilled at startup. List endpoints don't ship full body. `status` graduation lifecycle (`unprocessed|graduated|archived`, default `unprocessed`, indexed) — drives the UNPROCESSED sidebar triage queue + synthesizer's source filter. Note becomes `graduated` once it spawns Promise/Todo/Habit/Focus (tracked via `derives_from` edges, wired in PR-E); `archived` is a manual tombstone via `PATCH /notes/{id}` w/ `{"status":"archived"}`. `GET /notes/unprocessed` returns the queue.
   - `Focus` — long-running commitment. Color auto-assigned from 10-color palette. Drift cols: deferred `initial_signature` (frozen at promotion) + `current_signature` (EMA-updated per bind), `missed_run_count` (≥3 → `status='dormant'`), `drift_flagged_at` (one-shot when `1-cos(initial,current) > 0.35`), `evolved_from_focus_id` (lineage via `/focuses/{id}/fork`).
   - `Todo` — 3-state `state` enum (`not_yet|doing|done`), single-FK `focus_id`, singleton `is_primary` (auto-cleared on done).
-  - `BacklogTicket` — `board_status` (`not_yet|doing|done`), `pr_url`, `notes` (multi-line body), `todo_id` (FK set on `/promote`).
+  - `BacklogTicket` — `board_status` (`not_yet|doing|done`), `pr_url`, `notes` (multi-line body), `todo_id` (FK set on `/promote`). Singleton `is_primary` flag (mirrors Todo.is_primary): pinned ticket drives the dashboard north-star banner; auto-cleared on done.
   - `Memory`, `Message`, `Conversation` — embedding cols are `deferred()` (see Code Patterns).
   - `FocusCandidate` — synth-surfaced, lifecycle `proposed → promoted|dismissed`. Upsert key = `cluster_signature` (sha256). Status sticky on re-emit; seen_count bumps.
   - `Reflection` — per-turn self-eval (Reflexion pattern). Sev ≥ 2 + gap → cosine-cluster, 3+ matches at 0.8 auto-promotes a behavioral `CapabilityFacet`.
@@ -261,6 +261,11 @@ DELETE /todos/{id}                    → also clears backlog_tickets.todo_id
 # Backlog promote/demote
 POST   /backlog/tickets/{id}/promote  → idempotent. Creates Todo mirroring text/subtitle, stores ticket.todo_id.
 POST   /backlog/tickets/{id}/demote   → deletes linked Todo, clears todo_id. Ticket stays.
+
+# Backlog primary (singleton north-star banner)
+GET    /backlog/tickets/primary             → currently-pinned ticket or null. Excludes done tickets.
+POST   /backlog/tickets/{id}/promote-to-primary → set as singleton primary; atomically clears prior primary. Idempotent.
+POST   /backlog/tickets/primary/clear       → unpin whichever ticket is primary. Returns demoted ticket or null.
 
 # Focus synthesizer / candidates
 POST   /focus-synthesis/run           → pure probe (no DB writes). Body knobs: include_kinds, threshold, merge_threshold, sub_threshold, min_parent_for_subcluster, min_sub_size, min_cluster_size, classify, classify_model, state_bind_sim (0.38), state_bind_margin (0.10).

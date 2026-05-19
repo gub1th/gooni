@@ -586,6 +586,11 @@ class BacklogTicket(Base):
     # Free-form ticket body — context, design notes, follow-up scratch.
     # subtitle stays as the one-line tagline; notes is the multi-line story.
     notes = Column(Text, nullable=True)
+    # Singleton across the whole table — only one ticket can be the
+    # "north star" pinned to the dashboard banner. Mirrors Todo.is_primary
+    # singleton pattern; service layer enforces the invariant. Auto-clears
+    # when the ticket is marked done.
+    is_primary = Column(Boolean, default=False, nullable=False)
     # Set when this ticket has been promoted into Daniel's todo list.
     # Promote = create a Todo with focus_id null, link it here. Demote =
     # delete the linked Todo, clear this column. When the linked todo's

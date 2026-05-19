@@ -78,18 +78,71 @@ class BacklogService:
         db.refresh(t)
         return t
 
+    def get_primary(self, db: Session) -> BacklogTicket | None:
+        """The single ticket pinned as Daniel's north star, or None.
+
+        Excludes done tickets — completion auto-clears the primary flag,
+        but this filter is a belt-and-suspenders so a stale flag (e.g.
+        from direct DB edit) doesn't surface as the banner.
+        """
+        return (
+            db.query(BacklogTicket)
+            .filter(
+                BacklogTicket.is_primary.is_(True),
+                BacklogTicket.done.is_(False),
+            )
+            .first()
+        )
+
+    def promote_to_primary(self, db: Session, ticket_id: int) -> BacklogTicket | None:
+        """Pin `ticket_id` as the singleton primary, clearing any other
+        ticket that currently holds the flag. Idempotent."""
+        t = self.get(db, ticket_id)
+        if not t:
+            return None
+        db.query(BacklogTicket).filter(
+            BacklogTicket.is_primary.is_(True),
+            BacklogTicket.id != ticket_id,
+        ).update({"is_primary": False}, synchronize_session=False)
+        t.is_primary = True
+        db.commit()
+        db.refresh(t)
+        return t
+
+    def clear_primary(self, db: Session) -> BacklogTicket | None:
+        """Unpin whichever ticket currently holds primary (if any).
+        Returns the demoted ticket or None when no primary was set."""
+        current = self.get_primary(db)
+        if current is None:
+            return None
+        current.is_primary = False
+        db.commit()
+        db.refresh(current)
+        return current
+
     def update(self, db: Session, ticket_id: int, **patch: Any) -> BacklogTicket | None:
         t = self.get(db, ticket_id)
         if not t:
             return None
+        # is_primary singleton — if caller is setting it True, clear any
+        # other ticket holding the flag first. Mirrors Todo.update().
+        if patch.get("is_primary") is True:
+            db.query(BacklogTicket).filter(
+                BacklogTicket.is_primary.is_(True),
+                BacklogTicket.id != ticket_id,
+            ).update({"is_primary": False}, synchronize_session=False)
         for key in (
             "text", "subtitle", "board_status", "pr_url", "done", "sort_order",
-            "todo_id", "notes",
+            "todo_id", "notes", "is_primary",
         ):
             if key in patch:
                 setattr(t, key, patch[key])
         if "done" in patch:
             t.completed_at = datetime.utcnow() if patch["done"] else None
+            # Completing a primary frees the slot — mirrors Todo.is_primary
+            # auto-clear on state='done'.
+            if patch["done"]:
+                t.is_primary = False
         if any(k in patch for k in ("text", "subtitle")):
             embed_raw = _item_embed_text(t.text, t.subtitle)
             vec = list_service._embed_item_text(embed_raw)
@@ -185,6 +238,7 @@ def serialize_ticket(t: BacklogTicket) -> dict[str, Any]:
         "pr_url": t.pr_url,
         "notes": t.notes,
         "todo_id": t.todo_id,
+        "is_primary": bool(t.is_primary),
         "done": bool(t.done),
         "completed_at": t.completed_at.isoformat() if t.completed_at else None,
         "sort_order": t.sort_order,

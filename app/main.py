@@ -1353,6 +1353,35 @@ def backlog_delete(ticket_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@app.get("/backlog/tickets/primary")
+def backlog_get_primary(db: Session = Depends(get_db)):
+    """Singleton dashboard north-star ticket — or null when nothing is
+    pinned. Drives the PrimaryBacklogBanner on the dashboard."""
+    from .services.backlog_service import backlog_service, serialize_ticket
+    ticket = backlog_service.get_primary(db)
+    return serialize_ticket(ticket) if ticket else None
+
+
+@app.post("/backlog/tickets/{ticket_id}/promote-to-primary")
+def backlog_promote_to_primary(ticket_id: int, db: Session = Depends(get_db)):
+    """Pin this ticket as the singleton primary (banner anchor). Clears
+    any previously-primary ticket atomically. Idempotent."""
+    from .services.backlog_service import backlog_service, serialize_ticket
+    ticket = backlog_service.promote_to_primary(db, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    return serialize_ticket(ticket)
+
+
+@app.post("/backlog/tickets/primary/clear")
+def backlog_clear_primary(db: Session = Depends(get_db)):
+    """Unpin whichever ticket currently holds primary. Returns the
+    demoted ticket or null when nothing was pinned."""
+    from .services.backlog_service import backlog_service, serialize_ticket
+    ticket = backlog_service.clear_primary(db)
+    return serialize_ticket(ticket) if ticket else None
+
+
 @app.post("/backlog/tickets/{ticket_id}/promote")
 def backlog_promote(ticket_id: int, db: Session = Depends(get_db)):
     """Create a Todo mirroring this ticket and link them via ticket.todo_id.
