@@ -142,7 +142,7 @@ def _gather_todos(db: Session) -> list[dict]:
             Todo.id, Todo.text, Todo.subtitle, Todo.embedding,
             Todo.state, Todo.completed_at,
         )
-        .filter(Todo.embedding.isnot(None))
+        .filter(Todo.embedding.isnot(None), Todo.deleted_at.is_(None))
         .all()
     )
     items: list[dict] = []

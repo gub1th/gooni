@@ -150,7 +150,7 @@ class SnapshotService:
             "messages": db.query(Message).count(),
             "memories": db.query(Memory).count(),
             "focuses": db.query(Focus).count(),
-            "todos": db.query(Todo).count(),
+            "todos": db.query(Todo).filter(Todo.deleted_at.is_(None)).count(),
             "backlog_tickets": db.query(BacklogTicket).count(),
             "items_total": db.query(ListItem).count(),
         }

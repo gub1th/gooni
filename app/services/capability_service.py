@@ -520,6 +520,11 @@ class CapabilityService:
         "behavioral": 2,
     }
 
+    # Negative-polarity facets cap. Short list — the load-bearing piece is
+    # "LLM sees an explicit 'cannot' list" not "every constraint enumerated."
+    # Too many entries dilutes the signal and balloons the prompt.
+    _NEGATIVE_FACET_CAP = 5
+
     def build_prompt_block(self, db: Session, max_lines: int = 30) -> str:
         """Compact 'Who I am right now' block for master prompt injection.
 
@@ -529,6 +534,12 @@ class CapabilityService:
         capped via _LAYER_CAPS; behavioral takes the 2 MOST-RECENT (by
         updated_at desc) to surface the freshest patterns rather than the
         oldest clusters.
+
+        Polarity (G1): positive facets render under layer-prefixed
+        ("I can:", "I tend to:", "I am:"). Negative facets render under a
+        separate "I cannot:" section so the LLM has an explicit gap list
+        — kills the failure mode where it claims a capability it lacks
+        and tries to fake an action it can't perform.
         """
         # Pull behavioral separately so we can sort by updated_at desc.
         # The other layers stay in id order — they're hand-curated, so id
@@ -538,6 +549,7 @@ class CapabilityService:
             .filter(
                 CapabilityFacet.layer == "behavioral",
                 CapabilityFacet.status.in_(["verified", "claimed"]),
+                CapabilityFacet.polarity == "positive",
             )
             .order_by(CapabilityFacet.updated_at.desc())
             .limit(self._LAYER_CAPS["behavioral"])
@@ -548,6 +560,7 @@ class CapabilityService:
             .filter(
                 CapabilityFacet.layer.in_(["functional", "architectural"]),
                 CapabilityFacet.status.in_(["verified", "claimed"]),
+                CapabilityFacet.polarity == "positive",
             )
             .order_by(CapabilityFacet.layer, CapabilityFacet.id)
             .all()
@@ -561,20 +574,111 @@ class CapabilityService:
                 continue
             capped.append(r)
 
-        rows = capped + behavioral_rows
-        rows = rows[:max_lines]
-        if not rows:
+        # Negative facets — separate query, separate section, capped tight.
+        # Pulled across any layer; what matters is the constraint, not
+        # the architectural taxonomy.
+        negative_rows = (
+            db.query(CapabilityFacet)
+            .filter(
+                CapabilityFacet.status.in_(["verified", "claimed"]),
+                CapabilityFacet.polarity == "negative",
+            )
+            .order_by(CapabilityFacet.id)
+            .limit(self._NEGATIVE_FACET_CAP)
+            .all()
+        )
+
+        positive_rows = (capped + behavioral_rows)[:max_lines]
+        if not positive_rows and not negative_rows:
             return ""
 
-        lines = ["Who I am right now:"]
-        for r in rows:
-            tag = {
-                "functional": "I can",
-                "behavioral": "I tend to",
-                "architectural": "I am",
-            }.get(r.layer, "")
-            lines.append(f"- {tag}: {r.facet_text}")
+        lines: list[str] = []
+        if positive_rows:
+            lines.append("Who I am right now:")
+            for r in positive_rows:
+                tag = {
+                    "functional": "I can",
+                    "behavioral": "I tend to",
+                    "architectural": "I am",
+                }.get(r.layer, "")
+                lines.append(f"- {tag}: {r.facet_text}")
+        if negative_rows:
+            if positive_rows:
+                lines.append("")  # blank-line separator
+            lines.append("What I cannot do (do not claim or fake these):")
+            for r in negative_rows:
+                lines.append(f"- I cannot: {r.facet_text}")
         return "\n".join(lines)
+
+    # ── Boot-time seed for negative-polarity facets ─────────────────────
+    # These are the load-bearing "Gooni knows its own gaps" claims. Seeded
+    # once at boot, idempotent on facet_key. Edit this list when an
+    # architectural constraint changes (don't add granular tool-level
+    # negatives — those belong as functional-layer 'positive' facets
+    # describing what each tool DOES, not 16 negatives listing what
+    # other-than-X-it-doesn't).
+    _NEGATIVE_SEEDS = [
+        (
+            "negative.delete_payment_methods",
+            "delete payment methods, financial accounts, or any monetary "
+            "instrument on Daniel's behalf",
+        ),
+        (
+            "negative.send_external_unilaterally",
+            "send external messages (email, SMS to others, social posts) "
+            "without explicit per-instance authorization in that turn",
+        ),
+        (
+            "negative.modify_others_data",
+            "modify data belonging to anyone other than Daniel — single-"
+            "tenant architecture, no multi-user surface",
+        ),
+        (
+            "negative.guarantee_realtime_during_cold_start",
+            "guarantee real-time response during Fly cold-starts — the "
+            "fly-revive handshake catches up after, but mid-cold-start "
+            "messages are best-effort",
+        ),
+        (
+            "negative.irreversible_without_confirm",
+            "execute genuinely irreversible API calls (hard-deletes past "
+            "the soft-delete window, legal-doc sends, anything that can't "
+            "be rolled back) without explicit confirmation in-turn",
+        ),
+    ]
+
+    def seed_negative_facets(self, db: Session) -> int:
+        """Idempotent seed of negative-polarity facets. Returns count of
+        rows inserted (rows already present are skipped). Called from
+        lifespan boot scan alongside the mechanical refresh."""
+        inserted = 0
+        for key, text in self._NEGATIVE_SEEDS:
+            existing = (
+                db.query(CapabilityFacet)
+                .filter(CapabilityFacet.facet_key == key)
+                .one_or_none()
+            )
+            if existing is not None:
+                # Update text in case the seed string evolved; keep status.
+                if existing.facet_text != text:
+                    existing.facet_text = text
+                if existing.polarity != "negative":
+                    existing.polarity = "negative"
+                continue
+            db.add(
+                CapabilityFacet(
+                    facet_key=key,
+                    layer="architectural",
+                    facet_text=text,
+                    status="verified",
+                    source="manual_seed",
+                    polarity="negative",
+                )
+            )
+            inserted += 1
+        if inserted or any(True for _ in self._NEGATIVE_SEEDS):
+            db.commit()
+        return inserted
 
 
 capability_service = CapabilityService()

@@ -78,6 +78,7 @@ def gather_context(db: Session) -> dict[str, Any]:
             Todo.done.is_(False),
             Todo.due_date.is_not(None),
             Todo.due_date < today,
+            Todo.deleted_at.is_(None),
         )
         .order_by(Todo.due_date.asc(), Todo.sort_order.asc())
         .all()
@@ -89,6 +90,7 @@ def gather_context(db: Session) -> dict[str, Any]:
             Todo.due_date.is_not(None),
             Todo.due_date >= today,
             Todo.due_date < tomorrow,
+            Todo.deleted_at.is_(None),
         )
         .order_by(Todo.sort_order.asc())
         .all()
@@ -102,6 +104,7 @@ def gather_context(db: Session) -> dict[str, Any]:
         .filter(
             Todo.done.is_(False),
             Todo.due_date.is_(None),
+            Todo.deleted_at.is_(None),
         )
         .order_by(Todo.is_primary.desc(), Todo.sort_order.asc(), Todo.id.asc())
         .limit(_OPEN_TODO_CAP)
@@ -112,7 +115,11 @@ def gather_context(db: Session) -> dict[str, Any]:
     # when it's also in overdue / today / open buckets.
     primary_todo = (
         db.query(Todo)
-        .filter(Todo.is_primary.is_(True), Todo.done.is_(False))
+        .filter(
+            Todo.is_primary.is_(True),
+            Todo.done.is_(False),
+            Todo.deleted_at.is_(None),
+        )
         .first()
     )
     return {
@@ -211,7 +218,11 @@ def _pick_focus_item(db: Session) -> dict[str, Any] | None:
     # Todo tier — primary first, then most-overdue.
     primary = (
         db.query(Todo)
-        .filter(Todo.is_primary.is_(True), Todo.done.is_(False))
+        .filter(
+            Todo.is_primary.is_(True),
+            Todo.done.is_(False),
+            Todo.deleted_at.is_(None),
+        )
         .first()
     )
     if primary:
@@ -227,6 +238,7 @@ def _pick_focus_item(db: Session) -> dict[str, Any] | None:
             Todo.done.is_(False),
             Todo.due_date.is_not(None),
             Todo.due_date < today,
+            Todo.deleted_at.is_(None),
         )
         .order_by(Todo.due_date.asc())
         .first()
