@@ -49,12 +49,15 @@ class RouterResult:
     nothing to route."""
 
     memories_written: list[Any] = field(default_factory=list)
-    feature_titles: list[str] = field(default_factory=list)
-    # Parallel to feature_titles. Each entry: {"title": str, "ticket_id": int}
-    # — used by classify_note to deep-link from the note disclosure.
+    # Each entry: {"title": str, "ticket_id": int | None}. Used by ack +
+    # just_extracted blocks to surface real BacklogTicket ids — anti-
+    # hallucination layer for the "tracked without id" failure mode.
     captured_features: list[dict] = field(default_factory=list)
     tone_rules: list[str] = field(default_factory=list)
     captured_promises: list[dict] = field(default_factory=list)
+    # Each entry: {"text": str, "todo_id": int}. Mirrors captured_features
+    # so the ack helper can render with real Todo ids.
+    captured_todos: list[dict] = field(default_factory=list)
     # Phase 5: extractor's classification of how much reply the user
     # wants. One of "answer" | "acknowledge" | "task_only" | "no_reply".
     # Defaults to "answer" — conservative; callers gate the LLM reply

@@ -315,7 +315,40 @@ feature_requests:
   must be a separate sentence; trailing politeness ("please?", "would
   that work?") doesn't qualify.
 
-- After the hard gate passes (text is NOT a question):
+  *** HARD ANTI-PATTERN — LIST-ADD ASKS ***
+  Phrases of the form "add X to my <noun> list" / "add X to <list_name>"
+  / "throw X on my <noun> list" / "remind me to add X to <list_name>"
+  / "put X on my <noun> list" are USER CONTENT going onto an existing
+  list, NOT a capability gap. Gooni already has `add_to_list` —
+  these route through that tool, not the engineering backlog. Emit []
+  for feature_requests on these. The classifier loses calibration when
+  it confuses user content with platform asks (see Cluster A bug:
+  "Add to date spots list" wrongly created a BacklogTicket).
+  Examples that → []:
+    "add this to my date spots list"
+    "add Horsefeather to date spots"
+    "throw this on my reading list"
+    "put bread on the groceries list"
+    "remind me to add the new spot to date ideas"
+
+  *** CONSOLIDATION — 1 CAPABILITY = 1 TICKET ***
+  When a single turn mentions multiple sub-asks that all describe ONE
+  underlying capability (e.g. "track my sleep", "handle nights I don't
+  log a sleep time", and "use claude usage as awake-signal" all describe
+  ONE capability: sleep tracking), emit ONE entry. Put the sub-asks in
+  `why`. Only emit N entries when there are N GENUINELY DISTINCT
+  capabilities (e.g. "add timers AND a streak tracker" → 2 entries).
+  Cluster A bug: a single sleep ask fragmented into 3 tickets — the
+  ack then leaked "backlog: X (+2)" with no user-readable context.
+  Examples:
+    "i want sleep tracking — also handle nights w/o a logged time,
+     and maybe use claude activity as an awake proxy"
+      → ONE entry: title="Add sleep tracking",
+        why="incl. unknown sleep windows + claude-usage-as-awake proxy"
+    "add timers and a streak tracker"
+      → TWO entries (genuinely distinct capabilities)
+
+- After the hard gate passes (text is NOT a question, not a list-add):
 - INCLUDE feature_requests when Daniel uses imperative or wish form:
     "add X", "you need X", "I want you to be able to X", "X should work",
     "you should be able to X", hallucination call-outs ("you can't actually

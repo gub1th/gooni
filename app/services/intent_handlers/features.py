@@ -27,9 +27,9 @@ def handle(items: list[dict], ctx, result) -> None:
         except Exception as e:
             print(f"[features handler] execute error: {e}")
             continue
-        result.feature_titles.append(title)
         # Parse "(id #N)" or "#N" out of the tool result for back-link
-        # tracking — classify_note uses it to deep-link from notes.
+        # tracking — classify_note uses it to deep-link from notes;
+        # the ack helper surfaces ticket #N so Daniel can verify in OpsMode.
         m = _re.search(r"#(\d+)", tool_result or "")
         ticket_id = int(m.group(1)) if m else None
         result.captured_features.append({"title": title, "ticket_id": ticket_id})

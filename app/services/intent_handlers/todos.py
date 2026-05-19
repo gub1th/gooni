@@ -106,6 +106,7 @@ def handle(items: list[dict], ctx, result) -> None:
         except Exception as e:
             print(f"[todos handler] create error: {e}")
             continue
+        result.captured_todos.append({"text": text, "todo_id": todo.id})
         result.tools_used.append("router:todo")
         if ctx.on_tool_call:
             try:
