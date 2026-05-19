@@ -538,6 +538,43 @@ async def _capability_telemetry_loop():
             await asyncio.sleep(60)
 
 
+async def _urgency_rollup_loop():
+    """Nightly recompute of backlog ticket urgency_score from
+    friction_events. Fires at 03:30 local — staggered 30min after the
+    capability_telemetry_loop's 03:00 to avoid double-writing the same
+    rows in adjacent passes.
+
+    G2 self-PM: keeps urgency_score honest even when no fresh friction
+    fires (synchronous bump in log_friction handles real-time, but
+    decay-based ranking shifts daily without new events).
+    """
+    from .services.backlog_service import backlog_service
+    while True:
+        try:
+            db = SessionLocal()
+            try:
+                s = _settings_row(db)
+                tz_name = s.nudge_tz or "America/Los_Angeles"
+            finally:
+                db.close()
+            now = _dt.now(ZoneInfo(tz_name) if ZoneInfo else None)
+            target = _next_fire(now, hour=3, minute=30, tz_name=tz_name)
+            wait = max(1.0, (target - now).total_seconds())
+            await asyncio.sleep(wait)
+            db = SessionLocal()
+            try:
+                result = backlog_service.recompute_all_urgency(db)
+                print(f"[urgency-rollup] {result}", flush=True)
+            finally:
+                db.close()
+            await asyncio.sleep(70)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[urgency-rollup] loop error: {e}", flush=True)
+            await asyncio.sleep(60)
+
+
 async def _todo_soft_delete_sweeper_loop():
     """Hourly hard-purge of soft-deleted todos past the 24h undo window.
 
@@ -629,12 +666,13 @@ async def _lifespan(app: FastAPI):
     mem_task = asyncio.create_task(_memory_watchdog_loop())
     capability_task = asyncio.create_task(_capability_telemetry_loop())
     todo_sweeper_task = asyncio.create_task(_todo_soft_delete_sweeper_loop())
+    urgency_task = asyncio.create_task(_urgency_rollup_loop())
     try:
         yield
     finally:
         for t in (
             nudge_task, backfill_task, excerpt_task, mem_task, capability_task,
-            todo_sweeper_task,
+            todo_sweeper_task, urgency_task,
         ):
             t.cancel()
             try:
@@ -1289,8 +1327,32 @@ def reorder_list_items(body: dict, db: Session = Depends(get_db)):
 
 
 @app.get("/backlog/tickets")
-def backlog_list(include_done: bool = True, db: Session = Depends(get_db)):
+def backlog_list(
+    include_done: bool = True,
+    sort: str = "default",
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """List backlog tickets. sort='default' = sort_order ASC (current
+    behavior). sort='urgency' = G2 urgency-first ranking: open tickets
+    with urgency_score desc, then non-scored open, then done. Caps at
+    `limit` rows on urgency mode to avoid hauling the whole backlog."""
     from .services.backlog_service import backlog_service, serialize_ticket
+    if sort == "urgency":
+        # Use the dedicated query — only open + scored tickets, ranked.
+        # Fall back to default-sorted remainder for context if include_done.
+        scored = backlog_service.list_by_urgency(db, limit=limit)
+        scored_ids = {t.id for t in scored}
+        out = [serialize_ticket(t) for t in scored]
+        # Append non-scored open tickets after the ranked ones so callers
+        # paging through don't lose visibility of unscored work. Done
+        # tickets only included when include_done=True.
+        remainder = [
+            t for t in backlog_service.list_all(db, include_done=include_done)
+            if t.id not in scored_ids
+        ]
+        out.extend(serialize_ticket(t) for t in remainder)
+        return out
     rows = backlog_service.list_all(db, include_done=include_done)
     return [serialize_ticket(t) for t in rows]
 
