@@ -7,6 +7,11 @@ After the dashboard revamp, todos carry:
   - `focus_id` FK (single — legacy M2M `focus_todo_links` dropped).
   - `is_primary` singleton — only one Todo across the whole table can
     have is_primary=True. Service enforces.
+  - `deleted_at` soft-delete tombstone (G1 groom-mutation arc). NULL =
+    live; NOT NULL = deleted at that time. All service read-paths
+    filter `deleted_at IS NULL` so soft-deleted rows are invisible.
+    `purge_old_deleted` hard-removes anything past 24h (sweeper runs
+    in lifespan alongside daily nudge).
 """
 
 from __future__ import annotations
@@ -23,6 +28,10 @@ from .list_service import _item_embed_text, list_service
 
 
 VALID_STATES = ("not_yet", "doing", "done")
+
+# Soft-delete window. Anything past this gets hard-purged by the lifespan
+# sweeper. Tunable if Daniel wants longer/shorter undo runway.
+SOFT_DELETE_TTL_HOURS = 24
 
 
 def _state_to_done(state: str) -> bool:
@@ -42,12 +51,19 @@ def _next_state(current: str) -> str:
 
 
 class TodoService:
-    def get(self, db: Session, todo_id: int) -> Todo | None:
-        return db.query(Todo).filter(Todo.id == todo_id).first()
+    def get(self, db: Session, todo_id: int, include_deleted: bool = False) -> Todo | None:
+        """Fetch a todo by id. Soft-deleted rows hidden by default;
+        pass `include_deleted=True` to fetch tombstones (used by
+        undelete + audit paths)."""
+        q = db.query(Todo).filter(Todo.id == todo_id)
+        if not include_deleted:
+            q = q.filter(Todo.deleted_at.is_(None))
+        return q.first()
 
     def list_open(self, db: Session) -> list[Todo]:
         """All not-yet-done todos, sorted with `doing` floated above
-        `not_yet` and tied within state by sort_order."""
+        `not_yet` and tied within state by sort_order. Soft-deleted
+        rows excluded."""
         # SQLite: CASE in ORDER BY — `doing` (rank 0) sorts before
         # `not_yet` (rank 1). Done rows excluded.
         from sqlalchemy import case
@@ -58,7 +74,7 @@ class TodoService:
         )
         return (
             db.query(Todo)
-            .filter(Todo.done.is_(False))
+            .filter(Todo.done.is_(False), Todo.deleted_at.is_(None))
             .order_by(state_rank, Todo.sort_order, Todo.id)
             .all()
         )
@@ -87,6 +103,7 @@ class TodoService:
                 Todo.done.is_(True),
                 Todo.completed_at.is_not(None),
                 Todo.completed_at >= cutoff_utc,
+                Todo.deleted_at.is_(None),
             )
             .order_by(Todo.completed_at.desc())
             .all()
@@ -95,7 +112,11 @@ class TodoService:
     def get_primary(self, db: Session) -> Todo | None:
         return (
             db.query(Todo)
-            .filter(Todo.is_primary.is_(True), Todo.done.is_(False))
+            .filter(
+                Todo.is_primary.is_(True),
+                Todo.done.is_(False),
+                Todo.deleted_at.is_(None),
+            )
             .first()
         )
 
@@ -212,17 +233,135 @@ class TodoService:
         return self.update(db, todo_id, state=_next_state(t.state))
 
     def delete(self, db: Session, todo_id: int) -> bool:
+        """Soft-delete: stamp deleted_at, leave row in place for 24h
+        undo. Hard-purge happens via sweeper. Clears is_primary so the
+        slot opens immediately. Linked backlog tickets keep the FK —
+        they get cleared at purge time (not at soft-delete time) so
+        undelete can re-attach.
+        """
         t = self.get(db, todo_id)
         if not t:
             return False
-        # Clear backlog ticket link, if any.
-        from ..db.models import BacklogTicket
-        db.query(BacklogTicket).filter(BacklogTicket.todo_id == todo_id).update(
-            {"todo_id": None}, synchronize_session=False
-        )
-        db.delete(t)
+        t.deleted_at = datetime.utcnow()
+        # Free the primary slot immediately — Daniel shouldn't see the
+        # soft-deleted row holding the slot during the undo window.
+        if t.is_primary:
+            t.is_primary = False
         db.commit()
         return True
+
+    def undelete(self, db: Session, todo_id: int) -> Todo | None:
+        """Reverse a soft-delete within the 24h window. Returns the
+        restored Todo or None if (a) row doesn't exist, (b) row wasn't
+        soft-deleted, or (c) the undo window has expired.
+        """
+        t = self.get(db, todo_id, include_deleted=True)
+        if not t or t.deleted_at is None:
+            return None
+        if datetime.utcnow() - t.deleted_at > timedelta(hours=SOFT_DELETE_TTL_HOURS):
+            return None
+        t.deleted_at = None
+        db.commit()
+        db.refresh(t)
+        return t
+
+    def list_recently_deleted(
+        self, db: Session, since: datetime | None = None
+    ) -> list[Todo]:
+        """Tombstones still in the undo window, newest first. `since`
+        narrows further (e.g., for conv-scoped 'undo last op').
+        """
+        cutoff = datetime.utcnow() - timedelta(hours=SOFT_DELETE_TTL_HOURS)
+        if since is not None and since > cutoff:
+            cutoff = since
+        return (
+            db.query(Todo)
+            .filter(Todo.deleted_at.isnot(None), Todo.deleted_at >= cutoff)
+            .order_by(Todo.deleted_at.desc())
+            .all()
+        )
+
+    def purge_old_deleted(self, db: Session) -> int:
+        """Hard-delete tombstones past the 24h window. Returns count
+        purged. Called by the lifespan sweeper. Linked backlog tickets
+        get their todo_id cleared here (not at soft-delete time) so
+        undelete during the window can re-attach.
+        """
+        from ..db.models import BacklogTicket
+        cutoff = datetime.utcnow() - timedelta(hours=SOFT_DELETE_TTL_HOURS)
+        stale = (
+            db.query(Todo)
+            .filter(Todo.deleted_at.isnot(None), Todo.deleted_at < cutoff)
+            .all()
+        )
+        if not stale:
+            return 0
+        ids = [t.id for t in stale]
+        db.query(BacklogTicket).filter(BacklogTicket.todo_id.in_(ids)).update(
+            {"todo_id": None}, synchronize_session=False
+        )
+        for t in stale:
+            db.delete(t)
+        db.commit()
+        return len(stale)
+
+    def bulk_soft_delete(self, db: Session, ids: list[int]) -> list[int]:
+        """Soft-delete N todos in one go. Returns the ids actually
+        deleted (skips already-deleted or missing rows)."""
+        if not ids:
+            return []
+        now = datetime.utcnow()
+        rows = (
+            db.query(Todo)
+            .filter(Todo.id.in_(ids), Todo.deleted_at.is_(None))
+            .all()
+        )
+        deleted: list[int] = []
+        for t in rows:
+            t.deleted_at = now
+            if t.is_primary:
+                t.is_primary = False
+            deleted.append(t.id)
+        if deleted:
+            db.commit()
+        return deleted
+
+    def merge(
+        self, db: Session, primary_id: int, merged_ids: list[int]
+    ) -> Todo | None:
+        """Soft-merge: concat merged todos' text into primary.subtitle
+        (newline-joined), then soft-delete the merged rows. Primary's
+        text stays as-is. Returns the updated primary, or None if
+        primary doesn't exist.
+        """
+        primary = self.get(db, primary_id)
+        if primary is None:
+            return None
+        merged_ids = [m for m in (merged_ids or []) if m and m != primary_id]
+        if not merged_ids:
+            return primary
+        merged_rows = (
+            db.query(Todo)
+            .filter(Todo.id.in_(merged_ids), Todo.deleted_at.is_(None))
+            .all()
+        )
+        if not merged_rows:
+            return primary
+        # Append merged text strings to subtitle. Keep idempotent — if
+        # we re-run with the same merge set, we don't keep stacking.
+        appended = "\n".join(f"+ {r.text}" for r in merged_rows)
+        if primary.subtitle:
+            primary.subtitle = f"{primary.subtitle}\n{appended}"
+        else:
+            primary.subtitle = appended
+        now = datetime.utcnow()
+        for r in merged_rows:
+            r.deleted_at = now
+            if r.is_primary:
+                r.is_primary = False
+        db.commit()
+        db.refresh(primary)
+        return primary
 
     def reorder(self, db: Session, ordered_ids: list[int]) -> None:
         for idx, tid in enumerate(ordered_ids):
@@ -244,6 +383,7 @@ class TodoService:
                 Todo.due_date.is_not(None),
                 Todo.due_date >= today_start,
                 Todo.due_date < today_end,
+                Todo.deleted_at.is_(None),
             )
             .order_by(Todo.sort_order, Todo.id)
             .all()

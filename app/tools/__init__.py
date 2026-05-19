@@ -9,7 +9,15 @@ from .note_tools import (
     ReadNoteTool,
     ListRecentNotesTool,
 )
-from .todo_tools import AddTodoTool, ListTodosTool, SetTodoStateTool
+from .todo_tools import (
+    AddTodoTool,
+    ListTodosTool,
+    SetTodoStateTool,
+    GroomTodosTool,
+    MergeTodosTool,
+    RenameTodoTool,
+    UndoLastTodoOpTool,
+)
 from .focus_tools import AddFocusTool, ListFocusesTool
 from .habit_tools import LogHabitTool
 from .feature_request_tool import RequestFeatureTool
@@ -43,6 +51,11 @@ registry = [
     AddTodoTool(),
     ListTodosTool(),
     SetTodoStateTool(),
+    # Todo grooming (G1 — auto-act + 24h soft-delete undo)
+    GroomTodosTool(),
+    MergeTodosTool(),
+    RenameTodoTool(),
+    UndoLastTodoOpTool(),
     # Focuses
     AddFocusTool(),
     ListFocusesTool(),

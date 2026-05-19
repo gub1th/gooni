@@ -191,11 +191,17 @@ class ItemService:
 
 def _focus_tree_node(db: Session, f: Focus) -> dict[str, Any]:
     todo_count = (
-        db.query(Todo).filter(Todo.focus_id == f.id).count()
+        db.query(Todo)
+        .filter(Todo.focus_id == f.id, Todo.deleted_at.is_(None))
+        .count()
     )
     done_count = (
         db.query(Todo)
-        .filter(Todo.focus_id == f.id, Todo.done.is_(True))
+        .filter(
+            Todo.focus_id == f.id,
+            Todo.done.is_(True),
+            Todo.deleted_at.is_(None),
+        )
         .count()
     )
     updated = f.updated_at or f.created_at
