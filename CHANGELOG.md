@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.123.2 — 2026-05-19 (patch)
+
+- fix(routes): add view: undefined to remaining nav call sites (#291)
+
 ## 0.123.1 — 2026-05-19 (patch)
 
 - fix(sidebar): restore dead clicks after AppShell hoist (#290)
