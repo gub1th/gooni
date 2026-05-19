@@ -536,6 +536,42 @@ def _build_state_block(db) -> str:
                 summary = summary[:60].rstrip() + "…"
             lines.append(f"  · \"{summary}\" (id #{p.id})")
 
+    # G2 self-PM: surface Gooni's own top workflow blocker so the LLM
+    # can reference it when context warrants. Capped at 1 line — the
+    # whole state_block stays scannable. Only fires when urgency_score
+    # is above a floor (otherwise every backlog ticket would parade
+    # through here on slow days).
+    try:
+        from .backlog_service import backlog_service as _backlog
+        top_blockers = _backlog.list_by_urgency(db, limit=1, min_score=2.0)
+    except Exception:
+        top_blockers = []
+    if top_blockers:
+        t = top_blockers[0]
+        # Count friction events in last 7d to surface the "hit Nx" signal —
+        # repeated pain compounds; the LLM should know this is a session-
+        # killer not a one-off annoyance.
+        try:
+            from ..db.models import FrictionEvent as _FE
+            from datetime import datetime as _dt2, timedelta as _td2
+            cutoff_7d = _dt2.utcnow() - _td2(days=7)
+            recent_hits = (
+                db.query(_FE)
+                .filter(
+                    _FE.backlog_ticket_id == t.id,
+                    _FE.created_at >= cutoff_7d,
+                )
+                .count()
+            )
+        except Exception:
+            recent_hits = 0
+        text = (t.text or "")[:60]
+        hits_phrase = f"hit {recent_hits}x in 7d" if recent_hits >= 2 else "active blocker"
+        lines.append(
+            f"- top workflow blocker: \"{text}\" ({hits_phrase}, "
+            f"blast {t.blast_radius or '?'}/5)"
+        )
+
     if not lines:
         return ""
     return "[your state right now]\n" + "\n".join(lines)
@@ -873,6 +909,16 @@ class Orchestrator:
                     message_id=short_assistant_msg.id,
                     conversation_id=conv.id,
                 )
+                # G2: auto-detect "I can't X" patterns in Gooni's own reply,
+                # log against nearest backlog ticket. Short-circuit acks are
+                # rarely capability-gap surfaces but if one slips through
+                # (e.g. tone-correction ack saying "I can't change that"),
+                # the regex catches it.
+                from .friction_detector import log_async as _friction_log
+                _friction_log(
+                    assistant_reply=feedback_ack,
+                    message_id=short_assistant_msg.id,
+                )
             # Reconcile any memory candidates off-thread even on short-circuit.
             if memory_candidates:
                 threading.Thread(
@@ -1193,6 +1239,17 @@ class Orchestrator:
                 assistant_reply=response,
                 message_id=assistant_msg.id,
                 conversation_id=conv.id,
+            )
+            # G2 self-PM: auto-detect "I can't X" / "not yet supported" /
+            # "no tool for Y" patterns in this reply. If Gooni acknowledged
+            # a capability gap, log a FrictionEvent against the nearest
+            # backlog ticket (or create one). Same daemon-thread pattern as
+            # reflexion. Closes the loop where Gooni knew it was blocked but
+            # only the user could escalate.
+            from .friction_detector import log_async as _friction_log
+            _friction_log(
+                assistant_reply=response,
+                message_id=assistant_msg.id,
             )
 
         # Refresh the rolling conversation summary every N messages. Also
