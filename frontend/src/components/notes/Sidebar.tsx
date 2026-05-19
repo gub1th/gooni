@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { useListsStore } from "../../stores/useListsStore";
-import { fetchPinnedNotes, fetchDraftNotes, fetchRecentNotes, patchNote, type ApiNote } from "../../services/api";
+import { fetchPinnedNotes, fetchDraftNotes, fetchUnprocessedNotes, fetchRecentNotes, patchNote, type ApiNote } from "../../services/api";
 import { displayTitle, stripHtmlForExcerpt } from "../../utils/notePreview";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
@@ -11,7 +11,7 @@ import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeSt
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText, Pin, MessageSquare, Brain, ClipboardList, Settings as SettingsIcon,
-  Globe, Plug, Pencil, Clock, ListChecks, Inbox,
+  Globe, Plug, Pencil, Clock, ListChecks, Inbox, Sparkles,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -181,6 +181,11 @@ interface SidebarProps {
   isChat: boolean;
   isLists: boolean;
   isEval?: boolean;
+  // In-flight props from another agent's hoist work — declared here as
+  // optional passthrough so the type-check passes while that branch is
+  // mid-merge. Sidebar doesn't read them today; safe to ignore.
+  isStats?: boolean;
+  onOpenStats?: () => void;
   activeListId: number | null;
   showCompose: boolean;
   onLogoClick: () => void;
@@ -225,10 +230,12 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
 
   const [pinnedNotes, setPinnedNotes] = useState<ApiNote[]>([]);
   const [draftNotes, setDraftNotes] = useState<ApiNote[]>([]);
+  const [unprocessedNotes, setUnprocessedNotes] = useState<ApiNote[]>([]);
   const [recentNotes, setRecentNotes] = useState<ApiNote[]>([]);
   const [spacesOpen, setSpacesOpen] = useState(true);
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [draftsOpen, setDraftsOpen] = useState(true);
+  const [unprocessedOpen, setUnprocessedOpen] = useState(true);
   const [recentOpen, setRecentOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const theme = useGooniThemeStore((s) => s.theme);
@@ -256,6 +263,12 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
   useEffect(() => {
     fetchDraftNotes().then(setDraftNotes).catch(() => {});
   }, [activeNoteId, draftVersion]);
+  // Unprocessed notes — Daniel's triage queue. Captured intent that hasn't
+  // graduated into a Promise / Todo / Habit / Focus yet. Refetches on the
+  // same triggers as recents (any note edit could flip status).
+  useEffect(() => {
+    fetchUnprocessedNotes().then(setUnprocessedNotes).catch(() => {});
+  }, [activeNoteId, draftVersion, pinnedVersion]);
   // Recent: refetch on any state change that could shift order — note edits
   // (activeNoteId proxies opens/edits via the store), pin toggles (pinned
   // titles can change via inline rename), and draft toggles. We dedupe in
@@ -353,6 +366,15 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
     setDraftNotes((prev) => prev.filter((n) => n.id !== noteId)); // optimistic
     await patchNote(noteId, { is_draft: false });
     useDraftVersionStore.getState().bump();
+  }
+
+  async function handleArchiveUnprocessed(noteId: number) {
+    // Optimistic remove from the unprocessed list; the row stays in the DB
+    // but flips status='archived' so the synthesizer and this sidebar
+    // section stop surfacing it. Daniel can still find it via search +
+    // its parent space.
+    setUnprocessedNotes((prev) => prev.filter((n) => n.id !== noteId));
+    await patchNote(noteId, { status: "archived" });
   }
 
   // Top 5 most-recently-edited notes, excluding any already shown in the
@@ -869,6 +891,62 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                         className="draft-action"
                         onClick={(e) => { e.stopPropagation(); handleUndraft(note.id); }}
                         title="Remove from drafts"
+                        style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
+                      >×</button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "6px 10px" }} />
+            </>
+          )}
+
+          {/* Section: UNPROCESSED — captured notes that haven't graduated
+              into a Promise / Todo / Habit / Focus yet. Daniel's triage
+              queue. Hidden when empty; ✕ on hover archives the note
+              (status='archived') so it stops surfacing in the queue + the
+              synthesizer. */}
+          {unprocessedNotes.length > 0 && (
+            <>
+              <div style={{ padding: "0 6px 4px" }}>
+                <div style={{ display: "flex", alignItems: "center", padding: "6px 6px 2px" }}>
+                  <button
+                    onClick={() => setUnprocessedOpen((o) => !o)}
+                    style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
+                  >
+                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>UNPROCESSED</span>
+                    <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{unprocessedOpen ? "▾" : "▸"}</span>
+                  </button>
+                </div>
+                {unprocessedOpen && unprocessedNotes.slice(0, 12).map((note) => {
+                  const selected = activeNoteId === note.id;
+                  return (
+                    <div
+                      key={note.id}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 4,
+                        padding: "0 4px 0 10px", height: 30, borderRadius: 8,
+                        cursor: "pointer",
+                        background: selected ? "rgba(0,0,0,0.09)" : "transparent",
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".unproc-action").forEach(b => b.style.opacity = "1"); }}
+                      onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".unproc-action").forEach(b => b.style.opacity = "0"); }}
+                      onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; handleSelectNote(note); }}
+                    >
+                      <Sparkles size={13} strokeWidth={1.8} color="#AEAEB2" style={{ flexShrink: 0 }} />
+                      <span style={{
+                        flex: 1, fontSize: 13,
+                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                        fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        {displayTitle(note)}
+                      </span>
+                      <button
+                        className="unproc-action"
+                        onClick={(e) => { e.stopPropagation(); handleArchiveUnprocessed(note.id); }}
+                        title="Archive (stop surfacing)"
                         style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
                       >×</button>
                     </div>
