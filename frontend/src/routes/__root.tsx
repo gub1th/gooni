@@ -105,9 +105,11 @@ function AppShell() {
   const isChat = onIndex && hasConv;
   const isLists = onIndex && hasList;
   const isEval = onIndex && auditFlag;
-  const isStats = onIndex && viewParam === "stats";
+  // Stats view dropped in the dashboard restructure (Stats now lives as
+  // a tab inside the Dashboard's mode toggle, not a standalone view).
+  void viewParam;
   const isDashboard =
-    onIndex && !isNotes && !isChat && !isLists && !isEval && !isStats;
+    onIndex && !isNotes && !isChat && !isLists && !isEval;
   const activeListId =
     isLists && typeof rawSearch.list === "number"
       ? (rawSearch.list as number)
@@ -181,7 +183,6 @@ function AppShell() {
             isChat={isChat}
             isLists={isLists}
             isEval={isEval}
-            isStats={isStats}
             activeListId={activeListId}
             showCompose={!isNotes}
             onLogoClick={gotoBlank}
@@ -209,27 +210,6 @@ function AppShell() {
                   list: undefined,
                   audit: true,
                   segment: undefined,
-                },
-              })
-            }
-            onOpenStats={() =>
-              navigate({
-                to: "/",
-                // ?view=stats is the URL representation of the stats
-                // tab — index.tsx reads it to decide what to render.
-                search: ({
-                  note: undefined,
-                  conv: undefined,
-                  list: undefined,
-                  audit: undefined,
-                  segment: undefined,
-                  view: "stats",
-                } as unknown) as {
-                  note: undefined;
-                  conv: undefined;
-                  list: undefined;
-                  audit: undefined;
-                  segment: undefined;
                 },
               })
             }
