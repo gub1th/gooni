@@ -3,15 +3,11 @@ import { useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
 import { EvalView } from "../components/eval/EvalView";
-import { GooniLayer } from "../components/GooniLayer";
 import { BacklogBoard } from "../components/lists/BacklogBoard";
 import { ListView } from "../components/lists/ListView";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
-import { Sidebar } from "../components/notes/Sidebar";
-import { PasswordGate } from "../components/PasswordGate";
-import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useListsStore } from "../stores/useListsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useSpacesStore } from "../stores/useSpacesStore";
@@ -34,14 +30,10 @@ export const Route = createFileRoute("/")({
   component: NotesPage,
 });
 
-// Sidebar auto-collapses below this width
-const SIDEBAR_BREAKPOINT = 768;
-
 function NotesPage() {
   const fetchSpaces = useSpacesStore((s) => s.fetch);
   const { selectedSpaceId, selectSpace, loadNotes, createNote, selectNote } = useNotesContentStore();
-  const windowWidth = useWindowWidth();
-  const { fetchConversations, newChat, selectConversation } = useConversationsStore();
+  const { fetchConversations, selectConversation } = useConversationsStore();
   const fetchAllLists = useListsStore((s) => s.fetchAll);
   const allLists = useListsStore((s) => s.lists);
   const navigate = useNavigate({ from: "/" });
@@ -52,11 +44,6 @@ function NotesPage() {
     search.audit ? "eval" : search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
   );
   const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
-  const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
-
-  useEffect(() => {
-    setSidebarOpen(windowWidth >= SIDEBAR_BREAKPOINT);
-  }, [windowWidth >= SIDEBAR_BREAKPOINT]);
 
   // Initial load: restore from URL params
   useEffect(() => {
@@ -198,16 +185,6 @@ function NotesPage() {
     }
   }
 
-  function handleSelectList(id: number) {
-    setActiveListId(id);
-    setViewAndUrl("lists", undefined, undefined, id);
-  }
-
-  function handleNewChat() {
-    newChat();
-    setViewAndUrl("chat");
-  }
-
   function handleCompose() {
     const spaceId = selectedSpaceId ?? "general";
     setView("notes");
@@ -232,28 +209,11 @@ function NotesPage() {
     }
   }, [activeConvId, view]);
 
+  // Sidebar + GooniLayer + PasswordGate live in __root.tsx's AppShell so they
+  // persist across route changes. This route just renders the right-column
+  // content into AppShell's <Outlet />.
   return (
-    <PasswordGate>
-    <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "var(--gooni-bg, #FFFFFF)", position: "relative" }}>
-      {sidebarOpen && (
-        <Sidebar
-          isDashboard={view === "dashboard"}
-          isNotes={view === "notes"}
-          isChat={view === "chat"}
-          isLists={view === "lists"}
-          isEval={view === "eval"}
-          activeListId={view === "lists" ? activeListId : null}
-          showCompose={view !== "notes"}
-          onLogoClick={() => setViewAndUrl("dashboard")}
-          onSpaceSelect={() => setView("notes")}
-          onCompose={handleCompose}
-          onNewChat={handleNewChat}
-          onSelectList={handleSelectList}
-          onOpenEval={() => setViewAndUrl("eval")}
-        />
-      )}
-
-      <div style={{ flex: 1, display: "flex", minWidth: 0, position: "relative", overflow: "hidden" }}>
+    <>
         {view === "dashboard" ? (
           <Dashboard
             onOpenNote={() => setView("notes")}
@@ -315,12 +275,6 @@ function NotesPage() {
             </>
           );
         })()}
-      </div>
-
-      {/* FAB + floating panel + mascot all live in GooniLayer so /memories and
-          any other authed route get the same chat affordance for free. */}
-      <GooniLayer />
-    </div>
-    </PasswordGate>
+    </>
   );
 }
