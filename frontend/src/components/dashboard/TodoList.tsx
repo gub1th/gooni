@@ -8,6 +8,7 @@ import {
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
 import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
+import { TodoEditModal } from "./TodoEditModal";
 
 // TodoList — dashboard todos block. Mockup-aligned shape:
 //
@@ -120,6 +121,16 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (creating) inputRef.current?.focus(); }, [creating]);
 
+  // Edit modal — click into a card body opens the full-details view.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const editing: ApiTodo | null = useMemo(() => {
+    if (editingId == null) return null;
+    if (bundle?.primary?.id === editingId) return bundle.primary;
+    return (bundle?.open.find((t) => t.id === editingId)
+      ?? bundle?.done_today.find((t) => t.id === editingId)
+      ?? null);
+  }, [editingId, bundle]);
+
   async function onSubmitNew() {
     const text = draft.trim();
     if (!text) { setCreating(false); setDraft(""); return; }
@@ -209,6 +220,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           onPickState={(s) => onPickState(bundle.primary!.id, s)}
           onDemote={() => onDemotePrimary(bundle.primary!.id)}
           onDelete={() => onDelete(bundle.primary!.id)}
+          onOpenEdit={() => setEditingId(bundle.primary!.id)}
         />
       )}
 
@@ -258,6 +270,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
             onPickState={(s) => onPickState(t.id, s)}
             onPromotePrimary={() => onPromotePrimary(t.id)}
             onDelete={() => onDelete(t.id)}
+            onOpenEdit={() => setEditingId(t.id)}
           />
         ))}
       </div>
@@ -312,7 +325,19 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
       </div>
 
       {bundle.done_today.length > 0 && (
-        <DoneSection todos={bundle.done_today} focusById={focusById} />
+        <DoneSection
+          todos={bundle.done_today}
+          focusById={focusById}
+          onOpenEdit={(id) => setEditingId(id)}
+        />
+      )}
+
+      {editing && (
+        <TodoEditModal
+          todo={editing}
+          focuses={focuses ?? []}
+          onClose={() => setEditingId(null)}
+        />
       )}
     </div>
   );
@@ -322,7 +347,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
 
 function PrimaryCard({
   t, focus, cascade,
-  onCycle, onPickState, onDemote, onDelete,
+  onCycle, onPickState, onDemote, onDelete, onOpenEdit,
 }: {
   t: ApiTodo;
   focus: ApiFocus | null;
@@ -331,6 +356,7 @@ function PrimaryCard({
   onPickState: (s: TodoState) => void;
   onDemote: () => void;
   onDelete: () => void;
+  onOpenEdit: () => void;
 }) {
   const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
   const age = ageHint(t.created_at);
@@ -373,7 +399,7 @@ function PrimaryCard({
         <rect x="0" y="0" width="100%" height="100%" rx="12" ry="12" pathLength={1000} />
       </svg>
       <button
-        onClick={onDemote}
+        onClick={(e) => { e.stopPropagation(); onDemote(); }}
         title="Demote — clear primary"
         aria-label="Demote primary"
         style={{
@@ -385,22 +411,29 @@ function PrimaryCard({
         <Crown size={16} fill="currentColor" strokeWidth={1.5} />
       </button>
 
-      <Checkbox
-        state={t.state}
-        onClick={() => {
-          if (t.state === "done") setPickerOpen(true);
-          else onCycle();
-        }}
-        size="lg"
-      />
+      <span onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center" }}>
+        <Checkbox
+          state={t.state}
+          onClick={() => {
+            if (t.state === "done") setPickerOpen(true);
+            else onCycle();
+          }}
+          size="lg"
+        />
+      </span>
 
-      <span style={{
-        flex: 1, fontSize: 14, fontWeight: 500,
-        color: "var(--gooni-text, #1C1C1E)",
-        textDecoration: t.state === "done" ? "line-through" : "none",
-        opacity: t.state === "done" ? 0.55 : 1,
-        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-      }}>
+      <span
+        onClick={onOpenEdit}
+        title="Click to edit"
+        style={{
+          flex: 1, fontSize: 14, fontWeight: 500,
+          color: "var(--gooni-text, #1C1C1E)",
+          textDecoration: t.state === "done" ? "line-through" : "none",
+          opacity: t.state === "done" ? 0.55 : 1,
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          cursor: "pointer",
+        }}
+      >
         {t.text}
       </span>
 
@@ -417,7 +450,9 @@ function PrimaryCard({
       )}
 
       {hovered && (
-        <ConfirmDeleteButton onConfirm={onDelete} />
+        <span onClick={(e) => e.stopPropagation()}>
+          <ConfirmDeleteButton onConfirm={onDelete} />
+        </span>
       )}
 
       {pickerOpen && (
@@ -435,7 +470,7 @@ function PrimaryCard({
 
 function TodoRow({
   t, focus, cascade,
-  onCycle, onPickState, onPromotePrimary, onDelete,
+  onCycle, onPickState, onPromotePrimary, onDelete, onOpenEdit,
 }: {
   t: ApiTodo;
   focus: ApiFocus | null;
@@ -444,6 +479,7 @@ function TodoRow({
   onPickState: (s: TodoState) => void;
   onPromotePrimary: () => void;
   onDelete: () => void;
+  onOpenEdit: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -464,21 +500,28 @@ function TodoRow({
         display: "flex", alignItems: "center", gap: 12,
       }}
     >
-      <Checkbox
-        state={t.state}
-        onClick={() => {
-          if (t.state === "done") setPickerOpen(true);
-          else onCycle();
-        }}
-      />
+      <span onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center" }}>
+        <Checkbox
+          state={t.state}
+          onClick={() => {
+            if (t.state === "done") setPickerOpen(true);
+            else onCycle();
+          }}
+        />
+      </span>
 
-      <span style={{
-        flex: 1, minWidth: 0,
-        fontSize: 14, color: "var(--gooni-text, #1C1C1E)",
-        textDecoration: t.state === "done" ? "line-through" : "none",
-        opacity: t.state === "done" ? 0.55 : 1,
-        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-      }}>
+      <span
+        onClick={onOpenEdit}
+        title="Click to edit"
+        style={{
+          flex: 1, minWidth: 0,
+          fontSize: 14, color: "var(--gooni-text, #1C1C1E)",
+          textDecoration: t.state === "done" ? "line-through" : "none",
+          opacity: t.state === "done" ? 0.55 : 1,
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          cursor: "pointer",
+        }}
+      >
         {t.text}
       </span>
 
@@ -497,7 +540,7 @@ function TodoRow({
       {hovered && (
         <button
           title="Make primary"
-          onClick={onPromotePrimary}
+          onClick={(e) => { e.stopPropagation(); onPromotePrimary(); }}
           style={{
             border: "none", background: "transparent", cursor: "pointer",
             padding: 2, color: "#9CA3AF", display: "flex",
@@ -507,7 +550,9 @@ function TodoRow({
         </button>
       )}
       {hovered && (
-        <ConfirmDeleteButton onConfirm={onDelete} />
+        <span onClick={(e) => e.stopPropagation()}>
+          <ConfirmDeleteButton onConfirm={onDelete} />
+        </span>
       )}
 
       {pickerOpen && (
@@ -628,9 +673,10 @@ function StatePicker({ current, onPick, onClose }: {
 
 // ── Done section ─────────────────────────────────────────────────────────
 
-function DoneSection({ todos, focusById }: {
+function DoneSection({ todos, focusById, onOpenEdit }: {
   todos: ApiTodo[];
   focusById: Map<number, ApiFocus>;
+  onOpenEdit: (id: number) => void;
 }) {
   return (
     <div style={{ marginTop: 20 }}>
@@ -646,14 +692,20 @@ function DoneSection({ todos, focusById }: {
           const focus = t.focus_id ? focusById.get(t.focus_id) ?? null : null;
           const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
           return (
-            <div key={t.id} style={{
-              background: "var(--gooni-card, #FFFFFF)",
-              border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-              borderRadius: 8,
-              padding: "10px 16px",
-              display: "flex", alignItems: "center", gap: 12,
-              opacity: 0.45,
-            }}>
+            <div
+              key={t.id}
+              onClick={() => onOpenEdit(t.id)}
+              title="Click to edit"
+              style={{
+                background: "var(--gooni-card, #FFFFFF)",
+                border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+                borderRadius: 8,
+                padding: "10px 16px",
+                display: "flex", alignItems: "center", gap: 12,
+                opacity: 0.45,
+                cursor: "pointer",
+              }}
+            >
               <span style={{
                 width: 16, height: 16, borderRadius: "50%",
                 background: "#9CA3AF", color: "#fff",

@@ -1053,23 +1053,20 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                       <span style={{ flex: 1, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {space.name}
                       </span>
-                      {/* Pin toggle — stays visible when pinned so the
-                          state is glanceable; fades in on hover otherwise.
+                      {/* Pin toggle — pinned ★ is always visible (active-
+                          state signal); hollow ☆ rides the `.space-action`
+                          hover class so it doesn't litter every row.
                           Click bubbling is killed so we don't open the
                           space at the same time. */}
                       <button
+                        className={space.is_pinned ? undefined : "space-action"}
                         onClick={(e) => {
                           e.stopPropagation();
                           void updateSpace(space.id as number, { is_pinned: !space.is_pinned });
                         }}
                         title={space.is_pinned ? "Unpin space" : "Pin space"}
                         style={{
-                          // Always visible — was previously hover-gated +
-                          // imperatively flipped, which fought React's
-                          // inline-style on every re-render and made the
-                          // star disappear most of the time. Daniel
-                          // explicitly couldn't find it.
-                          opacity: 1,
+                          opacity: space.is_pinned ? 1 : 0,
                           background: "none",
                           border: "none",
                           cursor: "pointer",
@@ -1080,6 +1077,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                           padding: "0 3px",
                           flexShrink: 0,
                           lineHeight: 1,
+                          transition: "opacity 0.12s",
                         }}
                       >
                         {space.is_pinned ? "★" : "☆"}
