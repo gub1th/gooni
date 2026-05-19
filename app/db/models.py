@@ -592,6 +592,19 @@ class BacklogTicket(Base):
     # Free-form ticket body — context, design notes, follow-up scratch.
     # subtitle stays as the one-line tagline; notes is the multi-line story.
     notes = Column(Text, nullable=True)
+    # G2 self-PM: workflow blast-radius score (1=one-off annoyance, 5=blocks
+    # daily-driver claim). LLM scores at create time via feature_request_tool;
+    # surfaces in urgency calculation + severity-aware acks. Nullable for
+    # legacy tickets that predate scoring.
+    blast_radius = Column(Integer, nullable=True)
+    # Computed urgency_score = friction_count_30d × blast_radius × recency
+    # weight. Recomputed nightly by lifespan rollup; can also be bumped
+    # synchronously when a fresh friction_event fires. Nullable so unscored
+    # tickets sort naturally to the bottom of urgency lists.
+    urgency_score = Column(Float, nullable=True, index=True)
+    # Timestamp of the most-recent friction_event tied to this ticket.
+    # Drives recency weighting + the "currently hitting workflow" surface.
+    last_friction_at = Column(DateTime, nullable=True, index=True)
     # Set when this ticket has been promoted into Daniel's todo list.
     # Promote = create a Todo with focus_id null, link it here. Demote =
     # delete the linked Todo, clear this column. When the linked todo's
@@ -1107,6 +1120,60 @@ class WaProcessedId(Base):
     __tablename__ = "wa_processed_ids"
 
     wamid = Column(String, primary_key=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class FrictionEvent(Base):
+    """G2 self-PM: a logged moment where Gooni hit a capability gap that
+    interrupted Daniel's workflow. Each event ties to a BacklogTicket
+    (creating one if no match found) so the same gap aggregates across
+    sessions instead of stacking duplicate feature requests.
+
+    Sources:
+      - 'user_utterance'  — Daniel said "you can't X" / "isn't there a way
+                            to Y" → extractor signal → log + maybe-create.
+      - 'gooni_response'  — Gooni's own reply emitted "I can't" / "not yet
+                            supported" → orchestrator post-hook regex →
+                            log against nearest cosine-matched ticket.
+      - 'tool_failure'    — a tool call returned a capability-gap error.
+                            (reserved; not wired in v1.)
+      - 'manual'          — Daniel manually flagged a friction via the
+                            feature_request_tool with high blast_radius.
+
+    blast_radius is a 1-5 score of workflow impact:
+      1 = one-off annoyance (e.g., minor formatting)
+      2 = blocks list/UI ergonomics
+      3 = blocks a specific surface (e.g., voice capture)
+      4 = blocks daily flow (multiple sessions affected)
+      5 = blocks the daily-driver claim itself (e.g., todo grooming)
+
+    Urgency aggregation: backlog_ticket.urgency_score = sum of recent
+    friction_events × blast_radius × recency_decay. Surfaced in state_block
+    so Gooni sees its own top blocker every turn.
+    """
+
+    __tablename__ = "friction_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    backlog_ticket_id = Column(
+        Integer,
+        ForeignKey("backlog_tickets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Optional FK back to the message that triggered the friction. Null
+    # for boot-time seeds or manual flags. Indexed because state_block
+    # queries "what fired in this conv" use it.
+    message_id = Column(
+        Integer,
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    blast_radius = Column(Integer, nullable=False)
+    reason = Column(Text, nullable=True)
+    source = Column(String, nullable=False, default="user_utterance")
+    # 'user_utterance' | 'gooni_response' | 'tool_failure' | 'manual'
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
