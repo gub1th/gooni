@@ -65,6 +65,80 @@ def _detect_voice_drift(reply: str) -> str | None:
     return m.group(0).strip() if m else None
 
 
+# Character attacks — names aimed AT Daniel. Banned by the voice spec
+# (G0.1). Match these and force sev≥2 + tone dimension. Behavioral
+# clustering picks up the pattern and promotes "I tend to call Daniel
+# names" as a facet that future-turn LLM sees.
+#
+# Targets the SHAPE "second-person accusation" — "you X" / "your
+# X-cognition" — not the standalone slur word. Daniel uses "dumbass"
+# at himself casually; mirroring his lowercase register is fine, but
+# aiming any name at him is the violation.
+_CHARACTER_ATTACK_PATTERNS = [
+    # "you dumbass" / "you stupid" — direct name-call
+    r"\byou (?:dumbass|idiot|moron|stupid|imbecile|retard)\b",
+    # "your dumbass narrative generator" / "your stupid brain" — X-cognition
+    r"\byour (?:dumbass|stupid|idiotic|dumb|little)\s+\w*\s*(?:narrative|brain|mind|reasoning|logic|fog|loop|spiral|generator)\b",
+    # "dumbass narrative generator" without "your" prefix
+    r"\b(?:dumbass|stupid|idiotic)\s+(?:narrative generator|reasoning|brain|loop|story|fog)\b",
+    # "your little bullshit fog" / "your own nonsense spiral" — bare contempt
+    r"\byour (?:little|own|dumb|whole)\s+(?:bullshit|nonsense|drama)\s+(?:fog|loop|spiral|generator|story)\b",
+    # The specific banned phrase from the 2026-05-19 forge convo
+    r"\bstop freelancing\b",
+]
+
+_CHARACTER_ATTACK_RE = re.compile(
+    "|".join(_CHARACTER_ATTACK_PATTERNS), re.IGNORECASE | re.MULTILINE
+)
+
+
+def _detect_character_attack(reply: str) -> str | None:
+    """Return the first character-attack phrase matched, or None."""
+    if not reply:
+        return None
+    m = _CHARACTER_ATTACK_RE.search(reply)
+    return m.group(0).strip() if m else None
+
+
+# Reply shapes signalling Gooni just acknowledged being wrong. The
+# "doubled-down-after-correction" check requires BOTH a recovery
+# marker and continued harshness in the same reply.
+_RECOVERY_MARKER_RE = re.compile(
+    r"\b(?:my read was wrong|scratch that|my mistake|i was wrong|"
+    r"i'?m wrong|correction[—:]|disregard that|never mind that)\b",
+    re.IGNORECASE,
+)
+
+# Harshness shapes that should NOT follow a recovery in the same
+# reply. Pattern says "you were just proven wrong but you kept
+# attacking" — that's doubling-down contempt. Caring-core violation.
+_CONTINUED_HARSHNESS_RE = re.compile(
+    r"\b(?:now hold the line|before (?:your|you) (?:dumbass|brain|"
+    r"narrative|mind|story) (?:starts|begins) \w+|don'?t do that "
+    r"(?:again|with me)|stop (?:freelancing|spiraling|spinning|"
+    r"making up))\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_doubled_down_after_correction(reply: str) -> str | None:
+    """Reply contains a recovery shape AND a continued-harshness
+    phrase — Gooni admitted being wrong then kept attacking. Returns
+    the offending harshness phrase, or None.
+
+    Why both gates: standalone "now hold the line" can be appropriate
+    when Gooni is correcting Daniel. The violation is specifically
+    "Gooni was wrong, recalibrated, and KEPT attacking Daniel on the
+    now-disproved premise" — caring-core gone missing.
+    """
+    if not reply:
+        return None
+    if not _RECOVERY_MARKER_RE.search(reply):
+        return None
+    m = _CONTINUED_HARSHNESS_RE.search(reply)
+    return m.group(0).strip() if m else None
+
+
 # Threshold for behavioral promotion: when this many recent reflections
 # cluster on the same gap_exposed (cosine > _CLUSTER_SIM_FLOOR), the
 # centroid gets promoted into a behavioral CapabilityFacet.
@@ -320,6 +394,41 @@ class ReflexionService:
                 gap_text = drift_text
             elif "voice drift" not in gap_text:
                 gap_text = f"{gap_text.rstrip('.')}. {drift_text}"
+
+        # Character-attack override (G0.1) — name-calling aimed AT
+        # Daniel. Hard line per voice spec; force sev ≥ 2 + tone so
+        # repeated violations promote "I tend to attack Daniel's
+        # character" as a behavioral facet the next-turn LLM sees.
+        attack_phrase = _detect_character_attack(assistant_reply)
+        if attack_phrase:
+            if severity < 2:
+                severity = 2
+            parsed["gap_dimension"] = "tone"
+            attack_text = (
+                f"character attack on Daniel: \"{attack_phrase}\""
+            )
+            if not gap_text:
+                gap_text = attack_text
+            elif "character attack" not in gap_text:
+                gap_text = f"{gap_text.rstrip('.')}. {attack_text}"
+
+        # Doubled-down-after-correction override (G0.1) — reply
+        # admitted being wrong then kept attacking on the disproved
+        # premise. Caring-core violation; force sev ≥ 2.
+        doubled_phrase = _detect_doubled_down_after_correction(
+            assistant_reply
+        )
+        if doubled_phrase:
+            if severity < 2:
+                severity = 2
+            parsed["gap_dimension"] = "tone"
+            doubled_text = (
+                f"doubled down after correction: \"{doubled_phrase}\""
+            )
+            if not gap_text:
+                gap_text = doubled_text
+            elif "doubled down" not in gap_text:
+                gap_text = f"{gap_text.rstrip('.')}. {doubled_text}"
 
         gap_embedding_json = None
         if severity >= 2 and gap_text:
