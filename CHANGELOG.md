@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.121.0 — 2026-05-19 (minor)
+
+- feat(todos): groom mutation surface + capability honesty (G1) (#287)
+
 ## 0.120.0 — 2026-05-19 (minor)
 
 - feat(persona): Alfred voice load-bearing across every channel (G0) (#282)
