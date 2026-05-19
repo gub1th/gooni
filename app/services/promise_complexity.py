@@ -84,6 +84,20 @@ _HARD_COMPLEX_PATTERNS: tuple[str, ...] = (
 _HARD_COMPLEX_RE = re.compile("|".join(_HARD_COMPLEX_PATTERNS), re.IGNORECASE)
 
 
+def is_recurring(text: str) -> bool:
+    """True when the utterance has a hard recurrence shape — daily /
+    weekly / every <unit> / for N <unit> / until. PR-B's lock-in step
+    uses this to decide whether to auto-spawn a Habit alongside the
+    Promise. Tighter than `needs_game_plan` — soft markers (a bare
+    "day" / "starting") don't qualify because a habit row is more
+    opinionated than a probe prompt and we'd rather under-spawn than
+    create a habit Daniel didn't want.
+    """
+    if not text:
+        return False
+    return bool(_HARD_COMPLEX_RE.search(text))
+
+
 def needs_game_plan(text: str) -> bool:
     """Return True when the promise should trigger the lock-in probe.
 

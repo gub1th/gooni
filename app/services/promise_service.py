@@ -113,16 +113,23 @@ def create(
     if not cleaned:
         raise ValueError("utterance required")
 
-    # Complexity classification — pure-regex, no LLM. PR-B consumes this.
+    # Complexity classification — pure-regex, no LLM. Complex utterances
+    # ("no weed for 7 days") land in state='proposed' so the user can
+    # supply start/end/conditions via a PATCH lock-in step. Simple
+    # utterances ("call mom tomorrow") fall through to state='pending'
+    # immediately. The asymmetry kills the "fake promise" feeling Daniel
+    # called out — anything that needs a game plan is held open until
+    # he commits to one.
     try:
         from . import promise_complexity
         is_complex = promise_complexity.needs_game_plan(cleaned)
     except Exception as e:
         print(f"[promise complexity] classifier error: {e}")
         is_complex = False
+    initial_state = "proposed" if is_complex else "pending"
     print(
         f"[promise complexity] needs_game_plan={is_complex} "
-        f"for: {cleaned[:80]}"
+        f"initial_state={initial_state} for: {cleaned[:80]}"
     )
 
     inferred = inferred_due or _infer_due_from_text(cleaned)
@@ -155,7 +162,7 @@ def create(
         utterance=cleaned,
         summary=(summary or cleaned)[:200],
         inferred_due=inferred,
-        state="pending",
+        state=initial_state,
         slip_count=slip,
         source_message_id=source_message_id,
         embedding=json.dumps(vec) if vec else None,
@@ -292,22 +299,106 @@ def list_recent(db: Session, limit: int = 50) -> list[Promise]:
 
 def transition(db: Session, promise_id: int, new_state: str) -> Promise | None:
     """State transition with timestamp + idempotency. `new_state` must
-    be one of: pending | kept | broken | abandoned. Re-applying the
-    current state is a no-op (no resolved_at churn)."""
-    if new_state not in ("pending", "kept", "broken", "abandoned"):
+    be one of: proposed | pending | kept | broken | abandoned. Re-applying
+    the current state is a no-op (no resolved_at churn).
+
+    Side effect on `proposed → pending` (lock-in): if the utterance has
+    a recurring shape ("no weed for 7 days" / "leetcode daily"), auto-
+    create a sibling Habit row + write a `measured_by` edge from the
+    Promise to the Habit. The Habit becomes the daily scoreboard; the
+    Promise stays the term-contract. Daniel can rename / delete the
+    Habit if the auto-create misfired.
+    """
+    if new_state not in ("proposed", "pending", "kept", "broken", "abandoned"):
         raise ValueError(f"invalid state: {new_state}")
     p = get(db, promise_id)
     if p is None:
         return None
     if p.state == new_state:
         return p
+    prev_state = p.state
     p.state = new_state
     p.resolved_at = (
         datetime.utcnow() if new_state in ("kept", "broken", "abandoned") else None
     )
     db.commit()
     db.refresh(p)
+
+    # Lock-in side effect — only fires on the proposed → pending edge.
+    if prev_state == "proposed" and new_state == "pending":
+        try:
+            _maybe_auto_create_habit(db, p)
+        except Exception as e:
+            print(f"[promise lock-in] habit auto-create failed: {e}")
     return p
+
+
+# ── Lock-in habit auto-create ──────────────────────────────────────────
+# When a complex promise locks in, we check if its utterance describes a
+# recurring action (daily/weekly/for-N-days/every-X) and spawn a Habit
+# row so Daniel gets the daily scoreboard alongside the term contract.
+# The Habit name is derived from the utterance, polarity from a small
+# negation-prefix regex. Cosine dedup against existing habits prevents
+# a re-uttered promise from spawning a duplicate.
+
+_NEGATION_RE = __import__("re").compile(
+    r"^\s*(no|don'?t|stop|avoid|quit|cut|skip|kill)\s+", __import__("re").IGNORECASE,
+)
+
+
+def _derive_habit(utterance: str, summary: str | None) -> tuple[str, str]:
+    """Return (name, polarity) for an auto-created Habit derived from a
+    locked-in Promise. Polarity is `negative` (avoidance) when the
+    utterance starts with a negation verb, else `positive` (do this).
+    Name is the summary if present, else the utterance — capped at 60
+    chars to fit the Habit display.
+    """
+    raw = (summary or utterance or "").strip()
+    polarity = "negative" if _NEGATION_RE.match(raw) else "positive"
+    # For positive habits we keep the leading verb; for negative we keep
+    # the "no X" form so the daily scoreboard renders unambiguously
+    # ("no weed" toggled True/False per day reads cleanly).
+    name = raw[:60].rstrip()
+    return name, polarity
+
+
+def _maybe_auto_create_habit(db: Session, p: Promise) -> None:
+    """Spawn a Habit + measured_by edge for a recurring-shape locked-in
+    promise. Skipped when (a) the utterance isn't recurring-shaped, (b)
+    a near-name Habit already exists, or (c) the habit_service call
+    blows up — never breaks the transition path.
+    """
+    from . import promise_complexity, habit_service
+
+    text = p.utterance or p.summary or ""
+    if not promise_complexity.is_recurring(text):
+        return  # not recurring — Promise alone is the right shape
+
+    name, polarity = _derive_habit(p.utterance, p.summary)
+    if not name:
+        return
+
+    # Cheap dedup: exact-name match (case-insensitive) wins. Fuzzy match
+    # is intentionally not used — for habit creation we want to be
+    # conservative; if the user has "no weed" already, lock-in just
+    # links to it rather than risking a misfire on a near-name.
+    existing = habit_service.find_by_name(db, name)
+    if existing is not None:
+        habit = existing
+    else:
+        habit = habit_service.create(db, name=name, polarity=polarity)
+
+    try:
+        edge_service.link(
+            db,
+            src_kind="promise",
+            src_id=p.id,
+            dst_kind="habit",
+            dst_id=habit.id,
+            kind="measured_by",
+        )
+    except Exception as e:
+        print(f"[promise lock-in] measured_by edge link failed: {e}")
 
 
 def auto_mark_overdue(db: Session, now: datetime | None = None) -> int:
