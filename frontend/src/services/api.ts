@@ -137,6 +137,11 @@ export interface ApiNote {
   // Free-form labels (lowercase, ≤60 chars each, deduped server-side).
   // Always present in responses — empty array when no tags.
   tags: string[];
+  // Graduation lifecycle. `unprocessed` = captured but uncommitted;
+  // `graduated` = spawned a Promise / Todo / Habit / Focus (tracked via
+  // derives_from edges); `archived` = manual tombstone. Drives the
+  // Unprocessed sidebar view + the synthesizer's source filter.
+  status: "unprocessed" | "graduated" | "archived";
   // Distinct visitors that hit /public/notes/{id}. Only present on the
   // single-note GET (`/notes/{id}`), not on space-list responses — the
   // count requires a per-note Visit query that isn't worth running for
@@ -321,6 +326,12 @@ export async function deleteNoteComment(commentId: number): Promise<void> {
 export async function fetchDraftNotes(): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/notes/drafts`);
   if (!res.ok) throw new Error("Failed to fetch draft notes");
+  return res.json();
+}
+
+export async function fetchUnprocessedNotes(): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/notes/unprocessed`);
+  if (!res.ok) throw new Error("Failed to fetch unprocessed notes");
   return res.json();
 }
 
@@ -563,7 +574,7 @@ export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: numbe
 
 export async function patchNote(
   id: number,
-  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string; tags?: string[] },
+  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string; tags?: string[]; status?: "unprocessed" | "graduated" | "archived" },
 ): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",

@@ -211,6 +211,18 @@ class Note(Base):
     # M2M `note_tags` table is needed (cross-cutting analytics across
     # the whole corpus) we can derive it from this column.
     tags = Column(Text, nullable=True)
+    # Graduation lifecycle for the primitive-model redraw. Every Note
+    # starts as `unprocessed` — captured but uncommitted intent. Becomes
+    # `graduated` once it spawns a Promise / Todo / Habit / Focus (or is
+    # otherwise turned into structured action; tracked via derives_from
+    # edges back to the source note). `archived` is a manual tombstone
+    # for notes that never need to graduate. The synthesizer reads only
+    # `unprocessed` rows for focus-candidate clustering so a graduated
+    # note doesn't get re-surfaced as a stale prompt.
+    status = Column(
+        String, nullable=False, default="unprocessed",
+        server_default="unprocessed", index=True,
+    )
 
 
 class PublicProfile(Base):

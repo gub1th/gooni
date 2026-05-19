@@ -103,10 +103,27 @@ def create(
     new source message so the conversation graph still records the
     re-statement. Fixes T4→T5 of segment #209 where Daniel re-uttered
     a near-duplicate and the system silently piled up rows.
+
+    Complexity classifier: runs `promise_complexity.needs_game_plan` on
+    the utterance and logs the result. PR-A wires the classifier only;
+    PR-B will branch on the bool to route between instant-lock and
+    probe-then-lock flow. No behavior change in PR-A.
     """
     cleaned = utterance.strip()
     if not cleaned:
         raise ValueError("utterance required")
+
+    # Complexity classification — pure-regex, no LLM. PR-B consumes this.
+    try:
+        from . import promise_complexity
+        is_complex = promise_complexity.needs_game_plan(cleaned)
+    except Exception as e:
+        print(f"[promise complexity] classifier error: {e}")
+        is_complex = False
+    print(
+        f"[promise complexity] needs_game_plan={is_complex} "
+        f"for: {cleaned[:80]}"
+    )
 
     inferred = inferred_due or _infer_due_from_text(cleaned)
     vec = _embed(cleaned)

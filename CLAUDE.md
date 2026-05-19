@@ -41,7 +41,7 @@ See `docs/TODO.md` (gitignored — local only).
 - **`app/main.py`** — FastAPI routes + startup migrations. CORS allows `localhost:5173`. Daily nudge scheduler + capability telemetry rollup + fly-revive boot hook live in lifespan.
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`.
 - **`app/db/models.py`** — SQLAlchemy models. Grep for fields; high-leverage notes only:
-  - `Note` — `excerpt` cached preview (≤240 char, HTML/img stripped) populated on save; lazy-backfilled at startup. List endpoints don't ship full body.
+  - `Note` — `excerpt` cached preview (≤240 char, HTML/img stripped) populated on save; lazy-backfilled at startup. List endpoints don't ship full body. `status` graduation lifecycle (`unprocessed|graduated|archived`, default `unprocessed`, indexed) — drives the UNPROCESSED sidebar triage queue + synthesizer's source filter. Note becomes `graduated` once it spawns Promise/Todo/Habit/Focus (tracked via `derives_from` edges, wired in PR-E); `archived` is a manual tombstone via `PATCH /notes/{id}` w/ `{"status":"archived"}`. `GET /notes/unprocessed` returns the queue.
   - `Focus` — long-running commitment. Color auto-assigned from 10-color palette. Drift cols: deferred `initial_signature` (frozen at promotion) + `current_signature` (EMA-updated per bind), `missed_run_count` (≥3 → `status='dormant'`), `drift_flagged_at` (one-shot when `1-cos(initial,current) > 0.35`), `evolved_from_focus_id` (lineage via `/focuses/{id}/fork`).
   - `Todo` — 3-state `state` enum (`not_yet|doing|done`), single-FK `focus_id`, singleton `is_primary` (auto-cleared on done).
   - `BacklogTicket` — `board_status` (`not_yet|doing|done`), `pr_url`, `notes` (multi-line body), `todo_id` (FK set on `/promote`).
