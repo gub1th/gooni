@@ -18,6 +18,7 @@ import { TabToggle } from "./dashboard/TabToggle";
 import { FocusesView } from "./dashboard/FocusesView";
 import { ModeToggle } from "./dashboard/ModeToggle";
 import { OpsMode } from "./dashboard/OpsMode";
+import { PrimaryBacklogBanner } from "./dashboard/PrimaryBacklogBanner";
 import { StatsMode } from "./dashboard/StatsMode";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -115,6 +116,11 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
           Ops widens ~35% so backlog kanban + eval bubbles breathe. */}
       <div>
           <div style={{ maxWidth: activeMode === "ops" ? 960 : 720, margin: "0 auto", padding: "12px 40px 120px", transition: "max-width 220ms ease" }}>
+
+        {/* North-star banner. Pinned singleton backlog ticket; rendered
+            above the mode toggle so it's visible in every mode (today /
+            ops / stats). Empty state offers a picker. */}
+        <PrimaryBacklogBanner />
 
         {/* Top-tier mode toggle — Today | Build | Ops | Pulse. */}
         <ModeToggle />

@@ -1085,6 +1085,10 @@ export interface ApiBacklogTicket {
   // POST /backlog/tickets/{id}/promote. Null means "engineering-only,
   // not on Daniel's todo list yet".
   todo_id: number | null;
+  // Singleton — only one ticket across the table can have is_primary=true.
+  // Set via promoteBacklogToPrimary / cleared via clearPrimaryBacklog or
+  // by marking the ticket done. Drives the dashboard north-star banner.
+  is_primary: boolean;
   done: boolean;
   completed_at: string | null;
   sort_order: number;
@@ -1221,6 +1225,30 @@ export async function updateBacklogTicket(
 export async function deleteBacklogTicket(ticketId: number): Promise<void> {
   const res = await apiFetch(`${BASE}/backlog/tickets/${ticketId}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete backlog ticket");
+}
+
+// ── Primary backlog ticket (singleton north-star banner) ──────────────────
+
+export async function fetchPrimaryBacklog(): Promise<ApiBacklogTicket | null> {
+  const res = await apiFetch(`${BASE}/backlog/tickets/primary`);
+  if (!res.ok) throw new Error("Failed to fetch primary backlog ticket");
+  return res.json();
+}
+
+export async function promoteBacklogToPrimary(
+  ticketId: number,
+): Promise<ApiBacklogTicket> {
+  const res = await apiFetch(`${BASE}/backlog/tickets/${ticketId}/promote-to-primary`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to promote backlog ticket to primary");
+  return res.json();
+}
+
+export async function clearPrimaryBacklog(): Promise<ApiBacklogTicket | null> {
+  const res = await apiFetch(`${BASE}/backlog/tickets/primary/clear`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to clear primary backlog ticket");
+  return res.json();
 }
 
 export async function deleteListItem(itemId: number): Promise<void> {
