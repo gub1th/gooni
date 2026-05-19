@@ -731,7 +731,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           // that ever changes.
         }
         selectNote(id);
-        navigate({ to: "/", search: { note: id, conv: undefined, list: undefined, audit: undefined, segment: undefined } });
+        navigate({ to: "/", search: { note: id, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } });
       })();
     };
     dom.addEventListener("click", onClick);
@@ -794,7 +794,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     // reaches for it (otherwise the editor briefly renders an empty note).
     await refetchNote(child.id).catch(() => {});
     selectNote(child.id);
-    navigate({ to: "/", search: { note: child.id, conv: undefined, list: undefined, audit: undefined, segment: undefined } });
+    navigate({ to: "/", search: { note: child.id, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } });
     setExtractInFlight(false);
   }
 
@@ -1434,7 +1434,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       setDeleteConfirm(false);
                       if (neighbor) {
                         selectNote(neighbor.id);
-                        navigate({ to: "/", search: { note: neighbor.id, conv: undefined, list: undefined, audit: undefined, segment: undefined } });
+                        navigate({ to: "/", search: { note: neighbor.id, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } });
                       }
                     }}
                     style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#FF3B30", textAlign: "left" }}
@@ -1720,12 +1720,12 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
               const lists = useListsStore.getState().lists;
               const backlog = lists.find((l) => l.type === "backlog");
               if (backlog) {
-                navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined, segment: undefined} });
+                navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined, segment: undefined, view: undefined} });
               }
             } catch (e) { console.error(e); }
           };
           const openNote = () => {
-            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined , audit: undefined, segment: undefined} });
+            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined , audit: undefined, segment: undefined, view: undefined} });
           };
           return (
             <div
@@ -1805,7 +1805,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     onClick={async () => {
                       await save();
                       selectNote(parentLink.id);
-                      navigate({ to: "/", search: { note: parentLink.id, conv: undefined, list: undefined, audit: undefined, segment: undefined } });
+                      navigate({ to: "/", search: { note: parentLink.id, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } });
                     }}
                     title={`Back to "${parentLink.title}"`}
                     style={{
@@ -1991,7 +1991,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       const lists = useListsStore.getState().lists;
                       const backlog = lists.find((l) => l.type === "backlog");
                       if (backlog) {
-                        navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined, segment: undefined} });
+                        navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined, segment: undefined, view: undefined} });
                       }
                     } catch (e) {
                       console.error("openBacklog failed", e);

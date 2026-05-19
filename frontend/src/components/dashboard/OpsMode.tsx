@@ -63,7 +63,7 @@ function BacklogSection() {
         <button
           onClick={() => navigate({
             to: "/",
-            search: { note: undefined, conv: undefined, list: backlogList.id, audit: undefined, segment: undefined },
+            search: { note: undefined, conv: undefined, list: backlogList.id, audit: undefined, segment: undefined, view: undefined },
           })}
           style={{
             background: "transparent", border: "none", cursor: "pointer",
