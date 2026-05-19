@@ -97,16 +97,26 @@ def _parse_vec(emb: str | None) -> list[float] | None:
 
 
 def _gather_notes(db: Session) -> list[dict]:
+    """Pull recent unprocessed notes for synthesizer clustering.
+
+    Filter on `Note.status == 'unprocessed'` so already-graduated notes
+    don't re-surface as fresh focus candidates — once a note has spawned
+    a Promise/Todo/Habit/Focus, it shouldn't drag its old cluster back
+    into the candidate pool. Archived notes also excluded (manual
+    tombstone). `_promote_candidate_graduates_notes` (in
+    focus_candidate_service) flips the status when a candidate promotes.
+    """
     cutoff = datetime.utcnow() - timedelta(days=RECENT_DAYS_NOTES)
     space_names = {s.id: s.name for s in db.query(Space.id, Space.name).all()}
     rows = (
-        db.query(Note.id, Note.title, Note.content, Note.embedding, Note.space_id, Note.updated_at)
+        db.query(Note.id, Note.title, Note.content, Note.embedding, Note.space_id, Note.updated_at, Note.status)
         .filter(Note.embedding.isnot(None))
         .filter(Note.updated_at >= cutoff)
+        .filter(Note.status == "unprocessed")
         .all()
     )
     items: list[dict] = []
-    for nid, title, content, emb, space_id, _ in rows:
+    for nid, title, content, emb, space_id, _, _status in rows:
         if space_names.get(space_id, "") in EXCLUDED_SPACE_NAMES:
             continue
         body = _strip_html(content or "")
