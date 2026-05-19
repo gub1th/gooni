@@ -65,7 +65,7 @@ function StreaksSection() {
     queryKey: ["habits"], queryFn: fetchHabits,
   });
   const { data: dev } = useQuery<DevActivity>({
-    queryKey: ["dev-activity"], queryFn: fetchDevActivity,
+    queryKey: ["dev-activity"], queryFn: () => fetchDevActivity(),
   });
 
   const longestHabit = habits.reduce((m, h) => Math.max(m, h.streak), 0);

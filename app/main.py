@@ -5071,12 +5071,15 @@ def github_untrack_repo(owner: str, name: str, db: Session = Depends(get_db)):
 
 
 @app.get("/dashboard/dev-activity")
-def dashboard_dev_activity(db: Session = Depends(get_db)):
+def dashboard_dev_activity(refresh: bool = False, db: Session = Depends(get_db)):
     """Per-repo dev activity (today, recent commits, streak) + aggregate
     streak and weekly LLM summary across all tracked repos.
+
+    `?refresh=1` bypasses the 60s in-memory cache so the user can yank a
+    fresh pull from GitHub when they've just committed.
     """
     from .services import dev_activity_service as das
-    return das.dev_activity_service.build(db)
+    return das.dev_activity_service.build(db, force=refresh)
 
 
 @app.get("/dashboard/time-on-gooni")

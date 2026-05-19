@@ -535,9 +535,11 @@ export interface DevActivity {
   connected: boolean;
   repos: DevActivityRepo[];
   aggregate: { streak_days: number; today_commits: number };
+  fetched_at?: string | null;
 }
-export async function fetchDevActivity(): Promise<DevActivity> {
-  const res = await apiFetch(`${BASE}/dashboard/dev-activity`);
+export async function fetchDevActivity(refresh = false): Promise<DevActivity> {
+  const qs = refresh ? "?refresh=1" : "";
+  const res = await apiFetch(`${BASE}/dashboard/dev-activity${qs}`);
   if (!res.ok) throw new Error("Failed to fetch dev activity");
   return res.json();
 }

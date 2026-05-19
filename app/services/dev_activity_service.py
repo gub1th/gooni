@@ -5,8 +5,10 @@ Single-tenant, single-process — keeps a tiny in-memory cache (60s) over
 the full /dashboard/dev-activity payload to absorb dashboard re-mounts
 without re-spending GitHub API budget.
 
-Timezone: all "day" bucketing is UTC for v1. Refining to user-local TZ
-is a follow-up.
+Day bucketing uses Daniel's configured local TZ (Settings.nudge_tz,
+default America/Los_Angeles) so "today" matches his lived day, not UTC.
+Without this, after ~5pm PT the UTC day flips and "today's commits"
+silently empties out even while he's still committing.
 """
 
 from __future__ import annotations
@@ -14,11 +16,32 @@ from __future__ import annotations
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from ..db.models import TrackedRepo
+from ..db.models import Settings as SettingsModel, TrackedRepo
 from . import github as gh
+
+
+def _local_today(db: Session):
+    settings = db.query(SettingsModel).first()
+    tz_name = (settings.nudge_tz if settings else None) or "America/Los_Angeles"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("America/Los_Angeles")
+    return datetime.now(tz).date()
+
+
+def _local_day_key(iso_ts: str, tz: ZoneInfo) -> str:
+    try:
+        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    except ValueError:
+        return iso_ts[:10]
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(tz).date().isoformat()
 
 
 _CACHE_TTL_SECONDS = 60
@@ -55,12 +78,19 @@ class DevActivityService:
                 "connected": connected,
                 "repos": [],
                 "aggregate": {"streak_days": 0, "today_commits": 0},
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
             }
             self._cache_at = now
             self._cache_payload = payload
             return payload
 
-        today_utc = datetime.now(timezone.utc).date()
+        local_today = _local_today(db)
+        settings = db.query(SettingsModel).first()
+        tz_name = (settings.nudge_tz if settings else None) or "America/Los_Angeles"
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception:
+            tz = ZoneInfo("America/Los_Angeles")
         since_iso = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
 
         repos_payload: list[dict[str, Any]] = []
@@ -92,7 +122,7 @@ class DevActivityService:
                 ).get("date")
                 if not committed_at:
                     continue
-                day = committed_at[:10]  # YYYY-MM-DD
+                day = _local_day_key(committed_at, tz)
                 commit_days.add(day)
                 union_days.add(day)
                 msg = (c.get("commit") or {}).get("message") or ""
@@ -107,7 +137,7 @@ class DevActivityService:
                         "committed_at": committed_at,
                     })
 
-                if day == today_utc.isoformat():
+                if day == local_today.isoformat():
                     today_count += 1
                     today_subjects.append(subject)
                     # Extra API call for additions/deletions/files. Capped
@@ -135,10 +165,10 @@ class DevActivityService:
                     "subjects": today_subjects,
                 },
                 "recent": recent,
-                "streak_days": _streak_from_days(commit_days, today_utc),
+                "streak_days": _streak_from_days(commit_days, local_today),
             })
 
-        aggregate_streak = _streak_from_days(union_days, today_utc)
+        aggregate_streak = _streak_from_days(union_days, local_today)
         aggregate_today = sum((r.get("today") or {}).get("commits", 0) for r in repos_payload)
 
         payload = {
@@ -149,6 +179,7 @@ class DevActivityService:
                 "streak_days": aggregate_streak,
                 "today_commits": aggregate_today,
             },
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
 
         self._cache_at = now
