@@ -360,12 +360,26 @@ def _build_ack(
         # state='proposed' until he confirms via PATCH /promises/{id}
         # {"state":"pending"}. The ack surfaces the proposed state
         # explicitly so it's visible there's an open contract to lock in.
+        #
+        # Voice-of-reason: when the evaluator (promise_evaluator.evaluate)
+        # flagged a promise, we append its single-line suggestion AFTER
+        # the state phrase. Gooni pushes back conversationally, never
+        # blocks the create — the row is already persisted by the time
+        # we render this.
+        def _voice_tail(prom: dict) -> str:
+            v = prom.get("voice_of_reason")
+            if not v:
+                return ""
+            sug = (v.get("suggestion") or "").strip()
+            return f" — {sug}" if sug else ""
+
         proposed = [p for p in captured_promises if p.get("state") == "proposed"]
         pending = [p for p in captured_promises if p.get("state") != "proposed"]
         for prop in proposed[:2]:
             summary = _trim(prop.get("summary") or prop.get("utterance") or "")
             parts.append(
                 f"\"{summary}\" — needs game plan (reply w/ start, end, what breaks it)"
+                + _voice_tail(prop)
             )
         if len(proposed) > 2:
             parts.append(f"{len(proposed) - 2} more awaiting game plan")
@@ -375,9 +389,9 @@ def _build_ack(
                 slip = p.get("slip_count", 0) or 0
                 summary = _trim(p.get("summary") or p.get("utterance") or "")
                 if slip > 0:
-                    parts.append(f"\"{summary}\" — slip #{slip + 1}")
+                    parts.append(f"\"{summary}\" — slip #{slip + 1}" + _voice_tail(p))
                 else:
-                    parts.append(f"\"{summary}\" tracked")
+                    parts.append(f"\"{summary}\" tracked" + _voice_tail(p))
             else:
                 parts.append(f"{len(pending)} promises tracked")
     if captured_todos:
@@ -554,12 +568,22 @@ def _build_just_extracted_block(
         pid = p.get("id")
         state = p.get("state") or "pending"
         verb = "PROPOSED (needs game plan)" if state == "proposed" else "tracked"
+        # Voice-of-reason — when set, the LLM should treat the
+        # suggestion as Gooni's pushback to acknowledge naturally in
+        # its reply, NOT as a separate announcement.
+        voice = p.get("voice_of_reason") or {}
+        voice_tail = ""
+        if voice:
+            flag = voice.get("primary") or ""
+            sug = (voice.get("suggestion") or "").strip()
+            if sug:
+                voice_tail = f" — voice-of-reason flag '{flag}': {sug}"
         if pid is not None:
             lines.append(
-                f"- Promise #{pid} {verb}: \"{summary}\"{slip_tail}"
+                f"- Promise #{pid} {verb}: \"{summary}\"{slip_tail}{voice_tail}"
             )
         else:
-            lines.append(f"- Promise {verb}: \"{summary}\"{slip_tail}")
+            lines.append(f"- Promise {verb}: \"{summary}\"{slip_tail}{voice_tail}")
     for t in captured_todos[:3]:
         text = (t.get("text") or "").strip()
         if len(text) > 60:
