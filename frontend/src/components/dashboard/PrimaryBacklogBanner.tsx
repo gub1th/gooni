@@ -12,12 +12,33 @@ import {
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
-// Mirrors BacklogBoard's column palette so the banner state pill reads the
-// same color language as the kanban Daniel just came from.
-const STATE_STYLE: Record<BoardStatus, { label: string; tint: string; bg: string }> = {
-  not_yet: { label: "not yet", tint: "#94A3B8", bg: "rgba(148,163,184,0.14)" },
-  doing:   { label: "doing",   tint: "#F59E0B", bg: "rgba(245,158,11,0.14)" },
-  done:    { label: "done",    tint: "#16A34A", bg: "rgba(22,163,74,0.14)" },
+// Banner colors are vivid + saturated — this is the loudest surface on
+// the dashboard on purpose ("this is your one north-star"). Status color
+// floods the whole banner; the tonal label reads as a subtle in-bg chip
+// (darker shade of the same hue) so the state info doesn't compete with
+// the title.
+const STATE_STYLE: Record<
+  BoardStatus,
+  { label: string; bg: string; tonal: string; titleColor: string }
+> = {
+  not_yet: {
+    label: "not yet",
+    bg: "#6366F1",        // indigo-500
+    tonal: "#4338CA",     // indigo-700 (label blends darker into bg)
+    titleColor: "#FFFFFF",
+  },
+  doing: {
+    label: "doing",
+    bg: "#F59E0B",        // amber-500
+    tonal: "#B45309",     // amber-700
+    titleColor: "#FFFFFF",
+  },
+  done: {
+    label: "done",
+    bg: "#10B981",        // emerald-500
+    tonal: "#047857",     // emerald-700
+    titleColor: "#FFFFFF",
+  },
 };
 
 const CYCLE: Record<BoardStatus, BoardStatus> = {
@@ -139,105 +160,93 @@ export function PrimaryBacklogBanner() {
   }
 
   const state = currentStatus(ticket);
-  const pill = STATE_STYLE[state];
+  const palette = STATE_STYLE[state];
 
   return (
     <div
       style={{
-        margin: "8px 0 14px",
-        padding: "14px 16px",
-        borderRadius: 12,
-        // Subtle north-star vibe: thin amber accent stripe along the left
-        // edge, faint card background. Distinct from regular content blocks
-        // without being loud.
-        background: "var(--gooni-card, #fff)",
-        border: "1px solid var(--gooni-border, rgba(0,0,0,0.08))",
-        boxShadow: "inset 3px 0 0 #F59E0B",
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
+        position: "relative",
+        margin: "10px 0 18px",
+        padding: "30px 56px",
+        borderRadius: 16,
+        background: palette.bg,
         fontFamily: FONT,
+        // Subtle inner shadow gives the flat color slight depth without
+        // breaking the "no edge stripe" rule — looks like solid paint, not
+        // a card with a border.
+        boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06), 0 6px 20px rgba(0,0,0,0.06)",
+        textAlign: "center",
+        // Smooth color transition when the pill cycles, so the whole
+        // banner crossfades between status hues instead of snapping.
+        transition: "background 280ms ease",
       }}
     >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 10,
-            letterSpacing: 1,
-            textTransform: "uppercase",
-            color: "#F59E0B",
-            fontWeight: 700,
-            marginBottom: 3,
-          }}
-        >
-          Primary focus
-        </div>
-        <div
-          style={{
-            fontSize: 15,
-            fontWeight: 600,
-            color: "var(--gooni-text, #1C1C1E)",
-            lineHeight: 1.3,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {ticket.text}
-        </div>
-        {ticket.subtitle && (
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--gooni-muted, #6E6E73)",
-              marginTop: 2,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {ticket.subtitle}
-          </div>
-        )}
-      </div>
-
+      {/* Status label — top-left, small caps, blends into the bg via a
+          darker shade of the same hue. Click to cycle. Daniel's "doing
+          should blend with the actual color" ask. */}
       <button
         onClick={cyclePillState}
         title="Click to cycle: not yet → doing → done"
         style={{
-          padding: "5px 12px",
-          borderRadius: 999,
-          background: pill.bg,
-          color: pill.tint,
-          fontSize: 11.5,
+          position: "absolute",
+          top: 12,
+          left: 16,
+          padding: "3px 10px",
+          fontSize: 10.5,
           fontWeight: 700,
-          fontFamily: FONT,
-          letterSpacing: 0.3,
+          letterSpacing: 1.2,
           textTransform: "uppercase",
-          border: `1px solid ${pill.tint}33`,
-          cursor: "pointer",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {pill.label}
-      </button>
-
-      <button
-        onClick={unpin}
-        title="Unpin primary (banner returns to empty state)"
-        style={{
-          padding: "4px 8px",
-          fontSize: 14,
-          lineHeight: 1,
-          color: "var(--gooni-muted, #8E8E93)",
+          color: palette.tonal,
           background: "transparent",
           border: "none",
           cursor: "pointer",
-          borderRadius: 6,
+          fontFamily: FONT,
+        }}
+      >
+        {palette.label}
+      </button>
+
+      {/* Unpin — top-right, small, white. */}
+      <button
+        onClick={unpin}
+        title="Unpin primary"
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 12,
+          width: 22,
+          height: 22,
+          padding: 0,
+          fontSize: 12,
+          lineHeight: 1,
+          color: "#FFFFFF",
+          opacity: 0.7,
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          borderRadius: 4,
         }}
       >
         ✕
       </button>
+
+      {/* The title — big, bold, centered. The only thing that actually
+          matters on this surface; everything else recedes. */}
+      <div
+        style={{
+          fontSize: 32,
+          fontWeight: 800,
+          letterSpacing: "-0.4px",
+          lineHeight: 1.1,
+          color: palette.titleColor,
+          // Stop the title from getting clipped on tight widths — wrap
+          // gracefully instead of ellipsizing (a banner this loud should
+          // never truncate the one thing it's there to say).
+          wordBreak: "break-word",
+        }}
+      >
+        {ticket.text}
+      </div>
     </div>
   );
 }
@@ -384,7 +393,7 @@ function PrimaryPicker({
                       padding: "2px 8px",
                       borderRadius: 999,
                       background: pill.bg,
-                      color: pill.tint,
+                      color: "#FFFFFF",
                       fontSize: 10,
                       fontWeight: 700,
                       textTransform: "uppercase",
