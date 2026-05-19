@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import threading
 from datetime import datetime, timedelta
 
@@ -25,6 +26,43 @@ from ..db.models import Reflection, ToolCall
 from ..llm.client import llm_client
 from .capability_service import capability_service
 from .memory_extraction import _parse_json_object
+
+
+# Bot-register phrases that scream "AI assistant" not "Alfred."
+# Foundational to G0 voice enforcement: catches drift the LLM self-judge
+# misses, forces sev≥2 + tone dimension, lets behavioral clustering
+# promote "I tend to drift into bot register" if the pattern repeats.
+# Case-insensitive. Anchored where needed to avoid false positives.
+_BOT_REGISTER_PATTERNS = [
+    r"\bi'?d be happy to\b",
+    r"\bi'?d love to (help|hear)\b",
+    r"\bhappy to help\b",
+    r"\blet me know if (you|there)\b",
+    r"\bdon'?t hesitate to\b",
+    r"\bfeel free to\b",
+    r"\bhope (this|that) helps\b",
+    r"\bgreat question\b",
+    r"\bjust (a )?friendly reminder\b",
+    r"\bjust checking in\b",
+    r"\bi'?ve gone ahead and\b",
+    r"\bi have gone ahead and\b",
+    r"^\s*sure!",
+    r"^\s*absolutely!",
+    r"^\s*certainly!",
+    r"^\s*of course!",
+]
+
+_BOT_REGISTER_RE = re.compile(
+    "|".join(_BOT_REGISTER_PATTERNS), re.IGNORECASE | re.MULTILINE
+)
+
+
+def _detect_voice_drift(reply: str) -> str | None:
+    """Return the first bot-register phrase matched, or None."""
+    if not reply:
+        return None
+    m = _BOT_REGISTER_RE.search(reply)
+    return m.group(0).strip() if m else None
 
 
 # Threshold for behavioral promotion: when this many recent reflections
@@ -265,6 +303,23 @@ class ReflexionService:
         # 6×-dup-facet failure mode.
         if parsed.get("redundant_with_prior") is True:
             gap_text = None
+
+        # Voice-drift override — deterministic regex catch for bot-register
+        # phrases the LLM self-judge may miss. Forces tone + sev≥2 so the
+        # behavioral cluster picks up repeated drift and promotes "I tend to
+        # drift into bot register" as a facet. Fires AFTER redundancy gate
+        # so voice drift gets its own cluster even when the surrounding gap
+        # is a duplicate.
+        voice_drift_phrase = _detect_voice_drift(assistant_reply)
+        if voice_drift_phrase:
+            if severity < 2:
+                severity = 2
+            parsed["gap_dimension"] = "tone"
+            drift_text = f"voice drift to bot register: \"{voice_drift_phrase}\""
+            if not gap_text:
+                gap_text = drift_text
+            elif "voice drift" not in gap_text:
+                gap_text = f"{gap_text.rstrip('.')}. {drift_text}"
 
         gap_embedding_json = None
         if severity >= 2 and gap_text:
