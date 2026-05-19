@@ -26,6 +26,10 @@ export const Route = createFileRoute("/")({
     // ?segment=<id> → auto-open that segment's drilldown when the audit
     // view mounts. Used by the Ops eval section's "open full" deeplink.
     segment: typeof search.segment === "number" ? search.segment : typeof search.segment === "string" ? Number(search.segment) : undefined,
+    // ?view=notes|chat → force a view that has no other URL signal.
+    // Sidebar uses this to drive All Notes / space-row / new-chat clicks
+    // now that it lives in __root's AppShell and can't call setView().
+    view: search.view === "notes" || search.view === "chat" ? (search.view as "notes" | "chat") : undefined,
   }),
   component: NotesPage,
 });
@@ -41,7 +45,7 @@ function NotesPage() {
 
   // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
   const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "eval">(() =>
-    search.audit ? "eval" : search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : "dashboard"
+    search.audit ? "eval" : search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : search.view ?? "dashboard"
   );
   const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
 
@@ -130,6 +134,14 @@ function NotesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.audit]);
 
+  // ?view=notes|chat forces a view that has no other URL signal (All Notes,
+  // space row, fresh-chat). Sidebar lives in __root.tsx's AppShell, so it
+  // can't call setView directly — it drives the view through this param.
+  useEffect(() => {
+    if (search.view === "notes" || search.view === "chat") setView(search.view);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.view]);
+
   useEffect(() => {
     if (view === "notes") {
       const spaceId = selectedSpaceId ?? "general";
@@ -175,13 +187,13 @@ function NotesPage() {
   ) {
     setView(v);
     if (v === "notes" && noteId) {
-      navigate({ search: { note: noteId, conv: undefined, list: undefined , audit: undefined, segment: undefined}, replace: true });
+      navigate({ search: { note: noteId, conv: undefined, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
     } else if (v === "chat" && convId) {
-      navigate({ search: { note: undefined, conv: convId, list: undefined , audit: undefined, segment: undefined}, replace: true });
+      navigate({ search: { note: undefined, conv: convId, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
     } else if (v === "lists" && listId) {
-      navigate({ search: { note: undefined, conv: undefined, list: listId , audit: undefined, segment: undefined}, replace: true });
+      navigate({ search: { note: undefined, conv: undefined, list: listId , audit: undefined, segment: undefined, view: undefined}, replace: true });
     } else {
-      navigate({ search: { note: undefined, conv: undefined, list: undefined , audit: undefined, segment: undefined}, replace: true });
+      navigate({ search: { note: undefined, conv: undefined, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
     }
   }
 
@@ -190,14 +202,14 @@ function NotesPage() {
     setView("notes");
     selectSpace(spaceId);
     createNote(spaceId);
-    navigate({ search: { note: undefined, conv: undefined, list: undefined , audit: undefined, segment: undefined}, replace: true });
+    navigate({ search: { note: undefined, conv: undefined, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
   }
 
   // When active note changes while in notes view, update URL
   const { activeNoteId } = useNotesContentStore();
   useEffect(() => {
     if (view === "notes" && activeNoteId && activeNoteId > 0) {
-      navigate({ search: { note: activeNoteId, conv: undefined, list: undefined , audit: undefined, segment: undefined}, replace: true });
+      navigate({ search: { note: activeNoteId, conv: undefined, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
     }
   }, [activeNoteId, view]);
 
@@ -205,7 +217,7 @@ function NotesPage() {
   const { activeId: activeConvId } = useConversationsStore();
   useEffect(() => {
     if (view === "chat" && activeConvId) {
-      navigate({ search: { note: undefined, conv: activeConvId, list: undefined , audit: undefined, segment: undefined}, replace: true });
+      navigate({ search: { note: undefined, conv: activeConvId, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
     }
   }, [activeConvId, view]);
 

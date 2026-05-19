@@ -190,13 +190,19 @@ interface SidebarProps {
   showCompose: boolean;
   onLogoClick: () => void;
   onSpaceSelect: () => void;
+  // All-Notes row click. Sidebar mutates the store (selectSpace "general"),
+  // AppShell does the URL nav to ?view=notes.
+  onAllNotes: () => void;
+  // Note-row click (pinned / draft / unprocessed / recent). Drives the URL
+  // to ?note=<id> so NotesPage's search.note effect picks it up.
+  onSelectNote: (id: number) => void;
   onCompose: () => void;
   onNewChat: () => void;
   onSelectList: (id: number) => void;
   onOpenEval?: () => void;
 }
 
-export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect, onCompose, onNewChat, onSelectList, onOpenEval }: SidebarProps) {
+export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect, onAllNotes, onSelectNote, onCompose, onNewChat, onSelectList, onOpenEval }: SidebarProps) {
   const navigate = useNavigate();
   const { selectedSpaceId, selectSpace, loadNotes, selectNote, activeNoteId, removeSpace } = useNotesContentStore();
   const { spaces, createSpace, updateSpace, deleteSpace } = useSpacesStore();
@@ -488,7 +494,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
   function handleAllNotes() {
     selectSpace("general");
     loadNotes("general");
-    onSpaceSelect();
+    onAllNotes();
   }
 
   function handleSelectNote(note: ApiNote) {
@@ -496,7 +502,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
     selectSpace(spaceId);
     selectNote(note.id);
     loadNotes(spaceId);
-    onSpaceSelect();
+    onSelectNote(note.id);
   }
 
   function startInlineEdit(e: React.MouseEvent, id: number, name: string, emoji: string | null) {
@@ -1377,7 +1383,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                 }
                 navigate({
                   to: "/",
-                  search: { audit: true, note: undefined, conv: undefined, list: undefined, segment: undefined },
+                  search: { audit: true, note: undefined, conv: undefined, list: undefined, segment: undefined, view: undefined },
                 });
               }}
               title="Audit — score Gooni's replies + dispatch to Claude Code"

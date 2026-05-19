@@ -124,6 +124,8 @@ function AppShell() {
     const spaceId = selectedSpaceId ?? "general";
     selectSpace(spaceId);
     createNote(spaceId);
+    // createNote sets activeNoteId → NotesPage's effect on activeNoteId
+    // rewrites the URL to ?note=<id>, which flips view to "notes".
     navigate({
       to: "/",
       search: {
@@ -132,6 +134,7 @@ function AppShell() {
         list: undefined,
         audit: undefined,
         segment: undefined,
+        view: undefined,
       },
       replace: true,
     });
@@ -139,6 +142,9 @@ function AppShell() {
 
   function handleNewChat() {
     newChat();
+    // No conv id yet (created on first send). ?view=chat forces chat view
+    // in NotesPage; once a real convId lands, the activeConvId effect
+    // rewrites the URL to ?conv=<id>.
     navigate({
       to: "/",
       search: {
@@ -147,6 +153,7 @@ function AppShell() {
         list: undefined,
         audit: undefined,
         segment: undefined,
+        view: "chat",
       },
       replace: true,
     });
@@ -161,6 +168,39 @@ function AppShell() {
         list: undefined,
         audit: undefined,
         segment: undefined,
+        view: undefined,
+      },
+    });
+  }
+
+  // Notes-view nav for surfaces with no specific note id (All Notes click,
+  // space-row click). The Sidebar already mutates the store (selectSpace,
+  // loadNotes); this just forces the route to render the notes view.
+  function gotoNotesView() {
+    navigate({
+      to: "/",
+      search: {
+        note: undefined,
+        conv: undefined,
+        list: undefined,
+        audit: undefined,
+        segment: undefined,
+        view: "notes",
+      },
+      replace: true,
+    });
+  }
+
+  function handleSelectNote(id: number) {
+    navigate({
+      to: "/",
+      search: {
+        note: id,
+        conv: undefined,
+        list: undefined,
+        audit: undefined,
+        segment: undefined,
+        view: undefined,
       },
     });
   }
@@ -186,7 +226,9 @@ function AppShell() {
             activeListId={activeListId}
             showCompose={!isNotes}
             onLogoClick={gotoBlank}
-            onSpaceSelect={gotoBlank}
+            onSpaceSelect={gotoNotesView}
+            onAllNotes={gotoNotesView}
+            onSelectNote={handleSelectNote}
             onCompose={handleCompose}
             onNewChat={handleNewChat}
             onSelectList={(id) =>
@@ -198,6 +240,7 @@ function AppShell() {
                   list: id,
                   audit: undefined,
                   segment: undefined,
+                  view: undefined,
                 },
               })
             }
@@ -210,6 +253,7 @@ function AppShell() {
                   list: undefined,
                   audit: true,
                   segment: undefined,
+                  view: undefined,
                 },
               })
             }
