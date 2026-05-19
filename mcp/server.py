@@ -1079,6 +1079,69 @@ def find_similar_backlog(
 
 
 @mcp.tool()
+def set_backlog_state(match: str, state: str) -> str:
+    """Flip a backlog ticket's board_status by text match.
+
+    State vocab matches the rest of the system: 'not_yet' | 'doing' |
+    'done'. Setting state='done' also flips the `done` boolean so the
+    Done column on the Jira board picks it up; setting 'not_yet' or
+    'doing' clears `done`. Mirrors `check_task` for todos.
+
+    Args:
+        match: substring of ticket text or subtitle (case-insensitive)
+        state: 'not_yet' | 'doing' | 'done'
+    """
+    state = (state or "").strip().lower()
+    if state not in {"not_yet", "doing", "done"}:
+        return "(state must be 'not_yet', 'doing', or 'done')"
+    item, err = _find_backlog_item(match)
+    if err:
+        return err
+    body: dict = {"board_status": state, "done": state == "done"}
+    resp = _session.patch(
+        f"{BASE_URL}/backlog/tickets/{item['id']}",
+        json=body,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return f"#{item['id']} [{state}] {item['text']}"
+
+
+@mcp.tool()
+def promote_backlog_to_primary(match: str) -> str:
+    """Pin a backlog ticket as the singleton "primary" (dashboard north-
+    star banner). Clears any previously-primary ticket atomically.
+    Idempotent — re-promoting the same ticket is a no-op. Only one
+    ticket can be primary at a time across the whole backlog.
+
+    Args:
+        match: substring of ticket text or subtitle (case-insensitive)
+    """
+    item, err = _find_backlog_item(match)
+    if err:
+        return err
+    resp = _session.post(
+        f"{BASE_URL}/backlog/tickets/{item['id']}/promote-to-primary",
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return f"★ primary now #{item['id']}: {item['text']}"
+
+
+@mcp.tool()
+def clear_primary_backlog() -> str:
+    """Unpin whichever backlog ticket is currently primary. Returns the
+    demoted ticket's text or a "(no primary set)" sentinel. The ticket
+    row itself stays — only the is_primary flag flips."""
+    resp = _session.post(f"{BASE_URL}/backlog/tickets/primary/clear", timeout=10)
+    resp.raise_for_status()
+    out = resp.json()
+    if out is None:
+        return "(no primary set)"
+    return f"unpinned #{out['id']}: {out['text']}"
+
+
+@mcp.tool()
 def delete_backlog_item(match: str) -> str:
     """Delete a backlog ticket by text match. Refuses if the match is
     ambiguous — narrow it to exactly one ticket. To merge instead of
