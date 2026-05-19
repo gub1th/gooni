@@ -194,6 +194,30 @@ def create(
                 weight=score,
             )
 
+    # Voice-of-reason evaluation — deterministic checks (coupled reward,
+    # conflicts active, too vague, track-record doubt). Returns None when
+    # the promise passes all checks. Tagged onto the in-memory Promise as
+    # `_voice_of_reason` so the orchestrator's ack helper + just-extracted
+    # block can surface it without re-running the checks. Not persisted —
+    # rules can evolve; recompute on demand if a callsite needs them.
+    try:
+        from . import promise_evaluator
+        verdict = promise_evaluator.evaluate(
+            db,
+            utterance=cleaned,
+            summary=p.summary,
+            slip_count=p.slip_count or 0,
+            vec=vec,
+        )
+        if verdict is not None:
+            p._voice_of_reason = verdict
+            print(
+                f"[promise voice-of-reason] flag={verdict['primary']} "
+                f"for: {cleaned[:80]}"
+            )
+    except Exception as e:
+        print(f"[promise voice-of-reason] evaluator failed: {e}")
+
     return p
 
 
@@ -426,12 +450,19 @@ def auto_mark_overdue(db: Session, now: datetime | None = None) -> int:
 
 
 def serialize(p: Promise) -> dict[str, Any]:
+    # voice_of_reason is only present on freshly-created Promise rows
+    # (set by promise_service.create after the evaluator runs). Re-fetched
+    # rows won't have it; serialize emits null in that case so consumers
+    # never KeyError. Re-run the evaluator on demand if a callsite needs
+    # the verdict for a historical Promise.
+    voice = getattr(p, "_voice_of_reason", None)
     return {
         "id": p.id,
         "utterance": p.utterance,
         "summary": p.summary,
         "inferred_due": p.inferred_due.isoformat() if p.inferred_due else None,
         "state": p.state,
+        "voice_of_reason": voice,
         "slip_count": p.slip_count,
         "resolved_at": p.resolved_at.isoformat() if p.resolved_at else None,
         "source_message_id": p.source_message_id,
