@@ -1,14 +1,10 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchMemories, fetchMemoryStats, deleteMemory, patchMemory,
   type ApiMemory, type MemoryType,
 } from "../services/api";
-import { PasswordGate } from "../components/PasswordGate";
-import { Sidebar } from "../components/notes/Sidebar";
-import { GooniLayer } from "../components/GooniLayer";
 import { MemoryBrain } from "../components/notes/MemoryBrain";
-import { useWindowWidth } from "../hooks/useWindowWidth";
 
 export const Route = createFileRoute("/memories")({
   // ?focus=<id> deep-links into a specific memory row — fired by the
@@ -57,16 +53,8 @@ function relativeTime(iso: string | null): string {
   return `${Math.floor(mo / 12)}y ago`;
 }
 
-const SIDEBAR_BREAKPOINT = 768;
-
 function MemoriesPage() {
-  const navigate = useNavigate();
   const urlSearch = Route.useSearch();
-  const windowWidth = useWindowWidth();
-  const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
-  useEffect(() => {
-    setSidebarOpen(windowWidth >= SIDEBAR_BREAKPOINT);
-  }, [windowWidth >= SIDEBAR_BREAKPOINT]);
 
   // Brief highlight on the row deep-linked via ?focus=<id>. Cleared 2.4s
   // after the scroll lands so the flash doesn't linger.
@@ -168,13 +156,6 @@ function MemoriesPage() {
     }
   }
 
-  // Sidebar shows logo + spaces + recent notes. Repurposing "onLogoClick" to
-  // navigate back to dashboard. The other handlers redirect to / since this
-  // page doesn't host notes/chat composers.
-  function gotoDashboard() {
-    navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined , audit: undefined, segment: undefined} });
-  }
-
   const tabs = useMemo(() => {
     return [
       { key: "all" as const, label: "All", count: Object.values(stats).reduce((a, b) => a + b, 0) },
@@ -184,26 +165,9 @@ function MemoriesPage() {
     ];
   }, [stats, filter]);
 
+  // Sidebar + GooniLayer + PasswordGate live in __root.tsx's AppShell.
   return (
-    <PasswordGate>
-      <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#FAFAFA" }}>
-        {sidebarOpen && (
-          <Sidebar
-            isDashboard={false}
-            isNotes={false}
-            isChat={false}
-            isLists={false}
-            activeListId={null}
-            showCompose={true}
-            onLogoClick={gotoDashboard}
-            onSpaceSelect={gotoDashboard}
-            onCompose={gotoDashboard}
-            onNewChat={gotoDashboard}
-            onSelectList={(id) => navigate({ to: "/", search: { note: undefined, conv: undefined, list: id , audit: undefined, segment: undefined} })}
-          />
-        )}
-
-        <div style={{ flex: 1, overflowY: "auto", fontFamily: FONT }}>
+        <div style={{ flex: 1, overflowY: "auto", fontFamily: FONT, background: "#FAFAFA" }}>
           <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 32px 80px" }}>
             {/* Header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18 }}>
@@ -451,10 +415,6 @@ function MemoriesPage() {
             </div>
           </div>
         </div>
-
-        <GooniLayer />
-      </div>
-    </PasswordGate>
   );
 }
 
