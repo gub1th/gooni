@@ -538,18 +538,55 @@ async def _capability_telemetry_loop():
             await asyncio.sleep(60)
 
 
+async def _todo_soft_delete_sweeper_loop():
+    """Hourly hard-purge of soft-deleted todos past the 24h undo window.
+
+    G1 groom-mutation: chat-side delete/merge/rename soft-deletes via
+    `Todo.deleted_at`. This sweeper hard-removes anything past the TTL
+    so the table doesn't grow tombstones forever. Hourly cadence keeps
+    the window tight enough that the undo runway stays honest (matches
+    `SOFT_DELETE_TTL_HOURS` semantics).
+    """
+    from .services.todo_service import todo_service
+    while True:
+        try:
+            await asyncio.sleep(3600)  # 1 hour
+            db = SessionLocal()
+            try:
+                purged = todo_service.purge_old_deleted(db)
+                if purged:
+                    print(f"[todo-sweeper] purged {purged} stale tombstones", flush=True)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[todo-sweeper] loop error: {e}", flush=True)
+            await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     # Boot-time mechanical capability scan — populates the facet table
     # from the live tool registry + FastAPI routes + messaging channels.
     # Idempotent + source-hash short-circuited so it's cheap to re-run on
-    # every uvicorn restart.
+    # every uvicorn restart. Negative-polarity facet seed runs alongside
+    # so the "I cannot:" block in the prompt is populated from boot.
     try:
         from .services.capability_service import capability_service
         db = SessionLocal()
         try:
             result = capability_service.refresh_mechanical_layer(db)
             print(f"[capability] boot scan: {result}", flush=True)
+            try:
+                seeded = capability_service.seed_negative_facets(db)
+                if seeded:
+                    print(f"[capability] seeded {seeded} negative facets", flush=True)
+            except Exception as e:
+                # Pre-G1 dev DBs may not have the polarity column yet (the
+                # migration is inspector-guarded against missing columns
+                # both ways). Don't crash boot — just log.
+                print(f"[capability] negative seed skipped: {e}", flush=True)
         finally:
             db.close()
     except Exception as e:
@@ -591,10 +628,14 @@ async def _lifespan(app: FastAPI):
     excerpt_task = asyncio.create_task(_backfill_note_excerpts_loop())
     mem_task = asyncio.create_task(_memory_watchdog_loop())
     capability_task = asyncio.create_task(_capability_telemetry_loop())
+    todo_sweeper_task = asyncio.create_task(_todo_soft_delete_sweeper_loop())
     try:
         yield
     finally:
-        for t in (nudge_task, backfill_task, excerpt_task, mem_task, capability_task):
+        for t in (
+            nudge_task, backfill_task, excerpt_task, mem_task, capability_task,
+            todo_sweeper_task,
+        ):
             t.cancel()
             try:
                 await t
@@ -1780,10 +1821,76 @@ def todos_cycle(todo_id: int, db: Session = Depends(get_db)):
 
 @app.delete("/todos/{todo_id}")
 def todos_delete(todo_id: int, db: Session = Depends(get_db)):
+    """Soft-delete (G1). Stamps deleted_at; the row stays for 24h so
+    `POST /todos/{id}/undelete` can restore. Hard-purge happens via the
+    lifespan sweeper.
+    """
     from .services.todo_service import todo_service
     if not todo_service.delete(db, todo_id):
         raise HTTPException(status_code=404, detail="todo not found")
-    return {"ok": True}
+    return {"ok": True, "soft_deleted": True}
+
+
+@app.post("/todos/{todo_id}/undelete")
+def todos_undelete(todo_id: int, db: Session = Depends(get_db)):
+    """Reverse a soft-delete within the 24h window. 404 if row doesn't
+    exist or wasn't deleted. 410 if the undo window has expired."""
+    from .services.todo_service import todo_service, serialize_todo, SOFT_DELETE_TTL_HOURS
+    t = todo_service.undelete(db, todo_id)
+    if t is None:
+        # Distinguish "no such tombstone" from "window expired" for the
+        # caller — the latter is a 410 (gone) per HTTP semantics.
+        raw = todo_service.get(db, todo_id, include_deleted=True)
+        if raw is None:
+            raise HTTPException(status_code=404, detail="todo not found")
+        if raw.deleted_at is None:
+            raise HTTPException(status_code=409, detail="todo is not deleted")
+        raise HTTPException(
+            status_code=410,
+            detail=f"undo window expired ({SOFT_DELETE_TTL_HOURS}h)",
+        )
+    return serialize_todo(t)
+
+
+@app.post("/todos/bulk-delete")
+def todos_bulk_delete(payload: dict, db: Session = Depends(get_db)):
+    """Soft-delete N todos in one call. Body: { ids: [int] }. Returns the
+    ids actually soft-deleted (skips missing or already-deleted rows)."""
+    from .services.todo_service import todo_service
+    raw_ids = payload.get("ids") if isinstance(payload, dict) else None
+    if not isinstance(raw_ids, list):
+        raise HTTPException(status_code=400, detail="ids must be a list of int")
+    try:
+        ids = [int(i) for i in raw_ids]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="ids must be a list of int")
+    deleted = todo_service.bulk_soft_delete(db, ids)
+    return {"deleted_ids": deleted, "count": len(deleted)}
+
+
+@app.post("/todos/merge")
+def todos_merge(payload: dict, db: Session = Depends(get_db)):
+    """Merge N todos into one. Body: { primary_id: int, merged_ids: [int] }.
+    Concats merged.text into primary.subtitle (newline-joined, `+ ` prefix),
+    soft-deletes the merged rows. Primary's text is left alone."""
+    from .services.todo_service import todo_service, serialize_todo
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="invalid body")
+    try:
+        primary_id = int(payload.get("primary_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="primary_id required")
+    raw_merged = payload.get("merged_ids") or []
+    if not isinstance(raw_merged, list):
+        raise HTTPException(status_code=400, detail="merged_ids must be a list")
+    try:
+        merged_ids = [int(i) for i in raw_merged]
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="merged_ids must be int list")
+    primary = todo_service.merge(db, primary_id, merged_ids)
+    if primary is None:
+        raise HTTPException(status_code=404, detail="primary todo not found")
+    return serialize_todo(primary)
 
 
 @app.post("/todos/{todo_id}/promote-to-primary")

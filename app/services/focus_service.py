@@ -148,7 +148,7 @@ class FocusService:
     def linked_todos(self, db: Session, focus_id: int) -> list[Todo]:
         return (
             db.query(Todo)
-            .filter(Todo.focus_id == focus_id)
+            .filter(Todo.focus_id == focus_id, Todo.deleted_at.is_(None))
             .order_by(Todo.sort_order, Todo.id)
             .all()
         )

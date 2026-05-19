@@ -293,11 +293,11 @@ def _engagement_health(db: Session) -> dict[str, Any]:
     )
     todos_today = _count_today(
         db.query(func.count(Todo.id))
-        .filter(Todo.created_at >= today_start)
+        .filter(Todo.created_at >= today_start, Todo.deleted_at.is_(None))
     )
     todos_done_today = _count_today(
         db.query(func.count(Todo.id))
-        .filter(Todo.completed_at >= today_start)
+        .filter(Todo.completed_at >= today_start, Todo.deleted_at.is_(None))
     )
     habits_today = _count_today(
         db.query(func.count(HabitEntry.id))
@@ -321,7 +321,7 @@ def _engagement_health(db: Session) -> dict[str, Any]:
     )
     todos_week = _count_week(
         db.query(func.count(Todo.id))
-        .filter(Todo.created_at >= week_start)
+        .filter(Todo.created_at >= week_start, Todo.deleted_at.is_(None))
     )
 
     components = [

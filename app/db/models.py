@@ -555,6 +555,12 @@ class Todo(Base):
     sort_order = Column(Integer, default=0, nullable=False)
     source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
     embedding = deferred(Column(Text, nullable=True))
+    # Soft-delete tombstone. NULL = live row. NOT NULL = deleted at that
+    # time; lifespan sweeper hard-purges anything past 24h. All read
+    # paths in todo_service filter `deleted_at IS NULL` so soft-deleted
+    # rows are invisible to UI + chat. The undo window is the gap between
+    # soft-delete and sweep.
+    deleted_at = Column(DateTime, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -1207,6 +1213,14 @@ class CapabilityFacet(Base):
     source = Column(String, nullable=False)
     # 'code_introspection' | 'pr_audit' | 'reflection_cluster' |
     # 'manual_seed' | 'chat_tool_update'
+    # Polarity flips facet rendering. 'positive' facets render under
+    # "I can:" / "I tend to:" / "I am:" prefixes per layer. 'negative'
+    # facets render under "I cannot:" — the load-bearing piece for
+    # capability honesty (LLM knows its own gaps so it doesn't claim
+    # capabilities it lacks). Default positive for backward compat.
+    polarity = Column(
+        String, nullable=False, default="positive", server_default="positive"
+    )
     evidence_json = Column(Text, nullable=True)
     last_verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
