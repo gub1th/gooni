@@ -184,8 +184,9 @@ DELETE /comments/{id}
 # Uploads
 POST   /uploads/image                 → multipart → R2 → { url, key }. 503 when R2 env unset → FE falls back to inline base64. 10 MB, image/* only.
 POST   /uploads/file                  → multipart → R2 (`attachments/YYYY/MM/DD/...`) → { url, key, filename, mime_type, size_bytes, attachment_id? }. Optional `note_id` form field creates an `attachments` row (else upload is orphan-tolerable). 25 MB cap, any MIME. 503 when R2 env unset (no base64 fallback for opaque files).
-GET    /promises?state=pending&limit=50 → list w/ deadline-asc sort for pending, recency for everything else
-PATCH  /promises/{id}                  → { state: pending|kept|broken|abandoned }. Idempotent — re-sending current state is a no-op.
+GET    /promises?state=proposed|pending|kept|broken|abandoned&limit=50 → list w/ deadline-asc sort for pending, recency for everything else
+GET    /promises/pis                  → Promise Integrity Score (weighted aggregate over last 20 resolved: kept +1, broken -1.5, abandoned -0.5). Returns { score: 0-100 | null, sample_size, kept_streak, last_broken_at, last_broken_summary, weights, window }. Null score when sample_size < 3 (small-N noise distortion).
+PATCH  /promises/{id}                  → { state: proposed|pending|kept|broken|abandoned }. Idempotent — re-sending current state is a no-op. Lock-in flip proposed→pending auto-spawns Habit when utterance is recurring-shaped.
 GET    /uploads/og?url=...            → server-side Open Graph scraper (og:title/description/image/site_name + fallbacks). Used by TipTap LinkCard node so the browser doesn't expose its IP. Graceful degrade to { url, title:url } on any fetch error.
 GET    /notes/{id}/attachments        → list rows for that note
 DELETE /attachments/{id}              → drops DB row (R2 object kept; future sweeper reconciles)

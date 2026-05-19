@@ -248,6 +248,10 @@ function ActionBtn({
 }
 
 const STATE_ACCENT: Record<PromiseState, string> = {
+  // PR-B added 'proposed'. Drawer fetches state='pending' for the active
+  // tab + everything for history, so proposed rarely surfaces here yet,
+  // but the type-system requires every state to have an accent.
+  proposed: "#8B5CF6",
   pending: "#0A84FF",
   kept: "#15803D",
   broken: "#B91C1C",
