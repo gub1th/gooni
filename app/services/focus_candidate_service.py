@@ -214,7 +214,67 @@ def promote(
     db.commit()
     db.refresh(cand)
     db.refresh(focus)
+
+    # Graduate source notes — for every note in the candidate's evidence,
+    # flip Note.status='graduated' + write a `derives_from` edge from
+    # the note to the new focus. Closes the loop: unprocessed notes
+    # surfaced as a cluster → cluster promoted → those notes leave the
+    # triage queue + carry an audit trail back to the focus they spawned.
+    # Wrapped in try/except per-note so one bad edge doesn't break the
+    # whole promotion path.
+    try:
+        _graduate_evidence_notes(db, cand, focus)
+    except Exception as e:
+        print(f"[focus_candidate.promote] note graduation failed: {e}")
+
     return cand, focus
+
+
+def _graduate_evidence_notes(
+    db: Session, cand: FocusCandidate, focus: Focus
+) -> None:
+    """Walk the candidate's evidence_json, find every Note entry, and:
+      1. Flip Note.status='graduated' (skipping notes already graduated
+         or archived — never un-archive)
+      2. Write `derives_from` edge: src=note, dst=focus, kind=derives_from
+    Idempotent on the edges (edge_service.link uses 5-tuple uniq).
+    """
+    from . import edge_service
+    from ..db.models import Note as NoteModel
+
+    raw = cand.evidence_json or "[]"
+    try:
+        evidence = json.loads(raw)
+    except Exception:
+        return
+    note_ids: list[int] = []
+    for e in evidence:
+        if isinstance(e, dict) and e.get("kind") == "note":
+            nid = e.get("id")
+            if isinstance(nid, int):
+                note_ids.append(nid)
+    if not note_ids:
+        return
+    rows = db.query(NoteModel).filter(NoteModel.id.in_(note_ids)).all()
+    changed = 0
+    for note in rows:
+        try:
+            edge_service.link(
+                db,
+                src_kind="note",
+                src_id=note.id,
+                dst_kind="focus",
+                dst_id=focus.id,
+                kind="derives_from",
+            )
+        except Exception as e:
+            print(f"[graduate] edge link failed for note {note.id}: {e}")
+        # Don't un-archive; only flip the unprocessed → graduated edge.
+        if note.status == "unprocessed":
+            note.status = "graduated"
+            changed += 1
+    if changed:
+        db.commit()
 
 
 def dismiss(db: Session, candidate_id: int) -> FocusCandidate | None:
