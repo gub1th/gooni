@@ -136,7 +136,18 @@ class ListService:
         """Insert. If `embedding` is provided we store it; otherwise we try to
         generate one synchronously so future conflict checks have something to
         compare against. Embedding failures are non-fatal — the row still
-        inserts."""
+        inserts.
+
+        Side effects after insert:
+          1. Cosine-match the item's embed vs every active focus. Best match
+             ≥ 0.75 → `supports` edge from list_item → focus. Lists stop
+             feeling isolated from focuses without manual link-up. Wrapped
+             in try/except so edge failure can't block the insert.
+          2. If the parent list looks places-shaped (name regex hit) AND the
+             item has no subtitle, kick off an async venue enrichment that
+             web_searches the title and PATCHes a one-line summary into
+             subtitle. Lag is fine — user re-opens list to see it.
+        """
         max_order = (
             db.query(sqlfunc.max(ListItem.sort_order))
             .filter(ListItem.list_id == list_id)
@@ -157,7 +168,82 @@ class ListService:
         db.add(item)
         db.commit()
         db.refresh(item)
+
+        # Side effect 1: wire `supports` edge to nearest matching focus.
+        if embedding:
+            try:
+                self._wire_supports_edge(item, embedding, db)
+            except Exception as e:
+                print(f"[list_service] supports edge wire failed: {e}")
+
+        # Side effect 2: async venue enrichment for places-shaped lists.
+        try:
+            from . import list_enrich
+            list_enrich.maybe_enrich_item(item.id, list_id)
+        except Exception as e:
+            print(f"[list_service] enrich kickoff failed: {e}")
+
         return item
+
+    # ── graph wiring ────────────────────────────────────────────────────
+
+    # Cosine floor for list_item → focus `supports` edge. Mirrors the
+    # focus binding floor used by the synthesizer — items below this
+    # threshold are too loosely related to be worth surfacing as graph
+    # neighbours; better to leave them unlinked than to clutter the
+    # neighbourhood with noise. Higher than the conflict scan's
+    # CONFLICT_MEDIUM (0.78) because cross-kind matches (item vs focus
+    # signature) are noisier than same-kind (item vs item).
+    _FOCUS_SUPPORTS_FLOOR = 0.75
+
+    def _wire_supports_edge(
+        self,
+        item: ListItem,
+        item_embedding: list[float],
+        db: Session,
+    ) -> None:
+        """Cosine-match a freshly-inserted item against every active focus
+        and write a `supports` edge to the best match if it clears the
+        floor. One edge per call — we don't fan out to multiple focuses
+        even when several match, because the strongest signal is usually
+        the right one and multi-edges crowd traversal results.
+        """
+        # Late imports — list_service is loaded early; focus_service +
+        # edge_service pull SQLAlchemy models that aren't bound at
+        # import time on a fresh DB boot.
+        from . import edge_service
+        from ..db.models import Focus
+
+        rows = (
+            db.query(Focus.id, Focus.embedding)
+            .filter(
+                Focus.done.is_(False),
+                Focus.embedding.isnot(None),
+            )
+            .all()
+        )
+        best_id: int | None = None
+        best_score = 0.0
+        for fid, emb_text in rows:
+            try:
+                emb = json.loads(emb_text)
+            except Exception:
+                continue
+            score = _cosine(item_embedding, emb)
+            if score >= self._FOCUS_SUPPORTS_FLOOR and score > best_score:
+                best_id = fid
+                best_score = score
+        if best_id is None:
+            return
+        edge_service.link(
+            db,
+            src_kind="list_item",
+            src_id=item.id,
+            dst_kind="focus",
+            dst_id=best_id,
+            kind="supports",
+            weight=round(best_score, 4),
+        )
 
     # ── conflict detection ──────────────────────────────────────────────
 
