@@ -115,7 +115,7 @@ Exposes Gooni to Claude Code via stdio.
 **Stats**: `get_leetcode_activity` (reads `/leetcode/today`)
 **Spaces**: `list_spaces`
 **Lists** (todo + user-defined; `list_ref="backlog"` REJECTED on all — use backlog APIs): `read_list`, `add_list_item` (cosine-checks dupes), `find_similar_items`, `check_list_item`, `delete_list_item`
-**Backlog tickets** (own table): `read_backlog`, `add_backlog_item` (conflict scan via `POST /backlog/tickets/similar`), `find_similar_backlog`, `complete_backlog_item` (pr_url closes lifecycle), `delete_backlog_item`
+**Backlog tickets** (own table): `read_backlog`, `add_backlog_item` (conflict scan via `POST /backlog/tickets/similar`), `find_similar_backlog`, `set_backlog_state` (flip not_yet/doing/done), `complete_backlog_item` (pr_url closes lifecycle), `delete_backlog_item`, `promote_backlog_to_primary` (singleton north-star banner), `clear_primary_backlog`
 
 ## Running
 
