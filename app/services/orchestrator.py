@@ -354,16 +354,32 @@ def _build_ack(
                 f"noted all {n}. {', '.join(titles)} for backlog"
             )
     if captured_promises:
-        if len(captured_promises) == 1:
-            p = captured_promises[0]
-            slip = p.get("slip_count", 0) or 0
-            summary = _trim(p.get("summary") or p.get("utterance") or "")
-            if slip > 0:
-                parts.append(f"\"{summary}\" — slip #{slip + 1}")
+        # Split proposed (awaiting game-plan lock-in) vs pending (locked in).
+        # Daniel called out "fake promises" — anything that needs a real
+        # game plan (start / end / what counts as breaking) sits in
+        # state='proposed' until he confirms via PATCH /promises/{id}
+        # {"state":"pending"}. The ack surfaces the proposed state
+        # explicitly so it's visible there's an open contract to lock in.
+        proposed = [p for p in captured_promises if p.get("state") == "proposed"]
+        pending = [p for p in captured_promises if p.get("state") != "proposed"]
+        for prop in proposed[:2]:
+            summary = _trim(prop.get("summary") or prop.get("utterance") or "")
+            parts.append(
+                f"\"{summary}\" — needs game plan (reply w/ start, end, what breaks it)"
+            )
+        if len(proposed) > 2:
+            parts.append(f"{len(proposed) - 2} more awaiting game plan")
+        if pending:
+            if len(pending) == 1:
+                p = pending[0]
+                slip = p.get("slip_count", 0) or 0
+                summary = _trim(p.get("summary") or p.get("utterance") or "")
+                if slip > 0:
+                    parts.append(f"\"{summary}\" — slip #{slip + 1}")
+                else:
+                    parts.append(f"\"{summary}\" tracked")
             else:
-                parts.append(f"\"{summary}\" tracked")
-        else:
-            parts.append(f"{len(captured_promises)} promises tracked")
+                parts.append(f"{len(pending)} promises tracked")
     if captured_todos:
         texts = [
             f"\"{_trim(t.get('text'))}\""
@@ -443,6 +459,31 @@ def _build_state_block(db) -> str:
         elif promises:
             lines.append(f"- {len(promises)} pending promise(s)")
 
+    # Proposed promises — awaiting lock-in. Daniel asked for visibility
+    # so he doesn't forget to confirm or drop them. Distinct from pending
+    # because the contract isn't real yet — no accountability counter,
+    # no auto-overdue sweep.
+    try:
+        from ..db.models import Promise as _PromiseModel
+        proposed_rows = (
+            db.query(_PromiseModel)
+            .filter(_PromiseModel.state == "proposed")
+            .order_by(_PromiseModel.created_at.desc())
+            .limit(5)
+            .all()
+        )
+    except Exception:
+        proposed_rows = []
+    if proposed_rows:
+        lines.append(
+            f"- {len(proposed_rows)} promise(s) awaiting game-plan lock-in:"
+        )
+        for p in proposed_rows[:3]:
+            summary = p.summary or p.utterance or ""
+            if len(summary) > 60:
+                summary = summary[:60].rstrip() + "…"
+            lines.append(f"  · \"{summary}\" (id #{p.id})")
+
     if not lines:
         return ""
     return "[your state right now]\n" + "\n".join(lines)
@@ -511,12 +552,14 @@ def _build_just_extracted_block(
         slip = p.get("slip_count", 0) or 0
         slip_tail = f" (slip #{slip + 1})" if slip > 0 else ""
         pid = p.get("id")
+        state = p.get("state") or "pending"
+        verb = "PROPOSED (needs game plan)" if state == "proposed" else "tracked"
         if pid is not None:
             lines.append(
-                f"- Promise #{pid} tracked: \"{summary}\"{slip_tail}"
+                f"- Promise #{pid} {verb}: \"{summary}\"{slip_tail}"
             )
         else:
-            lines.append(f"- Promise tracked: \"{summary}\"{slip_tail}")
+            lines.append(f"- Promise {verb}: \"{summary}\"{slip_tail}")
     for t in captured_todos[:3]:
         text = (t.get("text") or "").strip()
         if len(text) > 60:
