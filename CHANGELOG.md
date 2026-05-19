@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.119.0 — 2026-05-19 (minor)
+
+- feat(mcp): set_backlog_state + promote_backlog_to_primary tools (#281)
+
 ## 0.118.0 — 2026-05-19 (minor)
 
 - feat(backlog): primary-ticket singleton + dashboard north-star banner (#280)
