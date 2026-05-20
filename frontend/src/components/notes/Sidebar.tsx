@@ -633,7 +633,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
             style={{
               background: "transparent",
               border: "none", borderRadius: 8, padding: "3px 7px", cursor: "pointer",
-              fontSize: 15, fontWeight: 700,
+              fontSize: 17, fontWeight: 700,
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
               color: "var(--gooni-text, #1C1C1E)", transition: "background 0.1s", outline: "none",
               display: "flex", alignItems: "center", gap: 7,
@@ -711,7 +711,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               background: isSelected ? "rgba(0,0,0,0.09)" : "transparent",
               cursor: "pointer",
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-              fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+              fontSize: 14.5, color: "var(--gooni-text, #1C1C1E)",
               fontWeight: isSelected ? 600 : 400,
               transition: "background 0.12s",
             });
@@ -748,7 +748,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
 
           {/* Section: NOTES */}
           <div style={{ padding: "8px 12px 4px" }}>
-            <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", userSelect: "none" }}>
               NOTES
             </span>
           </div>
@@ -788,7 +788,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     onClick={() => setPinnedOpen((o) => !o)}
                     style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
                   >
-                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>PINNED</span>
                     <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{pinnedOpen ? "▾" : "▸"}</span>
                   </button>
                 </div>
@@ -831,7 +831,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     >
                       <Pin size={13} strokeWidth={1.8} color={ICON_TINT.pinned} fill={ICON_TINT.pinned} style={{ flexShrink: 0 }} />
                       <span style={{
-                        flex: 1, fontSize: 13,
+                        flex: 1, fontSize: 14,
                         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                         fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -864,7 +864,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     onClick={() => setDraftsOpen((o) => !o)}
                     style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
                   >
-                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>DRAFTS</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>DRAFTS</span>
                     <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{draftsOpen ? "▾" : "▸"}</span>
                   </button>
                 </div>
@@ -886,7 +886,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     >
                       <Pencil size={13} strokeWidth={1.8} color={ICON_TINT.draft} style={{ flexShrink: 0 }} />
                       <span style={{
-                        flex: 1, fontSize: 13,
+                        flex: 1, fontSize: 14,
                         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                         fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -920,7 +920,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     onClick={() => setUnprocessedOpen((o) => !o)}
                     style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
                   >
-                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>UNPROCESSED</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>UNPROCESSED</span>
                     <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{unprocessedOpen ? "▾" : "▸"}</span>
                   </button>
                 </div>
@@ -942,7 +942,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     >
                       <Sparkles size={13} strokeWidth={1.8} color="#AEAEB2" style={{ flexShrink: 0 }} />
                       <span style={{
-                        flex: 1, fontSize: 13,
+                        flex: 1, fontSize: 14,
                         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                         fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -977,7 +977,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     onClick={() => setRecentOpen((o) => !o)}
                     style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
                   >
-                    <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>RECENT</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>RECENT</span>
                     <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{recentOpen ? "▾" : "▸"}</span>
                   </button>
                 </div>
@@ -1012,7 +1012,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     >
                       <Clock size={13} strokeWidth={1.8} color={ICON_TINT.recent} style={{ flexShrink: 0 }} />
                       <span style={{
-                        flex: 1, fontSize: 13,
+                        flex: 1, fontSize: 14,
                         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                         fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -1035,7 +1035,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                 onClick={() => setSpacesOpen((o) => !o)}
                 style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
               >
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>SPACES</span>
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>SPACES</span>
                 <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{spacesOpen ? "▾" : "▸"}</span>
               </button>
               <button
@@ -1120,7 +1120,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                         onClick={(e) => e.stopPropagation()}
                         placeholder="Space name"
                         style={{
-                          flex: 1, fontSize: 13, outline: "none", border: "none",
+                          flex: 1, fontSize: 14, outline: "none", border: "none",
                           fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                           fontWeight: 500, color: "var(--gooni-text, #1C1C1E)",
                           background: "rgba(0,0,0,0.04)",
@@ -1134,7 +1134,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                       <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 16, flexShrink: 0 }}>
                         <SpaceIcon emoji={space.emoji} size={14} />
                       </span>
-                      <span style={{ flex: 1, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ flex: 1, fontSize: 14, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", fontWeight: isSelected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {space.name}
                       </span>
                       {/* Pin toggle — pinned ★ is always visible (active-
@@ -1240,7 +1240,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                 onClick={() => setListsOpen((o) => !o)}
                 style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", cursor: "pointer", padding: 0, flex: 1 }}
               >
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>LISTS</span>
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.5, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>LISTS</span>
                 <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{listsOpen ? "▾" : "▸"}</span>
               </button>
               <button
@@ -1277,7 +1277,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     style={{
                       flex: 1, minWidth: 0,
                       border: "none", outline: "none", background: "transparent",
-                      fontFamily: "inherit", fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+                      fontFamily: "inherit", fontSize: 14.5, color: "var(--gooni-text, #1C1C1E)",
                     }}
                   />
                 </div>
@@ -1302,7 +1302,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                       cursor: "pointer", background: isSelected ? "rgba(0,0,0,0.09)" : "transparent",
                       border: "none", textAlign: "left",
                       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                      fontWeight: isSelected ? 600 : 400, fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+                      fontWeight: isSelected ? 600 : 400, fontSize: 14.5, color: "var(--gooni-text, #1C1C1E)",
                       transition: "background 0.12s",
                     }}
                     onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
@@ -1334,7 +1334,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                 cursor: "pointer", background: isChat ? "rgba(0,0,0,0.09)" : "transparent",
                 border: "none", textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontWeight: isChat ? 600 : 400, fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+                fontWeight: isChat ? 600 : 400, fontSize: 14.5, color: "var(--gooni-text, #1C1C1E)",
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
@@ -1396,7 +1396,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                 textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontWeight: isEval ? 600 : 400,
-                fontSize: 13.5, color: "var(--gooni-text, #1C1C1E)",
+                fontSize: 14.5, color: "var(--gooni-text, #1C1C1E)",
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) => { if (!isEval) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}

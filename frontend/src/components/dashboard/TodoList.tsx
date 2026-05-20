@@ -497,7 +497,7 @@ function PrimaryCard({
         onClick={onOpenEdit}
         title="Click to edit"
         style={{
-          flex: 1, fontSize: 14, fontWeight: 500,
+          flex: 1, fontSize: 15, fontWeight: 500,
           color: "var(--gooni-text, #1C1C1E)",
           textDecoration: t.state === "done" ? "line-through" : "none",
           opacity: t.state === "done" ? 0.55 : 1,
@@ -676,7 +676,7 @@ function TodoRow({
         title="Click to edit"
         style={{
           flex: 1, minWidth: 0,
-          fontSize: 14, color: "var(--gooni-text, #1C1C1E)",
+          fontSize: 15, color: "var(--gooni-text, #1C1C1E)",
           textDecoration: t.state === "done" ? "line-through" : "none",
           opacity: t.state === "done" ? 0.55 : 1,
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",

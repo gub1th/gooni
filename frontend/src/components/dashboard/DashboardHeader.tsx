@@ -71,7 +71,7 @@ export function DashboardHeader({
         }}>
           {getGreeting()}, Daniel.
         </div>
-        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", marginTop: 4 }}>
+        <div style={{ fontSize: 14, color: "var(--gooni-muted, #8E8E93)", marginTop: 4 }}>
           {getDateStr()}
         </div>
       </div>
@@ -123,7 +123,7 @@ function Stat({ value, label, color }: {
         {value}
       </span>
       <span style={{
-        fontSize: 12, color: "var(--gooni-muted, #8E8E93)",
+        fontSize: 13, color: "var(--gooni-muted, #8E8E93)",
       }}>
         {label}
       </span>

@@ -101,13 +101,15 @@ function AppShell() {
     rawSearch.audit === true || rawSearch.audit === "true" || rawSearch.audit === "1";
   const viewParam = typeof rawSearch.view === "string" ? rawSearch.view : null;
 
-  const isNotes = onIndex && hasNote;
-  const isChat = onIndex && hasConv;
+  // isNotes covers BOTH variants of the notes shell: a specific note
+  // open via ?note=N, and the All-Notes discovery view via ?view=notes
+  // (no specific id). The All Notes sidebar row keys its active state
+  // off this prop, so omitting ?view=notes left the row inactive when
+  // you clicked it. isChat similarly handles ?view=chat for parity.
+  const isNotes = onIndex && (hasNote || viewParam === "notes");
+  const isChat = onIndex && (hasConv || viewParam === "chat");
   const isLists = onIndex && hasList;
   const isEval = onIndex && auditFlag;
-  // Stats view dropped in the dashboard restructure (Stats now lives as
-  // a tab inside the Dashboard's mode toggle, not a standalone view).
-  void viewParam;
   const isDashboard =
     onIndex && !isNotes && !isChat && !isLists && !isEval;
   const activeListId =
