@@ -17,6 +17,7 @@ After the dashboard revamp, todos carry:
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -25,6 +26,77 @@ from sqlalchemy.orm import Session
 
 from ..db.models import Focus, Settings, Todo
 from .list_service import _item_embed_text, list_service
+from . import focus_binding
+
+
+# G3 mention-dedup cosine floor. On new-todo create, if the incoming
+# text matches an OPEN todo above this score, we bump the existing row's
+# mention_count + last_mentioned_at + mention_history instead of
+# inserting a duplicate. High floor — same-language paraphrases land
+# above 0.85; novel utterances stay below.
+MENTION_DEDUP_FLOOR = 0.85
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+def _find_open_todo_for_mention(
+    db: Session, embedding: list[float], floor: float = MENTION_DEDUP_FLOOR
+) -> tuple[Todo | None, float]:
+    """Return (todo, score) for the best OPEN (non-done, non-deleted)
+    todo above the floor, or (None, 0.0) if no match clears it. Tuple
+    query so deferred embeddings don't hydrate the whole row.
+    """
+    if not embedding:
+        return (None, 0.0)
+    rows = (
+        db.query(Todo.id, Todo.embedding)
+        .filter(
+            Todo.state != "done",
+            Todo.deleted_at.is_(None),
+            Todo.embedding.isnot(None),
+        )
+        .all()
+    )
+    best_id: int | None = None
+    best_score = 0.0
+    for tid, emb_text in rows:
+        try:
+            emb = json.loads(emb_text)
+        except Exception:
+            continue
+        score = _cosine(embedding, emb)
+        if score >= floor and score > best_score:
+            best_id = tid
+            best_score = score
+    if best_id is None:
+        return (None, 0.0)
+    return (db.query(Todo).filter(Todo.id == best_id).first(), best_score)
+
+
+def _bump_mention(db: Session, todo: Todo) -> None:
+    """Increment mention_count, stamp last_mentioned_at, append timestamp
+    to mention_history. Caller must commit. Idempotent on a per-call
+    basis but the counter intentionally double-counts back-to-back
+    chats — that IS the lazy-streak signal.
+    """
+    now = datetime.utcnow()
+    todo.mention_count = (todo.mention_count or 1) + 1
+    todo.last_mentioned_at = now
+    try:
+        history = json.loads(todo.mention_history) if todo.mention_history else []
+    except Exception:
+        history = []
+    history.append(now.isoformat())
+    todo.mention_history = json.dumps(history)
 
 
 VALID_STATES = ("not_yet", "doing", "done")
@@ -143,6 +215,18 @@ class TodoService:
         embed_raw = _item_embed_text(text, subtitle)
         embed_vec = list_service._embed_item_text(embed_raw)
 
+        # G3 mention dedup: if Daniel utters something that cosine-matches
+        # an existing OPEN todo at ≥0.85, bump that row's counter instead
+        # of inserting a duplicate. Skips re-creating todos he's already
+        # been ignoring; preserves the recurrence signal.
+        if embed_vec and state != "done":
+            existing, _score = _find_open_todo_for_mention(db, embed_vec)
+            if existing is not None:
+                _bump_mention(db, existing)
+                db.commit()
+                db.refresh(existing)
+                return existing
+
         t = Todo(
             text=text.strip(),
             subtitle=subtitle,
@@ -158,6 +242,24 @@ class TodoService:
         db.add(t)
         db.commit()
         db.refresh(t)
+
+        # G3 focus binding: wire `supports` edge to nearest matching active
+        # focus if the new todo clears the cross-kind cosine floor. Failure
+        # never blocks the create path — graph wiring is a side effect.
+        if embed_vec:
+            try:
+                fid = focus_binding.bind_to_focus(
+                    db, src_kind="todo", src_id=t.id, embedding=embed_vec
+                )
+                # If no explicit focus_id was set + we found a graph match,
+                # mirror it onto the FK so existing focus-bucket queries work
+                # without re-traversing edges. Only on auto-bind, never override.
+                if fid is not None and t.focus_id is None:
+                    t.focus_id = fid
+                    db.commit()
+            except Exception as e:
+                print(f"[todo_service] focus bind failed: {e}")
+
         return t
 
     def update(self, db: Session, todo_id: int, **patch: Any) -> Todo | None:

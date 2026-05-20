@@ -523,17 +523,54 @@ def _build_ack(
     # their parent's close phrase below. Bare creates still show here.
     bare_creates = [t for t in (captured_todos or []) if not t.get("spawned_from_id")]
     if bare_creates:
-        texts = [
-            f"\"{_trim(t.get('text'))}\""
-            for t in bare_creates[:3]
-        ]
-        n = len(bare_creates)
-        if n == 1:
-            parts.append(f"noted. {texts[0]} for todos")
-        elif n == 2:
-            parts.append(f"noted both. {texts[0]}, {texts[1]} for todos")
-        else:
-            parts.append(f"noted all {n}. {', '.join(texts)} for todos")
+        # G3 accountability tone: if Daniel re-mentioned a todo that already
+        # exists, todo_service.create returned the bumped existing row
+        # instead of inserting a dupe. captured_todos carries mention_count;
+        # at ≥3 we drop the "noted" register and call out the laziness.
+        # This is the whole reason we collect the counter — silence on a
+        # 4th mention is enabling, not helpful.
+        bumped = [t for t in bare_creates if t.get("bumped") and (t.get("mention_count") or 1) >= 3]
+        fresh = [t for t in bare_creates if not (t.get("bumped") and (t.get("mention_count") or 1) >= 3)]
+
+        for t in bumped[:2]:
+            text_q = f"\"{_trim(t.get('text'))}\""
+            count = t.get("mention_count") or 1
+            if count >= 5:
+                parts.append(
+                    f"{text_q} again. that's {count} mentions and it's still open. you're stalling — do it tonight or kill it."
+                )
+            elif count == 4:
+                parts.append(
+                    f"{text_q} — fourth mention. you keep saying this. tonight, or kill the todo."
+                )
+            else:  # count == 3
+                parts.append(
+                    f"{text_q} — third mention. either move on it tonight or kill it. talking about it isn't the work."
+                )
+        if len(bumped) > 2:
+            parts.append(f"+{len(bumped) - 2} more stale repeats")
+
+        if fresh:
+            # Light "second mention" surface for count==2 — neutral, just a
+            # nudge that Gooni's seen this before. Count==1 is the default
+            # fresh-create voice.
+            two_count_idx = next(
+                (i for i, t in enumerate(fresh) if t.get("bumped") and (t.get("mention_count") or 1) == 2),
+                None,
+            )
+            texts = [
+                f"\"{_trim(t.get('text'))}\""
+                + (" (second mention)" if (t.get("bumped") and (t.get("mention_count") or 1) == 2) else "")
+                for t in fresh[:3]
+            ]
+            n = len(fresh)
+            if n == 1:
+                parts.append(f"noted. {texts[0]} for todos")
+            elif n == 2:
+                parts.append(f"noted both. {texts[0]}, {texts[1]} for todos")
+            else:
+                parts.append(f"noted all {n}. {', '.join(texts)} for todos")
+            _ = two_count_idx  # signal kept for traceability; rendering inline above
 
     # G1.1 destructive-action acks. Verb-led, text-quoted, no opaque
     # "(+N)" suffix. Daniel needs to spot wrong cosine matches in the
@@ -646,6 +683,45 @@ def _build_state_block(db) -> str:
     open_count = sum(1 for t in open_todos if not t.is_primary)
     if open_count:
         lines.append(f"- {open_count} other open todo(s)")
+
+    # G3 priority ranking surface. Daniel manually orders todos via drag-
+    # handle in the TodoList UI (frontend persists sort_order on every
+    # swap). state_block exposes the resulting rank so chat can answer
+    # "what's next" correctly: primary is always #1, then sort_order asc
+    # for the rest. Default sort_order=0 from todo_service.create gets
+    # treated as "unranked" — surfaces at the bottom with a count.
+    # Render up to 5 ranked + bucket the rest.
+    try:
+        non_primary = [t for t in open_todos if not t.is_primary]
+        # Lower sort_order = higher priority. Default 0 means "user hasn't
+        # explicitly ranked this yet" — bucket those separately.
+        ranked = sorted(
+            [t for t in non_primary if (t.sort_order or 0) > 0],
+            key=lambda t: t.sort_order or 0,
+        )
+        unranked = [t for t in non_primary if (t.sort_order or 0) == 0]
+        total_open = open_count + (1 if primary is not None else 0)
+
+        if primary or ranked or unranked:
+            lines.append(
+                f"- priority order (Daniel-set via drag; {total_open} total open):"
+            )
+            slot = 1
+            if primary is not None:
+                lines.append(f"  · #{slot} (primary): \"{primary.text}\"")
+                slot += 1
+            for t in ranked[:4]:
+                text = (t.text or "")[:60]
+                mc = t.mention_count or 1
+                mention_tag = f" [×{mc} mentions]" if mc > 1 else ""
+                lines.append(f"  · #{slot}: \"{text}\"{mention_tag}")
+                slot += 1
+            if unranked:
+                lines.append(
+                    f"  · {len(unranked)} unranked (Daniel hasn't ordered these)"
+                )
+    except Exception as e:
+        print(f"[state_block] priority surface failed: {e}")
 
     try:
         done_today = todo_service.list_done_today(db)
