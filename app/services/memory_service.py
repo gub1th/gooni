@@ -13,9 +13,10 @@ context.
 """
 
 import json
+import re
 from datetime import datetime
 
-from sqlalchemy import update as sa_update
+from sqlalchemy import text as sa_text, update as sa_update
 from sqlalchemy.orm import Session
 
 from ..db.database import SessionLocal
@@ -23,6 +24,15 @@ from ..db.models import Memory
 from ..llm.client import llm_client
 from .memory_extraction import extract_candidates, reconcile_candidate
 from .note_service import _cosine_similarity
+
+# Strip FTS5 operators before passing user input to MATCH. Same shape as
+# note_service / todo_service.
+_FTS_MEMORY_STRIP = re.compile(r'[\"\'()+*\-:\\^~]')
+
+# How many FTS-only memory hits to ALSO inject alongside cosine results.
+# Small on purpose — cosine is the primary signal here; FTS just catches
+# exact-string queries cosine smushes ("the irs thing").
+FTS_EXTRA_TOP_K = 3
 
 
 # Below this length, an exchange is too short to carry a memorable signal
@@ -170,6 +180,47 @@ class MemoryService:
             return None
         emb, _ = llm_client.generate_embedding(text)
         return emb or None
+
+    def _fts_search(
+        self,
+        db: Session,
+        query: str,
+        limit: int = FTS_EXTRA_TOP_K,
+        type_filter: list[str] | None = None,
+    ) -> list[Memory]:
+        """FTS5 keyword companion to _cosine_search. Used in
+        build_memory_context_with_debug to surface exact-string memory
+        hits cosine misses ("the irs thing I told you about").
+
+        Returns Memory rows ordered by BM25 rank. Filters to is_active=True
+        + optional type_filter. Fails open — empty list if memories_fts
+        doesn't exist yet or the cleaned query is empty.
+        """
+        cleaned = _FTS_MEMORY_STRIP.sub(" ", query or "").strip()
+        if not cleaned:
+            return []
+        try:
+            rows = db.execute(
+                sa_text(
+                    "SELECT rowid FROM memories_fts "
+                    "WHERE memories_fts MATCH :q "
+                    "ORDER BY rank LIMIT :lim"
+                ),
+                {"q": cleaned, "lim": limit * 3},
+            ).fetchall()
+        except Exception as e:
+            print(f"[memory_service] FTS search failed (ignored): {e}")
+            return []
+        ids = [r[0] for r in rows]
+        if not ids:
+            return []
+        q = db.query(Memory).filter(Memory.id.in_(ids), Memory.is_active == True)
+        if type_filter:
+            q = q.filter(Memory.type.in_(type_filter))
+        loaded = q.all()
+        by_id = {m.id: m for m in loaded}
+        # Preserve BM25 rank order from the FTS query.
+        return [by_id[i] for i in ids if i in by_id][:limit]
 
     def _cosine_search(
         self,
@@ -535,6 +586,7 @@ class MemoryService:
             facts: list[Memory] = []
             episodes: list[Memory] = []
             scored: list[tuple[Memory, float]] = []
+            fts_only_ids: set[int] = set()  # debug: which rows came in via FTS, not cosine
             if query and len(query.strip()) >= MIN_EXCHANGE_LEN:
                 query_vec = self._embed(query)
                 if query_vec:
@@ -558,6 +610,34 @@ class MemoryService:
                     facts.sort(key=lambda m: sim_map.get(m.id, 0.0), reverse=True)
                     episodes.sort(key=lambda m: sim_map.get(m.id, 0.0), reverse=True)
 
+                # FTS5 companion — catches exact-string memory hits cosine
+                # smushes ("the irs thing I told you about"). Bounded by
+                # FTS_EXTRA_TOP_K so keyword recall never floods the prompt
+                # past the cosine signal. Appended AFTER the within-section
+                # sort so FTS-only hits sit at the bottom of their section
+                # (sim defaults to 0 in the lookup). Runs even when
+                # embedding generation failed.
+                cosine_ids_seen = {m.id for m in facts + episodes}
+                try:
+                    fts_hits = self._fts_search(
+                        sess,
+                        query,
+                        limit=FTS_EXTRA_TOP_K,
+                        # Exclude preferences (those are always-injected
+                        # separately above).
+                        type_filter=list(RETRIEVAL_PER_TYPE.keys()),
+                    )
+                    for m in fts_hits:
+                        if m.id in cosine_ids_seen:
+                            continue
+                        fts_only_ids.add(m.id)
+                        if m.type == "episode":
+                            episodes.append(m)
+                        else:
+                            facts.append(m)
+                except Exception as e:
+                    print(f"[memory_service] FTS merge failed (ignored): {e}")
+
             sim_lookup = {m.id: s for m, s in scored}
             debug: list[dict] = []
             for m in prefs:
@@ -573,8 +653,11 @@ class MemoryService:
                     "id": m.id,
                     "type": m.type,
                     "content": m.content,
-                    "similarity": sim_lookup.get(m.id),
+                    # FTS-only hits have no similarity score. Distinct from
+                    # always-injected prefs (which carry always_inject=True).
+                    "similarity": None if m.id in fts_only_ids else sim_lookup.get(m.id),
                     "always_inject": False,
+                    "source": "fts" if m.id in fts_only_ids else "cosine",
                 })
             # G3: format the block FIRST so [stale] tags reflect pre-turn
             # state, then bump retrieval tracking. If the bump happened
