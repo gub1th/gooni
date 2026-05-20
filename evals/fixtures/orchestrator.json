@@ -66,7 +66,7 @@
         {"text": "filter active focuses"},
         {"text": "call papi"}
       ],
-      "must_invoke_tool": ["router:todo_killed", "router:todo_completed", "router:todo"],
+      "must_invoke_tool": ["router:todo_killed", "router:todo_completed"],
       "must_not_include_regex": [
         "(?i)stop texting curtis",
         "(?i)move filter active focuses to done",
@@ -77,7 +77,7 @@
         "rubric": "Daniel sent FOUR actions in one message: (1) DELETE 'text Curtis about Houselympics' — verb 'kill', (2) CREATE 'plan the 100/200/400m event' — verb 'plan', (3) COMPLETE 'filter active focuses' — phrase 'move X to done', (4) COMPLETE 'call papi' — verb 'close'. Reply MUST acknowledge these as the correct kinds: one killed, two closed/completed, one new added. WRONG behavior (the pre-G1.1 bug this case locks in): reply enumerates four newly-CREATED todos with paraphrased text like 'stop texting Curtis', 'move filter active focuses to done', 'close call paip' — those are NEGATION/INSTRUCTION-shape todos that double the pile instead of acting on existing rows. The must_invoke_tool gate verifies router:todo_killed + router:todo_completed actually fired (not just router:todo creates). Reply tone should be terse Alfred — no enumerated bullet list, no 'noted all 4'.",
         "min_scores": {"helpful": 7, "no_hallucination": 8, "follows_prefs": 7}
       },
-      "notes": "MOST IMPORTANT CASE in this dataset (per Daniel 2026-05-19). Came from eval segment #280 where G1 shipped destructive tools but extractor router still paraphrased state-change verbs into new CREATE todos — list literally DOUBLED with negation copies. G1.1 fixes by adding kind=create|delete|complete|merge to extract_signals.todos schema + dispatch by kind in intent_handlers/todos.py. Tests both the extractor (must correctly classify 4 different verb shapes) AND the dispatch (must fire the right router tools, not just create). seed_todos required so cosine match has rows to hit. Pre-G1.1 baseline FAILS on must_not_include_regex. Replaced 003_tone_no_emoji which was low-signal."
+      "notes": "MOST IMPORTANT CASE in this dataset (per Daniel 2026-05-19). Came from eval segment #280 where G1 shipped destructive tools but extractor router still paraphrased state-change verbs into new CREATE todos — list literally DOUBLED with negation copies. G1.1 fixes by adding kind=create|delete|complete|merge to extract_signals.todos schema + dispatch by kind in intent_handlers/todos.py. Tests both the extractor (must correctly classify 4 different verb shapes) AND the dispatch (must fire the right router tools, not just create). seed_todos required so cosine match has rows to hit. Pre-G1.1 baseline FAILS on must_not_include_regex. Replaced 003_tone_no_emoji which was low-signal. must_invoke_tool only requires router:todo_killed + router:todo_completed — the create for '100/200/400m one' can either fire router:todo OR router:todo_dedup (acceptable since dedup means an existing todo was deemed a match)."
     },
     {
       "id": "004_focus_recall_current",

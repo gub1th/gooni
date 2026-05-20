@@ -428,10 +428,23 @@ CREATE — `{{kind:"create", text:"...", due_hint:"..."}}`:
 - When prev_assistant is empty (note save), emit create freely for chore-
   shaped imperatives.
 - The dashboard composer's "demo for gooni" use case lives here.
-- Examples:
+- RECURRING-REMINDER CARVE-OUT (READ CAREFULLY):
+  "remind me to X" is a CREATE only when X happens ONCE (no time-recurrence
+  modifier). Recurring-shape phrasings — "every day", "daily", "weekly",
+  "every morning", "at 8am every", "every N hours", "every N days" — are
+  CAPABILITY GAPS, not todos. Gooni has no recurring outbound reminder
+  surface. These belong in `feature_requests`, NOT `todos`. Emit [] here
+  for recurring shapes; the feature_requests handler will catch them.
+  Examples (recurring → feature_request, NOT todos):
+    "remind me every day at 8am to log my workout" → todos=[]
+    "remind me daily to drink water" → todos=[]
+    "every morning send me a focus list" → todos=[]
+    "weekly digest of my todos please" → todos=[]
+- Examples (single-shot → CREATE):
     Text "i need to create a demo for gooni" → [{{kind:"create", text:"create demo for gooni"}}]
     Text "call dentist tomorrow" → [{{kind:"create", text:"call dentist", due_hint:"tomorrow"}}]
     Text "buy milk + eggs" → [{{kind:"create", text:"buy milk + eggs"}}]
+    Text "remind me to take out trash tonight" → [{{kind:"create", text:"take out trash", due_hint:"tonight"}}]
 - Examples (chat context, skip → emits as soft_promise instead):
     Text "imma call mom tomorrow" → soft_promises, NOT todos
     Text "i'll fix the auth bug tonight" → soft_promises, NOT todos
