@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.129.0 — 2026-05-20 (minor)
+
+- feat(todos): live timer on primary card — seconds → minutes → hours → days (#298)
+
 ## 0.128.0 — 2026-05-20 (minor)
 
 - feat(coupling+accountability): G3 — everything maps to focus + recurrence counter + memory citation (#297)
