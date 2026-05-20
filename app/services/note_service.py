@@ -2,10 +2,18 @@ import json
 import math
 import re
 
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from ..db.models import Note, Space
 from ..llm.client import llm_client
+
+
+# FTS5 query special chars. Stripping is the cheap-and-correct way to
+# accept any user-typed string without it tripping FTS5's syntax (which
+# uses quotes, parens, +/-, *, NEAR, etc.). Tokens themselves are still
+# matched on word boundaries — we just don't expose operators.
+_FTS_QUERY_STRIP = re.compile(r'[\"\'()+*\-:\\^~]')
 
 
 def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
@@ -90,32 +98,85 @@ class NoteService:
             }
         return {"suggested_space_id": None, "suggested_space_name": None, "suggested_space_emoji": None}
 
-    def search_by_query(self, query: str, limit: int, db: Session) -> list[Note]:
-        """Search notes by semantic similarity to a query string."""
-        query_embedding, _ = llm_client.generate_embedding(query)
-        if not query_embedding:
+    def _search_fts(self, query: str, limit: int, db: Session) -> list[int]:
+        """SQLite FTS5 MATCH against notes_fts (virtual table populated by
+        migration c7e3d9b8a1f2 + insert/update/delete triggers on notes).
+        Returns rowids (note ids) ordered by BM25 rank, best match first.
+
+        Strips FTS5 query syntax (quotes, parens, operators) so any user-
+        typed string is accepted as bare tokens. Fails open — if the table
+        doesn't exist yet (mid-migration) or the query is empty after
+        stripping, returns [].
+        """
+        cleaned = _FTS_QUERY_STRIP.sub(" ", query or "").strip()
+        if not cleaned:
             return []
-        # Two-pass: first score every candidate with a tiny tuple query
-        # (id, embedding) — skips materializing full Note ORM objects with
-        # their fat content columns. Then load only the top-K full rows.
-        candidates = (
-            db.query(Note.id, Note.embedding)
-            .filter(Note.embedding.isnot(None))
-            .all()
-        )
-        scored: list[tuple[int, float]] = []
-        for nid, emb in candidates:
-            try:
-                sim = _cosine_similarity(query_embedding, json.loads(emb))
-                scored.append((nid, sim))
-            except Exception:
-                pass
-        scored.sort(key=lambda x: x[1], reverse=True)
-        top_ids = [nid for nid, _ in scored[:limit]]
+        try:
+            rows = db.execute(
+                sa_text(
+                    "SELECT rowid FROM notes_fts "
+                    "WHERE notes_fts MATCH :q "
+                    "ORDER BY rank LIMIT :lim"
+                ),
+                {"q": cleaned, "lim": limit},
+            ).fetchall()
+        except Exception as e:
+            print(f"[note_service] FTS search failed (ignored): {e}")
+            return []
+        return [r[0] for r in rows]
+
+    def search_by_query(self, query: str, limit: int, db: Session) -> list[Note]:
+        """Hybrid search: semantic cosine (always) + keyword FTS5.
+
+        Cosine catches paraphrased queries ("money owed to government" →
+        finds the tax note). FTS catches exact-phrase queries cosine
+        misses ("the forge prep thing"). Cosine-ranked ids float first;
+        FTS-only matches fill the remaining slots up to `limit`.
+
+        No RRF fusion yet — simple union with cosine-preferred ordering.
+        Worth the upgrade once both layers are populated enough that the
+        ranking divergence matters.
+        """
+        # Cosine pass — same shape as before, just one source of the merge.
+        cosine_ids: list[int] = []
+        query_embedding, _ = llm_client.generate_embedding(query)
+        if query_embedding:
+            candidates = (
+                db.query(Note.id, Note.embedding)
+                .filter(Note.embedding.isnot(None))
+                .all()
+            )
+            scored: list[tuple[int, float]] = []
+            for nid, emb in candidates:
+                try:
+                    sim = _cosine_similarity(query_embedding, json.loads(emb))
+                    scored.append((nid, sim))
+                except Exception:
+                    pass
+            scored.sort(key=lambda x: x[1], reverse=True)
+            cosine_ids = [nid for nid, _ in scored[:limit]]
+
+        # FTS pass — separate query for the same ids that cosine might
+        # have missed. Limit doubled so we have headroom when merging.
+        fts_ids = self._search_fts(query, limit * 2, db)
+
+        # Merge: cosine first (semantic is the primary signal Gooni's
+        # built around), FTS-only matches appended. Dedup by id.
+        seen: set[int] = set()
+        merged: list[int] = []
+        for nid in cosine_ids:
+            if nid not in seen:
+                seen.add(nid)
+                merged.append(nid)
+        for nid in fts_ids:
+            if nid not in seen:
+                seen.add(nid)
+                merged.append(nid)
+        top_ids = merged[:limit]
+
         if not top_ids:
             return []
         rows = db.query(Note).filter(Note.id.in_(top_ids)).all()
-        # Restore the cosine ordering.
         by_id = {n.id: n for n in rows}
         return [by_id[nid] for nid in top_ids if nid in by_id]
 
