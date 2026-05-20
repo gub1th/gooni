@@ -17,6 +17,8 @@ from .todo_tools import (
     MergeTodosTool,
     RenameTodoTool,
     UndoLastTodoOpTool,
+    ShowMyPlateTool,
+    ShowChainTool,
 )
 from .focus_tools import AddFocusTool, ListFocusesTool
 from .habit_tools import LogHabitTool
@@ -56,6 +58,9 @@ registry = [
     MergeTodosTool(),
     RenameTodoTool(),
     UndoLastTodoOpTool(),
+    # G3.9 recall fluency — explicit tools for "what's primary"/"chain of X"
+    ShowMyPlateTool(),
+    ShowChainTool(),
     # Focuses
     AddFocusTool(),
     ListFocusesTool(),

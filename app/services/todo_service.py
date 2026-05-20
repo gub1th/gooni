@@ -593,6 +593,87 @@ class TodoService:
             kind="spawned_from",
         )
 
+    def bulk_chain_summary(
+        self, db: Session, todo_ids: list[int] | None = None
+    ) -> dict[int, dict]:
+        """Build the per-todo chain_summary map used by the /todos
+        endpoint AND the show_my_plate chat tool AND state_block chain
+        inline rendering (G3.9). When todo_ids is None, covers every
+        open todo (the dashboard view); otherwise only those ids.
+
+        Returns: {tid: {"children_total", "children_done", "parent_id",
+                        "parent_text"}}
+        Todos with no parent and no children are absent from the map
+        (caller treats missing == orphan).
+        """
+        from ..db.models import Edge, Todo as _TodoModel
+
+        if todo_ids is None:
+            open_rows = self.list_open(db)
+            relevant_ids = {t.id for t in open_rows}
+        else:
+            relevant_ids = set(todo_ids)
+        if not relevant_ids:
+            return {}
+
+        out: dict[int, dict] = {}
+        try:
+            edge_rows = (
+                db.query(Edge)
+                .filter(Edge.kind == "spawned_from")
+                .filter(Edge.src_kind == "todo", Edge.dst_kind == "todo")
+                .all()
+            )
+            child_to_parent: dict[int, int] = {}
+            parent_to_children: dict[int, list[int]] = {}
+            for e in edge_rows:
+                child_to_parent[e.src_id] = e.dst_id
+                parent_to_children.setdefault(e.dst_id, []).append(e.src_id)
+
+            extra_ids: set[int] = set()
+            for cid, pid in child_to_parent.items():
+                if cid in relevant_ids:
+                    extra_ids.add(pid)
+            for pid, cids in parent_to_children.items():
+                if pid in relevant_ids:
+                    extra_ids |= set(cids)
+            all_ids = relevant_ids | extra_ids
+            if all_ids:
+                todo_lookup = {
+                    t.id: t
+                    for t in db.query(_TodoModel)
+                    .filter(_TodoModel.id.in_(all_ids))
+                    .all()
+                }
+            else:
+                todo_lookup = {}
+
+            for tid in relevant_ids:
+                children = parent_to_children.get(tid, [])
+                child_total = len(children)
+                child_done = sum(
+                    1
+                    for cid in children
+                    if (todo_lookup.get(cid) and todo_lookup[cid].done)
+                )
+                parent_id = child_to_parent.get(tid)
+                parent_text = (
+                    (todo_lookup.get(parent_id).text or "").strip()
+                    if parent_id and todo_lookup.get(parent_id)
+                    else None
+                )
+                if child_total > 0 or parent_id is not None:
+                    out[tid] = {
+                        "children_total": child_total,
+                        "children_done": child_done,
+                        "parent_id": parent_id,
+                        "parent_text": parent_text,
+                    }
+        except Exception as e:
+            print(f"[todo_service.bulk_chain_summary] {e}")
+            return {}
+        return out
+
     def get_chain(
         self,
         db: Session,

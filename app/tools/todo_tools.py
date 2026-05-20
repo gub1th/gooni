@@ -426,3 +426,145 @@ class UndoLastTodoOpTool(BaseTool):
             return "(undo window expired on those — past 24h)"
         rendered = ", ".join(f"\"{x}\"" for x in restored)
         return f"restored {len(restored)}. {rendered}."
+
+
+class ShowMyPlateTool(BaseTool):
+    """G3.9 recall fluency tool. The state_block is always-on context,
+    but it bloats the prompt to be fully verbose — this tool returns
+    a richer, Alfred-formatted view ON DEMAND when Daniel asks recall
+    questions like "what's on my plate", "what's primary", "what's
+    left today".
+    """
+    name = "show_my_plate"
+    description = (
+        "Show Daniel's actionable plate: primary todo + top-ranked + "
+        "counts + chain hints. CALL THIS WHEN Daniel asks 'what's on my "
+        "plate', 'what's primary', 'what's left', 'what do i have', "
+        "'what's open'. Do NOT make up the answer from memory — the "
+        "todos table is the source of truth. Returns one block of text "
+        "the user should see verbatim; reply with it directly + minimal "
+        "framing."
+    )
+    parameters = {"type": "object", "properties": {}}
+
+    def execute(self, db=None, **kwargs) -> str:
+        if db is None:
+            return "(no db session)"
+        from ..services.todo_service import todo_service
+        from ..db.models import Todo
+        from sqlalchemy import and_
+
+        primary = todo_service.get_primary(db)
+        open_todos = todo_service.list_open(db)
+        non_primary = [t for t in open_todos if not t.is_primary]
+        ranked = sorted(
+            [t for t in non_primary if (t.sort_order or 0) > 0],
+            key=lambda t: t.sort_order or 0,
+        )
+        unranked = [t for t in non_primary if (t.sort_order or 0) == 0]
+
+        # G3.9 chain inline: build a quick chain_summary like /todos does
+        # so per-row lines can carry "↗N" / "← from: X" without extra calls.
+        chain_summary = todo_service.bulk_chain_summary(db) if hasattr(todo_service, "bulk_chain_summary") else {}
+
+        def _chain_tail(t) -> str:
+            meta = chain_summary.get(t.id) if isinstance(chain_summary, dict) else None
+            if not meta:
+                return ""
+            bits = []
+            ct = meta.get("children_total") or 0
+            cd = meta.get("children_done") or 0
+            if ct:
+                bits.append(f"↗{ct}" + (f" ✓{cd}" if cd else ""))
+            pid = meta.get("parent_id")
+            ptext = meta.get("parent_text")
+            if pid and ptext:
+                bits.append(f"← from: \"{ptext[:40]}\"")
+            return f"  [{' · '.join(bits)}]" if bits else ""
+
+        def _mention_tail(t) -> str:
+            mc = t.mention_count or 1
+            return f" ×{mc}" if mc > 1 else ""
+
+        lines = []
+        total = len(open_todos)
+        done_today = todo_service.list_done_today(db)
+        lines.append(f"open: {total} · done today: {len(done_today)}")
+        slot = 1
+        if primary is not None:
+            lines.append(
+                f"#{slot} (primary): \"{primary.text}\" ({primary.state}){_mention_tail(primary)}{_chain_tail(primary)}"
+            )
+            slot += 1
+        for t in ranked[:6]:
+            lines.append(
+                f"#{slot}: \"{t.text}\" ({t.state}){_mention_tail(t)}{_chain_tail(t)}"
+            )
+            slot += 1
+        if unranked:
+            lines.append(f"+ {len(unranked)} unranked (no manual position set yet)")
+        return "\n".join(lines)
+
+
+class ShowChainTool(BaseTool):
+    """G3.9 recall tool — surfaces the full lineage thread for a todo
+    by substring/cosine match. Use when Daniel asks 'what came from X',
+    'show me the thread on Y', 'what's the chain for Z'."""
+    name = "show_chain"
+    description = (
+        "Show the lineage thread for a todo — ancestors, the todo itself, "
+        "descendants. Use when Daniel asks 'what came from X', 'show me "
+        "the thread on Y', 'what's the chain'. Resolves the todo by "
+        "substring match (shortest-match wins). Returns hierarchical text."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "match": {
+                "type": "string",
+                "description": "Substring identifying the todo to surface the chain for.",
+            },
+        },
+        "required": ["match"],
+    }
+
+    def execute(self, db=None, match: str = "", **kwargs) -> str:
+        if db is None:
+            return "(no db session)"
+        match = (match or "").strip()
+        if not match:
+            return "(match required)"
+        from ..services.todo_service import todo_service
+        todo, err = _find_todo_by_match(db, match, only_open=False)
+        if todo is None:
+            return err or f"(no todo for '{match}')"
+        chain = todo_service.get_chain(db, todo.id)
+        if chain is None:
+            return f"(todo #{todo.id} not found)"
+
+        # Ancestors come back deepest-first; render shallowest-first
+        # so the thread reads top-down.
+        ancestors = sorted(chain.get("ancestors") or [], key=lambda x: -x.get("depth", 0))
+        descendants = sorted(chain.get("descendants") or [], key=lambda x: x.get("depth", 0))
+        this = chain.get("this") or {}
+
+        lines = [f"chain for \"{todo.text}\":"]
+        if ancestors:
+            for a in ancestors:
+                t = a.get("todo") or {}
+                indent = "  " * (a.get("depth", 1))
+                state_tag = f"({t.get('state', '?')})"
+                lines.append(f"{indent}← \"{t.get('text', '')}\" {state_tag}")
+        else:
+            lines.append("  (no ancestors — root)")
+        lines.append(f"→ \"{this.get('text', '')}\" ({this.get('state', '?')}) ← here")
+        if descendants:
+            for d in descendants:
+                t = d.get("todo") or {}
+                indent = "  " * (d.get("depth", 1))
+                state_tag = f"({t.get('state', '?')})"
+                lines.append(f"{indent}↗ \"{t.get('text', '')}\" {state_tag}")
+        else:
+            lines.append("  (no descendants — leaf)")
+        return "\n".join(lines)
+

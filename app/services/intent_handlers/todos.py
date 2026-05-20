@@ -34,6 +34,14 @@ DEDUP_THRESHOLD = 0.85
 DELETE_FLOOR = 0.55
 COMPLETE_FLOOR = 0.60
 MERGE_FLOOR = 0.55
+EDIT_FLOOR = 0.60
+DONE_SIGNAL_FLOOR = 0.85
+
+# G3.9: disambiguation gap. If the top two candidate matches score
+# within this delta of each other, the handler refuses to execute and
+# surfaces a "which one — A or B?" question. One wrong auto-action
+# erodes trust faster than ten correct ones build it.
+AMBIGUITY_GAP = 0.05
 
 
 _DUE_HINTS = {
@@ -120,7 +128,12 @@ def _cosine_top_open(db, query_text: str, floor: float):
     """Top open-todo match for query_text at given cosine floor.
     Returns (todo_id, text, score) or None. Wraps the chat-tool's helper
     so router-side dispatch + chat-tool grooming share the same match
-    semantics — diverging them would be a silent bug factory."""
+    semantics — diverging them would be a silent bug factory.
+
+    NOTE: doesn't enforce the ambiguity gap — callers wanting that
+    behavior should use `resolve_cosine_match` instead, which returns
+    a single | ambiguous | none triplet.
+    """
     from ...tools.todo_tools import _cosine_match_open_todos
 
     matches = _cosine_match_open_todos(db, query_text, floor=floor, limit=1)
@@ -128,6 +141,54 @@ def _cosine_top_open(db, query_text: str, floor: float):
         return None
     tid, text, _sub, score = matches[0]
     return (tid, text, score)
+
+
+def resolve_cosine_match(db, query_text: str, floor: float):
+    """G3.9 disambiguation-aware cosine match resolver.
+
+    Returns one of:
+      {"kind": "single",     "todo": (tid, text, score)}
+      {"kind": "ambiguous",  "candidates": [(tid, text, score), ...]}
+      {"kind": "none"}
+
+    "ambiguous" fires when top1 - top2 < AMBIGUITY_GAP. The handler
+    should NOT execute and should queue a disambiguation question via
+    result.disambiguation_needed instead. Daniel's next turn with more
+    specific text will re-resolve cleanly.
+    """
+    from ...tools.todo_tools import _cosine_match_open_todos
+
+    matches = _cosine_match_open_todos(db, query_text, floor=floor, limit=5)
+    if not matches:
+        return {"kind": "none"}
+    # matches sorted desc by score
+    top = matches[0]
+    if len(matches) == 1:
+        return {"kind": "single", "todo": (top[0], top[1], top[3])}
+    second = matches[1]
+    if (top[3] - second[3]) < AMBIGUITY_GAP:
+        # Bundle all candidates within the gap so the ack can render them.
+        cluster = [
+            (m[0], m[1], m[3]) for m in matches
+            if (top[3] - m[3]) < AMBIGUITY_GAP
+        ]
+        return {"kind": "ambiguous", "candidates": cluster}
+    return {"kind": "single", "todo": (top[0], top[1], top[3])}
+
+
+def _queue_disambiguation(result, action: str, match: str, candidates: list) -> None:
+    """Append a disambiguation request to result.disambiguation_needed.
+    Candidates is the list of (tid, text, score) tuples from
+    resolve_cosine_match.
+    """
+    result.disambiguation_needed.append({
+        "action": action,
+        "match": match,
+        "candidates": [
+            {"id": tid, "text": text, "score": round(score, 3)}
+            for tid, text, score in candidates
+        ],
+    })
 
 
 def _safe_trace(ctx, name: str, label: str, args: dict) -> None:
@@ -156,11 +217,295 @@ def handle(items: list[dict], ctx, result) -> None:
                 _handle_complete(it, ctx, result, todo_service)
             elif kind == "merge":
                 _handle_merge(it, ctx, result, todo_service)
+            elif kind == "edit":
+                _handle_edit(it, ctx, result, todo_service)
             # Unknown kinds dropped silently — normalize step already
             # validates, so this only catches future-kind drift.
         except Exception as e:
             print(f"[todos handler] {kind} error: {e}")
             continue
+
+
+def handle_done_signals(items: list[dict], ctx, result) -> None:
+    """G3.9 implicit-done dispatch. Each item: {phrase, match}. The
+    extractor catches utterances like "just called papi" / "finished X"
+    / "did Y already" — we cosine-resolve `match` against open todos at
+    DONE_SIGNAL_FLOOR (0.85, strict), apply the disambiguation gap, then
+    auto-close. Ack composer renders the implicit-done phrase + offers
+    inline undo.
+    """
+    if not items:
+        return
+
+    from ..todo_service import todo_service
+
+    for it in items:
+        match = (it.get("match") or "").strip()
+        phrase = (it.get("phrase") or "").strip()
+        if not match or not phrase:
+            continue
+        try:
+            res = resolve_cosine_match(ctx.db, match, floor=DONE_SIGNAL_FLOOR)
+            if res["kind"] == "none":
+                _safe_trace(
+                    ctx,
+                    "router:done_signal_no_match",
+                    f"Implicit-done no-match for '{match}' (phrase: '{phrase}')",
+                    {"match": match, "phrase": phrase, "floor": DONE_SIGNAL_FLOOR},
+                )
+                continue
+            if res["kind"] == "ambiguous":
+                _queue_disambiguation(result, "done_signal", match, res["candidates"])
+                _safe_trace(
+                    ctx,
+                    "router:done_signal_ambiguous",
+                    f"Implicit-done ambiguous for '{match}'",
+                    {"match": match, "phrase": phrase, "candidates": len(res["candidates"])},
+                )
+                continue
+            tid, text, score = res["todo"]
+            todo = todo_service.update(ctx.db, tid, state="done")
+            if todo is None:
+                continue
+            result.implicit_done_todos.append({
+                "text": text,
+                "todo_id": tid,
+                "phrase": phrase,
+            })
+            result.tools_used.append("router:todo_implicit_done")
+            _safe_trace(
+                ctx,
+                "router:todo_implicit_done",
+                f"Implicit-done closed (cosine={score:.2f})",
+                {"match": match, "phrase": phrase, "text": text, "id": tid},
+            )
+        except Exception as e:
+            print(f"[done_signals handler] error: {e}")
+            continue
+
+
+def _handle_edit(it, ctx, result, todo_service) -> None:
+    """G3.9 edit dispatch. Cosine-resolves the existing todo by `match`,
+    applies patch fields. Supported patch keys:
+      text, subtitle, due_hint, primary, parent_match, unlink_parent, position
+    Each applied change appended to a human-readable list for the ack.
+    """
+    from ..todo_service import todo_service as _ts
+    _ = _ts  # noqa: F841 — keep import warm
+
+    match = (it.get("match") or "").strip()
+    patch = it.get("patch") or {}
+    if not match or not isinstance(patch, dict) or not patch:
+        return
+
+    res = resolve_cosine_match(ctx.db, match, floor=EDIT_FLOOR)
+    if res["kind"] == "none":
+        _safe_trace(
+            ctx,
+            "router:todo_no_match",
+            f"Edit no-match for '{match}'",
+            {"kind": "edit", "match": match, "floor": EDIT_FLOOR},
+        )
+        result.failed_todo_actions.append({"kind": "edit", "match": match})
+        return
+    if res["kind"] == "ambiguous":
+        _queue_disambiguation(result, "edit", match, res["candidates"])
+        _safe_trace(
+            ctx,
+            "router:todo_edit_ambiguous",
+            f"Edit ambiguous for '{match}'",
+            {"match": match, "patch_keys": list(patch.keys()), "candidates": len(res["candidates"])},
+        )
+        return
+
+    tid, original_text, score = res["todo"]
+    todo = todo_service.get(ctx.db, tid)
+    if todo is None:
+        return
+
+    update_kwargs: dict = {}
+    changes: list[str] = []
+    snapshot = {
+        "text": todo.text,
+        "subtitle": todo.subtitle,
+        "due_date": todo.due_date.isoformat() if todo.due_date else None,
+        "is_primary": bool(todo.is_primary),
+    }
+
+    if "text" in patch:
+        update_kwargs["text"] = patch["text"]
+        changes.append(f"renamed → \"{patch['text']}\"")
+    if "subtitle" in patch:
+        update_kwargs["subtitle"] = patch["subtitle"]
+        changes.append("subtitle set")
+    if "due_hint" in patch:
+        new_due = _parse_due(patch["due_hint"])
+        if new_due is not None:
+            update_kwargs["due_date"] = new_due
+            changes.append(f"due → {patch['due_hint']}")
+        else:
+            # Couldn't parse — mark as ambiguous-hint, ack can ask Daniel.
+            changes.append(f"due-hint '{patch['due_hint']}' unrecognized")
+    if "primary" in patch:
+        update_kwargs["is_primary"] = bool(patch["primary"])
+        changes.append("primary=on" if patch["primary"] else "primary=off")
+
+    if update_kwargs:
+        # todo_service.update already enforces the is_primary singleton
+        # (clears other crowns when one is set), so a single PATCH-shape
+        # call is enough.
+        todo_service.update(ctx.db, tid, **update_kwargs)
+
+    # Parent link/unlink via spawned_from edge.
+    if patch.get("unlink_parent") is True:
+        try:
+            _unlink_parent(ctx.db, tid)
+            changes.append("unlinked parent")
+        except Exception as e:
+            print(f"[todos handler] unlink parent failed: {e}")
+    if "parent_match" in patch:
+        parent_query = patch["parent_match"]
+        parent_res = resolve_cosine_match(ctx.db, parent_query, floor=EDIT_FLOOR)
+        if parent_res["kind"] == "single":
+            ptid, ptext, _ = parent_res["todo"]
+            if ptid != tid:
+                try:
+                    _link_parent(ctx.db, child_id=tid, parent_id=ptid)
+                    changes.append(f"linked-parent: \"{ptext}\"")
+                except Exception as e:
+                    print(f"[todos handler] link parent failed: {e}")
+        elif parent_res["kind"] == "ambiguous":
+            _queue_disambiguation(result, "edit_parent_link", parent_query, parent_res["candidates"])
+        else:
+            changes.append(f"parent-match '{parent_query}' no-match")
+
+    # Position reorder. "top" / "bottom" / "above:<match>" / "below:<match>".
+    if "position" in patch:
+        position = patch["position"]
+        try:
+            applied = _apply_position(ctx.db, todo_service, tid, position)
+            if applied:
+                changes.append(f"position → {position}")
+        except Exception as e:
+            print(f"[todos handler] position reorder failed: {e}")
+
+    if not changes:
+        # Patch had nothing actionable — skip surfacing.
+        return
+
+    result.edited_todos.append({
+        "text": original_text,
+        "todo_id": tid,
+        "changes": changes,
+        "from": snapshot,
+    })
+    result.tools_used.append("router:todo_edited")
+    _safe_trace(
+        ctx,
+        "router:todo_edited",
+        f"Edited todo (cosine={score:.2f}): {', '.join(changes)}",
+        {"match": match, "text": original_text, "id": tid, "changes": changes},
+    )
+
+
+def _link_parent(db, *, child_id: int, parent_id: int) -> None:
+    """Wire `spawned_from` edge: child Todo → parent Todo. Idempotent on
+    the 5-tuple via edge_service. Used by the chat edit handler when
+    Daniel says 'X is a follow-up to Y'.
+    """
+    from .. import edge_service
+    edge_service.link(
+        db,
+        src_kind="todo",
+        src_id=child_id,
+        dst_kind="todo",
+        dst_id=parent_id,
+        kind="spawned_from",
+    )
+
+
+def _unlink_parent(db, child_id: int) -> None:
+    """Remove all `spawned_from` edges where this todo is the child.
+    Edge model: child IS the src, parent IS the dst. Removes ALL parent
+    edges — Daniel can re-link a specific parent in a follow-up turn.
+    """
+    from ..db.models import Edge
+    db.query(Edge).filter(
+        Edge.src_kind == "todo",
+        Edge.src_id == child_id,
+        Edge.dst_kind == "todo",
+        Edge.kind == "spawned_from",
+    ).delete(synchronize_session=False)
+    db.commit()
+
+
+def _apply_position(db, todo_service, todo_id: int, position: str) -> bool:
+    """Apply a chat-driven position move. Returns True on success.
+
+    Position string forms:
+      "top"           → smallest sort_order
+      "bottom"        → largest sort_order + 1
+      "above:<match>" → set sort_order to (target.sort_order - 0.5),
+                         then renormalize to ints
+      "below:<match>" → same w/ +0.5
+    """
+    from ..db.models import Todo
+
+    pos = (position or "").strip().lower()
+    if not pos:
+        return False
+
+    todo = todo_service.get(db, todo_id)
+    if todo is None:
+        return False
+
+    open_todos = todo_service.list_open(db)
+    if pos == "top":
+        # Set this todo's sort_order to min - 1, then renormalize.
+        new_order = -1
+    elif pos == "bottom":
+        new_order = sum(1 for t in open_todos) + 100  # arbitrary high
+    elif pos.startswith("above:") or pos.startswith("below:"):
+        target_text = position.split(":", 1)[1].strip()
+        from ...tools.todo_tools import _cosine_match_open_todos
+        matches = _cosine_match_open_todos(db, target_text, floor=EDIT_FLOOR, limit=1)
+        if not matches:
+            return False
+        target_tid = matches[0][0]
+        if target_tid == todo_id:
+            return False
+        target = todo_service.get(db, target_tid)
+        if target is None:
+            return False
+        target_so = target.sort_order or 0
+        new_order = (target_so - 0.5) if pos.startswith("above:") else (target_so + 0.5)
+    else:
+        return False
+
+    # Stamp the new (possibly fractional) order, then renormalize all open
+    # todos to dense integer ranks so future inserts have headroom.
+    todo.sort_order = new_order  # may be float temporarily
+    db.commit()
+    _renormalize_sort_orders(db, todo_service)
+    return True
+
+
+def _renormalize_sort_orders(db, todo_service) -> None:
+    """Re-stamp all open todos with dense integer sort_orders matching
+    their current ordering. Runs after any fractional-position write so
+    sort_order stays well-behaved long-term.
+    """
+    from ..db.models import Todo
+    rows = (
+        db.query(Todo)
+        .filter(Todo.done.is_(False), Todo.deleted_at.is_(None))
+        .order_by(Todo.sort_order.asc().nullslast(), Todo.id.asc())
+        .all()
+    )
+    for i, t in enumerate(rows, start=1):
+        if t.sort_order != i:
+            t.sort_order = i
+    db.commit()
 
 
 def _handle_create(it, ctx, result, todo_service) -> None:
@@ -201,8 +546,8 @@ def _handle_delete(it, ctx, result, todo_service) -> None:
     match = (it.get("match") or "").strip()
     if not match:
         return
-    hit = _cosine_top_open(ctx.db, match, floor=DELETE_FLOOR)
-    if not hit:
+    res = resolve_cosine_match(ctx.db, match, floor=DELETE_FLOOR)
+    if res["kind"] == "none":
         _safe_trace(
             ctx,
             "router:todo_no_match",
@@ -211,7 +556,16 @@ def _handle_delete(it, ctx, result, todo_service) -> None:
         )
         result.failed_todo_actions.append({"kind": "delete", "match": match})
         return
-    tid, text, score = hit
+    if res["kind"] == "ambiguous":
+        _queue_disambiguation(result, "delete", match, res["candidates"])
+        _safe_trace(
+            ctx,
+            "router:todo_delete_ambiguous",
+            f"Delete ambiguous for '{match}'",
+            {"match": match, "candidates": len(res["candidates"])},
+        )
+        return
+    tid, text, score = res["todo"]
     deleted = todo_service.bulk_soft_delete(ctx.db, [tid])
     if not deleted:
         return
@@ -229,8 +583,8 @@ def _handle_complete(it, ctx, result, todo_service) -> None:
     match = (it.get("match") or "").strip()
     if not match:
         return
-    hit = _cosine_top_open(ctx.db, match, floor=COMPLETE_FLOOR)
-    if not hit:
+    res = resolve_cosine_match(ctx.db, match, floor=COMPLETE_FLOOR)
+    if res["kind"] == "none":
         _safe_trace(
             ctx,
             "router:todo_no_match",
@@ -239,7 +593,16 @@ def _handle_complete(it, ctx, result, todo_service) -> None:
         )
         result.failed_todo_actions.append({"kind": "complete", "match": match})
         return
-    tid, text, score = hit
+    if res["kind"] == "ambiguous":
+        _queue_disambiguation(result, "complete", match, res["candidates"])
+        _safe_trace(
+            ctx,
+            "router:todo_complete_ambiguous",
+            f"Complete ambiguous for '{match}'",
+            {"match": match, "candidates": len(res["candidates"])},
+        )
+        return
+    tid, text, score = res["todo"]
 
     # G3.5: complete kind can carry closure_note + spawned follow-ups.
     # Use close_with_outcome instead of bare update() so the closure_note

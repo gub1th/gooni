@@ -70,6 +70,22 @@ class RouterResult:
     # match but the router couldn't find a matching open todo. Logged to
     # the trace + surfaced in ack so Daniel can spot extraction errors.
     failed_todo_actions: list[dict] = field(default_factory=list)
+    # G3.9 edit-action results — populated by router-level dispatch when
+    # the extractor emits kind=edit. Each entry:
+    #   {"text": str, "todo_id": int, "changes": [str], "from": dict}
+    # changes = human-readable list of what changed ("due → friday",
+    # "primary", "linked-parent: X"). from = pre-edit snapshot for ack.
+    edited_todos: list[dict] = field(default_factory=list)
+    # G3.9 implicit-done results from `done_signals` extraction. Each:
+    #   {"text": str, "todo_id": int, "phrase": str}
+    implicit_done_todos: list[dict] = field(default_factory=list)
+    # G3.9 disambiguation queue — when cosine match returns ≥2 candidates
+    # within 0.05 score gap, the handler doesn't execute. Ack composer
+    # surfaces a "which one — A or B?" question; Daniel's next turn
+    # picks the right one with more specific text.
+    # Each entry: {"action": "delete"|"complete"|"edit"|"done_signal",
+    #              "match": str, "candidates": [{"id", "text", "score"}]}
+    disambiguation_needed: list[dict] = field(default_factory=list)
     # Phase 5: extractor's classification of how much reply the user
     # wants. One of "answer" | "acknowledge" | "task_only" | "no_reply".
     # Defaults to "answer" — conservative; callers gate the LLM reply
@@ -116,6 +132,16 @@ def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
         todos.handle(signals.get("todos") or [], ctx, result)
     except Exception as e:
         print(f"[intent_router] todo handler error: {e}")
+
+    # G3.9 implicit-done: "just called papi" auto-closes the matching todo
+    # at ≥0.85 cosine. Lives on its own signal list (done_signals) so the
+    # extractor can emit it independently of the explicit todos[] actions.
+    try:
+        todos.handle_done_signals(
+            signals.get("done_signals") or [], ctx, result
+        )
+    except Exception as e:
+        print(f"[intent_router] done_signals handler error: {e}")
 
     try:
         memories.handle(signals.get("memories") or [], ctx, result)

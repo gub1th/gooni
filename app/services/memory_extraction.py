@@ -225,13 +225,20 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
   ],
   "todos": [
     {{
-      "kind":         "create|delete|complete|merge",
+      "kind":         "create|delete|complete|merge|edit",
       "text":         "<for create — short imperative chore, max 12 words>",
       "due_hint":     "tonight|today|tomorrow|this week|null",
-      "match":        "<for delete/complete/merge — substring of the existing todo Daniel is acting on>",
+      "match":        "<for delete/complete/merge/edit — substring of the existing todo Daniel is acting on>",
       "merge_into":   "<for merge only — substring identifying the keep-target>",
       "closure_note": "<for complete only — optional short outcome text Daniel said about how it went>",
-      "spawned":      [{{"text": "<follow-up chore>", "due_hint": "..."}}]
+      "spawned":      [{{"text": "<follow-up chore>", "due_hint": "..."}}],
+      "patch":        "<for edit only — JSON-like object with fields to change. Supported keys: text (rename), subtitle (notes), due_hint (snooze/reschedule), primary (true/false to toggle), parent_match (substring of parent todo to link as child of), unlink_parent (true to clear parent link), position ('top' | 'bottom' | 'above:<match>' | 'below:<match>'). Emit ONLY the fields Daniel actually changed. Examples: 'push X to friday' → {{patch: {{due_hint: 'this week'}}}}; 'make X primary' → {{patch: {{primary: true}}}}; 'X is a follow-up to Y' on X → {{patch: {{parent_match: 'Y'}}}}; 'X is more important than Y' on X → {{patch: {{position: 'above:Y'}}}}; 'add note about Z to X' on X → {{patch: {{subtitle: 'Z'}}}}>"
+    }}
+  ],
+  "done_signals": [
+    {{
+      "phrase": "<the verbatim done-utterance Daniel said, e.g. 'just called papi', 'finished the auth bug', 'did the gym thing'>",
+      "match":  "<short substring/keyword identifying which existing open todo this corresponds to — Gooni will cosine-resolve against open todos at ≥0.85, ambiguity check on top-2 within 0.05>"
     }}
   ],
   "reply_intent": "answer|acknowledge|task_only|no_reply",
@@ -686,7 +693,11 @@ def _normalize_promises(items: Any) -> list[dict]:
     return out
 
 
-_VALID_TODO_KINDS = ("create", "delete", "complete", "merge")
+_VALID_TODO_KINDS = ("create", "delete", "complete", "merge", "edit")
+_VALID_EDIT_PATCH_KEYS = (
+    "text", "subtitle", "due_hint", "primary",
+    "parent_match", "unlink_parent", "position",
+)
 
 
 def _normalize_todos(items: Any) -> list[dict]:
@@ -727,7 +738,7 @@ def _normalize_todos(items: Any) -> list[dict]:
         # Per-kind required-field validation. Drop malformed entries.
         if kind == "create" and not text:
             continue
-        if kind in ("delete", "complete") and not match:
+        if kind in ("delete", "complete", "edit") and not match:
             continue
         if kind == "merge" and (not match or not merge_into):
             continue
@@ -767,6 +778,28 @@ def _normalize_todos(items: Any) -> list[dict]:
                     ),
                 })
 
+        # G3.9 EDIT kind: validate + normalize the patch object. Drop
+        # unknown keys, coerce types, leave empty values out so handlers
+        # know which fields the user actually intended.
+        patch_raw = it.get("patch") if kind == "edit" else None
+        patch: dict = {}
+        if isinstance(patch_raw, dict):
+            for k, v in patch_raw.items():
+                if k not in _VALID_EDIT_PATCH_KEYS:
+                    continue
+                if k in ("text", "subtitle", "due_hint", "parent_match", "position") and isinstance(v, str):
+                    s = v.strip()
+                    if s and s.lower() != "null":
+                        patch[k] = s[:200]
+                elif k in ("primary", "unlink_parent"):
+                    if isinstance(v, bool):
+                        patch[k] = v
+                    elif isinstance(v, str):
+                        patch[k] = v.strip().lower() == "true"
+        if kind == "edit" and not patch:
+            # Edit with no actionable patch fields is noise — drop.
+            continue
+
         out.append({
             "kind": kind,
             "text": text[:200] if text else None,
@@ -781,6 +814,32 @@ def _normalize_todos(items: Any) -> list[dict]:
             "merge_into": merge_into[:200] if merge_into else None,
             "closure_note": closure_note[:500] if closure_note else None,
             "spawned": spawned,
+            "patch": patch if kind == "edit" else None,
+        })
+    return out
+
+
+def _normalize_done_signals(items: Any) -> list[dict]:
+    """Normalize done_signals entries from the extractor (G3.9 atom #2).
+    Each entry is an implicit done-utterance ("just called papi") that
+    Gooni should fuzzy-match against an open todo at ≥0.85 cosine and
+    auto-close. Bad entries silently dropped.
+    """
+    out = []
+    if not isinstance(items, list):
+        return out
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        phrase = it.get("phrase")
+        match = it.get("match")
+        if not (isinstance(phrase, str) and phrase.strip()):
+            continue
+        if not (isinstance(match, str) and match.strip()):
+            continue
+        out.append({
+            "phrase": phrase.strip()[:200],
+            "match": match.strip()[:200],
         })
     return out
 
@@ -849,6 +908,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "feature_requests": [],
         "soft_promises": [],
         "todos": [],
+        "done_signals": [],
         "reply_intent": "answer",
         "memories": [],
     }
@@ -888,6 +948,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "feature_requests": _normalize_features(parsed.get("feature_requests")),
         "soft_promises":    _normalize_promises(parsed.get("soft_promises")),
         "todos":            _normalize_todos(parsed.get("todos")),
+        "done_signals":     _normalize_done_signals(parsed.get("done_signals")),
         "reply_intent":     _normalize_reply_intent(parsed.get("reply_intent")),
         "memories":         _normalize_memories(parsed.get("memories")),
     }
