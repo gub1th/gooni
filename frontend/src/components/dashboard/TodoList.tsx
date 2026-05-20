@@ -171,6 +171,17 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         .gooni-todo-row:hover { background: rgba(0,0,0,0.025); }
         .gooni-todo-cascade { animation: gooni-todo-fade-out 600ms ease forwards; }
 
+        /* Doing-state indicator pulse — subtle breathing. Conveys
+           "active, in motion" without the visual loudness of a spinner.
+           Matches Claude minimal aesthetic. */
+        @keyframes gooni-doing-pulse {
+          0%, 100% { transform: scale(1.0); opacity: 0.92; }
+          50%      { transform: scale(1.10); opacity: 1.0;  }
+        }
+        .gooni-doing-dot {
+          animation: gooni-doing-pulse 1.8s ease-in-out infinite;
+        }
+
         /* Primary-todo card border: a single soft yellow stroke draws
            itself around the perimeter clockwise from the top-left,
            carrying its own drop-shadow so the glow lights up the card
@@ -380,7 +391,9 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         <TodoEditModal
           todo={editing}
           focuses={focuses ?? []}
+          chainMeta={bundle?.chain_summary?.[editing.id]}
           onClose={() => setEditingId(null)}
+          onOpenChain={(id) => { setEditingId(null); setChainViewId(id); }}
         />
       )}
 
@@ -624,11 +637,16 @@ function TodoRow({
   const age = ageHint(t.created_at);
 
   return (
-    <div>
+    // Outer wrapper carries hover state so the OrphanLinkHint sitting
+    // BELOW the row stays mounted while the cursor is anywhere in this
+    // todo's territory. Pre-fix the hover lived on the inner row only —
+    // mouse moving down to click the hint caused it to vanish.
     <div
-      className={`gooni-todo-row${cascade ? " gooni-todo-cascade" : ""}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+    >
+    <div
+      className={`gooni-todo-row${cascade ? " gooni-todo-cascade" : ""}`}
       style={{
         position: "relative",
         background: subdued ? "transparent" : "var(--gooni-card, #FFFFFF)",
@@ -864,16 +882,23 @@ function Checkbox({ state, onClick, size = "md" }: {
     );
   }
   if (state === "doing") {
+    // Match Claude reference: 2px terracotta ring + filled center dot
+    // in the same color. Pulse animation on the inner dot — subtle
+    // breathing (scale + opacity) at 1.8s/cycle. Conveys "actively in
+    // motion" without spinner loudness.
     return (
       <span onClick={onClick} style={{
         ...common,
         background: "transparent",
-        border: "2px solid #F59E0B",
+        border: "2px solid #D85A30",
       }}>
-        <span style={{
-          width: innerDim, height: innerDim, borderRadius: "50%",
-          background: "#F59E0B",
-        }} />
+        <span
+          className="gooni-doing-dot"
+          style={{
+            width: innerDim, height: innerDim, borderRadius: "50%",
+            background: "#D85A30",
+          }}
+        />
       </span>
     );
   }
