@@ -18,13 +18,19 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from ..db.models import Focus, Settings, Todo
+
+# FTS5 operators that need stripping before passing user input to MATCH.
+# Same shape as note_service's _FTS_QUERY_STRIP.
+_FTS_TODO_STRIP = re.compile(r'[\"\'()+*\-:\\^~]')
 from .list_service import _item_embed_text, list_service
 from . import focus_binding
 
@@ -749,30 +755,84 @@ class TodoService:
         limit: int = 10,
         include_done: bool = True,
     ) -> list[Todo]:
-        """Fuzzy search for retroactive-linking UI. Case-insensitive
-        substring match on text + subtitle. Returns up to `limit` rows
-        ordered by recency. Includes soft-deleted only if explicitly
-        requested (default: skip)."""
-        q = (query or "").strip().lower()
-        if not q:
+        """Fuzzy search for retroactive-linking UI.
+
+        Two-pass: FTS5 first (BM25-ranked, O(log N) via todos_fts virtual
+        table), then a substring LIKE fallback to catch matches FTS missed
+        — partial-word fragments ("groc" → "groceries"), since FTS tokenizes
+        on word boundaries. Both passes filter soft-deleted rows.
+
+        Returns up to `limit` rows. FTS hits float first; substring-only
+        hits fill remaining slots.
+        """
+        raw = (query or "").strip()
+        if not raw:
             return []
-        rows = (
+
+        # ── FTS5 pass ────────────────────────────────────────────────
+        fts_cleaned = _FTS_TODO_STRIP.sub(" ", raw).strip()
+        fts_ids: list[int] = []
+        if fts_cleaned:
+            try:
+                rows = db.execute(
+                    sa_text(
+                        "SELECT rowid FROM todos_fts "
+                        "WHERE todos_fts MATCH :q "
+                        "ORDER BY rank LIMIT :lim"
+                    ),
+                    {"q": fts_cleaned, "lim": limit * 2},
+                ).fetchall()
+                fts_ids = [r[0] for r in rows]
+            except Exception as e:
+                print(f"[todo_service] FTS search failed (ignored): {e}")
+
+        # ── Substring LIKE fallback ──────────────────────────────────
+        # Cheap, catches partial-word hits FTS misses. Limited to active
+        # todos + recent done ones via the existing recency sort downstream.
+        like = f"%{raw.lower()}%"
+        like_rows: list[Todo] = (
             db.query(Todo)
             .filter(Todo.deleted_at.is_(None))
+            .filter(sa_text("LOWER(text) LIKE :p OR LOWER(COALESCE(subtitle, '')) LIKE :p"))
+            .params(p=like)
             .all()
         )
-        hits: list[tuple[int, Todo]] = []
-        for t in rows:
+        like_ids = [t.id for t in like_rows]
+
+        # Merge: FTS-ranked first, LIKE-only matches fill remaining slots.
+        seen: set[int] = set()
+        merged_ids: list[int] = []
+        for tid in fts_ids:
+            if tid not in seen:
+                seen.add(tid)
+                merged_ids.append(tid)
+        for tid in like_ids:
+            if tid not in seen:
+                seen.add(tid)
+                merged_ids.append(tid)
+        if not merged_ids:
+            return []
+
+        # Load full rows, filter done if requested, apply legacy score
+        # ordering (shorter text + non-done first) for ties WITHIN each
+        # source — FTS already ranks, LIKE doesn't.
+        full = (
+            db.query(Todo)
+            .filter(Todo.id.in_(merged_ids), Todo.deleted_at.is_(None))
+            .all()
+        )
+        by_id = {t.id: t for t in full}
+        out: list[Todo] = []
+        for tid in merged_ids:
+            t = by_id.get(tid)
+            if t is None:
+                continue
             if not include_done and t.done:
                 continue
-            text = (t.text or "").lower()
-            subtitle = (t.subtitle or "").lower()
-            if q in text or q in subtitle:
-                # Score: shorter text + non-done first
-                score = len(text) + (1000 if t.done else 0)
-                hits.append((score, t))
-        hits.sort(key=lambda x: (x[0], -x[1].id))
-        return [t for _s, t in hits[:limit]]
+            out.append(t)
+            if len(out) >= limit:
+                break
+        return out
 
     def reorder(self, db: Session, ordered_ids: list[int]) -> None:
         for idx, tid in enumerate(ordered_ids):
