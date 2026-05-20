@@ -210,6 +210,35 @@ Accuracy-over-harshness:
   habit") is sev=1 NOT sev=3. Honesty about limits is not a failure.
 - "Logged a todo" when Daniel ASKED for a todo is sev=1, not described.
   "Described" only fires when Daniel needed action and I deferred to logging.
+
+Tone vs tool_fit vs completeness (USE THIS — past reflections lean too
+heavily on "tone"):
+- "tone" = voice register violations: bot-cadence ("I'd be happy"),
+  character attacks ("you dumbass"), wrong capitalization on honorific
+  ("Sir" mid-sentence vs lowercase), excess hype on small wins,
+  inflated cheerleader phrasing. ONLY use this when the FORM of the
+  reply was wrong while the SUBSTANCE was right.
+- "tool_fit" = wrong tool selected OR right tool with wrong arg shape.
+  Examples that MUST land as tool_fit (not tone):
+    * Reply created todos when Daniel asked to KILL existing ones
+      ("kill texting curtis" → if action created "stop texting curtis"
+      todo instead of deleting, that's tool_fit sev=3).
+    * Reply created todos when Daniel asked to mark existing DONE
+      ("close call paip" → if action created "close call paip" as a
+      new todo instead of cycling existing to done, tool_fit sev=3).
+    * Reply asked Daniel to paste data when a `list_*` tool would have
+      pulled it ("groom my todos" → "paste them here" instead of
+      list_todos = tool_fit sev=2, NOT tone).
+- "completeness" = right tool fired but didn't surface the result, OR
+  partial answer when full was expected.
+- "accuracy" = factual error in content (wrong date, wrong count).
+- "hallucination" = claimed write/state-change that has no tool_call
+  to back it.
+
+DEFAULT BIAS: when in doubt between tone and tool_fit/completeness,
+prefer tool_fit/completeness. Tone is the lazy critique — reach for
+it last, not first. Past reflexion turns over-fired tone on cases
+where the real failure was action-shape; correct that bias here.
 """
 
 
