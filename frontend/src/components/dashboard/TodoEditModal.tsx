@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Crown, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Crown, Trash2, X } from "lucide-react";
 import {
   deleteTodo, updateTodo, promoteTodoToPrimary,
-  type ApiTodo, type ApiFocus, type TodoState,
+  type ApiTodo, type ApiFocus, type TodoChainMeta, type TodoState,
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
 
@@ -22,10 +22,12 @@ const STATES: { value: TodoState; label: string }[] = [
 interface Props {
   todo: ApiTodo;
   focuses: ApiFocus[];
+  chainMeta?: TodoChainMeta;
   onClose: () => void;
+  onOpenChain?: (todoId: number) => void;
 }
 
-export function TodoEditModal({ todo, focuses, onClose }: Props) {
+export function TodoEditModal({ todo, focuses, chainMeta, onClose, onOpenChain }: Props) {
   const qc = useQueryClient();
   const [text, setText] = useState(todo.text);
   const [subtitle, setSubtitle] = useState(todo.subtitle ?? "");
@@ -146,7 +148,7 @@ export function TodoEditModal({ todo, focuses, onClose }: Props) {
         </div>
 
         {/* Body */}
-        <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
           <Field label="Title">
             <input
               autoFocus
@@ -171,6 +173,9 @@ export function TodoEditModal({ todo, focuses, onClose }: Props) {
             <div style={{ display: "flex", gap: 6 }}>
               {STATES.map((s) => {
                 const active = state === s.value;
+                // Subtle dark slate active (was over-saturated green).
+                // Matches Claude minimal — color signals selection, not
+                // a status verdict.
                 return (
                   <button
                     key={s.value}
@@ -180,14 +185,15 @@ export function TodoEditModal({ todo, focuses, onClose }: Props) {
                       padding: "8px 10px",
                       borderRadius: 8,
                       border: active
-                        ? "1.5px solid #0F6E56"
-                        : "0.5px solid rgba(0,0,0,0.12)",
-                      background: active ? "rgba(15,110,86,0.10)" : "transparent",
-                      color: active ? "#0F6E56" : "var(--gooni-text, #1C1C1E)",
+                        ? "1px solid rgba(15,23,42,0.85)"
+                        : "0.5px solid rgba(0,0,0,0.10)",
+                      background: active ? "rgba(15,23,42,0.05)" : "transparent",
+                      color: active ? "#0F172A" : "var(--gooni-muted, #6B7280)",
                       fontWeight: active ? 600 : 500,
                       fontSize: 13,
                       cursor: "pointer",
                       fontFamily: FONT,
+                      transition: "all 0.15s",
                     }}
                   >
                     {s.label}
@@ -227,11 +233,13 @@ export function TodoEditModal({ todo, focuses, onClose }: Props) {
               style={{
                 display: "inline-flex", alignItems: "center", gap: 8,
                 padding: "8px 12px", borderRadius: 8,
+                // Muted slate when active (was warm-yellow chip).
+                // Crown icon does the visual lifting; color stays calm.
                 border: isPrimary
-                  ? "1.5px solid #BA7517"
-                  : "0.5px solid rgba(0,0,0,0.12)",
-                background: isPrimary ? "rgba(245,200,73,0.18)" : "transparent",
-                color: isPrimary ? "#854F0B" : "var(--gooni-text, #1C1C1E)",
+                  ? "1px solid rgba(15,23,42,0.85)"
+                  : "0.5px solid rgba(0,0,0,0.10)",
+                background: isPrimary ? "rgba(15,23,42,0.05)" : "transparent",
+                color: isPrimary ? "#0F172A" : "var(--gooni-muted, #6B7280)",
                 fontWeight: 500, fontSize: 13,
                 cursor: "pointer", fontFamily: FONT,
               }}
@@ -240,6 +248,72 @@ export function TodoEditModal({ todo, focuses, onClose }: Props) {
               {isPrimary ? "Crowned as primary" : "Make primary"}
             </button>
           </Field>
+
+          {/* G3.5-polish: Lineage section. Shows parent + spawned-children
+              when chainMeta is present, with a single click-through to
+              the full chain view for inline editing (link/unlink/add).
+              Absent chainMeta = todo has no lineage edges; section
+              hides entirely so the modal doesn't carry empty noise. */}
+          {chainMeta && (chainMeta.parent_id || chainMeta.children_total > 0) && (
+            <Field label="Lineage">
+              <div style={{
+                display: "flex", flexDirection: "column", gap: 6,
+                padding: "10px 12px",
+                borderRadius: 8,
+                background: "rgba(15,23,42,0.025)",
+                border: "0.5px solid rgba(0,0,0,0.06)",
+              }}>
+                {chainMeta.parent_id && (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    fontSize: 12, color: "var(--gooni-muted, #6B7280)",
+                  }}>
+                    <ArrowLeft size={11} />
+                    <span style={{ flexShrink: 0 }}>from:</span>
+                    <span style={{
+                      color: "var(--gooni-text, #1C1C1E)",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {chainMeta.parent_text || `todo #${chainMeta.parent_id}`}
+                    </span>
+                  </div>
+                )}
+                {chainMeta.children_total > 0 && (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    fontSize: 12, color: "var(--gooni-muted, #6B7280)",
+                  }}>
+                    <ArrowUpRight size={11} />
+                    <span>
+                      spawned {chainMeta.children_total}
+                      {chainMeta.children_done > 0 && (
+                        <span style={{ marginLeft: 6 }}>
+                          · {chainMeta.children_done} done
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                )}
+                {onOpenChain && (
+                  <button
+                    onClick={() => onOpenChain(todo.id)}
+                    style={{
+                      alignSelf: "flex-start",
+                      marginTop: 2,
+                      background: "none", border: "none",
+                      padding: 0, cursor: "pointer",
+                      fontSize: 11, fontWeight: 500,
+                      color: "var(--gooni-text, #1C1C1E)",
+                      textDecoration: "underline",
+                      fontFamily: FONT,
+                    }}
+                  >
+                    view chain →
+                  </button>
+                )}
+              </div>
+            </Field>
+          )}
 
           {focusId != null && (() => {
             const f = focuses.find((x) => x.id === focusId);
@@ -274,8 +348,8 @@ export function TodoEditModal({ todo, focuses, onClose }: Props) {
 
         {/* Footer */}
         <div style={{
-          padding: "12px 20px 16px",
-          borderTop: "0.5px solid rgba(0,0,0,0.08)",
+          padding: "14px 24px 18px",
+          borderTop: "0.5px solid rgba(0,0,0,0.06)",
           display: "flex", alignItems: "center", gap: 10,
         }}>
           {confirmDel ? (
@@ -300,17 +374,23 @@ export function TodoEditModal({ todo, focuses, onClose }: Props) {
             </>
           ) : (
             <>
+              {/* Destructive action de-amplified: small muted text link
+                  on the left (was a loud red button). Confirm flow still
+                  surfaces the destructive color when explicit. */}
               <button
                 onClick={() => setConfirmDel(true)}
                 title="Delete todo"
                 style={{
-                  ...btnSecondary,
-                  color: "#791F1F",
-                  display: "inline-flex", alignItems: "center", gap: 6,
+                  background: "none", border: "none",
+                  padding: 0, cursor: "pointer",
+                  fontSize: 12,
+                  color: "var(--gooni-muted, #8E8E93)",
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  fontFamily: FONT,
                 }}
               >
-                <Trash2 size={14} />
-                Delete
+                <Trash2 size={12} />
+                delete
               </button>
               <div style={{ flex: 1 }} />
               <button onClick={onClose} style={btnSecondary}>Cancel</button>
@@ -388,7 +468,9 @@ const btnPrimary: React.CSSProperties = {
   padding: "8px 16px",
   borderRadius: 8,
   border: "none",
-  background: "#0F6E56",
+  // Dark slate instead of green — primary CTA is monochrome per Claude
+  // aesthetic. Color reserved for status signals (age pill, doing dot).
+  background: "#0F172A",
   color: "#fff",
   fontSize: 13, fontWeight: 600,
   cursor: "pointer",
