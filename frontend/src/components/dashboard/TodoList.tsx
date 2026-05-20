@@ -216,27 +216,9 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         }
       `}</style>
 
-      {/* Primary card — separate visual treatment, sits above the list.
-          ALWAYS at top regardless of state (a not_yet primary still sits
-          here, not down in the pending bucket). */}
-      {bundle.primary && (
-        <PrimaryCard
-          t={bundle.primary}
-          focus={bundle.primary.focus_id ? focusById.get(bundle.primary.focus_id) ?? null : null}
-          cascade={cascadeIds.includes(bundle.primary.id)}
-          chainMeta={bundle.chain_summary?.[bundle.primary.id]}
-          onCycle={() => onCycle(bundle.primary!)}
-          onPickState={(s) => onPickState(bundle.primary!.id, s)}
-          onDemote={() => onDemotePrimary(bundle.primary!.id)}
-          onDelete={() => onDelete(bundle.primary!.id)}
-          onOpenEdit={() => setEditingId(bundle.primary!.id)}
-          onOpenChain={(id) => setChainViewId(id)}
-        />
-      )}
-
-      {/* Counter + add button — the "TODAY'S TODOS" label was redundant
-          with the Today/Focuses tab header on the dashboard, so it's
-          dropped. Counter stays for at-a-glance progress. */}
+      {/* Counter + add button moved to the TOP per Daniel's redesign —
+          progress should be the first thing the eye lands on, above the
+          actionable cards. */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "flex-end",
         margin: "0 4px 8px", gap: 8,
@@ -262,18 +244,32 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         </button>
       </div>
 
-      {/* Three-tier hierarchy:
-          1. Primary card (rendered above)
-          2. Active todos (state='doing') — keep the elevated card chrome
-          3. Pending todos (state='not_yet') — subdued plain rows so the
-             eye lands on what's actually being worked. */}
+      {/* Primary + Active as ONE GROUP — "what I'm focused on right now."
+          Primary always tops the group (exception for state='not_yet'
+          primary still applies — it sits here, not in pending). Tight
+          gap (4px) so primary and active read as related, not separated. */}
       {(() => {
         const activeOpen = bundle.open.filter((t) => t.state === "doing");
         const pendingOpen = bundle.open.filter((t) => t.state !== "doing");
+        const hasFocusedGroup = !!bundle.primary || activeOpen.length > 0;
         return (
           <>
-            {activeOpen.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {hasFocusedGroup && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {bundle.primary && (
+                  <PrimaryCard
+                    t={bundle.primary}
+                    focus={bundle.primary.focus_id ? focusById.get(bundle.primary.focus_id) ?? null : null}
+                    cascade={cascadeIds.includes(bundle.primary.id)}
+                    chainMeta={bundle.chain_summary?.[bundle.primary.id]}
+                    onCycle={() => onCycle(bundle.primary!)}
+                    onPickState={(s) => onPickState(bundle.primary!.id, s)}
+                    onDemote={() => onDemotePrimary(bundle.primary!.id)}
+                    onDelete={() => onDelete(bundle.primary!.id)}
+                    onOpenEdit={() => setEditingId(bundle.primary!.id)}
+                    onOpenChain={(id) => setChainViewId(id)}
+                  />
+                )}
                 {activeOpen.map((t) => (
                   <TodoRow
                     key={t.id}
@@ -296,7 +292,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
               <div
                 style={{
                   display: "flex", flexDirection: "column", gap: 0,
-                  marginTop: activeOpen.length > 0 ? 8 : 0,
+                  marginTop: hasFocusedGroup ? 10 : 0,
                 }}
               >
                 {pendingOpen.map((t) => (
@@ -424,7 +420,7 @@ function PrimaryCard({
   // from scratch (the React key flip forces a remount of the SVG layer).
 
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div>
     <div
       className={cascade ? "gooni-todo-cascade" : ""}
       onMouseEnter={() => setHovered(true)}
