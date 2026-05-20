@@ -216,7 +216,9 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         }
       `}</style>
 
-      {/* Primary card — separate visual treatment, sits above the list. */}
+      {/* Primary card — separate visual treatment, sits above the list.
+          ALWAYS at top regardless of state (a not_yet primary still sits
+          here, not down in the pending bucket). */}
       {bundle.primary && (
         <PrimaryCard
           t={bundle.primary}
@@ -232,58 +234,92 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         />
       )}
 
-      {/* Section header */}
+      {/* Counter + add button — the "TODAY'S TODOS" label was redundant
+          with the Today/Focuses tab header on the dashboard, so it's
+          dropped. Counter stays for at-a-glance progress. */}
       <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        margin: "0 4px 8px",
+        display: "flex", alignItems: "center", justifyContent: "flex-end",
+        margin: "0 4px 8px", gap: 8,
       }}>
         <span style={{
-          fontSize: 12, fontWeight: 500, letterSpacing: 0.4,
-          color: "var(--gooni-muted, #6B7280)",
+          fontSize: 12, color: "var(--gooni-muted, #9CA3AF)",
+          fontVariantNumeric: "tabular-nums",
         }}>
-          TODAY'S TODOS
+          {doneCount} / {totalToday}
         </span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{
-            fontSize: 12, color: "var(--gooni-muted, #9CA3AF)",
-            fontVariantNumeric: "tabular-nums",
-          }}>
-            {doneCount} / {totalToday}
-          </span>
-          <button
-            onClick={() => setCreating(true)}
-            title="Add a todo"
-            style={{
-              width: 24, height: 24, borderRadius: 6,
-              background: "rgba(15,110,86,0.12)",
-              color: "#0F6E56",
-              border: "none", cursor: "pointer",
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <Plus size={14} />
-          </button>
-        </div>
+        <button
+          onClick={() => setCreating(true)}
+          title="Add a todo"
+          style={{
+            width: 24, height: 24, borderRadius: 6,
+            background: "rgba(15,110,86,0.12)",
+            color: "#0F6E56",
+            border: "none", cursor: "pointer",
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <Plus size={14} />
+        </button>
       </div>
 
-      {/* Open list */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {bundle.open.map((t) => (
-          <TodoRow
-            key={t.id}
-            t={t}
-            focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
-            cascade={cascadeIds.includes(t.id)}
-            chainMeta={bundle.chain_summary?.[t.id]}
-            onCycle={() => onCycle(t)}
-            onPickState={(s) => onPickState(t.id, s)}
-            onPromotePrimary={() => onPromotePrimary(t.id)}
-            onDelete={() => onDelete(t.id)}
-            onOpenEdit={() => setEditingId(t.id)}
-            onOpenChain={(id) => setChainViewId(id)}
-          />
-        ))}
-      </div>
+      {/* Three-tier hierarchy:
+          1. Primary card (rendered above)
+          2. Active todos (state='doing') — keep the elevated card chrome
+          3. Pending todos (state='not_yet') — subdued plain rows so the
+             eye lands on what's actually being worked. */}
+      {(() => {
+        const activeOpen = bundle.open.filter((t) => t.state === "doing");
+        const pendingOpen = bundle.open.filter((t) => t.state !== "doing");
+        return (
+          <>
+            {activeOpen.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {activeOpen.map((t) => (
+                  <TodoRow
+                    key={t.id}
+                    t={t}
+                    focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
+                    cascade={cascadeIds.includes(t.id)}
+                    chainMeta={bundle.chain_summary?.[t.id]}
+                    subdued={false}
+                    onCycle={() => onCycle(t)}
+                    onPickState={(s) => onPickState(t.id, s)}
+                    onPromotePrimary={() => onPromotePrimary(t.id)}
+                    onDelete={() => onDelete(t.id)}
+                    onOpenEdit={() => setEditingId(t.id)}
+                    onOpenChain={(id) => setChainViewId(id)}
+                  />
+                ))}
+              </div>
+            )}
+            {pendingOpen.length > 0 && (
+              <div
+                style={{
+                  display: "flex", flexDirection: "column", gap: 0,
+                  marginTop: activeOpen.length > 0 ? 8 : 0,
+                }}
+              >
+                {pendingOpen.map((t) => (
+                  <TodoRow
+                    key={t.id}
+                    t={t}
+                    focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
+                    cascade={cascadeIds.includes(t.id)}
+                    chainMeta={bundle.chain_summary?.[t.id]}
+                    subdued={true}
+                    onCycle={() => onCycle(t)}
+                    onPickState={(s) => onPickState(t.id, s)}
+                    onPromotePrimary={() => onPromotePrimary(t.id)}
+                    onDelete={() => onDelete(t.id)}
+                    onOpenEdit={() => setEditingId(t.id)}
+                    onOpenChain={(id) => setChainViewId(id)}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* Inline create row — always visible per mockup. Click anywhere
           to focus the input; ESC collapses back to the placeholder hint. */}
@@ -567,13 +603,18 @@ function LiveTimer({ since }: { since: string | null }) {
 // ── Single open row ──────────────────────────────────────────────────────
 
 function TodoRow({
-  t, focus, cascade, chainMeta,
+  t, focus, cascade, chainMeta, subdued = false,
   onCycle, onPickState, onPromotePrimary, onDelete, onOpenEdit, onOpenChain,
 }: {
   t: ApiTodo;
   focus: ApiFocus | null;
   cascade: boolean;
   chainMeta?: TodoChainMeta;
+  // When true, render as a plain-row (no card chrome) — used for
+  // state='not_yet' so the "I'm doing this" todos stand out above the
+  // pile. Active todos pass subdued=false and keep the elevated card
+  // treatment.
+  subdued?: boolean;
   onCycle: () => void;
   onPickState: (s: TodoState) => void;
   onPromotePrimary: () => void;
@@ -594,10 +635,10 @@ function TodoRow({
       onMouseLeave={() => setHovered(false)}
       style={{
         position: "relative",
-        background: "var(--gooni-card, #FFFFFF)",
-        border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-        borderRadius: 8,
-        padding: "10px 16px",
+        background: subdued ? "transparent" : "var(--gooni-card, #FFFFFF)",
+        border: subdued ? "none" : "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+        borderRadius: subdued ? 0 : 8,
+        padding: subdued ? "7px 12px" : "10px 16px",
         display: "flex", alignItems: "center", gap: 12,
       }}
     >
