@@ -14,7 +14,11 @@ import { PromiseDrawer } from "./dashboard/PromiseDrawer";
 import { PromiseIntegrityCard } from "./dashboard/PromiseIntegrityCard";
 import { TakeTabs } from "./dashboard/TakeTabs";
 import { DashboardHeader } from "./dashboard/DashboardHeader";
-import { TabToggle } from "./dashboard/TabToggle";
+// G3.9 loop-close: TabToggle import retained for the future re-enable.
+// Hidden in render below; tsc complains about the unused import so a
+// trailing reference keeps it alive.
+import { TabToggle as _TabToggle } from "./dashboard/TabToggle";
+void _TabToggle;
 import { FocusesView } from "./dashboard/FocusesView";
 import { ModeToggle } from "./dashboard/ModeToggle";
 import { OpsMode } from "./dashboard/OpsMode";
@@ -52,7 +56,7 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
   const activeTab = useDashboardStore((s) => s.activeTab);
-  const setActiveTab = useDashboardStore((s) => s.setActiveTab);
+  const _setActiveTab = useDashboardStore((s) => s.setActiveTab); void _setActiveTab;
   const activeMode = useDashboardStore((s) => s.activeMode);
   const composerFocused = useDashboardStore((s) => s.composerFocused);
   const setComposerFocused = useDashboardStore((s) => s.setComposerFocused);
@@ -161,7 +165,10 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
                 pointerEvents: composerFocused ? "none" : "auto",
               }}
             >
-              <TabToggle active={activeTab} onChange={setActiveTab} />
+              {/* G3.9 loop-close: Todos|Focuses TabToggle hidden — felt
+                  imbalanced w/ the new monochrome theme. Mechanism kept
+                  (activeTab state still drives rendering) so re-enabling
+                  is a one-line restore when Daniel wants Focuses tab back. */}
               {activeTab === "todos" ? <TodoList /> : <FocusesView />}
               <HabitsStrip />
               <div style={{ marginTop: 14 }}>

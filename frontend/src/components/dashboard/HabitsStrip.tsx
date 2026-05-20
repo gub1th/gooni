@@ -124,9 +124,10 @@ export function HabitsStrip() {
           title="Add a habit"
           style={{
             width: 24, height: 24, borderRadius: 6,
-            background: "rgba(15,110,86,0.12)",
-            color: "#0F6E56",
-            border: "none", cursor: "pointer",
+            background: "rgba(15,23,42,0.06)",
+            color: "#0F172A",
+            border: "0.5px solid rgba(15,23,42,0.10)",
+            cursor: "pointer",
             display: "inline-flex", alignItems: "center", justifyContent: "center",
           }}
         >
