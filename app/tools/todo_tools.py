@@ -428,6 +428,75 @@ class UndoLastTodoOpTool(BaseTool):
         return f"restored {len(restored)}. {rendered}."
 
 
+class ShowDueWindowTool(BaseTool):
+    """G3.9 loop-close: date-range recall. Filters open todos by their
+    due_date relative to today/tomorrow/this_week, or surfaces overdues.
+    Master prompt should call this when Daniel asks date-relative
+    questions ("what's due tomorrow", "this week", "what's overdue").
+    """
+    name = "show_due_window"
+    description = (
+        "Show open todos due within a window. CALL when Daniel asks "
+        "'what's due today', 'tomorrow', 'this week', or 'what's overdue'. "
+        "Don't ad-lib from state_block — query the actual due_date col. "
+        "Returns formatted list."
+    )
+    parameters = {
+        "type": "object",
+        "properties": {
+            "range": {
+                "type": "string",
+                "enum": ["today", "tomorrow", "this_week", "overdue"],
+                "description": "Which due-date window to filter.",
+            },
+        },
+        "required": ["range"],
+    }
+
+    def execute(self, db=None, range: str = "today", **kwargs) -> str:
+        from datetime import datetime, timedelta
+        from ..db.models import Todo
+
+        if db is None:
+            return "(no db session)"
+        now = datetime.utcnow()
+        today_eod = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        tomorrow_start = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_eod = tomorrow_start.replace(hour=23, minute=59, second=59)
+        week_eod = (now + timedelta(days=7)).replace(hour=23, minute=59, second=59, microsecond=0)
+
+        q = db.query(Todo).filter(
+            Todo.done.is_(False),
+            Todo.deleted_at.is_(None),
+            Todo.due_date.is_not(None),
+        )
+
+        if range == "today":
+            q = q.filter(Todo.due_date <= today_eod, Todo.due_date >= now.replace(hour=0, minute=0, second=0, microsecond=0))
+            label = "due today"
+        elif range == "tomorrow":
+            q = q.filter(Todo.due_date >= tomorrow_start, Todo.due_date <= tomorrow_eod)
+            label = "due tomorrow"
+        elif range == "this_week":
+            q = q.filter(Todo.due_date >= now, Todo.due_date <= week_eod)
+            label = "due this week"
+        elif range == "overdue":
+            q = q.filter(Todo.due_date < now)
+            label = "overdue"
+        else:
+            return f"(invalid range '{range}' — expected today|tomorrow|this_week|overdue)"
+
+        rows = q.order_by(Todo.due_date.asc()).limit(20).all()
+        if not rows:
+            return f"({label}: nothing)"
+        lines = [f"{label}: {len(rows)} todo(s)"]
+        for t in rows:
+            due_str = t.due_date.strftime("%a %b %d") if t.due_date else "?"
+            state_tag = {"not_yet": "[ ]", "doing": "[~]"}.get(t.state, "[ ]")
+            lines.append(f"  {state_tag} \"{t.text}\" · {due_str}")
+        return "\n".join(lines)
+
+
 class ShowMyPlateTool(BaseTool):
     """G3.9 recall fluency tool. The state_block is always-on context,
     but it bloats the prompt to be fully verbose — this tool returns

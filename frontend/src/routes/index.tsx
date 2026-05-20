@@ -165,6 +165,30 @@ function NotesPage() {
     return () => window.removeEventListener("keydown", handler);
   }, [selectedSpaceId, view]);
 
+  // G3.9 loop-close: chat action chip → focus the corresponding todo on
+  // the dashboard. If view is already dashboard, TodoList catches the
+  // event directly. Otherwise we flip view, then re-fire the event on a
+  // microtask delay so the freshly-mounted TodoList listener catches it.
+  useEffect(() => {
+    function onFocusTodo(e: Event) {
+      const ev = e as CustomEvent<{ todoId: number }>;
+      const todoId = ev.detail?.todoId;
+      if (typeof todoId !== "number") return;
+      if (view !== "dashboard") {
+        setViewAndUrl("dashboard");
+        // Re-fire so the now-mounted TodoList catches it.
+        window.setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("gooni:focus-todo", { detail: { todoId } }));
+        }, 120);
+      }
+      // If already on dashboard, TodoList's own listener will handle
+      // scroll + flash; no view change needed.
+    }
+    window.addEventListener("gooni:focus-todo", onFocusTodo);
+    return () => window.removeEventListener("gooni:focus-todo", onFocusTodo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
   function setViewAndUrl(
     v: "notes" | "dashboard" | "chat" | "lists" | "eval",
     noteId?: number,
