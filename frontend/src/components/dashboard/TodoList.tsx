@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crown, Plus, AlertTriangle, ArrowUpRight, ArrowLeft } from "lucide-react";
+import { Crown, GripVertical, Plus, AlertTriangle, ArrowUpRight, ArrowLeft } from "lucide-react";
 import {
   fetchTodos, createTodo, updateTodo, cycleTodoState, deleteTodo,
   promoteTodoToPrimary, fetchFocuses,
@@ -76,7 +76,63 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
   const [cascadeIds, setCascadeIds] = useState<number[]>([]);
   const cascadeTimersRef = useRef<Record<number, number>>({});
 
+  // G3.9 drag-reorder state. draggedId = the row currently being
+  // dragged; dragOver = which row + side the cursor is hovering. We
+  // hold these in parent state so insertion-line indicators render
+  // consistently across siblings.
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<{ id: number; pos: "above" | "below" } | null>(null);
+
   const refresh = () => qc.invalidateQueries({ queryKey: ["todos-bundle"] });
+
+  async function handleReorderDrop() {
+    if (!bundle || draggedId === null || !dragOver) {
+      setDraggedId(null); setDragOver(null); return;
+    }
+    if (draggedId === dragOver.id) {
+      setDraggedId(null); setDragOver(null); return;
+    }
+    const target = bundle.open.find((x) => x.id === dragOver.id)
+      ?? (bundle.primary?.id === dragOver.id ? bundle.primary : null);
+    if (!target) {
+      setDraggedId(null); setDragOver(null); return;
+    }
+    // Compute new sort_order. Fractional between neighbors; backend
+    // PATCH stores it. Long-term drift acceptable for v1 — the
+    // `_apply_position` renormalizer in intent_handlers runs on chat-
+    // driven reorders; we can mirror that here later if frequent
+    // drags drift the column.
+    const targetSO = target.sort_order ?? 0;
+    const newSO = dragOver.pos === "above" ? targetSO - 0.5 : targetSO + 0.5;
+    try {
+      await updateTodo(draggedId, { sort_order: newSO });
+      refresh();
+    } catch (e) {
+      console.error("reorder PATCH failed", e);
+    } finally {
+      setDraggedId(null); setDragOver(null);
+    }
+  }
+
+  function makeDragHandlers(todoId: number) {
+    return {
+      onDragStart: () => setDraggedId(todoId),
+      onDragEnd: () => { setDraggedId(null); setDragOver(null); },
+      onDragOver: (e: React.DragEvent, pos: "above" | "below") => {
+        // Skip self-hover — no insertion line over the dragged row.
+        if (draggedId === todoId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (dragOver?.id !== todoId || dragOver.pos !== pos) {
+          setDragOver({ id: todoId, pos });
+        }
+      },
+      onDrop: () => { void handleReorderDrop(); },
+      showInsertionAbove: dragOver?.id === todoId && dragOver.pos === "above" && draggedId !== todoId,
+      showInsertionBelow: dragOver?.id === todoId && dragOver.pos === "below" && draggedId !== todoId,
+      isDragging: draggedId === todoId,
+    };
+  }
 
   function scheduleCascade(id: number) {
     setCascadeIds((arr) => (arr.includes(id) ? arr : [...arr, id]));
@@ -300,6 +356,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
                     onDelete={() => onDelete(t.id)}
                     onOpenEdit={() => setEditingId(t.id)}
                     onOpenChain={(id) => setChainViewId(id)}
+                    dragHandlers={makeDragHandlers(t.id)}
                   />
                 ))}
               </div>
@@ -325,6 +382,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
                     onDelete={() => onDelete(t.id)}
                     onOpenEdit={() => setEditingId(t.id)}
                     onOpenChain={(id) => setChainViewId(id)}
+                    dragHandlers={makeDragHandlers(t.id)}
                   />
                 ))}
               </div>
@@ -619,6 +677,7 @@ function LiveTimer({ since }: { since: string | null }) {
 function TodoRow({
   t, focus, cascade, chainMeta, subdued = false,
   onCycle, onPickState, onPromotePrimary, onDelete, onOpenEdit, onOpenChain,
+  dragHandlers,
 }: {
   t: ApiTodo;
   focus: ApiFocus | null;
@@ -635,6 +694,19 @@ function TodoRow({
   onDelete: () => void;
   onOpenEdit: () => void;
   onOpenChain: (id: number) => void;
+  // G3.9 frontend follow-up: drag-reorder handlers. Optional — when
+  // undefined the row renders without grip + drag affordances. Parent
+  // owns the drag state (draggedId, dragOverState) so the insertion-
+  // line indicator can render across siblings consistently.
+  dragHandlers?: {
+    onDragStart: () => void;
+    onDragEnd: () => void;
+    onDragOver: (e: React.DragEvent, pos: "above" | "below") => void;
+    onDrop: () => void;
+    showInsertionAbove: boolean;
+    showInsertionBelow: boolean;
+    isDragging: boolean;
+  };
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -649,7 +721,31 @@ function TodoRow({
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onDragOver={(e) => {
+        if (!dragHandlers) return;
+        // Split target into top-half (insert above) vs bottom-half
+        // (insert below) so the user can choose either side w/o
+        // overshooting.
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        const pos = e.clientY < midY ? "above" : "below";
+        dragHandlers.onDragOver(e, pos);
+      }}
+      onDrop={(e) => {
+        if (!dragHandlers) return;
+        e.preventDefault();
+        dragHandlers.onDrop();
+      }}
+      style={{ position: "relative", opacity: dragHandlers?.isDragging ? 0.4 : 1 }}
     >
+      {/* Insertion indicator lines — claude-minimal: 2px dark slate
+          bar above or below the target row, only visible during drag. */}
+      {dragHandlers?.showInsertionAbove && (
+        <div style={{
+          position: "absolute", top: -1, left: 12, right: 12, height: 2,
+          background: "#0F172A", borderRadius: 2, zIndex: 2,
+        }} />
+      )}
     <div
       className={`gooni-todo-row${cascade ? " gooni-todo-cascade" : ""}`}
       style={{
@@ -661,6 +757,32 @@ function TodoRow({
         display: "flex", alignItems: "center", gap: 12,
       }}
     >
+      {/* Drag grip — visible on hover (or always during a drag). Carries
+          draggable=true so picking it up grabs the whole row via the
+          parent's drag handlers. Cursor: grab/grabbing. Muted gray;
+          claude-minimal pattern. */}
+      {dragHandlers && (
+        <span
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            // Some browsers refuse to drag without dataTransfer.setData.
+            try { e.dataTransfer.setData("text/plain", String(t.id)); } catch { /* ignore */ }
+            dragHandlers.onDragStart();
+          }}
+          onDragEnd={() => dragHandlers.onDragEnd()}
+          title="Drag to reorder"
+          style={{
+            display: "flex", alignItems: "center",
+            color: hovered || dragHandlers.isDragging ? "#9CA3AF" : "transparent",
+            cursor: "grab",
+            transition: "color 0.15s",
+            marginLeft: -6, marginRight: -4,
+          }}
+        >
+          <GripVertical size={14} />
+        </span>
+      )}
       <span onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center" }}>
         <Checkbox
           state={t.state}
@@ -740,6 +862,12 @@ function TodoRow({
     )}
     {!chainMeta?.parent_id && hovered && (
       <OrphanLinkHint todoId={t.id} onOpenChain={onOpenChain} />
+    )}
+    {dragHandlers?.showInsertionBelow && (
+      <div style={{
+        position: "absolute", bottom: -1, left: 12, right: 12, height: 2,
+        background: "#0F172A", borderRadius: 2, zIndex: 2,
+      }} />
     )}
     </div>
   );
