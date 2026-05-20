@@ -8,6 +8,7 @@ import { publicNoteQueryOptions } from "../utils/publicQueries";
 import { fetchPublicNoteComments, type ApiNoteComment } from "../services/api";
 import { AttachmentModal } from "../components/notes/AttachmentModal";
 import { useNoteCardStyles } from "../components/notes/noteCardStyles";
+import { ReactionBar } from "../components/ReactionBar";
 
 export const Route = createFileRoute("/public/$noteId")({
   component: PublicNotePage,
@@ -302,6 +303,12 @@ function PublicNotePage() {
               data-public-view="true"
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(note.content || "") }}
             />
+            {/* Page-level reactions — same shape Daniel sees in the editor.
+                Anonymous reactor_id (localStorage UUID) so public viewers
+                can react without auth. */}
+            <div style={{ marginTop: 18, marginBottom: 18 }}>
+              <ReactionBar targetType="note" targetId={id} />
+            </div>
             <PublicNoteCommentsThread noteId={id} />
           </>
         )}
@@ -417,6 +424,9 @@ function PublicNoteCommentsThread({ noteId }: { noteId: number }) {
                 style={{ fontSize: 13.5, lineHeight: 1.55, color: "#1E293B" }}
                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(c.content) }}
               />
+              <div style={{ marginTop: 6 }}>
+                <ReactionBar targetType="comment" targetId={c.id} compact />
+              </div>
             </div>
           </div>
         ))}

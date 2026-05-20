@@ -2799,3 +2799,48 @@ export async function fetchReflections(opts: {
   if (!res.ok) throw new Error("Failed to fetch reflections");
   return res.json();
 }
+
+// ── Reactions (Confluence-style emoji on notes + comments) ────────────────
+
+export type ReactionTarget = "note" | "comment";
+
+export interface ReactionBucket {
+  emoji: string;
+  count: number;
+  reacted_by_me: boolean;
+}
+
+export async function fetchReactions(
+  targetType: ReactionTarget,
+  targetId: number,
+  reactorId: string | null,
+): Promise<ReactionBucket[]> {
+  const params = new URLSearchParams({
+    target_type: targetType,
+    target_id: String(targetId),
+  });
+  if (reactorId) params.set("reactor_id", reactorId);
+  const res = await apiFetch(`${BASE}/reactions?${params.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch reactions");
+  return res.json();
+}
+
+export async function toggleReaction(
+  targetType: ReactionTarget,
+  targetId: number,
+  emoji: string,
+  reactorId: string,
+): Promise<ReactionBucket[]> {
+  const res = await apiFetch(`${BASE}/reactions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_type: targetType,
+      target_id: targetId,
+      emoji,
+      reactor_id: reactorId,
+    }),
+  });
+  if (!res.ok) throw new Error("Failed to toggle reaction");
+  return res.json();
+}

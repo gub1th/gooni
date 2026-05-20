@@ -29,6 +29,7 @@ import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
 import { NoteComments } from "./NoteComments";
+import { ReactionBar } from "../ReactionBar";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
@@ -2463,6 +2464,12 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 </div>
 
                 <NoteMemoriesPanel memories={noteMemories} />
+
+                {activeNote?.id && activeNote.id > 0 ? (
+                  <div style={{ marginTop: 16, paddingLeft: 4 }}>
+                    <ReactionBar targetType="note" targetId={activeNote.id} />
+                  </div>
+                ) : null}
 
                 {activeNote?.id && activeNote.id > 0 ? (
                   <NoteComments noteId={activeNote.id} />

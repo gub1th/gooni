@@ -1465,3 +1465,38 @@ class Attachment(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class Reaction(Base):
+    """Confluence-style emoji reaction on a note or comment.
+
+    Polymorphic on (target_type, target_id) — same row shape covers
+    notes + comments + future surfaces (lists, etc) without a per-target
+    join table explosion. UNIQUE constraint on
+    (target_type, target_id, emoji, reactor_id) so a reactor can't
+    double-react with the same emoji on the same target.
+
+    reactor_id is a stable opaque string from the frontend (localStorage
+    UUID for anonymous public viewers, or a real user id once auth lands).
+    Not an FK — the backend doesn't know who the reactor is, just that
+    they were consistent across requests. No PII.
+    """
+
+    __tablename__ = "reactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # "note" | "comment". Kept flexible so we can add more targets without
+    # migrating; validation happens at the route layer.
+    target_type = Column(String, nullable=False)
+    target_id = Column(Integer, nullable=False)
+    emoji = Column(String, nullable=False)
+    reactor_id = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "target_type", "target_id", "emoji", "reactor_id",
+            name="uq_reaction_target_emoji_reactor",
+        ),
+        Index("ix_reactions_target", "target_type", "target_id"),
+    )
+
+
