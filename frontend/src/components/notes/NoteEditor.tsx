@@ -1778,7 +1778,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           ref={scrollContainerRef}
           style={{ flex: 1, overflowY: "auto", boxSizing: "border-box", width: "100%" }}
         >
-          <div style={{ maxWidth: 780, width: "100%", margin: "0 auto", padding: "48px 72px", boxSizing: "border-box" }}>
+          <div style={{ maxWidth: 780, width: "100%", margin: "0 auto", padding: "72px 72px 48px", boxSizing: "border-box" }}>
             {!activeNote && (
               <div
                 style={{

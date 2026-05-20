@@ -709,13 +709,16 @@ export function NotesList() {
             }}
           />
 
-          {/* Footer row — stats + cover-edit affordance. Stats are
-              best-effort; nothing if the fetch hasn't resolved yet. */}
+          {/* Footer — stats stack into two lines (notes + touched on
+              line 1, top tags on line 2) so the 210px column doesn't
+              pulverize them into a vertical drip of fragments. The
+              "+ cover" affordance moves out of the row entirely into the
+              card's top-right corner — keeps the stats line uncluttered. */}
           <div
             style={{
               display: "flex",
-              alignItems: "center",
-              gap: 6,
+              flexDirection: "column",
+              gap: 2,
               marginTop: 6,
               fontSize: 11,
               color: "rgba(71,85,105,0.85)",
@@ -724,20 +727,32 @@ export function NotesList() {
           >
             {spaceStats && (
               <>
-                <span>{spaceStats.note_count} note{spaceStats.note_count === 1 ? "" : "s"}</span>
-                {spaceStats.last_touched && (
-                  <span style={{ color: "rgba(142,142,147,0.85)" }}>
-                    · last touched {formatRelative(spaceStats.last_touched)}
-                  </span>
-                )}
+                <span>
+                  {spaceStats.note_count} note{spaceStats.note_count === 1 ? "" : "s"}
+                  {spaceStats.last_touched && (
+                    <span style={{ color: "rgba(142,142,147,0.85)" }}>
+                      {" · "}{formatRelative(spaceStats.last_touched)}
+                    </span>
+                  )}
+                </span>
                 {spaceStats.top_tags.length > 0 && (
                   <span style={{ color: "rgba(142,142,147,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    · {spaceStats.top_tags.map((t) => `#${t.tag}`).join(" ")}
+                    {spaceStats.top_tags.map((t) => `#${t.tag}`).join(" ")}
                   </span>
                 )}
               </>
             )}
-            <span style={{ flex: 1 }} />
+          </div>
+          <div
+            style={{
+              position: "absolute",
+              top: 6,
+              right: 8,
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
             <button
               onClick={() => coverInputRef.current?.click()}
               disabled={coverUploading}

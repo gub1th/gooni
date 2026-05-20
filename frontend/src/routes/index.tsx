@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { ChatView } from "../components/ChatView";
 import { Dashboard } from "../components/Dashboard";
 import { EvalView } from "../components/eval/EvalView";
@@ -42,27 +42,41 @@ function NotesPage() {
   const allLists = useListsStore((s) => s.lists);
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
+  const { activeNoteId } = useNotesContentStore();
 
-  // Initialize view from URL so deep-linking a note doesn't flash the dashboard first.
-  const [view, setView] = useState<"notes" | "dashboard" | "chat" | "lists" | "eval">(() =>
-    search.audit ? "eval" : search.note ? "notes" : search.conv ? "chat" : search.list ? "lists" : search.view ?? "dashboard"
-  );
-  const [activeListId, setActiveListId] = useState<number | null>(search.list ?? null);
+  // View is DERIVED from the URL, not stored locally. Single source of
+  // truth: search params own the answer, so any navigate() — Gooni-logo
+  // click, deep link, browser back — flips the view immediately without
+  // a side-channel.
+  //
+  // The compose path is the one subtlety: createNote stamps a negative
+  // temp activeNoteId (-Date.now()) BEFORE the URL knows about it.
+  // handleCompose writes ?view=notes to the URL so the view derivation
+  // reads "notes" through that gap; the effect further down replaces
+  // ?view=notes with ?note=<id> once the real positive id lands.
+  const view: "notes" | "dashboard" | "chat" | "lists" | "eval" =
+    search.audit ? "eval" :
+    search.note ? "notes" :
+    search.conv ? "chat" :
+    search.list ? "lists" :
+    search.view === "notes" ? "notes" :
+    search.view === "chat" ? "chat" :
+    "dashboard";
 
-  // Initial load: restore from URL params
+  const activeListId: number | null = search.list ?? null;
+
+  // Initial load: prefetch core stores. Search-param effects below own
+  // the per-param fetches (fetchNote, selectConversation, etc.) so they
+  // re-fire on subsequent in-page navigations, not just on first mount.
   useEffect(() => {
     fetchSpaces();
     fetchConversations();
     fetchAllLists();
-    // Note: search.note / search.conv handling moved to dedicated effect below
-    // so navigation TO this page (e.g. from the notes-map "open this note")
-    // also takes effect, not just the first mount.
   }, []);
 
-  // React to search.note changes — fires both on initial mount and on
-  // subsequent navigations (e.g. clicking a node in the notes map while
-  // already on /). Without this, navigate({ to: "/", search: { note } })
-  // from elsewhere would silently no-op when the page is already mounted.
+  // ?note=<id> → fetch + seed the note into the store. View derives to
+  // "notes" automatically from the URL param; this effect handles the
+  // side effects (fetch, store seed, space switch).
   //
   // All Zustand mutations land in ONE setState so no intermediate render
   // observes `activeNoteId === null` between the selectSpace call (which
@@ -100,47 +114,19 @@ function NotesPage() {
         };
       });
       loadNotes(targetSpace);
-      setView("notes");
     }).catch(() => {
-      setView("dashboard");
+      // Bad note id — strip it from the URL so view falls back to dashboard.
+      navigate({ search: { note: undefined, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined }, replace: true });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.note]);
 
-  // Same pattern for conversation deep-links.
+  // ?conv=<id> → select the conversation. View derives to "chat".
   useEffect(() => {
     if (!search.conv) return;
     selectConversation(search.conv);
-    setView("chat");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.conv]);
-
-  // Same pattern for list deep-links. Without this, navigating to
-  // `/?list=N` while already on `/` (e.g. clicking the composer "Routed:
-  // backlog" pill, or the chat-audit/memories sidebars' onSelectList) only
-  // updated the URL — the view stayed wherever it was. Initial mount used
-  // search.list via useState, so refresh worked; subsequent navigations
-  // didn't.
-  useEffect(() => {
-    if (!search.list) return;
-    setActiveListId(search.list);
-    setView("lists");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.list]);
-
-  // ?audit=1 lands directly on the Audit tab.
-  useEffect(() => {
-    if (search.audit) setView("eval");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.audit]);
-
-  // ?view=notes|chat forces a view that has no other URL signal (All Notes,
-  // space row, fresh-chat). Sidebar lives in __root.tsx's AppShell, so it
-  // can't call setView directly — it drives the view through this param.
-  useEffect(() => {
-    if (search.view === "notes" || search.view === "chat") setView(search.view);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.view]);
 
   useEffect(() => {
     if (view === "notes") {
@@ -185,7 +171,6 @@ function NotesPage() {
     convId?: number,
     listId?: number,
   ) {
-    setView(v);
     if (v === "notes" && noteId) {
       navigate({ search: { note: noteId, conv: undefined, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
     } else if (v === "chat" && convId) {
@@ -199,26 +184,31 @@ function NotesPage() {
 
   function handleCompose() {
     const spaceId = selectedSpaceId ?? "general";
-    setView("notes");
     selectSpace(spaceId);
     createNote(spaceId);
-    navigate({ search: { note: undefined, conv: undefined, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
+    // ?view=notes parks us in the notes shell while the optimistic
+    // negative-id createNote resolves. The activeNoteId effect below
+    // replaces ?view=notes with ?note=<id> once the real id lands.
+    navigate({ search: { note: undefined, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: "notes" }, replace: true });
   }
 
-  // When active note changes while in notes view, update URL
-  const { activeNoteId } = useNotesContentStore();
+  // Store-driven URL sync. When createNote (or any other path) sets a
+  // real positive activeNoteId, mirror it into ?note=<id> so refresh /
+  // back-button work and view derivation lands on "notes" via search.note.
   useEffect(() => {
-    if (view === "notes" && activeNoteId && activeNoteId > 0) {
+    if (view === "notes" && activeNoteId && activeNoteId > 0 && search.note !== activeNoteId) {
       navigate({ search: { note: activeNoteId, conv: undefined, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeNoteId, view]);
 
-  // When active conversation changes while in chat view, update URL
+  // Mirror active conversation id into ?conv=<id> for refresh/back-button.
   const { activeId: activeConvId } = useConversationsStore();
   useEffect(() => {
-    if (view === "chat" && activeConvId) {
+    if (view === "chat" && activeConvId && search.conv !== activeConvId) {
       navigate({ search: { note: undefined, conv: activeConvId, list: undefined , audit: undefined, segment: undefined, view: undefined}, replace: true });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConvId, view]);
 
   // Sidebar + GooniLayer + PasswordGate live in __root.tsx's AppShell so they
@@ -228,7 +218,7 @@ function NotesPage() {
     <>
         {view === "dashboard" ? (
           <Dashboard
-            onOpenNote={() => setView("notes")}
+            onOpenNote={() => navigate({ search: { note: undefined, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: "notes" }, replace: true })}
           />
         ) : view === "chat" ? (
           <ChatView />

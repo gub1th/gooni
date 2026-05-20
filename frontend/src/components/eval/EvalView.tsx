@@ -1903,9 +1903,15 @@ function MessageRatingRow({
   const [pending, setPending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Only resync local buffer when switching to a different message.
+  // Re-syncing on every existing.comment change clobbered typed-but-
+  // unsaved text whenever setRating() fired (parent re-renders existing
+  // with the freshly-saved rating, and that flipped existing.comment
+  // back to its persisted value, wiping the in-flight comment).
   useEffect(() => {
     setComment(existing?.comment ?? "");
-  }, [existing?.comment, messageId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messageId]);
 
   // Auto-grow up to 3× the rows={3} default so a long rationale doesn't
   // hide behind a 3-line viewport. Caller-driven changes (the effect
@@ -1937,9 +1943,13 @@ function MessageRatingRow({
         // thumbs was the only thing). Comment goes with it.
         onRatingPatched(messageId, null);
       } else {
+        // Carry the in-flight local comment so clicking a rating button
+        // ALSO persists whatever Daniel typed but hasn't manually saved.
+        // Falls back to the persisted value when local is empty.
+        const commentToSend = comment.trim() || existing?.comment || null;
         const updated = await putMessageRating(segmentId, messageId, {
           rating,
-          comment: existing?.comment ?? null,
+          comment: commentToSend,
         });
         onRatingPatched(messageId, {
           id: updated.id,
