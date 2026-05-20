@@ -187,7 +187,7 @@ def extract_candidates(user_message: str, assistant_reply: str) -> list[dict[str
         user=user_message[:1500],
         assistant=(assistant_reply or "")[:1500],
     )
-    raw = llm_client.generate_simple_completion(prompt, max_tokens=600)
+    raw = llm_client.generate_simple_completion(prompt, max_tokens=600, model="gpt-5.4-mini")
     parsed = _parse_json_array(raw)
     return [c for c in parsed if _validate_candidate(c)]
 
@@ -857,7 +857,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         text=text[:2000],
     )
     try:
-        raw = llm_client.generate_simple_completion(prompt, max_tokens=500, temperature=0.0)
+        raw = llm_client.generate_simple_completion(prompt, max_tokens=500, temperature=0.0, model="gpt-5.4-mini")
     except Exception as e:
         print(f"extract_signals LLM error: {e}")
         return empty
@@ -906,7 +906,7 @@ def reconcile_candidate(
         cconfidence=candidate.get("confidence", 0.8),
         existing=existing_block,
     )
-    raw = llm_client.generate_simple_completion(prompt, max_tokens=120, temperature=0.0)
+    raw = llm_client.generate_simple_completion(prompt, max_tokens=120, temperature=0.0, model="gpt-5.4-mini")
     parsed = _parse_json_object(raw)
     if not parsed:
         return None

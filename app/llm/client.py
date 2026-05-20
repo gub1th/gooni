@@ -322,11 +322,11 @@ class LLMClient:
             print(f"Completion error: {e}")
             return ""
 
-    def generate_intention_context(self, query: str, recent_history: List[Dict[str, str]]) -> str:
+    def generate_intention_context(self, query: str, recent_history: List[Dict[str, str]], model: str | None = None) -> str:
         """Generate intention context for the given query and recent history."""
         try:
             response = self.client.chat.completions.create(
-                model=self.chat_model,
+                model=model or self.chat_model,
                 messages=[{"role": "system", "content": INTENTION_GENERATION_PROMPT}] + recent_history + [
                     {"role": "user", "content": query},
                 ],

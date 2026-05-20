@@ -9,8 +9,12 @@ import { tileKey, type BaseTile } from "./tileGrid";
 // Selection: cap at NOTE_COIN_CAP. Pinned-public notes first, then
 // newest by updated_at desc.
 //
+// Spawn tile (0,0): reserved for the top-ranked pinned note (the
+// "what is Gooni" intro coin) so the player lands on it immediately.
+// All other notes hash-and-probe past spawn.
+//
 // Hash: Knuth multiplicative on note.id, linear-probe on collision.
-// Skip (0,0) spawn tile and any nature-blocked tile.
+// Skip any nature-blocked tile.
 
 export const NOTE_COIN_CAP = 10;
 
@@ -46,7 +50,21 @@ export function buildNoteTileMap(
   const taken = new Set<string>();
   const out: NoteTileAssignment[] = [];
 
-  for (const note of ranked) {
+  // Spawn-anchor the top pinned note so the player lands on the
+  // "what is Gooni" coin immediately. Falls through to hashed placement
+  // if the spawn tile is somehow blocked or missing.
+  let remaining: PublicNote[] = ranked;
+  const topPinned = ranked.find((n) => n.is_public_pinned);
+  if (topPinned) {
+    const spawn = tiles.find((t) => isSpawnTile(t));
+    if (spawn && !isTileBlocked(spawn.gx, spawn.gz)) {
+      taken.add(tileKey(spawn.gx, spawn.gz));
+      out.push({ note: topPinned, tile: spawn });
+      remaining = ranked.filter((n) => n.id !== topPinned.id);
+    }
+  }
+
+  for (const note of remaining) {
     const start = knuthHash(note.id) % tiles.length;
     let placed = false;
     for (let i = 0; i < tiles.length; i++) {

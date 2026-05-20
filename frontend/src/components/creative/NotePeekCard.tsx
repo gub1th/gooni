@@ -67,13 +67,12 @@ export function NotePeekCard({ note, onExpand, onDismiss }: Props) {
   const spaceName = displayed.space_name;
   const readMin = displayed.read_time_minutes;
 
-  // Accent matches coin palette: gold for regular, rose-magenta for
-  // pinned. Same gradient as the /public hero pill so cross-surface
-  // identity stays consistent.
+  // Accent matches coin palette: gold for regular, violet for pinned
+  // (the spawn-anchored "what is Gooni" intro coin).
   const accent = isPinned
-    ? "linear-gradient(135deg, #ff7ab8 0%, #ff3d8c 100%)"
+    ? "linear-gradient(135deg, #c4a8ff 0%, #7c3aed 100%)"
     : "linear-gradient(135deg, #ffe79a 0%, #ffaa1f 100%)";
-  const accentSolid = isPinned ? "#ff3d8c" : "#ffaa1f";
+  const accentSolid = isPinned ? "#7c3aed" : "#ffaa1f";
 
   return createPortal(
     <div

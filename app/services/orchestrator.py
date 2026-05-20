@@ -1193,7 +1193,7 @@ class Orchestrator:
                 print(f"[event_cb] stage {stage} failed: {e}")
 
         _emit("intent", "Reading your message")
-        intention_context = llm_client.generate_intention_context(query, recent_history[-6:])
+        intention_context = llm_client.generate_intention_context(query, recent_history[-6:], model="gpt-5.4-mini")
         tb.intent(query, intention_context)
         _emit("memory_recall", "Pulling related memories")
         memory_context, recalled_memories = memory_service.build_memory_context_with_debug(query, db=db)
