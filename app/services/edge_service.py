@@ -11,7 +11,16 @@ Edge kinds in use (v1):
   - 'supports'     Promise → Focus    (this promise serves a focus)
   - 'closes'       Promise → Todo     (promise fulfilled by todo)
   - 'derives_from' generic provenance
+
+Edge kinds in use (v2 — G3.5 Todo Continuity):
   - 'mentions'     references without owning
+  - 'spawned_from' child Todo → parent Todo (lineage; M:N. A closed
+                   todo can spawn multiple follow-ups; a follow-up can
+                   have multiple ancestors when a merge happens.)
+  - 'outcome_of'   Note → closed Todo (for longer outcomes than the
+                   inline Todo.closure_note can carry. The Note is the
+                   primary surface; this edge tags it as the closure
+                   record for the todo.)
 
 Idempotency: insert is upsert-on-conflict (the UNIQUE constraint
 `uq_edges_endpoints_kind` covers the 5-tuple).

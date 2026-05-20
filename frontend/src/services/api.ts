@@ -837,8 +837,22 @@ export interface ApiTodo {
   completed_at: string | null;
   sort_order: number;
   source_note_id: number | null;
+  // G3.5: short inline outcome text captured at close. Null when no
+  // outcome was given. Longer outcomes use a Note + `outcome_of` edge.
+  closure_note?: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+// G3.5: per-todo chain lineage summary. Backend computes once for the
+// whole bundle so the UI can render Surface C (↗N + "from:" indicators)
+// without N+1 chain fetches. parent_text is the parent's text trimmed —
+// the UI may truncate further. Only todos with chain links have entries.
+export interface TodoChainMeta {
+  children_total: number;
+  children_done: number;
+  parent_id: number | null;
+  parent_text: string | null;
 }
 
 // Bucketed payload from GET /todos. Frontend renders `primary` as the
@@ -848,6 +862,10 @@ export interface ApiTodoBundle {
   primary: ApiTodo | null;
   open: ApiTodo[];
   done_today: ApiTodo[];
+  // G3.5: map of todo_id → chain metadata. Only present for todos with
+  // at least one spawned_from edge (either as src or dst). Absent entries
+  // mean the todo has no chain — render no indicator.
+  chain_summary?: Record<number, TodoChainMeta>;
 }
 
 export interface ApiFocus {
@@ -964,6 +982,93 @@ export async function promoteTodoToPrimary(id: number): Promise<ApiTodo> {
     method: "POST",
   });
   if (!res.ok) throw new Error("Failed to promote todo to primary");
+  return res.json();
+}
+
+// ── G3.5 Todo Continuity — close-with-outcome + chain + search ──────
+
+export interface SpawnedTodoSpec {
+  text: string;
+  due_hint?: string | null;
+  subtitle?: string | null;
+}
+
+export interface CloseTodoResult {
+  parent: ApiTodo;
+  spawned: ApiTodo[];
+  edges: number[];
+}
+
+export async function closeTodoWithOutcome(
+  id: number,
+  payload: { closure_note?: string | null; spawned?: SpawnedTodoSpec[] },
+): Promise<CloseTodoResult> {
+  const res = await apiFetch(`${BASE}/todos/${id}/close`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to close todo with outcome");
+  return res.json();
+}
+
+export interface TodoChainNode {
+  todo: ApiTodo;
+  depth: number;
+}
+
+export interface TodoChain {
+  this: ApiTodo;
+  ancestors: TodoChainNode[];
+  descendants: TodoChainNode[];
+}
+
+export async function fetchTodoChain(
+  id: number,
+  maxDepth: number = 10,
+): Promise<TodoChain> {
+  const res = await apiFetch(`${BASE}/todos/${id}/chain?max_depth=${maxDepth}`);
+  if (!res.ok) throw new Error("Failed to fetch todo chain");
+  return res.json();
+}
+
+export async function linkTodoParent(
+  childId: number,
+  parentId: number,
+): Promise<{ ok: boolean; child_id: number; parent_id: number }> {
+  const res = await apiFetch(`${BASE}/todos/${childId}/link-parent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parent_id: parentId }),
+  });
+  if (!res.ok) throw new Error("Failed to link parent");
+  return res.json();
+}
+
+export async function unlinkTodoParent(
+  childId: number,
+  parentId: number,
+): Promise<{ deleted: number }> {
+  const res = await apiFetch(
+    `${BASE}/todos/${childId}/parents/${parentId}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error("Failed to unlink parent");
+  return res.json();
+}
+
+export async function searchTodos(
+  q: string,
+  limit: number = 10,
+  includeDone: boolean = true,
+): Promise<{ matches: ApiTodo[] }> {
+  const params = new URLSearchParams({
+    q,
+    limit: String(limit),
+    include_done: String(includeDone),
+  });
+  const res = await apiFetch(`${BASE}/todos/search?${params}`);
+  if (!res.ok) throw new Error("Failed to search todos");
   return res.json();
 }
 

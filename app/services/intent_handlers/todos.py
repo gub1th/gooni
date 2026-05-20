@@ -208,6 +208,70 @@ def _handle_complete(it, ctx, result, todo_service) -> None:
         result.failed_todo_actions.append({"kind": "complete", "match": match})
         return
     tid, text, score = hit
+
+    # G3.5: complete kind can carry closure_note + spawned follow-ups.
+    # Use close_with_outcome instead of bare update() so the closure_note
+    # lands on the Todo + spawned_from edges get wired in one transaction.
+    closure_note = (it.get("closure_note") or "").strip() or None
+    spawned = it.get("spawned") or []
+
+    if closure_note or spawned:
+        out = todo_service.close_with_outcome(
+            ctx.db,
+            tid,
+            closure_note=closure_note,
+            spawned=spawned,
+        )
+        if out is None:
+            return
+        result.completed_todos.append(
+            {
+                "text": text,
+                "todo_id": tid,
+                "closure_note": closure_note,
+            }
+        )
+        result.tools_used.append("router:todo_completed")
+        _safe_trace(
+            ctx,
+            "router:todo_completed",
+            f"Completed todo (cosine={score:.2f}) w/ outcome+{len(spawned)} spawn",
+            {
+                "match": match,
+                "text": text,
+                "id": tid,
+                "closure_note": closure_note,
+                "spawned_count": len(spawned),
+            },
+        )
+        # Surface spawned children in captured_todos so the ack composer
+        # + just_extracted_block can render them with real ids. Each
+        # carries spawned_from_id pointing back to the parent.
+        for child_serial in out.get("spawned", []):
+            result.captured_todos.append(
+                {
+                    "text": child_serial.get("text"),
+                    "todo_id": child_serial.get("id"),
+                    "spawned_from_id": tid,
+                    "spawned_from_text": text,
+                }
+            )
+            result.tools_used.append("router:todo_spawned")
+            _safe_trace(
+                ctx,
+                "router:todo_spawned",
+                f"Spawned follow-up todo from #{tid}",
+                {
+                    "parent_id": tid,
+                    "child_id": child_serial.get("id"),
+                    "child_text": child_serial.get("text"),
+                },
+            )
+        return
+
+    # No closure metadata — bare complete via the existing update() path
+    # so the existing behavior (backlog ticket auto-sync, primary clear)
+    # stays intact. This is the common case for terse closes.
     todo = todo_service.update(ctx.db, tid, state="done")
     if todo is None:
         return

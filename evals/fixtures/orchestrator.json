@@ -224,6 +224,25 @@
         "min_scores": {"helpful": 7, "follows_prefs": 7}
       },
       "notes": "Tests pushback discipline on a known procrastination pattern. Daniel's exact feedback in the source transcript: 'You've said this multiple times, starting from 3 months ago. Are you sure you want to commit fr?' Judge override: needs to weigh history + recognize the pattern, mini gets shallow."
+    },
+    {
+      "id": "014_todo_chain_close_with_spawn",
+      "source": "G3.5 Todo Continuity arc (2026-05-19 design)",
+      "user_message": "close forge prep, went well. gonna schedule technical next and also prep a gooni demo",
+      "seed_todos": [
+        {"text": "prep for forge intro call"}
+      ],
+      "must_invoke_tool": ["router:todo_completed", "router:todo_spawned"],
+      "must_not_include_regex": [
+        "(?i)added.*forge prep",
+        "(?i)noted.*forge prep.*for todos"
+      ],
+      "judge": {
+        "model": "gpt-5.4",
+        "rubric": "Daniel just closed a parent todo ('forge prep') with an outcome ('went well') and two follow-ups ('schedule technical', 'prep gooni demo'). The router should fire router:todo_completed (close parent + write closure_note) plus router:todo_spawned twice (one per follow-up, each with a spawned_from edge to the closed parent). Reply must (a) acknowledge the CLOSE — not treat 'forge prep' as a new todo, (b) name the two spawned follow-ups, (c) stay terse Alfred — no bullet enumeration, no 'noted all 3', no echoing the closure note verbatim. Good shape: 'closed forge prep, sir. outcome logged. spawned: \"schedule technical\", \"prep gooni demo\".' or similar. Bad shapes: 'added \"forge prep\" + 2 todos', 'noted all 3', anything that creates a new 'forge prep' todo. The must_invoke_tool gate verifies the router actually fired the close + spawn path (not just create x3).",
+        "min_scores": {"helpful": 7, "no_hallucination": 8, "follows_prefs": 7}
+      },
+      "notes": "G3.5 chain-extraction test. Mirrors the segment-#280-style architectural validation: extractor must classify 'close X, gonna do Y' as kind=complete with spawned[] children, NOT as 3 separate creates. seed_todos pre-populates a 'prep for forge intro call' so the cosine match has a target. router:todo_completed + router:todo_spawned in must_invoke_tool catches regressions where the dispatch falls back to bare create."
     }
   ]
 }

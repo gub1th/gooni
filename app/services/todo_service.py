@@ -363,6 +363,234 @@ class TodoService:
         db.refresh(primary)
         return primary
 
+    # ── G3.5 Todo Continuity — closure capture + lineage edges ──────
+    #
+    # Closure ≠ end-of-thread. When a todo closes, the work often continues
+    # (outcomes happen, follow-ups emerge). These methods let callers
+    # capture a `closure_note` on the parent + spawn child todos with
+    # `spawned_from` edges so the lineage graph stays walkable.
+    #
+    # `spawned_from` is M:N — a closed todo can spawn multiple follow-ups;
+    # a follow-up can have multiple ancestors when a merge happens. Edges
+    # live in the generic `edges` table (kind='spawned_from', src=child,
+    # dst=parent — convention is "src has property X dst").
+
+    def close_with_outcome(
+        self,
+        db: Session,
+        todo_id: int,
+        *,
+        closure_note: str | None = None,
+        spawned: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """Close a todo with optional outcome text + optional spawned
+        follow-ups. Single transaction.
+
+        Args:
+          todo_id: the todo being closed
+          closure_note: optional short outcome text (TEXT col on Todo)
+          spawned: list of {text, due_hint?, subtitle?} dicts. Each becomes
+            a new Todo with a `spawned_from` edge pointing back to todo_id.
+            Inherits focus_id from the parent so chains stay focused.
+
+        Returns:
+          {
+            "parent": serialized Todo,
+            "spawned": [serialized Todo, ...],
+            "edges": [edge_id, ...],
+          }
+          Or None if todo_id doesn't exist.
+        """
+        from . import edge_service
+
+        parent = self.get(db, todo_id)
+        if parent is None:
+            return None
+
+        # Close the parent. Reuses update() so backlog-ticket auto-sync
+        # + is_primary auto-clear behavior stays intact.
+        if (closure_note or "").strip():
+            parent.closure_note = closure_note.strip()
+        self.update(db, todo_id, state="done")
+        db.refresh(parent)
+
+        # Spawn children. Each inherits parent's focus_id so threads stay
+        # within the same focus context.
+        spawned_rows: list[Todo] = []
+        edge_ids: list[int] = []
+        for spec in (spawned or []):
+            text = (spec.get("text") or "").strip()
+            if not text:
+                continue
+            due_at = spec.get("due_date")
+            if due_at is None:
+                from ..services.intent_handlers.todos import _parse_due
+                due_at = _parse_due(spec.get("due_hint"))
+            child = self.create(
+                db,
+                text=text,
+                subtitle=spec.get("subtitle"),
+                due_date=due_at,
+                focus_id=parent.focus_id,
+            )
+            edge = edge_service.link(
+                db,
+                src_kind="todo",
+                src_id=child.id,
+                dst_kind="todo",
+                dst_id=parent.id,
+                kind="spawned_from",
+            )
+            spawned_rows.append(child)
+            if edge is not None:
+                edge_ids.append(edge.id)
+
+        return {
+            "parent": serialize_todo(parent),
+            "spawned": [serialize_todo(t) for t in spawned_rows],
+            "edges": edge_ids,
+        }
+
+    def add_parent(
+        self, db: Session, child_id: int, parent_id: int
+    ) -> bool:
+        """Wire a `spawned_from` edge from child → parent. Idempotent.
+        Returns True if either created or already existed; False if
+        either todo is missing or child == parent."""
+        from . import edge_service
+
+        if child_id == parent_id:
+            return False
+        child = self.get(db, child_id)
+        parent = self.get(db, parent_id)
+        if child is None or parent is None:
+            return False
+        edge_service.link(
+            db,
+            src_kind="todo",
+            src_id=child_id,
+            dst_kind="todo",
+            dst_id=parent_id,
+            kind="spawned_from",
+        )
+        return True
+
+    def remove_parent(
+        self, db: Session, child_id: int, parent_id: int
+    ) -> int:
+        """Drop the `spawned_from` edge between child and parent.
+        Returns count deleted (0 or 1)."""
+        from . import edge_service
+
+        return edge_service.unlink(
+            db,
+            src_kind="todo",
+            src_id=child_id,
+            dst_kind="todo",
+            dst_id=parent_id,
+            kind="spawned_from",
+        )
+
+    def get_chain(
+        self,
+        db: Session,
+        todo_id: int,
+        *,
+        max_depth: int = 10,
+    ) -> dict[str, Any] | None:
+        """Walk the lineage graph centered on todo_id. Returns a dict
+        with three lists:
+          {
+            "this":        serialized Todo,
+            "ancestors":   [{todo: serialized, depth: int}, ...],  # parents, grandparents, ...
+            "descendants": [{todo: serialized, depth: int}, ...],  # children, grandchildren, ...
+          }
+
+        BFS in each direction up to max_depth. Returns None if the todo
+        doesn't exist. Soft-deleted nodes ARE included (chain history is
+        valuable even when a node was killed) — caller decides whether
+        to render them.
+        """
+        from . import edge_service
+
+        this = self.get(db, todo_id, include_deleted=True)
+        if this is None:
+            return None
+
+        def walk(start_id: int, direction: str) -> list[dict[str, Any]]:
+            """direction='up' = ancestors (follow src.spawned_from→dst);
+            direction='down' = descendants (follow dst.spawned_from→src)."""
+            out: list[dict[str, Any]] = []
+            seen: set[int] = {start_id}
+            frontier: list[tuple[int, int]] = [(start_id, 0)]  # (id, depth)
+            while frontier:
+                next_frontier: list[tuple[int, int]] = []
+                for nid, depth in frontier:
+                    if depth >= max_depth:
+                        continue
+                    neighbors = edge_service.neighbors(
+                        db,
+                        kind_of_node="todo",
+                        node_id=nid,
+                        edge_kind="spawned_from",
+                        direction="out" if direction == "up" else "in",
+                    )
+                    for nb_kind, nb_id, _ek in neighbors:
+                        if nb_kind != "todo" or nb_id in seen:
+                            continue
+                        seen.add(nb_id)
+                        nb_todo = self.get(db, nb_id, include_deleted=True)
+                        if nb_todo is None:
+                            continue
+                        out.append(
+                            {
+                                "todo": serialize_todo(nb_todo),
+                                "depth": depth + 1,
+                            }
+                        )
+                        next_frontier.append((nb_id, depth + 1))
+                frontier = next_frontier
+            return out
+
+        return {
+            "this": serialize_todo(this),
+            "ancestors": walk(todo_id, "up"),
+            "descendants": walk(todo_id, "down"),
+        }
+
+    def search(
+        self,
+        db: Session,
+        query: str,
+        *,
+        limit: int = 10,
+        include_done: bool = True,
+    ) -> list[Todo]:
+        """Fuzzy search for retroactive-linking UI. Case-insensitive
+        substring match on text + subtitle. Returns up to `limit` rows
+        ordered by recency. Includes soft-deleted only if explicitly
+        requested (default: skip)."""
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+        rows = (
+            db.query(Todo)
+            .filter(Todo.deleted_at.is_(None))
+            .all()
+        )
+        hits: list[tuple[int, Todo]] = []
+        for t in rows:
+            if not include_done and t.done:
+                continue
+            text = (t.text or "").lower()
+            subtitle = (t.subtitle or "").lower()
+            if q in text or q in subtitle:
+                # Score: shorter text + non-done first
+                score = len(text) + (1000 if t.done else 0)
+                hits.append((score, t))
+        hits.sort(key=lambda x: (x[0], -x[1].id))
+        return [t for _s, t in hits[:limit]]
+
     def reorder(self, db: Session, ordered_ids: list[int]) -> None:
         for idx, tid in enumerate(ordered_ids):
             db.query(Todo).filter(Todo.id == tid).update(
@@ -423,6 +651,7 @@ def serialize_todo(t: Todo) -> dict[str, Any]:
         "completed_at": t.completed_at.isoformat() if t.completed_at else None,
         "sort_order": t.sort_order,
         "source_note_id": t.source_note_id,
+        "closure_note": t.closure_note,
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "updated_at": t.updated_at.isoformat() if t.updated_at else None,
     }
