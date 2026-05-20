@@ -3765,13 +3765,21 @@ def list_promises(
     from .db.models import Promise as _Promise
 
     q = db.query(_Promise)
+    # Modern 5-state lifecycle (matches frontend PromiseState type +
+    # api.ts schema). The legacy "active" alias was renamed to "pending"
+    # during the proposed-vs-pending lock-in split; this validation list
+    # was stale and 400'd the dashboard PromiseDrawer fetch on "pending".
+    _VALID_STATES = ("proposed", "pending", "kept", "broken", "abandoned")
     if state:
-        if state not in ("active", "kept", "broken"):
-            raise HTTPException(status_code=400, detail="invalid state (expected active|kept|broken)")
+        if state not in _VALID_STATES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid state (expected one of {_VALID_STATES})",
+            )
         q = q.filter(_Promise.state == state)
-    # Active sorts by deadline-first (asc nullslast), so the closest due
-    # promises bubble up; resolved states sort by recency.
-    if state == "active":
+    # Pending sorts deadline-first so the closest-due promise bubbles up;
+    # everything else sorts by recency.
+    if state == "pending":
         q = q.order_by(
             _Promise.inferred_due.asc().nullslast(), _Promise.created_at.desc()
         )
