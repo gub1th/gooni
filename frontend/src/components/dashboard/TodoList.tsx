@@ -45,7 +45,12 @@ function ageHint(iso: string | null): { label: string; tint: keyof typeof AGE_TI
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const day = new Date(created); day.setHours(0, 0, 0, 0);
   const diff = Math.round((today.getTime() - day.getTime()) / 86400000);
-  if (diff <= 0) return { label: "today", tint: "today" };
+  // G3.5-polish: drop the today pill. "Today" is the default frame of
+  // reference — fresh todos shouldn't carry a green confirmation chip.
+  // The color signal is now reserved for late states (yesterday + stale),
+  // matching Claude's reference aesthetic where status colors earn their
+  // slot. Returns null so the AgePill render path skips entirely.
+  if (diff <= 0) return null;
   if (diff === 1) return { label: "yesterday", tint: "yesterday" };
   return { label: `${diff} days`, tint: "stale" };
 }
