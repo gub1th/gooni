@@ -390,7 +390,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
     const skip = new Set<number>();
     pinnedNotes.forEach((n) => skip.add(n.id));
     draftNotes.forEach((n) => skip.add(n.id));
-    return recentNotes.filter((n) => !skip.has(n.id)).slice(0, 5);
+    return recentNotes.filter((n) => !skip.has(n.id)).slice(0, 4);
   }, [recentNotes, pinnedNotes, draftNotes]);
 
   // ── Submit-ink + typing animation (migrated from Dashboard) ───────────────
@@ -924,7 +924,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                     <span style={{ fontSize: 9, color: "#AEAEB2", marginLeft: 4 }}>{unprocessedOpen ? "▾" : "▸"}</span>
                   </button>
                 </div>
-                {unprocessedOpen && unprocessedNotes.slice(0, 12).map((note) => {
+                {unprocessedOpen && unprocessedNotes.slice(0, 3).map((note) => {
                   const selected = activeNoteId === note.id;
                   return (
                     <div
