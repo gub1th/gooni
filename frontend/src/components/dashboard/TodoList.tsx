@@ -156,8 +156,11 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         }
       },
       onDrop: () => { void handleReorderDrop(); },
-      showInsertionAbove: dragOver?.id === todoId && dragOver.pos === "above" && draggedId !== todoId,
-      showInsertionBelow: dragOver?.id === todoId && dragOver.pos === "below" && draggedId !== todoId,
+      // G3.9 loop-close fix: also guard on `draggedId !== null` so a
+      // stuck dragOver (e.g. browser fails to fire dragend) doesn't
+      // leave a phantom black insertion line on the page.
+      showInsertionAbove: draggedId !== null && dragOver?.id === todoId && dragOver.pos === "above" && draggedId !== todoId,
+      showInsertionBelow: draggedId !== null && dragOver?.id === todoId && dragOver.pos === "below" && draggedId !== todoId,
       isDragging: draggedId === todoId,
     };
   }
@@ -274,10 +277,11 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
 
         /* Doing-state indicator pulse — subtle breathing. Conveys
            "active, in motion" without the visual loudness of a spinner.
-           Matches Claude minimal aesthetic. */
+           Matches Claude minimal aesthetic. Scale clamped to 1.05 so
+           the dot stays inside its ring at peak (1.10 was bleeding). */
         @keyframes gooni-doing-pulse {
-          0%, 100% { transform: scale(1.0); opacity: 0.92; }
-          50%      { transform: scale(1.10); opacity: 1.0;  }
+          0%, 100% { transform: scale(1.0);  opacity: 0.92; }
+          50%      { transform: scale(1.05); opacity: 1.0;  }
         }
         .gooni-doing-dot {
           animation: gooni-doing-pulse 1.8s ease-in-out infinite;
@@ -346,9 +350,10 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           title="Add a todo"
           style={{
             width: 24, height: 24, borderRadius: 6,
-            background: "rgba(15,110,86,0.12)",
-            color: "#0F6E56",
-            border: "none", cursor: "pointer",
+            background: "rgba(15,23,42,0.06)",
+            color: "#0F172A",
+            border: "0.5px solid rgba(15,23,42,0.10)",
+            cursor: "pointer",
             display: "inline-flex", alignItems: "center", justifyContent: "center",
           }}
         >
@@ -356,10 +361,12 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         </button>
       </div>
 
-      {/* Primary + Active as ONE GROUP — "what I'm focused on right now."
-          Primary always tops the group (exception for state='not_yet'
-          primary still applies — it sits here, not in pending). Tight
-          gap (4px) so primary and active read as related, not separated. */}
+      {/* Primary stands alone with its card. Active (doing) + pending
+          (not_yet) todos render uniformly as subdued rows — only the
+          checkbox state differentiates them visually. Per Daniel: "all
+          i wanted was a lil separation that we had before, where
+          primary was separated". Active rows previously rendered as
+          cards too; that double-separation read as visual noise. */}
       {(() => {
         const activeOpen = bundle.open.filter((t) => t.state === "doing");
         const pendingOpen = bundle.open.filter((t) => t.state !== "doing");
@@ -367,7 +374,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         return (
           <>
             {hasFocusedGroup && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                 {bundle.primary && (
                   <PrimaryCard
                     t={bundle.primary}
@@ -389,7 +396,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
                     focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
                     cascade={cascadeIds.includes(t.id)}
                     chainMeta={bundle.chain_summary?.[t.id]}
-                    subdued={false}
+                    subdued={true}
                     onCycle={() => onCycle(t)}
                     onPickState={(s) => onPickState(t.id, s)}
                     onPromotePrimary={() => onPromotePrimary(t.id)}
