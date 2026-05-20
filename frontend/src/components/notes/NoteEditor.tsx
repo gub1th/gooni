@@ -15,7 +15,7 @@ import {
   Heading1, Heading2,
   Trash2, FolderInput, Pin as PinIcon, ListPlus, Check, Pencil as PencilIcon,
   Globe as GlobeIcon,
-  StickyNote, CheckCircle2,
+  StickyNote, CheckCircle2, Droplet,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -23,6 +23,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
 import { NoteCard } from "./NoteCardExtension";
+import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
+import { useNoteCardStyles } from "./noteCardStyles";
 import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
@@ -292,62 +294,9 @@ function useEditorStyles() {
       }
       .gooni-toolbar-btn { transition: background 0.1s; }
       .gooni-toolbar-btn:hover { background: rgba(0,0,0,0.05) !important; }
-      /* Note cards — pastel inline pills that wrap retroactive "I did this"
-         text spans. Inline-flow so multi-line selections stretch like
-         highlighter marks. Hover surfaces a check icon as visual telegraph
-         that cmd+click toggles the done state. Checked state: dimmed +
-         struck through. */
-      .gooni-note-editor .gooni-note-card {
-        padding: 1px 7px;
-        border-radius: 7px;
-        position: relative;
-        transition: background 0.15s, color 0.15s, opacity 0.15s;
-        cursor: default;
-      }
-      .gooni-note-editor .gooni-note-card-blue {
-        background: rgba(186, 230, 253, 0.55);
-        color: #0C4A6E;
-        box-shadow: inset 0 0 0 0.5px rgba(56, 189, 248, 0.30);
-      }
-      .gooni-note-editor .gooni-note-card-pink {
-        background: rgba(251, 207, 232, 0.55);
-        color: #831843;
-        box-shadow: inset 0 0 0 0.5px rgba(244, 114, 182, 0.30);
-      }
-      .gooni-note-editor .gooni-note-card-checked {
-        text-decoration: line-through;
-        opacity: 0.5;
-      }
-      /* Hover check telegraph — pure CSS pseudo, not clickable.
-         Cmd/Ctrl+click on the card body is the real toggle. */
-      .gooni-note-editor .gooni-note-card::after {
-        content: "✓";
-        position: absolute;
-        top: -8px;
-        right: -8px;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: #fff;
-        color: #16A34A;
-        font-size: 11px;
-        line-height: 16px;
-        text-align: center;
-        font-weight: 700;
-        box-shadow: 0 1px 3px rgba(15,23,42,0.18), inset 0 0 0 0.5px rgba(15,23,42,0.10);
-        opacity: 0;
-        pointer-events: none;
-        transform: scale(0.7);
-        transition: opacity 0.12s ease, transform 0.12s ease;
-      }
-      .gooni-note-editor .gooni-note-card:hover::after {
-        opacity: 1;
-        transform: scale(1);
-      }
-      .gooni-note-editor .gooni-note-card-checked::after {
-        color: #16A34A;
-        background: #DCFCE7;
-      }
+      /* NoteCard + TextColor CSS lives in ./noteCardStyles.ts so the public
+         read view can mount the same rules (visual parity). See
+         useNoteCardStyles() call in this component. */
       .gooni-note-editor table {
         border-collapse: collapse;
         width: 100%;
@@ -404,6 +353,7 @@ interface NoteEditorProps {
 
 export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFocusChange }: NoteEditorProps = {}) {
   useEditorStyles();
+  useNoteCardStyles();
   const embedded = variant === "embedded";
 
   const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, moveNote, selectNote, deleteNote } = useNotesContentStore();
@@ -665,6 +615,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         SlashCommand,
         NoteLink,
         NoteCard,
+        TextColor,
       ],
       content: activeNote?.content ?? "",
       // Embedded variant intentionally does NOT autofocus — focus
@@ -797,27 +748,27 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     return () => dom.removeEventListener("click", onClick);
   }, [editor, navigate, selectNote]);
 
-  // Cmd/Ctrl+click on a `noteCard` mark toggles its checked state. Stand-in
-  // for the hover-button affordance Daniel asked for — proper hover button
-  // needs a ProseMirror plugin decoration, which is v2. Cmd+click is the
-  // universal "secondary action" muscle memory in editors.
+  // NoteCard interactions: (1) click the hover check pill toggles checked,
+  // (2) cmd/ctrl+click anywhere on the card body also toggles (keyboard
+  // shortcut for power users). Both paths resolve a DOM click to a
+  // ProseMirror doc pos via view.posAtDOM, then call the mark command.
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     const dom = editor.view.dom as HTMLElement;
     const onClick = (e: MouseEvent) => {
-      if (!e.metaKey && !e.ctrlKey) return;
       const target = e.target as HTMLElement | null;
-      const card = target?.closest("[data-note-card]") as HTMLElement | null;
+      if (!target) return;
+      const checkBtn = target.closest("[data-card-check]") as HTMLElement | null;
+      const isCmdClick = (e.metaKey || e.ctrlKey) && !!target.closest("[data-note-card]");
+      if (!checkBtn && !isCmdClick) return;
+      const card = (checkBtn ?? target).closest("[data-note-card]") as HTMLElement | null;
       if (!card) return;
-      // Resolve the DOM click into a ProseMirror doc position. posAtDOM
-      // takes (node, offset) of the click target. Falling back to the
-      // mark wrapper if the click landed on a child text node.
-      let domNode: Node = card;
-      let domOffset = 0;
-      if (target && card.contains(target) && target !== card) {
-        domNode = target;
-      }
-      const pos = editor.view.posAtDOM(domNode, domOffset);
+      // Aim the pos lookup at the content span — its first text child is
+      // always inside the mark range. Falling back to the card wrapper
+      // if the content span is missing for some reason.
+      const content = card.querySelector(".gooni-note-card-content") as HTMLElement | null;
+      const probe: Node = content?.firstChild ?? content ?? card;
+      const pos = editor.view.posAtDOM(probe, 0);
       if (pos == null || pos < 0) return;
       e.preventDefault();
       e.stopPropagation();
@@ -2223,6 +2174,14 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         // Only meaningful when cursor is inside an existing card.
                         hidden: !editor.isActive("noteCard"),
                       },
+                      {
+                        // Cycle card color blue ↔ pink. Only shown inside a card.
+                        Icon: Droplet,
+                        title: "Cycle card color",
+                        action: () => editor.chain().focus().cycleNoteCardColor().run(),
+                        active: false,
+                        hidden: !editor.isActive("noteCard"),
+                      },
                     ] as const).filter((item) => !("hidden" in item && item.hidden)).map((item) => (
                       <button
                         key={item.title}
@@ -2249,6 +2208,61 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         <item.Icon size={15} strokeWidth={1.9} />
                       </button>
                     ))}
+                    {/* Text-color swatches. Minimal: a row of small filled
+                        circles + a reset dot. Click applies via the TextColor
+                        mark. Active color shows a ring. Always visible —
+                        Daniel didn't want a popover, wants the picker flat
+                        in the toolbar. */}
+                    <span style={{ width: 1, height: 18, background: "rgba(15,23,42,0.10)", margin: "0 4px" }} />
+                    {TEXT_COLOR_PALETTE.map((sw) => {
+                      const isActive = sw.value == null
+                        ? !editor.isActive("textColor")
+                        : editor.isActive("textColor", { color: sw.value });
+                      return (
+                        <button
+                          key={sw.name}
+                          title={sw.label}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            editor.chain().focus().setTextColor(sw.value).run();
+                          }}
+                          style={{
+                            display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            width: 22, height: 22,
+                            padding: 0,
+                            borderRadius: "50%",
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "inline-block",
+                              width: 14, height: 14, borderRadius: "50%",
+                              background: sw.value ?? "transparent",
+                              border: sw.value
+                                ? (isActive ? "2px solid #0F172A" : "0.5px solid rgba(15,23,42,0.18)")
+                                : "1.5px solid rgba(15,23,42,0.35)",
+                              boxSizing: "border-box",
+                              // Diagonal slash on the "default" (null) swatch so
+                              // it reads as "clear" not "white".
+                              position: "relative",
+                            }}
+                          >
+                            {sw.value == null && (
+                              <span
+                                style={{
+                                  position: "absolute", left: "50%", top: "50%",
+                                  transform: "translate(-50%, -50%) rotate(-45deg)",
+                                  width: 12, height: 1.5, background: "rgba(15,23,42,0.5)",
+                                }}
+                              />
+                            )}
+                          </span>
+                        </button>
+                      );
+                    })}
                     {/* Vertical separator before the structural action — keeps
                         the formatting marks visually grouped. */}
                     {activeNoteId && activeNoteId > 0 && (

@@ -6,37 +6,35 @@ declare module "@tiptap/core" {
       toggleNoteCard: (attrs?: { color?: NoteCardColor }) => ReturnType;
       setNoteCardChecked: (checked: boolean) => ReturnType;
       toggleNoteCardCheckedAtPos: (pos: number) => ReturnType;
+      cycleNoteCardColor: () => ReturnType;
     };
   }
 }
 
 export type NoteCardColor = "blue" | "pink";
-
 export const NOTE_CARD_COLORS: NoteCardColor[] = ["blue", "pink"];
 
 /**
  * Inline mark that wraps a selection in a pastel rounded "card." Used as a
- * retroactive "I did this" visual marker inside notes — distinct from a Todo
- * (no list semantics, no backend, no due date).
+ * retroactive "I did this" visual marker inside notes — distinct from a Todo.
  *
  * State carried as attrs:
- *   - color: "blue" | "pink" (default "blue") — pastel palette
- *   - checked: boolean (default false) — when true, card renders dimmed + struck through
+ *   - color: "blue" | "pink"
+ *   - checked: boolean (when true, card renders dimmed + struck through)
  *
- * Editing affordance:
- *   - BubbleMenu "Card" button — toggle the mark on the current selection
- *   - Cmd/Ctrl+click anywhere on a card → toggle `checked` (the v1 stand-in
- *     for the hover-only check button Daniel asked for; the proper
- *     decoration-based hover button is a v2)
+ * Rendering: <span data-note-card> wraps a content hole + a clickable check
+ * affordance. The check is rendered as a real DOM sibling (not a CSS pseudo)
+ * so clicking it can toggle `checked` without keyboard/mouse-target gymnastics.
+ * It's `contenteditable="false"` so the editor cursor skips over it. Click
+ * delegation in NoteEditor catches the click and routes via posAtDOM.
  *
- * Persistence: TipTap serializes the mark into the note HTML, so checked
- * state survives saves + reloads without any backend changes.
+ * IMPORTANT: kept as <span role="button">, NOT <button>, because the
+ * sanitizer (utils/sanitize.ts) strips <button> tags on the public view.
+ * Span + role keeps the affordance accessible while surviving sanitization.
  */
 export const NoteCard = Mark.create({
   name: "noteCard",
   inclusive: false,
-  // Marks of the same name with different `color` attrs shouldn't auto-merge
-  // — keeping the user's color choice stable across edits.
   excludes: "",
 
   addAttributes() {
@@ -80,7 +78,23 @@ export const NoteCard = Mark.create({
           .filter(Boolean)
           .join(" "),
       }),
-      0,
+      // Content hole — selected text renders here. Wrapped so the check
+      // affordance can sit as a sibling without breaking inline flow.
+      ["span", { class: "gooni-note-card-content" }, 0],
+      // Clickable check affordance. contenteditable=false so the cursor
+      // never lands inside it. Click delegation in NoteEditor handles
+      // toggling `checked` via toggleNoteCardCheckedAtPos.
+      [
+        "span",
+        {
+          class: "gooni-note-card-check",
+          contenteditable: "false",
+          "data-card-check": "true",
+          role: "button",
+          "aria-label": "Toggle done",
+        },
+        "✓",
+      ],
     ];
   },
 
@@ -102,9 +116,8 @@ export const NoteCard = Mark.create({
             .updateAttributes(this.name, { checked })
             .run(),
 
-      // Toggle the checked state of the noteCard mark at a specific doc pos.
-      // Used by the cmd+click delegate in NoteEditor — the click event
-      // resolves to a DOM position which we convert to a ProseMirror pos.
+      // Toggle checked at a specific doc position. Used by the click
+      // delegate for the inline check button + cmd+click anywhere on card.
       toggleNoteCardCheckedAtPos:
         (pos) =>
         ({ state, chain }) => {
@@ -121,6 +134,21 @@ export const NoteCard = Mark.create({
             .setTextSelection(range)
             .updateAttributes(this.name, { checked: !current })
             .setTextSelection(state.selection.from)
+            .run();
+        },
+
+      // Cycle blue → pink → blue. Toolbar button calls this when cursor
+      // is inside an existing card.
+      cycleNoteCardColor:
+        () =>
+        ({ chain, editor }) => {
+          const cur = (editor.getAttributes(this.name).color ?? "blue") as
+            | NoteCardColor
+            | undefined;
+          const next: NoteCardColor = cur === "blue" ? "pink" : "blue";
+          return chain()
+            .extendMarkRange(this.name)
+            .updateAttributes(this.name, { color: next })
             .run();
         },
     };

@@ -7,6 +7,7 @@ import { NoteLoadingState } from "../components/NoteLoadingState";
 import { publicNoteQueryOptions } from "../utils/publicQueries";
 import { fetchPublicNoteComments, type ApiNoteComment } from "../services/api";
 import { AttachmentModal } from "../components/notes/AttachmentModal";
+import { useNoteCardStyles } from "../components/notes/noteCardStyles";
 
 export const Route = createFileRoute("/public/$noteId")({
   component: PublicNotePage,
@@ -46,6 +47,7 @@ interface AttachmentPreviewState {
 }
 
 function PublicNotePage() {
+  useNoteCardStyles();
   const { noteId } = Route.useParams();
   const id = Number(noteId);
   const { data: note, isLoading, isError } = useQuery(publicNoteQueryOptions(id));
@@ -290,9 +292,14 @@ function PublicNotePage() {
               /* First heading in content shouldn't double-space against the meta line. */
               .public-prose > :first-child { margin-top: 0; }
             `}</style>
+            {/* data-public-view attribute is consumed by noteCardStyles.ts —
+                hides the interactive check affordance on NoteCard marks
+                since public viewers can't toggle anything. Visual state
+                (checked vs not, color) renders the same as the editor. */}
             <div
               ref={proseRef}
               className="public-prose"
+              data-public-view="true"
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(note.content || "") }}
             />
             <PublicNoteCommentsThread noteId={id} />
