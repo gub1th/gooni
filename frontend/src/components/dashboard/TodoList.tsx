@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Crown, GripVertical, Plus, AlertTriangle, ArrowUpRight, ArrowLeft } from "lucide-react";
 import {
@@ -82,6 +82,55 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
   // consistently across siblings.
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<{ id: number; pos: "above" | "below" } | null>(null);
+
+  // G3.9 animations follow-up: FLIP-style move animation. Captures
+  // every visible row's bounding rect each render, then on the NEXT
+  // layout commit compares old vs new positions per data-todo-id.
+  // Rows that moved get a one-shot inverse-transform animation via
+  // the Web Animations API — translate(dx,dy) → translate(0,0) — so
+  // state-change reordering (doing→not_yet, drag-reorder, primary
+  // promotion) glides instead of snapping. Cascade-exiting rows are
+  // intentionally skipped so the gooni-todo-cascade keyframe owns
+  // their motion uncontested.
+  const prevPositionsRef = useRef<Map<number, DOMRect>>(new Map());
+  useLayoutEffect(() => {
+    const next = new Map<number, DOMRect>();
+    document.querySelectorAll<HTMLElement>("[data-todo-id]").forEach((el) => {
+      const tidStr = el.getAttribute("data-todo-id");
+      if (!tidStr) return;
+      const tid = Number(tidStr);
+      if (!tid) return;
+      next.set(tid, el.getBoundingClientRect());
+    });
+    // Animate any row whose position changed since the last render.
+    next.forEach((rect, tid) => {
+      if (cascadeIds.includes(tid)) return; // exiting — let cascade own motion
+      const prev = prevPositionsRef.current.get(tid);
+      if (!prev) return;
+      const dx = prev.left - rect.left;
+      const dy = prev.top - rect.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      const el = document.querySelector<HTMLElement>(`[data-todo-id="${tid}"]`);
+      if (!el) return;
+      try {
+        el.animate(
+          [
+            { transform: `translate(${dx}px, ${dy}px)` },
+            { transform: "translate(0, 0)" },
+          ],
+          {
+            duration: 280,
+            easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+            fill: "none",
+          },
+        );
+      } catch {
+        // Older browsers without Web Animations API — fallback is
+        // the existing snap. Acceptable.
+      }
+    });
+    prevPositionsRef.current = next;
+  }, [bundle?.primary?.id, bundle?.open, cascadeIds]);
 
   // G3.9 loop-close: listen for chat-chip clicks and scroll/flash the
   // target row. Selector uses data-todo-id which TodoRow + PrimaryCard
@@ -254,14 +303,46 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
   return (
     <div style={{ fontFamily: FONT }}>
       <style>{`
+        /* G3.9 animations follow-up: richer cascade-done effect. Replaces
+           the old plain fade+translate with a 4-phase ink-absorb shape:
+           row briefly snaps tight (ink draws inward), scales down +
+           shifts right-down (toward the done bucket), then fades.
+           Slate background-flash adds the "ink absorbed" pulse. ~700ms
+           total — long enough to feel deliberate, short enough not to
+           block batched check-offs. */
         @keyframes gooni-todo-fade-out {
-          0%   { opacity: 1; transform: translateX(0);   }
-          80%  { opacity: 0.4; transform: translateX(8px); }
-          100% { opacity: 0; transform: translateX(12px); }
+          0%   { opacity: 1;   transform: translate(0, 0) scale(1.00); background: transparent; }
+          18%  { opacity: 1;   transform: translate(-2px, 0) scale(0.99); background: rgba(15,23,42,0.08); }
+          50%  { opacity: 0.7; transform: translate(10px, 4px) scale(0.97); background: rgba(15,23,42,0.04); }
+          100% { opacity: 0;   transform: translate(22px, 10px) scale(0.94); background: transparent; }
         }
-        .gooni-todo-row { transition: background 0.12s; }
+        /* Ink trail pseudo — a thin slate streak that briefly draws out
+           of the row's left edge as it "loses" its ink. Renders only
+           on cascade thanks to the .gooni-todo-cascade scope. */
+        @keyframes gooni-todo-ink-trail {
+          0%   { opacity: 0; transform: translateX(0)    scaleX(0); }
+          25%  { opacity: 0.45; transform: translateX(8px)  scaleX(1); }
+          70%  { opacity: 0.20; transform: translateX(22px) scaleX(1.4); }
+          100% { opacity: 0; transform: translateX(36px) scaleX(0.8); }
+        }
+        .gooni-todo-row { transition: background 0.12s; position: relative; }
         .gooni-todo-row:hover { background: rgba(0,0,0,0.025); }
-        .gooni-todo-cascade { animation: gooni-todo-fade-out 600ms ease forwards; }
+        .gooni-todo-cascade {
+          animation: gooni-todo-fade-out 700ms cubic-bezier(0.4, 0.0, 0.2, 1) forwards;
+          pointer-events: none;
+        }
+        .gooni-todo-cascade::before {
+          content: "";
+          position: absolute;
+          left: 28px;
+          top: 50%;
+          width: 36px; height: 1.5px;
+          transform-origin: left center;
+          background: linear-gradient(90deg, rgba(15,23,42,0.55), rgba(15,23,42,0));
+          border-radius: 2px;
+          animation: gooni-todo-ink-trail 700ms cubic-bezier(0.4, 0.0, 0.2, 1) forwards;
+          pointer-events: none;
+        }
 
         /* G3.9 loop-close: flash highlight when chat chip dispatches
            gooni:focus-todo. A soft slate ring pulses twice over 1.6s
