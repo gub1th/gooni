@@ -479,18 +479,15 @@ def _build_ack(
                 f"noted all {n}. {', '.join(titles)} for backlog"
             )
     if captured_promises:
-        # Split proposed (awaiting game-plan lock-in) vs pending (locked in).
-        # Daniel called out "fake promises" — anything that needs a real
-        # game plan (start / end / what counts as breaking) sits in
-        # state='proposed' until he confirms via PATCH /promises/{id}
-        # {"state":"pending"}. The ack surfaces the proposed state
-        # explicitly so it's visible there's an open contract to lock in.
+        # G3.1: all promises are `active` on create — no proposed/pending
+        # split. `needs_clarification` (vague-promise flag) is metadata
+        # that drives a conversational clarifier appended to the ack,
+        # NOT a state gate. Daniel: "it's active, then kept or broken."
         #
-        # Voice-of-reason: when the evaluator (promise_evaluator.evaluate)
-        # flagged a promise, we append its single-line suggestion AFTER
-        # the state phrase. Gooni pushes back conversationally, never
-        # blocks the create — the row is already persisted by the time
-        # we render this.
+        # Voice-of-reason: when promise_evaluator flagged a promise, its
+        # single-line suggestion appends AFTER the tracking phrase.
+        # Gooni pushes back conversationally; the row is already
+        # persisted by the time we render this.
         def _voice_tail(prom: dict) -> str:
             v = prom.get("voice_of_reason")
             if not v:
@@ -498,27 +495,31 @@ def _build_ack(
             sug = (v.get("suggestion") or "").strip()
             return f" — {sug}" if sug else ""
 
-        proposed = [p for p in captured_promises if p.get("state") == "proposed"]
-        pending = [p for p in captured_promises if p.get("state") != "proposed"]
-        for prop in proposed[:2]:
-            summary = _trim(prop.get("summary") or prop.get("utterance") or "")
-            parts.append(
-                f"\"{summary}\" — needs game plan (reply w/ start, end, what breaks it)"
-                + _voice_tail(prop)
-            )
-        if len(proposed) > 2:
-            parts.append(f"{len(proposed) - 2} more awaiting game plan")
-        if pending:
-            if len(pending) == 1:
-                p = pending[0]
-                slip = p.get("slip_count", 0) or 0
-                summary = _trim(p.get("summary") or p.get("utterance") or "")
-                if slip > 0:
-                    parts.append(f"\"{summary}\" — slip #{slip + 1}" + _voice_tail(p))
-                else:
-                    parts.append(f"\"{summary}\" tracked" + _voice_tail(p))
+        def _clarifier_tail(prom: dict) -> str:
+            """Sharp Alfred clarifier for vague promises. Asked in the
+            same turn — no state-machine wait. Daniel can answer in the
+            next utterance to sharpen, or ignore and the promise stays
+            vague (no penalty, just lower-quality)."""
+            if not prom.get("needs_clarification"):
+                return ""
+            return " — how often counts? say it specific or this stays mush."
+
+        if len(captured_promises) == 1:
+            p = captured_promises[0]
+            slip = p.get("slip_count", 0) or 0
+            summary = _trim(p.get("summary") or p.get("utterance") or "")
+            tail = _clarifier_tail(p) + _voice_tail(p)
+            if slip > 0:
+                parts.append(f"\"{summary}\" — slip #{slip + 1}{tail}")
             else:
-                parts.append(f"{len(pending)} promises tracked")
+                parts.append(f"\"{summary}\" tracked{tail}")
+        else:
+            n = len(captured_promises)
+            vague = sum(1 for p in captured_promises if p.get("needs_clarification"))
+            phrase = f"{n} promises tracked"
+            if vague:
+                phrase += f" ({vague} vague — sharpen or stay mush)"
+            parts.append(phrase)
     # G3.5: filter out spawned children — they'll be rendered alongside
     # their parent's close phrase below. Bare creates still show here.
     bare_creates = [t for t in (captured_todos or []) if not t.get("spawned_from_id")]
@@ -749,30 +750,34 @@ def _build_state_block(db) -> str:
         elif promises:
             lines.append(f"- {len(promises)} pending promise(s)")
 
-    # Proposed promises — awaiting lock-in. Daniel asked for visibility
-    # so he doesn't forget to confirm or drop them. Distinct from pending
-    # because the contract isn't real yet — no accountability counter,
-    # no auto-overdue sweep.
+    # G3.1: lock-in is gone. Vague promises (needs_clarification=True)
+    # are still active — Gooni already pushed back in the ack at create
+    # time. Surface them here as a separate line so chat can re-nudge
+    # if Daniel keeps ignoring the clarifier: "you've got 3 vague
+    # promises sitting open. nail down what counts as kept."
     try:
         from ..db.models import Promise as _PromiseModel
-        proposed_rows = (
+        vague_rows = (
             db.query(_PromiseModel)
-            .filter(_PromiseModel.state == "proposed")
+            .filter(
+                _PromiseModel.state == "active",
+                _PromiseModel.needs_clarification.is_(True),
+            )
             .order_by(_PromiseModel.created_at.desc())
             .limit(5)
             .all()
         )
     except Exception:
-        proposed_rows = []
-    if proposed_rows:
+        vague_rows = []
+    if vague_rows:
         lines.append(
-            f"- {len(proposed_rows)} promise(s) awaiting game-plan lock-in:"
+            f"- {len(vague_rows)} vague active promise(s) — Daniel hasn't sharpened these yet:"
         )
-        for p in proposed_rows[:3]:
+        for p in vague_rows[:3]:
             summary = p.summary or p.utterance or ""
             if len(summary) > 60:
                 summary = summary[:60].rstrip() + "…"
-            lines.append(f"  · \"{summary}\" (id #{p.id})")
+            lines.append(f"  · \"{summary}\"")
 
     # G2 self-PM: surface Gooni's own top workflow blocker so the LLM
     # can reference it when context warrants. Capped at 1 line — the
@@ -882,8 +887,11 @@ def _build_just_extracted_block(
         slip = p.get("slip_count", 0) or 0
         slip_tail = f" (slip #{slip + 1})" if slip > 0 else ""
         pid = p.get("id")
-        state = p.get("state") or "pending"
-        verb = "PROPOSED (needs game plan)" if state == "proposed" else "tracked"
+        # G3.1: all promises are `active` on create. needs_clarification
+        # flags vague utterances so the LLM knows Gooni already asked the
+        # sharpener question in this turn — don't ask it again.
+        needs_c = bool(p.get("needs_clarification"))
+        verb = "tracked (VAGUE — Gooni asked for clarification)" if needs_c else "tracked"
         # Voice-of-reason — when set, the LLM should treat the
         # suggestion as Gooni's pushback to acknowledge naturally in
         # its reply, NOT as a separate announcement.

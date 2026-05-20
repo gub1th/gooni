@@ -190,7 +190,7 @@ def _pick_focus_item(db: Session) -> dict[str, Any] | None:
 
     pending = (
         db.query(Promise)
-        .filter(Promise.state == "pending")
+        .filter(Promise.state == "active")
         .order_by(Promise.inferred_due.asc().nullslast(), Promise.created_at.desc())
         .all()
     )
