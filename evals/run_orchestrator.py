@@ -85,6 +85,7 @@ from app.db.models import Focus as FocusModel
 from app.db.models import ListItem as ListItemModel
 from app.db.models import Memory as MemoryModel
 from app.db.models import Message as MessageModel
+from app.db.models import Todo as TodoModel
 from app.llm.client import llm_client
 from app.main import _alembic_upgrade
 from app.services.orchestrator import Orchestrator as orchestrator  # singleton instance
@@ -249,6 +250,11 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
                        (uncommitted-but-still-actionable focuses use status='someday').
                        Mirrors prod data path for "what's my current focus?"-shape questions
                        — orchestrator pulls these via item_service.get_active_context, NOT cosine.
+      seed_todos:    [{text: str, [subtitle: str], [done: bool], [state: str]}]
+                     → Todo rows with embeddings generated on insert. Required for
+                       G1.1 destructive-action dispatch tests — router cosine-matches
+                       the extractor's `match` field against open todos at extract
+                       time. state ∈ {not_yet, doing, done} (default not_yet).
       history:       [{role: 'user'|'assistant', content: str}]
 
     Embeddings generated on insert for memories so cosine retrieval picks them
@@ -257,6 +263,7 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
     seeded_memory_ids: list[int] = []
     seeded_message_ids: list[int] = []
     seeded_focus_ids: list[int] = []
+    seeded_todo_ids: list[int] = []
 
     for entry in case.get("seed_prefs") or []:
         rule = (entry.get("rule") or entry.get("content") or "").strip()
@@ -309,6 +316,27 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
         db.flush()
         seeded_focus_ids.append(focus.id)
 
+    # Seed todos. Required for G1.1 destructive-action dispatch tests
+    # (router cosine-matches the extractor's `match` field against open
+    # todos at extract time; with no seeded todos, every delete/complete
+    # action no-matches and the test can't verify the dispatch happened).
+    # Embeddings generated on insert so the cosine match works.
+    for entry in case.get("seed_todos") or []:
+        text = (entry.get("text") or "").strip()
+        if not text:
+            continue
+        emb, _ = llm_client.generate_embedding(text)
+        todo = TodoModel(
+            text=text,
+            subtitle=entry.get("subtitle"),
+            done=bool(entry.get("done", False)),
+            state=entry.get("state", "not_yet"),
+            embedding=json.dumps(emb) if emb else None,
+        )
+        db.add(todo)
+        db.flush()
+        seeded_todo_ids.append(todo.id)
+
     for turn in case.get("history") or []:
         msg = MessageModel(
             conversation_id=conv_id,
@@ -333,6 +361,10 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
         if seeded_focus_ids:
             db.query(FocusModel).filter(
                 FocusModel.id.in_(seeded_focus_ids)
+            ).delete(synchronize_session=False)
+        if seeded_todo_ids:
+            db.query(TodoModel).filter(
+                TodoModel.id.in_(seeded_todo_ids)
             ).delete(synchronize_session=False)
         db.commit()
 
@@ -497,6 +529,7 @@ def _run_case(orch, case: dict, verbose: bool, use_cache: bool = True) -> dict[s
             "seed_focuses": case.get("seed_focuses") or [],
             "seed_memories": case.get("seed_memories") or [],
             "seed_prefs": case.get("seed_prefs") or [],
+            "seed_todos": case.get("seed_todos") or [],
             "history": case.get("history") or [],
             "user_message": user_msg,
         },
@@ -546,6 +579,10 @@ def _render_html_report(
         if ctx.get("seed_prefs"):
             parts.append(
                 f'<div><b>seed_prefs:</b> <pre style="margin:2px 0;font-size:11px;white-space:pre-wrap">{_html.escape(json.dumps(ctx["seed_prefs"], indent=2))}</pre></div>'
+            )
+        if ctx.get("seed_todos"):
+            parts.append(
+                f'<div><b>seed_todos:</b> <pre style="margin:2px 0;font-size:11px;white-space:pre-wrap">{_html.escape(json.dumps(ctx["seed_todos"], indent=2))}</pre></div>'
             )
         if ctx.get("history"):
             hist = "\n".join(

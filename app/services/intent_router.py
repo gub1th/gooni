@@ -58,6 +58,18 @@ class RouterResult:
     # Each entry: {"text": str, "todo_id": int}. Mirrors captured_features
     # so the ack helper can render with real Todo ids.
     captured_todos: list[dict] = field(default_factory=list)
+    # G1.1 destructive todo action results — populated by router-level
+    # dispatch when the extractor emits kind=delete | complete | merge.
+    # Each entry mirrors captured_todos {"text", "todo_id"} except merge
+    # which carries both ids. Ack composer renders these separately.
+    killed_todos: list[dict] = field(default_factory=list)
+    completed_todos: list[dict] = field(default_factory=list)
+    # Merge entries: {"into_text", "into_id", "from_text", "from_id"}.
+    merged_todos: list[dict] = field(default_factory=list)
+    # Observability: destructive actions where the extractor emitted a
+    # match but the router couldn't find a matching open todo. Logged to
+    # the trace + surfaced in ack so Daniel can spot extraction errors.
+    failed_todo_actions: list[dict] = field(default_factory=list)
     # Phase 5: extractor's classification of how much reply the user
     # wants. One of "answer" | "acknowledge" | "task_only" | "no_reply".
     # Defaults to "answer" — conservative; callers gate the LLM reply

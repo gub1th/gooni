@@ -10,6 +10,7 @@
     "seed_memories": "optional list [{type, content, [key], [confidence]}]. Inserted as Memory rows w/ embeddings, retrievable mid-turn, removed on teardown. Type ∈ {preference, fact, routine, constraint, episode} — note: 'goal' was removed; action-shaped aspirations belong in seed_focuses.",
     "seed_prefs": "optional list [{rule, [confidence]}]. Inserted as type='preference' w/ feedback__ key prefix → always-injected by master prompt.",
     "seed_focuses": "optional list [{text, [endgoal], [is_primary], [status], [scale]}]. Inserted as ListItem rows in the focuses list (always committed=True). Mirrors prod data path for 'what's my current focus?'-shape questions — orchestrator pulls these via item_service.get_active_context, NOT cosine. Status ∈ {committed, someday}. Scale ∈ {quick, slow}.",
+    "seed_todos": "optional list [{text, [subtitle], [done], [state]}]. Inserted as Todo rows with embeddings on insert so router-side cosine-match (DELETE/COMPLETE/MERGE dispatch in intent_handlers/todos.py) can find them. state ∈ {not_yet, doing, done} (default not_yet).",
     "must_not_include_regex": "optional list of regex patterns the reply MUST NOT match (case-insensitive). Hard assertion; if any hit, judge skipped + case fails.",
     "must_invoke_tool": "optional list of tool names that MUST be called during the turn (verified against the trace, not the reply text). Catches fake-completion failures where reply says 'Logged it' without actually calling the tool.",
     "judge": {
@@ -57,21 +58,26 @@
       "notes": "Tone-only test. Topic = decorators (universally known by base model, no Gooni-specific knowledge needed). Isolates the variable: did the seeded pref actually steer reply tone?"
     },
     {
-      "id": "003_tone_no_emoji",
-      "source": "synthetic",
-      "user_message": "I'm shipping the eval harness today. wish me luck",
-      "seed_prefs": [
-        {"rule": "never use emoji in replies"}
+      "id": "003_destructive_todo_dispatch",
+      "source": "eval segment #280 msg #1112-1113",
+      "user_message": "kill texting curtis bout houselympics, and plan the 100/200/400m one. lets move filter active focuses to done. and lets close call paip",
+      "seed_todos": [
+        {"text": "text Curtis about Houselympics"},
+        {"text": "filter active focuses"},
+        {"text": "call papi"}
       ],
+      "must_invoke_tool": ["router:todo_killed", "router:todo_completed"],
       "must_not_include_regex": [
-        "[\\U0001F300-\\U0001FAFF]",
-        "[\\u2600-\\u27BF]"
+        "(?i)stop texting curtis",
+        "(?i)move filter active focuses to done",
+        "(?i)close call paip"
       ],
       "judge": {
-        "rubric": "Reply should be encouraging-but-grounded, no emoji. Hard regex catches obvious emoji; judge catches 'good luck! 🚀' style.",
-        "min_scores": {"follows_prefs": 8}
+        "model": "gpt-5.4",
+        "rubric": "Daniel sent FOUR actions in one message: (1) DELETE 'text Curtis about Houselympics' — verb 'kill', (2) CREATE 'plan the 100/200/400m event' — verb 'plan', (3) COMPLETE 'filter active focuses' — phrase 'move X to done', (4) COMPLETE 'call papi' — verb 'close'. Reply MUST acknowledge these as the correct kinds: one killed, two closed/completed, one new added. WRONG behavior (the pre-G1.1 bug this case locks in): reply enumerates four newly-CREATED todos with paraphrased text like 'stop texting Curtis', 'move filter active focuses to done', 'close call paip' — those are NEGATION/INSTRUCTION-shape todos that double the pile instead of acting on existing rows. The must_invoke_tool gate verifies router:todo_killed + router:todo_completed actually fired (not just router:todo creates). Reply tone should be terse Alfred — no enumerated bullet list, no 'noted all 4'.",
+        "min_scores": {"helpful": 7, "no_hallucination": 8, "follows_prefs": 7}
       },
-      "notes": "Hard regex covers Unicode ranges for emoji + symbols. Judge backs it up. follows_prefs threshold = 8 (not 10) — judge nits on phrases that 'read like' emoji-substitutes (e.g. 'you've got this') shouldn't auto-fail; the regex is the hard gate, the judge floor is for clear violations."
+      "notes": "MOST IMPORTANT CASE in this dataset (per Daniel 2026-05-19). Came from eval segment #280 where G1 shipped destructive tools but extractor router still paraphrased state-change verbs into new CREATE todos — list literally DOUBLED with negation copies. G1.1 fixes by adding kind=create|delete|complete|merge to extract_signals.todos schema + dispatch by kind in intent_handlers/todos.py. Tests both the extractor (must correctly classify 4 different verb shapes) AND the dispatch (must fire the right router tools, not just create). seed_todos required so cosine match has rows to hit. Pre-G1.1 baseline FAILS on must_not_include_regex. Replaced 003_tone_no_emoji which was low-signal. must_invoke_tool only requires router:todo_killed + router:todo_completed — the create for '100/200/400m one' can either fire router:todo OR router:todo_dedup (acceptable since dedup means an existing todo was deemed a match)."
     },
     {
       "id": "004_focus_recall_current",

@@ -224,8 +224,11 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
   ],
   "todos": [
     {{
-      "text":     "<short imperative chore, max 12 words>",
-      "due_hint": "tonight|today|tomorrow|this week|null"
+      "kind":       "create|delete|complete|merge",
+      "text":       "<for create — short imperative chore, max 12 words>",
+      "due_hint":   "tonight|today|tomorrow|this week|null",
+      "match":      "<for delete/complete/merge — substring of the existing todo Daniel is acting on>",
+      "merge_into": "<for merge only — substring identifying the keep-target>"
     }}
   ],
   "reply_intent": "answer|acknowledge|task_only|no_reply",
@@ -405,30 +408,105 @@ soft_promises:
 - Empty when no self-committal verb fired.
 
 todos:
-- Chore-shaped actionable tasks Daniel needs to remember to do. Distinct
-  from soft_promises (which are first-person commitments tracked for
-  accountability). Todos = items for the chore list; promises = items
-  for the accountability surface.
-- The dashboard composer's "demo for gooni" use case lives here: Daniel
-  types a chore into the note composer expecting it to land on his todo
-  list, NOT the engineering backlog. Without `todos`, those route to
-  feature_requests and confuse the surfaces.
+- Chore-shaped actionable items. FOUR action kinds — pick correctly per entry.
+  Distinct from soft_promises (first-person commitments).
+
+KIND DISPATCH — read the verb to pick:
+- CREATE — new chore. Verbs: "add", "remind me to", "i need to", "todo:"
+- DELETE — kill existing. Verbs: "kill", "delete", "remove", "drop",
+  "scratch", "cut", "get rid of"
+- COMPLETE — close existing. Verbs: "close", "done with", "finished",
+  "completed", "marked done", "move X to done", "X is done", "did X"
+- MERGE — combine two existing. Verbs: "merge", "combine", "X and Y are
+  the same thing"
+
+CREATE — `{{kind:"create", text:"...", due_hint:"..."}}`:
 - SURFACE RULE: when `prev_assistant` is non-empty (chat surface), prefer
-  soft_promises for "imma X" / "i'll X" / "i'm gonna X" — those go
-  through accountability tracking. Emit todos on chat ONLY when text is
-  explicit: "add to todos: X", "remind me to X", "todo: X".
-- When prev_assistant is empty (note save), emit todos freely for chore-
-  shaped imperatives: "call mom", "buy milk", "create demo for gooni",
-  "fix the auth bug".
-- Skip when text is pure capture (groceries lists, design ideas, journal
-  entries) — let the prefilter handle those.
-- Examples (note-save context, fires):
-    Text "i need to create a demo for gooni" → [{{text:"create demo for gooni", due_hint:"null"}}]
-    Text "call dentist tomorrow" → [{{text:"call dentist", due_hint:"tomorrow"}}]
-    Text "buy milk + eggs" → [{{text:"buy milk + eggs", due_hint:"null"}}]
+  soft_promises for "imma X" / "i'll X" / "i'm gonna X". Emit create on
+  chat ONLY when text is explicit: "add to todos: X", "remind me to X",
+  "todo: X".
+- When prev_assistant is empty (note save), emit create freely for chore-
+  shaped imperatives.
+- The dashboard composer's "demo for gooni" use case lives here.
+- RECURRING-REMINDER CARVE-OUT (READ CAREFULLY):
+  "remind me to X" is a CREATE only when X happens ONCE (no time-recurrence
+  modifier). Recurring-shape phrasings — "every day", "daily", "weekly",
+  "every morning", "at 8am every", "every N hours", "every N days" — are
+  CAPABILITY GAPS, not todos. Gooni has no recurring outbound reminder
+  surface. These belong in `feature_requests`, NOT `todos`. Emit [] here
+  for recurring shapes; the feature_requests handler will catch them.
+  Examples (recurring → feature_request, NOT todos):
+    "remind me every day at 8am to log my workout" → todos=[]
+    "remind me daily to drink water" → todos=[]
+    "every morning send me a focus list" → todos=[]
+    "weekly digest of my todos please" → todos=[]
+- Examples (single-shot → CREATE):
+    Text "i need to create a demo for gooni" → [{{kind:"create", text:"create demo for gooni"}}]
+    Text "call dentist tomorrow" → [{{kind:"create", text:"call dentist", due_hint:"tomorrow"}}]
+    Text "buy milk + eggs" → [{{kind:"create", text:"buy milk + eggs"}}]
+    Text "remind me to take out trash tonight" → [{{kind:"create", text:"take out trash", due_hint:"tonight"}}]
 - Examples (chat context, skip → emits as soft_promise instead):
     Text "imma call mom tomorrow" → soft_promises, NOT todos
     Text "i'll fix the auth bug tonight" → soft_promises, NOT todos
+
+DELETE — `{{kind:"delete", match:"..."}}`:
+- Daniel signals to KILL an existing todo. The router cosine-matches `match`
+  against open todos and soft-deletes the hit (24h undo).
+- `match` MUST be the OBJECT of the kill — the noun phrase identifying which
+  todo. DO NOT include the verb. DO NOT capture the kill as a new todo text.
+- Examples:
+    Text "kill texting curtis bout houselympics" →
+      [{{kind:"delete", match:"texting Curtis about Houselympics"}}]
+    Text "delete the trim-list-title stuff" →
+      [{{kind:"delete", match:"trim-list-title"}}]
+    Text "scratch call mom" → [{{kind:"delete", match:"call mom"}}]
+    Text "drop the leetcode todo" → [{{kind:"delete", match:"leetcode"}}]
+- NEVER emit a create alongside — the user is killing, not adding.
+
+COMPLETE — `{{kind:"complete", match:"..."}}`:
+- Daniel signals an existing todo is DONE. Router cosine-matches against
+  open todos and cycles state to done.
+- `match` = the OBJECT (the existing todo's text or close paraphrase).
+- Examples:
+    Text "close call paip" → [{{kind:"complete", match:"call paip"}}]
+    Text "lets close call paip" → [{{kind:"complete", match:"call paip"}}]
+    Text "move filter active focuses to done" →
+      [{{kind:"complete", match:"filter active focuses"}}]
+    Text "finished the auth bug fix" → [{{kind:"complete", match:"auth bug"}}]
+    Text "i did the dentist call" → [{{kind:"complete", match:"dentist"}}]
+- NEVER emit a create alongside — the user is closing existing work.
+
+MERGE — `{{kind:"merge", match:"...", merge_into:"..."}}`:
+- Daniel signals two existing todos should combine. `merge_into` = the
+  KEEP-target (text stays); `match` = the MERGED-IN target (soft-deleted,
+  its text appended to merge_into's subtitle).
+- Examples:
+    Text "merge leg doctor and dermatologist todos" →
+      [{{kind:"merge", merge_into:"leg doctor", match:"dermatologist"}}]
+    Text "the gym and workout todos are the same — combine" →
+      [{{kind:"merge", merge_into:"gym", match:"workout"}}]
+
+BATCHING — a single message can carry MULTIPLE actions of DIFFERENT kinds.
+Emit them ALL as separate entries.
+- Example: "kill texting curtis bout houselympics, and plan the 100/200/400m
+  one. lets move filter active focuses to done. and lets close call paip" →
+    [
+      {{kind:"delete",   match:"texting Curtis about Houselympics"}},
+      {{kind:"create",   text:"plan the 100/200/400m event"}},
+      {{kind:"complete", match:"filter active focuses"}},
+      {{kind:"complete", match:"call paip"}}
+    ]
+- Eval-segment-280 anti-pattern (NEVER emit this shape — wrong):
+    [
+      {{kind:"create", text:"stop texting Curtis about Houselympics"}},
+      {{kind:"create", text:"plan the 100/200/400m event"}},
+      {{kind:"create", text:"move filter active focuses to done"}}
+    ]
+  All 3 state-changes got captured as create — that's the bug this dispatch
+  fixes. Verbs first, then objects. Never paraphrase a kill into a new todo.
+
+- Skip when text is pure capture (groceries lists, design ideas, journal
+  entries) — let the prefilter handle those.
 - Empty when nothing chore-shaped fires.
 
 reply_intent:
@@ -571,19 +649,56 @@ def _normalize_promises(items: Any) -> list[dict]:
     return out
 
 
+_VALID_TODO_KINDS = ("create", "delete", "complete", "merge")
+
+
 def _normalize_todos(items: Any) -> list[dict]:
+    """Normalize todo action entries from the extractor.
+
+    Each entry carries a `kind` (create | delete | complete | merge) + the
+    kind-specific payload fields. Defaults to `create` for backwards-compat
+    with extractor outputs that pre-date G1.1. Validates per-kind required
+    fields and drops malformed entries silently (failure mode: never crash
+    the extractor, ever).
+    """
     out = []
     if not isinstance(items, list):
         return out
     for it in items:
         if not isinstance(it, dict):
             continue
-        text = it.get("text")
-        if not (isinstance(text, str) and text.strip()):
+        kind_raw = it.get("kind")
+        kind = (
+            kind_raw.strip().lower()
+            if isinstance(kind_raw, str) and kind_raw.strip()
+            else "create"
+        )
+        if kind not in _VALID_TODO_KINDS:
+            kind = "create"
+
+        text_raw = it.get("text")
+        text = text_raw.strip() if isinstance(text_raw, str) else ""
+        match_raw = it.get("match")
+        match = match_raw.strip() if isinstance(match_raw, str) else ""
+        merge_into_raw = it.get("merge_into")
+        merge_into = (
+            merge_into_raw.strip()
+            if isinstance(merge_into_raw, str)
+            else ""
+        )
+
+        # Per-kind required-field validation. Drop malformed entries.
+        if kind == "create" and not text:
             continue
+        if kind in ("delete", "complete") and not match:
+            continue
+        if kind == "merge" and (not match or not merge_into):
+            continue
+
         due_hint = it.get("due_hint")
         out.append({
-            "text": text.strip()[:200],
+            "kind": kind,
+            "text": text[:200] if text else None,
             "due_hint": (
                 due_hint.strip()[:40]
                 if isinstance(due_hint, str)
@@ -591,6 +706,8 @@ def _normalize_todos(items: Any) -> list[dict]:
                 and due_hint.strip().lower() != "null"
                 else None
             ),
+            "match": match[:200] if match else None,
+            "merge_into": merge_into[:200] if merge_into else None,
         })
     return out
 
