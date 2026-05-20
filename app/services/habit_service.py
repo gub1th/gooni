@@ -89,6 +89,22 @@ def create(
     db.add(h)
     db.commit()
     db.refresh(h)
+
+    # G3 Habit→Focus binding: cosine-match the habit name against active
+    # focuses, write `supports` edge if it clears the floor. Habit names
+    # are short ("gym", "no smoke") so the threshold matches the standard
+    # SUPPORTS_FLOOR; very generic names won't bind and that's fine.
+    try:
+        from .list_service import list_service
+        from . import focus_binding
+        name_embedding = list_service._embed_item_text(h.name)
+        if name_embedding:
+            focus_binding.bind_to_focus(
+                db, src_kind="habit", src_id=h.id, embedding=name_embedding
+            )
+    except Exception as e:
+        print(f"[habit_service] habit→focus bind failed: {e}")
+
     return h
 
 

@@ -217,9 +217,10 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
   ],
   "soft_promises": [
     {{
-      "utterance": "<verbatim quote of Daniel's commitment phrase, no rewriting>",
-      "summary":   "<short 3rd-person description, max 10 words — for nudge subjects>",
-      "time_hint": "tonight|today|tomorrow|this week|this weekend|next week|by friday|null"
+      "utterance":    "<verbatim quote of Daniel's commitment phrase, no rewriting>",
+      "summary":      "<short 3rd-person description, max 10 words — for nudge subjects>",
+      "time_hint":    "tonight|today|tomorrow|this week|this weekend|next week|by friday|null",
+      "spawns_todo":  "true|false — true ONLY when the promise is action-shaped (concrete one-shot verb + object, e.g. 'imma text david', 'i'll fix the auth bug tonight'). false for chronic / avoidance / vague promises ('no smoke for 7 days', 'i'll be better about X', 'imma start working out more'). When true, the router auto-creates a linked Todo so the promise has a concrete actionable shadow."
     }}
   ],
   "todos": [
@@ -669,10 +670,18 @@ def _normalize_promises(items: Any) -> list[dict]:
             continue
         summary = it.get("summary")
         time_hint = it.get("time_hint")
+        spawns_raw = it.get("spawns_todo")
+        if isinstance(spawns_raw, bool):
+            spawns_todo = spawns_raw
+        elif isinstance(spawns_raw, str):
+            spawns_todo = spawns_raw.strip().lower() == "true"
+        else:
+            spawns_todo = False
         out.append({
             "utterance": utt.strip()[:500],
             "summary": summary.strip()[:200] if isinstance(summary, str) and summary.strip() else None,
             "time_hint": time_hint.strip()[:60] if isinstance(time_hint, str) and time_hint.strip() and time_hint.strip().lower() != "null" else None,
+            "spawns_todo": spawns_todo,
         })
     return out
 

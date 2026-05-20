@@ -62,3 +62,38 @@ def handle(items: list[dict], ctx, result) -> None:
                 )
             except Exception as e:
                 print(f"[promises handler] trace hook error: {e}")
+
+        # G3 Promise→Todo spawn: when extract_signals marks the promise as
+        # action-shaped (`spawns_todo: True`, e.g. "imma text david tonight"),
+        # auto-create a linked Todo + `spawned_from` edge from the Promise.
+        # Chronic-style promises ("no smoke 7d") don't spawn — they stay
+        # behind-the-scenes accountability surfaces. The todo text mirrors
+        # the promise summary (or trimmed utterance) so it's actionable
+        # on its own.
+        if sp.get("spawns_todo"):
+            todo_text = (sp.get("summary") or utterance).strip()[:200]
+            if todo_text:
+                try:
+                    from .. import todo_service, edge_service
+                    spawned = todo_service.todo_service.create(
+                        ctx.db,
+                        text=todo_text,
+                        due_date=inferred,
+                    )
+                    edge_service.link(
+                        ctx.db,
+                        src_kind="promise",
+                        src_id=p.id,
+                        dst_kind="todo",
+                        dst_id=spawned.id,
+                        kind="spawned_from",
+                    )
+                    result.captured_todos.append({
+                        "id": spawned.id,
+                        "text": spawned.text,
+                        "spawned_from_promise_id": p.id,
+                        "mention_count": spawned.mention_count,
+                    })
+                    result.tools_used.append("router:todo_spawned_from_promise")
+                except Exception as e:
+                    print(f"[promises handler] todo spawn error: {e}")

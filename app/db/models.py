@@ -567,6 +567,20 @@ class Todo(Base):
     # Sits next to the lineage edges (kind='spawned_from') that link this
     # todo to its parents/children in the `edges` table.
     closure_note = Column(Text, nullable=True)
+    # G3 recurrence counter. On create, todo_service cosine-matches the
+    # new text against open todos at ≥0.85; on match it bumps the
+    # existing row's mention_count + last_mentioned_at + appends the
+    # timestamp to mention_history INSTEAD of inserting a duplicate.
+    # Drives accountability tone: at mention_count ≥3 the ack composer
+    # switches from neutral ("noted") to confrontational Alfred voice
+    # ("third mention. tonight or kill it.") — silence isn't helping.
+    mention_count = Column(Integer, nullable=False, default=1)
+    last_mentioned_at = Column(DateTime, nullable=True, index=True)
+    # JSON array of ISO timestamps — full audit of every utterance that
+    # re-mentioned this todo. Kept so Gooni can cite specifics ("you
+    # talked about this Tue, Thu, and Sun"). Nullable: legacy rows
+    # don't get backfilled to keep the migration cheap.
+    mention_history = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

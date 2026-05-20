@@ -45,20 +45,54 @@ _DUE_HINTS = {
 
 
 def _parse_due(hint):
+    """Resolve a due-hint phrase to a concrete datetime (UTC, EOD-anchored).
+
+    Two-tier strategy:
+      1. Regex map (_DUE_HINTS) handles the canonical phrases the LLM
+         emits as enum-shaped strings ("tomorrow", "tonight", etc.).
+         Fast, deterministic, no external call.
+      2. `dateparser` fallback for free-form phrases the LLM might emit
+         that we never enumerated ("in 3 days", "next friday", "by aug 5",
+         "2 weeks from tuesday"). Pure Python, no LLM cost, ~3ms.
+
+    Stays null for context-dependent phrases ("soon", "before the trip",
+    "when i get back") — those need state Gooni doesn't reliably have.
+    Daniel can pick a date manually if it matters.
+    """
     if not hint:
         return None
     h = hint.strip().lower()
     rule = _DUE_HINTS.get(h)
-    if not rule:
-        return None
-    kind, arg = rule
     now = datetime.utcnow()
-    if kind == "today_eod":
-        return now.replace(hour=23, minute=59, second=0, microsecond=0)
-    if kind == "plus_days" and isinstance(arg, int):
-        return (now + timedelta(days=arg)).replace(
-            hour=23, minute=59, second=0, microsecond=0
+    if rule:
+        kind, arg = rule
+        if kind == "today_eod":
+            return now.replace(hour=23, minute=59, second=0, microsecond=0)
+        if kind == "plus_days" and isinstance(arg, int):
+            return (now + timedelta(days=arg)).replace(
+                hour=23, minute=59, second=0, microsecond=0
+            )
+
+    # Regex map missed — try dateparser. PREFER_DATES_FROM='future' so
+    # "friday" resolves to the NEXT friday, not last. RETURN_AS_TIMEZONE_AWARE
+    # off because the rest of the codebase stores naive UTC.
+    try:
+        import dateparser
+        parsed = dateparser.parse(
+            h,
+            settings={
+                "PREFER_DATES_FROM": "future",
+                "RETURN_AS_TIMEZONE_AWARE": False,
+            },
         )
+        if parsed is not None:
+            # If dateparser returned a date-only (midnight), nudge to EOD so
+            # todos due "next friday" don't expire at 00:00.
+            if parsed.hour == 0 and parsed.minute == 0:
+                parsed = parsed.replace(hour=23, minute=59, second=0, microsecond=0)
+            return parsed
+    except Exception as e:
+        print(f"[todos handler] dateparser failed on '{h}': {e}")
     return None
 
 
@@ -135,33 +169,31 @@ def _handle_create(it, ctx, result, todo_service) -> None:
         return
     due_at = _parse_due(it.get("due_hint"))
 
-    from ..list_service import list_service
-
-    vec = list_service._embed_item_text(text)
-    if vec:
-        existing, score = _find_open_duplicate(ctx.db, vec, todo_service)
-        if existing is not None:
-            _safe_trace(
-                ctx,
-                "router:todo_dedup",
-                f"Todo dedup hit (cosine={score:.2f})",
-                {"new": text, "matched": existing.text, "id": existing.id},
-            )
-            return
-
+    # G3: dedup + mention-bump moved into todo_service.create itself. When
+    # the new text cosine-matches an open todo at ≥0.85, the service bumps
+    # the existing row's mention_count + last_mentioned_at + mention_history
+    # and returns it instead of inserting a duplicate. We surface the
+    # mention_count so the ack composer can escalate tone at ≥3 mentions
+    # ("third mention. tonight or kill it.") — silence isn't helping.
     todo = todo_service.create(
         ctx.db,
         text=text,
         due_date=due_at,
         source_note_id=ctx.source_note_id,
     )
-    result.captured_todos.append({"text": text, "todo_id": todo.id})
-    result.tools_used.append("router:todo")
+    bumped = (todo.mention_count or 1) > 1
+    result.captured_todos.append({
+        "text": todo.text,
+        "todo_id": todo.id,
+        "mention_count": todo.mention_count or 1,
+        "bumped": bumped,
+    })
+    result.tools_used.append("router:todo_bumped" if bumped else "router:todo")
     _safe_trace(
         ctx,
-        "router:todo",
-        "Captured todo",
-        {"text": text, "due_hint": it.get("due_hint"), "todo_id": todo.id},
+        "router:todo_bumped" if bumped else "router:todo",
+        f"Mention-bumped existing todo (count={todo.mention_count})" if bumped else "Captured todo",
+        {"text": todo.text, "due_hint": it.get("due_hint"), "todo_id": todo.id, "mention_count": todo.mention_count},
     )
 
 

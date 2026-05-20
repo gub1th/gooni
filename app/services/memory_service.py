@@ -576,6 +576,12 @@ class MemoryService:
                     "similarity": sim_lookup.get(m.id),
                     "always_inject": False,
                 })
+            # G3: format the block FIRST so [stale] tags reflect pre-turn
+            # state, then bump retrieval tracking. If the bump happened
+            # before formatting, the just-bumped last_retrieved_at would
+            # mask "first recall ever" / stale signals.
+            base_block = self._format_block(prefs, facts, episodes)
+
             # Bump retrieval tracking on cosine-pulled rows only. Always-inject
             # prefs are excluded — their count would equal turn count and tell
             # us nothing about which memories actually earn their slot.
@@ -594,7 +600,6 @@ class MemoryService:
                 except Exception as e:
                     print(f"memory retrieval bump error: {e}")
                     sess.rollback()
-            base_block = self._format_block(prefs, facts, episodes)
             # Prepend the capability profile so Gooni grounds "I can / I can't"
             # answers in verified facts instead of hallucinating. The block is
             # capped at ~30 lines inside capability_service so the prompt
@@ -618,23 +623,59 @@ class MemoryService:
         facts: list[Memory],
         episodes: list[Memory],
     ) -> str:
+        """Render memories with [M#N] citation anchors so the model can
+        cite specifically (G3). Master-prompt rule enforces "synthesize
+        only from cited memories" — bare claims sourced from this block
+        without a [M#N] tag are hallucination signal.
+
+        Also surfaces a 'stale' tag on cosine-retrieved rows whose
+        retrieval_count == 0 (Memory.last_retrieved_at older than 60d
+        OR never read). Memory.last_retrieved_at + retrieval_count are
+        bumped in build_memory_context_with_debug above just before this
+        format call, so 'stale' here means "never earned a slot before
+        this turn." Daniel's freshness signal — preferences are excluded
+        (they always inject; stale doesn't apply).
+        """
+        from datetime import datetime, timedelta
         if not preferences and not facts and not episodes:
             return ""
+        STALE_THRESHOLD = timedelta(days=60)
+        now = datetime.utcnow()
         lines = []
         if preferences:
             lines.append("Daniel's preferences (always apply):")
             for m in preferences:
-                lines.append(f"- {m.content}")
+                lines.append(f"- [M#{m.id}] {m.content}")
         if facts:
             lines.append("\nRelevant facts about Daniel:")
             for m in facts:
-                lines.append(f"- {m.content}")
+                tag = self._stale_tag(m, now, STALE_THRESHOLD)
+                lines.append(f"- [M#{m.id}]{tag} {m.content}")
         if episodes:
             lines.append("\nRelevant past context:")
             for m in episodes:
                 snippet = (m.content or "")[:200].replace("\n", " ")
-                lines.append(f"- {snippet}")
+                tag = self._stale_tag(m, now, STALE_THRESHOLD)
+                lines.append(f"- [M#{m.id}]{tag} {snippet}")
         return "\n".join(lines)
+
+    @staticmethod
+    def _stale_tag(m: Memory, now, threshold) -> str:
+        """Return ' [stale]' if this memory has never been retrieved before
+        OR last retrieval is older than threshold. Empty string otherwise.
+        Read AFTER the retrieval bump in build_memory_context_with_debug
+        — a fresh cosine hit on previously-zero count still tags as stale
+        because the read that bumped it IS this same turn.
+        """
+        # retrieval_count was just bumped to 1 for first-time hits, so check
+        # last_retrieved_at age: if it's null OR older than threshold the
+        # memory is earning its slot for the first time in a long time.
+        last = m.last_retrieved_at
+        if last is None:
+            return " [stale: first recall ever]"
+        if (now - last) > threshold:
+            return f" [stale: {(now - last).days}d untouched]"
+        return ""
 
     def search(
         self, query: str, limit: int = 8, db: Session | None = None

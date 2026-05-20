@@ -3153,18 +3153,82 @@ def create_space_note(space_id: str, body: dict, db: Session = Depends(get_db)):
     numeric_id = None if space_id == "general" else int(space_id)
     initial_content = body.get("content") or ""
     initial_tags = _normalize_tags(body.get("tags") or [])
+    # G3 publish ceremony: every new note enters as a draft (Confluence
+    # pattern). The Publish action — POST /notes/{id}/publish — is the
+    # explicit transition from draft → published, where the user picks
+    # public or private. Callers can still pass is_draft=False to bypass
+    # the ceremony for programmatic creates (eval seed, MCP add_note).
     note = Note(
         title=body.get("title") or "",
         content=initial_content,
         excerpt=_excerpt_from_html(initial_content),
         space_id=numeric_id,
-        is_draft=bool(body.get("is_draft", False)),
+        is_draft=bool(body.get("is_draft", True)),
         is_pinned=bool(body.get("is_pinned", False)),
         tags=json.dumps(initial_tags) if initial_tags else None,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
     db.add(note)
+    db.commit()
+    db.refresh(note)
+
+    # G3 Note→Focus binding: embed title + first 500 chars of HTML-stripped
+    # content, cosine-match active focuses, wire `supports` edge if it
+    # clears the floor. Skipped when title + content are empty.
+    try:
+        from .services import focus_binding
+        from .services.list_service import list_service
+        text_seed = (note.title or "").strip()
+        body_text = _excerpt_from_html(initial_content, limit=500) or ""
+        if body_text:
+            text_seed = f"{text_seed} {body_text}".strip()
+        if text_seed:
+            emb = list_service._embed_item_text(text_seed)
+            if emb:
+                focus_binding.bind_to_focus(
+                    db, src_kind="note", src_id=note.id, embedding=emb
+                )
+    except Exception as e:
+        print(f"[create_space_note] note→focus bind failed: {e}")
+
+    return _serialize_note(note)
+
+
+@app.post("/notes/{note_id}/publish")
+def publish_note(note_id: int, body: dict, db: Session = Depends(get_db)):
+    """Promote a draft to published. Body: { visibility: "public"|"private" }.
+    Confluence-style ceremony — replaces the old globe-icon instant flip
+    that was too easy to misclick. Idempotent on already-published notes
+    (the visibility flag still applies).
+    """
+    from datetime import datetime
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        return {"error": "note not found"}, 404
+    visibility = (body.get("visibility") or "private").lower()
+    if visibility not in ("public", "private"):
+        return {"error": "visibility must be 'public' or 'private'"}, 400
+    note.is_draft = False
+    note.is_public = visibility == "public"
+    note.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(note)
+    return _serialize_note(note)
+
+
+@app.post("/notes/{note_id}/unpublish")
+def unpublish_note(note_id: int, db: Session = Depends(get_db)):
+    """Revert a published note back to draft state. Pulls it off the
+    public site (if it was public) AND flags it as a draft again.
+    """
+    from datetime import datetime
+    note = db.query(Note).filter(Note.id == note_id).first()
+    if not note:
+        return {"error": "note not found"}, 404
+    note.is_draft = True
+    note.is_public = False
+    note.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(note)
     return _serialize_note(note)

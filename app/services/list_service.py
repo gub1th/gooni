@@ -98,6 +98,22 @@ class ListService:
         db.add(lst)
         db.commit()
         db.refresh(lst)
+
+        # G3 List→Focus binding: cosine-match the list name against active
+        # focuses and wire a `supports` edge. Replaces the old per-item
+        # ListItem→Focus binding (dropped in same PR) — Daniel's read was
+        # "we can access list items through focuses" so we bind once at
+        # the list level instead of N times per item.
+        try:
+            from . import focus_binding
+            name_embedding = self._embed_item_text(name)
+            if name_embedding:
+                focus_binding.bind_to_focus(
+                    db, src_kind="list", src_id=lst.id, embedding=name_embedding
+                )
+        except Exception as e:
+            print(f"[list_service] list→focus bind failed: {e}")
+
         return lst
 
     def get_or_create_todo_list(self, db: Session) -> List:
@@ -169,14 +185,12 @@ class ListService:
         db.commit()
         db.refresh(item)
 
-        # Side effect 1: wire `supports` edge to nearest matching focus.
-        if embedding:
-            try:
-                self._wire_supports_edge(item, embedding, db)
-            except Exception as e:
-                print(f"[list_service] supports edge wire failed: {e}")
+        # G3: ListItem→Focus binding was dropped. List→Focus is wired in
+        # get_or_create_list instead. Rationale: items in a list inherit
+        # the list's topic; per-item binding produced noisy duplicate
+        # edges and didn't serve any traversal that List→Focus doesn't.
 
-        # Side effect 2: async venue enrichment for places-shaped lists.
+        # Side effect: async venue enrichment for places-shaped lists.
         try:
             from . import list_enrich
             list_enrich.maybe_enrich_item(item.id, list_id)
