@@ -381,7 +381,6 @@ function PrimaryCard({
   onOpenChain: (id: number) => void;
 }) {
   const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
-  const age = ageHint(t.created_at);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   // Trace-border lives forever once the card is primary, but we key it
@@ -466,7 +465,12 @@ function PrimaryCard({
         />
       )}
 
-      {age && t.state !== "done" && <AgePill age={age} />}
+      {/* Continuously-running timer — primary-only. Replaces the static
+          AgePill non-primary rows use. Scales seconds → minutes → hours
+          → days and caps at days (no week/month rollup). Tick cadence
+          scales with elapsed time so we don't re-render every second
+          forever. Hidden when done since the primary auto-clears on done. */}
+      {t.state !== "done" && <LiveTimer since={t.created_at} />}
 
       {focus && (
         <span
@@ -500,6 +504,63 @@ function PrimaryCard({
       />
     )}
     </div>
+  );
+}
+
+// Continuously-updating elapsed-time pill. Tier cadence is tied to the
+// elapsed bucket: re-render every 1s while under a minute, every 30s
+// under an hour, every minute under a day, every hour beyond. Caps at
+// days (no week/month — primary todos lingering past days should
+// surface a different signal, not a bigger number).
+function LiveTimer({ since }: { since: string | null }) {
+  const start = useMemo(() => {
+    if (!since) return null;
+    const ms = new Date(since).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }, [since]);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (start == null) return;
+    let id: number | null = null;
+    function tick() {
+      const elapsed = Date.now() - start!;
+      const next =
+        elapsed < 60_000 ? 1000 :
+        elapsed < 3_600_000 ? 30_000 :
+        elapsed < 86_400_000 ? 60_000 :
+        3_600_000;
+      setNow(Date.now());
+      id = window.setTimeout(tick, next);
+    }
+    tick();
+    return () => { if (id != null) clearTimeout(id); };
+  }, [start]);
+
+  if (start == null) return null;
+  const elapsed = Math.max(0, now - start);
+  const label =
+    elapsed < 60_000 ? `${Math.floor(elapsed / 1000)}s` :
+    elapsed < 3_600_000 ? `${Math.floor(elapsed / 60_000)}m` :
+    elapsed < 86_400_000 ? `${Math.floor(elapsed / 3_600_000)}h` :
+    `${Math.floor(elapsed / 86_400_000)}d`;
+
+  return (
+    <span
+      title={`Primary for ${label}`}
+      style={{
+        display: "inline-flex", alignItems: "center",
+        fontSize: 11,
+        color: "#0F6E56",
+        background: "rgba(15,110,86,0.10)",
+        padding: "2px 8px", borderRadius: 99,
+        flexShrink: 0,
+        fontVariantNumeric: "tabular-nums",
+        fontWeight: 500,
+      }}
+    >
+      {label}
+    </span>
   );
 }
 
