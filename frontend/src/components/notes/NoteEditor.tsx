@@ -15,12 +15,16 @@ import {
   Heading1, Heading2,
   Trash2, FolderInput, Pin as PinIcon, ListPlus, Check, Pencil as PencilIcon,
   Globe as GlobeIcon,
+  StickyNote, CheckCircle2, Droplet,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
+import { NoteCard } from "./NoteCardExtension";
+import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
+import { useNoteCardStyles } from "./noteCardStyles";
 import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
@@ -290,6 +294,9 @@ function useEditorStyles() {
       }
       .gooni-toolbar-btn { transition: background 0.1s; }
       .gooni-toolbar-btn:hover { background: rgba(0,0,0,0.05) !important; }
+      /* NoteCard + TextColor CSS lives in ./noteCardStyles.ts so the public
+         read view can mount the same rules (visual parity). See
+         useNoteCardStyles() call in this component. */
       .gooni-note-editor table {
         border-collapse: collapse;
         width: 100%;
@@ -346,6 +353,7 @@ interface NoteEditorProps {
 
 export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFocusChange }: NoteEditorProps = {}) {
   useEditorStyles();
+  useNoteCardStyles();
   const embedded = variant === "embedded";
 
   const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, moveNote, selectNote, deleteNote } = useNotesContentStore();
@@ -606,6 +614,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         TableCell,
         SlashCommand,
         NoteLink,
+        NoteCard,
+        TextColor,
       ],
       content: activeNote?.content ?? "",
       // Embedded variant intentionally does NOT autofocus — focus
@@ -737,6 +747,36 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     dom.addEventListener("click", onClick);
     return () => dom.removeEventListener("click", onClick);
   }, [editor, navigate, selectNote]);
+
+  // NoteCard interactions: (1) click the hover check pill toggles checked,
+  // (2) cmd/ctrl+click anywhere on the card body also toggles (keyboard
+  // shortcut for power users). Both paths resolve a DOM click to a
+  // ProseMirror doc pos via view.posAtDOM, then call the mark command.
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const dom = editor.view.dom as HTMLElement;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const checkBtn = target.closest("[data-card-check]") as HTMLElement | null;
+      const isCmdClick = (e.metaKey || e.ctrlKey) && !!target.closest("[data-note-card]");
+      if (!checkBtn && !isCmdClick) return;
+      const card = (checkBtn ?? target).closest("[data-note-card]") as HTMLElement | null;
+      if (!card) return;
+      // Aim the pos lookup at the content span — its first text child is
+      // always inside the mark range. Falling back to the card wrapper
+      // if the content span is missing for some reason.
+      const content = card.querySelector(".gooni-note-card-content") as HTMLElement | null;
+      const probe: Node = content?.firstChild ?? content ?? card;
+      const pos = editor.view.posAtDOM(probe, 0);
+      if (pos == null || pos < 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      editor.commands.toggleNoteCardCheckedAtPos(pos);
+    };
+    dom.addEventListener("click", onClick);
+    return () => dom.removeEventListener("click", onClick);
+  }, [editor]);
 
   /**
    * BubbleMenu "↗ Extract" handler — carve the current selection out of the
@@ -2109,7 +2149,40 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       { Icon: ItalicIcon,    title: "Italic",      action: () => editor.chain().focus().toggleItalic().run(),  active: editor.isActive("italic") },
                       { Icon: Strikethrough, title: "Strike",      action: () => editor.chain().focus().toggleStrike().run(),  active: editor.isActive("strike") },
                       { Icon: CodeIcon,      title: "Inline code", action: () => editor.chain().focus().toggleCode().run(),    active: editor.isActive("code") },
-                    ] as const).map((item) => (
+                      // Card mark — wraps selection in a pastel "I did this"
+                      // visual card. Clicking again toggles it back off. The
+                      // CheckCircle2 icon next to it cycles the checked state
+                      // (cmd+click on the card body also works).
+                      {
+                        Icon: StickyNote,
+                        title: editor.isActive("noteCard") ? "Remove card" : "Card",
+                        action: () => editor.chain().focus().toggleNoteCard().run(),
+                        active: editor.isActive("noteCard"),
+                      },
+                      {
+                        Icon: CheckCircle2,
+                        title: editor.isActive("noteCard", { checked: true })
+                          ? "Mark card undone"
+                          : "Mark card done",
+                        action: () =>
+                          editor
+                            .chain()
+                            .focus()
+                            .setNoteCardChecked(!editor.isActive("noteCard", { checked: true }))
+                            .run(),
+                        active: editor.isActive("noteCard", { checked: true }),
+                        // Only meaningful when cursor is inside an existing card.
+                        hidden: !editor.isActive("noteCard"),
+                      },
+                      {
+                        // Cycle card color blue ↔ pink. Only shown inside a card.
+                        Icon: Droplet,
+                        title: "Cycle card color",
+                        action: () => editor.chain().focus().cycleNoteCardColor().run(),
+                        active: false,
+                        hidden: !editor.isActive("noteCard"),
+                      },
+                    ] as const).filter((item) => !("hidden" in item && item.hidden)).map((item) => (
                       <button
                         key={item.title}
                         title={item.title}
@@ -2135,6 +2208,61 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         <item.Icon size={15} strokeWidth={1.9} />
                       </button>
                     ))}
+                    {/* Text-color swatches. Minimal: a row of small filled
+                        circles + a reset dot. Click applies via the TextColor
+                        mark. Active color shows a ring. Always visible —
+                        Daniel didn't want a popover, wants the picker flat
+                        in the toolbar. */}
+                    <span style={{ width: 1, height: 18, background: "rgba(15,23,42,0.10)", margin: "0 4px" }} />
+                    {TEXT_COLOR_PALETTE.map((sw) => {
+                      const isActive = sw.value == null
+                        ? !editor.isActive("textColor")
+                        : editor.isActive("textColor", { color: sw.value });
+                      return (
+                        <button
+                          key={sw.name}
+                          title={sw.label}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            editor.chain().focus().setTextColor(sw.value).run();
+                          }}
+                          style={{
+                            display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            width: 22, height: 22,
+                            padding: 0,
+                            borderRadius: "50%",
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "inline-block",
+                              width: 14, height: 14, borderRadius: "50%",
+                              background: sw.value ?? "transparent",
+                              border: sw.value
+                                ? (isActive ? "2px solid #0F172A" : "0.5px solid rgba(15,23,42,0.18)")
+                                : "1.5px solid rgba(15,23,42,0.35)",
+                              boxSizing: "border-box",
+                              // Diagonal slash on the "default" (null) swatch so
+                              // it reads as "clear" not "white".
+                              position: "relative",
+                            }}
+                          >
+                            {sw.value == null && (
+                              <span
+                                style={{
+                                  position: "absolute", left: "50%", top: "50%",
+                                  transform: "translate(-50%, -50%) rotate(-45deg)",
+                                  width: 12, height: 1.5, background: "rgba(15,23,42,0.5)",
+                                }}
+                              />
+                            )}
+                          </span>
+                        </button>
+                      );
+                    })}
                     {/* Vertical separator before the structural action — keeps
                         the formatting marks visually grouped. */}
                     {activeNoteId && activeNoteId > 0 && (
