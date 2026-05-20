@@ -279,6 +279,158 @@ def add_note(
     return f"Created note #{n['id']} in {space_name}: {n['title']}{suffix}{tag_part} ({url})"
 
 
+# Mirror of AttachmentExtension.ts:iconLabelForMime/shortMime/formatBytes.
+# Keep aligned — these strings appear in the rendered attachment block and
+# must match the frontend renderHTML output exactly so the TipTap parseHTML
+# round-trips cleanly (the editor expects the same DOM shape on next save).
+def _attachment_icon_label(mime: str) -> str:
+    m = (mime or "").lower()
+    if m.startswith("image/"): return "IMG"
+    if m == "application/pdf": return "PDF"
+    if m.startswith("video/"): return "VID"
+    if m.startswith("audio/"): return "AUD"
+    if m.startswith("text/") or "json" in m or "xml" in m: return "TXT"
+    if any(s in m for s in ("zip", "compressed", "tar", "rar")): return "ZIP"
+    if "word" in m or "officedocument.wordprocessing" in m: return "DOC"
+    if "sheet" in m or "excel" in m: return "XLS"
+    if "presentation" in m or "powerpoint" in m: return "PPT"
+    return "FILE"
+
+
+def _attachment_short_mime(mime: str) -> str:
+    if not mime: return "file"
+    last = mime.split("/")[-1] or mime
+    return re.sub(r"^vnd\.[^.]*\.", "", last).removeprefix("x-").upper()
+
+
+def _attachment_format_bytes(b: int) -> str:
+    if b is None or b <= 0: return "0 B"
+    units = ["B", "KB", "MB", "GB"]
+    v = float(b)
+    u = 0
+    while v >= 1024 and u < len(units) - 1:
+        v /= 1024
+        u += 1
+    val = f"{round(v)}" if (v >= 10 or u == 0) else f"{v:.1f}"
+    return f"{val} {units[u]}"
+
+
+def _attachment_block_html(
+    *,
+    url: str,
+    filename: str,
+    mime: str,
+    size: int,
+    attachment_id: int | None,
+) -> str:
+    """Render an Attachment node's HTML matching frontend renderHTML
+    output exactly. TipTap parseHTML will re-recognize this on next save."""
+    import html as _html
+    icon = _attachment_icon_label(mime)
+    sub = f"{_attachment_short_mime(mime)} · {_attachment_format_bytes(size)}"
+    attrs = [
+        'data-attachment=""',
+        f'data-url="{_html.escape(url, quote=True)}"',
+        f'data-filename="{_html.escape(filename, quote=True)}"',
+        f'data-mime="{_html.escape(mime, quote=True)}"',
+        f'data-size="{int(size)}"',
+        'class="gooni-attachment-card"',
+    ]
+    if attachment_id is not None:
+        attrs.insert(-1, f'data-attachment-id="{int(attachment_id)}"')
+    return (
+        f'<div {" ".join(attrs)}>'
+        f'<a href="{_html.escape(url, quote=True)}" target="_blank" rel="noopener noreferrer" class="gooni-attachment-link">'
+        f'<span class="gooni-attachment-icon">{icon}</span>'
+        f'<span class="gooni-attachment-meta">'
+        f'<span class="gooni-attachment-name">{_html.escape(filename)}</span>'
+        f'<span class="gooni-attachment-sub">{_html.escape(sub)}</span>'
+        f'</span></a></div>'
+    )
+
+
+@mcp.tool()
+def attach_file_to_note(
+    note_id: int,
+    file_path: str,
+    filename: str | None = None,
+    mime_type: str | None = None,
+) -> str:
+    """Upload a local file to Gooni's storage and attach it to a note as
+    an inline block (PDF, doc, image, etc.). Use this when you've generated
+    a file Daniel should see embedded in the note — a PDF summary, an
+    exported dataset, an image. The block renders as a clickable card at
+    the end of the note body, same shape as drag-dropped attachments.
+
+    Args:
+        note_id: target note id (must exist)
+        file_path: absolute path to a local file you've already written
+        filename: optional display name (defaults to file basename)
+        mime_type: optional MIME (defaults to guess from extension)
+
+    Returns: terse confirmation with attachment id + URL.
+    """
+    import mimetypes
+    import pathlib
+
+    p = pathlib.Path(file_path).expanduser()
+    if not p.is_file():
+        return f"ERROR: file not found at {file_path}"
+    data = p.read_bytes()
+    if not data:
+        return f"ERROR: file is empty: {file_path}"
+
+    name = filename or p.name
+    mime = mime_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+
+    # Multipart upload — the /uploads/file endpoint takes a `file` form
+    # field + optional `note_id`. Passing note_id makes it create the
+    # attachments DB row server-side; we just need to drop the block into
+    # the note body afterwards.
+    upload_resp = _session.post(
+        f"{BASE_URL}/uploads/file",
+        files={"file": (name, data, mime)},
+        data={"note_id": str(note_id)},
+        timeout=60,
+    )
+    if upload_resp.status_code == 503:
+        return f"ERROR: R2 storage not configured on backend ({upload_resp.text})"
+    upload_resp.raise_for_status()
+    up = upload_resp.json()
+
+    # Append the attachment block to the note's current content. We fetch
+    # the current HTML, append, then PATCH — same pattern check_task uses
+    # for HTML mutation through BeautifulSoup, but a string append is
+    # sufficient here since the attachment block is self-contained.
+    note_resp = _session.get(f"{BASE_URL}/notes/{note_id}", timeout=10)
+    note_resp.raise_for_status()
+    note = note_resp.json()
+    current = note.get("content") or ""
+    block = _attachment_block_html(
+        url=up["url"],
+        filename=up["filename"],
+        mime=up["mime_type"],
+        size=up["size_bytes"],
+        attachment_id=up.get("attachment_id"),
+    )
+    new_content = (current + block) if current else block
+
+    patch = _session.patch(
+        f"{BASE_URL}/notes/{note_id}",
+        json={"content": new_content},
+        timeout=10,
+    )
+    patch.raise_for_status()
+
+    aid = up.get("attachment_id")
+    aid_str = f" attachment_id={aid}" if aid is not None else " (no DB row — orphan upload)"
+    return (
+        f"Attached {name} ({_attachment_short_mime(mime)}, "
+        f"{_attachment_format_bytes(len(data))}) to note #{note_id}.{aid_str} "
+        f"URL: {up['url']}"
+    )
+
+
 @mcp.tool()
 def search_notes(query: str, limit: int = 5) -> str:
     """Search Gooni notes by semantic similarity.

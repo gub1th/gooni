@@ -26,7 +26,7 @@ import { NoteCard } from "./NoteCardExtension";
 import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
 import { useNoteCardStyles } from "./noteCardStyles";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
 import { NoteComments } from "./NoteComments";
 import { DOMSerializer } from "@tiptap/pm/model";
@@ -111,6 +111,70 @@ async function uploadAndInsertImage(
 // Upload a non-image file to R2 and insert an AttachmentNode pointing at
 // it. No base64 fallback — opaque files don't render inline. We bail and
 // surface the error instead of dirtying the note with a broken URL.
+// Tight regex: clipboard text counts as a URL paste ONLY when it's
+// http(s)://something with no whitespace. Anything trailing (extra text,
+// commentary, multiple URLs) falls through to TipTap's normal paste.
+const URL_PASTE_RE = /^https?:\/\/[^\s]+$/i;
+
+/**
+ * If `text` is a bare URL, replace it with a LinkCard node at cursor and
+ * fetch OG metadata async. Returns true if handled. Caller must already
+ * have called e.preventDefault() synchronously — this helper is async.
+ */
+async function pasteAsLinkCardIfUrl(editor: Editor, text: string): Promise<boolean> {
+  const trimmed = text.trim();
+  if (!URL_PASTE_RE.test(trimmed)) return false;
+  const hostname = (() => {
+    try { return new URL(trimmed).hostname.replace(/^www\./, ""); }
+    catch { return trimmed; }
+  })();
+  editor
+    .chain()
+    .focus()
+    .insertContent([
+      {
+        type: "linkCard",
+        attrs: {
+          url: trimmed,
+          title: trimmed,
+          description: null,
+          image: null,
+          siteName: hostname,
+        },
+      },
+      { type: "paragraph" },
+    ])
+    .run();
+  // OG fetch + patch attrs in the background. If the user keeps typing,
+  // node positions can drift — walk the doc to find the most-recent
+  // linkCard with this URL and update by its current pos.
+  void (async () => {
+    try {
+      const og = await fetchOgMetadata(trimmed);
+      let targetPos: number | null = null;
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name === "linkCard" && node.attrs.url === trimmed) {
+          targetPos = pos; // last match wins → most-recently inserted card
+        }
+        return true;
+      });
+      if (targetPos == null) return;
+      editor.commands.command(({ tr }) => {
+        tr.setNodeAttribute(targetPos!, "title", og.title || trimmed);
+        if (og.description) tr.setNodeAttribute(targetPos!, "description", og.description);
+        if (og.image) tr.setNodeAttribute(targetPos!, "image", og.image);
+        if (og.site_name) tr.setNodeAttribute(targetPos!, "siteName", og.site_name);
+        return true;
+      });
+    } catch (e) {
+      // OG fetch failed — leave the placeholder card (it still has url +
+      // hostname). User can delete or keep.
+      console.warn("[NoteEditor] OG fetch failed for", trimmed, e);
+    }
+  })();
+  return true;
+}
+
 async function uploadAndInsertAttachment(
   editor: Editor,
   file: File,
@@ -1697,6 +1761,9 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 const all = Array.from(e.dataTransfer?.files ?? []);
                 if (!all.length || !editor) return;
                 e.preventDefault();
+                // Drop-coordinate-aware insert (Notion-style inline).
+                const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+                if (coords) editor.chain().focus().setTextSelection(coords.pos).run();
                 const noteIdForUpload = activeNoteId && activeNoteId > 0 ? activeNoteId : undefined;
                 for (const file of all) {
                   if (file.type.startsWith("image/")) {
@@ -1714,8 +1781,21 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 }
               }}
               onPaste={async (e) => {
+                if (!editor) return;
+                // URL paste → LinkCard (Slack/Confluence smartcard).
+                // Sync detect + preventDefault first; only then await.
+                const text = e.clipboardData?.getData("text/plain") ?? "";
+                const trimmed = text.trim();
+                if (URL_PASTE_RE.test(trimmed)) {
+                  e.preventDefault();
+                  await pasteAsLinkCardIfUrl(editor, trimmed);
+                  hasChanges.current = true;
+                  scheduleSave();
+                  return;
+                }
+                // File paste — existing path.
                 const all = Array.from(e.clipboardData?.files ?? []);
-                if (!all.length || !editor) return;
+                if (!all.length) return;
                 e.preventDefault();
                 const noteIdForUpload = activeNoteId && activeNoteId > 0 ? activeNoteId : undefined;
                 for (const file of all) {
@@ -2329,6 +2409,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     const all = Array.from(e.dataTransfer?.files ?? []);
                     if (!all.length || !editor) return;
                     e.preventDefault();
+                    // Move the cursor to the drop coordinates BEFORE inserting
+                    // so the attachment lands where the user dropped it
+                    // (Notion-style inline), not at whatever the prior cursor
+                    // position was. posAtCoords returns null if the drop missed
+                    // a renderable position — fall back to current selection.
+                    const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
+                    if (coords) editor.chain().focus().setTextSelection(coords.pos).run();
                     const noteIdForUpload = activeNoteId && activeNoteId > 0 ? activeNoteId : undefined;
                     for (const file of all) {
                       if (file.type.startsWith("image/")) {
@@ -2346,8 +2433,19 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     }
                   }}
                   onPaste={async (e) => {
+                    if (!editor) return;
+                    // URL paste → LinkCard. Same logic as embedded variant.
+                    const text = e.clipboardData?.getData("text/plain") ?? "";
+                    const trimmed = text.trim();
+                    if (URL_PASTE_RE.test(trimmed)) {
+                      e.preventDefault();
+                      await pasteAsLinkCardIfUrl(editor, trimmed);
+                      hasChanges.current = true;
+                      scheduleSave();
+                      return;
+                    }
                     const all = Array.from(e.clipboardData?.files ?? []);
-                    if (!all.length || !editor) return;
+                    if (!all.length) return;
                     e.preventDefault();
                     const noteIdForUpload = activeNoteId && activeNoteId > 0 ? activeNoteId : undefined;
                     for (const file of all) {
