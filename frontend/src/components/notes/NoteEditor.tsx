@@ -15,12 +15,14 @@ import {
   Heading1, Heading2,
   Trash2, FolderInput, Pin as PinIcon, ListPlus, Check, Pencil as PencilIcon,
   Globe as GlobeIcon,
+  StickyNote, CheckCircle2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
+import { NoteCard } from "./NoteCardExtension";
 import { SendButton } from "../chat/SendButton";
 import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
@@ -290,6 +292,62 @@ function useEditorStyles() {
       }
       .gooni-toolbar-btn { transition: background 0.1s; }
       .gooni-toolbar-btn:hover { background: rgba(0,0,0,0.05) !important; }
+      /* Note cards — pastel inline pills that wrap retroactive "I did this"
+         text spans. Inline-flow so multi-line selections stretch like
+         highlighter marks. Hover surfaces a check icon as visual telegraph
+         that cmd+click toggles the done state. Checked state: dimmed +
+         struck through. */
+      .gooni-note-editor .gooni-note-card {
+        padding: 1px 7px;
+        border-radius: 7px;
+        position: relative;
+        transition: background 0.15s, color 0.15s, opacity 0.15s;
+        cursor: default;
+      }
+      .gooni-note-editor .gooni-note-card-blue {
+        background: rgba(186, 230, 253, 0.55);
+        color: #0C4A6E;
+        box-shadow: inset 0 0 0 0.5px rgba(56, 189, 248, 0.30);
+      }
+      .gooni-note-editor .gooni-note-card-pink {
+        background: rgba(251, 207, 232, 0.55);
+        color: #831843;
+        box-shadow: inset 0 0 0 0.5px rgba(244, 114, 182, 0.30);
+      }
+      .gooni-note-editor .gooni-note-card-checked {
+        text-decoration: line-through;
+        opacity: 0.5;
+      }
+      /* Hover check telegraph — pure CSS pseudo, not clickable.
+         Cmd/Ctrl+click on the card body is the real toggle. */
+      .gooni-note-editor .gooni-note-card::after {
+        content: "✓";
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        color: #16A34A;
+        font-size: 11px;
+        line-height: 16px;
+        text-align: center;
+        font-weight: 700;
+        box-shadow: 0 1px 3px rgba(15,23,42,0.18), inset 0 0 0 0.5px rgba(15,23,42,0.10);
+        opacity: 0;
+        pointer-events: none;
+        transform: scale(0.7);
+        transition: opacity 0.12s ease, transform 0.12s ease;
+      }
+      .gooni-note-editor .gooni-note-card:hover::after {
+        opacity: 1;
+        transform: scale(1);
+      }
+      .gooni-note-editor .gooni-note-card-checked::after {
+        color: #16A34A;
+        background: #DCFCE7;
+      }
       .gooni-note-editor table {
         border-collapse: collapse;
         width: 100%;
@@ -606,6 +664,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         TableCell,
         SlashCommand,
         NoteLink,
+        NoteCard,
       ],
       content: activeNote?.content ?? "",
       // Embedded variant intentionally does NOT autofocus — focus
@@ -737,6 +796,36 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     dom.addEventListener("click", onClick);
     return () => dom.removeEventListener("click", onClick);
   }, [editor, navigate, selectNote]);
+
+  // Cmd/Ctrl+click on a `noteCard` mark toggles its checked state. Stand-in
+  // for the hover-button affordance Daniel asked for — proper hover button
+  // needs a ProseMirror plugin decoration, which is v2. Cmd+click is the
+  // universal "secondary action" muscle memory in editors.
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    const dom = editor.view.dom as HTMLElement;
+    const onClick = (e: MouseEvent) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      const target = e.target as HTMLElement | null;
+      const card = target?.closest("[data-note-card]") as HTMLElement | null;
+      if (!card) return;
+      // Resolve the DOM click into a ProseMirror doc position. posAtDOM
+      // takes (node, offset) of the click target. Falling back to the
+      // mark wrapper if the click landed on a child text node.
+      let domNode: Node = card;
+      let domOffset = 0;
+      if (target && card.contains(target) && target !== card) {
+        domNode = target;
+      }
+      const pos = editor.view.posAtDOM(domNode, domOffset);
+      if (pos == null || pos < 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      editor.commands.toggleNoteCardCheckedAtPos(pos);
+    };
+    dom.addEventListener("click", onClick);
+    return () => dom.removeEventListener("click", onClick);
+  }, [editor]);
 
   /**
    * BubbleMenu "↗ Extract" handler — carve the current selection out of the
@@ -2109,7 +2198,32 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       { Icon: ItalicIcon,    title: "Italic",      action: () => editor.chain().focus().toggleItalic().run(),  active: editor.isActive("italic") },
                       { Icon: Strikethrough, title: "Strike",      action: () => editor.chain().focus().toggleStrike().run(),  active: editor.isActive("strike") },
                       { Icon: CodeIcon,      title: "Inline code", action: () => editor.chain().focus().toggleCode().run(),    active: editor.isActive("code") },
-                    ] as const).map((item) => (
+                      // Card mark — wraps selection in a pastel "I did this"
+                      // visual card. Clicking again toggles it back off. The
+                      // CheckCircle2 icon next to it cycles the checked state
+                      // (cmd+click on the card body also works).
+                      {
+                        Icon: StickyNote,
+                        title: editor.isActive("noteCard") ? "Remove card" : "Card",
+                        action: () => editor.chain().focus().toggleNoteCard().run(),
+                        active: editor.isActive("noteCard"),
+                      },
+                      {
+                        Icon: CheckCircle2,
+                        title: editor.isActive("noteCard", { checked: true })
+                          ? "Mark card undone"
+                          : "Mark card done",
+                        action: () =>
+                          editor
+                            .chain()
+                            .focus()
+                            .setNoteCardChecked(!editor.isActive("noteCard", { checked: true }))
+                            .run(),
+                        active: editor.isActive("noteCard", { checked: true }),
+                        // Only meaningful when cursor is inside an existing card.
+                        hidden: !editor.isActive("noteCard"),
+                      },
+                    ] as const).filter((item) => !("hidden" in item && item.hidden)).map((item) => (
                       <button
                         key={item.title}
                         title={item.title}
