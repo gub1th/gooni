@@ -187,7 +187,7 @@ def extract_candidates(user_message: str, assistant_reply: str) -> list[dict[str
         user=user_message[:1500],
         assistant=(assistant_reply or "")[:1500],
     )
-    raw = llm_client.generate_simple_completion(prompt, max_tokens=600)
+    raw = llm_client.generate_simple_completion(prompt, max_tokens=600, model="gpt-5.4-mini")
     parsed = _parse_json_array(raw)
     return [c for c in parsed if _validate_candidate(c)]
 
@@ -224,11 +224,13 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
   ],
   "todos": [
     {{
-      "kind":       "create|delete|complete|merge",
-      "text":       "<for create — short imperative chore, max 12 words>",
-      "due_hint":   "tonight|today|tomorrow|this week|null",
-      "match":      "<for delete/complete/merge — substring of the existing todo Daniel is acting on>",
-      "merge_into": "<for merge only — substring identifying the keep-target>"
+      "kind":         "create|delete|complete|merge",
+      "text":         "<for create — short imperative chore, max 12 words>",
+      "due_hint":     "tonight|today|tomorrow|this week|null",
+      "match":        "<for delete/complete/merge — substring of the existing todo Daniel is acting on>",
+      "merge_into":   "<for merge only — substring identifying the keep-target>",
+      "closure_note": "<for complete only — optional short outcome text Daniel said about how it went>",
+      "spawned":      [{{"text": "<follow-up chore>", "due_hint": "..."}}]
     }}
   ],
   "reply_intent": "answer|acknowledge|task_only|no_reply",
@@ -463,18 +465,44 @@ DELETE — `{{kind:"delete", match:"..."}}`:
     Text "drop the leetcode todo" → [{{kind:"delete", match:"leetcode"}}]
 - NEVER emit a create alongside — the user is killing, not adding.
 
-COMPLETE — `{{kind:"complete", match:"..."}}`:
+COMPLETE — `{{kind:"complete", match:"...", closure_note?:"...", spawned?:[{{text, due_hint?}}]}}`:
 - Daniel signals an existing todo is DONE. Router cosine-matches against
   open todos and cycles state to done.
 - `match` = the OBJECT (the existing todo's text or close paraphrase).
-- Examples:
+- `closure_note` (optional) — short outcome text Daniel said about HOW it went,
+  what happened, the takeaway. Captures continuity ("closure ≠ end-of-thread").
+- `spawned` (optional) — list of follow-up todos Daniel mentioned in the same
+  message ("close X, gonna do Y next"). Each becomes a new Todo linked to the
+  closed one via a spawned_from edge. NEVER emit these as separate kind=create
+  entries when they're follow-ups to a close — bundle them inside the complete
+  entry's spawned[] so the lineage edge gets wired.
+- Examples (close only):
     Text "close call paip" → [{{kind:"complete", match:"call paip"}}]
     Text "lets close call paip" → [{{kind:"complete", match:"call paip"}}]
     Text "move filter active focuses to done" →
       [{{kind:"complete", match:"filter active focuses"}}]
     Text "finished the auth bug fix" → [{{kind:"complete", match:"auth bug"}}]
     Text "i did the dentist call" → [{{kind:"complete", match:"dentist"}}]
-- NEVER emit a create alongside — the user is closing existing work.
+- Examples (close + outcome, no spawn):
+    Text "closed forge prep, went well" →
+      [{{kind:"complete", match:"forge prep", closure_note:"went well"}}]
+    Text "did the dentist appointment. great visit." →
+      [{{kind:"complete", match:"dentist", closure_note:"great visit"}}]
+- Examples (close + outcome + spawn — the chain-continuity case):
+    Text "close forge prep, went well, gonna schedule technical next" →
+      [{{kind:"complete", match:"forge prep", closure_note:"went well",
+         spawned:[{{text:"schedule technical round", due_hint:null}}]}}]
+    Text "leg appointment done. now need to provide my info" →
+      [{{kind:"complete", match:"leg appointment",
+         spawned:[{{text:"provide info for appointment", due_hint:null}}]}}]
+    Text "closed taxes prep. gonna file tonight and call cpa tomorrow" →
+      [{{kind:"complete", match:"taxes prep",
+         spawned:[
+           {{text:"file taxes", due_hint:"tonight"}},
+           {{text:"call cpa", due_hint:"tomorrow"}}
+         ]}}]
+- NEVER emit a create alongside — the user is closing existing work, and any
+  follow-ups belong INSIDE the complete entry's spawned[] field.
 
 MERGE — `{{kind:"merge", match:"...", merge_into:"..."}}`:
 - Daniel signals two existing todos should combine. `merge_into` = the
@@ -696,6 +724,40 @@ def _normalize_todos(items: Any) -> list[dict]:
             continue
 
         due_hint = it.get("due_hint")
+
+        # G3.5: COMPLETE kind can carry closure_note + spawned follow-ups.
+        # Only meaningful when kind=complete; silently dropped for other
+        # kinds so the schema stays consistent.
+        closure_note_raw = it.get("closure_note") if kind == "complete" else None
+        closure_note = (
+            closure_note_raw.strip()
+            if isinstance(closure_note_raw, str)
+            and closure_note_raw.strip()
+            and closure_note_raw.strip().lower() != "null"
+            else None
+        )
+
+        spawned_raw = it.get("spawned") if kind == "complete" else None
+        spawned: list[dict] = []
+        if isinstance(spawned_raw, list):
+            for sp in spawned_raw:
+                if not isinstance(sp, dict):
+                    continue
+                sp_text = sp.get("text")
+                if not isinstance(sp_text, str) or not sp_text.strip():
+                    continue
+                sp_due = sp.get("due_hint")
+                spawned.append({
+                    "text": sp_text.strip()[:200],
+                    "due_hint": (
+                        sp_due.strip()[:40]
+                        if isinstance(sp_due, str)
+                        and sp_due.strip()
+                        and sp_due.strip().lower() != "null"
+                        else None
+                    ),
+                })
+
         out.append({
             "kind": kind,
             "text": text[:200] if text else None,
@@ -708,6 +770,8 @@ def _normalize_todos(items: Any) -> list[dict]:
             ),
             "match": match[:200] if match else None,
             "merge_into": merge_into[:200] if merge_into else None,
+            "closure_note": closure_note[:500] if closure_note else None,
+            "spawned": spawned,
         })
     return out
 
@@ -793,7 +857,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         text=text[:2000],
     )
     try:
-        raw = llm_client.generate_simple_completion(prompt, max_tokens=500, temperature=0.0)
+        raw = llm_client.generate_simple_completion(prompt, max_tokens=500, temperature=0.0, model="gpt-5.4-mini")
     except Exception as e:
         print(f"extract_signals LLM error: {e}")
         return empty
@@ -842,7 +906,7 @@ def reconcile_candidate(
         cconfidence=candidate.get("confidence", 0.8),
         existing=existing_block,
     )
-    raw = llm_client.generate_simple_completion(prompt, max_tokens=120, temperature=0.0)
+    raw = llm_client.generate_simple_completion(prompt, max_tokens=120, temperature=0.0, model="gpt-5.4-mini")
     parsed = _parse_json_object(raw)
     if not parsed:
         return None

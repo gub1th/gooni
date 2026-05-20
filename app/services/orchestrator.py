@@ -306,6 +306,22 @@ GROOMING / READ-FIRST behavior:
 - Frictionless-yes principle: a request to act on existing state is not
   a request for permission to look. Pull first, ask second.
 
+TODO CONTINUITY (G3.5) — closure is rarely the end:
+- When Daniel closes a todo by chat ("close X, went well, gonna do Y next"),
+  the router automatically: (a) completes the matched parent, (b) saves the
+  outcome as closure_note, (c) creates each follow-up as a child Todo wired
+  via a `spawned_from` edge. You don't need to do this yourself — just
+  acknowledge what happened. The [just extracted] block will name the parent
+  + outcome + spawned children with IDs as the verification anchor.
+- Watch the [just extracted] block for "Todo #N spawned: 'X' (from Todo #M
+  'Y')" — that line means a lineage chain just formed. The reply should
+  confirm both the close AND the new chore in one breath, not announce them
+  separately ("closed forge prep, sir. spawned schedule technical." — one
+  bubble, two clauses).
+- If Daniel mentions an outcome but doesn't propose a follow-up, just confirm
+  the close + acknowledge the outcome briefly ("closed forge prep, sir.
+  noted: went well.") — don't invent a follow-up.
+
 HOW DANIEL WRITES — match HIS register, don't escalate it:
 - Lowercase, fragments OK, typos pass through. Don't proofread.
 - He cusses at himself ("dumbass", "retarded"). Mirror the
@@ -503,12 +519,15 @@ def _build_ack(
                     parts.append(f"\"{summary}\" tracked" + _voice_tail(p))
             else:
                 parts.append(f"{len(pending)} promises tracked")
-    if captured_todos:
+    # G3.5: filter out spawned children — they'll be rendered alongside
+    # their parent's close phrase below. Bare creates still show here.
+    bare_creates = [t for t in (captured_todos or []) if not t.get("spawned_from_id")]
+    if bare_creates:
         texts = [
             f"\"{_trim(t.get('text'))}\""
-            for t in captured_todos[:3]
+            for t in bare_creates[:3]
         ]
-        n = len(captured_todos)
+        n = len(bare_creates)
         if n == 1:
             parts.append(f"noted. {texts[0]} for todos")
         elif n == 2:
@@ -534,14 +553,36 @@ def _build_ack(
         else:
             parts.append(f"killed {n}: {', '.join(texts)}")
     if completed_todos:
-        texts = [f"\"{_trim(t.get('text'))}\"" for t in completed_todos[:3]]
-        n = len(completed_todos)
-        if n == 1:
-            parts.append(f"closed {texts[0]}")
-        elif n == 2:
-            parts.append(f"closed {texts[0]}, {texts[1]}")
+        # G3.5: rendering varies by whether closure_note + spawned[] present.
+        # Per Surface F spec: "closed X, sir. outcome logged. spawned: A, B."
+        # Multiple closes condense, but a SINGLE close with outcome/spawn
+        # gets the richer per-line phrasing.
+        if len(completed_todos) == 1:
+            ct = completed_todos[0]
+            text = _trim(ct.get("text"))
+            outcome_present = bool((ct.get("closure_note") or "").strip())
+            # Find any spawned_todos in captured_todos that point at this close
+            close_id = ct.get("todo_id")
+            spawned_for_this = [
+                t for t in (captured_todos or [])
+                if t.get("spawned_from_id") == close_id
+            ]
+            phrase = f"closed \"{text}\""
+            if outcome_present:
+                phrase += ". outcome logged"
+            if spawned_for_this:
+                spawn_texts = ", ".join(
+                    f"\"{_trim(t.get('text'))}\"" for t in spawned_for_this[:3]
+                )
+                phrase += f" · spawned: {spawn_texts}"
+            parts.append(phrase)
         else:
-            parts.append(f"closed {n}: {', '.join(texts)}")
+            texts = [f"\"{_trim(t.get('text'))}\"" for t in completed_todos[:3]]
+            n = len(completed_todos)
+            if n == 2:
+                parts.append(f"closed {texts[0]}, {texts[1]}")
+            else:
+                parts.append(f"closed {n}: {', '.join(texts)}")
     if merged_todos:
         # Render each merge as `"from" → "into"` so the direction is clear
         # (which text was kept vs absorbed).
@@ -788,7 +829,20 @@ def _build_just_extracted_block(
         if len(text) > 60:
             text = text[:60].rstrip() + "…"
         tid = t.get("todo_id")
-        if tid is not None:
+        spawn_parent = t.get("spawned_from_id")
+        if spawn_parent is not None:
+            # G3.5: a child todo spawned from a close. Surface the lineage
+            # so the LLM understands it's a follow-up, not a fresh chore.
+            parent_text = (t.get("spawned_from_text") or "").strip()
+            if len(parent_text) > 40:
+                parent_text = parent_text[:40].rstrip() + "…"
+            anchor = f"#{tid}" if tid is not None else "?"
+            parent_anchor = f"#{spawn_parent}"
+            lines.append(
+                f"- Todo {anchor} spawned: \"{text}\" "
+                f"(from Todo {parent_anchor} \"{parent_text}\")"
+            )
+        elif tid is not None:
             lines.append(f"- Todo #{tid} added: \"{text}\"")
         else:
             lines.append(f"- Todo added (id unknown): \"{text}\"")
@@ -809,10 +863,15 @@ def _build_just_extracted_block(
         if len(text) > 60:
             text = text[:60].rstrip() + "…"
         tid = t.get("todo_id")
+        # G3.5: closure_note on the completed todo. Surface verbatim so the
+        # LLM has the outcome context the user just shared — useful for any
+        # follow-up question or summary they ask later in the turn.
+        outcome = (t.get("closure_note") or "").strip()
+        outcome_tail = f" · outcome: \"{outcome[:80]}\"" if outcome else ""
         if tid is not None:
-            lines.append(f"- Todo #{tid} completed: \"{text}\"")
+            lines.append(f"- Todo #{tid} completed: \"{text}\"{outcome_tail}")
         else:
-            lines.append(f"- Todo completed: \"{text}\"")
+            lines.append(f"- Todo completed: \"{text}\"{outcome_tail}")
     for m in (merged_todos or [])[:3]:
         into_text = (m.get("into_text") or "").strip()
         from_text = (m.get("from_text") or "").strip()
@@ -1134,7 +1193,7 @@ class Orchestrator:
                 print(f"[event_cb] stage {stage} failed: {e}")
 
         _emit("intent", "Reading your message")
-        intention_context = llm_client.generate_intention_context(query, recent_history[-6:])
+        intention_context = llm_client.generate_intention_context(query, recent_history[-6:], model="gpt-5.4-mini")
         tb.intent(query, intention_context)
         _emit("memory_recall", "Pulling related memories")
         memory_context, recalled_memories = memory_service.build_memory_context_with_debug(query, db=db)

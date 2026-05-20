@@ -561,6 +561,12 @@ class Todo(Base):
     # rows are invisible to UI + chat. The undo window is the gap between
     # soft-delete and sweep.
     deleted_at = Column(DateTime, nullable=True, index=True)
+    # G3.5 Todo Continuity: short inline outcome text captured when this
+    # todo closes. Optional — most closes have nothing to say. For longer
+    # outcomes, callers write a Note + wire an `outcome_of` edge instead.
+    # Sits next to the lineage edges (kind='spawned_from') that link this
+    # todo to its parents/children in the `edges` table.
+    closure_note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

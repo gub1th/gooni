@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crown, Plus, AlertTriangle } from "lucide-react";
+import { Crown, Plus, AlertTriangle, ArrowUpRight, ArrowLeft } from "lucide-react";
 import {
   fetchTodos, createTodo, updateTodo, cycleTodoState, deleteTodo,
   promoteTodoToPrimary, fetchFocuses,
   type ApiTodo, type ApiTodoBundle, type ApiFocus, type TodoState,
+  type TodoChainMeta,
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
 import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 import { TodoEditModal } from "./TodoEditModal";
+import { TodoChainView } from "./TodoChainView";
 
 // TodoList — dashboard todos block. Mockup-aligned shape:
 //
@@ -121,6 +123,10 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (creating) inputRef.current?.focus(); }, [creating]);
 
+  // Chain view modal — opens via ↗ indicator click OR "from:" line
+  // click. Null = closed. G3.5 Surface B + D entry point.
+  const [chainViewId, setChainViewId] = useState<number | null>(null);
+
   // Edit modal — click into a card body opens the full-details view.
   const [editingId, setEditingId] = useState<number | null>(null);
   const editing: ApiTodo | null = useMemo(() => {
@@ -216,11 +222,13 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           t={bundle.primary}
           focus={bundle.primary.focus_id ? focusById.get(bundle.primary.focus_id) ?? null : null}
           cascade={cascadeIds.includes(bundle.primary.id)}
+          chainMeta={bundle.chain_summary?.[bundle.primary.id]}
           onCycle={() => onCycle(bundle.primary!)}
           onPickState={(s) => onPickState(bundle.primary!.id, s)}
           onDemote={() => onDemotePrimary(bundle.primary!.id)}
           onDelete={() => onDelete(bundle.primary!.id)}
           onOpenEdit={() => setEditingId(bundle.primary!.id)}
+          onOpenChain={(id) => setChainViewId(id)}
         />
       )}
 
@@ -266,11 +274,13 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
             t={t}
             focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
             cascade={cascadeIds.includes(t.id)}
+            chainMeta={bundle.chain_summary?.[t.id]}
             onCycle={() => onCycle(t)}
             onPickState={(s) => onPickState(t.id, s)}
             onPromotePrimary={() => onPromotePrimary(t.id)}
             onDelete={() => onDelete(t.id)}
             onOpenEdit={() => setEditingId(t.id)}
+            onOpenChain={(id) => setChainViewId(id)}
           />
         ))}
       </div>
@@ -328,7 +338,9 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         <DoneSection
           todos={bundle.done_today}
           focusById={focusById}
+          chainSummary={bundle.chain_summary}
           onOpenEdit={(id) => setEditingId(id)}
+          onOpenChain={(id) => setChainViewId(id)}
         />
       )}
 
@@ -339,6 +351,14 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           onClose={() => setEditingId(null)}
         />
       )}
+
+      {chainViewId !== null && (
+        <TodoChainView
+          todoId={chainViewId}
+          onClose={() => setChainViewId(null)}
+          onMutate={refresh}
+        />
+      )}
     </div>
   );
 }
@@ -346,17 +366,19 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
 // ── Primary card ─────────────────────────────────────────────────────────
 
 function PrimaryCard({
-  t, focus, cascade,
-  onCycle, onPickState, onDemote, onDelete, onOpenEdit,
+  t, focus, cascade, chainMeta,
+  onCycle, onPickState, onDemote, onDelete, onOpenEdit, onOpenChain,
 }: {
   t: ApiTodo;
   focus: ApiFocus | null;
   cascade: boolean;
+  chainMeta?: TodoChainMeta;
   onCycle: () => void;
   onPickState: (s: TodoState) => void;
   onDemote: () => void;
   onDelete: () => void;
   onOpenEdit: () => void;
+  onOpenChain: (id: number) => void;
 }) {
   const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
   const age = ageHint(t.created_at);
@@ -367,6 +389,7 @@ function PrimaryCard({
   // from scratch (the React key flip forces a remount of the SVG layer).
 
   return (
+    <div style={{ marginBottom: 12 }}>
     <div
       className={cascade ? "gooni-todo-cascade" : ""}
       onMouseEnter={() => setHovered(true)}
@@ -381,7 +404,6 @@ function PrimaryCard({
         borderRadius: 12,
         padding: "12px 16px",
         display: "flex", alignItems: "center", gap: 12,
-        marginBottom: 12,
         fontFamily: FONT,
         boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
       }}
@@ -437,6 +459,13 @@ function PrimaryCard({
         {t.text}
       </span>
 
+      {chainMeta && chainMeta.children_total > 0 && (
+        <ChainIndicator
+          meta={chainMeta}
+          onClick={(e) => { e.stopPropagation(); onOpenChain(t.id); }}
+        />
+      )}
+
       {age && t.state !== "done" && <AgePill age={age} />}
 
       {focus && (
@@ -463,23 +492,33 @@ function PrimaryCard({
         />
       )}
     </div>
+    {chainMeta?.parent_id && (
+      <FromLine
+        parentId={chainMeta.parent_id}
+        parentText={chainMeta.parent_text}
+        onOpenChain={onOpenChain}
+      />
+    )}
+    </div>
   );
 }
 
 // ── Single open row ──────────────────────────────────────────────────────
 
 function TodoRow({
-  t, focus, cascade,
-  onCycle, onPickState, onPromotePrimary, onDelete, onOpenEdit,
+  t, focus, cascade, chainMeta,
+  onCycle, onPickState, onPromotePrimary, onDelete, onOpenEdit, onOpenChain,
 }: {
   t: ApiTodo;
   focus: ApiFocus | null;
   cascade: boolean;
+  chainMeta?: TodoChainMeta;
   onCycle: () => void;
   onPickState: (s: TodoState) => void;
   onPromotePrimary: () => void;
   onDelete: () => void;
   onOpenEdit: () => void;
+  onOpenChain: (id: number) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -487,6 +526,7 @@ function TodoRow({
   const age = ageHint(t.created_at);
 
   return (
+    <div>
     <div
       className={`gooni-todo-row${cascade ? " gooni-todo-cascade" : ""}`}
       onMouseEnter={() => setHovered(true)}
@@ -525,6 +565,13 @@ function TodoRow({
         {t.text}
       </span>
 
+      {chainMeta && chainMeta.children_total > 0 && (
+        <ChainIndicator
+          meta={chainMeta}
+          onClick={(e) => { e.stopPropagation(); onOpenChain(t.id); }}
+        />
+      )}
+
       {age && t.state !== "done" && <AgePill age={age} />}
 
       {focus && (
@@ -562,6 +609,115 @@ function TodoRow({
           onClose={() => setPickerOpen(false)}
         />
       )}
+    </div>
+    {chainMeta?.parent_id && (
+      <FromLine
+        parentId={chainMeta.parent_id}
+        parentText={chainMeta.parent_text}
+        onOpenChain={onOpenChain}
+      />
+    )}
+    {!chainMeta?.parent_id && hovered && (
+      <OrphanLinkHint todoId={t.id} onOpenChain={onOpenChain} />
+    )}
+    </div>
+  );
+}
+
+// ── G3.5 chain indicators + from-line + orphan link hint ─────────────────
+
+function ChainIndicator({
+  meta,
+  onClick,
+}: {
+  meta: TodoChainMeta;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  // ↗N ✓M — children_total spawn count, done count in muted green.
+  return (
+    <button
+      onClick={onClick}
+      title="View thread"
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 3,
+        background: "transparent",
+        border: "none",
+        cursor: "pointer",
+        padding: "2px 6px",
+        borderRadius: 4,
+        fontSize: 10,
+        color: "var(--gooni-muted, #6B7280)",
+        flexShrink: 0,
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
+      <ArrowUpRight size={10} />
+      <span style={{ fontWeight: 600 }}>{meta.children_total}</span>
+      {meta.children_done > 0 && (
+        <>
+          <span style={{ color: "#0F6E56", marginLeft: 2 }}>✓</span>
+          <span style={{ color: "#0F6E56", fontWeight: 600 }}>
+            {meta.children_done}
+          </span>
+        </>
+      )}
+    </button>
+  );
+}
+
+function FromLine({
+  parentId,
+  parentText,
+  onOpenChain,
+}: {
+  parentId: number;
+  parentText: string | null;
+  onOpenChain: (id: number) => void;
+}) {
+  const truncated = (parentText || "").length > 60
+    ? (parentText || "").slice(0, 60).trim() + "…"
+    : (parentText || "");
+  return (
+    <div
+      onClick={() => onOpenChain(parentId)}
+      style={{
+        padding: "2px 16px 4px 42px",   // align under todo text column
+        fontSize: 11,
+        color: "var(--gooni-muted, #9CA3AF)",
+        display: "flex", alignItems: "center", gap: 4,
+        cursor: "pointer",
+      }}
+    >
+      <ArrowLeft size={10} />
+      <span style={{ opacity: 0.8 }}>from:</span>
+      <span style={{ fontStyle: "italic" }}>{truncated}</span>
+    </div>
+  );
+}
+
+function OrphanLinkHint({
+  todoId,
+  onOpenChain,
+}: {
+  todoId: number;
+  onOpenChain: (id: number) => void;
+}) {
+  // Hover affordance for orphan todos — opens chain view in parent-link
+  // mode. The chain view's ParentLinkAffordance handles the search UI.
+  return (
+    <div
+      onClick={() => onOpenChain(todoId)}
+      style={{
+        padding: "2px 16px 4px 42px",
+        fontSize: 11,
+        color: "var(--gooni-muted, #C0C4CC)",
+        display: "flex", alignItems: "center", gap: 4,
+        cursor: "pointer",
+        opacity: 0.7,
+      }}
+    >
+      <ArrowLeft size={10} />
+      <span style={{ fontStyle: "italic" }}>link to parent todo…</span>
     </div>
   );
 }
@@ -673,10 +829,12 @@ function StatePicker({ current, onPick, onClose }: {
 
 // ── Done section ─────────────────────────────────────────────────────────
 
-function DoneSection({ todos, focusById, onOpenEdit }: {
+function DoneSection({ todos, focusById, chainSummary, onOpenEdit, onOpenChain }: {
   todos: ApiTodo[];
   focusById: Map<number, ApiFocus>;
+  chainSummary?: Record<number, TodoChainMeta>;
   onOpenEdit: (id: number) => void;
+  onOpenChain: (id: number) => void;
 }) {
   return (
     <div style={{ marginTop: 20 }}>
@@ -691,9 +849,10 @@ function DoneSection({ todos, focusById, onOpenEdit }: {
         {todos.map((t) => {
           const focus = t.focus_id ? focusById.get(t.focus_id) ?? null : null;
           const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
+          const meta = chainSummary?.[t.id];
           return (
+            <div key={t.id}>
             <div
-              key={t.id}
               onClick={() => onOpenEdit(t.id)}
               title="Click to edit"
               style={{
@@ -718,9 +877,23 @@ function DoneSection({ todos, focusById, onOpenEdit }: {
                 textDecoration: "line-through",
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>{t.text}</span>
+              {meta && meta.children_total > 0 && (
+                <ChainIndicator
+                  meta={meta}
+                  onClick={(e) => { e.stopPropagation(); onOpenChain(t.id); }}
+                />
+              )}
               {focus && (
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
               )}
+            </div>
+            {meta?.parent_id && (
+              <FromLine
+                parentId={meta.parent_id}
+                parentText={meta.parent_text}
+                onOpenChain={onOpenChain}
+              />
+            )}
             </div>
           );
         })}

@@ -101,7 +101,7 @@ export function NoteCoins({ onSelect }: Props) {
       setPeekState({ note });
       // Pickup chime + sparkle burst when player lands on a coin-tile.
       // Use the assignment's pinned-or-not status for tint so the
-      // sparkle matches the coin (rose for pinned, gold for regular).
+      // sparkle matches the coin (violet for pinned, gold for regular).
       if (note) {
         const assignment = assignmentsRef.current.find((a) => a.note.id === note.id);
         if (assignment) {
@@ -116,7 +116,7 @@ export function NoteCoins({ onSelect }: Props) {
             world: { x: e.world.x, y: 1.30, z: e.world.z },
             intensity: isRead ? 0.6 : 1.1,
             color: isPinned
-              ? { r: 1.0, g: 0.55, b: 0.78 }     // rose-magenta
+              ? { r: 0.55, g: 0.35, b: 0.95 }    // violet
               : { r: 1.0, g: 0.85, b: 0.42 },    // gold
           });
         }
