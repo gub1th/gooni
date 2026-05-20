@@ -271,7 +271,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 // icon. Wiring click→open-edit-modal cross-cuts dashboard + chat state
 // and is left for the next polish pass.
 function ActionCards({ trace }: { trace: MessageTraceStep[] }) {
-  const cards: { kind: string; icon: string; text: string }[] = [];
+  const cards: { kind: string; icon: string; text: string; todoId?: number }[] = [];
   for (const step of trace) {
     // TraceBuilder canonical: tool calls land with `type: "tool_call"`
     // and `key` carrying the router event name (router:todo etc.).
@@ -283,20 +283,22 @@ function ActionCards({ trace }: { trace: MessageTraceStep[] }) {
       typeof args.text === "string" ? args.text :
       typeof args.match === "string" ? args.match :
       "";
+    // G3.9 loop-close: chip carries todo_id for click-navigation.
+    const todoId = (typeof args.todo_id === "number" ? args.todo_id : typeof args.id === "number" ? args.id : undefined);
     if (!name.startsWith("router:") || !text) continue;
     if (name === "router:todo" || name === "router:todo_bumped") {
-      cards.push({ kind: "create", icon: "＋", text: trim(text) });
+      cards.push({ kind: "create", icon: "＋", text: trim(text), todoId });
     } else if (name === "router:todo_killed") {
-      cards.push({ kind: "kill", icon: "✗", text: trim(text) });
+      cards.push({ kind: "kill", icon: "✗", text: trim(text), todoId });
     } else if (name === "router:todo_completed" || name === "router:todo_implicit_done") {
-      cards.push({ kind: "done", icon: "✓", text: trim(text) });
+      cards.push({ kind: "done", icon: "✓", text: trim(text), todoId });
     } else if (name === "router:todo_merged") {
-      cards.push({ kind: "merge", icon: "⇆", text: trim(text) });
+      cards.push({ kind: "merge", icon: "⇆", text: trim(text), todoId });
     } else if (name === "router:todo_edited") {
       const changes = Array.isArray(args.changes) ? (args.changes as string[]).join(", ") : "";
-      cards.push({ kind: "edit", icon: "✎", text: `${trim(text)}${changes ? ` — ${changes}` : ""}` });
+      cards.push({ kind: "edit", icon: "✎", text: `${trim(text)}${changes ? ` — ${changes}` : ""}`, todoId });
     } else if (name === "router:todo_spawned") {
-      cards.push({ kind: "spawn", icon: "↗", text: trim(text) });
+      cards.push({ kind: "spawn", icon: "↗", text: trim(text), todoId });
     } else if (name === "router:promise") {
       const utt = typeof args.utterance === "string" ? args.utterance : text;
       cards.push({ kind: "promise", icon: "🤝", text: trim(utt) });
@@ -322,9 +324,18 @@ function ActionCards({ trace }: { trace: MessageTraceStep[] }) {
     }}>
       {cards.slice(0, 6).map((c, i) => {
         const t = tint[c.kind as keyof typeof tint] ?? tint.create;
+        // G3.9 loop-close: clickable chips when a todo_id is present.
+        // Dispatches gooni:focus-todo → routes/index.tsx flips view to
+        // dashboard if needed; TodoList then scrolls + flash-highlights.
+        const clickable = typeof c.todoId === "number";
         return (
           <span
             key={i}
+            onClick={clickable ? () => {
+              window.dispatchEvent(new CustomEvent("gooni:focus-todo", {
+                detail: { todoId: c.todoId },
+              }));
+            } : undefined}
             style={{
               display: "inline-flex", alignItems: "center", gap: 5,
               padding: "3px 8px", borderRadius: 99,
@@ -333,8 +344,12 @@ function ActionCards({ trace }: { trace: MessageTraceStep[] }) {
               border: "0.5px solid rgba(15,23,42,0.08)",
               maxWidth: 280,
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              cursor: clickable ? "pointer" : "default",
+              transition: "transform 0.12s",
             }}
-            title={c.text}
+            onMouseEnter={clickable ? (e) => { (e.currentTarget as HTMLSpanElement).style.transform = "translateY(-1px)"; } : undefined}
+            onMouseLeave={clickable ? (e) => { (e.currentTarget as HTMLSpanElement).style.transform = "translateY(0)"; } : undefined}
+            title={clickable ? `${c.text} (click to view)` : c.text}
           >
             <span style={{ opacity: 0.7 }}>{c.icon}</span>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{c.text}</span>

@@ -19,6 +19,7 @@ from .todo_tools import (
     UndoLastTodoOpTool,
     ShowMyPlateTool,
     ShowChainTool,
+    ShowDueWindowTool,
 )
 from .focus_tools import AddFocusTool, ListFocusesTool
 from .habit_tools import LogHabitTool
@@ -61,6 +62,7 @@ registry = [
     # G3.9 recall fluency — explicit tools for "what's primary"/"chain of X"
     ShowMyPlateTool(),
     ShowChainTool(),
+    ShowDueWindowTool(),
     # Focuses
     AddFocusTool(),
     ListFocusesTool(),

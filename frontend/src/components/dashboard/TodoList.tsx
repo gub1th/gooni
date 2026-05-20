@@ -83,6 +83,34 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
   const [draggedId, setDraggedId] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<{ id: number; pos: "above" | "below" } | null>(null);
 
+  // G3.9 loop-close: listen for chat-chip clicks and scroll/flash the
+  // target row. Selector uses data-todo-id which TodoRow + PrimaryCard
+  // both stamp on their outer wrapper.
+  useEffect(() => {
+    function onFocusTodo(e: Event) {
+      const ev = e as CustomEvent<{ todoId: number }>;
+      const tid = ev.detail?.todoId;
+      if (typeof tid !== "number") return;
+      // Defer to the next paint so a freshly-mounted row is queryable.
+      requestAnimationFrame(() => {
+        const el = document.querySelector(
+          `[data-todo-id="${tid}"]`,
+        ) as HTMLElement | null;
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.remove("gooni-todo-flash");
+        // Force reflow so the animation restarts even on repeat clicks.
+        void el.offsetWidth;
+        el.classList.add("gooni-todo-flash");
+        window.setTimeout(() => {
+          el.classList.remove("gooni-todo-flash");
+        }, 1700);
+      });
+    }
+    window.addEventListener("gooni:focus-todo", onFocusTodo);
+    return () => window.removeEventListener("gooni:focus-todo", onFocusTodo);
+  }, []);
+
   const refresh = () => qc.invalidateQueries({ queryKey: ["todos-bundle"] });
 
   async function handleReorderDrop() {
@@ -231,6 +259,18 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         .gooni-todo-row { transition: background 0.12s; }
         .gooni-todo-row:hover { background: rgba(0,0,0,0.025); }
         .gooni-todo-cascade { animation: gooni-todo-fade-out 600ms ease forwards; }
+
+        /* G3.9 loop-close: flash highlight when chat chip dispatches
+           gooni:focus-todo. A soft slate ring pulses twice over 1.6s
+           then fades — long enough to see, short enough not to nag. */
+        @keyframes gooni-todo-flash {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(15,23,42,0); }
+          15%, 70% { box-shadow: 0 0 0 3px rgba(15,23,42,0.25); }
+        }
+        .gooni-todo-flash {
+          animation: gooni-todo-flash 1600ms ease forwards;
+          border-radius: 8px;
+        }
 
         /* Doing-state indicator pulse — subtle breathing. Conveys
            "active, in motion" without the visual loudness of a spinner.
@@ -496,7 +536,7 @@ function PrimaryCard({
   // from scratch (the React key flip forces a remount of the SVG layer).
 
   return (
-    <div>
+    <div data-todo-id={t.id}>
     <div
       className={cascade ? "gooni-todo-cascade" : ""}
       onMouseEnter={() => setHovered(true)}
@@ -719,6 +759,7 @@ function TodoRow({
     // todo's territory. Pre-fix the hover lived on the inner row only —
     // mouse moving down to click the hint caused it to vanish.
     <div
+      data-todo-id={t.id}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onDragOver={(e) => {

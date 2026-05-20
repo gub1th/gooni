@@ -232,7 +232,7 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "merge_into":   "<for merge only — substring identifying the keep-target>",
       "closure_note": "<for complete only — optional short outcome text Daniel said about how it went>",
       "spawned":      [{{"text": "<follow-up chore>", "due_hint": "..."}}],
-      "patch":        "<for edit only — JSON-like object with fields to change. Supported keys: text (rename), subtitle (notes), due_hint (snooze/reschedule), primary (true/false to toggle), parent_match (substring of parent todo to link as child of), unlink_parent (true to clear parent link), position ('top' | 'bottom' | 'above:<match>' | 'below:<match>'). Emit ONLY the fields Daniel actually changed. Examples: 'push X to friday' → {{patch: {{due_hint: 'this week'}}}}; 'make X primary' → {{patch: {{primary: true}}}}; 'X is a follow-up to Y' on X → {{patch: {{parent_match: 'Y'}}}}; 'X is more important than Y' on X → {{patch: {{position: 'above:Y'}}}}; 'add note about Z to X' on X → {{patch: {{subtitle: 'Z'}}}}>"
+      "patch":        "<for edit only — JSON-like object with fields to change. Supported keys: text (rename), subtitle (notes), due_hint (snooze/reschedule), primary (true/false to toggle), parent_match (substring of parent todo to link as child of), unlink_parent (true to clear parent link), position ('top' | 'bottom' | 'above:<match>' | 'below:<match>'), focus_name (link this todo to the named active focus — cosine-resolved). Emit ONLY the fields Daniel actually changed. Examples: 'push X to friday' → {{patch: {{due_hint: 'this week'}}}}; 'make X primary' → {{patch: {{primary: true}}}}; 'X is a follow-up to Y' on X → {{patch: {{parent_match: 'Y'}}}}; 'X is more important than Y' on X → {{patch: {{position: 'above:Y'}}}}; 'add note about Z to X' on X → {{patch: {{subtitle: 'Z'}}}}; 'this is for forge prep' on X → {{patch: {{focus_name: 'forge prep'}}}}>"
     }}
   ],
   "done_signals": [
@@ -697,6 +697,7 @@ _VALID_TODO_KINDS = ("create", "delete", "complete", "merge", "edit")
 _VALID_EDIT_PATCH_KEYS = (
     "text", "subtitle", "due_hint", "primary",
     "parent_match", "unlink_parent", "position",
+    "focus_name",
 )
 
 
@@ -787,7 +788,7 @@ def _normalize_todos(items: Any) -> list[dict]:
             for k, v in patch_raw.items():
                 if k not in _VALID_EDIT_PATCH_KEYS:
                     continue
-                if k in ("text", "subtitle", "due_hint", "parent_match", "position") and isinstance(v, str):
+                if k in ("text", "subtitle", "due_hint", "parent_match", "position", "focus_name") and isinstance(v, str):
                     s = v.strip()
                     if s and s.lower() != "null":
                         patch[k] = s[:200]

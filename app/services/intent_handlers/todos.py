@@ -379,6 +379,57 @@ def _handle_edit(it, ctx, result, todo_service) -> None:
         else:
             changes.append(f"parent-match '{parent_query}' no-match")
 
+    # G3.9 loop-close: Focus rebinding via chat. "this is for forge prep"
+    # cosine-resolves against active focuses by name (Focus.text), sets
+    # Todo.focus_id + wires `supports` edge via focus_binding helper.
+    # No disambiguation gap here because focus names are short + usually
+    # distinct; if needed later add the same resolver pattern.
+    if "focus_name" in patch:
+        focus_query = patch["focus_name"]
+        try:
+            from .. import focus_binding
+            from ..list_service import list_service
+            from ...db.models import Focus
+            focus_query_vec = list_service._embed_item_text(focus_query)
+            if focus_query_vec:
+                # Match against active focus signatures/text.
+                rows = (
+                    ctx.db.query(Focus.id, Focus.text, Focus.embedding)
+                    .filter(Focus.status == "committed")
+                    .all()
+                )
+                best_fid, best_score, best_text = None, 0.0, None
+                from ..list_service import _cosine
+                import json as _json
+                for fid, ftext, femb in rows:
+                    if not femb:
+                        continue
+                    try:
+                        emb = _json.loads(femb)
+                    except Exception:
+                        continue
+                    score = _cosine(focus_query_vec, emb)
+                    if score >= 0.55 and score > best_score:
+                        best_fid, best_score, best_text = fid, score, ftext
+                if best_fid is not None:
+                    todo_service.update(ctx.db, tid, focus_id=best_fid)
+                    # Wire supports edge so graph stays consistent w/ FK.
+                    try:
+                        from .. import edge_service
+                        edge_service.link(
+                            ctx.db,
+                            src_kind="todo", src_id=tid,
+                            dst_kind="focus", dst_id=best_fid,
+                            kind="supports", weight=round(best_score, 4),
+                        )
+                    except Exception as e:
+                        print(f"[todos handler] focus supports edge failed: {e}")
+                    changes.append(f"focus → \"{(best_text or '')[:40]}\"")
+                else:
+                    changes.append(f"focus-name '{focus_query}' no-match")
+        except Exception as e:
+            print(f"[todos handler] focus rebind failed: {e}")
+
     # Position reorder. "top" / "bottom" / "above:<match>" / "below:<match>".
     if "position" in patch:
         position = patch["position"]
