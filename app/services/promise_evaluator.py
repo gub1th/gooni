@@ -129,7 +129,7 @@ def _check_conflicts_active(db: Session, vec: list[float] | None) -> dict[str, A
     import json
     rows = (
         db.query(Promise.id, Promise.embedding, Promise.summary, Promise.utterance)
-        .filter(Promise.state == "pending", Promise.embedding.is_not(None))
+        .filter(Promise.state == "active", Promise.embedding.is_not(None))
         .all()
     )
     best: tuple[int, float, str] | None = None

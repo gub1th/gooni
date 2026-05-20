@@ -91,54 +91,52 @@ def create(
     source_message_id: int | None = None,
     inferred_due: datetime | None = None,
 ) -> Promise:
-    """Insert a new pending promise, wire `utters` edge from the source
-    Message, and best-effort wire `supports` edge to the closest active
-    Focus by cosine similarity. Slip count is set from the cosine match
-    against past broken promises so re-uttering an old broken pattern
-    surfaces immediately.
+    """Insert a new ACTIVE promise (G3.1: no more `proposed` / `pending`).
+    Wires `utters` edge from source Message, best-effort `supports` edge
+    to closest active Focus, sets slip_count from cosine match against
+    past broken promises.
 
-    Active-pending dedup: if the utterance cosine-matches an existing
-    pending Promise above DEDUP_THRESHOLD, we return the existing row
-    instead of inserting a duplicate. Wires an `utters` edge from the
-    new source message so the conversation graph still records the
-    re-statement. Fixes T4→T5 of segment #209 where Daniel re-uttered
-    a near-duplicate and the system silently piled up rows.
+    Active dedup: if the utterance cosine-matches an existing ACTIVE
+    promise above DEDUP_THRESHOLD, returns the existing row instead of
+    inserting a duplicate (touches the `utters` edge for re-statement
+    provenance).
 
-    Complexity classifier: runs `promise_complexity.needs_game_plan` on
-    the utterance and logs the result. PR-A wires the classifier only;
-    PR-B will branch on the bool to route between instant-lock and
-    probe-then-lock flow. No behavior change in PR-A.
+    Complexity classifier: runs `promise_complexity.needs_game_plan` and
+    stores it as `needs_clarification` metadata. Doesn't gate the
+    lifecycle — promise is `active` either way. The flag drives ack
+    pushback (Gooni asks one sharp clarifier in the same turn) and
+    seeds future weekly-digest stats.
+
+    Habit auto-spawn: runs at CREATE time when the utterance has a
+    recurring shape ("no weed for 7 days", "leetcode daily"). Previously
+    deferred to the proposed→pending lock-in flip — flip is gone, so
+    auto-spawn fires here. Same outcome, no waiting state.
     """
     cleaned = utterance.strip()
     if not cleaned:
         raise ValueError("utterance required")
 
-    # Complexity classification — pure-regex, no LLM. Complex utterances
-    # ("no weed for 7 days") land in state='proposed' so the user can
-    # supply start/end/conditions via a PATCH lock-in step. Simple
-    # utterances ("call mom tomorrow") fall through to state='pending'
-    # immediately. The asymmetry kills the "fake promise" feeling Daniel
-    # called out — anything that needs a game plan is held open until
-    # he commits to one.
+    # G3.1 complexity classification — pure-regex, no LLM. The bool
+    # determines `needs_clarification` metadata, NOT the state. Both
+    # vague and concrete utterances land as `active` immediately.
     try:
         from . import promise_complexity
-        is_complex = promise_complexity.needs_game_plan(cleaned)
+        needs_clarification = promise_complexity.needs_game_plan(cleaned)
     except Exception as e:
         print(f"[promise complexity] classifier error: {e}")
-        is_complex = False
-    initial_state = "proposed" if is_complex else "pending"
+        needs_clarification = False
     print(
-        f"[promise complexity] needs_game_plan={is_complex} "
-        f"initial_state={initial_state} for: {cleaned[:80]}"
+        f"[promise complexity] needs_clarification={needs_clarification} "
+        f"for: {cleaned[:80]}"
     )
 
     inferred = inferred_due or _infer_due_from_text(cleaned)
     vec = _embed(cleaned)
 
-    # Active-pending dedup BEFORE insert. Skip when no embedding —
-    # cosine match isn't possible.
+    # Active dedup BEFORE insert. Skip when no embedding — cosine match
+    # isn't possible.
     if vec is not None:
-        existing = _find_pending_duplicate(db, vec)
+        existing = _find_active_duplicate(db, vec)
         if existing is not None:
             # Touch source-msg edge on the existing row so we don't lose
             # the re-statement provenance.
@@ -162,7 +160,8 @@ def create(
         utterance=cleaned,
         summary=(summary or cleaned)[:200],
         inferred_due=inferred,
-        state=initial_state,
+        state="active",
+        needs_clarification=needs_clarification,
         slip_count=slip,
         source_message_id=source_message_id,
         embedding=json.dumps(vec) if vec else None,
@@ -218,15 +217,26 @@ def create(
     except Exception as e:
         print(f"[promise voice-of-reason] evaluator failed: {e}")
 
+    # G3.1 Habit auto-spawn — fires at CREATE time on recurring-shape
+    # promises ("no weed for 7 days", "leetcode daily"). Was deferred to
+    # proposed→pending lock-in; lock-in is gone so we spawn now. Same
+    # outcome, no waiting state. Errors swallowed — habit creation
+    # never blocks the promise insert.
+    try:
+        _maybe_auto_create_habit(db, p)
+    except Exception as e:
+        print(f"[promise create] habit auto-create failed: {e}")
+
     return p
 
 
-def _find_pending_duplicate(db: Session, vec: list[float]) -> Promise | None:
-    """Return the closest active pending Promise above DEDUP_THRESHOLD,
-    or None. Tuple-walk first to avoid hydrating non-matches."""
+def _find_active_duplicate(db: Session, vec: list[float]) -> Promise | None:
+    """Return the closest ACTIVE Promise above DEDUP_THRESHOLD, or None.
+    Tuple-walk first to avoid hydrating non-matches.
+    """
     rows = (
         db.query(Promise.id, Promise.embedding)
-        .filter(Promise.state == "pending", Promise.embedding.is_not(None))
+        .filter(Promise.state == "active", Promise.embedding.is_not(None))
         .all()
     )
     best_id: int | None = None
@@ -302,14 +312,22 @@ def get(db: Session, promise_id: int) -> Promise | None:
     return db.query(Promise).filter(Promise.id == promise_id).first()
 
 
-def list_pending(db: Session, limit: int = 20) -> list[Promise]:
+def list_active(db: Session, limit: int = 20) -> list[Promise]:
+    """List active (un-resolved) promises, due-soonest first. G3.1
+    renamed from `list_pending` — same semantic, new state name.
+    """
     return (
         db.query(Promise)
-        .filter(Promise.state == "pending")
+        .filter(Promise.state == "active")
         .order_by(Promise.inferred_due.asc().nullslast(), Promise.created_at.asc())
         .limit(limit)
         .all()
     )
+
+
+# Back-compat shim: external callers may still import `list_pending`.
+# Aliasing instead of leaving a dead function — single source of truth.
+list_pending = list_active
 
 
 def list_recent(db: Session, limit: int = 50) -> list[Promise]:
@@ -322,45 +340,36 @@ def list_recent(db: Session, limit: int = 50) -> list[Promise]:
 
 
 def transition(db: Session, promise_id: int, new_state: str) -> Promise | None:
-    """State transition with timestamp + idempotency. `new_state` must
-    be one of: proposed | pending | kept | broken | abandoned. Re-applying
-    the current state is a no-op (no resolved_at churn).
+    """G3.1 state transition. `new_state` must be one of:
+    `active` | `kept` | `broken`. Re-applying current state is a no-op
+    (no resolved_at churn).
 
-    Side effect on `proposed → pending` (lock-in): if the utterance has
-    a recurring shape ("no weed for 7 days" / "leetcode daily"), auto-
-    create a sibling Habit row + write a `measured_by` edge from the
-    Promise to the Habit. The Habit becomes the daily scoreboard; the
-    Promise stays the term-contract. Daniel can rename / delete the
-    Habit if the auto-create misfired.
+    Lock-in is gone — promises land active on create, habit auto-spawn
+    now fires at create-time when recurring-shaped. This function only
+    handles terminal transitions (→ kept, → broken) and explicit revival
+    (kept/broken → active, which clears resolved_at).
     """
-    if new_state not in ("proposed", "pending", "kept", "broken", "abandoned"):
-        raise ValueError(f"invalid state: {new_state}")
+    if new_state not in ("active", "kept", "broken"):
+        raise ValueError(f"invalid state: {new_state} (expected active|kept|broken)")
     p = get(db, promise_id)
     if p is None:
         return None
     if p.state == new_state:
         return p
-    prev_state = p.state
     p.state = new_state
     p.resolved_at = (
-        datetime.utcnow() if new_state in ("kept", "broken", "abandoned") else None
+        datetime.utcnow() if new_state in ("kept", "broken") else None
     )
     db.commit()
     db.refresh(p)
-
-    # Lock-in side effect — only fires on the proposed → pending edge.
-    if prev_state == "proposed" and new_state == "pending":
-        try:
-            _maybe_auto_create_habit(db, p)
-        except Exception as e:
-            print(f"[promise lock-in] habit auto-create failed: {e}")
     return p
 
 
-# ── Lock-in habit auto-create ──────────────────────────────────────────
-# When a complex promise locks in, we check if its utterance describes a
-# recurring action (daily/weekly/for-N-days/every-X) and spawn a Habit
-# row so Daniel gets the daily scoreboard alongside the term contract.
+# ── Habit auto-spawn (G3.1: fires at Promise create, not lock-in) ──────
+# When a new promise's utterance describes a recurring action
+# (daily/weekly/for-N-days/every-X), we spawn a Habit row so Daniel gets
+# the daily scoreboard alongside the term contract. Previously deferred
+# to proposed→pending lock-in; lock-in is gone so this runs at create.
 # The Habit name is derived from the utterance, polarity from a small
 # negation-prefix regex. Cosine dedup against existing habits prevents
 # a re-uttered promise from spawning a duplicate.
@@ -387,10 +396,10 @@ def _derive_habit(utterance: str, summary: str | None) -> tuple[str, str]:
 
 
 def _maybe_auto_create_habit(db: Session, p: Promise) -> None:
-    """Spawn a Habit + measured_by edge for a recurring-shape locked-in
-    promise. Skipped when (a) the utterance isn't recurring-shaped, (b)
-    a near-name Habit already exists, or (c) the habit_service call
-    blows up — never breaks the transition path.
+    """Spawn a Habit + measured_by edge for a recurring-shape promise.
+    Skipped when (a) the utterance isn't recurring-shaped, (b) a
+    near-name Habit already exists, or (c) the habit_service call
+    blows up — never breaks the promise create path.
     """
     from . import promise_complexity, habit_service
 
@@ -426,21 +435,22 @@ def _maybe_auto_create_habit(db: Session, p: Promise) -> None:
 
 
 def auto_mark_overdue(db: Session, now: datetime | None = None) -> int:
-    """Sweep: any pending promise whose inferred_due is in the past
-    gets flipped to broken. Idempotent. Returns count flipped.
+    """Sweep: any active promise whose inferred_due is in the past gets
+    flipped to broken. Idempotent. Returns count flipped.
 
-    Run by the daily nudge or a background scheduler — kept here so
-    the lifecycle stays in one place.
+    Run by the daily nudge or a background scheduler — kept here so the
+    lifecycle stays in one place. G3.1: filters on `active` (was
+    `pending` pre-collapse).
     """
     now = now or datetime.utcnow()
-    pending = (
+    overdue = (
         db.query(Promise)
-        .filter(Promise.state == "pending", Promise.inferred_due.is_not(None))
+        .filter(Promise.state == "active", Promise.inferred_due.is_not(None))
         .filter(Promise.inferred_due < now)
         .all()
     )
     n = 0
-    for p in pending:
+    for p in overdue:
         p.state = "broken"
         p.resolved_at = now
         n += 1
@@ -462,6 +472,7 @@ def serialize(p: Promise) -> dict[str, Any]:
         "summary": p.summary,
         "inferred_due": p.inferred_due.isoformat() if p.inferred_due else None,
         "state": p.state,
+        "needs_clarification": bool(p.needs_clarification),
         "voice_of_reason": voice,
         "slip_count": p.slip_count,
         "resolved_at": p.resolved_at.isoformat() if p.resolved_at else None,

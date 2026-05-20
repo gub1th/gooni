@@ -3766,12 +3766,12 @@ def list_promises(
 
     q = db.query(_Promise)
     if state:
-        if state not in ("proposed", "pending", "kept", "broken", "abandoned"):
-            raise HTTPException(status_code=400, detail="invalid state")
+        if state not in ("active", "kept", "broken"):
+            raise HTTPException(status_code=400, detail="invalid state (expected active|kept|broken)")
         q = q.filter(_Promise.state == state)
-    # Pending sorts by deadline-first (asc nullslast), so the closest due
-    # promises bubble up; other states sort by recency.
-    if state == "pending":
+    # Active sorts by deadline-first (asc nullslast), so the closest due
+    # promises bubble up; resolved states sort by recency.
+    if state == "active":
         q = q.order_by(
             _Promise.inferred_due.asc().nullslast(), _Promise.created_at.desc()
         )
@@ -3785,12 +3785,10 @@ def list_promises(
 def promise_integrity_score(db: Session = Depends(get_db)):
     """Promise Integrity Score — Daniel's accountability scoreboard.
 
-    Weighted aggregate over the last 20 resolved promises:
-      kept       → +1.0
-      broken     → -1.5  (asymmetric: breaking stings more than keeping helps)
-      abandoned  → -0.5  (you owned it vs ghosting)
-      pending    → 0  (not counted; resolution unknown)
-      proposed   → 0  (not a contract yet)
+    G3.1 weighting (3-state lifecycle):
+      kept   → +1.0
+      broken → -1.5  (asymmetric: breaking stings more than keeping helps)
+      active → 0     (not counted; resolution unknown yet)
 
     Normalized to 0..100 percentage. Plus current kept-streak (consecutive
     `kept` walking back from most recent) and last_broken metadata.
@@ -3798,17 +3796,17 @@ def promise_integrity_score(db: Session = Depends(get_db)):
     Returns `{score: null, ...}` when fewer than 3 resolved promises exist
     — small-N noise distorts the score, better to show "not enough data".
 
-    Algorithm notes for the curious:
+    Algorithm notes:
       score% = ((sum + theoretical_min_abs) / theoretical_range) * 100
-             = ((sum + 30) / 50) * 100        (when sample_size = 20)
-      kept rate alone would punish early breaks asymmetrically (1 of 3
-      broken = 33% feels catastrophic). Weighted-asymmetric form smooths
-      the punishment curve while still making broken weigh more than kept.
+      Pre-G3.1 `abandoned` rolled into `broken` during the state collapse
+      migration; the score function lost its softer-penalty middle ground.
+      If a softer 'gave up gracefully' verdict comes back, add a state +
+      re-introduce the asymmetric weight here.
     """
     from .db.models import Promise as _Promise
 
-    RESOLVED = ("kept", "broken", "abandoned")
-    WEIGHTS = {"kept": 1.0, "broken": -1.5, "abandoned": -0.5}
+    RESOLVED = ("kept", "broken")
+    WEIGHTS = {"kept": 1.0, "broken": -1.5}
     MIN_SAMPLE = 3
     WINDOW = 20
 
@@ -3871,16 +3869,16 @@ def promise_integrity_score(db: Session = Depends(get_db)):
 
 @app.patch("/promises/{promise_id}")
 def patch_promise(promise_id: int, body: dict, db: Session = Depends(get_db)):
-    """State transition only — proposed | pending | kept | broken |
-    abandoned. Mirrors `promise_service.transition` so the same
-    idempotency + resolved_at bookkeeping fires regardless of caller.
-    Lock-in flip (proposed → pending) auto-spawns a Habit when the
-    utterance is recurring-shaped (see promise_service)."""
+    """G3.1 state transition only — active | kept | broken. Mirrors
+    `promise_service.transition` so the same idempotency + resolved_at
+    bookkeeping fires regardless of caller. Lock-in is gone — habit
+    auto-spawn now fires at promise create (see promise_service.create).
+    """
     from .services import promise_service
 
     new_state = body.get("state")
-    if new_state not in ("proposed", "pending", "kept", "broken", "abandoned"):
-        raise HTTPException(status_code=400, detail="state required (proposed|pending|kept|broken|abandoned)")
+    if new_state not in ("active", "kept", "broken"):
+        raise HTTPException(status_code=400, detail="state required (active|kept|broken)")
     p = promise_service.transition(db, promise_id, new_state)
     if p is None:
         raise HTTPException(status_code=404, detail="Promise not found")
