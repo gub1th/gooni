@@ -436,6 +436,9 @@ def _build_ack(
     completed_todos: list[dict] | None = None,
     merged_todos: list[dict] | None = None,
     failed_todo_actions: list[dict] | None = None,
+    edited_todos: list[dict] | None = None,
+    implicit_done_todos: list[dict] | None = None,
+    disambiguation_needed: list[dict] | None = None,
 ) -> str | None:
     """Alfred-voice ack — terse, casual, no clinical receipts.
 
@@ -580,6 +583,9 @@ def _build_ack(
     completed_todos = completed_todos or []
     merged_todos = merged_todos or []
     failed_todo_actions = failed_todo_actions or []
+    edited_todos = edited_todos or []
+    implicit_done_todos = implicit_done_todos or []
+    disambiguation_needed = disambiguation_needed or []
 
     if killed_todos:
         texts = [f"\"{_trim(t.get('text'))}\"" for t in killed_todos[:3]]
@@ -640,9 +646,58 @@ def _build_ack(
         for f in failed_todo_actions[:3]:
             kind = f.get("kind", "")
             match = _trim(f.get("match", ""))
-            verb = {"delete": "kill", "complete": "close", "merge": "merge"}.get(kind, kind)
+            verb = {"delete": "kill", "complete": "close", "merge": "merge", "edit": "edit"}.get(kind, kind)
             misses.append(f"couldn't {verb} \"{match}\" — no match")
         parts.append("; ".join(misses))
+
+    # G3.9 edit-action ack. Each edit carries a `changes` list of
+    # human-readable diffs — render verb-led + comma-joined.
+    for ed in edited_todos[:3]:
+        text = _trim(ed.get("text"))
+        changes = ed.get("changes") or []
+        if not changes:
+            continue
+        # First change leads the phrase; rest comma-join in parens.
+        head = changes[0]
+        if len(changes) > 1:
+            extra = ", ".join(changes[1:])
+            parts.append(f"\"{text}\": {head} ({extra})")
+        else:
+            parts.append(f"\"{text}\": {head}")
+    if len(edited_todos) > 3:
+        parts.append(f"+{len(edited_todos) - 3} more edits")
+
+    # G3.9 implicit-done ack. Daniel said "just called papi" → Gooni
+    # closed the matching open todo. Surface what + why + undo hint.
+    if implicit_done_todos:
+        if len(implicit_done_todos) == 1:
+            done = implicit_done_todos[0]
+            text = _trim(done.get("text"))
+            phrase = _trim(done.get("phrase", ""), 80)
+            parts.append(f"closed \"{text}\". you said \"{phrase}\". undo if wrong.")
+        else:
+            n = len(implicit_done_todos)
+            texts = [f"\"{_trim(d.get('text'))}\"" for d in implicit_done_todos[:3]]
+            parts.append(f"closed {n} from what you said: {', '.join(texts)}. undo if wrong.")
+
+    # G3.9 disambiguation ack. Cosine returned 2+ candidates within
+    # 0.05 of each other — refuse to execute, ask Daniel to clarify.
+    # One wrong auto-action erodes trust faster than ten correct ones.
+    for amb in disambiguation_needed[:2]:
+        action = amb.get("action", "")
+        match = _trim(amb.get("match", ""))
+        cands = amb.get("candidates") or []
+        verb = {
+            "delete": "kill", "complete": "close", "edit": "edit",
+            "done_signal": "close (you said done)",
+            "edit_parent_link": "link as parent",
+        }.get(action, action)
+        if len(cands) >= 2:
+            cand_texts = " or ".join(f"\"{_trim(c.get('text'))}\"" for c in cands[:2])
+            scores = " / ".join(f"{c.get('score'):.2f}" for c in cands[:2])
+            parts.append(
+                f"which one to {verb} for \"{match}\"? {cand_texts} (both ~{scores})"
+            )
 
     if not parts:
         return None
@@ -703,19 +758,51 @@ def _build_state_block(db) -> str:
         unranked = [t for t in non_primary if (t.sort_order or 0) == 0]
         total_open = open_count + (1 if primary is not None else 0)
 
+        # G3.9 atom #8: chain context inline. Build bulk_chain_summary for
+        # all visible todos so each line can carry "↗N · M done" + "← from:
+        # X" without an N+1 traversal. Orphans get no chain line — pay
+        # the ~25 token cost only when there's info.
+        try:
+            chain_ids = []
+            if primary is not None:
+                chain_ids.append(primary.id)
+            chain_ids.extend(t.id for t in ranked[:4])
+            chain_summary = (
+                todo_service.bulk_chain_summary(db, chain_ids)
+                if chain_ids else {}
+            )
+        except Exception:
+            chain_summary = {}
+
+        def _chain_inline(t) -> str:
+            meta = chain_summary.get(t.id)
+            if not meta:
+                return ""
+            bits = []
+            ct = meta.get("children_total") or 0
+            cd = meta.get("children_done") or 0
+            if ct:
+                bits.append(f"↗{ct}" + (f" ✓{cd}" if cd else ""))
+            ptext = meta.get("parent_text")
+            if ptext:
+                bits.append(f"← from: \"{(ptext or '')[:40]}\"")
+            return f" [{' · '.join(bits)}]" if bits else ""
+
         if primary or ranked or unranked:
             lines.append(
                 f"- priority order (Daniel-set via drag; {total_open} total open):"
             )
             slot = 1
             if primary is not None:
-                lines.append(f"  · #{slot} (primary): \"{primary.text}\"")
+                tail = _chain_inline(primary)
+                lines.append(f"  · #{slot} (primary): \"{primary.text}\"{tail}")
                 slot += 1
             for t in ranked[:4]:
                 text = (t.text or "")[:60]
                 mc = t.mention_count or 1
                 mention_tag = f" [×{mc} mentions]" if mc > 1 else ""
-                lines.append(f"  · #{slot}: \"{text}\"{mention_tag}")
+                chain_tail = _chain_inline(t)
+                lines.append(f"  · #{slot}: \"{text}\"{mention_tag}{chain_tail}")
                 slot += 1
             if unranked:
                 lines.append(
@@ -859,6 +946,9 @@ def _build_just_extracted_block(
     completed_todos: list[dict] | None = None,
     merged_todos: list[dict] | None = None,
     failed_todo_actions: list[dict] | None = None,
+    edited_todos: list[dict] | None = None,
+    implicit_done_todos: list[dict] | None = None,
+    disambiguation_needed: list[dict] | None = None,
 ) -> str:
     """Tells the LLM what already got routed this turn. Without this the
     LLM either re-announces ("Logged feature request:…") or doesn't know
@@ -969,11 +1059,40 @@ def _build_just_extracted_block(
     for f in (failed_todo_actions or [])[:3]:
         kind = f.get("kind", "")
         match = (f.get("match") or "").strip()
-        verb = {"delete": "kill", "complete": "close", "merge": "merge"}.get(
+        verb = {"delete": "kill", "complete": "close", "merge": "merge", "edit": "edit"}.get(
             kind, kind
         )
         lines.append(
             f"- Todo {verb} ATTEMPTED but NO MATCH for: \"{match}\". Acknowledge the miss honestly."
+        )
+    # G3.9 edit-action surfacing.
+    for ed in (edited_todos or [])[:3]:
+        text = (ed.get("text") or "").strip()
+        tid = ed.get("todo_id")
+        changes = ", ".join(ed.get("changes") or [])
+        lines.append(
+            f"- Todo #{tid} edited: \"{text}\" — {changes}"
+        )
+    # G3.9 implicit-done surfacing.
+    for d in (implicit_done_todos or [])[:3]:
+        text = (d.get("text") or "").strip()
+        tid = d.get("todo_id")
+        phrase = (d.get("phrase") or "").strip()
+        lines.append(
+            f"- Todo #{tid} CLOSED implicitly (\"{phrase}\"): \"{text}\". Surface that you closed it + offer undo."
+        )
+    # G3.9 disambiguation surfacing — tell LLM to surface the candidate
+    # list as a clarifying question, NOT to pick one.
+    for amb in (disambiguation_needed or [])[:2]:
+        match = (amb.get("match") or "").strip()
+        action = amb.get("action", "")
+        cands = amb.get("candidates") or []
+        cand_str = " | ".join(
+            f"\"{c.get('text')}\" (#{c.get('id')}, {c.get('score'):.2f})"
+            for c in cands[:3]
+        )
+        lines.append(
+            f"- AMBIGUOUS {action} for \"{match}\" — candidates within 0.05: {cand_str}. ASK Daniel which one before doing anything."
         )
     if not lines:
         return ""
@@ -1077,6 +1196,9 @@ class Orchestrator:
         completed_todos: list[dict] = []
         merged_todos: list[dict] = []
         failed_todo_actions: list[dict] = []
+        edited_todos: list[dict] = []
+        implicit_done_todos: list[dict] = []
+        disambiguation_needed: list[dict] = []
         tone_rules: list[str] = []
         skip_normal_reply = False
 
@@ -1158,6 +1280,7 @@ class Orchestrator:
                         "feature_requests": signals["feature_requests"],
                         "soft_promises": soft_promises,
                         "todos": extracted_todos,
+                        "done_signals": signals.get("done_signals", []),
                         "reply_intent": reply_intent,
                         # memory_candidates routed separately (off-thread).
                         "memories": [],
@@ -1172,6 +1295,9 @@ class Orchestrator:
                 completed_todos.extend(routed.completed_todos)
                 merged_todos.extend(routed.merged_todos)
                 failed_todo_actions.extend(routed.failed_todo_actions)
+                edited_todos.extend(routed.edited_todos)
+                implicit_done_todos.extend(routed.implicit_done_todos)
+                disambiguation_needed.extend(routed.disambiguation_needed)
                 feedback_tools.extend(routed.tools_used)
 
                 # Stamp the user message as feedback when either a tone
@@ -1200,6 +1326,9 @@ class Orchestrator:
                     completed_todos=completed_todos,
                     merged_todos=merged_todos,
                     failed_todo_actions=failed_todo_actions,
+                    edited_todos=edited_todos,
+                    implicit_done_todos=implicit_done_todos,
+                    disambiguation_needed=disambiguation_needed,
                 )
                 if feedback_ack is not None:
                     # Skip the LLM reply ONLY when the extractor explicitly
@@ -1356,6 +1485,9 @@ class Orchestrator:
                     completed_todos=completed_todos,
                     merged_todos=merged_todos,
                     failed_todo_actions=failed_todo_actions,
+                    edited_todos=edited_todos,
+                    implicit_done_todos=implicit_done_todos,
+                    disambiguation_needed=disambiguation_needed,
                 )
             except Exception as e:
                 print(f"[just_extracted_block] build failed: {e}")
