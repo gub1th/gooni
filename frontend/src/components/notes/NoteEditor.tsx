@@ -1436,20 +1436,21 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       />
       <div
         style={{
-          // Floating action island — centered above the editor scroll. Frosted
-          // pill (backdrop-blur) so the fade-out content shows through faintly.
+          // Floating action island — moved to LEFT side per Daniel's
+          // persistent-top-bar redesign. Title now sticks at the center
+          // via a position:sticky wrapper inside the scroll content; the
+          // island stays absolute over the editor wrapper.
           position: "absolute",
           top: 14,
-          left: "50%",
-          transform: "translateX(-50%)",
+          left: 14,
           zIndex: 10,
-          maxWidth: "calc(100% - 32px)",
+          maxWidth: "calc(60% - 28px)",
           display: "flex",
           alignItems: "center",
           gap: 6,
           padding: "5px 8px",
           borderRadius: 999,
-          background: "rgba(255,255,255,0.78)",
+          background: "rgba(255,255,255,0.82)",
           backdropFilter: "blur(22px) saturate(1.8)",
           WebkitBackdropFilter: "blur(22px) saturate(1.8)",
           boxShadow:
@@ -2034,6 +2035,26 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     <span>from “{parentLink.title}”</span>
                   </button>
                 )}
+                {/* Persistent top-bar wrapper (Confluence/Notion-style).
+                    Wraps date + tags + title in a position:sticky div so
+                    they stay visible as the user scrolls into long notes.
+                    Top-padding clears the floating action pill (left
+                    side, top:14) and PublishButton (right, top:14).
+                    Background matches the editor surface so content
+                    behind it disappears cleanly on scroll. z-index 6
+                    sits ABOVE the top-fade gradient (z 5) but BELOW the
+                    floating pill / publish CTA (z 10/20). */}
+                <div
+                  style={{
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 6,
+                    background: "var(--gooni-card, #FFFFFF)",
+                    padding: "56px 0 14px",
+                    marginTop: -72,
+                    marginBottom: 6,
+                  }}
+                >
                 {/* Apple-Notes-style date line — sits centred above the title
                     in muted grey, mirroring the "Edited Mar 4 at 9:42 AM"
                     treatment Daniel called out in note 246. Updates live as
@@ -2158,19 +2179,22 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                   style={{
                     display: "block",
                     width: "100%",
-                    fontSize: 24,
+                    fontSize: 26,
                     fontWeight: 700,
                     fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
                     color: "var(--gooni-text, #1C1C1E)",
                     border: "none",
                     outline: "none",
                     background: "transparent",
-                    marginBottom: 14,
+                    marginBottom: 0,
                     padding: 0,
-                    lineHeight: 1.25,
+                    lineHeight: 1.2,
                     letterSpacing: "-0.4px",
+                    textAlign: "center",
                   }}
                 />
+                </div>
+                {/* /sticky top-bar — content below scrolls under the bar */}
                 {(() => {
                   const sig = activeNote.classify_signals;
                   if (!sig) return null;
