@@ -11,6 +11,7 @@ import {
 import { renderMarkdown } from "../../utils/markdown";
 import { useProfileStore } from "../../stores/useProfileStore";
 import { CommentAvatar, identityFor, type Identity } from "./CommentAvatar";
+import { ReactionBar } from "../ReactionBar";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -331,6 +332,9 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
                   >
                     ×
                   </button>
+                </div>
+                <div style={{ marginTop: 4, paddingLeft: isOwner ? 0 : 4, paddingRight: isOwner ? 4 : 0 }}>
+                  <ReactionBar targetType="comment" targetId={c.id} compact />
                 </div>
               </div>
             </div>
