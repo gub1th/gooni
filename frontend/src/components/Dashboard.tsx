@@ -20,6 +20,7 @@ import { DashboardHeader } from "./dashboard/DashboardHeader";
 import { TabToggle as _TabToggle } from "./dashboard/TabToggle";
 void _TabToggle;
 import { FocusesView } from "./dashboard/FocusesView";
+import { SynthesizerSection } from "./dashboard/SynthesizerSection";
 import { ModeToggle } from "./dashboard/ModeToggle";
 import { OpsMode } from "./dashboard/OpsMode";
 import { PrimaryBacklogBanner } from "./dashboard/PrimaryBacklogBanner";
@@ -55,7 +56,7 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
   const [exploreOpen, setExploreOpen] = useState(false);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
-  const activeTab = useDashboardStore((s) => s.activeTab);
+  const _activeTab = useDashboardStore((s) => s.activeTab); void _activeTab;
   const _setActiveTab = useDashboardStore((s) => s.setActiveTab); void _setActiveTab;
   const activeMode = useDashboardStore((s) => s.activeMode);
   const composerFocused = useDashboardStore((s) => s.composerFocused);
@@ -165,11 +166,22 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
                 pointerEvents: composerFocused ? "none" : "auto",
               }}
             >
-              {/* G3.9 loop-close: Todos|Focuses TabToggle hidden — felt
-                  imbalanced w/ the new monochrome theme. Mechanism kept
-                  (activeTab state still drives rendering) so re-enabling
-                  is a one-line restore when Daniel wants Focuses tab back. */}
-              {activeTab === "todos" ? <TodoList /> : <FocusesView />}
+              {/* G3.9 loop-close: Todos|Focuses TabToggle hidden. Both
+                  blocks now render together — todos first (daily-action
+                  anchor), focuses next, synthesizer demoted to its own
+                  card below since it's audit-shaped, not daily-action. */}
+              <TodoList />
+              <div style={{ marginTop: 14 }}>
+                <FocusesView />
+              </div>
+              <div style={{
+                marginTop: 14,
+                background: "var(--gooni-card, #fff)",
+                border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+                borderRadius: 12, padding: "12px 16px",
+              }}>
+                <SynthesizerSection />
+              </div>
               <HabitsStrip />
               <div style={{ marginTop: 14 }}>
                 <PromiseIntegrityCard />

@@ -886,6 +886,13 @@ class WhoopSnapshot(Base):
     # Sleep performance percentage (0–100).
     sleep_performance_pct = Column(Float, nullable=True)
 
+    # Newest `updated_at` across the upstream Whoop records (recovery /
+    # cycle / sleep) this snapshot was rolled up from. Distinct from
+    # `updated_at` below, which is "when we last cached the row" — that
+    # said "updated now" right after a poll even when Daniel hadn't worn
+    # his strap in 24h. Use this for the freshness UI.
+    source_updated_at = Column(DateTime, nullable=True)
+
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 

@@ -65,10 +65,7 @@ export function SynthesizerSection() {
   };
 
   return (
-    <div style={{
-      borderTop: "0.5px solid rgba(0,0,0,0.08)",
-      paddingTop: 10, marginTop: 10, fontFamily: FONT,
-    }}>
+    <div style={{ fontFamily: FONT }}>
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         marginBottom: 6,
