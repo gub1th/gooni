@@ -12,6 +12,7 @@ import { QuickComposer } from "../components/QuickComposer";
 import { ErrorView, NotFoundView } from "../components/ErrorView";
 import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
+import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { GooniLayer } from "../components/GooniLayer";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -297,30 +298,35 @@ function AppShell() {
             }
           />
         )}
-        {/* Sidebar-reopen affordance — floats top-left when sidebar is
-            closed. Same icon shape Claude uses, mirror-flipped. */}
+        {/* Claude-style icon rail. Renders when sidebarOpen=false instead
+            of completely hiding the sidebar — gives one-click access to
+            New chat / Search / All Notes / Memories / Audit / Settings
+            without expanding. Replaces the prior floating panel-open
+            affordance. */}
         {!sidebarOpen && (
-          <button
-            onClick={() => setSidebarOpen(true)}
-            title="Open sidebar"
-            style={{
-              position: "absolute", top: 14, left: 14, zIndex: 50,
-              width: 32, height: 32, borderRadius: 8,
-              background: "var(--gooni-card, #FFFFFF)",
-              border: "1px solid rgba(0,0,0,0.08)",
-              cursor: "pointer", display: "flex", alignItems: "center",
-              justifyContent: "center", color: "#475569",
-              boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
-              transition: "background 0.12s, color 0.12s",
-            }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.04)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--gooni-card, #FFFFFF)"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-              <line x1="9" y1="3" x2="9" y2="21"></line>
-            </svg>
-          </button>
+          <CollapsedSidebar
+            isDashboard={isDashboard}
+            isNotes={isNotes}
+            isChat={isChat}
+            isEval={isEval}
+            onOpen={() => setSidebarOpen(true)}
+            onLogoClick={gotoBlank}
+            onAllNotes={gotoNotesView}
+            onNewChat={handleNewChat}
+            onOpenEval={() =>
+              navigate({
+                to: "/",
+                search: {
+                  note: undefined,
+                  conv: undefined,
+                  list: undefined,
+                  audit: true,
+                  segment: undefined,
+                  view: undefined,
+                },
+              })
+            }
+          />
         )}
         <div
           style={{
