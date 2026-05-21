@@ -253,7 +253,7 @@ POST   /focuses/{id}/reactivate       → dormant → committed. Clears missed_r
 # Todos
 GET    /todos                         → bucketed { primary, open, done_today }. open sorted doing > not_yet.
 POST   /todos                         → { text, focus_id?, due_date?, subtitle?, state? }
-PATCH  /todos/{id}                    → { text?, subtitle?, state?, focus_id?, is_primary?, due_date?, sort_order?, done? }. state=done auto-clears primary + syncs linked backlog ticket.
+PATCH  /todos/{id}                    → { text?, subtitle?, state?, focus_id?, is_primary?, due_date?, sort_order?, done?, closure_note? }. state=done auto-clears primary + syncs linked backlog ticket. `closure_note` editable post-close via the chain-view inline note editor.
 POST   /todos/{id}/cycle              → not_yet → doing → done. From done, FE pops picker (programmatic cycle bounces to not_yet).
 POST   /todos/{id}/promote-to-primary → singleton. Idempotent.
 DELETE /todos/{id}                    → also clears backlog_tickets.todo_id

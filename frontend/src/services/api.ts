@@ -956,6 +956,7 @@ export async function updateTodo(
     due_date: string | null;
     sort_order: number;
     done: boolean;
+    closure_note: string | null;
   }>,
 ): Promise<ApiTodo> {
   const res = await apiFetch(`${BASE}/todos/${id}`, {
