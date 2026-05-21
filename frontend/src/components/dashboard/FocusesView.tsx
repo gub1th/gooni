@@ -53,9 +53,8 @@ export function FocusesView() {
         marginBottom: 8, padding: "0 2px",
       }}>
         <span style={{
-          fontSize: 12, fontWeight: 500,
-          color: "var(--gooni-muted, #8E8E93)",
-          letterSpacing: 0.4, textTransform: "uppercase",
+          fontSize: 13, fontWeight: 500,
+          color: "var(--gooni-muted, #6B6557)",
         }}>
           Focuses
         </span>
