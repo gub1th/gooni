@@ -9,6 +9,7 @@ import {
   type ApiBacklogTicket,
   type BoardStatus,
 } from "../../services/api";
+import { LiveTimer } from "./LiveTimer";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -205,6 +206,20 @@ export function PrimaryBacklogBanner() {
       >
         {palette.label}
       </button>
+
+      {/* Live timer — top-right, just inside the unpin button. Same
+          shape as the primary-todo timer (Xs → Xm → Xh → Xd, capped).
+          Anchored to ticket.created_at; semantics match the todo case
+          (timer reads age of the ticket, not "time since promoted to
+          primary"). On-color variant so the pill reads cleanly over
+          the saturated banner background. */}
+      <div style={{ position: "absolute", top: 14, right: 42 }}>
+        <LiveTimer
+          since={ticket.created_at}
+          variant="onColor"
+          title="Active on this banner"
+        />
+      </div>
 
       {/* Unpin — top-right, small, white. */}
       <button
