@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.139.0 — 2026-05-21 (minor)
+
+- feat(ui): minimal sidebar + publish CTA + global scrollbar (#312)
+
 ## 0.138.0 — 2026-05-20 (minor)
 
 - feat(ui): G3.9 animations — cascade ink-trail on done + FLIP move animation (#311)
