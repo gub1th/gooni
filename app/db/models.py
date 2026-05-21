@@ -175,6 +175,11 @@ class Note(Base):
     # of is_pinned (a draft can also be pinned). Auto-clears when the note
     # flips to public — once it ships, it's no longer a draft.
     is_draft = Column(Boolean, default=False, nullable=False)
+    # Optional Notion-style note icon — single emoji OR a "lucide:<name>"
+    # reference (same encoding Space.emoji uses, see SpaceIcon). Null =
+    # no icon (Gooni's default). Stored as Text so we can switch
+    # encodings later without a migration.
+    icon = Column(Text, nullable=True)
     # Snapshot of the note's embedding at the moment the unified extractor
     # last classified its content. Used as the dedup gate for re-running
     # the classifier — if the live embedding has cosine ≥ ~0.92 vs this
