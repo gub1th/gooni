@@ -1,0 +1,44 @@
+# Blocks merging PRs that would leave alembic with multiple heads.
+#
+# Multi-head state happens when two PRs branch from the same revision in
+# parallel — each adds a migration whose down_revision points at the
+# same parent, and the merge order doesn't matter: `alembic upgrade head`
+# refuses to pick. Production crash-loops until a merge migration lands.
+#
+# This workflow reads alembic/versions/*.py without a DB and asserts the
+# resulting graph has exactly one head. Fail = author must add a merge
+# migration (`alembic merge -m "merge heads" <revA> <revB>`) before the
+# PR can land.
+name: alembic heads check
+on:
+  pull_request:
+    paths:
+      - "alembic/**"
+      - "app/db/models.py"
+      - ".github/workflows/alembic-heads-check.yml"
+
+jobs:
+  one-head:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install alembic + sqlalchemy
+        run: pip install "alembic>=1.13" "sqlalchemy>=2.0"
+      - name: assert single head
+        run: |
+          python <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          cfg = Config("alembic.ini")
+          script = ScriptDirectory.from_config(cfg)
+          heads = script.get_heads()
+          if len(heads) != 1:
+              print(f"::error::alembic has {len(heads)} heads: {heads}")
+              print("fix: run `alembic merge -m \"merge heads\" " + " ".join(heads) + "` and commit the resulting revision.")
+              raise SystemExit(1)
+          print(f"single head ok: {heads[0]}")
+          PY
