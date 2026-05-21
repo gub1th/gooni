@@ -17,16 +17,18 @@ const STYLE_ATTR = "data-gooni-note-card-styles";
 
 const SHARED_CSS = `
   /* === NoteCard mark ====================================================
-     Pastel inline pill. box-decoration-break: clone makes multi-line
-     selections render as one clean pill per wrapped line instead of the
-     default browser behavior of a single un-rounded continuous strip. */
+     Pastel inline highlight. Intentionally NOT box-decoration-break:clone
+     — Daniel flagged that cloning rendered multi-line selections as N
+     separate rounded pills (each looking like a distinct card with its
+     own check). Default behavior extends the background continuously
+     across line breaks: first line rounded-left + padding-left, last
+     line rounded-right + padding-right, middle lines bleed edge-to-edge.
+     Reads as ONE continuous card (Notion / Confluence behavior). */
   .gooni-note-card {
     padding: 1px 7px;
     border-radius: 7px;
     position: relative;
     transition: background 0.15s, color 0.15s, opacity 0.15s;
-    -webkit-box-decoration-break: clone;
-    box-decoration-break: clone;
   }
   .gooni-note-card-blue {
     background: rgba(186, 230, 253, 0.55);
