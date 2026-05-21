@@ -142,6 +142,10 @@ export interface ApiNote {
   // derives_from edges); `archived` = manual tombstone. Drives the
   // Unprocessed sidebar view + the synthesizer's source filter.
   status: "unprocessed" | "graduated" | "archived";
+  // Notion-style optional note icon. Either a single emoji (e.g. "📝")
+  // OR a lucide reference of shape "lucide:<name>" matching SpaceIcon
+  // encoding. Null = no icon (default).
+  icon?: string | null;
   // Distinct visitors that hit /public/notes/{id}. Only present on the
   // single-note GET (`/notes/{id}`), not on space-list responses — the
   // count requires a per-note Visit query that isn't worth running for
@@ -575,7 +579,7 @@ export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: numbe
 
 export async function patchNote(
   id: number,
-  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string; tags?: string[]; status?: "unprocessed" | "graduated" | "archived" },
+  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string; tags?: string[]; status?: "unprocessed" | "graduated" | "archived"; icon?: string | null },
 ): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",

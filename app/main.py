@@ -3084,6 +3084,7 @@ def _serialize_note(n: Note) -> dict:
         "excerpt_anchor": n.excerpt_anchor,
         "tags": _parse_tags(n.tags),
         "status": getattr(n, "status", "unprocessed") or "unprocessed",
+        "icon": getattr(n, "icon", None),
     }
 
 
@@ -3324,6 +3325,14 @@ def update_note(
     if "tags" in body:
         normalized = _normalize_tags(body["tags"])
         note.tags = json.dumps(normalized) if normalized else None
+    if "icon" in body:
+        raw_icon = body.get("icon")
+        if raw_icon is None or raw_icon == "":
+            note.icon = None
+        elif isinstance(raw_icon, str) and len(raw_icon) <= 64:
+            note.icon = raw_icon
+        else:
+            raise HTTPException(status_code=400, detail="icon must be string ≤64 chars or null")
     db.commit()
     db.refresh(note)
     return _serialize_note(note)

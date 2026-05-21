@@ -6,7 +6,7 @@ import {
   Heading1, Heading2,
   List, ListOrdered, ListChecks,
   Quote, Code2, Minus, Table as TableIcon,
-  Link as LinkIcon,
+  Link as LinkIcon, ChevronRight as ChevronRightIcon,
 } from "lucide-react";
 import { fetchOgMetadata } from "../../services/api";
 
@@ -79,6 +79,14 @@ const ITEMS: SlashItem[] = [
     keywords: ["divider", "hr", "horizontal", "rule", "line"],
     command: ({ editor, range }) =>
       editor.chain().focus().deleteRange(range).setHorizontalRule().run(),
+  },
+  {
+    title: "Toggle",
+    description: "Collapsible block — Notion-style",
+    Icon: ChevronRightIcon,
+    keywords: ["toggle", "collapse", "details", "expand", "hide"],
+    command: ({ editor, range }) =>
+      editor.chain().focus().deleteRange(range).insertToggleBlock().run(),
   },
   {
     title: "Table",

@@ -23,6 +23,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
 import { PublishButton } from "./PublishButton";
+import { ToggleBlock } from "./ToggleBlockExtension";
+import { OutlinePanel } from "./OutlinePanel";
+import { NoteIconPicker } from "./NoteIconPicker";
 import { NoteCard } from "./NoteCardExtension";
 import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
 import { useNoteCardStyles } from "./noteCardStyles";
@@ -681,6 +684,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         NoteLink,
         NoteCard,
         TextColor,
+        ToggleBlock,
       ],
       content: activeNote?.content ?? "",
       // Embedded variant intentionally does NOT autofocus — focus
@@ -1337,6 +1341,24 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     }
   }
 
+  async function handleSetNoteIcon(next: string | null) {
+    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
+    useNotesContentStore.setState((s) => {
+      const updated: Record<string, ApiNote[]> = {};
+      for (const [k, list] of Object.entries(s.notes)) {
+        updated[k] = list.map((n) =>
+          n.id === activeNoteId ? { ...n, icon: next } : n,
+        );
+      }
+      return { notes: updated };
+    });
+    try {
+      await apiPatchNote(activeNoteId, { icon: next });
+    } catch (e) {
+      console.error("set note icon failed", e);
+    }
+  }
+
   async function handleTogglePublic() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
     const next = !activeNote.is_public;
@@ -1977,8 +1999,19 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       ) : (
         <div
           ref={scrollContainerRef}
-          style={{ flex: 1, overflowY: "auto", boxSizing: "border-box", width: "100%" }}
+          style={{ flex: 1, overflowY: "auto", boxSizing: "border-box", width: "100%", position: "relative" }}
         >
+          {/* Outline panel — Notion-style left rail. Absolute-positioned
+              inside the scroll container so it doesn't take a flex slot
+              and the editor's centered max-width content layout stays
+              intact. Hides itself when fewer than 2 headings exist. */}
+          {!embedded && (
+            <div style={{ position: "absolute", top: 0, left: 16, height: "100%", pointerEvents: "none" }}>
+              <div style={{ pointerEvents: "auto" }}>
+                <OutlinePanel editor={editor} />
+              </div>
+            </div>
+          )}
           <div style={{ maxWidth: 780, width: "100%", margin: "0 auto", padding: "72px 72px 48px", boxSizing: "border-box" }}>
             {!activeNote && (
               <div
@@ -2055,6 +2088,15 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     marginBottom: 6,
                   }}
                 >
+                {/* Notion-style optional icon — small picker centred above
+                    the date line. Click an empty placeholder to add; click
+                    an existing icon to swap or remove. Renders the lucide
+                    catalog from SpaceIcon so it matches the rest of the
+                    app's icon vocabulary. */}
+                <NoteIconPicker
+                  current={activeNote.icon ?? null}
+                  onPick={(next) => handleSetNoteIcon(next)}
+                />
                 {/* Apple-Notes-style date line — sits centred above the title
                     in muted grey, mirroring the "Edited Mar 4 at 9:42 AM"
                     treatment Daniel called out in note 246. Updates live as
