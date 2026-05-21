@@ -22,6 +22,7 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
+import { PublishButton } from "./PublishButton";
 import { NoteCard } from "./NoteCardExtension";
 import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
 import { useNoteCardStyles } from "./noteCardStyles";
@@ -1274,6 +1275,68 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     }
   }
 
+  async function handlePublishPublic() {
+    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
+    const wasDraft = activeNote.is_draft;
+    useNotesContentStore.setState((s) => {
+      const updated: Record<string, ApiNote[]> = {};
+      for (const [k, list] of Object.entries(s.notes)) {
+        updated[k] = list.map((n) =>
+          n.id === activeNoteId ? { ...n, is_public: true, is_draft: false } : n,
+        );
+      }
+      return { notes: updated };
+    });
+    setLocalIsPublic(true);
+    if (wasDraft) useDraftVersionStore.getState().bump();
+    try {
+      await apiPatchNote(activeNoteId, { is_public: true, is_draft: false });
+    } catch (e) {
+      console.error("publish public failed", e);
+    }
+  }
+
+  async function handlePublishPrivate() {
+    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
+    const wasDraft = activeNote.is_draft;
+    useNotesContentStore.setState((s) => {
+      const updated: Record<string, ApiNote[]> = {};
+      for (const [k, list] of Object.entries(s.notes)) {
+        updated[k] = list.map((n) =>
+          n.id === activeNoteId ? { ...n, is_public: false, is_draft: false } : n,
+        );
+      }
+      return { notes: updated };
+    });
+    setLocalIsPublic(false);
+    if (wasDraft) useDraftVersionStore.getState().bump();
+    try {
+      await apiPatchNote(activeNoteId, { is_public: false, is_draft: false });
+    } catch (e) {
+      console.error("publish private failed", e);
+    }
+  }
+
+  async function handleUnpublish() {
+    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
+    useNotesContentStore.setState((s) => {
+      const updated: Record<string, ApiNote[]> = {};
+      for (const [k, list] of Object.entries(s.notes)) {
+        updated[k] = list.map((n) =>
+          n.id === activeNoteId ? { ...n, is_public: false, is_draft: true } : n,
+        );
+      }
+      return { notes: updated };
+    });
+    setLocalIsPublic(false);
+    useDraftVersionStore.getState().bump();
+    try {
+      await apiPatchNote(activeNoteId, { is_public: false, is_draft: true });
+    } catch (e) {
+      console.error("unpublish failed", e);
+    }
+  }
+
   async function handleTogglePublic() {
     if (!activeNote || !activeNoteId || activeNoteId < 0) return;
     const next = !activeNote.is_public;
@@ -1337,6 +1400,23 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       {/* Header bar — full variant only */}
       {!embedded && (
       <>
+      {/* PublishButton — Confluence-style primary CTA. Top-right of the
+          editor surface. Three states (draft/private/public) addressed
+          via a dropdown menu instead of two separate icon toggles. */}
+      {activeNote && activeNoteId && activeNoteId > 0 && (
+        <PublishButton
+          visibility={
+            activeNote.is_public
+              ? "public"
+              : activeNote.is_draft
+                ? "draft"
+                : "private"
+          }
+          onPublishPublic={handlePublishPublic}
+          onPublishPrivate={handlePublishPrivate}
+          onUnpublish={handleUnpublish}
+        />
+      )}
       {/* Top fade — content scrolls under the floating action pill so the
           first lines dissolve into the page bg instead of slamming into the
           toolbar. Apple-Notes feel. Pointer-events off so clicks pass to the
