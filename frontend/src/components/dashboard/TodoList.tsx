@@ -384,8 +384,8 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           100% { stroke-dashoffset: 0;    }
         }
         @keyframes gooni-primary-trace-breath {
-          0%, 100% { filter: drop-shadow(0 0 4px rgba(245,200,73,0.45)) drop-shadow(0 0 10px rgba(245,200,73,0.22)); }
-          50%      { filter: drop-shadow(0 0 6px rgba(245,200,73,0.60)) drop-shadow(0 0 14px rgba(245,200,73,0.32)); }
+          0%, 100% { filter: drop-shadow(0 0 4px rgba(201,119,46,0.45)) drop-shadow(0 0 10px rgba(201,119,46,0.22)); }
+          50%      { filter: drop-shadow(0 0 6px rgba(201,119,46,0.60)) drop-shadow(0 0 14px rgba(201,119,46,0.32)); }
         }
         .gooni-primary-trace {
           position: absolute;
@@ -398,18 +398,19 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         }
         .gooni-primary-trace rect {
           fill: none;
-          stroke: #F5C849;
+          stroke: #C9772E;
           stroke-width: 1.4;
           stroke-linecap: round;
           stroke-dasharray: 1000;
           stroke-dashoffset: 1000;
           /* Draw once (forwards = stay drawn), then settle into a slow
              breathing halo. Delay the breath so it doesn't fight the
-             draw mid-flight. */
+             draw mid-flight. Color: terracotta — replaces prior gold
+             accent; matches the doing-state ring + slice-1 warm palette. */
           animation:
             gooni-primary-trace-draw 1800ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards,
             gooni-primary-trace-breath 4200ms ease-in-out 1800ms infinite;
-          filter: drop-shadow(0 0 4px rgba(245,200,73,0.55)) drop-shadow(0 0 10px rgba(245,200,73,0.25));
+          filter: drop-shadow(0 0 4px rgba(201,119,46,0.55)) drop-shadow(0 0 10px rgba(201,119,46,0.25));
         }
       `}</style>
 
@@ -622,6 +623,7 @@ function PrimaryCard({
   // Trace-border lives forever once the card is primary, but we key it
   // on todo id so promoting a different todo re-runs the draw animation
   // from scratch (the React key flip forces a remount of the SVG layer).
+  const hasChain = !!chainMeta && chainMeta.children_total > 0;
 
   return (
     <div data-todo-id={t.id}>
@@ -629,18 +631,20 @@ function PrimaryCard({
       className={cascade ? "gooni-todo-cascade" : ""}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={hasChain ? () => onOpenChain(t.id) : undefined}
       style={{
         position: "relative",
-        background: "var(--gooni-card, #FFFFFF)",
-        // No yellow border or glow at mount — the SVG trace paints both
-        // in as it draws. A whisper-faint elevation shadow keeps the
-        // card legible against the dashboard backdrop.
-        border: "0.5px solid rgba(0,0,0,0.05)",
+        background: "var(--gooni-card, #FFFCF3)",
+        // No terracotta border or glow at mount — the SVG trace paints
+        // both in as it draws. A whisper-faint warm elevation shadow
+        // keeps the card legible against the dashboard backdrop.
+        border: "0.5px solid rgba(155,130,70,0.15)",
         borderRadius: 12,
         padding: "12px 16px",
         display: "flex", alignItems: "center", gap: 12,
         fontFamily: FONT,
-        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+        boxShadow: "0 1px 3px rgba(155,130,70,0.06)",
+        cursor: hasChain ? "pointer" : "default",
       }}
     >
       <svg
@@ -661,7 +665,7 @@ function PrimaryCard({
         aria-label="Demote primary"
         style={{
           border: "none", background: "transparent",
-          color: "#BA7517", cursor: "pointer",
+          color: "#C9772E", cursor: "pointer",
           display: "flex", alignItems: "center", padding: 0,
         }}
       >
@@ -680,7 +684,7 @@ function PrimaryCard({
       </span>
 
       <span
-        onClick={onOpenEdit}
+        onClick={(e) => { e.stopPropagation(); onOpenEdit(); }}
         title="Click to edit"
         style={{
           flex: 1, fontSize: 15, fontWeight: 500,
@@ -694,9 +698,9 @@ function PrimaryCard({
         {t.text}
       </span>
 
-      {chainMeta && chainMeta.children_total > 0 && (
+      {hasChain && (
         <ChainIndicator
-          meta={chainMeta}
+          meta={chainMeta!}
           onClick={(e) => { e.stopPropagation(); onOpenChain(t.id); }}
         />
       )}
@@ -840,6 +844,7 @@ function TodoRow({
   const [hovered, setHovered] = useState(false);
   const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
   const age = ageHint(t.created_at);
+  const hasChain = !!chainMeta && chainMeta.children_total > 0;
 
   return (
     // Outer wrapper carries hover state so the OrphanLinkHint sitting
@@ -877,6 +882,7 @@ function TodoRow({
       )}
     <div
       className={`gooni-todo-row${cascade ? " gooni-todo-cascade" : ""}`}
+      onClick={hasChain ? () => onOpenChain(t.id) : undefined}
       style={{
         position: "relative",
         background: subdued ? "transparent" : "var(--gooni-card, #FFFFFF)",
@@ -884,6 +890,7 @@ function TodoRow({
         borderRadius: subdued ? 0 : 8,
         padding: subdued ? "7px 12px" : "10px 16px",
         display: "flex", alignItems: "center", gap: 12,
+        cursor: hasChain ? "pointer" : "default",
       }}
     >
       {/* Drag grip — visible on hover (or always during a drag). Carries
@@ -923,7 +930,7 @@ function TodoRow({
       </span>
 
       <span
-        onClick={onOpenEdit}
+        onClick={(e) => { e.stopPropagation(); onOpenEdit(); }}
         title="Click to edit"
         style={{
           flex: 1, minWidth: 0,
@@ -937,9 +944,9 @@ function TodoRow({
         {t.text}
       </span>
 
-      {chainMeta && chainMeta.children_total > 0 && (
+      {hasChain && (
         <ChainIndicator
-          meta={chainMeta}
+          meta={chainMeta!}
           onClick={(e) => { e.stopPropagation(); onOpenChain(t.id); }}
         />
       )}
@@ -1225,10 +1232,10 @@ function DoneSection({ todos, focusById, chainSummary, onOpenEdit, onOpenChain }
     <div style={{ marginTop: 20 }}>
       <div style={{
         margin: "0 4px 8px",
-        fontSize: 12, fontWeight: 500, letterSpacing: 0.4,
+        fontSize: 12, fontWeight: 500,
         color: "var(--gooni-muted, #9CA3AF)",
       }}>
-        DONE TODAY
+        Done today
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {todos.map((t) => {
@@ -1241,24 +1248,24 @@ function DoneSection({ todos, focusById, chainSummary, onOpenEdit, onOpenChain }
               onClick={() => onOpenEdit(t.id)}
               title="Click to edit"
               style={{
-                background: "var(--gooni-card, #FFFFFF)",
-                border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+                background: "var(--gooni-card, #FFFCF3)",
+                border: "0.5px solid var(--gooni-border, rgba(155,130,70,0.12))",
                 borderRadius: 8,
-                padding: "10px 16px",
-                display: "flex", alignItems: "center", gap: 12,
-                opacity: 0.45,
+                padding: "8px 14px",
+                display: "flex", alignItems: "center", gap: 10,
+                opacity: 0.4,
                 cursor: "pointer",
               }}
             >
               <span style={{
-                width: 16, height: 16, borderRadius: "50%",
+                width: 14, height: 14, borderRadius: "50%",
                 background: "#9CA3AF", color: "#fff",
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
-                fontSize: 11, fontFamily: FONT, flexShrink: 0,
+                fontSize: 10, fontFamily: FONT, flexShrink: 0,
               }}>✓</span>
               <span style={{
                 flex: 1, minWidth: 0,
-                fontSize: 14, color: "var(--gooni-text, #1C1C1E)",
+                fontSize: 13, color: "var(--gooni-text, #1C1C1E)",
                 textDecoration: "line-through",
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>{t.text}</span>

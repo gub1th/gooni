@@ -114,10 +114,10 @@ export function HabitsStrip() {
         margin: "0 4px 8px",
       }}>
         <span style={{
-          fontSize: 12, fontWeight: 500, letterSpacing: 0.4,
+          fontSize: 12, fontWeight: 500,
           color: "var(--gooni-muted, #6B7280)",
         }}>
-          HABITS
+          Habits
         </span>
         <button
           onClick={() => { setCreating(true); window.setTimeout(() => inputRef.current?.focus(), 0); }}
