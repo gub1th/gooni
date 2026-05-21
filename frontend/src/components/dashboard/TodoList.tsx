@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crown, GripVertical, Plus, AlertTriangle, ArrowUpRight, ArrowLeft } from "lucide-react";
+import { Crown, GripVertical, Plus, X, AlertTriangle, ArrowUpRight, ArrowLeft } from "lucide-react";
 import {
   fetchTodos, createTodo, updateTodo, cycleTodoState, deleteTodo,
   promoteTodoToPrimary, fetchFocuses,
+  closeTodoWithOutcome,
   type ApiTodo, type ApiTodoBundle, type ApiFocus, type TodoState,
-  type TodoChainMeta,
+  type TodoChainMeta, type SpawnedTodoSpec,
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
 import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
@@ -230,13 +231,39 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
     };
   }, []);
 
+  // Slice 3 — Close-with-outcome inline flow. Doing-state checkbox
+  // click opens the close modal instead of insta-cycling to done. Lets
+  // Daniel log an outcome + optionally spawn follow-up todos in one
+  // motion. not_yet → doing keeps the instant cycle so the common path
+  // ("mark as actively working on") stays one click.
+  const [closingId, setClosingId] = useState<number | null>(null);
+
   async function onCycle(t: ApiTodo) {
     if (t.state === "done") return;
+    if (t.state === "doing") {
+      // doing → done graduates through the close modal so outcome +
+      // spawned follow-ups can land in the same write.
+      setClosingId(t.id);
+      return;
+    }
     try {
       const next = await cycleTodoState(t.id);
       if (next.state === "done") scheduleCascade(t.id);
       refresh();
     } catch (e) { console.error("cycle todo failed", e); }
+  }
+
+  async function onSubmitClose(
+    id: number,
+    closure_note: string | null,
+    spawned: SpawnedTodoSpec[],
+  ) {
+    try {
+      await closeTodoWithOutcome(id, { closure_note, spawned });
+      scheduleCascade(id);
+      setClosingId(null);
+      refresh();
+    } catch (e) { console.error("close-with-outcome failed", e); }
   }
 
   async function onPickState(id: number, state: TodoState) {
@@ -384,8 +411,8 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           100% { stroke-dashoffset: 0;    }
         }
         @keyframes gooni-primary-trace-breath {
-          0%, 100% { filter: drop-shadow(0 0 4px rgba(245,200,73,0.45)) drop-shadow(0 0 10px rgba(245,200,73,0.22)); }
-          50%      { filter: drop-shadow(0 0 6px rgba(245,200,73,0.60)) drop-shadow(0 0 14px rgba(245,200,73,0.32)); }
+          0%, 100% { filter: drop-shadow(0 0 4px rgba(201,119,46,0.45)) drop-shadow(0 0 10px rgba(201,119,46,0.22)); }
+          50%      { filter: drop-shadow(0 0 6px rgba(201,119,46,0.60)) drop-shadow(0 0 14px rgba(201,119,46,0.32)); }
         }
         .gooni-primary-trace {
           position: absolute;
@@ -398,18 +425,19 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         }
         .gooni-primary-trace rect {
           fill: none;
-          stroke: #F5C849;
+          stroke: #C9772E;
           stroke-width: 1.4;
           stroke-linecap: round;
           stroke-dasharray: 1000;
           stroke-dashoffset: 1000;
           /* Draw once (forwards = stay drawn), then settle into a slow
              breathing halo. Delay the breath so it doesn't fight the
-             draw mid-flight. */
+             draw mid-flight. Color: terracotta — replaces prior gold
+             accent; matches the doing-state ring + slice-1 warm palette. */
           animation:
             gooni-primary-trace-draw 1800ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards,
             gooni-primary-trace-breath 4200ms ease-in-out 1800ms infinite;
-          filter: drop-shadow(0 0 4px rgba(245,200,73,0.55)) drop-shadow(0 0 10px rgba(245,200,73,0.25));
+          filter: drop-shadow(0 0 4px rgba(201,119,46,0.55)) drop-shadow(0 0 10px rgba(201,119,46,0.25));
         }
       `}</style>
 
@@ -457,35 +485,53 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
             {hasFocusedGroup && (
               <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                 {bundle.primary && (
-                  <PrimaryCard
-                    t={bundle.primary}
-                    focus={bundle.primary.focus_id ? focusById.get(bundle.primary.focus_id) ?? null : null}
-                    cascade={cascadeIds.includes(bundle.primary.id)}
-                    chainMeta={bundle.chain_summary?.[bundle.primary.id]}
-                    onCycle={() => onCycle(bundle.primary!)}
-                    onPickState={(s) => onPickState(bundle.primary!.id, s)}
-                    onDemote={() => onDemotePrimary(bundle.primary!.id)}
-                    onDelete={() => onDelete(bundle.primary!.id)}
-                    onOpenEdit={() => setEditingId(bundle.primary!.id)}
-                    onOpenChain={(id) => setChainViewId(id)}
-                  />
+                  closingId === bundle.primary.id ? (
+                    <CloseInlineFlow
+                      key={`close-${bundle.primary.id}`}
+                      todo={bundle.primary}
+                      onSubmit={(note, sp) => onSubmitClose(bundle.primary!.id, note, sp)}
+                      onCancel={() => setClosingId(null)}
+                    />
+                  ) : (
+                    <PrimaryCard
+                      t={bundle.primary}
+                      focus={bundle.primary.focus_id ? focusById.get(bundle.primary.focus_id) ?? null : null}
+                      cascade={cascadeIds.includes(bundle.primary.id)}
+                      chainMeta={bundle.chain_summary?.[bundle.primary.id]}
+                      onCycle={() => onCycle(bundle.primary!)}
+                      onPickState={(s) => onPickState(bundle.primary!.id, s)}
+                      onDemote={() => onDemotePrimary(bundle.primary!.id)}
+                      onDelete={() => onDelete(bundle.primary!.id)}
+                      onOpenEdit={() => setEditingId(bundle.primary!.id)}
+                      onOpenChain={(id) => setChainViewId(id)}
+                    />
+                  )
                 )}
                 {activeOpen.map((t) => (
-                  <TodoRow
-                    key={t.id}
-                    t={t}
-                    focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
-                    cascade={cascadeIds.includes(t.id)}
-                    chainMeta={bundle.chain_summary?.[t.id]}
-                    subdued={true}
-                    onCycle={() => onCycle(t)}
-                    onPickState={(s) => onPickState(t.id, s)}
-                    onPromotePrimary={() => onPromotePrimary(t.id)}
-                    onDelete={() => onDelete(t.id)}
-                    onOpenEdit={() => setEditingId(t.id)}
-                    onOpenChain={(id) => setChainViewId(id)}
-                    dragHandlers={makeDragHandlers(t.id)}
-                  />
+                  closingId === t.id ? (
+                    <CloseInlineFlow
+                      key={`close-${t.id}`}
+                      todo={t}
+                      onSubmit={(note, sp) => onSubmitClose(t.id, note, sp)}
+                      onCancel={() => setClosingId(null)}
+                    />
+                  ) : (
+                    <TodoRow
+                      key={t.id}
+                      t={t}
+                      focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
+                      cascade={cascadeIds.includes(t.id)}
+                      chainMeta={bundle.chain_summary?.[t.id]}
+                      subdued={true}
+                      onCycle={() => onCycle(t)}
+                      onPickState={(s) => onPickState(t.id, s)}
+                      onPromotePrimary={() => onPromotePrimary(t.id)}
+                      onDelete={() => onDelete(t.id)}
+                      onOpenEdit={() => setEditingId(t.id)}
+                      onOpenChain={(id) => setChainViewId(id)}
+                      dragHandlers={makeDragHandlers(t.id)}
+                    />
+                  )
                 ))}
               </div>
             )}
@@ -497,21 +543,30 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
                 }}
               >
                 {pendingOpen.map((t) => (
-                  <TodoRow
-                    key={t.id}
-                    t={t}
-                    focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
-                    cascade={cascadeIds.includes(t.id)}
-                    chainMeta={bundle.chain_summary?.[t.id]}
-                    subdued={true}
-                    onCycle={() => onCycle(t)}
-                    onPickState={(s) => onPickState(t.id, s)}
-                    onPromotePrimary={() => onPromotePrimary(t.id)}
-                    onDelete={() => onDelete(t.id)}
-                    onOpenEdit={() => setEditingId(t.id)}
-                    onOpenChain={(id) => setChainViewId(id)}
-                    dragHandlers={makeDragHandlers(t.id)}
-                  />
+                  closingId === t.id ? (
+                    <CloseInlineFlow
+                      key={`close-${t.id}`}
+                      todo={t}
+                      onSubmit={(note, sp) => onSubmitClose(t.id, note, sp)}
+                      onCancel={() => setClosingId(null)}
+                    />
+                  ) : (
+                    <TodoRow
+                      key={t.id}
+                      t={t}
+                      focus={t.focus_id ? focusById.get(t.focus_id) ?? null : null}
+                      cascade={cascadeIds.includes(t.id)}
+                      chainMeta={bundle.chain_summary?.[t.id]}
+                      subdued={true}
+                      onCycle={() => onCycle(t)}
+                      onPickState={(s) => onPickState(t.id, s)}
+                      onPromotePrimary={() => onPromotePrimary(t.id)}
+                      onDelete={() => onDelete(t.id)}
+                      onOpenEdit={() => setEditingId(t.id)}
+                      onOpenChain={(id) => setChainViewId(id)}
+                      dragHandlers={makeDragHandlers(t.id)}
+                    />
+                  )
                 ))}
               </div>
             )}
@@ -622,6 +677,7 @@ function PrimaryCard({
   // Trace-border lives forever once the card is primary, but we key it
   // on todo id so promoting a different todo re-runs the draw animation
   // from scratch (the React key flip forces a remount of the SVG layer).
+  const hasChain = !!chainMeta && chainMeta.children_total > 0;
 
   return (
     <div data-todo-id={t.id}>
@@ -629,18 +685,20 @@ function PrimaryCard({
       className={cascade ? "gooni-todo-cascade" : ""}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={hasChain ? () => onOpenChain(t.id) : undefined}
       style={{
         position: "relative",
-        background: "var(--gooni-card, #FFFFFF)",
-        // No yellow border or glow at mount — the SVG trace paints both
-        // in as it draws. A whisper-faint elevation shadow keeps the
-        // card legible against the dashboard backdrop.
-        border: "0.5px solid rgba(0,0,0,0.05)",
+        background: "var(--gooni-card, #FFFCF3)",
+        // No terracotta border or glow at mount — the SVG trace paints
+        // both in as it draws. A whisper-faint warm elevation shadow
+        // keeps the card legible against the dashboard backdrop.
+        border: "0.5px solid rgba(155,130,70,0.15)",
         borderRadius: 12,
         padding: "12px 16px",
         display: "flex", alignItems: "center", gap: 12,
         fontFamily: FONT,
-        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+        boxShadow: "0 1px 3px rgba(155,130,70,0.06)",
+        cursor: hasChain ? "pointer" : "default",
       }}
     >
       <svg
@@ -661,7 +719,7 @@ function PrimaryCard({
         aria-label="Demote primary"
         style={{
           border: "none", background: "transparent",
-          color: "#BA7517", cursor: "pointer",
+          color: "#C9772E", cursor: "pointer",
           display: "flex", alignItems: "center", padding: 0,
         }}
       >
@@ -680,7 +738,7 @@ function PrimaryCard({
       </span>
 
       <span
-        onClick={onOpenEdit}
+        onClick={(e) => { e.stopPropagation(); onOpenEdit(); }}
         title="Click to edit"
         style={{
           flex: 1, fontSize: 15, fontWeight: 500,
@@ -694,9 +752,9 @@ function PrimaryCard({
         {t.text}
       </span>
 
-      {chainMeta && chainMeta.children_total > 0 && (
+      {hasChain && (
         <ChainIndicator
-          meta={chainMeta}
+          meta={chainMeta!}
           onClick={(e) => { e.stopPropagation(); onOpenChain(t.id); }}
         />
       )}
@@ -840,6 +898,7 @@ function TodoRow({
   const [hovered, setHovered] = useState(false);
   const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
   const age = ageHint(t.created_at);
+  const hasChain = !!chainMeta && chainMeta.children_total > 0;
 
   return (
     // Outer wrapper carries hover state so the OrphanLinkHint sitting
@@ -877,6 +936,7 @@ function TodoRow({
       )}
     <div
       className={`gooni-todo-row${cascade ? " gooni-todo-cascade" : ""}`}
+      onClick={hasChain ? () => onOpenChain(t.id) : undefined}
       style={{
         position: "relative",
         background: subdued ? "transparent" : "var(--gooni-card, #FFFFFF)",
@@ -884,6 +944,7 @@ function TodoRow({
         borderRadius: subdued ? 0 : 8,
         padding: subdued ? "7px 12px" : "10px 16px",
         display: "flex", alignItems: "center", gap: 12,
+        cursor: hasChain ? "pointer" : "default",
       }}
     >
       {/* Drag grip — visible on hover (or always during a drag). Carries
@@ -923,7 +984,7 @@ function TodoRow({
       </span>
 
       <span
-        onClick={onOpenEdit}
+        onClick={(e) => { e.stopPropagation(); onOpenEdit(); }}
         title="Click to edit"
         style={{
           flex: 1, minWidth: 0,
@@ -937,9 +998,9 @@ function TodoRow({
         {t.text}
       </span>
 
-      {chainMeta && chainMeta.children_total > 0 && (
+      {hasChain && (
         <ChainIndicator
-          meta={chainMeta}
+          meta={chainMeta!}
           onClick={(e) => { e.stopPropagation(); onOpenChain(t.id); }}
         />
       )}
@@ -1225,10 +1286,10 @@ function DoneSection({ todos, focusById, chainSummary, onOpenEdit, onOpenChain }
     <div style={{ marginTop: 20 }}>
       <div style={{
         margin: "0 4px 8px",
-        fontSize: 12, fontWeight: 500, letterSpacing: 0.4,
+        fontSize: 12, fontWeight: 500,
         color: "var(--gooni-muted, #9CA3AF)",
       }}>
-        DONE TODAY
+        Done today
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {todos.map((t) => {
@@ -1241,24 +1302,24 @@ function DoneSection({ todos, focusById, chainSummary, onOpenEdit, onOpenChain }
               onClick={() => onOpenEdit(t.id)}
               title="Click to edit"
               style={{
-                background: "var(--gooni-card, #FFFFFF)",
-                border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+                background: "var(--gooni-card, #FFFCF3)",
+                border: "0.5px solid var(--gooni-border, rgba(155,130,70,0.12))",
                 borderRadius: 8,
-                padding: "10px 16px",
-                display: "flex", alignItems: "center", gap: 12,
-                opacity: 0.45,
+                padding: "8px 14px",
+                display: "flex", alignItems: "center", gap: 10,
+                opacity: 0.4,
                 cursor: "pointer",
               }}
             >
               <span style={{
-                width: 16, height: 16, borderRadius: "50%",
+                width: 14, height: 14, borderRadius: "50%",
                 background: "#9CA3AF", color: "#fff",
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
-                fontSize: 11, fontFamily: FONT, flexShrink: 0,
+                fontSize: 10, fontFamily: FONT, flexShrink: 0,
               }}>✓</span>
               <span style={{
                 flex: 1, minWidth: 0,
-                fontSize: 14, color: "var(--gooni-text, #1C1C1E)",
+                fontSize: 13, color: "var(--gooni-text, #1C1C1E)",
                 textDecoration: "line-through",
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
               }}>{t.text}</span>
@@ -1282,6 +1343,234 @@ function DoneSection({ todos, focusById, chainSummary, onOpenEdit, onOpenChain }
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ── Slice 3: close-with-outcome inline flow ──────────────────────────────
+//
+// Replaces the doing-state row with a vertical expansion: outcome
+// textarea + multi-line spawn list + close button. Keyboard:
+//   - Esc cancels (closingId → null)
+//   - Cmd/Ctrl+Enter submits
+//   - Enter inside a spawn input adds another row
+//   - Enter on the textarea inserts a newline (default <textarea> behavior)
+//
+// Submit calls /todos/{id}/close with closure_note + spawned[]. Empty
+// textarea → null closure_note; empty spawn entries are stripped.
+
+function CloseInlineFlow({
+  todo,
+  onSubmit,
+  onCancel,
+}: {
+  todo: ApiTodo;
+  onSubmit: (closure_note: string | null, spawned: SpawnedTodoSpec[]) => void;
+  onCancel: () => void;
+}) {
+  const [outcome, setOutcome] = useState("");
+  const [spawnList, setSpawnList] = useState<string[]>([]);
+  const [draftSpawn, setDraftSpawn] = useState("");
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => { taRef.current?.focus(); }, []);
+
+  function commitDraftSpawn(): boolean {
+    const v = draftSpawn.trim();
+    if (!v) return false;
+    setSpawnList((arr) => [...arr, v]);
+    setDraftSpawn("");
+    return true;
+  }
+
+  function handleSubmit() {
+    // Commit any pending draft spawn before submitting so the row Daniel
+    // typed-but-didn't-Enter still gets persisted.
+    const tailDraft = draftSpawn.trim();
+    const finalSpawns = tailDraft ? [...spawnList, tailDraft] : spawnList;
+    const cleaned: SpawnedTodoSpec[] = finalSpawns
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((text) => ({ text }));
+    const note = outcome.trim();
+    onSubmit(note ? note : null, cleaned);
+  }
+
+  function handleRootKey(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onCancel();
+      return;
+    }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  }
+
+  return (
+    <div
+      onKeyDown={handleRootKey}
+      style={{
+        background: "var(--gooni-card, #FFFCF3)",
+        border: "0.5px solid rgba(201,119,46,0.40)",
+        borderRadius: 12,
+        overflow: "hidden",
+        boxShadow: "0 2px 8px rgba(184,140,60,0.10)",
+        fontFamily: FONT,
+        margin: "1px 0",
+      }}
+    >
+      {/* Header — shows the closing todo greyed-out + line-through */}
+      <div style={{
+        padding: "10px 16px",
+        display: "flex", alignItems: "center", gap: 10,
+        borderBottom: "0.5px solid rgba(155,130,70,0.15)",
+        background: "rgba(243,238,220,0.40)",
+      }}>
+        <span style={{
+          width: 17, height: 17, borderRadius: "50%",
+          background: "#9CA3AF", color: "#fff",
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          fontSize: 11, flexShrink: 0,
+        }}>✓</span>
+        <span style={{
+          flex: 1, fontSize: 14,
+          color: "var(--gooni-muted, #6B6557)",
+          textDecoration: "line-through",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>{todo.text}</span>
+        <span style={{ fontSize: 11, color: "#A89D80" }}>closing…</span>
+      </div>
+
+      {/* Body */}
+      <div style={{ padding: "12px 16px" }}>
+        <div style={{
+          fontSize: 11, color: "#8A8270", marginBottom: 6, letterSpacing: 0.02,
+        }}>
+          what happened?
+        </div>
+        <textarea
+          ref={taRef}
+          value={outcome}
+          onChange={(e) => setOutcome(e.target.value)}
+          placeholder="enter to skip · multi-line ok"
+          style={{
+            width: "100%",
+            fontSize: 13,
+            border: "0.5px solid rgba(155,130,70,0.20)",
+            background: "var(--gooni-bg, #FAF7F0)",
+            borderRadius: 7,
+            padding: "8px 11px",
+            color: "var(--gooni-text, #2A2620)",
+            fontFamily: FONT,
+            lineHeight: 1.6,
+            resize: "vertical",
+            minHeight: 52,
+            marginBottom: 14,
+            outline: "none",
+            boxSizing: "border-box",
+          }}
+        />
+
+        <div style={{
+          fontSize: 11, color: "#8A8270", marginBottom: 8,
+        }}>
+          next steps <span style={{ color: "#A89D80" }}>· enter adds another</span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+          {spawnList.map((text, i) => (
+            <div key={i} style={{
+              display: "flex", alignItems: "center", gap: 9,
+              padding: "7px 11px",
+              background: "var(--gooni-bg, #FAF7F0)",
+              borderRadius: 7,
+              border: "0.5px solid rgba(155,130,70,0.15)",
+            }}>
+              <div style={{
+                width: 13, height: 13, borderRadius: "50%",
+                border: "1.5px solid rgba(155,130,70,0.40)",
+                flexShrink: 0,
+              }} />
+              <span style={{ flex: 1, fontSize: 13, color: "var(--gooni-text, #2A2620)" }}>
+                {text}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSpawnList((arr) => arr.filter((_, idx) => idx !== i))}
+                aria-label="remove spawn"
+                style={{
+                  border: "none", background: "transparent",
+                  color: "#A89D80", cursor: "pointer", padding: 2,
+                  display: "flex",
+                }}
+              >
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 9,
+            padding: "7px 11px",
+            border: "0.5px dashed rgba(155,130,70,0.30)",
+            borderRadius: 7,
+          }}>
+            <Plus size={12} color="#A89D80" />
+            <input
+              type="text"
+              value={draftSpawn}
+              onChange={(e) => setDraftSpawn(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !(e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  commitDraftSpawn();
+                }
+              }}
+              placeholder="add another…"
+              style={{
+                flex: 1, fontSize: 12, border: "none",
+                background: "transparent", padding: 0,
+                color: "var(--gooni-text, #4A4538)",
+                outline: "none", fontFamily: FONT,
+              }}
+            />
+          </div>
+        </div>
+
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          paddingTop: 8, borderTop: "0.5px solid rgba(155,130,70,0.15)",
+        }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            style={{
+              border: "none", background: "transparent",
+              color: "#A89D80", cursor: "pointer", fontSize: 11,
+              padding: "4px 6px", fontFamily: FONT,
+            }}
+          >
+            esc to cancel
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 10, color: "#A89D80" }}>⌘↵</span>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              style={{
+                fontSize: 12, padding: "6px 16px",
+                background: "#C9772E", color: "#FFFCF3",
+                border: "none", borderRadius: 7,
+                fontWeight: 500, cursor: "pointer",
+                fontFamily: FONT,
+              }}
+            >
+              close todo
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

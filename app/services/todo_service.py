@@ -299,7 +299,7 @@ class TodoService:
             if new_done:
                 t.is_primary = False
 
-        for key in ("text", "subtitle", "due_date", "sort_order", "focus_id", "is_primary"):
+        for key in ("text", "subtitle", "due_date", "sort_order", "focus_id", "is_primary", "closure_note"):
             if key in patch:
                 setattr(t, key, patch[key])
 

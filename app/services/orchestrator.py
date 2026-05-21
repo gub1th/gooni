@@ -611,14 +611,23 @@ def _build_ack(
                 t for t in (captured_todos or [])
                 if t.get("spawned_from_id") == close_id
             ]
-            phrase = f"closed \"{text}\""
+            # Slice 5: warmer close voice + Todo #id grounding on each
+            # spawn. The id stays internal (PERSONA prompt forbids reciting
+            # raw ids in user replies), but the ack composer surfaces it so
+            # frontend chat-chip rendering + downstream LLM reasoning have
+            # a verifiable anchor. ", sir" honorific anchors the line to
+            # Alfred voice. Comma-joined intentionally — newlines would
+            # split into separate segments under _MAX_SEGMENTS=2 on bots.
+            phrase = f"closed \"{text}\", sir"
             if outcome_present:
                 phrase += ". outcome logged"
             if spawned_for_this:
-                spawn_texts = ", ".join(
-                    f"\"{_trim(t.get('text'))}\"" for t in spawned_for_this[:3]
-                )
-                phrase += f" · spawned: {spawn_texts}"
+                def _spawn_tag(t: dict) -> str:
+                    quoted = f"\"{_trim(t.get('text'))}\""
+                    tid = t.get("todo_id")
+                    return f"{quoted} (Todo #{tid})" if tid is not None else quoted
+                spawn_texts = ", ".join(_spawn_tag(t) for t in spawned_for_this[:3])
+                phrase += f". spawned {spawn_texts}"
             parts.append(phrase)
         else:
             texts = [f"\"{_trim(t.get('text'))}\"" for t in completed_todos[:3]]

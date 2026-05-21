@@ -1973,7 +1973,7 @@ def todos_create(body: dict, db: Session = Depends(get_db)):
 def todos_update(todo_id: int, body: dict, db: Session = Depends(get_db)):
     from .services.todo_service import todo_service, serialize_todo
     patch: dict = {}
-    for key in ("text", "subtitle", "state", "focus_id", "is_primary", "sort_order", "done"):
+    for key in ("text", "subtitle", "state", "focus_id", "is_primary", "sort_order", "done", "closure_note"):
         if key in body:
             patch[key] = body[key]
     if "due_date" in body:
