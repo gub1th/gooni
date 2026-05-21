@@ -1439,7 +1439,7 @@ def backlog_update(ticket_id: int, body: dict, db: Session = Depends(get_db)):
     patch: dict = {}
     for key in (
         "text", "subtitle", "board_status", "pr_url", "done", "sort_order",
-        "notes",
+        "notes", "claimed_by",
     ):
         if key in body:
             patch[key] = body[key]

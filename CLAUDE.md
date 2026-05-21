@@ -24,9 +24,9 @@ Ambient physical assistant — device that knows you passively, surfaces context
 - **One-line takeaway per merged PR.** After merge, ask Daniel "what did you learn shipping this?" → write to a Gooni note via `mcp__gooni__add_note` (or `add_memory` if more durable than note-shaped). Title `"PR #N takeaway: <topic>"`, body = his sentence + one-line context. Skip for pure plumbing (typo/version bump) or if he says skip.
 - **Check off backlog items as you ship.** Commit pushed = call `mcp__gooni__check_list_item` with a unique substring. Don't batch at session end. If one PR closes multiple, check off each.
 - **Backlog ticket lifecycle (Jira flow).** Every non-trivial task lives on the board.
-  1. Before coding: `mcp__gooni__find_similar_items` (threshold 0.78). If exists, `PATCH /backlog/tickets/{id} {"board_status":"doing"}`. Else create then flip.
+  1. Before coding: `mcp__gooni__find_similar_items` (threshold 0.78). If exists, `PATCH /backlog/tickets/{id} {"board_status":"doing","claimed_by":"claude"}`. Else create then flip. `claimed_by="claude"` surfaces the 🤖 pill on the board so Daniel can glance and see which tickets Claude is driving.
   2. Working: stays `doing`. Scope shifts → edit the same ticket.
-  3. On PR merge: `PATCH /backlog/tickets/{id} {"board_status":"done","pr_url":"..."}`.
+  3. On PR merge: `PATCH /backlog/tickets/{id} {"board_status":"done","pr_url":"..."}`. Backend auto-clears `claimed_by` on done — pill is for live work only.
   4. One ticket per PR; bundled PRs do N sequential PATCHes w/ same pr_url.
   Vocab: legacy `'todo'`/`'in_progress'` was remapped to `'not_yet'`/`'doing'`. Skip only for trivial fixes.
 
@@ -44,7 +44,7 @@ See `docs/TODO.md` (gitignored — local only).
   - `Note` — `excerpt` cached preview (≤240 char, HTML/img stripped) populated on save; lazy-backfilled at startup. List endpoints don't ship full body. `status` graduation lifecycle (`unprocessed|graduated|archived`, default `unprocessed`, indexed) — drives the UNPROCESSED sidebar triage queue + synthesizer's source filter. Note becomes `graduated` once it spawns Promise/Todo/Habit/Focus (tracked via `derives_from` edges, wired in PR-E); `archived` is a manual tombstone via `PATCH /notes/{id}` w/ `{"status":"archived"}`. `GET /notes/unprocessed` returns the queue.
   - `Focus` — long-running commitment. Color auto-assigned from 10-color palette. Drift cols: deferred `initial_signature` (frozen at promotion) + `current_signature` (EMA-updated per bind), `missed_run_count` (≥3 → `status='dormant'`), `drift_flagged_at` (one-shot when `1-cos(initial,current) > 0.35`), `evolved_from_focus_id` (lineage via `/focuses/{id}/fork`).
   - `Todo` — 3-state `state` enum (`not_yet|doing|done`), single-FK `focus_id`, singleton `is_primary` (auto-cleared on done).
-  - `BacklogTicket` — `board_status` (`not_yet|doing|done`), `pr_url`, `notes` (multi-line body), `todo_id` (FK set on `/promote`). Singleton `is_primary` flag (mirrors Todo.is_primary): pinned ticket drives the dashboard north-star banner; auto-cleared on done.
+  - `BacklogTicket` — `board_status` (`not_yet|doing|done`), `pr_url`, `notes` (multi-line body), `todo_id` (FK set on `/promote`), `claimed_by` (free-text agent attribution, e.g. `"claude"` — backs the "🤖 claude picked up" pill; auto-cleared by `backlog_service.update` whenever ticket flips to `done`). Singleton `is_primary` flag (mirrors Todo.is_primary): pinned ticket drives the dashboard north-star banner; auto-cleared on done.
   - `Memory`, `Message`, `Conversation` — embedding cols are `deferred()` (see Code Patterns).
   - `FocusCandidate` — synth-surfaced, lifecycle `proposed → promoted|dismissed`. Upsert key = `cluster_signature` (sha256). Status sticky on re-emit; seen_count bumps.
   - `Reflection` — per-turn self-eval (Reflexion pattern). Sev ≥ 2 + gap → cosine-cluster, 3+ matches at 0.8 auto-promotes a behavioral `CapabilityFacet`.

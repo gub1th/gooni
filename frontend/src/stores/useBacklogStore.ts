@@ -17,6 +17,7 @@ interface BacklogStoreState {
     subtitle?: string | null;
     board_status?: BoardStatus | null;
     pr_url?: string | null;
+    claimed_by?: string | null;
     done?: boolean;
     sort_order?: number;
   }) => Promise<void>;
