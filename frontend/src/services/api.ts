@@ -453,6 +453,7 @@ export interface WhoopToday {
   sleep_minutes: number | null;
   sleep_performance_pct: number | null;
   updated_at: string | null;
+  source_updated_at: string | null;
 }
 export async function fetchWhoopToday(refresh = false): Promise<WhoopToday> {
   const url = `${BASE}/whoop/today${refresh ? "?refresh=1" : ""}`;

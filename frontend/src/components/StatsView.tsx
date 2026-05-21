@@ -169,9 +169,13 @@ export function WhoopSection() {
     return `${h}h ${m}m`;
   }
 
+  // Prefer Whoop's upstream record-timestamp over our cache-poll stamp.
+  // If Daniel hasn't worn his strap in a day, `source_updated_at` is the
+  // honest answer ("18h ago") instead of our misleading "now" from the
+  // 2-hour cache refresh.
   const headerActions = (
     <FreshnessActions
-      updatedAt={data?.updated_at}
+      updatedAt={data?.source_updated_at ?? data?.updated_at}
       isFetching={isFetching}
       onRefresh={() => fetchWhoopToday(true).then(() => refetch())}
     />

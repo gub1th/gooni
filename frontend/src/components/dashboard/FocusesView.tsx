@@ -6,15 +6,14 @@ import {
   type ApiFocus,
 } from "../../services/api";
 import { FocusCard } from "./FocusCard";
-import { SynthesizerSection } from "./SynthesizerSection";
 import { FocusDrillDown } from "./FocusDrillDown";
 
-// FocusesView — Focuses tab content. Synthesizer audit pills first
-// (proposed candidates → promote/dismiss inline), then the 3-col grid
-// of active focuses w/ drift / dormant / lineage states. Manual
-// creation lives as a small "+ manual" affordance on the section
-// header — explicitly demoted now that synth surfaces the same shape
-// automatically.
+// FocusesView — 3-col grid of active focuses w/ drift / dormant /
+// lineage states. Manual creation lives as a small "+ manual"
+// affordance on the section header — explicitly demoted now that
+// synth surfaces the same shape automatically.
+// Synthesizer used to live inside this view; promoted to a sibling
+// card in Dashboard so it can sit BELOW focuses w/o coupling.
 //
 // The top-of-dashboard TakeTabs already shows Gooni's focus take, so
 // this view doesn't duplicate it.
@@ -48,16 +47,6 @@ export function FocusesView() {
 
   return (
     <div style={{ fontFamily: FONT }}>
-      {/* Synthesizer audit pills — proposed candidates first. */}
-      <div style={{
-        background: "var(--gooni-card, #fff)",
-        border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
-        borderRadius: 12, padding: "12px 16px",
-        marginBottom: 14,
-      }}>
-        <SynthesizerSection />
-      </div>
-
       {/* Section header + "+ manual" demoted creation */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",

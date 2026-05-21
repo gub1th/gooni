@@ -5385,6 +5385,10 @@ def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
         "sleep_minutes": row.sleep_minutes if row else None,
         "sleep_performance_pct": row.sleep_performance_pct if row else None,
         "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
+        "source_updated_at": (
+            row.source_updated_at.isoformat()
+            if row and row.source_updated_at else None
+        ),
     }
 
 

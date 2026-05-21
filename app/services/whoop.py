@@ -297,6 +297,28 @@ def fetch_today_snapshot(db: Session) -> dict[str, Any] | None:
     slp_score = (sleep.get("score") or {})
     slp_stage = (slp_score.get("stage_summary") or {})
 
+    # Newest upstream record-timestamp across all three streams. Parsed
+    # from Whoop's ISO strings; tz-aware → naive UTC for storage (DB
+    # column is naive). Fed to FreshnessActions so "updated 18h ago"
+    # reflects Whoop's actual data age, not our cache poll.
+    src_ts_strs = [
+        recovery.get("updated_at") or recovery.get("created_at"),
+        cycle.get("updated_at") or cycle.get("created_at"),
+        sleep.get("updated_at") or sleep.get("created_at"),
+    ]
+    source_updated_at = None
+    for s in src_ts_strs:
+        if not s:
+            continue
+        try:
+            ts = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if ts.tzinfo is not None:
+                ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+            if source_updated_at is None or ts > source_updated_at:
+                source_updated_at = ts
+        except (ValueError, TypeError):
+            continue
+
     return {
         "recovery_score": rec_score.get("recovery_score"),
         "hrv_rmssd_ms": rec_score.get("hrv_rmssd_milli"),
@@ -308,6 +330,7 @@ def fetch_today_snapshot(db: Session) -> dict[str, Any] | None:
         ),
         "sleep_performance_pct": slp_score.get("sleep_performance_percentage"),
         "fetched_at": end.isoformat(),
+        "source_updated_at": source_updated_at,
     }
 
 
@@ -328,6 +351,9 @@ def upsert_today_snapshot(db: Session, payload: dict[str, Any]) -> WhoopSnapshot
     row.strain = payload.get("strain")
     row.sleep_minutes = payload.get("sleep_minutes")
     row.sleep_performance_pct = payload.get("sleep_performance_pct")
+    src_ts = payload.get("source_updated_at")
+    if src_ts is not None:
+        row.source_updated_at = src_ts
     row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
