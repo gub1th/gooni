@@ -209,6 +209,41 @@ function AppShell() {
 
   return (
     <PasswordGate>
+      {/* Global thin/translucent scrollbar — applies to everything except
+          explicit opt-outs. Daniel's "feels like part of the app" pass.
+          Firefox uses scrollbar-width/color; WebKit uses ::-webkit-scrollbar.
+          Track stays transparent; thumb fades in only on hover of the
+          scrollable container so the bar is invisible at rest. */}
+      <style>{`
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: transparent transparent;
+        }
+        *:hover {
+          scrollbar-color: rgba(15,23,42,0.20) transparent;
+        }
+        *::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+        *::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        *::-webkit-scrollbar-thumb {
+          background: transparent;
+          border-radius: 4px;
+          transition: background 0.18s ease;
+        }
+        *:hover::-webkit-scrollbar-thumb {
+          background: rgba(15,23,42,0.18);
+        }
+        *::-webkit-scrollbar-thumb:hover {
+          background: rgba(15,23,42,0.32);
+        }
+        *::-webkit-scrollbar-corner {
+          background: transparent;
+        }
+      `}</style>
       <div
         style={{
           display: "flex",
@@ -233,6 +268,7 @@ function AppShell() {
             onSelectNote={handleSelectNote}
             onCompose={handleCompose}
             onNewChat={handleNewChat}
+            onClose={() => setSidebarOpen(false)}
             onSelectList={(id) =>
               navigate({
                 to: "/",
@@ -260,6 +296,31 @@ function AppShell() {
               })
             }
           />
+        )}
+        {/* Sidebar-reopen affordance — floats top-left when sidebar is
+            closed. Same icon shape Claude uses, mirror-flipped. */}
+        {!sidebarOpen && (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            title="Open sidebar"
+            style={{
+              position: "absolute", top: 14, left: 14, zIndex: 50,
+              width: 32, height: 32, borderRadius: 8,
+              background: "var(--gooni-card, #FFFFFF)",
+              border: "1px solid rgba(0,0,0,0.08)",
+              cursor: "pointer", display: "flex", alignItems: "center",
+              justifyContent: "center", color: "#475569",
+              boxShadow: "0 1px 3px rgba(15,23,42,0.06)",
+              transition: "background 0.12s, color 0.12s",
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.04)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--gooni-card, #FFFFFF)"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+          </button>
         )}
         <div
           style={{

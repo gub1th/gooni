@@ -537,7 +537,7 @@ export function NotesList() {
 
   return (
     <div
-      style={{ width: 210, minWidth: 210, height: "100vh", background: "#FAFAFA", display: "flex", flexDirection: "column", borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box" }}
+      style={{ width: 280, minWidth: 280, height: "100vh", background: "#FAFAFA", display: "flex", flexDirection: "column", borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box" }}
     >
       {/* Header */}
       <div style={{ height: 52, padding: "0 10px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 6 }}>
@@ -586,7 +586,6 @@ export function NotesList() {
           style={{
             position: "relative",
             padding: "10px 12px 8px",
-            borderBottom: "1px solid rgba(0,0,0,0.06)",
             flexShrink: 0,
             background: currentSpace.cover_image_url
               ? `linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.95)), url(${JSON.stringify(currentSpace.cover_image_url).slice(1, -1)}) center/cover`

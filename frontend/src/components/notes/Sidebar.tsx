@@ -10,8 +10,8 @@ import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
-  PenLine, FileText, Pin, MessageSquare, Brain, ClipboardList, Settings as SettingsIcon,
-  Globe, Plug, Clock, ListChecks, Inbox,
+  PenLine, FileText, Pin, Brain, ClipboardList, Settings as SettingsIcon,
+  Globe, Plug, Clock, ListChecks, Inbox, PanelLeftClose, Plus,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -199,9 +199,12 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelectList: (id: number) => void;
   onOpenEval?: () => void;
+  // Collapse the sidebar — Claude-style top-right panel-close icon.
+  // AppShell owns sidebarOpen state; Sidebar just calls this.
+  onClose?: () => void;
 }
 
-export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect: _unusedOnSpaceSelect, onAllNotes, onSelectNote, onCompose, onNewChat, onSelectList, onOpenEval }: SidebarProps) {
+export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect: _unusedOnSpaceSelect, onAllNotes, onSelectNote, onCompose, onNewChat, onSelectList, onOpenEval, onClose }: SidebarProps) {
   void _unusedOnSpaceSelect;
   // Dead helpers retained for now (referenced via `void` so tsc accepts
   // them) — they wired the dropped DRAFTS/UNPROCESSED/SPACES sections.
@@ -626,7 +629,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
 
       <div
         style={{
-          width: 200, minWidth: 200, height: "100vh",
+          width: 240, minWidth: 240, height: "100vh",
           background: palette.sidebar, display: "flex", flexDirection: "column",
           borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box",
           position: "relative",
@@ -656,17 +659,30 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
             <GooniLogo size={20} />
             Gooni
           </button>
-          {showCompose && (
-            <button
-              onClick={onCompose}
-              title="New note"
-              style={{ width: 30, height: 30, borderRadius: 8, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-            >
-              <PenLine size={15} strokeWidth={1.6} />
-            </button>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+            {showCompose && (
+              <button
+                onClick={onCompose}
+                title="New note"
+                style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+              >
+                <PenLine size={14} strokeWidth={1.6} />
+              </button>
+            )}
+            {onClose && (
+              <button
+                onClick={onClose}
+                title="Close sidebar"
+                style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+              >
+                <PanelLeftClose size={15} strokeWidth={1.7} />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Scrollable content — thin overlay scrollbar that fades in only
@@ -675,7 +691,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
         <style>{`
           .gooni-sidebar-scroll { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0) transparent; transition: scrollbar-color 0.2s; }
           .gooni-sidebar-scroll:hover { scrollbar-color: rgba(0,0,0,0.18) transparent; }
-          .gooni-sidebar-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+          .gooni-sidebar-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
           .gooni-sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
           .gooni-sidebar-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; transition: background 0.2s; }
           .gooni-sidebar-scroll:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.22); }
@@ -708,6 +724,38 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
           className="gooni-sidebar-scroll"
           style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}
         >
+          {/* New chat — Claude-style prominent row at the TOP of the
+              sidebar content. Was buried at the bottom previously; moved
+              up because starting a new chat is the most-frequent action
+              and deserves the first visual slot. */}
+          <div style={{ padding: "4px 6px" }}>
+            <button
+              onClick={onNewChat}
+              title="Start a new chat with Gooni"
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                width: "100%", padding: "0 10px", height: 36, borderRadius: 8,
+                cursor: "pointer", background: isChat ? "rgba(0,0,0,0.09)" : "transparent",
+                border: "none", textAlign: "left",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontWeight: 500, fontSize: 15, color: "var(--gooni-text, #1C1C1E)",
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+              onMouseLeave={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              <span style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: 22, height: 22, borderRadius: "50%",
+                background: "rgba(15,23,42,0.05)", color: "#475569",
+                flexShrink: 0,
+              }}>
+                <Plus size={14} strokeWidth={2} />
+              </span>
+              New chat
+            </button>
+          </div>
+
           {/* Top-level shortcuts: Todos + Backlog. Resolves to the canonical
               first list of each type (multiple todo/backlog lists are rare —
               the rest are reachable via the LISTS section below). Hidden when
@@ -893,30 +941,9 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
           </div>
 
 
-          {/* Spacer — push New chat + Settings to the bottom */}
+          {/* Spacer — push Memories + Audit + Settings to the bottom.
+              (New chat moved to the TOP of this scroll surface.) */}
           <div style={{ flex: 1, minHeight: 20 }} />
-
-          {/* New chat — directly above Settings */}
-          <div style={{ padding: "0 6px 4px" }}>
-            <button
-              onClick={onNewChat}
-              title="Start a new chat with Gooni"
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
-                cursor: "pointer", background: isChat ? "rgba(0,0,0,0.09)" : "transparent",
-                border: "none", textAlign: "left",
-                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontWeight: isChat ? 600 : 400, fontSize: 14.5, color: "var(--gooni-text, #1C1C1E)",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
-              onMouseLeave={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              <MessageSquare size={14} strokeWidth={1.7} color={ICON_TINT.newChat} style={{ flexShrink: 0 }} />
-              New chat
-            </button>
-          </div>
 
           {/* Memories — full dashboard at /memories. Sits above Dev tools so
               it reads as a top-level surface (not a debug affordance). */}
