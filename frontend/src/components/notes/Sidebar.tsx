@@ -10,8 +10,9 @@ import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
-  PenLine, FileText, Pin, Brain, ClipboardList, Settings as SettingsIcon,
-  Globe, Plug, Clock, ListChecks, Inbox, PanelLeftClose, Plus,
+  PenLine, FileText, Brain, ClipboardList, Settings as SettingsIcon,
+  Globe, Plug, PanelLeftClose, Plus,
+  Home, Folder as FolderIcon, List as ListIcon, MessageSquare,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -204,6 +205,115 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
+// SidebarSection — labeled group (Notes / Spaces / Lists). Header row
+// has icon + label + + button; children render indented underneath.
+function SidebarSection({
+  label, Icon, iconColor, active, onHeaderClick, onPlusClick, children,
+}: {
+  label: string;
+  Icon: typeof FileText;
+  iconColor?: string;
+  active?: boolean;
+  onHeaderClick: (e: React.MouseEvent) => void;
+  onPlusClick: (e: React.MouseEvent) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div style={{ padding: "0 6px", marginBottom: 6 }}>
+      <div
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "4px 10px", borderRadius: 7,
+          background: active ? "rgba(0,0,0,0.06)" : "transparent",
+          transition: "background 0.12s",
+        }}
+        onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.04)"; }}
+        onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+      >
+        <button
+          onClick={onHeaderClick}
+          style={{
+            display: "flex", alignItems: "center", gap: 8,
+            flex: 1, background: "none", border: "none", cursor: "pointer",
+            padding: 0, textAlign: "left",
+            color: "var(--gooni-text, #1C1C1E)",
+            fontSize: 13, fontWeight: active ? 600 : 500,
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+          }}
+        >
+          <Icon size={14} strokeWidth={1.8} color={iconColor ?? "#475569"} style={{ flexShrink: 0 }} />
+          {label}
+        </button>
+        <button
+          onClick={onPlusClick}
+          title={`New ${label.toLowerCase().replace(/s$/, "")}`}
+          style={{
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            width: 18, height: 18, borderRadius: 4,
+            border: "none", background: "transparent",
+            color: "var(--gooni-muted, #9CA3AF)",
+            cursor: "pointer", transition: "background 0.1s, color 0.1s",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.06)";
+            (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+            (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #9CA3AF)";
+          }}
+        >
+          <Plus size={12} strokeWidth={2.2} />
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// SidebarChildRow — indented child row under a section (a note, a space,
+// a list, etc). Small font, muted color, tight padding.
+function SidebarChildRow({
+  label, prefix, selected, onClick,
+}: {
+  label: string;
+  prefix?: string;
+  selected?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      style={{
+        display: "block", width: "calc(100% - 12px)",
+        marginLeft: 12,
+        padding: "3px 10px",
+        background: selected ? "rgba(0,0,0,0.07)" : "transparent",
+        border: "none", borderRadius: 5,
+        cursor: "pointer", textAlign: "left",
+        fontSize: 12,
+        fontWeight: selected ? 600 : 400,
+        color: selected ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-muted, #6B7280)",
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        transition: "background 0.12s, color 0.12s",
+      }}
+      onMouseEnter={(e) => {
+        if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.05)";
+        (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+      }}
+      onMouseLeave={(e) => {
+        if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+        (e.currentTarget as HTMLButtonElement).style.color = selected
+          ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-muted, #6B7280)";
+      }}
+    >
+      {prefix ?? ""}{label}
+    </button>
+  );
+}
+
 export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect: _unusedOnSpaceSelect, onAllNotes, onSelectNote, onCompose, onNewChat, onSelectList, onOpenEval, onClose }: SidebarProps) {
   void _unusedOnSpaceSelect;
   // Dead helpers retained for now (referenced via `void` so tsc accepts
@@ -211,10 +321,11 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
   // Sweep in a follow-up if the redesign sticks.
   // eslint-disable-next-line @typescript-eslint/no-unused-expressions
   const _silenceUnused = () => {
-    void _handleAddList; void _commitNewList; void _dropSpace;
+    void _dropSpace; void dropPinned; void handleUnpin;
+    void pulseId; void typing;
     void _handleUndraft; void _handleArchiveUnprocessed;
     void _startInlineEdit; void _commitInlineEdit; void _cancelInlineEdit;
-    void _openCreatePopover; void _confirmDelete;
+    void _confirmDelete;
   };
   void _silenceUnused;
   const navigate = useNavigate();
@@ -228,14 +339,13 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
   const [newListDraft, setNewListDraft] = useState<string | null>(null);
   const newListInputRef = useRef<HTMLInputElement>(null);
 
-  function _handleAddList() {
-    _setListsOpen(true);
+  function handleAddList() {
     setNewListDraft("");
     // Focus once the input is mounted on the next paint.
     requestAnimationFrame(() => newListInputRef.current?.focus());
   }
 
-  async function _commitNewList() {
+  async function commitNewList() {
     const name = (newListDraft ?? "").trim();
     setNewListDraft(null);
     if (!name) return;
@@ -543,7 +653,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
     setInlinePaletteOpen(false);
   }
 
-  function _openCreatePopover(e: React.MouseEvent) {
+  function openCreatePopover(e: React.MouseEvent) {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setPopoverAnchor({ top: Math.max(rect.top - 8, 8), left: 208 });
     setPopoverName("");
@@ -724,246 +834,187 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
           className="gooni-sidebar-scroll"
           style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", padding: "4px 0" }}
         >
-          {/* New chat — Claude-style prominent row at the TOP of the
-              sidebar content. Was buried at the bottom previously; moved
-              up because starting a new chat is the most-frequent action
-              and deserves the first visual slot. */}
-          <div style={{ padding: "4px 6px" }}>
+          {/* === REDESIGN v2 layout (matches Daniel's mockup) ===
+              Dashboard prominent at top → New chat row → Notes / Spaces /
+              Lists each as a labeled section with + button + 3-item
+              flat list of children. Smaller font tier (13/12) so the
+              chrome doesn't dwarf the editor content. */}
+
+          {/* Dashboard — primary destination. info-blue highlight when
+              active so eye-tracking lands here first. Reuses gotoBlank
+              (onLogoClick) under the hood — both clear URL params and
+              the view derivation in routes/index.tsx lands on
+              "dashboard". */}
+          <div style={{ padding: "4px 6px 2px" }}>
+            <button
+              onClick={onLogoClick}
+              title="Dashboard"
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                width: "100%", padding: "0 10px", height: 30, borderRadius: 7,
+                cursor: "pointer",
+                background: isDashboard ? "rgba(10,132,255,0.10)" : "transparent",
+                border: "none", textAlign: "left",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontWeight: isDashboard ? 600 : 500,
+                fontSize: 13,
+                color: isDashboard ? "#0A84FF" : "var(--gooni-text, #1C1C1E)",
+                transition: "background 0.12s, color 0.12s",
+              }}
+              onMouseEnter={(e) => { if (!isDashboard) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+              onMouseLeave={(e) => { if (!isDashboard) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              <Home size={14} strokeWidth={1.8} color={isDashboard ? "#0A84FF" : "#475569"} style={{ flexShrink: 0 }} />
+              Dashboard
+            </button>
+          </div>
+
+          {/* New chat — plain row, not a hero element. */}
+          <div style={{ padding: "0 6px 6px" }}>
             <button
               onClick={onNewChat}
               title="Start a new chat with Gooni"
               style={{
                 display: "flex", alignItems: "center", gap: 10,
-                width: "100%", padding: "0 10px", height: 36, borderRadius: 8,
+                width: "100%", padding: "0 10px", height: 30, borderRadius: 7,
                 cursor: "pointer", background: isChat ? "rgba(0,0,0,0.09)" : "transparent",
                 border: "none", textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontWeight: 500, fontSize: 15, color: "var(--gooni-text, #1C1C1E)",
+                fontWeight: 500, fontSize: 13, color: "var(--gooni-text, #1C1C1E)",
                 transition: "background 0.12s",
               }}
               onMouseEnter={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
               onMouseLeave={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
-              <span style={{
-                display: "inline-flex", alignItems: "center", justifyContent: "center",
-                width: 22, height: 22, borderRadius: "50%",
-                background: "rgba(15,23,42,0.05)", color: "#475569",
-                flexShrink: 0,
-              }}>
-                <Plus size={14} strokeWidth={2} />
-              </span>
+              <MessageSquare size={14} strokeWidth={1.7} color={ICON_TINT.newChat} style={{ flexShrink: 0 }} />
               New chat
             </button>
           </div>
 
-          {/* Top-level shortcuts: Todos + Backlog. Resolves to the canonical
-              first list of each type (multiple todo/backlog lists are rare —
-              the rest are reachable via the LISTS section below). Hidden when
-              the lists haven't loaded yet or no list of that type exists. */}
-          {(() => {
-            const todoList = lists.find((l) => l.type === "todo");
-            const backlogList = lists.find((l) => l.type === "backlog");
-            if (!todoList && !backlogList) return null;
-            const rowStyle = (isSelected: boolean): React.CSSProperties => ({
-              display: "flex", alignItems: "center", gap: 8,
-              width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
-              border: "none", textAlign: "left",
-              background: isSelected ? "rgba(0,0,0,0.09)" : "transparent",
-              cursor: "pointer",
-              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-              fontSize: 14.5, color: "var(--gooni-text, #1C1C1E)",
-              fontWeight: isSelected ? 600 : 400,
-              transition: "background 0.12s",
-            });
-            return (
-              <div style={{ padding: "4px 6px 4px" }}>
-                {todoList && (
-                  <button
-                    onClick={() => onSelectList(todoList.id)}
-                    title="Todos"
-                    style={rowStyle(isLists && activeListId === todoList.id)}
-                    onMouseEnter={(e) => { if (!(isLists && activeListId === todoList.id)) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
-                    onMouseLeave={(e) => { if (!(isLists && activeListId === todoList.id)) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-                  >
-                    <ListChecks size={15} strokeWidth={1.7} color={ICON_TINT.todos} style={{ flexShrink: 0 }} />
-                    <span>Todos</span>
-                  </button>
-                )}
-                {backlogList && (
-                  <button
-                    onClick={() => onSelectList(backlogList.id)}
-                    title="Backlog"
-                    style={rowStyle(isLists && activeListId === backlogList.id)}
-                    onMouseEnter={(e) => { if (!(isLists && activeListId === backlogList.id)) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
-                    onMouseLeave={(e) => { if (!(isLists && activeListId === backlogList.id)) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-                  >
-                    <Inbox size={15} strokeWidth={1.7} color={ICON_TINT.backlog} style={{ flexShrink: 0 }} />
-                    <span>Backlog</span>
-                  </button>
-                )}
-                <div style={{ height: 1, background: "rgba(0,0,0,0.07)", margin: "8px 4px 0" }} />
-              </div>
-            );
-          })()}
-
-          {/* Minimal Notes block — All Notes prominent on top; pinned +
-              recent items below as subordinate rows (icon differentiated,
-              one font tier smaller). Dropped the NOTES caps header, the
-              PINNED caps header, the RECENT caps header, all dividers,
-              the DRAFTS section, the UNPROCESSED section, the SPACES
-              section, and the LISTS section per Daniel's minimal pass —
-              they were chrome without earning their slot. */}
-          <div style={{ padding: "4px 6px" }}>
-            {/* All Notes — top-level destination, bigger font for clear
-                hierarchy over the subordinate rows that follow. */}
-            <div
-              onClick={handleAllNotes}
-              style={{
-                display: "flex", alignItems: "center", gap: 9,
-                padding: "0 10px", height: 34, borderRadius: 8,
-                cursor: "pointer",
-                background: isAllNotes ? "rgba(0,0,0,0.09)" : "transparent",
-                transition: "background 0.12s", userSelect: "none", marginBottom: 4,
-              }}
-              onMouseEnter={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
-              onMouseLeave={(e) => { if (!isAllNotes) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
-            >
-              <FileText size={16} strokeWidth={1.7} color={ICON_TINT.allNotes} style={{ flexShrink: 0 }} />
-              <span style={{
-                flex: 1, fontSize: 15.5,
-                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontWeight: isAllNotes ? 600 : 500, color: "var(--gooni-text, #1C1C1E)",
-              }}>All Notes</span>
-            </div>
-
-            {/* Pinned notes — flat list under All Notes, no caps header.
-                Pin icon differentiates from recent below. */}
-            {orderedPinnedNotes.map((note) => {
+          {/* === Notes section ===
+              Header row clickable → All Notes. + button → compose.
+              Top 3 indented children (pinned + recent merged). */}
+          <SidebarSection
+            label="Notes"
+            Icon={FileText}
+            iconColor={ICON_TINT.allNotes}
+            active={isAllNotes}
+            onHeaderClick={handleAllNotes}
+            onPlusClick={onCompose}
+          >
+            {[...orderedPinnedNotes, ...recentTop].slice(0, 3).map((note) => {
               const selected = activeNoteId === note.id;
-              const isDragging = drag?.kind === "pinned" && drag.fromId === note.id;
-              const isDropTarget = drag?.kind === "pinned" && drag.overId === note.id && drag.fromId !== note.id;
+              const pinned = pinnedNotes.some((p) => p.id === note.id);
               return (
-                <div
-                  key={`pin-${note.id}`}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("text/plain", String(note.id));
-                    setDrag({ kind: "pinned", fromId: note.id, overId: null });
-                  }}
-                  onDragOver={(e) => {
-                    if (drag?.kind !== "pinned") return;
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    if (drag.overId !== note.id) setDrag({ ...drag, overId: note.id });
-                  }}
-                  onDragLeave={() => {
-                    if (drag?.kind === "pinned" && drag.overId === note.id) setDrag({ ...drag, overId: null });
-                  }}
-                  onDrop={(e) => { e.preventDefault(); dropPinned(note.id); }}
-                  onDragEnd={() => setDrag(null)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "0 8px 0 12px", height: 28, borderRadius: 7,
-                    cursor: "pointer",
-                    background: selected ? "rgba(0,0,0,0.09)" : (isDropTarget ? "rgba(0,120,255,0.10)" : "transparent"),
-                    opacity: isDragging ? 0.4 : 1,
-                    transition: "background 0.12s, opacity 0.12s",
-                    boxShadow: isDropTarget ? "inset 0 2px 0 rgba(0,120,255,0.45)" : "none",
-                  }}
-                  onMouseEnter={(e) => { if (!selected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "1"); }}
-                  onMouseLeave={(e) => { if (!selected && !isDropTarget) (e.currentTarget as HTMLDivElement).style.background = "transparent"; (e.currentTarget as HTMLDivElement).querySelectorAll<HTMLButtonElement>(".pin-action").forEach(b => b.style.opacity = "0"); }}
-                  onClick={(e) => { if ((e.target as HTMLElement).closest("button")) return; handleSelectNote(note); }}
-                >
-                  <Pin size={12} strokeWidth={1.8} color={ICON_TINT.pinned} fill={ICON_TINT.pinned} style={{ flexShrink: 0 }} />
-                  <span style={{
-                    flex: 1, fontSize: 13.5,
-                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                    fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {displayTitle(note)}
-                  </span>
-                  <button
-                    className="pin-action"
-                    onClick={(e) => { e.stopPropagation(); handleUnpin(note.id); }}
-                    title="Unpin"
-                    style={{ opacity: 0, background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 12, padding: "0 3px", flexShrink: 0 }}
-                  >×</button>
-                </div>
-              );
-            })}
-
-            {/* Recent notes — flat under pinned, no caps header. Clock
-                icon. Owns the post-submit ink + typewriter animation. */}
-            {recentTop.map((note) => {
-              const selected = activeNoteId === note.id;
-              const fullTitle = displayTitle(note);
-              const isTyping = typing !== null && typing.noteId === note.id;
-              const revealed = isTyping ? typing!.revealed : Infinity;
-              const shownTitle = isTyping
-                ? fullTitle.slice(0, Math.min(revealed, fullTitle.length))
-                : fullTitle;
-              const showCaret = isTyping && revealed <= fullTitle.length;
-              const isPulsing = pulseId === note.id;
-              return (
-                <div
-                  key={`recent-${note.id}`}
-                  ref={(el) => {
-                    if (el) recentRowRefs.current.set(note.id, el);
-                    else recentRowRefs.current.delete(note.id);
-                  }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "0 8px 0 12px", height: 28, borderRadius: 7,
-                    cursor: "pointer",
-                    background: selected ? "rgba(0,0,0,0.09)" : "transparent",
-                    transition: "background 0.12s",
-                    animation: isPulsing ? "gooni-sidebar-row-pulse 0.6s cubic-bezier(0.22,1,0.36,1)" : undefined,
-                  }}
-                  onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.05)"; }}
-                  onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+                <SidebarChildRow
+                  key={`note-${note.id}`}
+                  label={displayTitle(note)}
+                  prefix={pinned ? "📌 " : ""}
+                  selected={selected}
                   onClick={() => handleSelectNote(note)}
-                >
-                  <Clock size={12} strokeWidth={1.8} color={ICON_TINT.recent} style={{ flexShrink: 0 }} />
-                  <span style={{
-                    flex: 1, fontSize: 13.5,
-                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                    fontWeight: selected ? 600 : 400, color: "var(--gooni-text, #1C1C1E)",
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {shownTitle || (isTyping ? " " : fullTitle || "Untitled")}
-                    {showCaret && <span className="gooni-sidebar-caret">▍</span>}
-                  </span>
-                </div>
+                />
               );
             })}
-          </div>
+          </SidebarSection>
+
+          {/* === Spaces section ===
+              Header opens nothing (just a label) — clicking a space row
+              navigates. + opens the SpacePopover (existing create flow). */}
+          <SidebarSection
+            label="Spaces"
+            Icon={FolderIcon}
+            iconColor="#94A3B8"
+            onHeaderClick={() => { /* label-only header for now */ }}
+            onPlusClick={(e) => openCreatePopover(e as React.MouseEvent)}
+          >
+            {orderedSpaces.map((space) => {
+              const spaceId = String(space.id);
+              const isSelected = isNotes && selectedSpaceId === spaceId;
+              return (
+                <SidebarChildRow
+                  key={`space-${space.id}`}
+                  label={space.name}
+                  prefix={space.is_pinned ? "★ " : ""}
+                  selected={isSelected}
+                  onClick={() => { selectSpace(spaceId); loadNotes(spaceId); }}
+                />
+              );
+            })}
+          </SidebarSection>
+
+          {/* === Lists section ===
+              + button opens an inline composer (newListDraft state). */}
+          <SidebarSection
+            label="Lists"
+            Icon={ListIcon}
+            iconColor="#94A3B8"
+            onHeaderClick={() => { /* label-only header for now */ }}
+            onPlusClick={() => handleAddList()}
+          >
+            {lists.map((lst) => (
+              <SidebarChildRow
+                key={`list-${lst.id}`}
+                label={lst.name}
+                selected={isLists && activeListId === lst.id}
+                onClick={() => onSelectList(lst.id)}
+              />
+            ))}
+            {newListDraft !== null && (
+              <div style={{ padding: "3px 10px 3px 26px" }}>
+                <input
+                  ref={newListInputRef}
+                  value={newListDraft}
+                  onChange={(e) => setNewListDraft(e.target.value)}
+                  onBlur={() => { void commitNewList(); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); void commitNewList(); }
+                    if (e.key === "Escape") { e.preventDefault(); setNewListDraft(null); }
+                  }}
+                  placeholder="List name"
+                  style={{
+                    width: "100%", fontSize: 12, padding: "3px 6px",
+                    border: "1px solid rgba(0,0,0,0.10)", borderRadius: 4,
+                    outline: "none",
+                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                    background: "rgba(255,255,255,0.6)",
+                  }}
+                />
+              </div>
+            )}
+          </SidebarSection>
 
 
           {/* Spacer — push Memories + Audit + Settings to the bottom.
               (New chat moved to the TOP of this scroll surface.) */}
           <div style={{ flex: 1, minHeight: 20 }} />
 
-          {/* Memories — full dashboard at /memories. Sits above Dev tools so
-              it reads as a top-level surface (not a debug affordance). */}
-          <div style={{ padding: "0 6px 2px" }}>
+          {/* Bottom utility cluster — Memories / Audit / Settings.
+              Muted (12px tertiary color) per Daniel's redesign — these
+              are tools you visit occasionally, shouldn't compete with
+              Notes / Spaces / Lists. */}
+          <div style={{ padding: "8px 6px 0", borderTop: "0.5px solid rgba(0,0,0,0.07)" }}>
             <button
               onClick={() => navigate({ to: "/memories", search: { focus: undefined } })}
               title="Memory dashboard"
               style={{
                 display: "flex", alignItems: "center", gap: 8,
-                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                width: "100%", padding: "0 10px", height: 26, borderRadius: 6,
                 border: "none", background: "transparent", cursor: "pointer",
                 textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontSize: 13.5, color: "#3C3C43",
-                transition: "background 0.12s",
+                fontSize: 12, color: "var(--gooni-muted, #6B7280)",
+                transition: "background 0.12s, color 0.12s",
               }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)";
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #6B7280)";
+              }}
             >
-              <Brain size={14} strokeWidth={1.7} color={ICON_TINT.memories} style={{ flexShrink: 0 }} />
+              <Brain size={13} strokeWidth={1.7} color={ICON_TINT.memories} style={{ flexShrink: 0 }} />
               Memories
             </button>
           </div>
@@ -974,7 +1025,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               the router via ?audit=1, not a parent-passed callback. The
               optional `onOpenEval` short-circuit still works for index.tsx
               where we'd rather flip view state than re-route. */}
-          <div style={{ padding: "0 6px 2px" }}>
+          <div style={{ padding: "0 6px" }}>
             <button
               onClick={() => {
                 if (onOpenEval) {
@@ -989,20 +1040,31 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               title="Audit — score Gooni's replies + dispatch to Claude Code"
               style={{
                 display: "flex", alignItems: "center", gap: 8,
-                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                width: "100%", padding: "0 10px", height: 26, borderRadius: 6,
                 border: "none",
-                background: isEval ? "rgba(0,0,0,0.09)" : "transparent",
+                background: isEval ? "rgba(0,0,0,0.06)" : "transparent",
                 cursor: "pointer",
                 textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontWeight: isEval ? 600 : 400,
-                fontSize: 14.5, color: "var(--gooni-text, #1C1C1E)",
-                transition: "background 0.12s",
+                fontSize: 12,
+                color: isEval ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-muted, #6B7280)",
+                transition: "background 0.12s, color 0.12s",
               }}
-              onMouseEnter={(e) => { if (!isEval) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
-              onMouseLeave={(e) => { if (!isEval) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+              onMouseEnter={(e) => {
+                if (!isEval) {
+                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)";
+                  (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isEval) {
+                  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                  (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #6B7280)";
+                }
+              }}
             >
-              <ClipboardList size={14} strokeWidth={1.7} color={ICON_TINT.chatAudit} style={{ flexShrink: 0 }} />
+              <ClipboardList size={13} strokeWidth={1.7} color={ICON_TINT.chatAudit} style={{ flexShrink: 0 }} />
               Audit
             </button>
           </div>
@@ -1011,24 +1073,30 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               page's content (Whoop / LeetCode / Dev / Usage / Activity)
               moved into the dashboard Stats tab. */}
 
-          {/* Settings — stays at the bottom as a full row (icon + label) */}
+          {/* Settings — bottom, same muted style as Memories + Audit. */}
           <div style={{ padding: "0 6px 10px" }}>
             <button
               onClick={() => setSettingsOpen(true)}
               title="Settings"
               style={{
                 display: "flex", alignItems: "center", gap: 8,
-                width: "100%", padding: "0 10px", height: 32, borderRadius: 8,
+                width: "100%", padding: "0 10px", height: 26, borderRadius: 6,
                 border: "none", background: "transparent", cursor: "pointer",
                 textAlign: "left",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontSize: 13.5, color: "#3C3C43",
-                transition: "background 0.12s",
+                fontSize: 12, color: "var(--gooni-muted, #6B7280)",
+                transition: "background 0.12s, color 0.12s",
               }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)";
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #6B7280)";
+              }}
             >
-              <SettingsIcon size={14} strokeWidth={1.7} color={ICON_TINT.settings} style={{ flexShrink: 0 }} />
+              <SettingsIcon size={13} strokeWidth={1.7} color={ICON_TINT.settings} style={{ flexShrink: 0 }} />
               Settings
             </button>
           </div>
