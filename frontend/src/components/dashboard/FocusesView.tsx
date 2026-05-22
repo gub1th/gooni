@@ -56,7 +56,7 @@ export function FocusesView() {
           fontSize: 13, fontWeight: 500,
           color: "var(--gooni-muted, #6B6557)",
         }}>
-          Focuses
+          focuses
         </span>
         <button
           onClick={handleManualAdd}
