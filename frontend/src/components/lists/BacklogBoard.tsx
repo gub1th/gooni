@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GripVertical, ExternalLink, ListChecks, Plus, Search, X, Bot } from "lucide-react";
 import type { ApiBacklogTicket, BoardStatus } from "../../services/api";
@@ -340,6 +340,8 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
                   flex: 1, minHeight: 0, overflowY: "auto",
                   display: "flex", flexDirection: "column", gap: 6,
                   paddingRight: 4,
+                  // Scroll body sits above the pinned AddCard footer —
+                  // long columns no longer push the add affordance off-screen.
                 }}>
                   {col.status === "not_yet" ? (
                     <TodoColumnBody
@@ -419,6 +421,12 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
                     />
                   )}
                 </div>
+              )}
+              {!isDoingStrip && (
+                <AddCardFooter
+                  status={col.status}
+                  tint={col.tint}
+                />
               )}
             </div>
           );
@@ -866,6 +874,135 @@ function BacklogCard({
           {item.subtitle}
         </div>
       )}
+    </div>
+  );
+}
+
+// Jira-style "+ Add card" pinned at the bottom of each column. Sits
+// outside the scroll body so a long column doesn't push the affordance
+// off-screen. Collapsed → pill; click → inline textarea + Save button.
+// Enter saves, Shift+Enter newline, Escape cancels.
+function AddCardFooter({ status, tint }: { status: BoardStatus; tint: string }) {
+  const createTicket = useBacklogStore((s) => s.createTicket);
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (open) taRef.current?.focus();
+  }, [open]);
+
+  async function commit() {
+    const v = text.trim();
+    if (!v) { setOpen(false); return; }
+    setSaving(true);
+    try {
+      // board_status is null for not_yet (the implicit default state in
+      // the legacy schema). Doing/done get explicit values.
+      const board_status = status === "not_yet" ? null : status;
+      await createTicket(v, { board_status });
+      setText("");
+      setOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          width: "100%", padding: "7px 9px",
+          background: "transparent",
+          border: "none",
+          borderRadius: 6,
+          color: "var(--gooni-muted, #8E8E93)",
+          cursor: "pointer", textAlign: "left",
+          fontFamily: FONT, fontSize: 12,
+          transition: "background 0.12s, color 0.12s",
+          flexShrink: 0,
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)";
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)";
+        }}
+      >
+        <Plus size={12} strokeWidth={2} />
+        Add card
+      </button>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        flexShrink: 0,
+        background: "var(--gooni-bg, #FFFFFF)",
+        border: `1px solid ${tint}`,
+        borderRadius: 6,
+        padding: 6,
+        display: "flex", flexDirection: "column", gap: 6,
+      }}
+    >
+      <textarea
+        ref={taRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            void commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setText("");
+            setOpen(false);
+          }
+        }}
+        placeholder="What needs doing?"
+        rows={2}
+        style={{
+          width: "100%", resize: "none",
+          border: "none", outline: "none",
+          background: "transparent",
+          fontFamily: FONT, fontSize: 12.5,
+          color: "var(--gooni-text, #1C1C1E)",
+          padding: "2px 4px",
+        }}
+      />
+      <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+        <button
+          onClick={() => { setText(""); setOpen(false); }}
+          style={{
+            padding: "3px 8px", borderRadius: 4,
+            border: "none", background: "transparent",
+            color: "var(--gooni-muted, #8E8E93)",
+            fontFamily: FONT, fontSize: 11.5, cursor: "pointer",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => void commit()}
+          disabled={saving || !text.trim()}
+          style={{
+            padding: "3px 10px", borderRadius: 4,
+            border: "none",
+            background: text.trim() && !saving ? tint : "rgba(0,0,0,0.10)",
+            color: text.trim() && !saving ? "#FFFFFF" : "var(--gooni-muted, #8E8E93)",
+            fontFamily: FONT, fontSize: 11.5, fontWeight: 600,
+            cursor: text.trim() && !saving ? "pointer" : "default",
+          }}
+        >
+          {saving ? "…" : "Add"}
+        </button>
+      </div>
     </div>
   );
 }
