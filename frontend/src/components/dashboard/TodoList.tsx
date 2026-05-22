@@ -478,7 +478,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           fontSize: 13, fontWeight: 500,
           color: "var(--gooni-muted, #6B6557)",
         }}>
-          Today's todos
+          todos
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{
@@ -908,7 +908,7 @@ function TodoRow({
       onClick={hasChain ? () => onOpenChain(t.id) : undefined}
       style={{
         position: "relative",
-        background: "var(--gooni-card, #FFFCF3)",
+        background: "#FFFFFF",
         border: "0.5px solid var(--gooni-border, rgba(155,130,70,0.15))",
         borderRadius: 8,
         padding: "10px 16px",
@@ -1145,17 +1145,28 @@ function OrphanLinkHint({
   onOpenChain: (id: number) => void;
 }) {
   // Hover affordance for orphan todos — opens chain view in parent-link
-  // mode. The chain view's ParentLinkAffordance handles the search UI.
+  // mode. Absolutely positioned so it floats below the card on hover
+  // without pushing siblings down (would otherwise create a visual gap
+  // every time the cursor entered an orphan row).
   return (
     <div
-      onClick={() => onOpenChain(todoId)}
+      onClick={(e) => { e.stopPropagation(); onOpenChain(todoId); }}
       style={{
-        padding: "2px 16px 4px 42px",
+        position: "absolute",
+        top: "100%",
+        left: 42,
+        marginTop: 2,
+        padding: "2px 8px",
         fontSize: 11,
         color: "var(--gooni-muted, #C0C4CC)",
-        display: "flex", alignItems: "center", gap: 4,
+        background: "var(--gooni-bg, #FBF7EE)",
+        display: "inline-flex", alignItems: "center", gap: 4,
         cursor: "pointer",
-        opacity: 0.7,
+        opacity: 0.85,
+        zIndex: 3,
+        borderRadius: 6,
+        pointerEvents: "auto",
+        whiteSpace: "nowrap",
       }}
     >
       <ArrowLeft size={10} />
