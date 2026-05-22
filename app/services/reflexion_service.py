@@ -145,6 +145,10 @@ def _detect_doubled_down_after_correction(reply: str) -> str | None:
 _CLUSTER_MIN_HITS = 3
 _CLUSTER_SIM_FLOOR = 0.8
 _CLUSTER_LOOKBACK_DAYS = 30
+# Deterministic redundancy floor — cosine sim between this turn's
+# gap_exposed and any of the last 3 priors. Higher than the cluster
+# floor because we're catching exact-echo loops, not pattern clusters.
+_DET_REDUNDANCY_FLOOR = 0.85
 
 
 _REFLEXION_PROMPT = """You are evaluating your own most recent reply to Daniel. Judge it honestly.
@@ -407,6 +411,42 @@ class ReflexionService:
         if parsed.get("redundant_with_prior") is True:
             gap_text = None
 
+        # Deterministic redundancy backstop. gpt-4o-mini reliably ignores the
+        # anti-redundancy rule and echoes prior gap_exposed quotes back as
+        # "new" gaps (conv #1123-1145: every reflection was sev 2 with the
+        # same stale quote that wasn't even in the visible turns). Embed
+        # this turn's gap_exposed, cosine-compare against the last 3 priors'
+        # stored embeddings, and snap to redundant + sev=1 if max sim ≥ 0.85.
+        # No LLM trust needed.
+        precomputed_gap_emb: list[float] | None = None
+        if gap_text and severity >= 2 and prior:
+            try:
+                this_emb, _ = llm_client.generate_embedding(gap_text)
+                if this_emb:
+                    precomputed_gap_emb = this_emb
+                    max_sim = 0.0
+                    for pr in prior:
+                        if not pr.gap_embedding:
+                            continue
+                        try:
+                            pr_vec = json.loads(pr.gap_embedding)
+                        except Exception:
+                            continue
+                        sim = _cosine(this_emb, pr_vec)
+                        if sim > max_sim:
+                            max_sim = sim
+                    if max_sim >= _DET_REDUNDANCY_FLOOR:
+                        print(
+                            f"[reflexion] det-redundant max_sim={max_sim:.3f} "
+                            f"≥ {_DET_REDUNDANCY_FLOOR}; forcing sev=1"
+                        )
+                        parsed["redundant_with_prior"] = True
+                        gap_text = None
+                        severity = 1
+                        precomputed_gap_emb = None
+            except Exception as e:
+                print(f"[reflexion] det-redundancy failed (ignored): {e}")
+
         # Voice-drift override — deterministic regex catch for bot-register
         # phrases the LLM self-judge may miss. Forces tone + sev≥2 so the
         # behavioral cluster picks up repeated drift and promotes "I tend to
@@ -461,7 +501,11 @@ class ReflexionService:
 
         gap_embedding_json = None
         if severity >= 2 and gap_text:
-            emb, _ = llm_client.generate_embedding(gap_text)
+            # Reuse the embedding from the det-redundancy check if we have
+            # one — avoids a duplicate OpenAI call on every reflection turn.
+            emb = precomputed_gap_emb
+            if emb is None:
+                emb, _ = llm_client.generate_embedding(gap_text)
             if emb:
                 gap_embedding_json = json.dumps(emb)
 
