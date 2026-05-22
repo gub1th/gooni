@@ -41,7 +41,9 @@ export function NoteReaderOverlay({ noteId, onClose }: Props) {
         inset: 0,
         background: "rgba(20, 24, 34, 0.32)",
         backdropFilter: "blur(8px)",
-        zIndex: 20,
+        // Above drei <Html> nametag band ([40, 50]) and the peek card
+        // (100). Avatar nametags otherwise pierce the modal scrim.
+        zIndex: 110,
         display: "flex",
         alignItems: "flex-end",
         justifyContent: "center",

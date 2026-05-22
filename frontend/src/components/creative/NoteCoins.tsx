@@ -137,6 +137,17 @@ export function NoteCoins({ onSelect }: Props) {
     });
   }, [noteByTile]);
 
+  // Re-resolve peek when noteByTile populates after the player has
+  // already landed. The landing subscriber captures noteByTile in its
+  // closure, so if the public-notes query lands AFTER the first drop,
+  // the peek never fires for the spawn tile. Re-emit here so the
+  // spawn-tile START HERE card actually shows up on world-entry.
+  useEffect(() => {
+    if (!playerGrid) return;
+    const note = noteByTile.get(tileKey(playerGrid.gx, playerGrid.gz)) ?? null;
+    setPeekState({ note });
+  }, [noteByTile, playerGrid]);
+
   const handleExpand = useCallback((note: PublicNote) => {
     const assignment = assignmentsRef.current.find((a) => a.note.id === note.id);
     if (!assignment) return;

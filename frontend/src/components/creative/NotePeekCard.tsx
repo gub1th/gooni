@@ -94,7 +94,9 @@ export function NotePeekCard({ note, onExpand, onDismiss }: Props) {
         backdropFilter: "blur(14px) saturate(170%)",
         WebkitBackdropFilter: "blur(14px) saturate(170%)",
         cursor: "pointer",
-        zIndex: 9,
+        // Sits above drei <Html> nametags (which render in zIndexRange
+        // [40, 50]) so avatar names don't pierce the peek card.
+        zIndex: 100,
         opacity: visible ? 1 : 0,
         transition: "transform 320ms cubic-bezier(0.20, 0.84, 0.30, 1), opacity 240ms ease",
         userSelect: "none",
