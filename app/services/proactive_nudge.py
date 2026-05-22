@@ -118,7 +118,26 @@ def _compose_whoop_message(row: WhoopSnapshot) -> str:
 
     bits: list[str] = []
     if sleep_h is not None:
-        bits.append(f"slept {sleep_h:.1f}h")
+        # When Whoop captured the actual bed/wake window, render it
+        # inline ("slept 11:23p→6:47a, 7.4h") so the ping reads
+        # specific rather than abstract. Falls back to duration-only
+        # when start/end are missing.
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("America/Los_Angeles")
+        start = getattr(row, "sleep_start_at", None)
+        end = getattr(row, "sleep_end_at", None)
+        if start is not None and end is not None:
+            try:
+                # Stored naive UTC — interpret as UTC then convert.
+                s_local = start.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
+                e_local = end.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
+                s_str = s_local.strftime("%I:%M%p").lstrip("0").lower()
+                e_str = e_local.strftime("%I:%M%p").lstrip("0").lower()
+                bits.append(f"slept {s_str} → {e_str}, {sleep_h:.1f}h")
+            except Exception:
+                bits.append(f"slept {sleep_h:.1f}h")
+        else:
+            bits.append(f"slept {sleep_h:.1f}h")
     if recovery is not None:
         bits.append(f"recovery {recovery:.0f}%")
     if strain is not None:
