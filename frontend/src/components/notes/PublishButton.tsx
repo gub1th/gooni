@@ -53,13 +53,13 @@ export function PublishButton({
   // Button-shape varies with state. Draft = primary tinted CTA, the
   // visual focal point. Published states = subtle pill with status dot.
   const baseStyle: React.CSSProperties = {
-    display: "inline-flex", alignItems: "center", gap: 7,
-    height: 32, padding: "0 14px",
+    display: "inline-flex", alignItems: "center", gap: 6,
+    height: 26, padding: "0 10px",
     borderRadius: 8,
     border: "none",
     cursor: "pointer",
     fontFamily: FONT,
-    fontSize: 13.5, fontWeight: 500,
+    fontSize: 12.5, fontWeight: 500,
     transition: "background 0.12s, color 0.12s, box-shadow 0.12s",
     boxShadow: "0 1px 2px rgba(15,23,42,0.05), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
   };
@@ -92,7 +92,7 @@ export function PublishButton({
       : <Lock size={13} strokeWidth={2.1} />;
 
   return (
-    <div ref={ref} style={{ position: "absolute", top: 14, right: 14, zIndex: 20 }}>
+    <div ref={ref} style={{ position: "relative" }}>
       <button
         onClick={() => setOpen((o) => !o)}
         style={{ ...baseStyle, ...variantStyle }}
