@@ -42,12 +42,13 @@ const COIN_COLOR = "#F5F0E8";
 const COIN_EMISSIVE = "#9FE1CB";
 const BEAM_COLOR = "#E7F4EE";
 
-// Pinned ("what is Gooni" / start-here coin): violet paper body + soft
-// purple emissive edge. Distinguishes the spawn-anchored intro coin
-// from the regular gold-paper notes scattered around the plaza.
-const PINNED_COIN_COLOR = "#EFE4FB";
-const PINNED_COIN_EMISSIVE = "#B89CF0";
-const PINNED_BEAM_COLOR = "#DCCDF6";
+// Pinned ("what is Gooni" / start-here coin): vibrant violet paper body
+// + punchy purple emissive edge. Distinguishes the spawn-anchored intro
+// coin from the regular cream-paper notes scattered around the plaza —
+// reads as the obvious "start here" anchor from across the plaza.
+const PINNED_COIN_COLOR = "#C8A2F5";
+const PINNED_COIN_EMISSIVE = "#9333EA";
+const PINNED_BEAM_COLOR = "#B388F5";
 
 // Read state: drained warmth — visited notes recede further.
 const READ_COIN_COLOR = "#D7D2CA";

@@ -60,6 +60,15 @@ function isChromelessPath(pathname: string): boolean {
   return pathname === "/public" || pathname.startsWith("/public/");
 }
 
+// Paths where the Gooni chat orb (ChatLauncher + GooniMascot inside
+// GooniLayer) is intentionally hidden. /creative is an immersive 3D
+// world — the bottom-right FAB pops up over the plaza and breaks the
+// scene. Sidebar still mounts on /creative; only the floating orb +
+// mascot get suppressed.
+function suppressGooniLayer(pathname: string): boolean {
+  return pathname === "/creative" || pathname.startsWith("/creative/");
+}
+
 // Single Sidebar instance for the whole authed app. Mounted once at
 // root and persists across child route changes — replaces the per-route
 // remount pattern that wiped sidebar scrollTop + in-memory state (drag,
@@ -339,7 +348,7 @@ function AppShell() {
         >
           <Outlet />
         </div>
-        <GooniLayer />
+        {!suppressGooniLayer(location.pathname) && <GooniLayer />}
       </div>
     </PasswordGate>
   );

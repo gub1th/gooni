@@ -12,7 +12,8 @@ import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText, Brain, ClipboardList, Settings as SettingsIcon,
   Globe, Plug, PanelLeftClose, Plus,
-  Home, Folder as FolderIcon, List as ListIcon, MessageSquare,
+  Home, Folder as FolderIcon, List as ListIcon,
+  FilePlus, MessageSquarePlus,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -208,7 +209,7 @@ interface SidebarProps {
 // SidebarSection — labeled group (Notes / Spaces / Lists). Header row
 // has icon + label + + button; children render indented underneath.
 function SidebarSection({
-  label, Icon, iconColor, active, onHeaderClick, onPlusClick, children,
+  label, Icon, iconColor, active, onHeaderClick, onPlusClick, showPlus = true, children,
 }: {
   label: string;
   Icon: typeof FileText;
@@ -216,6 +217,7 @@ function SidebarSection({
   active?: boolean;
   onHeaderClick: (e: React.MouseEvent) => void;
   onPlusClick: (e: React.MouseEvent) => void;
+  showPlus?: boolean;
   children?: React.ReactNode;
 }) {
   return (
@@ -236,35 +238,38 @@ function SidebarSection({
             display: "flex", alignItems: "center", gap: 8,
             flex: 1, background: "none", border: "none", cursor: "pointer",
             padding: 0, textAlign: "left",
-            color: "var(--gooni-text, #1C1C1E)",
-            fontSize: 13, fontWeight: active ? 600 : 500,
+            color: "var(--gooni-muted, #6B7280)",
+            fontSize: 11, fontWeight: 500,
+            letterSpacing: "0.04em", textTransform: "lowercase",
             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
           }}
         >
           <Icon size={14} strokeWidth={1.8} color={iconColor ?? "#475569"} style={{ flexShrink: 0 }} />
           {label}
         </button>
-        <button
-          onClick={onPlusClick}
-          title={`New ${label.toLowerCase().replace(/s$/, "")}`}
-          style={{
-            display: "inline-flex", alignItems: "center", justifyContent: "center",
-            width: 18, height: 18, borderRadius: 4,
-            border: "none", background: "transparent",
-            color: "var(--gooni-muted, #9CA3AF)",
-            cursor: "pointer", transition: "background 0.1s, color 0.1s",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.06)";
-            (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-            (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #9CA3AF)";
-          }}
-        >
-          <Plus size={12} strokeWidth={2.2} />
-        </button>
+        {showPlus && (
+          <button
+            onClick={onPlusClick}
+            title={`New ${label.toLowerCase().replace(/s$/, "")}`}
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              width: 22, height: 22, borderRadius: 4,
+              border: "none", background: "transparent",
+              color: "var(--gooni-muted, #9CA3AF)",
+              cursor: "pointer", transition: "background 0.1s, color 0.1s",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.06)";
+              (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+              (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #9CA3AF)";
+            }}
+          >
+            <Plus size={16} strokeWidth={2} />
+          </button>
+        )}
       </div>
       {children}
     </div>
@@ -286,13 +291,13 @@ function SidebarChildRow({
       onClick={onClick}
       title={label}
       style={{
-        display: "block", width: "calc(100% - 12px)",
-        marginLeft: 12,
-        padding: "3px 10px",
+        display: "block", width: "calc(100% - 16px)",
+        marginLeft: 16,
+        padding: "4px 10px",
         background: selected ? "rgba(0,0,0,0.07)" : "transparent",
         border: "none", borderRadius: 5,
         cursor: "pointer", textAlign: "left",
-        fontSize: 12,
+        fontSize: 13,
         fontWeight: selected ? 600 : 400,
         color: selected ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-muted, #6B7280)",
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -869,31 +874,55 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
             </button>
           </div>
 
-          {/* New chat — plain row, not a hero element. */}
-          <div style={{ padding: "0 6px 6px" }}>
+          {/* Top action row — 2-up Note (primary) + Chat (secondary).
+              Note button replaces the old "New chat" row's primary slot
+              and absorbs note-creation away from the Notes section header. */}
+          <div style={{ padding: "0 6px 6px", display: "flex", gap: 6 }}>
+            <button
+              onClick={onCompose}
+              title="New note"
+              style={{
+                flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                height: 30, borderRadius: 7,
+                cursor: "pointer",
+                background: "rgba(10,132,255,0.12)",
+                color: "#0A66D6",
+                border: "none",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontWeight: 500, fontSize: 13,
+                transition: "background 0.12s",
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(10,132,255,0.18)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(10,132,255,0.12)"; }}
+            >
+              <FilePlus size={14} strokeWidth={1.9} style={{ flexShrink: 0 }} />
+              Note
+            </button>
             <button
               onClick={onNewChat}
               title="Start a new chat with Gooni"
               style={{
-                display: "flex", alignItems: "center", gap: 10,
-                width: "100%", padding: "0 10px", height: 30, borderRadius: 7,
-                cursor: "pointer", background: isChat ? "rgba(0,0,0,0.09)" : "transparent",
-                border: "none", textAlign: "left",
+                flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+                height: 30, borderRadius: 7,
+                cursor: "pointer",
+                background: isChat ? "rgba(0,0,0,0.09)" : "transparent",
+                color: "var(--gooni-text, #1C1C1E)",
+                border: "0.5px solid rgba(0,0,0,0.18)",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontWeight: 500, fontSize: 13, color: "var(--gooni-text, #1C1C1E)",
+                fontWeight: 400, fontSize: 13,
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+              onMouseEnter={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)"; }}
               onMouseLeave={(e) => { if (!isChat) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
-              <MessageSquare size={14} strokeWidth={1.7} color={ICON_TINT.newChat} style={{ flexShrink: 0 }} />
-              New chat
+              <MessageSquarePlus size={14} strokeWidth={1.7} color={ICON_TINT.newChat} style={{ flexShrink: 0 }} />
+              Chat
             </button>
           </div>
 
           {/* === Notes section ===
-              Header row clickable → All Notes. + button → compose.
-              Top 3 indented children (pinned + recent merged). */}
+              Header row clickable → All Notes. No + (top "Note" button
+              owns note creation now). Top 3 indented children. */}
           <SidebarSection
             label="Notes"
             Icon={FileText}
@@ -901,6 +930,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
             active={isAllNotes}
             onHeaderClick={handleAllNotes}
             onPlusClick={onCompose}
+            showPlus={false}
           >
             {[...orderedPinnedNotes, ...recentTop].slice(0, 3).map((note) => {
               const selected = activeNoteId === note.id;
@@ -916,6 +946,8 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               );
             })}
           </SidebarSection>
+
+          <div style={{ height: 1, margin: "4px 12px", background: "rgba(0,0,0,0.07)" }} />
 
           {/* === Spaces section ===
               Header opens nothing (just a label) — clicking a space row
@@ -941,6 +973,8 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               );
             })}
           </SidebarSection>
+
+          <div style={{ height: 1, margin: "4px 12px", background: "rgba(0,0,0,0.07)" }} />
 
           {/* === Lists section ===
               + button opens an inline composer (newListDraft state). */}
