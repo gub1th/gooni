@@ -135,6 +135,82 @@ Rules — be CONSERVATIVE (default ok=true):
 """
 
 
+# Verbs the LLM uses to claim a persisted side-effect. If any of these
+# appear in a draft reply on a turn where nothing was actually persisted
+# (no captured_* router writes, no state-changing chat tool call), the
+# claim is unbacked — force a regen. Deterministic backstop for the LLM
+# verifier, which has historically missed the "tracked"-class lie
+# (conv #1136-1137: "do a little leetcode" tracked with no audit).
+_UNBACKED_CLAIM_RE = re.compile(
+    r"\b(tracked|logged|saved|added|noted|created|recorded)\b",
+    re.IGNORECASE,
+)
+
+# Read-only tools whose presence in the audit doesn't justify a
+# "tracked/saved" claim. Used by the deterministic precheck.
+_READ_ONLY_TOOLS = {
+    "list_todos", "list_focuses", "list_promises", "list_habits",
+    "list_recent_notes", "list_recent_commits", "list_recent_backlog",
+    "read_note", "read_todos", "read_focus", "read_list",
+    "find_note", "search_notes", "search_memories",
+    "find_similar_items", "find_similar_backlog",
+    "web_search", "fetch_url",
+    "check_calendar_busy", "get_calendar_event", "list_calendar_events",
+    "get_context", "read_capability_facets",
+    "get_leetcode_activity", "list_comments", "list_focus_signals",
+}
+
+
+def _deterministic_unbacked_check(
+    *,
+    draft: str,
+    captured_features: list[dict],
+    captured_promises: list[dict],
+    captured_todos: list[dict],
+    tool_call_ids: list[int],
+    db,
+) -> str | None:
+    """Return a critique string if the draft claims a persisted write that
+    nothing in this turn actually backs. Returns None when the draft is
+    clean OR a real write exists.
+
+    Hard rail backstop — runs before the LLM verifier so the regen path
+    fires deterministically on the leetcode-class miss.
+    """
+    if not draft:
+        return None
+    # Router-layer writes back any "tracked" claim — Promise/Feature/Todo
+    # rows landed even when no chat tool fired. ok regardless of verb.
+    if captured_features or captured_promises or captured_todos:
+        return None
+    m = _UNBACKED_CLAIM_RE.search(draft)
+    if not m:
+        return None
+    # Any state-changing chat tool call this turn also backs the claim.
+    # Filter out read-only tools — they don't justify "tracked/saved".
+    if tool_call_ids:
+        try:
+            rows = (
+                db.query(ToolCallModel)
+                .filter(ToolCallModel.id.in_(tool_call_ids))
+                .all()
+            )
+            for r in rows:
+                if r.status != "done":
+                    continue
+                if (r.tool_name or "") not in _READ_ONLY_TOOLS:
+                    return None
+        except Exception as e:
+            print(f"[unbacked_check] audit read failed: {e}")
+            return None
+    return (
+        f'reply contains "{m.group(0)}" claim but nothing was persisted '
+        f"this turn — no router-layer captures and no state-changing tool "
+        f"call. Drop the verb or scope it honestly "
+        f'("noted in chat, sir — not formally tracked").'
+    )
+
+
 def _run_verify(
     draft: str,
     user_msg: str,
@@ -760,23 +836,45 @@ def _build_state_block(db) -> str:
     if open_count:
         lines.append(f"- {open_count} other open todo(s)")
 
-    # G3 priority ranking surface. Daniel manually orders todos via drag-
-    # handle in the TodoList UI (frontend persists sort_order on every
-    # swap). state_block exposes the resulting rank so chat can answer
-    # "what's next" correctly: primary is always #1, then sort_order asc
-    # for the rest. Default sort_order=0 from todo_service.create gets
-    # treated as "unranked" — surfaces at the bottom with a count.
-    # Render up to 5 ranked + bucket the rest.
+    # G3 priority ranking surface — revised to hoist active todos.
+    #
+    # Anti-hallucination motivation (conv #1136): Daniel said "imma do a
+    # little leetcode" and Gooni claimed "tracked" without checking that
+    # an active "do a little leetcode" todo already existed. The todo was
+    # unranked, so state_block rendered it as part of an opaque count
+    # line, and the LLM was effectively blind to it. The fix surfaces
+    # ALL state='doing' todos by name regardless of rank, because doing
+    # todos are the most likely match for any "imma X" / "gonna X"
+    # utterance — they need to be name-level visible so the LLM can
+    # cross-reference before claiming a new write.
+    #
+    # Render order:
+    #   1. primary (if any)
+    #   2. ALL state='doing' non-primary, flagged [doing]
+    #   3. state='not_yet' ranked (sort_order asc), filling remaining slots
+    #   4. count line for whatever was clipped
+    # Cap total named lines at 8 to keep the block scannable.
     try:
         non_primary = [t for t in open_todos if not t.is_primary]
-        # Lower sort_order = higher priority. Default 0 means "user hasn't
-        # explicitly ranked this yet" — bucket those separately.
-        ranked = sorted(
-            [t for t in non_primary if (t.sort_order or 0) > 0],
+        doing = [t for t in non_primary if (t.state or "") == "doing"]
+        not_yet = [t for t in non_primary if (t.state or "") != "doing"]
+        not_yet_ranked = sorted(
+            [t for t in not_yet if (t.sort_order or 0) > 0],
             key=lambda t: t.sort_order or 0,
         )
-        unranked = [t for t in non_primary if (t.sort_order or 0) == 0]
+        not_yet_unranked = [t for t in not_yet if (t.sort_order or 0) == 0]
         total_open = open_count + (1 if primary is not None else 0)
+
+        MAX_NAMED = 8
+        primary_slot = 1 if primary is not None else 0
+        doing_to_show = doing[:max(0, MAX_NAMED - primary_slot)]
+        remaining = max(0, MAX_NAMED - primary_slot - len(doing_to_show))
+        not_yet_to_show = not_yet_ranked[:remaining]
+        clipped_count = (
+            (len(doing) - len(doing_to_show))
+            + (len(not_yet_ranked) - len(not_yet_to_show))
+            + len(not_yet_unranked)
+        )
 
         # G3.9 atom #8: chain context inline. Build bulk_chain_summary for
         # all visible todos so each line can carry "↗N · M done" + "← from:
@@ -786,7 +884,8 @@ def _build_state_block(db) -> str:
             chain_ids = []
             if primary is not None:
                 chain_ids.append(primary.id)
-            chain_ids.extend(t.id for t in ranked[:4])
+            chain_ids.extend(t.id for t in doing_to_show)
+            chain_ids.extend(t.id for t in not_yet_to_show)
             chain_summary = (
                 todo_service.bulk_chain_summary(db, chain_ids)
                 if chain_ids else {}
@@ -808,7 +907,7 @@ def _build_state_block(db) -> str:
                 bits.append(f"← from: \"{(ptext or '')[:40]}\"")
             return f" [{' · '.join(bits)}]" if bits else ""
 
-        if primary or ranked or unranked:
+        if primary or doing_to_show or not_yet_to_show or clipped_count:
             lines.append(
                 f"- priority order (Daniel-set via drag; {total_open} total open):"
             )
@@ -817,16 +916,25 @@ def _build_state_block(db) -> str:
                 tail = _chain_inline(primary)
                 lines.append(f"  · #{slot} (primary): \"{primary.text}\"{tail}")
                 slot += 1
-            for t in ranked[:4]:
+            for t in doing_to_show:
+                text = (t.text or "")[:60]
+                mc = t.mention_count or 1
+                mention_tag = f" [×{mc} mentions]" if mc > 1 else ""
+                chain_tail = _chain_inline(t)
+                lines.append(
+                    f"  · #{slot} [doing]: \"{text}\"{mention_tag}{chain_tail}"
+                )
+                slot += 1
+            for t in not_yet_to_show:
                 text = (t.text or "")[:60]
                 mc = t.mention_count or 1
                 mention_tag = f" [×{mc} mentions]" if mc > 1 else ""
                 chain_tail = _chain_inline(t)
                 lines.append(f"  · #{slot}: \"{text}\"{mention_tag}{chain_tail}")
                 slot += 1
-            if unranked:
+            if clipped_count:
                 lines.append(
-                    f"  · {len(unranked)} unranked (Daniel hasn't ordered these)"
+                    f"  · {clipped_count} more open todo(s) not shown"
                 )
     except Exception as e:
         print(f"[state_block] priority surface failed: {e}")
@@ -1642,6 +1750,22 @@ class Orchestrator:
                     tool_call_ids=(usage or {}).get("tool_call_ids") or [],
                     db=db,
                 )
+                # Deterministic backstop — overrides the LLM verify when
+                # the draft contains an unbacked "tracked/logged/saved"
+                # claim. Catches the conv #1136-1137 failure mode where
+                # the LLM verifier shrugged off "do a little leetcode
+                # tracked" with no audit. Runs even when LLM said ok=True.
+                det_critique = _deterministic_unbacked_check(
+                    draft=response,
+                    captured_features=captured_features,
+                    captured_promises=captured_promises,
+                    captured_todos=captured_todos,
+                    tool_call_ids=(usage or {}).get("tool_call_ids") or [],
+                    db=db,
+                )
+                if det_critique:
+                    verify_ok = False
+                    verify_critique = det_critique
                 tb.step(
                     "verify",
                     "OK" if verify_ok else f"REVISE: {verify_critique[:120]}",
