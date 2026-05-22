@@ -34,9 +34,7 @@ export function NoteIconPicker({
     <div
       ref={ref}
       style={{
-        display: "flex",
-        justifyContent: "center",
-        marginBottom: 10,
+        display: "inline-flex",
         position: "relative",
       }}
     >
@@ -47,14 +45,14 @@ export function NoteIconPicker({
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          width: current ? 44 : 28,
-          height: current ? 44 : 28,
+          width: current ? 34 : 22,
+          height: current ? 34 : 22,
           borderRadius: 8,
           border: "none",
-          background: current ? "transparent" : "transparent",
+          background: "transparent",
           cursor: "pointer",
           color: current ? "#1C1C1E" : "rgba(142,142,147,0.55)",
-          fontSize: current ? 28 : 11,
+          fontSize: current ? 26 : 10,
           fontWeight: current ? 400 : 500,
           letterSpacing: current ? 0 : 0.4,
           textTransform: current ? "none" : "uppercase",
@@ -73,7 +71,7 @@ export function NoteIconPicker({
         }}
       >
         {current ? (
-          <SpaceIcon emoji={current} size={28} color="#1C1C1E" />
+          <SpaceIcon emoji={current} size={22} color="#1C1C1E" />
         ) : (
           "+ icon"
         )}

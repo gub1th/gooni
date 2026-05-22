@@ -12,7 +12,7 @@ import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText, Brain, ClipboardList, Settings as SettingsIcon,
   Globe, Plug, PanelLeftClose, Plus,
-  Home, Folder as FolderIcon, List as ListIcon, MessageSquare,
+  Home, Folder as FolderIcon, List as ListIcon, MessageSquare, Pin as PinIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
@@ -295,10 +295,11 @@ function SidebarSection({
 // SidebarChildRow — indented child row under a section (a note, a space,
 // a list, etc). Small font, muted color, tight padding.
 function SidebarChildRow({
-  label, prefix, selected, onClick,
+  label, prefix, icon, selected, onClick,
 }: {
   label: string;
   prefix?: string;
+  icon?: React.ReactNode;
   selected?: boolean;
   onClick: () => void;
 }) {
@@ -307,7 +308,8 @@ function SidebarChildRow({
       onClick={onClick}
       title={label}
       style={{
-        display: "block", width: "100%",
+        display: "flex", alignItems: "center", gap: 6,
+        width: "100%",
         padding: "5px 14px 5px 38px",
         background: selected ? "rgba(0,0,0,0.05)" : "transparent",
         border: "none", borderRadius: 0,
@@ -316,7 +318,6 @@ function SidebarChildRow({
         fontWeight: selected ? 600 : 400,
         color: selected ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-muted, #6B7280)",
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
         transition: "background 0.12s, color 0.12s",
       }}
       onMouseEnter={(e) => {
@@ -329,7 +330,17 @@ function SidebarChildRow({
           ? "var(--gooni-text, #1C1C1E)" : "var(--gooni-muted, #6B7280)";
       }}
     >
-      {prefix ?? ""}{label}
+      {icon && (
+        <span style={{ display: "inline-flex", flexShrink: 0, color: "rgba(142,142,147,0.7)" }}>
+          {icon}
+        </span>
+      )}
+      <span style={{
+        flex: 1, minWidth: 0,
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+      }}>
+        {prefix ?? ""}{label}
+      </span>
     </button>
   );
 }
@@ -914,7 +925,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                 <SidebarChildRow
                   key={`note-${note.id}`}
                   label={displayTitle(note)}
-                  prefix={pinned ? "📌 " : ""}
+                  icon={pinned ? <PinIcon size={11} strokeWidth={2} /> : null}
                   selected={selected}
                   onClick={() => handleSelectNote(note)}
                 />

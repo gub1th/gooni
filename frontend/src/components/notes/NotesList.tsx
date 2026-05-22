@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Pin as PinIcon } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import {
@@ -352,12 +353,13 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
           opacity: 0,
           background: "rgba(255,255,255,0.85)",
           border: "none", cursor: "pointer",
-          fontSize: 10, padding: "2px 5px", lineHeight: 1,
-          transition: "opacity 0.1s",
+          padding: "3px 5px", lineHeight: 0,
+          transition: "opacity 0.1s, color 0.12s",
           borderRadius: 5,
-          filter: note.is_pinned ? "none" : "grayscale(1) opacity(0.6)",
+          color: note.is_pinned ? "#6B7280" : "rgba(142,142,147,0.6)",
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
         }}
-      >📌</button>
+      ><PinIcon size={11} strokeWidth={2} /></button>
     </div>
   );
 }

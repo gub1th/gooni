@@ -262,6 +262,81 @@ export function PrimaryBacklogBanner() {
       >
         {ticket.text}
       </div>
+
+      {/* Explicit transition row — done/cancel CTAs on-color so the user
+          isn't forced to discover the small status pill or ✕ glyph. Done
+          flips ticket → done (also auto-clears is_primary server-side via
+          done cascade). Cancel unpins without touching board_status. */}
+      {state !== "done" && (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 10,
+            marginTop: 22,
+          }}
+        >
+          <button
+            onClick={unpin}
+            title="Unpin primary (ticket stays on board)"
+            style={{
+              padding: "7px 16px",
+              fontSize: 12.5,
+              fontWeight: 600,
+              fontFamily: FONT,
+              color: "#FFFFFF",
+              background: "rgba(255,255,255,0.14)",
+              border: "1px solid rgba(255,255,255,0.28)",
+              borderRadius: 8,
+              cursor: "pointer",
+              transition: "background 0.12s, border-color 0.12s",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.22)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.14)";
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={async () => {
+              try {
+                await updateBacklogTicket(ticket.id, { board_status: "done", done: true });
+                refresh();
+              } catch (e) {
+                console.error("Failed to mark primary done", e);
+              }
+            }}
+            title="Mark done — clears primary"
+            style={{
+              padding: "7px 18px",
+              fontSize: 12.5,
+              fontWeight: 700,
+              fontFamily: FONT,
+              color: palette.bg,
+              background: "#FFFFFF",
+              border: "none",
+              borderRadius: 8,
+              cursor: "pointer",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.10)",
+              transition: "transform 0.08s",
+            }}
+            onMouseDown={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.transform = "scale(0.97)";
+            }}
+            onMouseUp={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
+            }}
+          >
+            Mark done
+          </button>
+        </div>
+      )}
     </div>
   );
 }

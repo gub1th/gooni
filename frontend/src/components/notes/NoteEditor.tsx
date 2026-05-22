@@ -14,7 +14,6 @@ import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
   Heading1, Heading2,
   Trash2, FolderInput, Pin as PinIcon, ListPlus, Check, Pencil as PencilIcon,
-  Globe as GlobeIcon,
   StickyNote, CheckCircle2, Droplet,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -25,7 +24,6 @@ import { NoteLink } from "./NoteLinkExtension";
 import { PublishButton } from "./PublishButton";
 import { ToggleBlock } from "./ToggleBlockExtension";
 import { OutlinePanel } from "./OutlinePanel";
-import { NoteIconPicker } from "./NoteIconPicker";
 import { NoteCard } from "./NoteCardExtension";
 import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
 import { useNoteCardStyles } from "./noteCardStyles";
@@ -393,17 +391,133 @@ function useEditorStyles() {
   }, []);
 }
 
-function formatNoteDate(iso: string | null): string {
+// Notion-style "Edited Xm ago" label — relative under 30 min, then snaps
+// to absolute clock time ("Edited at 11:00 PM" today, or "Edited <date>"
+// for older). Used on the floating top-right activity chip.
+function formatEdited(iso: string | null, nowMs: number): string {
   if (!iso) return "";
   const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
   const d = new Date(hasOffset ? iso : iso + "Z");
-  const now = new Date();
+  const diffMs = nowMs - d.getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "Edited just now";
+  if (min < 30) return `Edited ${min}m ago`;
+  const now = new Date(nowMs);
   const isToday = d.toDateString() === now.toDateString();
   if (isToday) {
-    return "Today at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+    return "Edited at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
   }
-  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) +
-    " at " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  return "Edited " + d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatAbsolute(iso: string | null): string {
+  if (!iso) return "—";
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  const d = new Date(hasOffset ? iso : iso + "Z");
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
+    ", " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+function relativeFromNow(iso: string | null, nowMs: number): string {
+  if (!iso) return "—";
+  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
+  const d = new Date(hasOffset ? iso : iso + "Z");
+  const diffMs = nowMs - d.getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "Just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// Right-island activity chip — shows live "Edited Xm ago" with a hover
+// popover that lists Edited + Created timestamps. Mirrors Notion's
+// top-right Activity card.
+function EditedChip({
+  updatedAt,
+  createdAt,
+}: {
+  updatedAt: string | null;
+  createdAt: string | null;
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [hover, setHover] = useState(false);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const label = formatEdited(updatedAt, nowMs);
+  if (!label) return null;
+
+  return (
+    <div
+      style={{ position: "relative", display: "inline-flex" }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <div
+        style={{
+          display: "inline-flex", alignItems: "center",
+          height: 26, padding: "0 10px",
+          borderRadius: 8,
+          fontSize: 12, fontWeight: 500,
+          color: "#6E6E73",
+          background: "rgba(255,255,255,0.82)",
+          backdropFilter: "blur(22px) saturate(1.8)",
+          WebkitBackdropFilter: "blur(22px) saturate(1.8)",
+          boxShadow: "0 1px 2px rgba(15,23,42,0.05), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
+          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+          cursor: "default",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </div>
+      {hover && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            right: 0,
+            minWidth: 240,
+            background: "#fff",
+            borderRadius: 10,
+            padding: "10px 12px",
+            boxShadow:
+              "0 12px 28px rgba(15,23,42,0.16), 0 2px 6px rgba(15,23,42,0.10), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+            zIndex: 30,
+          }}
+        >
+          <div style={{
+            fontSize: 11, fontWeight: 600, letterSpacing: 0.4,
+            textTransform: "uppercase", color: "#8E8E93", marginBottom: 6,
+          }}>Activity</div>
+          <div style={{
+            display: "flex", justifyContent: "space-between", gap: 16,
+            fontSize: 12.5, color: "#1C1C1E", padding: "3px 0",
+          }}>
+            <span>Edited</span>
+            <span style={{ color: "#6E6E73" }} title={formatAbsolute(updatedAt)}>
+              {relativeFromNow(updatedAt, nowMs)}
+            </span>
+          </div>
+          <div style={{
+            display: "flex", justifyContent: "space-between", gap: 16,
+            fontSize: 12.5, color: "#1C1C1E", padding: "3px 0",
+          }}>
+            <span>Created</span>
+            <span style={{ color: "#6E6E73" }}>{formatAbsolute(createdAt)}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -1342,59 +1456,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     }
   }
 
-  async function handleSetNoteIcon(next: string | null) {
-    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
-    useNotesContentStore.setState((s) => {
-      const updated: Record<string, ApiNote[]> = {};
-      for (const [k, list] of Object.entries(s.notes)) {
-        updated[k] = list.map((n) =>
-          n.id === activeNoteId ? { ...n, icon: next } : n,
-        );
-      }
-      return { notes: updated };
-    });
-    try {
-      await apiPatchNote(activeNoteId, { icon: next });
-    } catch (e) {
-      console.error("set note icon failed", e);
-    }
-  }
-
-  async function handleTogglePublic() {
-    if (!activeNote || !activeNoteId || activeNoteId < 0) return;
-    const next = !activeNote.is_public;
-    // Optimistic flip — backend also clears `is_draft` when public goes
-    // true (note shipped → no longer a draft); mirror that locally.
-    useNotesContentStore.setState((s) => {
-      const updated: Record<string, ApiNote[]> = {};
-      for (const [k, list] of Object.entries(s.notes)) {
-        updated[k] = list.map((n) =>
-          n.id === activeNoteId
-            ? { ...n, is_public: next, is_draft: next ? false : n.is_draft }
-            : n,
-        );
-      }
-      return { notes: updated };
-    });
-    setLocalIsPublic(next);
-    if (next && activeNote.is_draft) useDraftVersionStore.getState().bump();
-    try {
-      await apiPatchNote(activeNoteId, { is_public: next });
-    } catch (e) {
-      console.error("publish toggle failed", e);
-      useNotesContentStore.setState((s) => {
-        const updated: Record<string, ApiNote[]> = {};
-        for (const [k, list] of Object.entries(s.notes)) {
-          updated[k] = list.map((n) =>
-            n.id === activeNoteId ? { ...n, is_public: !next } : n,
-          );
-        }
-        return { notes: updated };
-      });
-      setLocalIsPublic(!next);
-    }
-  }
-
   return (
     <div
       style={
@@ -1423,22 +1484,32 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       {/* Header bar — full variant only */}
       {!embedded && (
       <>
-      {/* PublishButton — Confluence-style primary CTA. Top-right of the
-          editor surface. Three states (draft/private/public) addressed
-          via a dropdown menu instead of two separate icon toggles. */}
+      {/* Right-side floating island — EditedChip ("Edited Xm ago" + hover
+          activity popover) + PublishButton. Mirrors the left action island
+          shape (rounded pill, backdrop blur, thin padding) so the top-bar
+          reads as two matched islands. */}
       {activeNote && activeNoteId && activeNoteId > 0 && (
-        <PublishButton
-          visibility={
-            activeNote.is_public
-              ? "public"
-              : activeNote.is_draft
-                ? "draft"
-                : "private"
-          }
-          onPublishPublic={handlePublishPublic}
-          onPublishPrivate={handlePublishPrivate}
-          onUnpublish={handleUnpublish}
-        />
+        <div style={{
+          position: "absolute", top: 14, right: 14, zIndex: 20,
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <EditedChip
+            updatedAt={activeNote.updated_at}
+            createdAt={activeNote.created_at}
+          />
+          <PublishButton
+            visibility={
+              activeNote.is_public
+                ? "public"
+                : activeNote.is_draft
+                  ? "draft"
+                  : "private"
+            }
+            onPublishPublic={handlePublishPublic}
+            onPublishPrivate={handlePublishPrivate}
+            onUnpublish={handleUnpublish}
+          />
+        </div>
       )}
       {/* Top fade — content scrolls under the floating action pill so the
           first lines dissolve into the page bg instead of slamming into the
@@ -1470,8 +1541,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           maxWidth: "calc(60% - 28px)",
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          padding: "5px 8px",
+          gap: 4,
+          padding: "3px 6px",
           borderRadius: 999,
           background: "rgba(255,255,255,0.82)",
           backdropFilter: "blur(22px) saturate(1.8)",
@@ -1782,35 +1853,9 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           </Tooltip>
         )}
 
-        {/* Publish — moved back into the floating action pill (the orb
-            felt too big sitting next to the Gooni chat launcher). Green
-            tint when live, neutral when private. Backend clears is_draft
-            when is_public flips true, so going live also closes out any
-            draft mark. */}
-        {activeNote && activeNoteId && activeNoteId > 0 && (
-          <Tooltip label={localIsPublic ? "Unpublish from portfolio" : "Publish to portfolio"}>
-            <button
-              onClick={handleTogglePublic}
-              style={{
-                width: 30, height: 30, borderRadius: 8,
-                border: "none",
-                background: localIsPublic ? "rgba(52,199,89,0.16)" : "transparent",
-                cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                padding: 0, flexShrink: 0,
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
-              onMouseLeave={(e) => { if (!localIsPublic) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              <GlobeIcon
-                size={15}
-                strokeWidth={1.7}
-                color={localIsPublic ? "#1F9E45" : "#636366"}
-              />
-            </button>
-          </Tooltip>
-        )}
+        {/* Globe publish toggle removed — PublishButton (top-right) is the
+            primary publish surface; keeping a second toggle here was visual
+            noise. Viewer-count chip kept below as informational only. */}
 
         {/* Viewer count — only when published. Optimistic-render falls back
             to "—" while unique_viewers hydrates from the single-note GET. */}
@@ -1833,6 +1878,44 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         )}
 
         </div>
+
+        {/* Truncated note title — Notion-style top-left navbar label. Sits
+            beside the action icons in the floating island so the title
+            stays visible when the user scrolls past the body H1. Click
+            focuses the in-body title input. */}
+        {activeNote && (localTitle?.trim() || activeNote.title?.trim()) && (
+          <>
+            <div style={{
+              width: 1, height: 16,
+              background: "rgba(15,23,42,0.10)",
+              flexShrink: 0,
+              margin: "0 4px",
+            }} />
+            <button
+              onClick={() => titleInputRef.current?.focus()}
+              title={localTitle || activeNote.title || ""}
+              style={{
+                background: "transparent",
+                border: "none",
+                padding: "0 6px",
+                cursor: "pointer",
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                fontSize: 12.5,
+                fontWeight: 500,
+                color: "#1C1C1E",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                minWidth: 0,
+                maxWidth: 280,
+                textAlign: "left",
+                lineHeight: 1.4,
+              }}
+            >
+              {localTitle || activeNote.title}
+            </button>
+          </>
+        )}
       </div>
       </>
       )}
@@ -2069,63 +2152,50 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     <span>from “{parentLink.title}”</span>
                   </button>
                 )}
-                {/* Persistent top-bar wrapper (Confluence/Notion-style).
-                    Wraps date + tags + title in a position:sticky div so
-                    they stay visible as the user scrolls into long notes.
-                    Top-padding clears the floating action pill (left
-                    side, top:14) and PublishButton (right, top:14).
-                    Background matches the editor surface so content
-                    behind it disappears cleanly on scroll. z-index 6
-                    sits ABOVE the top-fade gradient (z 5) but BELOW the
-                    floating pill / publish CTA (z 10/20). */}
-                <div
-                  style={{
-                    position: "sticky",
-                    top: 0,
-                    zIndex: 6,
-                    background: "var(--gooni-card, #FFFFFF)",
-                    padding: "56px 0 14px",
-                    marginTop: -72,
-                    marginBottom: 6,
-                  }}
-                >
-                {/* Notion-style optional icon — small picker centred above
-                    the date line. Click an empty placeholder to add; click
-                    an existing icon to swap or remove. Renders the lucide
-                    catalog from SpaceIcon so it matches the rest of the
-                    app's icon vocabulary. */}
-                <NoteIconPicker
-                  current={activeNote.icon ?? null}
-                  onPick={(next) => handleSetNoteIcon(next)}
-                />
-                {/* Apple-Notes-style date line — sits centred above the title
-                    in muted grey, mirroring the "Edited Mar 4 at 9:42 AM"
-                    treatment Daniel called out in note 246. Updates live as
-                    autosave runs (activeNote.updated_at re-renders this). */}
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "var(--gooni-muted, #8E8E93)",
-                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                    textAlign: "center",
-                    marginBottom: 14,
-                    letterSpacing: 0.1,
-                  }}
-                >
-                  {formatNoteDate(activeNote.updated_at)}
+                {/* Title + meta header — no sticky wrapper. Title scrolls
+                    naturally with the body; the truncated copy on the
+                    left-island floating pill keeps it visible after
+                    scroll. Top margin clears the floating top islands
+                    (action pill + publish/edited pill, both at top:14).
+                    Icon picker removed — title is flush left, big bold. */}
+                <div style={{ marginTop: 52, marginBottom: 2 }}>
+                  <input
+                    ref={titleInputRef}
+                    value={localTitle}
+                    onChange={handleTitleChange}
+                    onBlur={save}
+                    onKeyDown={handleTitleKeyDown}
+                    placeholder="Title"
+                    style={{
+                      width: "100%",
+                      fontSize: 30,
+                      fontWeight: 700,
+                      fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
+                      color: "var(--gooni-text, #1C1C1E)",
+                      border: "none",
+                      outline: "none",
+                      background: "transparent",
+                      padding: 0,
+                      lineHeight: 1.2,
+                      letterSpacing: "-0.5px",
+                      textAlign: "left",
+                    }}
+                  />
                 </div>
-                {/* Tag row — small-caps low-contrast chips above the title.
-                    Click chip → remove. "+ tag" enters inline input mode.
-                    Daniel asked for "subtle" — hence the small font / muted
-                    color, no rounded background unless hovered. */}
+                {/* Tags row — date moved to right-island EditedChip. Lowercase
+                    #tag pills w/ subtle bg, hover reveals remove affordance.
+                    Tight to title above, breathing room below before body. */}
                 <div
                   style={{
                     display: "flex",
                     flexWrap: "wrap",
-                    gap: 6,
                     alignItems: "center",
-                    marginBottom: 8,
+                    gap: 6,
+                    marginBottom: 22,
+                    fontSize: 12,
+                    color: "var(--gooni-muted, #8E8E93)",
                     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+                    letterSpacing: 0.1,
                   }}
                 >
                   {localTags.map((tag) => (
@@ -2134,24 +2204,23 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       onClick={() => removeTag(tag)}
                       title={`Remove tag "${tag}"`}
                       style={{
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        letterSpacing: 0.6,
-                        textTransform: "uppercase",
+                        fontSize: 11.5,
+                        fontWeight: 500,
                         color: "var(--gooni-muted, #8E8E93)",
-                        background: "transparent",
+                        background: "rgba(15,23,42,0.04)",
                         border: "none",
-                        padding: "1px 6px",
-                        borderRadius: 4,
+                        padding: "2px 8px",
+                        borderRadius: 999,
                         cursor: "pointer",
                         transition: "background 0.12s, color 0.12s",
+                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                       }}
                       onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.05)";
-                        (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.10)";
+                        (e.currentTarget as HTMLButtonElement).style.color = "#B91C1C";
                       }}
                       onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.04)";
                         (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)";
                       }}
                     >
@@ -2174,18 +2243,16 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                           setTagInputOpen(false);
                         }
                       }}
-                      placeholder="add tag"
+                      placeholder="tag"
                       style={{
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        letterSpacing: 0.6,
-                        textTransform: "uppercase",
+                        fontSize: 11.5,
+                        fontWeight: 500,
                         color: "var(--gooni-text, #1C1C1E)",
-                        background: "rgba(15,23,42,0.05)",
+                        background: "rgba(15,23,42,0.06)",
                         border: "none",
                         outline: "none",
-                        padding: "2px 6px",
-                        borderRadius: 4,
+                        padding: "2px 8px",
+                        borderRadius: 999,
                         width: 90,
                         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                       }}
@@ -2195,49 +2262,30 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       onClick={() => setTagInputOpen(true)}
                       title="Add tag"
                       style={{
-                        fontSize: 10.5,
-                        fontWeight: 600,
-                        letterSpacing: 0.6,
-                        textTransform: "uppercase",
+                        fontSize: 11.5,
+                        fontWeight: 500,
                         color: "rgba(142,142,147,0.55)",
                         background: "transparent",
                         border: "none",
-                        padding: "1px 4px",
+                        padding: "2px 6px",
+                        borderRadius: 999,
                         cursor: "pointer",
+                        transition: "background 0.12s, color 0.12s",
+                        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                       }}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)")}
-                      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "rgba(142,142,147,0.55)")}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.04)";
+                        (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                        (e.currentTarget as HTMLButtonElement).style.color = "rgba(142,142,147,0.55)";
+                      }}
                     >
                       + tag
                     </button>
                   )}
                 </div>
-                <input
-                  ref={titleInputRef}
-                  value={localTitle}
-                  onChange={handleTitleChange}
-                  onBlur={save}
-                  onKeyDown={handleTitleKeyDown}
-                  placeholder="Title"
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    fontSize: 26,
-                    fontWeight: 700,
-                    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif",
-                    color: "var(--gooni-text, #1C1C1E)",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    marginBottom: 0,
-                    padding: 0,
-                    lineHeight: 1.2,
-                    letterSpacing: "-0.4px",
-                    textAlign: "center",
-                  }}
-                />
-                </div>
-                {/* /sticky top-bar — content below scrolls under the bar */}
                 {(() => {
                   const sig = activeNote.classify_signals;
                   if (!sig) return null;
