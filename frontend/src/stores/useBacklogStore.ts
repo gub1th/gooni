@@ -3,6 +3,7 @@ import {
   type ApiBacklogTicket,
   type BoardStatus,
   fetchBacklogTickets,
+  createBacklogTicket,
   updateBacklogTicket,
   deleteBacklogTicket,
 } from "../services/api";
@@ -12,6 +13,7 @@ interface BacklogStoreState {
   loading: boolean;
   loaded: boolean;
   refresh: () => Promise<void>;
+  createTicket: (text: string, opts?: { board_status?: BoardStatus | null; subtitle?: string | null }) => Promise<ApiBacklogTicket>;
   updateTicket: (id: number, patch: {
     text?: string;
     subtitle?: string | null;
@@ -40,6 +42,15 @@ export const useBacklogStore = create<BacklogStoreState>((set, get) => ({
     } finally {
       set({ loading: false });
     }
+  },
+
+  createTicket: async (text, opts = {}) => {
+    const created = await createBacklogTicket(text, opts);
+    // Prepend so the new ticket appears at the top of its column —
+    // matches Jira/Linear "just-added shows at top" expectation.
+    // Sort_order from the server still wins on next refresh.
+    set({ tickets: [created, ...get().tickets] });
+    return created;
   },
 
   updateTicket: async (id, patch) => {
