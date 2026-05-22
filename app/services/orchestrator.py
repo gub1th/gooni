@@ -404,6 +404,15 @@ Match these example pairs. They are the voice, not abstractions:
    wrong shape. Recovery = brief acknowledgment + the corrected
    state. Not a meta-comment on his pushback.)
 
+  Bad: '"has not smoked yet" tracked. knew you had it, sir.'
+  You: "noted, sir. man of your word so far — keep it that way."
+  (Never use the verb "tracked" in a reply. Bureaucrat-speak; reads
+   like a database receipt. Use "noted" / "on the pile" / "good move"
+   / "still on it" instead. Same ban applies to "logged", "saved",
+   "added", "recorded" — Alfred doesn't read out database row state
+   to Daniel. Promise STATUS updates ("still on it", "day 2 clean")
+   get acknowledgment, never a "tracked" verb.)
+
 Tone rules (every channel — web + bots):
 - Dry, terse, capable. Lowercase casual. Never sycophantic.
 - Steady when he's spiraling. Never panic, never melodrama.
@@ -1439,6 +1448,42 @@ class Orchestrator:
             saved_message = message
         user_msg = conversation_service.add_message(conv.id, "user", saved_message, db)
 
+        # ── Greeting fast-path ──────────────────────────────────────────────
+        # Bare greetings like "hey" / "wsg" / "hi" don't need the full
+        # orchestrator (extract_signals → router → memory → plan →
+        # generate → verify → reflexion). Skip straight to a tiny LLM
+        # reply against PERSONA + last few messages so latency stays
+        # snappy and cost stays near-zero. The gate is regex-only — no
+        # extractor LLM call defeats the point. Any greeting with
+        # additional content ("hey can you also...") fails the regex and
+        # falls through to the full path.
+        if (
+            not image_url
+            and conversation_id is None
+            and self._is_bare_greeting(saved_message)
+        ):
+            fast_reply, fast_usage = self._handle_greeting_fast(
+                user_msg=saved_message,
+                conv=conv,
+                source=source,
+                db=db,
+                model=model,
+                event_cb=event_cb,
+            )
+            if fast_reply is not None:
+                tb.step("fast_path", "greeting", meta={"text_preview": saved_message[:40]})
+                tb.reply(fast_reply, usage=fast_usage)
+                full_trace = tb.build()
+                conversation_service.add_message(
+                    conv.id, "assistant", fast_reply, db,
+                    trace=json.dumps(full_trace) if full_trace else None,
+                )
+                return fast_reply, {
+                    "intention": "greeting (fast path)",
+                    "tools_used": [],
+                    "signals": {},
+                }
+
         # ── Unified signal extraction ───────────────────────────────────────
         # One LLM call per turn surfaces all three signal types (tone
         # corrections, feature requests, memory candidates).
@@ -1647,7 +1692,46 @@ class Orchestrator:
         # system-style message so long sessions retain early context past the
         # 10-message truncation window.
         recent_messages = conversation_service.get_recent_messages(conv.id, limit=10, db=db)
-        recent_history = [{"role": m.role, "content": m.content} for m in recent_messages]
+
+        # Attach a per-message tool-call summary to each assistant turn
+        # so the LLM can see its own audit trail in history. Without
+        # this the model hallucinates whether it called tools earlier
+        # in the conv (conv #1155 / 2026-05-22: Gooni denied calling
+        # `list_recent_notes` despite the audit showing 2 calls that
+        # turn). Recent_history strips tool calls by default — only
+        # assistant text survives — so the model has amnesia about
+        # its own actions one turn later. Inline-appending the summary
+        # to the assistant content is the cheapest fix.
+        assistant_msg_ids = [m.id for m in recent_messages if m.role == "assistant"]
+        tool_names_by_msg: dict[int, list[str]] = {}
+        if assistant_msg_ids:
+            try:
+                tc_rows = (
+                    db.query(ToolCallModel)
+                    .filter(ToolCallModel.message_id.in_(assistant_msg_ids))
+                    .filter(ToolCallModel.status == "done")
+                    .order_by(ToolCallModel.id.asc())
+                    .all()
+                )
+                for tc in tc_rows:
+                    bucket = tool_names_by_msg.setdefault(tc.message_id, [])
+                    if tc.tool_name and tc.tool_name not in bucket:
+                        bucket.append(tc.tool_name)
+            except Exception as e:
+                print(f"[recent_history] tool audit attach failed: {e}")
+
+        recent_history = []
+        for m in recent_messages:
+            content = m.content or ""
+            if m.role == "assistant":
+                tools = tool_names_by_msg.get(m.id) or []
+                if tools:
+                    content = (
+                        f"{content}\n[tools you actually called this turn: "
+                        f"{', '.join(tools)}]"
+                    )
+            recent_history.append({"role": m.role, "content": content})
+
         if conv.summary:
             recent_history.insert(0, {
                 "role": "system",
@@ -2033,6 +2117,84 @@ class Orchestrator:
         for m in memories:
             lines.append(f"  - {m.get('content') or m.get('memory', '')[:120]}")
         return "\n".join(lines)
+
+    # ── Greeting fast-path helpers ──────────────────────────────────────
+    # Regex-only gate (no LLM) — the whole point is to skip downstream
+    # expense. Matches bare greetings w/ optional punctuation: "hey",
+    # "wsg gooni", "yo!", "good morning". Anything compound ("hey can
+    # you also...") fails the regex and falls through to the full
+    # pipeline.
+    _GREETING_RE = re.compile(
+        r"^\s*(?:hey+|hi+|hello+|wsg+|wassup+|sup+|yo+|"
+        r"(?:good\s+)?(?:morning|night|afternoon|evening)|gm|gn)"
+        r"(?:\s+(?:gooni|sir|man|bro|fam))?"
+        r"[!.?,\s]*$",
+        re.IGNORECASE,
+    )
+
+    def _is_bare_greeting(self, text: str) -> bool:
+        if not text:
+            return False
+        if len(text) > 32:
+            return False
+        return bool(self._GREETING_RE.match(text.strip()))
+
+    def _handle_greeting_fast(
+        self,
+        *,
+        user_msg: str,
+        conv,
+        source: str,
+        db,
+        model: str | None,
+        event_cb,
+    ) -> tuple[str | None, dict | None]:
+        """Single tiny LLM call against PERSONA + last few messages.
+        No memory recall, no plan, no verify, no reflexion. Saves
+        ~$0.03 + ~5s vs the full orchestrator path.
+
+        Returns (None, None) on any failure so the caller can fall
+        through to the full pipeline. Critically: the caller must NOT
+        double-save the assistant message — this helper persists nothing
+        beyond the assistant reply at the call site (caller does that).
+        """
+        if event_cb is not None:
+            try:
+                event_cb({"type": "stage", "stage": "fast_path", "label": "Quick reply"})
+            except Exception:
+                pass
+        try:
+            recent = conversation_service.get_recent_messages(conv.id, limit=4, db=db)
+            history_lines = []
+            for m in recent:
+                content = (m.content or "").strip()
+                if not content:
+                    continue
+                role = "Daniel" if m.role == "user" else "Gooni"
+                history_lines.append(f"{role}: {content}")
+            history_block = "\n".join(history_lines) if history_lines else "(no prior turns)"
+            prompt = (
+                f"{PERSONA_BLOCK}\n\n"
+                "This is a casual greeting. Reply terse — 1 short bubble. "
+                "No questions unless natural. Don't summon state or open a "
+                "task — Daniel just said hey.\n\n"
+                f"Recent conversation:\n{history_block}\n\n"
+                f"Daniel just said: {user_msg!r}\n\n"
+                "Your reply (alfred voice, ≤2 sentences):"
+            )
+            text = llm_client.generate_simple_completion(
+                prompt,
+                model="gpt-4o-mini",
+                max_tokens=80,
+                temperature=0.5,
+            )
+            text = (text or "").strip()
+            if not text:
+                return None, None
+            return text, {"tools_used": [], "tool_call_ids": []}
+        except Exception as e:
+            print(f"[fast_path:greeting] errored, falling through: {e}")
+            return None, None
 
 
 Orchestrator = Orchestrator()
