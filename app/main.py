@@ -302,6 +302,33 @@ async def _fire_nudge_once(force: bool = False) -> dict:
         db.close()
 
 
+async def _sleep_nudge_loop():
+    """Wake every 5 minutes and let proactive_nudge decide whether to
+    fire a late-night sleep callout. All logic — cutoff hour, activity
+    signal, idempotency, channel — lives in proactive_nudge so this
+    loop stays a dumb tick. Fail-open: any error here just sleeps and
+    retries.
+    """
+    # Stagger past boot so we don't race the alembic upgrade.
+    await asyncio.sleep(30)
+    while True:
+        try:
+            from .services.proactive_nudge import maybe_fire_sleep_nudge
+            db = SessionLocal()
+            try:
+                maybe_fire_sleep_nudge(db)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[sleep_nudge] tick error (ignored): {e}")
+        try:
+            await asyncio.sleep(300)
+        except asyncio.CancelledError:
+            return
+
+
 async def _nudge_loop():
     """Sleep until the next configured fire time, then fire. Re-reads Settings
     every iteration so a UI change to nudge_hour/minute/tz takes effect on the
@@ -668,12 +695,13 @@ async def _lifespan(app: FastAPI):
     capability_task = asyncio.create_task(_capability_telemetry_loop())
     todo_sweeper_task = asyncio.create_task(_todo_soft_delete_sweeper_loop())
     urgency_task = asyncio.create_task(_urgency_rollup_loop())
+    sleep_nudge_task = asyncio.create_task(_sleep_nudge_loop())
     try:
         yield
     finally:
         for t in (
             nudge_task, backfill_task, excerpt_task, mem_task, capability_task,
-            todo_sweeper_task, urgency_task,
+            todo_sweeper_task, urgency_task, sleep_nudge_task,
         ):
             t.cancel()
             try:

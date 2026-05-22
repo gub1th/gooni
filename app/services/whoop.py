@@ -357,4 +357,13 @@ def upsert_today_snapshot(db: Session, payload: dict[str, Any]) -> WhoopSnapshot
     row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
+    # Proactive nudge — phase 0. Fires once per fresh source_updated_at
+    # via WhatsApp. Lazy import to avoid an import cycle (proactive_nudge
+    # imports from whoop.models indirectly). Fail-open: any error here
+    # must not break whoop ingest.
+    try:
+        from .proactive_nudge import maybe_fire_whoop_nudge
+        maybe_fire_whoop_nudge(row, db)
+    except Exception as e:
+        print(f"[whoop] proactive nudge hook errored (ignored): {e}")
     return row

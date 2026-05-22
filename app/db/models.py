@@ -732,6 +732,19 @@ class Settings(Base):
     # (same shape as nudge_last_sent_day). Prevents double-fire when Fly
     # scales horizontally — the loop checks this before doing work.
     capability_telemetry_last_run_day = Column(String, nullable=True)
+    # Proactive nudges (phase 0). Each column is the idempotency token
+    # for one trigger; the proactive_nudge_service refuses to re-fire on
+    # the same value.
+    #   last_whoop_nudge_source_ts: WhoopSnapshot.source_updated_at the
+    #     last time we pinged about whoop. Fresh source_updated_at → new
+    #     ping; same → skip.
+    #   last_sleep_nudge_day: YYYY-MM-DD in sleep_cutoff_tz. One sleep
+    #     ping per night max.
+    #   sleep_cutoff_hour: local hour at which "you're up too late"
+    #     triggers fire. 1 = past 1am. NULL → defaults to 1 in code.
+    last_whoop_nudge_source_ts = Column(DateTime, nullable=True)
+    last_sleep_nudge_day = Column(String, nullable=True)
+    sleep_cutoff_hour = Column(Integer, nullable=True)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )

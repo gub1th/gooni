@@ -38,7 +38,7 @@ See `docs/TODO.md` (gitignored — local only).
 
 ### Backend (`app/`)
 
-- **`app/main.py`** — FastAPI routes + startup migrations. CORS allows `localhost:5173`. Daily nudge scheduler + capability telemetry rollup + fly-revive boot hook live in lifespan.
+- **`app/main.py`** — FastAPI routes + startup migrations. CORS allows `localhost:5173`. Daily nudge scheduler + capability telemetry rollup + fly-revive boot hook + sleep-nudge tick (`_sleep_nudge_loop`, ~5 min cadence) live in lifespan.
 - **`app/db/database.py`** — SQLite via `SessionLocal`, `get_db`.
 - **`app/db/models.py`** — SQLAlchemy models. Grep for fields; high-leverage notes only:
   - `Note` — `excerpt` cached preview (≤240 char, HTML/img stripped) populated on save; lazy-backfilled at startup. List endpoints don't ship full body. `status` graduation lifecycle (`unprocessed|graduated|archived`, default `unprocessed`, indexed) — drives the UNPROCESSED sidebar triage queue + synthesizer's source filter. Note becomes `graduated` once it spawns Promise/Todo/Habit/Focus (tracked via `derives_from` edges, wired in PR-E); `archived` is a manual tombstone via `PATCH /notes/{id}` w/ `{"status":"archived"}`. `GET /notes/unprocessed` returns the queue.
@@ -83,6 +83,7 @@ See `docs/TODO.md` (gitignored — local only).
 - **`app/services/note_service.py`** — Embedding + space suggest + related notes (OpenAI embeddings, cosine).
 - **`app/services/take_service.py`** — Daily LLM takes (`GooniTake`, kind=focus|dev). `PROMPT_VERSIONS` per kind; stale rows auto-regenerate. Empty takes not persisted (keeps yesterday alive when source is empty). **Dev take = JSON** (v3): array of `{theme, summary}`, max 5. Frontend `parseDevTake` handles legacy v2 prose.
 - **`app/services/todo_nudge.py`** — Daily morning digest. Picks ONE thing (priority: promise due within 24h → any pending promise → primary todo → most-overdue todo) and asks conversationally. Sweeps `promise_service.auto_mark_overdue` first. Voice instruction enforces friend-texting cadence; falls back to static one-liner if LLM fails.
+- **`app/services/proactive_nudge.py`** — Proactive Gooni phase 0. Two deterministic WhatsApp pings: `maybe_fire_whoop_nudge(row, db)` (fires on every fresh `WhoopSnapshot.source_updated_at` from `whoop.upsert_today_snapshot`'s post-commit hook; alfred-voice summary; idempotent on `Settings.last_whoop_nudge_source_ts`) and `maybe_fire_sleep_nudge(db)` (lifespan tick every ~5 min; fires when local hour ≥ `Settings.sleep_cutoff_hour` (default 1) AND active signal (msg/claude turn/note) in last 15 min AND not already pinged tonight; idempotent on `Settings.last_sleep_nudge_day`). No LLM in the loop — rules only. Channel hardcoded to WhatsApp (first handle from `WHATSAPP_ALLOWED_HANDLES`).
 - **`app/services/image_storage.py`** — Cloudflare R2 uploader. `POST /uploads/image`. `R2NotConfigured` → 503 → frontend falls back to inline base64.
 - **`app/llm/client.py`** — OpenAI wrapper. Default `gpt-4o-mini`. `_execute_with_audit` writes ToolCall rows; failures logged + swallowed (never breaks chat path).
 
