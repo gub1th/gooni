@@ -908,6 +908,20 @@ class WhoopSnapshot(Base):
     sleep_minutes = Column(Integer, nullable=True)
     # Sleep performance percentage (0–100).
     sleep_performance_pct = Column(Float, nullable=True)
+    # Actual bed/wake timestamps from Whoop's sleep session. Naive UTC.
+    # Lets Gooni answer "when did i sleep last night" instead of just
+    # "how long". Nullable — older rows + days w/o a synced sleep
+    # session leave these NULL.
+    sleep_start_at = Column(DateTime, nullable=True)
+    sleep_end_at = Column(DateTime, nullable=True)
+    # Sleep efficiency = % of in-bed time that was actual sleep
+    # (Whoop `score.sleep_efficiency_percentage`). Distinct from
+    # sleep_performance_pct, which is Whoop's composite quality score.
+    sleep_efficiency_pct = Column(Float, nullable=True)
+    # Disturbance count — number of wakes during the night
+    # (Whoop `score.stage_summary.disturbance_count`). High count =
+    # fragmented sleep even when total duration is fine.
+    sleep_disturbance_count = Column(Integer, nullable=True)
 
     # Newest `updated_at` across the upstream Whoop records (recovery /
     # cycle / sleep) this snapshot was rolled up from. Distinct from

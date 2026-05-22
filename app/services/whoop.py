@@ -319,6 +319,25 @@ def fetch_today_snapshot(db: Session) -> dict[str, Any] | None:
         except (ValueError, TypeError):
             continue
 
+    # Sleep session bed/wake timestamps. Whoop returns ISO8601 w/ Z;
+    # normalize to naive UTC for storage (matches `source_updated_at`).
+    sleep_start_at = None
+    sleep_end_at = None
+    for attr, target in (("start", "sleep_start_at"), ("end", "sleep_end_at")):
+        raw = sleep.get(attr)
+        if not raw:
+            continue
+        try:
+            ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if ts.tzinfo is not None:
+                ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+            if target == "sleep_start_at":
+                sleep_start_at = ts
+            else:
+                sleep_end_at = ts
+        except (ValueError, TypeError):
+            continue
+
     return {
         "recovery_score": rec_score.get("recovery_score"),
         "hrv_rmssd_ms": rec_score.get("hrv_rmssd_milli"),
@@ -329,6 +348,12 @@ def fetch_today_snapshot(db: Session) -> dict[str, Any] | None:
             if slp_stage else None
         ),
         "sleep_performance_pct": slp_score.get("sleep_performance_percentage"),
+        "sleep_start_at": sleep_start_at,
+        "sleep_end_at": sleep_end_at,
+        "sleep_efficiency_pct": slp_score.get("sleep_efficiency_percentage"),
+        "sleep_disturbance_count": (
+            slp_stage.get("disturbance_count") if slp_stage else None
+        ),
         "fetched_at": end.isoformat(),
         "source_updated_at": source_updated_at,
     }
@@ -351,6 +376,10 @@ def upsert_today_snapshot(db: Session, payload: dict[str, Any]) -> WhoopSnapshot
     row.strain = payload.get("strain")
     row.sleep_minutes = payload.get("sleep_minutes")
     row.sleep_performance_pct = payload.get("sleep_performance_pct")
+    row.sleep_start_at = payload.get("sleep_start_at")
+    row.sleep_end_at = payload.get("sleep_end_at")
+    row.sleep_efficiency_pct = payload.get("sleep_efficiency_pct")
+    row.sleep_disturbance_count = payload.get("sleep_disturbance_count")
     src_ts = payload.get("source_updated_at")
     if src_ts is not None:
         row.source_updated_at = src_ts

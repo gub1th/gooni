@@ -5523,6 +5523,16 @@ def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
         "strain": row.strain if row else None,
         "sleep_minutes": row.sleep_minutes if row else None,
         "sleep_performance_pct": row.sleep_performance_pct if row else None,
+        "sleep_start_at": (
+            row.sleep_start_at.isoformat()
+            if row and row.sleep_start_at else None
+        ),
+        "sleep_end_at": (
+            row.sleep_end_at.isoformat()
+            if row and row.sleep_end_at else None
+        ),
+        "sleep_efficiency_pct": row.sleep_efficiency_pct if row else None,
+        "sleep_disturbance_count": row.sleep_disturbance_count if row else None,
         "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
         "source_updated_at": (
             row.source_updated_at.isoformat()
