@@ -1,6 +1,8 @@
 import json
 import re
 import threading
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from ..db.models import ToolCall as ToolCallModel
 
@@ -1059,9 +1061,112 @@ def _build_state_block(db) -> str:
             f"blast {t.blast_radius or '?'}/5)"
         )
 
+    # Cal snapshot — today + next ~24h. Proactive Gooni phase 0: bot turns
+    # become schedule-aware so "what's my afternoon" answers from cal, not
+    # a shrug. Cached 5 min at module scope so we don't hammer Google on
+    # every chat turn. Skip silently when cal is disconnected.
+    try:
+        cal_lines = _build_calendar_lines(db)
+        for cl in cal_lines:
+            lines.append(cl)
+    except Exception as e:
+        print(f"[state_block] calendar surface failed: {e}")
+
     if not lines:
         return ""
     return "[your state right now]\n" + "\n".join(lines)
+
+
+# ── Calendar surface (state_block helper) ─────────────────────────────
+
+
+# Module-level cache for calendar fetches. Key is unused for now
+# (single-tenant), value is (fetched_at_utc, list_of_formatted_lines).
+_CAL_CACHE: dict[str, tuple[datetime, list[str]]] = {}
+_CAL_TTL_SECONDS = 300  # 5 min
+
+
+def _format_cal_event(ev: dict, tz: ZoneInfo) -> str | None:
+    """Format one Google event row as a one-line state_block entry.
+    Returns None on garbage / events we don't want surfaced (cancelled,
+    declined). Prose-shape: '3:00pm — Lunch with Maya'."""
+    if not isinstance(ev, dict):
+        return None
+    if ev.get("status") == "cancelled":
+        return None
+    # Skip events Daniel explicitly declined. attendees is a list of
+    # {email, self: true, responseStatus: ...}.
+    for att in (ev.get("attendees") or []):
+        if att.get("self") and att.get("responseStatus") == "declined":
+            return None
+    summary = (ev.get("summary") or "(no title)").strip()
+    if len(summary) > 60:
+        summary = summary[:60].rstrip() + "…"
+    start = ev.get("start") or {}
+    if start.get("date"):
+        # All-day event — render as "all-day".
+        return f"all-day — {summary}"
+    dt_str = start.get("dateTime")
+    if not dt_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        local = dt.astimezone(tz)
+        time_part = local.strftime("%I:%M%p").lstrip("0").lower()
+    except Exception:
+        return None
+    return f"{time_part} — {summary}"
+
+
+def _build_calendar_lines(db) -> list[str]:
+    """Pull today + next ~24h of cal events, format up to 5 for the
+    state_block. Module-cached 5 min. Empty list when cal disconnected
+    or the cal API errors."""
+    from . import google_calendar as gcal
+
+    now_utc = datetime.utcnow()
+    cached = _CAL_CACHE.get("primary")
+    if cached and (now_utc - cached[0]).total_seconds() < _CAL_TTL_SECONDS:
+        return cached[1]
+
+    try:
+        # Only fetch if cal is connected. get_valid_access_token returns
+        # None when no row exists; skip silently in that case.
+        if gcal.get_valid_access_token(db) is None:
+            _CAL_CACHE["primary"] = (now_utc, [])
+            return []
+    except Exception:
+        # Network blip or refresh fail — don't poison state_block with
+        # a cal error. Cache empty so we don't retry on every turn.
+        _CAL_CACHE["primary"] = (now_utc, [])
+        return []
+
+    tz = ZoneInfo("America/Los_Angeles")
+    time_min = now_utc.replace(tzinfo=ZoneInfo("UTC")).isoformat()
+    time_max = (now_utc + timedelta(hours=24)).replace(
+        tzinfo=ZoneInfo("UTC")
+    ).isoformat()
+
+    try:
+        events = gcal.list_events(db, time_min, time_max, max_results=10)
+    except Exception as e:
+        print(f"[state_block] cal list_events failed: {e}")
+        _CAL_CACHE["primary"] = (now_utc, [])
+        return []
+
+    formatted: list[str] = []
+    for ev in events[:5]:
+        line = _format_cal_event(ev, tz)
+        if line:
+            formatted.append(f"  · {line}")
+
+    if not formatted:
+        result = ["- next 24h on calendar: nothing scheduled"]
+    else:
+        result = ["- next 24h on calendar:"] + formatted
+
+    _CAL_CACHE["primary"] = (now_utc, result)
+    return result
 
 
 def _build_time_block(db) -> str:
