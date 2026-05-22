@@ -745,6 +745,15 @@ class Settings(Base):
     last_whoop_nudge_source_ts = Column(DateTime, nullable=True)
     last_sleep_nudge_day = Column(String, nullable=True)
     sleep_cutoff_hour = Column(Integer, nullable=True)
+    # Whoop debounce — fixes the dup-ping race where recovery + cycle +
+    # sleep webhooks fire within seconds, each passing the idempotency
+    # check BEFORE any of them commits. Instead of firing on the spot,
+    # `maybe_fire_whoop_nudge` writes the candidate snapshot's source_ts
+    # here and stamps `pending_set_at`. A lifespan tick fires the pending
+    # ping only after `pending_set_at` has been stable for ≥3 min, so
+    # bursts collapse to one ping carrying the LATEST snapshot's data.
+    whoop_nudge_pending_source_ts = Column(DateTime, nullable=True)
+    whoop_nudge_pending_set_at = Column(DateTime, nullable=True)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )

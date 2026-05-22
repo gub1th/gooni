@@ -302,29 +302,33 @@ async def _fire_nudge_once(force: bool = False) -> dict:
         db.close()
 
 
-async def _sleep_nudge_loop():
-    """Wake every 5 minutes and let proactive_nudge decide whether to
-    fire a late-night sleep callout. All logic — cutoff hour, activity
-    signal, idempotency, channel — lives in proactive_nudge so this
-    loop stays a dumb tick. Fail-open: any error here just sleeps and
-    retries.
-    """
+async def _proactive_nudge_loop():
+    """Single tick driving every proactive surface: sleep callout +
+    debounced whoop ping. Runs every 60s so the whoop debouncer has
+    minute-level resolution while the sleep callout stays cheap. All
+    decision logic lives in proactive_nudge; this loop just calls the
+    checks and fails open. Renamed from `_sleep_nudge_loop` once the
+    whoop debouncer landed."""
     # Stagger past boot so we don't race the alembic upgrade.
     await asyncio.sleep(30)
     while True:
         try:
-            from .services.proactive_nudge import maybe_fire_sleep_nudge
+            from .services.proactive_nudge import (
+                maybe_fire_sleep_nudge,
+                process_pending_whoop_nudge,
+            )
             db = SessionLocal()
             try:
+                process_pending_whoop_nudge(db)
                 maybe_fire_sleep_nudge(db)
             finally:
                 db.close()
         except asyncio.CancelledError:
             return
         except Exception as e:
-            print(f"[sleep_nudge] tick error (ignored): {e}")
+            print(f"[proactive_nudge] tick error (ignored): {e}")
         try:
-            await asyncio.sleep(300)
+            await asyncio.sleep(60)
         except asyncio.CancelledError:
             return
 
@@ -695,7 +699,7 @@ async def _lifespan(app: FastAPI):
     capability_task = asyncio.create_task(_capability_telemetry_loop())
     todo_sweeper_task = asyncio.create_task(_todo_soft_delete_sweeper_loop())
     urgency_task = asyncio.create_task(_urgency_rollup_loop())
-    sleep_nudge_task = asyncio.create_task(_sleep_nudge_loop())
+    sleep_nudge_task = asyncio.create_task(_proactive_nudge_loop())
     try:
         yield
     finally:

@@ -170,12 +170,25 @@ def _compose_whoop_message(row: WhoopSnapshot) -> str:
     return f"{opener} {summary}."
 
 
-def maybe_fire_whoop_nudge(row: WhoopSnapshot, db: Session) -> bool:
-    """Fire a whoop-stats ping if this snapshot's source_updated_at is
-    fresh relative to the last ping. Returns True if a ping was sent.
+_WHOOP_DEBOUNCE_SECONDS = 180  # 3 min stability window
 
-    Fail-open: catches every error path so whoop ingest never breaks
-    on a nudge bug. Idempotency lives on Settings.last_whoop_nudge_source_ts.
+
+def maybe_fire_whoop_nudge(row: WhoopSnapshot, db: Session) -> bool:
+    """Queue a whoop-stats ping for the debouncer instead of firing
+    inline. Returns True when something was queued (or short-circuited
+    because nothing new).
+
+    Why debounce: Whoop webhooks fire as a burst (recovery + cycle +
+    sleep arrive within seconds), and the earliest webhook may carry
+    incomplete/stale sleep data while a later one in the same burst
+    has the finalized window. Firing inline produced 2 pings within
+    1 second w/ different sleep timings (conv #1162 on 2026-05-22).
+
+    Now: stamp `whoop_nudge_pending_*` on Settings. The lifespan tick
+    `process_pending_whoop_nudge` actually sends ~3 min after the LAST
+    update, so bursts collapse to one ping carrying the latest data.
+
+    Fail-open as before.
     """
     if row is None:
         return False
@@ -183,23 +196,76 @@ def maybe_fire_whoop_nudge(row: WhoopSnapshot, db: Session) -> bool:
         s = _settings(db)
         if s is None:
             return False
-        src_ts = row.source_updated_at
-        # No source timestamp from Whoop — fall back to row.updated_at so
-        # we still ping when the row is genuinely new today.
-        compare_ts = src_ts or row.updated_at
+        compare_ts = row.source_updated_at or row.updated_at
         if compare_ts is None:
             return False
+        # Already pinged this exact source_ts — nothing new to debounce.
         if s.last_whoop_nudge_source_ts is not None and compare_ts <= s.last_whoop_nudge_source_ts:
-            # Same (or older) snapshot — already pinged.
             return False
-        message = _compose_whoop_message(row)
-        if not _send_wa(message):
-            return False
-        s.last_whoop_nudge_source_ts = compare_ts
+        # Update the pending slot. Re-stamps pending_set_at so the
+        # debouncer waits another full window from THIS update.
+        s.whoop_nudge_pending_source_ts = compare_ts
+        s.whoop_nudge_pending_set_at = datetime.utcnow()
         db.commit()
         return True
     except Exception as e:
-        print(f"[proactive_nudge] whoop nudge errored (ignored): {e}")
+        print(f"[proactive_nudge] whoop nudge queue errored (ignored): {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return False
+
+
+def process_pending_whoop_nudge(db: Session) -> bool:
+    """Lifespan tick — fires the pending whoop ping when the staging
+    slot has been stable for ≥`_WHOOP_DEBOUNCE_SECONDS`. Uses the
+    LATEST whoop_snapshot row (today's data) since that's what the
+    user wants to see.
+
+    Returns True if a ping was sent.
+    """
+    try:
+        s = _settings(db)
+        if s is None:
+            return False
+        pending_ts = s.whoop_nudge_pending_source_ts
+        pending_set = s.whoop_nudge_pending_set_at
+        if pending_ts is None or pending_set is None:
+            return False
+        if (datetime.utcnow() - pending_set).total_seconds() < _WHOOP_DEBOUNCE_SECONDS:
+            return False
+        # Pull the snapshot the pending ts came from — but use whatever
+        # is freshest in `whoop_snapshots` since the burst may have
+        # written more recent data while we waited. The day key is
+        # `date` (one row per day) so latest = newest non-null updated_at.
+        latest = (
+            db.query(WhoopSnapshot)
+            .order_by(WhoopSnapshot.updated_at.desc())
+            .first()
+        )
+        if latest is None:
+            # Clean up the stale pending — no snapshot to send anyway.
+            s.whoop_nudge_pending_source_ts = None
+            s.whoop_nudge_pending_set_at = None
+            db.commit()
+            return False
+
+        message = _compose_whoop_message(latest)
+        sent = _send_wa(message)
+        if not sent:
+            # Don't clear the pending slot — try again next tick. If WA
+            # is broken we'd rather retry than lose the ping silently.
+            return False
+        s.last_whoop_nudge_source_ts = (
+            latest.source_updated_at or latest.updated_at or pending_ts
+        )
+        s.whoop_nudge_pending_source_ts = None
+        s.whoop_nudge_pending_set_at = None
+        db.commit()
+        return True
+    except Exception as e:
+        print(f"[proactive_nudge] pending whoop process errored (ignored): {e}")
         try:
             db.rollback()
         except Exception:
