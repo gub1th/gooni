@@ -132,16 +132,19 @@ function AppShell() {
   // Compose / new-chat callbacks. The store actions live in Zustand
   // already; we just call them then navigate. routes/index.tsx's
   // useEffect on `search` repopulates / re-views accordingly.
-  function handleCompose() {
+  async function handleCompose() {
     const spaceId = selectedSpaceId ?? "general";
     selectSpace(spaceId);
-    createNote(spaceId);
-    // createNote sets activeNoteId → NotesPage's effect on activeNoteId
-    // rewrites the URL to ?note=<id>, which flips view to "notes".
+    // Await the create so we have the real note id, then put it directly
+    // in the URL. Previously this fired the navigate before the API
+    // resolved → URL landed on / with note=undefined → view derived to
+    // 'dashboard' and the new note never opened. (Daniel reported
+    // "click + see network calls but stay on dashboard".)
+    const real = await createNote(spaceId);
     navigate({
       to: "/",
       search: {
-        note: undefined,
+        note: real?.id,
         conv: undefined,
         list: undefined,
         audit: undefined,
