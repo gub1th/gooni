@@ -122,7 +122,11 @@ class SetTodoStateTool(BaseTool):
         "'not_yet' (not started), 'doing' (in progress), 'done' (complete). "
         "Use 'doing' when Daniel says 'starting X', 'done' when he says "
         "'finished X' / 'done with X', 'not_yet' to reopen something he "
-        "marked done by accident. Shortest-match wins."
+        "marked done by accident. Call ONCE per intent — do NOT retry "
+        "with shorter or alternate substrings if the first call fails. "
+        "If multiple todos match, the tool returns an ambiguity error: "
+        "ask Daniel to clarify which one. If no todo matches, the tool "
+        "says so honestly — surface the miss to the user, don't loop."
     )
     parameters = {
         "type": "object",
@@ -148,6 +152,8 @@ class SetTodoStateTool(BaseTool):
         **kwargs,
     ) -> str:
         from ..services.todo_service import todo_service
+        from ..db.models import Todo
+        from datetime import datetime, timedelta
 
         if db is None:
             return "(no db session)"
@@ -158,6 +164,47 @@ class SetTodoStateTool(BaseTool):
         only_open = state == "done"
         t, err = _find_todo_by_match(db, match, only_open=only_open)
         if err:
+            # G4: closed-this-turn fallback. When state=done + no open
+            # match, scan recently-closed todos (last 90s ≈ same turn)
+            # for a substring hit. The WA seg 319 bug fired because call
+            # #71 closed the todo and call #72 (LLM-issued redundant
+            # variant) couldn't find any open match — its error string
+            # was the only signal the LLM had, so the reply said "match
+            # missed." Surfacing the just-closed match here gives the
+            # LLM enough context to acknowledge the close instead of
+            # contradicting it. The react-loop dedup gate also catches
+            # this case, but defense in depth: a different shorter match
+            # won't fingerprint-collide, so we need both.
+            if state == "done" and (match or "").strip():
+                try:
+                    cutoff = datetime.utcnow() - timedelta(seconds=90)
+                    needle = (match or "").lower().strip()
+                    rows = (
+                        db.query(Todo.id, Todo.text, Todo.updated_at, Todo.state)
+                        .filter(
+                            Todo.deleted_at.is_(None),
+                            Todo.state == "done",
+                            Todo.updated_at >= cutoff,
+                        )
+                        .all()
+                    )
+                    matches = [
+                        (rid, rtext) for rid, rtext, _, _ in rows
+                        if needle in (rtext or "").lower()
+                    ]
+                    if matches:
+                        # Pick the shortest matching text (closest fit).
+                        matches.sort(key=lambda r: len(r[1] or ""))
+                        _, hit_text = matches[0]
+                        return (
+                            f"(no OPEN todo matching '{match}' — but you "
+                            f"just closed '{hit_text}' earlier this turn. "
+                            f"If that was the intended close, no further "
+                            f"action needed; acknowledge it as already "
+                            f"closed and move on.)"
+                        )
+                except Exception as e:
+                    print(f"[set_todo_state] closed-this-turn check failed: {e}")
             return err
         todo_service.update(db, t.id, state=state)
         mark = {"not_yet": "[ ]", "doing": "[~]", "done": "[x]"}[state]
