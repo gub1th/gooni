@@ -162,6 +162,23 @@ _READ_ONLY_TOOLS = {
     "get_leetcode_activity", "list_comments", "list_focus_signals",
 }
 
+# G4: phrases that DENY a state change happened. If the draft contains
+# any of these AND a state-changing tool actually succeeded this turn,
+# the reply contradicts its own work — force regen. Catches the WA seg
+# 319 msg 1171 failure: set_todo_state #71 closed the todo, but the LLM
+# said "couldn't formally close it, sir — that match missed."
+_DENIED_CHANGE_RE = re.compile(
+    r"\b("
+    r"couldn'?t (?:formally )?(?:close|track|log|save|add|update|create)|"
+    r"could not (?:close|track|log|save|add|update|create)|"
+    r"wasn'?t able to|was not able to|"
+    r"no match(?:ed)?|match missed|missed the match|"
+    r"not formally tracked|nothing tracked|"
+    r"no luck|failed to|didn'?t (?:close|land|track|save|stick)"
+    r")\b",
+    re.IGNORECASE,
+)
+
 
 def _deterministic_unbacked_check(
     *,
@@ -210,6 +227,74 @@ def _deterministic_unbacked_check(
         f"this turn — no router-layer captures and no state-changing tool "
         f"call. Drop the verb or scope it honestly "
         f'("noted in chat, sir — not formally tracked").'
+    )
+
+
+def _deterministic_denied_success_check(
+    *,
+    draft: str,
+    captured_features: list[dict],
+    captured_promises: list[dict],
+    captured_todos: list[dict],
+    completed_todos: list[dict] | None,
+    killed_todos: list[dict] | None,
+    edited_todos: list[dict] | None,
+    implicit_done_todos: list[dict] | None,
+    tool_call_ids: list[int],
+    db,
+) -> str | None:
+    """Inverse of _deterministic_unbacked_check: reply DENIES a state
+    change ("couldn't close", "match missed", "no luck") while a real
+    write actually landed this turn — either a router capture or a
+    successful state-changing chat tool call. Force regen.
+
+    Catches the WA seg 319 msg 1171 failure: set_todo_state call #71
+    closed the todo, but call #72 (LLM-issued redundant variant) failed,
+    and the LLM narrated #72's failure as the truth.
+    """
+    if not draft:
+        return None
+    m = _DENIED_CHANGE_RE.search(draft)
+    if not m:
+        return None
+    # Did any write actually land?
+    real_router_write = bool(
+        captured_features
+        or captured_promises
+        or captured_todos
+        or (completed_todos or [])
+        or (killed_todos or [])
+        or (edited_todos or [])
+        or (implicit_done_todos or [])
+    )
+    real_tool_write = False
+    if tool_call_ids:
+        try:
+            rows = (
+                db.query(ToolCallModel)
+                .filter(ToolCallModel.id.in_(tool_call_ids))
+                .all()
+            )
+            for r in rows:
+                if r.status != "done":
+                    continue
+                if (r.tool_name or "") in _READ_ONLY_TOOLS:
+                    continue
+                # State-changing tool succeeded.
+                real_tool_write = True
+                break
+        except Exception as e:
+            print(f"[denied_success_check] audit read failed: {e}")
+            return None
+    if not (real_router_write or real_tool_write):
+        return None
+    return (
+        f'reply says "{m.group(0)}" — denying a state change — but a '
+        f"successful write DID land this turn (router capture or a "
+        f"state-changing tool call returned done). The reply contradicts "
+        f"its own work. Acknowledge what actually happened: name the "
+        f"action (close/track/log) plainly in alfred voice with a sir "
+        f"anchor, no raw ids."
     )
 
 
@@ -601,12 +686,12 @@ def _build_ack(
         ]
         n = len(captured_features)
         if n == 1:
-            parts.append(f"noted. {titles[0]} for backlog")
+            parts.append(f"on the backlog, sir: {titles[0]}")
         elif n == 2:
-            parts.append(f"noted both. {titles[0]}, {titles[1]} for backlog")
+            parts.append(f"on the backlog, sir: {titles[0]}, {titles[1]}")
         else:
             parts.append(
-                f"noted all {n}. {', '.join(titles)} for backlog"
+                f"on the backlog, sir ({n}): {', '.join(titles)}"
             )
     if captured_promises:
         # G3.1: all promises are `active` on create — no proposed/pending
@@ -640,13 +725,13 @@ def _build_ack(
             summary = _trim(p.get("summary") or p.get("utterance") or "")
             tail = _clarifier_tail(p) + _voice_tail(p)
             if slip > 0:
-                parts.append(f"\"{summary}\" — slip #{slip + 1}{tail}")
+                parts.append(f"tracked, sir — slip #{slip + 1} on \"{summary}\"{tail}")
             else:
-                parts.append(f"\"{summary}\" tracked{tail}")
+                parts.append(f"tracked \"{summary}\", sir{tail}")
         else:
             n = len(captured_promises)
             vague = sum(1 for p in captured_promises if p.get("needs_clarification"))
-            phrase = f"{n} promises tracked"
+            phrase = f"tracked {n}, sir"
             if vague:
                 phrase += f" ({vague} vague — sharpen or stay mush)"
             parts.append(phrase)
@@ -696,11 +781,11 @@ def _build_ack(
             ]
             n = len(fresh)
             if n == 1:
-                parts.append(f"noted. {texts[0]} for todos")
+                parts.append(f"noted {texts[0]}, sir.")
             elif n == 2:
-                parts.append(f"noted both. {texts[0]}, {texts[1]} for todos")
+                parts.append(f"noted {texts[0]} and {texts[1]}, sir.")
             else:
-                parts.append(f"noted all {n}. {', '.join(texts)} for todos")
+                parts.append(f"noted all {n}: {', '.join(texts)}, sir.")
             _ = two_count_idx  # signal kept for traceability; rendering inline above
 
     # G1.1 destructive-action acks. Verb-led, text-quoted, no opaque
@@ -718,11 +803,11 @@ def _build_ack(
         texts = [f"\"{_trim(t.get('text'))}\"" for t in killed_todos[:3]]
         n = len(killed_todos)
         if n == 1:
-            parts.append(f"killed {texts[0]}")
+            parts.append(f"killed {texts[0]}, sir.")
         elif n == 2:
-            parts.append(f"killed {texts[0]}, {texts[1]}")
+            parts.append(f"killed {texts[0]} and {texts[1]}, sir.")
         else:
-            parts.append(f"killed {n}: {', '.join(texts)}")
+            parts.append(f"killed {n}, sir: {', '.join(texts)}")
     if completed_todos:
         # G3.5: rendering varies by whether closure_note + spawned[] present.
         # Per Surface F spec: "closed X, sir. outcome logged. spawned: A, B."
@@ -749,20 +834,21 @@ def _build_ack(
             if outcome_present:
                 phrase += ". outcome logged"
             if spawned_for_this:
-                def _spawn_tag(t: dict) -> str:
-                    quoted = f"\"{_trim(t.get('text'))}\""
-                    tid = t.get("todo_id")
-                    return f"{quoted} (Todo #{tid})" if tid is not None else quoted
-                spawn_texts = ", ".join(_spawn_tag(t) for t in spawned_for_this[:3])
+                # id stays internal — surfaces via just_extracted_block for
+                # LLM grounding, NEVER in user-facing ack. Daniel called the
+                # "(Todo #N)" leak jira-bot syntax 2026-05-22.
+                spawn_texts = ", ".join(
+                    f"\"{_trim(t.get('text'))}\"" for t in spawned_for_this[:3]
+                )
                 phrase += f". spawned {spawn_texts}"
             parts.append(phrase)
         else:
             texts = [f"\"{_trim(t.get('text'))}\"" for t in completed_todos[:3]]
             n = len(completed_todos)
             if n == 2:
-                parts.append(f"closed {texts[0]}, {texts[1]}")
+                parts.append(f"closed {texts[0]} and {texts[1]}, sir.")
             else:
-                parts.append(f"closed {n}: {', '.join(texts)}")
+                parts.append(f"closed {n}, sir: {', '.join(texts)}")
     if merged_todos:
         # Render each merge as `"from" → "into"` so the direction is clear
         # (which text was kept vs absorbed).
@@ -1081,6 +1167,23 @@ def _build_state_block(db) -> str:
     except Exception as e:
         print(f"[state_block] calendar surface failed: {e}")
 
+    # G4: recent-activity surface. Daniel called this out 2026-05-22 —
+    # state_block was point-in-time only, so when he closed a todo via
+    # dashboard then texted "finished leetcode" 2min later, Gooni had no
+    # signal about the recent close and hallucinated a "match missed"
+    # failure. Recent activity = signal. NO raw ids in this section
+    # (alfred-voice contract); the LLM uses verb + quoted text + age to
+    # reconcile what just happened with the new utterance.
+    try:
+        from . import recent_activity
+        recent_lines = recent_activity.build_recent_activity_lines(db)
+        if recent_lines:
+            lines.append("[recent — last 1h]")
+            for rl in recent_lines:
+                lines.append(f"- {rl}")
+    except Exception as e:
+        print(f"[state_block] recent_activity surface failed: {e}")
+
     if not lines:
         return ""
     return "[your state right now]\n" + "\n".join(lines)
@@ -1368,11 +1471,19 @@ def _build_just_extracted_block(
     if not lines:
         return ""
     return (
-        "[just extracted from this message — already routed, don't "
-        "re-announce. kind+id pairs below are INTERNAL anchors so you "
-        "know the write is real; never recite the raw id number in your "
-        "user-facing reply — speak plainly (\"noted that\", \"on the "
-        "pile\", \"tracked\").]\n"
+        "[just extracted from this message — Gooni's separate ack stub "
+        "ALREADY confirmed the capture to the user (\"tracked X, sir\" / "
+        "\"closed X, sir\" / etc.) and that ack gets prepended to your "
+        "reply automatically. Do NOT also say \"tracked\", \"noted\", "
+        "\"logged\", \"on it\", \"got it\", \"saved\", \"added\", \"on "
+        "the pile\", or similar capture-confirmation phrasing — that's "
+        "double-narration. Kind+id pairs below are INTERNAL grounding "
+        "only — NEVER recite the raw id number to the user. Your reply "
+        "should continue the conversation (answer a question, push back, "
+        "ask a sharpener) as if no logging happened. If the user's "
+        "message is JUST a capture statement with nothing to respond to, "
+        "the orchestrator already short-circuited and your reply won't "
+        "be called.]\n"
         + "\n".join(lines)
     )
 
@@ -1647,6 +1758,42 @@ class Orchestrator:
                     # reply_intent; if it says "answer" or "acknowledge",
                     # we run the full LLM reply.
                     skip_normal_reply = routed.reply_intent in ("task_only", "no_reply")
+
+                    # G4: capture-only short-circuit. When the ack stub
+                    # already says "tracked X, sir" / "closed X, sir" and
+                    # the user message is a short statement (no question,
+                    # ≤12 words), an LLM continuation just adds filler
+                    # ("on it, sir. 450 now."). Daniel called this double-
+                    # narration 2026-05-22 on the "do 450" turn. The fix:
+                    # the ack stub IS the reply. Only fires when the
+                    # extractor didn't already pick task_only.
+                    if not skip_normal_reply:
+                        msg_text = (message or "").strip()
+                        word_count = len(msg_text.split())
+                        has_question = "?" in msg_text
+                        first_word = (msg_text.split() or [""])[0].lower().strip(",.!?;:")
+                        _QUESTION_WORDS = {
+                            "what", "when", "where", "how", "why", "who",
+                            "which", "can", "will", "should", "is", "are",
+                            "do", "does", "did", "could", "would", "wdym",
+                        }
+                        looks_like_question = first_word in _QUESTION_WORDS
+                        capture_happened = bool(
+                            captured_promises
+                            or captured_todos
+                            or completed_todos
+                            or killed_todos
+                            or merged_todos
+                            or implicit_done_todos
+                            or edited_todos
+                        )
+                        if (
+                            capture_happened
+                            and not has_question
+                            and not looks_like_question
+                            and word_count <= 12
+                        ):
+                            skip_normal_reply = True
 
         if skip_normal_reply and feedback_ack is not None:
             tb.reply(feedback_ack, usage={"short_circuit": True})
@@ -1984,6 +2131,25 @@ class Orchestrator:
                 if det_critique:
                     verify_ok = False
                     verify_critique = det_critique
+                # G4 inverse check: reply denies a state change while a
+                # real write landed. Catches "couldn't formally close it"
+                # contradiction (WA seg 319 msg 1171).
+                if verify_ok:
+                    denied_critique = _deterministic_denied_success_check(
+                        draft=response,
+                        captured_features=captured_features,
+                        captured_promises=captured_promises,
+                        captured_todos=captured_todos,
+                        completed_todos=completed_todos,
+                        killed_todos=killed_todos,
+                        edited_todos=edited_todos,
+                        implicit_done_todos=implicit_done_todos,
+                        tool_call_ids=(usage or {}).get("tool_call_ids") or [],
+                        db=db,
+                    )
+                    if denied_critique:
+                        verify_ok = False
+                        verify_critique = denied_critique
                 tb.step(
                     "verify",
                     "OK" if verify_ok else f"REVISE: {verify_critique[:120]}",

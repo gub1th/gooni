@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from datetime import datetime
@@ -14,6 +15,30 @@ from .prompts import (
     system_prompt,
     vision_prompt,
 )
+
+
+def _args_fingerprint(tool_args: dict) -> str:
+    """Stable hash of normalized tool args — case-insensitive on strings,
+    sorted keys. Used by the per-turn dedup gate to spot redundant calls
+    like set_todo_state(match="X") followed by set_todo_state(match="x ").
+
+    Strips trailing/leading whitespace + lowercases string values; leaves
+    non-string values untouched. JSON-encoded with sorted keys so dict
+    ordering can't fool the comparator.
+    """
+    def _norm(v):
+        if isinstance(v, str):
+            return v.strip().lower()
+        if isinstance(v, dict):
+            return {k: _norm(v[k]) for k in sorted(v.keys())}
+        if isinstance(v, list):
+            return [_norm(x) for x in v]
+        return v
+    try:
+        payload = json.dumps(_norm(tool_args), sort_keys=True, default=str)
+    except Exception:
+        payload = str(tool_args)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
 
 def _execute_with_audit(
@@ -164,6 +189,17 @@ class LLMClient:
         tracker = UsageTracker(active_model)
         tools_used = []
         tool_call_ids: list[int] = []
+        # G4: per-turn dedup cache. Keys = (tool_name, args_fingerprint).
+        # Values = the prior result string. When the LLM emits a second
+        # call with the same fingerprint (case-insensitive, whitespace-
+        # normalized), we short-circuit instead of re-executing — and we
+        # tell the model the prior outcome explicitly so it can finalize
+        # its reply instead of looping. Catches the WA seg 319 redundant
+        # set_todo_state(match="lowest common ancestor of binary tree
+        # leetcode") → set_todo_state(match="lowest common ancestor")
+        # sequence where the second call's failure overwrote the first
+        # call's success in the LLM's mental state.
+        prior_calls: dict[tuple[str, str], str] = {}
 
         try:
             for _ in range(5):
@@ -187,6 +223,23 @@ class LLMClient:
                     for tool_call in choice.message.tool_calls:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
+                        # G4: dedup gate. If this (tool, args) pair already
+                        # ran this turn, skip the audit-logging path + tell
+                        # the model the prior result + a finalize hint.
+                        key = (tool_name, _args_fingerprint(tool_args))
+                        if key in prior_calls:
+                            redundant_msg = (
+                                f"(redundant call — same args ran earlier this "
+                                f"turn. prior result was: {prior_calls[key][:300]}. "
+                                f"Don't retry with variants; finalize your reply "
+                                f"now based on the prior outcome.)"
+                            )
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": redundant_msg,
+                            })
+                            continue
                         tool = tool_map.get(tool_name)
                         result, tc_id = _execute_with_audit(
                             tool, tool_name, tool_args, db, conversation_id,
@@ -195,6 +248,7 @@ class LLMClient:
                         tools_used.append(tool_name)
                         if tc_id is not None:
                             tool_call_ids.append(tc_id)
+                        prior_calls[key] = result or ""
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -240,6 +294,8 @@ class LLMClient:
         tracker = UsageTracker(vision_model)
         tools_used = []
         tool_call_ids: list[int] = []
+        # G4: same dedup gate as the text path. See generate_chat_response_with_memory.
+        prior_calls: dict[tuple[str, str], str] = {}
 
         try:
             for _ in range(5):
@@ -258,6 +314,20 @@ class LLMClient:
                     for tool_call in choice.message.tool_calls:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
+                        key = (tool_name, _args_fingerprint(tool_args))
+                        if key in prior_calls:
+                            redundant_msg = (
+                                f"(redundant call — same args ran earlier this "
+                                f"turn. prior result was: {prior_calls[key][:300]}. "
+                                f"Don't retry with variants; finalize your reply "
+                                f"now based on the prior outcome.)"
+                            )
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": redundant_msg,
+                            })
+                            continue
                         tool = tool_map.get(tool_name)
                         result, tc_id = _execute_with_audit(
                             tool, tool_name, tool_args, db, conversation_id
@@ -265,6 +335,7 @@ class LLMClient:
                         tools_used.append(tool_name)
                         if tc_id is not None:
                             tool_call_ids.append(tc_id)
+                        prior_calls[key] = result or ""
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,

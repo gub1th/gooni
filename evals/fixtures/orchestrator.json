@@ -243,6 +243,44 @@
         "min_scores": {"helpful": 7, "no_hallucination": 8, "follows_prefs": 7}
       },
       "notes": "G3.5 chain-extraction test. Mirrors the segment-#280-style architectural validation: extractor must classify 'close X, gonna do Y' as kind=complete with spawned[] children, NOT as 3 separate creates. seed_todos pre-populates a 'prep for forge intro call' so the cosine match has a target. router:todo_completed + router:todo_spawned in must_invoke_tool catches regressions where the dispatch falls back to bare create."
+    },
+    {
+      "id": "015_done_signal_no_contradiction_on_success",
+      "source": "WA seg 319 msg 1170-1171 (2026-05-22) — leetcode finished turn",
+      "user_message": "finished the leetcode problem",
+      "seed_todos": [
+        {"text": "lowest common ancestor of binary tree leetcode", "state": "not_yet"}
+      ],
+      "must_not_include_regex": [
+        "(?i)couldn'?t\\s+(?:formally\\s+)?(?:close|track|log)",
+        "(?i)match\\s+missed",
+        "(?i)not\\s+formally\\s+tracked",
+        "(?i)no\\s+luck",
+        "(?i)didn'?t\\s+(?:close|land|track)",
+        "(Todo|Promise)\\s*#\\s*\\d"
+      ],
+      "judge": {
+        "model": "gpt-5.4",
+        "rubric": "User said 'finished the leetcode problem' with one open todo matching ('lowest common ancestor of binary tree leetcode'). The router done_signal path or the LLM-side set_todo_state path must close that todo. Reply must (a) acknowledge the close in alfred voice with a sir anchor — 'closed leetcode, sir.' or similar; (b) NOT deny success — no 'couldn't formally close it', 'match missed', 'not formally tracked'; (c) NOT cite raw DB ids — no 'Todo #142'. Even if the LLM emits two set_todo_state calls (a redundant variant on shorter substring), the closed-this-turn fallback in the tool should produce a context-rich message and the denied-success deterministic guard should catch any contradiction and force regen. Good shape: 'closed leetcode, sir.' Bad shape (the actual prod failure): 'couldn't formally close it, sir — that match missed.'",
+        "min_scores": {"helpful": 7, "no_hallucination": 8, "follows_prefs": 7}
+      },
+      "notes": "G4 regression lock. Captures the WA seg 319 leetcode failure: LLM ran set_todo_state twice — call #71 succeeded, call #72 (shorter match variant) failed because the todo was already closed, and the reply narrated call #72's failure as truth. Fix layers (defense in depth): tool description forbids retry-with-variants, set_todo_state has a closed-this-turn fallback when state=done + no open match, react-loop dedup catches identical retries, and _deterministic_denied_success_check forces regen when reply denies a state change that actually landed."
+    },
+    {
+      "id": "016_capture_only_short_circuit_no_double_narration",
+      "source": "WA seg 319 msg 1172-1173 (2026-05-22) — 'gonna do 450' turn",
+      "user_message": "gonna do 450",
+      "must_not_include_regex": [
+        "(Promise|Todo)\\s*#\\s*\\d",
+        "(?i)on\\s+it.{0,20}\\b450\\s+now",
+        "(?i)\"\\s*do\\s+450\\s*\"\\s+tracked"
+      ],
+      "judge": {
+        "model": "gpt-5.4",
+        "rubric": "User uttered a short soft commitment ('gonna do 450'). Router captures as a Promise. The orchestrator should short-circuit the LLM continuation because the message is ≤12 words, has no question mark, and no question word — the ack stub is the full reply. Reply must (a) be verb-first alfred voice — 'tracked \"gonna do 450\", sir' or similar; (b) NOT cite raw DB ids — no 'Promise #44'; (c) NOT add LLM-continuation filler — no 'on it, 450 now' or 'on it, sir. 450 now.' Good shape: a single phrase like 'tracked \"gonna do 450\", sir.' Bad shape (the actual prod failure): '\"do 450\" tracked\\n\\non it, sir. 450 now.' — verb-last echo + LLM continuation double-narration.",
+        "min_scores": {"helpful": 6, "follows_prefs": 8, "no_hallucination": 8}
+      },
+      "notes": "G4 regression lock. Captures the WA seg 319 'gonna do 450' failure: ack stub was '\"do 450\" tracked' (verb-last echo) and LLM appended 'on it, sir. 450 now.' as continuation. Two fixes layered: ack composer rewrite (verb-first, sir anchor, no echo shape) + capture-only short-circuit (ack stub IS the reply when user message is short capture-shape). The short-circuit gate uses word count + question-mark + leading-word heuristic; this case (4 words, no '?') should trip it."
     }
   ]
 }
