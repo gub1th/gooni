@@ -101,7 +101,18 @@ def _execute_with_audit(
         error = "unknown_tool"
     else:
         try:
-            result = tool.execute(db=db, **tool_args)
+            raw = tool.execute(db=db, **tool_args)
+            # Phase 2 (backlog #313): structured tool returns. Migrated
+            # write-tools return a typed dict {kind,id,status,summary,...};
+            # serialize to JSON so the LLM reads an unambiguous status enum
+            # as the tool-result message (and the audit row captures the
+            # same shape). Legacy tools return str → pass through unchanged.
+            # This is the single serialization choke point for both the
+            # text and vision tool loops.
+            if isinstance(raw, (dict, list)):
+                result = json.dumps(raw, default=str)
+            else:
+                result = raw
             status = "done"
             error = None
         except Exception as e:

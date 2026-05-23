@@ -1,4 +1,5 @@
 from .base import BaseTool
+from ._returns import TodoReturn
 
 
 VALID_TODO_STATES = ("not_yet", "doing", "done")
@@ -29,7 +30,10 @@ class AddTodoTool(BaseTool):
         "Add a todo to Daniel's dashboard. Use when he says 'remind me to X', "
         "'add a todo for X', 'I need to do X today/tomorrow'. Todos carry a "
         "3-state lifecycle (not_yet → doing → done); new todos start at "
-        "not_yet. Returns the todo id + text."
+        "not_yet. Returns a structured result {kind:'todo', status, summary}: "
+        "status='created' for a new todo, status='duplicate' when the text "
+        "already matched an open todo (the existing row was bumped, not "
+        "doubled — tell Daniel it's already on the list)."
     )
     parameters = {
         "type": "object",
@@ -46,24 +50,41 @@ class AddTodoTool(BaseTool):
         "required": ["text"],
     }
 
-    def execute(self, db=None, text: str = "", due_date: str = "", **kwargs) -> str:
+    def execute(self, db=None, text: str = "", due_date: str = "", **kwargs) -> TodoReturn:
         from datetime import datetime
 
         from ..services.todo_service import todo_service
 
         if db is None:
-            return "(no db session)"
+            return {"kind": "todo", "id": 0, "status": "invalid", "summary": "(no db session)"}
         text = (text or "").strip()
         if not text:
-            return "(text required)"
+            return {"kind": "todo", "id": 0, "status": "invalid", "summary": "(text required)"}
         due = None
         if due_date:
             try:
                 due = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
             except ValueError:
-                return f"(could not parse due_date '{due_date}' — use YYYY-MM-DD)"
+                return {
+                    "kind": "todo", "id": 0, "status": "invalid",
+                    "summary": f"could not parse due_date '{due_date}' — use YYYY-MM-DD",
+                }
+        # todo_service.create dedups at cosine ≥0.85: a near-paraphrase of an
+        # open todo bumps the existing row's mention_count instead of inserting
+        # a dupe. mention_count>1 means we hit that path → status='duplicate'.
         t = todo_service.create(db, text=text, due_date=due)
-        return f"added todo #{t.id}: {t.text}"
+        mc = t.mention_count or 1
+        if mc > 1:
+            return {
+                "kind": "todo", "id": t.id, "status": "duplicate",
+                "summary": f'already on the list — "{t.text}" (mention #{mc})',
+                "context": {"matched_text": t.text, "mention_count": mc},
+            }
+        return {
+            "kind": "todo", "id": t.id, "status": "created",
+            "summary": f'added "{t.text}"',
+            "context": {"matched_text": t.text},
+        }
 
 
 class ListTodosTool(BaseTool):
@@ -122,11 +143,15 @@ class SetTodoStateTool(BaseTool):
         "'not_yet' (not started), 'doing' (in progress), 'done' (complete). "
         "Use 'doing' when Daniel says 'starting X', 'done' when he says "
         "'finished X' / 'done with X', 'not_yet' to reopen something he "
-        "marked done by accident. Call ONCE per intent — do NOT retry "
-        "with shorter or alternate substrings if the first call fails. "
-        "If multiple todos match, the tool returns an ambiguity error: "
-        "ask Daniel to clarify which one. If no todo matches, the tool "
-        "says so honestly — surface the miss to the user, don't loop."
+        "marked done by accident. Shortest match wins.\n"
+        "Returns a structured result {kind:'todo', status, summary}:\n"
+        "  status='closed'|'reopened'|'started' — the change landed.\n"
+        "  status='already_in_state' — the todo was ALREADY in that state; "
+        "nothing to do. Acknowledge it as already done/started — do NOT say "
+        "you couldn't close it.\n"
+        "  status='not_found' — no todo matched; surface the miss honestly.\n"
+        "Call ONCE per intent. Do NOT retry with shorter or alternate "
+        "substrings — if status='not_found', ask Daniel to clarify, don't loop."
     )
     parameters = {
         "type": "object",
@@ -150,65 +175,45 @@ class SetTodoStateTool(BaseTool):
         match: str = "",
         state: str = "",
         **kwargs,
-    ) -> str:
+    ) -> TodoReturn:
         from ..services.todo_service import todo_service
-        from ..db.models import Todo
-        from datetime import datetime, timedelta
 
         if db is None:
-            return "(no db session)"
+            return {"kind": "todo", "id": 0, "status": "invalid", "summary": "(no db session)"}
         if state not in VALID_TODO_STATES:
-            return f"(invalid state '{state}'; use not_yet | doing | done)"
-        # When marking done, allow matching already-done items only if the
-        # caller is reopening — but for state=done we want only-open.
-        only_open = state == "done"
-        t, err = _find_todo_by_match(db, match, only_open=only_open)
+            return {
+                "kind": "todo", "id": 0, "status": "invalid",
+                "summary": f"invalid state '{state}'; use not_yet | doing | done",
+            }
+        # Phase 2: match ANY todo (not only-open). This is what kills the
+        # leetcode-class bug without the old 90s closed-this-turn fallback:
+        # when a todo is already in the requested state we now return
+        # status='already_in_state' instead of a free-text "(no match)".
+        # The redundant shorter-substring variant call that broke seg 319
+        # now lands on an unambiguous status the LLM can't misread as
+        # failure. The react-loop dedup gate still short-circuits identical
+        # args; this handles the variant-arg case.
+        t, err = _find_todo_by_match(db, match, only_open=False)
         if err:
-            # G4: closed-this-turn fallback. When state=done + no open
-            # match, scan recently-closed todos (last 90s ≈ same turn)
-            # for a substring hit. The WA seg 319 bug fired because call
-            # #71 closed the todo and call #72 (LLM-issued redundant
-            # variant) couldn't find any open match — its error string
-            # was the only signal the LLM had, so the reply said "match
-            # missed." Surfacing the just-closed match here gives the
-            # LLM enough context to acknowledge the close instead of
-            # contradicting it. The react-loop dedup gate also catches
-            # this case, but defense in depth: a different shorter match
-            # won't fingerprint-collide, so we need both.
-            if state == "done" and (match or "").strip():
-                try:
-                    cutoff = datetime.utcnow() - timedelta(seconds=90)
-                    needle = (match or "").lower().strip()
-                    rows = (
-                        db.query(Todo.id, Todo.text, Todo.updated_at, Todo.state)
-                        .filter(
-                            Todo.deleted_at.is_(None),
-                            Todo.state == "done",
-                            Todo.updated_at >= cutoff,
-                        )
-                        .all()
-                    )
-                    matches = [
-                        (rid, rtext) for rid, rtext, _, _ in rows
-                        if needle in (rtext or "").lower()
-                    ]
-                    if matches:
-                        # Pick the shortest matching text (closest fit).
-                        matches.sort(key=lambda r: len(r[1] or ""))
-                        _, hit_text = matches[0]
-                        return (
-                            f"(no OPEN todo matching '{match}' — but you "
-                            f"just closed '{hit_text}' earlier this turn. "
-                            f"If that was the intended close, no further "
-                            f"action needed; acknowledge it as already "
-                            f"closed and move on.)"
-                        )
-                except Exception as e:
-                    print(f"[set_todo_state] closed-this-turn check failed: {e}")
-            return err
+            return {
+                "kind": "todo", "id": 0, "status": "not_found",
+                "summary": f"no todo matching '{match}'",
+                "context": {"matched_text": match},
+            }
+        current = t.state or ("done" if t.done else "not_yet")
+        verb = {"done": "closed", "not_yet": "reopened", "doing": "started"}[state]
+        if current == state:
+            return {
+                "kind": "todo", "id": t.id, "status": "already_in_state",
+                "summary": f'"{t.text}" is already {state}',
+                "context": {"matched_text": t.text, "from_state": current, "to_state": state},
+            }
         todo_service.update(db, t.id, state=state)
-        mark = {"not_yet": "[ ]", "doing": "[~]", "done": "[x]"}[state]
-        return f"{mark} {t.text}"
+        return {
+            "kind": "todo", "id": t.id, "status": verb,
+            "summary": f'{verb} "{t.text}"',
+            "context": {"matched_text": t.text, "from_state": current, "to_state": state},
+        }
 
 
 # ── G1 groom-mutation tools — auto-act + soft-delete + 24h undo ────────

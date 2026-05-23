@@ -162,24 +162,6 @@ _READ_ONLY_TOOLS = {
     "get_leetcode_activity", "list_comments", "list_focus_signals",
 }
 
-# G4: phrases that DENY a state change happened. If the draft contains
-# any of these AND a state-changing tool actually succeeded this turn,
-# the reply contradicts its own work — force regen. Catches the WA seg
-# 319 msg 1171 failure: set_todo_state #71 closed the todo, but the LLM
-# said "couldn't formally close it, sir — that match missed."
-_DENIED_CHANGE_RE = re.compile(
-    r"\b("
-    r"couldn'?t (?:formally )?(?:close|track|log|save|add|update|create)|"
-    r"could not (?:close|track|log|save|add|update|create)|"
-    r"wasn'?t able to|was not able to|"
-    r"no match(?:ed)?|match missed|missed the match|"
-    r"not formally tracked|nothing tracked|"
-    r"no luck|failed to|didn'?t (?:close|land|track|save|stick)"
-    r")\b",
-    re.IGNORECASE,
-)
-
-
 def _deterministic_unbacked_check(
     *,
     draft: str,
@@ -230,72 +212,27 @@ def _deterministic_unbacked_check(
     )
 
 
-def _deterministic_denied_success_check(
-    *,
-    draft: str,
-    captured_features: list[dict],
-    captured_promises: list[dict],
-    captured_todos: list[dict],
-    completed_todos: list[dict] | None,
-    killed_todos: list[dict] | None,
-    edited_todos: list[dict] | None,
-    implicit_done_todos: list[dict] | None,
-    tool_call_ids: list[int],
-    db,
-) -> str | None:
-    """Inverse of _deterministic_unbacked_check: reply DENIES a state
-    change ("couldn't close", "match missed", "no luck") while a real
-    write actually landed this turn — either a router capture or a
-    successful state-changing chat tool call. Force regen.
+# Phase 2 (backlog #313): memory-citation anchors. The static system prompt
+# (app/llm/prompts.py master-rule #7) requires the LLM to tag every recalled
+# memory it synthesizes from with an inline [M#N] anchor — anti-hallucination
+# grounding. Those anchors are INTERNAL: they force the model to ground its
+# claims, but they're noise to the user. The leak: "job apps are still the
+# cleanest leverage [M#184]" surfaced verbatim in a WhatsApp reply. We strip
+# them on the way out so the grounding contract stays in the prompt while the
+# user sees clean prose. Matches single [M#1] and multi [M#3, M#7] forms.
+_MEMORY_ANCHOR_RE = re.compile(r"\s*\[M#\d+(?:\s*,\s*M#\d+)*\]")
 
-    Catches the WA seg 319 msg 1171 failure: set_todo_state call #71
-    closed the todo, but call #72 (LLM-issued redundant variant) failed,
-    and the LLM narrated #72's failure as the truth.
-    """
-    if not draft:
-        return None
-    m = _DENIED_CHANGE_RE.search(draft)
-    if not m:
-        return None
-    # Did any write actually land?
-    real_router_write = bool(
-        captured_features
-        or captured_promises
-        or captured_todos
-        or (completed_todos or [])
-        or (killed_todos or [])
-        or (edited_todos or [])
-        or (implicit_done_todos or [])
-    )
-    real_tool_write = False
-    if tool_call_ids:
-        try:
-            rows = (
-                db.query(ToolCallModel)
-                .filter(ToolCallModel.id.in_(tool_call_ids))
-                .all()
-            )
-            for r in rows:
-                if r.status != "done":
-                    continue
-                if (r.tool_name or "") in _READ_ONLY_TOOLS:
-                    continue
-                # State-changing tool succeeded.
-                real_tool_write = True
-                break
-        except Exception as e:
-            print(f"[denied_success_check] audit read failed: {e}")
-            return None
-    if not (real_router_write or real_tool_write):
-        return None
-    return (
-        f'reply says "{m.group(0)}" — denying a state change — but a '
-        f"successful write DID land this turn (router capture or a "
-        f"state-changing tool call returned done). The reply contradicts "
-        f"its own work. Acknowledge what actually happened: name the "
-        f"action (close/track/log) plainly in alfred voice with a sir "
-        f"anchor, no raw ids."
-    )
+
+def _strip_memory_anchors(text: str) -> str:
+    """Remove [M#N] / [M#3, M#7] memory-citation tags from outbound text."""
+    if not text or "[M#" not in text:
+        return text
+    cleaned = _MEMORY_ANCHOR_RE.sub("", text)
+    # Tidy whitespace the removal left behind: space-before-punctuation and
+    # collapsed double-spaces mid-sentence.
+    cleaned = re.sub(r"\s+([.,;:!?])", r"\1", cleaned)
+    cleaned = re.sub(r"  +", " ", cleaned)
+    return cleaned
 
 
 def _run_verify(
@@ -2131,25 +2068,13 @@ class Orchestrator:
                 if det_critique:
                     verify_ok = False
                     verify_critique = det_critique
-                # G4 inverse check: reply denies a state change while a
-                # real write landed. Catches "couldn't formally close it"
-                # contradiction (WA seg 319 msg 1171).
-                if verify_ok:
-                    denied_critique = _deterministic_denied_success_check(
-                        draft=response,
-                        captured_features=captured_features,
-                        captured_promises=captured_promises,
-                        captured_todos=captured_todos,
-                        completed_todos=completed_todos,
-                        killed_todos=killed_todos,
-                        edited_todos=edited_todos,
-                        implicit_done_todos=implicit_done_todos,
-                        tool_call_ids=(usage or {}).get("tool_call_ids") or [],
-                        db=db,
-                    )
-                    if denied_critique:
-                        verify_ok = False
-                        verify_critique = denied_critique
+                # Phase 2 (backlog #313): the old _deterministic_denied_success_check
+                # backstop (reply denies a state change that actually landed —
+                # WA seg 319 msg 1171) was deleted here. Structured tool returns
+                # fix that class at the source: set_todo_state now returns a typed
+                # status='already_in_state'|'closed' the LLM can't misread as
+                # failure, so there's nothing left to contradict. Eval cases
+                # 015/016 regression-lock the behavior.
                 tb.step(
                     "verify",
                     "OK" if verify_ok else f"REVISE: {verify_critique[:120]}",
@@ -2192,6 +2117,10 @@ class Orchestrator:
         # sees that the correction was logged before the actual answer.
         if feedback_ack is not None:
             response = f"{feedback_ack}\n\n{response}"
+
+        # Phase 2: strip internal [M#N] memory-citation anchors before the
+        # reply leaves the building. See _strip_memory_anchors.
+        response = _strip_memory_anchors(response)
 
         tb.reply(response, usage=usage)
         full_trace = tb.build()

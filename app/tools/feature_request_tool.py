@@ -15,6 +15,7 @@ blocking workflow, not just filed alongside fifty others.
 """
 
 from .base import BaseTool
+from ._returns import BacklogTicketReturn
 
 
 class RequestFeatureTool(BaseTool):
@@ -76,16 +77,16 @@ class RequestFeatureTool(BaseTool):
         source_note_id: int | None = None,
         message_id: int | None = None,
         **kwargs,
-    ) -> str:
+    ) -> BacklogTicketReturn:
         from ..services.backlog_service import backlog_service
         from ..db.models import FrictionEvent
 
         title = (title or "").strip()
         why = (why or "").strip()
         if not title:
-            return "request_feature: title required"
+            return {"kind": "backlog_ticket", "id": 0, "status": "invalid", "summary": "title required"}
         if db is None:
-            return "request_feature: no db session"
+            return {"kind": "backlog_ticket", "id": 0, "status": "invalid", "summary": "no db session"}
         try:
             br = int(blast_radius or 0)
         except (TypeError, ValueError):
@@ -118,9 +119,11 @@ class RequestFeatureTool(BaseTool):
             .count()
         )
 
-        # Severity-aware ack (Alfred voice). The LLM sees this string
-        # and paraphrases — give it semantic shape, not bot-receipt
-        # syntax. Daniel hates "Logged feature request: X" cadence.
+        # Severity-aware summary (Alfred voice). The LLM paraphrases the
+        # `summary` field — give it semantic shape, not bot-receipt syntax.
+        # Daniel hates "Logged feature request: X" cadence. The structured
+        # bits (hit_count, severity, blast_radius) ride in `context` so the
+        # model can escalate tone on repeat hits without parsing prose.
         if br >= 4:
             severity_phrase = "flagged blocker"
         elif br == 3:
@@ -128,14 +131,25 @@ class RequestFeatureTool(BaseTool):
         else:
             severity_phrase = "logged, minor"
 
+        hit_count = prior_count + 1
+        ctx = {
+            "title": title,
+            "blast_radius": br,
+            "hit_count": hit_count,
+            "severity_phrase": severity_phrase,
+        }
+        # prior_count == 0 → brand-new ticket; >=1 → upsert bumped an existing.
+        status = "created" if prior_count == 0 else "duplicate"
         if prior_count >= 2:
-            return (
-                f"{severity_phrase} (hit {prior_count + 1}x now). "
-                f"{title}. urgency bumped."
-            )
-        if prior_count == 1:
-            return f"{severity_phrase} (second hit). {title}. urgency bumped."
-        return f"{severity_phrase}. {title}."
+            summary = f"{severity_phrase} (hit {hit_count}x now). {title}. urgency bumped."
+        elif prior_count == 1:
+            summary = f"{severity_phrase} (second hit). {title}. urgency bumped."
+        else:
+            summary = f"{severity_phrase}. {title}."
+        return {
+            "kind": "backlog_ticket", "id": ticket.id, "status": status,
+            "summary": summary, "context": ctx,
+        }
 
 
 feature_request_tool = RequestFeatureTool()
