@@ -1,11 +1,15 @@
 from .base import BaseTool
+from ._returns import ListItemReturn
 
 
 class AddToListTool(BaseTool):
     name = "add_to_list"
     description = (
         "Add an item to one of the user's lists. "
-        "Use the exact list name from the user's existing lists when possible."
+        "Use the exact list name from the user's existing lists when possible. "
+        "Returns {kind:'list_item', status, summary}: status='created' on success, "
+        "status='invalid' if the list name or item was empty. The list is "
+        "auto-created if it doesn't exist yet."
     )
     parameters = {
         "type": "object",
@@ -22,11 +26,27 @@ class AddToListTool(BaseTool):
         "required": ["list_name", "item"],
     }
 
-    def execute(self, db=None, list_name: str = "", item: str = "", **kwargs) -> str:
+    def execute(self, db=None, list_name: str = "", item: str = "", **kwargs) -> ListItemReturn:
         from ..services.list_service import list_service
 
-        lst, _ = list_service.add_item_by_list_name(list_name, item, db)
-        return f'Added "{item}" to {lst.name}.'
+        if db is None:
+            return {"kind": "list_item", "id": 0, "status": "invalid", "summary": "(no db session)"}
+        list_name = (list_name or "").strip()
+        item = (item or "").strip()
+        if not list_name or not item:
+            return {
+                "kind": "list_item", "id": 0, "status": "invalid",
+                "summary": "(list_name and item are both required)",
+            }
+        try:
+            lst, row = list_service.add_item_by_list_name(list_name, item, db)
+        except Exception as e:
+            return {"kind": "list_item", "id": 0, "status": "error", "summary": f"add failed: {e}"}
+        return {
+            "kind": "list_item", "id": row.id, "status": "created",
+            "summary": f'added "{item}" to {lst.name}',
+            "context": {"list_name": lst.name, "item_text": item},
+        }
 
 
 class ShowListTool(BaseTool):

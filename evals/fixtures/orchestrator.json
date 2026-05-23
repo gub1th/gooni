@@ -261,10 +261,10 @@
       ],
       "judge": {
         "model": "gpt-5.4",
-        "rubric": "User said 'finished the leetcode problem' with one open todo matching ('lowest common ancestor of binary tree leetcode'). The router done_signal path or the LLM-side set_todo_state path must close that todo. Reply must (a) acknowledge the close in alfred voice with a sir anchor — 'closed leetcode, sir.' or similar; (b) NOT deny success — no 'couldn't formally close it', 'match missed', 'not formally tracked'; (c) NOT cite raw DB ids — no 'Todo #142'. Even if the LLM emits two set_todo_state calls (a redundant variant on shorter substring), the closed-this-turn fallback in the tool should produce a context-rich message and the denied-success deterministic guard should catch any contradiction and force regen. Good shape: 'closed leetcode, sir.' Bad shape (the actual prod failure): 'couldn't formally close it, sir — that match missed.'",
+        "rubric": "User said 'finished the leetcode problem' with one open todo matching ('lowest common ancestor of binary tree leetcode'). The router done_signal path or the LLM-side set_todo_state path must close that todo. Reply must (a) acknowledge the close in alfred voice with a sir anchor — 'closed leetcode, sir.' or similar; (b) NOT deny success — no 'couldn't formally close it', 'match missed', 'not formally tracked'; (c) NOT cite raw DB ids — no 'Todo #142'. Even if the LLM emits two set_todo_state calls (a redundant variant on shorter substring), phase-2 structured tool returns make the second call return status='already_in_state' (a typed enum) rather than a free-text '(no match)' string, so the LLM can't misread it as failure. Good shape: 'closed leetcode, sir.' Bad shape (the actual prod failure): 'couldn't formally close it, sir — that match missed.'",
         "min_scores": {"helpful": 7, "no_hallucination": 8, "follows_prefs": 7}
       },
-      "notes": "G4 regression lock. Captures the WA seg 319 leetcode failure: LLM ran set_todo_state twice — call #71 succeeded, call #72 (shorter match variant) failed because the todo was already closed, and the reply narrated call #72's failure as truth. Fix layers (defense in depth): tool description forbids retry-with-variants, set_todo_state has a closed-this-turn fallback when state=done + no open match, react-loop dedup catches identical retries, and _deterministic_denied_success_check forces regen when reply denies a state change that actually landed."
+      "notes": "G4 regression lock, re-pointed at the phase-2 (backlog #313) fix. Captures the WA seg 319 leetcode failure: LLM ran set_todo_state twice — call #71 succeeded, call #72 (shorter match variant) failed because the todo was already closed, and the reply narrated call #72's failure as truth. The phase-2 fix is structural: set_todo_state now returns a typed status='already_in_state' (not a free-text '(no match)' string), which the LLM can't misparse — so the old closed-this-turn fallback + _deterministic_denied_success_check backstops were deleted as dead code. react-loop dedup still short-circuits identical-arg retries; tool description still forbids retry-with-variants."
     },
     {
       "id": "016_capture_only_short_circuit_no_double_narration",
@@ -281,6 +281,51 @@
         "min_scores": {"helpful": 6, "follows_prefs": 8, "no_hallucination": 8}
       },
       "notes": "G4 regression lock. Captures the WA seg 319 'gonna do 450' failure: ack stub was '\"do 450\" tracked' (verb-last echo) and LLM appended 'on it, sir. 450 now.' as continuation. Two fixes layered: ack composer rewrite (verb-first, sir anchor, no echo shape) + capture-only short-circuit (ack stub IS the reply when user message is short capture-shape). The short-circuit gate uses word count + question-mark + leading-word heuristic; this case (4 words, no '?') should trip it."
+    },
+    {
+      "id": "017_already_done_clean_ack_no_contradiction",
+      "source": "phase-2 backlog #313 — structured tool returns (set_todo_state already_in_state)",
+      "user_message": "yeah i already finished the lowest common ancestor leetcode problem",
+      "seed_todos": [
+        {
+          "text": "lowest common ancestor of binary tree leetcode",
+          "state": "done"
+        }
+      ],
+      "must_not_include_regex": [
+        "(?i)couldn'?t\\s+(?:formally\\s+)?(?:close|track|log)",
+        "(?i)match\\s+missed",
+        "(?i)no\\s+luck",
+        "(?i)didn'?t\\s+(?:close|land|track)",
+        "(Todo|Promise)\\s*#\\s*\\d"
+      ],
+      "judge": {
+        "model": "gpt-5.4",
+        "rubric": "The matching todo is ALREADY done (seeded state='done'). The router done_signal path only matches OPEN todos, so it finds nothing; the LLM-side set_todo_state path returns the phase-2 structured status='already_in_state'. Reply must (a) recognize the todo is already closed and acknowledge that plainly in alfred voice — 'already closed, sir.' or 'that one's already done, sir.'; (b) NOT deny success or claim a failure — no 'couldn't close it', 'match missed', 'no luck'; (c) NOT cite raw DB ids. Good shape: 'already done, sir.' Bad shape: 'couldn't close it — that match missed.' This locks the structured-return contract: an already-done state must read as success-already, never as failure.",
+        "min_scores": {"helpful": 6, "no_hallucination": 8, "follows_prefs": 7}
+      },
+      "notes": "Phase-2 (#313) contract lock. Directly tests set_todo_state's status='already_in_state' typed return — the mechanism that replaced the deleted closed-this-turn fallback + denied-success guard. When the todo is already in the requested state the LLM must read it as 'already done' and never narrate a contradiction."
+    },
+    {
+      "id": "018_memory_anchor_never_leaks_to_user",
+      "source": "phase-2 backlog #313 — [M#184] citation tag leaked into a WhatsApp reply",
+      "user_message": "what should i focus on today?",
+      "seed_memories": [
+        {"type": "fact", "content": "Daniel is job searching and treats job applications as his cleanest leverage block right now."}
+      ],
+      "seed_prefs": [
+        {"rule": "always reply terse — fragments fine, no filler"}
+      ],
+      "must_not_include_regex": [
+        "\\[M#\\d",
+        "\\[M\\s*#"
+      ],
+      "judge": {
+        "model": "gpt-5.4",
+        "rubric": "User asks what to focus on; a seeded memory says job applications are Daniel's cleanest leverage block. The master prompt instructs the LLM to cite recalled memories with inline [M#N] anchors for grounding — but those anchors are INTERNAL and must be stripped before the reply reaches the user. Reply must (a) be grounded in the seeded memory (mention job apps / applications as the priority); (b) contain NO '[M#N]' citation tags of any form — the outbound strip removes them. Good shape: 'job apps, sir — your cleanest leverage.' Bad shape (the actual leak): 'job apps are still the cleanest leverage [M#184].'",
+        "min_scores": {"groundedness": 7, "no_hallucination": 8, "follows_prefs": 7}
+      },
+      "notes": "Phase-2 (#313) leak lock. Master-rule #7 forces [M#N] memory-citation anchors in the LLM's draft for grounding; _strip_memory_anchors removes them on the outbound path. This case asserts the tag never survives to the user regardless of whether the LLM emitted it."
     }
   ]
 }

@@ -10,14 +10,16 @@ def handle(items: list[dict], ctx, result) -> None:
         return
     from ...tools.feature_request_tool import feature_request_tool
 
-    import re as _re
-
     for fr in items:
         title = (fr.get("title") or "").strip()
         why = (fr.get("why") or "").strip()
         if not title:
             continue
         try:
+            # Direct call bypasses the LLM client's _execute_with_audit, so
+            # we receive the raw structured dict (not the json-serialized
+            # string the LLM sees). Phase 2: read the ticket id off the dict
+            # instead of regex-scraping a prose result string.
             tool_result = feature_request_tool.execute(
                 db=ctx.db,
                 title=title,
@@ -27,11 +29,10 @@ def handle(items: list[dict], ctx, result) -> None:
         except Exception as e:
             print(f"[features handler] execute error: {e}")
             continue
-        # Parse "(id #N)" or "#N" out of the tool result for back-link
-        # tracking — classify_note uses it to deep-link from notes;
-        # the ack helper surfaces ticket #N so Daniel can verify in OpsMode.
-        m = _re.search(r"#(\d+)", tool_result or "")
-        ticket_id = int(m.group(1)) if m else None
+        ticket_id = None
+        if isinstance(tool_result, dict):
+            tid = tool_result.get("id")
+            ticket_id = int(tid) if tid else None
         result.captured_features.append({"title": title, "ticket_id": ticket_id})
         result.tools_used.append("router:feature_request")
         if ctx.on_tool_call:
