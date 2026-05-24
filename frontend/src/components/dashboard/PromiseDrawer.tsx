@@ -7,6 +7,7 @@ import {
   type ApiPromise,
   type PromiseState,
 } from "../../services/api";
+import { parseServerDate } from "../../utils/date";
 
 
 // Promise drawer — dashboard widget that surfaces the `promises` table.
@@ -259,10 +260,8 @@ const STATE_ACCENT: Record<PromiseState, string> = {
 };
 
 function formatDue(iso: string | null): string | null {
-  if (!iso) return null;
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  if (Number.isNaN(d.getTime())) return null;
+  const d = parseServerDate(iso);
+  if (!d) return null;
   const now = new Date();
   const diffMs = d.getTime() - now.getTime();
   const absHours = Math.abs(diffMs) / 36e5;

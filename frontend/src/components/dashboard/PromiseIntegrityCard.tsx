@@ -5,6 +5,7 @@ import {
   fetchPromiseIntegrity,
   type PromiseIntegrity,
 } from "../../services/api";
+import { parseServerDate } from "../../utils/date";
 
 
 // PromiseIntegrityCard — Daniel's accountability scoreboard.
@@ -194,9 +195,8 @@ function scoreTone(score: number): { accent: string } {
 }
 
 function formatRel(iso: string): string {
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  if (Number.isNaN(d.getTime())) return iso;
+  const d = parseServerDate(iso);
+  if (!d) return iso;
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
   const days = Math.floor(diffMs / 86_400_000);

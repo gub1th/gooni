@@ -14,20 +14,15 @@ import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { SpaceIcon } from "./SpaceIcon";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
 import { color as ctok } from "../../ui";
+import { parseServerDate } from "../../utils/date";
 
 // Module-level drag state so Sidebar can read it without prop drilling
 export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
 
-function parseDate(iso: string | null): Date | null {
-  if (!iso) return null;
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  return new Date(hasOffset ? iso : iso + "Z");
-}
-
 // Compact "Xd ago" / "Xh ago" stamp for the space header. Falls back to
 // the localized date when the gap is older than ~30 days.
 function formatRelative(iso: string | null): string {
-  const d = parseDate(iso);
+  const d = parseServerDate(iso);
   if (!d) return "—";
   const diffMs = Date.now() - d.getTime();
   if (diffMs < 60_000) return "just now";
@@ -41,7 +36,7 @@ function formatRelative(iso: string | null): string {
 }
 
 function formatTime(iso: string | null): string {
-  const d = parseDate(iso);
+  const d = parseServerDate(iso);
   if (!d) return "";
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
@@ -73,7 +68,7 @@ function groupNotes(notes: ApiNote[]): { label: string; notes: ApiNote[] }[] {
   };
 
   for (const note of notes) {
-    const d = parseDate(note.updated_at);
+    const d = parseServerDate(note.updated_at);
     if (!d) { buckets.Older.push(note); continue; }
     const ds = d.toDateString();
     if (ds === todayStr) buckets.Today.push(note);

@@ -662,6 +662,34 @@ export async function fetchPublicVisitCount(): Promise<{ unique_visitors: number
   return res.json();
 }
 
+// Public MCP-config surface — scraped server-side from .mcp.json + the MCP
+// server source at request time. Powers the /public/mcp page.
+export interface PublicMcpServer {
+  name: string;
+  command: string;
+  script: string | null;
+  env_keys: string[];
+}
+export interface PublicMcpToolParam {
+  name: string;
+  required: boolean;
+}
+export interface PublicMcpTool {
+  name: string;
+  params: PublicMcpToolParam[];
+  description: string;
+}
+export interface PublicMcpConfig {
+  servers: PublicMcpServer[];
+  tools: PublicMcpTool[];
+}
+
+export async function fetchPublicMcpConfig(): Promise<PublicMcpConfig> {
+  const res = await apiFetch(`${BASE}/public/mcp`);
+  if (!res.ok) throw new Error("Failed to fetch MCP config");
+  return res.json();
+}
+
 // ── Items (unified focus + todo) ────────────────────────────────────────────
 //
 // One concept, one table. An item with `endgoal` and no parent renders as a

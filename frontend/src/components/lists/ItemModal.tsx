@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardStatus } from "../../services/api";
 import { color as ctok, FONT } from "../../ui";
+import { toDateInputValue } from "../../utils/date";
 
 
 // Structural shape — accepts either ApiListItem (generic) or
@@ -44,17 +45,6 @@ export interface ItemModalProps {
   // Called when the user clicks the "from note #N" pill. Navigates to
   // that note. Only rendered when item.source_note_id is set.
   onOpenSourceNote?: (noteId: number) => void;
-}
-
-function toDateInputValue(iso: string | null): string {
-  if (!iso) return "";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  if (Number.isNaN(d.getTime())) return "";
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
 }
 
 function fromDateInputValue(v: string): string | null {

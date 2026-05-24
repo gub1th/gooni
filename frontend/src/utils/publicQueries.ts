@@ -1,4 +1,4 @@
-import { fetchPublicNote, fetchPublicNotes, fetchPublicProfile, fetchPublicVisitCount } from "../services/api";
+import { fetchPublicNote, fetchPublicNotes, fetchPublicProfile, fetchPublicVisitCount, fetchPublicMcpConfig } from "../services/api";
 
 // Centralized query options so the list, detail, and any prefetcher all use
 // the same key. Without this, hover-prefetch would write to one cache slot
@@ -22,4 +22,10 @@ export const publicProfileQueryOptions = () => ({
 export const publicVisitCountQueryOptions = () => ({
   queryKey: ["public-visits"] as const,
   queryFn: fetchPublicVisitCount,
+});
+
+export const publicMcpConfigQueryOptions = () => ({
+  queryKey: ["public-mcp"] as const,
+  queryFn: fetchPublicMcpConfig,
+  staleTime: 60_000,
 });
