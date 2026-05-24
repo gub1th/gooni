@@ -132,7 +132,7 @@ export function PublicChatLauncher() {
             lineHeight: 1.55,
             fontFamily: "'Inter', system-ui, sans-serif",
             boxShadow: "0 10px 26px rgba(0,0,0,0.30)",
-            zIndex: z.overlay,
+            zIndex: z.fab,
             animation: "gooni-public-msg-in 0.18s ease-out",
           }}
         >
@@ -162,7 +162,7 @@ export function PublicChatLauncher() {
           cursor: pressed ? "grabbing" : "pointer",
           // Below the modal tier (legacy modals sit at 1000) so the orb can't
           // pierce a full-screen modal's scrim on the public note page.
-          zIndex: z.overlay,
+          zIndex: z.fab,
           padding: 0,
           outline: "none",
           transform: `scale(${scale})`,

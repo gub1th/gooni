@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Volume2, VolumeX, Timer } from "lucide-react";
-import { FONT } from "../ui";
+import { FONT, z } from "../ui";
 
 const STORAGE_KEY = "gooni-focus-mode";
 const MUTE_KEY = "gooni-focus-mode-muted";
@@ -429,7 +429,7 @@ export function FocusOverlay({ focusName, startedAt, onExit }: FocusOverlayProps
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 1500,
+        zIndex: z.modalScrim,
         background: "rgba(15, 15, 18, 0.78)",
         backdropFilter: "blur(14px)",
         WebkitBackdropFilter: "blur(14px)",

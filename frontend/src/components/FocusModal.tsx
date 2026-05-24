@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { color as ctok, FONT } from "../ui";
+import { color as ctok, FONT, z } from "../ui";
 import {
   type ApiItemNode, type FocusScale, type FocusStatus,
   updateItem, deleteItem, createItem,
@@ -111,7 +111,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
       style={{
         position: "fixed", inset: 0,
         background: "rgba(15, 18, 24, 0.45)",
-        zIndex: 10000,
+        zIndex: z.modalScrim,
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 24, animation: "gooni-modal-in 160ms ease-out",
       }}

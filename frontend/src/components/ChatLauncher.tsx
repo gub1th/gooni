@@ -130,7 +130,7 @@ export function ChatLauncher() {
           // Below the modal tier (legacy app modals sit at 1000) so the orb
           // can't pierce a full-screen modal's scrim. The chat panel itself
           // (GooniLayer FloatingModal, z 1100) is the active surface when open.
-          zIndex: z.overlay,
+          zIndex: z.fab,
           padding: 0,
           outline: "none",
           transform: `scale(${scale})`,

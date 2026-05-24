@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
+import { z } from "../../ui";
 
 interface Props {
   url: string;
@@ -40,7 +41,7 @@ export function AttachmentModal({ url, filename, mime, onClose }: Props) {
         position: "fixed",
         inset: 0,
         background: "rgba(0,0,0,0.65)",
-        zIndex: 1000,
+        zIndex: z.modalScrim,
         display: "flex",
         flexDirection: "column",
         padding: 24,

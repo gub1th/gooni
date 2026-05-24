@@ -10,7 +10,7 @@ import { displayTitle } from "../utils/notePreview";
 import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
 import { Skeleton } from "../components/Skeleton";
-import { color as ctok, FONT } from "../ui";
+import { color as ctok, FONT, z } from "../ui";
 import { formatLongDate as formatDate, parseServerDate } from "../utils/date";
 import {
   publicNoteQueryOptions,
@@ -924,7 +924,7 @@ function PublicPage() {
             boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
             fontSize: 13.5,
             fontFamily: FONT,
-            zIndex: 1300,
+            zIndex: z.toast,
           }}
         >
           <span>Removed from public — "{displayTitle({ title: undo.note.title, content: undo.note.excerpt })}"</span>

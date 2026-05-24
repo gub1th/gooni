@@ -5,6 +5,7 @@ import { GooniPanel } from "./GooniPanel";
 import { useGooniStore } from "../stores/useGooniStore";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useGooniModalCornerStore } from "../stores/useGooniModalCornerStore";
+import { z } from "../ui";
 
 // Mounts the chat-related global UI: FAB, Gooni panel (modal or sidebar
 // surface), walking mascot. Used by every authed route so the experience
@@ -51,7 +52,7 @@ export function GooniLayer() {
             top: 0,
             right: 0,
             height: "100vh",
-            zIndex: 1100,
+            zIndex: z.panel,
             display: "flex",
             animation: "gooni-sidebar-slide 280ms cubic-bezier(0.22, 1, 0.36, 1)",
           }}
@@ -175,7 +176,7 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
             ? undefined
             : "0 24px 60px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)",
           overflow: "hidden",
-          zIndex: 1100,
+          zIndex: z.panel,
           display: "flex",
           transformOrigin: pos ? "top left" : "bottom right",
           // Animations: drag glow while dragging; pop ONLY on first mount.

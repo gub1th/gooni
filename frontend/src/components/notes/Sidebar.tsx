@@ -17,7 +17,7 @@ import {
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
 import { SpaceIcon, SPACE_ICON_OPTIONS, lucideIconValue } from "./SpaceIcon";
-import { color as ctok } from "../../ui";
+import { color as ctok, z } from "../../ui";
 
 const ICON_TINT = {
   allNotes: "#6366F1",   // indigo
@@ -752,7 +752,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
             boxShadow: "0 2px 8px rgba(0,0,0,0.28), 0 0 2px rgba(0,0,0,0.35)",
             filter: "blur(0.3px)",
             pointerEvents: "none",
-            zIndex: 9999,
+            zIndex: z.toast,
             willChange: "transform, opacity",
             transform:
               ink.phase === "init"

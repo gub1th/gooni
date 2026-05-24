@@ -10,7 +10,7 @@ import {
   type BoardStatus,
 } from "../../services/api";
 import { LiveTimer } from "./LiveTimer";
-import { FONT } from "../../ui";
+import { FONT, z } from "../../ui";
 
 
 // Banner colors are vivid + saturated — this is the loudest surface on
@@ -396,7 +396,7 @@ function PrimaryPicker({
         position: "fixed",
         inset: 0,
         background: "rgba(0,0,0,0.32)",
-        zIndex: 4000,
+        zIndex: z.modalScrim,
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "center",

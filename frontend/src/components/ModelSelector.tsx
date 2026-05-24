@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { MODELS, useModelStore, type ModelId } from "../stores/useModelStore";
-import { FONT } from "../ui";
+import { FONT, z } from "../ui";
 
 
 // Custom dropdown — replaces the OS-native <select> so it matches the
@@ -65,7 +65,7 @@ export function ModelSelector() {
             borderRadius: 10,
             boxShadow: "0 10px 28px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)",
             padding: 4,
-            zIndex: 1200,
+            zIndex: z.dropdown,
           }}
         >
           {MODELS.map((m) => {

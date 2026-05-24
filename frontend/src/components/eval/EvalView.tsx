@@ -26,7 +26,7 @@ import {
   type MessageTraceStep,
 } from "../../services/api";
 import { Check, Minus, X } from "lucide-react";
-import { color as ctok, FONT } from "../../ui";
+import { color as ctok, FONT, z } from "../../ui";
 
 
 // Per-source visual identity. Tone matches Apple-Notes restraint that the
@@ -1399,7 +1399,7 @@ function DispatchModal({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 1000,
+        zIndex: z.modalScrim,
         fontFamily: FONT,
       }}
     >
@@ -2473,7 +2473,7 @@ function FormattedModal({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 1000,
+        zIndex: z.modalScrim,
         fontFamily: FONT,
       }}
     >
@@ -2666,7 +2666,7 @@ function ToolLegendPopup({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 1000,
+        zIndex: z.modalScrim,
       }}
     >
       <div
