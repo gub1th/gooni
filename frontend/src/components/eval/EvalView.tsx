@@ -2234,10 +2234,42 @@ function serializedLength(v: unknown): number {
 }
 
 function CodeBlock({ label, value }: { label: string; value: unknown }) {
+  const [expanded, setExpanded] = useState(false);
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  // Big payloads (master_prompt, recall) get an expand button → modal that
+  // un-escapes \n / \t into real line breaks so the assembled prompt is
+  // actually readable instead of one JSON-string wall.
+  const showExpand = text.length > 200;
   return (
     <div>
-      <div style={{ fontSize: 10, color: "#8E8E93", marginBottom: 2 }}>{label}</div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 2,
+        }}
+      >
+        <span style={{ fontSize: 10, color: "#8E8E93" }}>{label}</span>
+        {showExpand && (
+          <button
+            onClick={() => setExpanded(true)}
+            title="View formatted (newlines expanded)"
+            style={{
+              background: "transparent",
+              border: "1px solid #E5E5EA",
+              borderRadius: 5,
+              padding: "1px 6px",
+              fontSize: 10,
+              color: "#0A84FF",
+              cursor: "pointer",
+              fontFamily: FONT,
+            }}
+          >
+            ⤢ formatted
+          </button>
+        )}
+      </div>
       <pre
         style={{
           margin: 0,
@@ -2255,6 +2287,95 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
       >
         {text}
       </pre>
+      {expanded && (
+        <FormattedModal label={label} text={text} onClose={() => setExpanded(false)} />
+      )}
+    </div>
+  );
+}
+
+// Modal that renders a payload with escaped \n / \t turned into real line
+// breaks — the master_prompt step stores the assembled system prompt as a
+// JSON object, so the inline <pre> shows it as one escaped string. Here the
+// reviewer can read it laid out.
+function FormattedModal({
+  label,
+  text,
+  onClose,
+}: {
+  label: string;
+  text: string;
+  onClose: () => void;
+}) {
+  const formatted = text.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.32)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+        fontFamily: FONT,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#FFFFFF",
+          borderRadius: 12,
+          padding: "16px 18px",
+          width: "80vw",
+          maxWidth: 860,
+          maxHeight: "85vh",
+          boxShadow: "0 20px 50px rgba(0,0,0,0.18)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#1C1C1E" }}>
+            {label} — formatted
+          </span>
+          <button
+            onClick={onClose}
+            style={{
+              marginLeft: "auto",
+              background: "transparent",
+              border: "1px solid #E5E5EA",
+              borderRadius: 6,
+              padding: "4px 12px",
+              fontSize: 13,
+              color: "#0A84FF",
+              cursor: "pointer",
+              fontFamily: FONT,
+            }}
+          >
+            Close
+          </button>
+        </div>
+        <pre
+          style={{
+            margin: 0,
+            padding: 12,
+            background: "#FAFAFA",
+            border: "1px solid #E5E5EA",
+            borderRadius: 8,
+            fontSize: 12,
+            lineHeight: 1.5,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+            overflow: "auto",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {formatted}
+        </pre>
+      </div>
     </div>
   );
 }
