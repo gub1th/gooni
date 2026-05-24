@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import { Check, X, AlertTriangle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, X, AlertTriangle, Plus } from "lucide-react";
 import { color as ctok, FONT } from "../../ui";
 import {
   fetchPromises,
   patchPromiseState,
+  createPromise,
   type ApiPromise,
   type PromiseState,
 } from "../../services/api";
@@ -11,21 +12,29 @@ import { parseServerDate } from "../../utils/date";
 
 
 // Promise drawer — dashboard widget that surfaces the `promises` table.
-// Daniel can't currently see his soft commitments / slip_count / history
-// anywhere; this is the entry point. Two tabs: Active (state=pending,
-// closest-due first), History (all, recency-sorted). Each pending card
-// has kept / broken / abandoned actions.
+// Two tabs: Active (state=active, closest-due first), History (all,
+// recency-sorted). Each active card has kept / broken actions. The "+"
+// adds a promise directly (they usually arrive via chat utterances).
+//
+// G3.1 lifecycle: promises land `active` on create, resolve to `kept` or
+// `broken`. The old proposed/pending lock-in + `abandoned` are gone — the
+// active tab used to query the dead `pending` state, so it always read
+// empty even with live promises.
 export function PromiseDrawer() {
   const [tab, setTab] = useState<"active" | "history">("active");
   const [active, setActive] = useState<ApiPromise[]>([]);
   const [history, setHistory] = useState<ApiPromise[]>([]);
   const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   async function reload() {
     setLoading(true);
     try {
       const [a, h] = await Promise.all([
-        fetchPromises({ state: "pending", limit: 50 }),
+        fetchPromises({ state: "active", limit: 50 }),
         fetchPromises({ limit: 50 }),
       ]);
       setActive(a);
@@ -39,6 +48,10 @@ export function PromiseDrawer() {
     void reload();
   }, []);
 
+  useEffect(() => {
+    if (adding) inputRef.current?.focus();
+  }, [adding]);
+
   async function transition(id: number, state: PromiseState) {
     // Optimistic: drop the promise from the active list immediately so
     // the UX feels instant; reload to pick up server's resolved_at.
@@ -47,6 +60,21 @@ export function PromiseDrawer() {
       await patchPromiseState(id, state);
     } finally {
       void reload();
+    }
+  }
+
+  async function submitAdd() {
+    const text = draft.trim();
+    if (!text || saving) return;
+    setSaving(true);
+    try {
+      await createPromise(text);
+      setDraft("");
+      setAdding(false);
+      setTab("active"); // jump to where the new promise lands
+      await reload();
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -74,7 +102,27 @@ export function PromiseDrawer() {
         >
           Promises
         </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
+          <button
+            onClick={() => setAdding((v) => !v)}
+            title="Add a promise"
+            aria-label="Add a promise"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 22,
+              height: 22,
+              borderRadius: 999,
+              border: "none",
+              background: adding ? "rgba(10,132,255,0.10)" : "transparent",
+              color: adding ? ctok.accent : "var(--gooni-muted, #8E8E93)",
+              cursor: "pointer",
+              marginRight: 2,
+            }}
+          >
+            <Plus size={15} strokeWidth={2.4} />
+          </button>
           {(["active", "history"] as const).map((t) => (
             <button
               key={t}
@@ -100,11 +148,67 @@ export function PromiseDrawer() {
         </div>
       </div>
 
+      {adding && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void submitAdd();
+              if (e.key === "Escape") {
+                setAdding(false);
+                setDraft("");
+              }
+            }}
+            placeholder="e.g. hit the gym tonight"
+            style={{
+              flex: 1,
+              fontSize: 13,
+              fontFamily: FONT,
+              padding: "7px 10px",
+              borderRadius: 8,
+              border: "1px solid var(--gooni-border, rgba(0,0,0,0.12))",
+              background: "var(--gooni-card, #FFFFFF)",
+              color: "var(--gooni-text, #1C1C1E)",
+              outline: "none",
+            }}
+          />
+          <button
+            onClick={() => void submitAdd()}
+            disabled={!draft.trim() || saving}
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              padding: "0 14px",
+              borderRadius: 8,
+              border: "none",
+              background: !draft.trim() || saving ? "rgba(10,132,255,0.35)" : ctok.accent,
+              color: "#FFFFFF",
+              cursor: !draft.trim() || saving ? "default" : "pointer",
+            }}
+          >
+            {saving ? "…" : "Add"}
+          </button>
+        </div>
+      )}
+
       {loading && rows.length === 0 ? (
         <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>Loading…</div>
       ) : rows.length === 0 ? (
-        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>
-          {tab === "active" ? "No active promises." : "No history yet."}
+        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", lineHeight: 1.5 }}>
+          {tab === "active" ? (
+            <>
+              No active promises.
+              <br />
+              <span style={{ fontSize: 12 }}>
+                Gooni captures these from chat — say "imma hit the gym tonight" — or
+                hit <strong>+</strong> to add one.
+              </span>
+            </>
+          ) : (
+            "No history yet."
+          )}
         </div>
       ) : (
         <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -198,9 +302,6 @@ function PromiseRow({
           <ActionBtn label="broken" color="#B91C1C" onClick={() => onTransition(promise.id, "broken")}>
             <X size={13} strokeWidth={2.4} />
           </ActionBtn>
-          <ActionBtn label="abandoned" color="#6B7280" onClick={() => onTransition(promise.id, "abandoned")}>
-            <span style={{ fontSize: 11, fontWeight: 700 }}>—</span>
-          </ActionBtn>
         </div>
       )}
     </li>
@@ -249,14 +350,10 @@ function ActionBtn({
 }
 
 const STATE_ACCENT: Record<PromiseState, string> = {
-  // PR-B added 'proposed'. Drawer fetches state='pending' for the active
-  // tab + everything for history, so proposed rarely surfaces here yet,
-  // but the type-system requires every state to have an accent.
-  proposed: "#8B5CF6",
-  pending: ctok.accent,
+  // G3.1 lifecycle: active | kept | broken.
+  active: ctok.accent,
   kept: "#15803D",
   broken: "#B91C1C",
-  abandoned: "#6B7280",
 };
 
 function formatDue(iso: string | null): string | null {

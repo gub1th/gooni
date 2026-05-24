@@ -20,16 +20,16 @@ def list_promises(
 ):
     """List promises. Default returns the most recent N regardless of state
     so the dashboard drawer can show history alongside active commitments.
-    Pass `state=proposed|pending|kept|broken|abandoned` for one slate.
+    Pass `state=active|kept|broken` for one slate.
     """
     from ..db.models import Promise as _Promise
 
     q = db.query(_Promise)
-    # Modern 5-state lifecycle (matches frontend PromiseState type +
-    # api.ts schema). The legacy "active" alias was renamed to "pending"
-    # during the proposed-vs-pending lock-in split; this validation list
-    # was stale and 400'd the dashboard PromiseDrawer fetch on "pending".
-    _VALID_STATES = ("proposed", "pending", "kept", "broken", "abandoned")
+    # G3.1 lifecycle: active | kept | broken. The proposed/pending lock-in
+    # split + `abandoned` terminal were removed from promise_service; this
+    # list previously lagged behind that migration and 400'd state=active
+    # while returning nothing for the now-dead state=pending.
+    _VALID_STATES = ("active", "kept", "broken")
     if state:
         if state not in _VALID_STATES:
             raise HTTPException(
@@ -37,9 +37,9 @@ def list_promises(
                 detail=f"invalid state (expected one of {_VALID_STATES})",
             )
         q = q.filter(_Promise.state == state)
-    # Pending sorts deadline-first so the closest-due promise bubbles up;
+    # Active sorts deadline-first so the closest-due promise bubbles up;
     # everything else sorts by recency.
-    if state == "pending":
+    if state == "active":
         q = q.order_by(
             _Promise.inferred_due.asc().nullslast(), _Promise.created_at.desc()
         )
@@ -47,6 +47,23 @@ def list_promises(
         q = q.order_by(_Promise.created_at.desc())
     rows = q.limit(limit).all()
     return [_serialize_promise(p) for p in rows]
+
+
+@router.post("/promises")
+def create_promise(body: dict, db: Session = Depends(get_db)):
+    """Manually add a promise from the dashboard drawer. Promises usually
+    land via chat utterances; this is the direct-entry path. Runs the same
+    `promise_service.create` pipeline (complexity classify, embed, closest-
+    focus `supports` edge, recurring-shape habit auto-spawn) minus the
+    source-message `utters` edge. Lands `active` per G3.1.
+    """
+    from ..services import promise_service
+
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    p = promise_service.create(db, utterance=text)
+    return _serialize_promise(p)
 
 
 @router.get("/promises/pis")

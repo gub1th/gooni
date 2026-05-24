@@ -11,7 +11,6 @@ import { ExploreModal } from "./ExploreModal";
 import { TodoList } from "./dashboard/TodoList";
 import { HabitsStrip } from "./dashboard/HabitsStrip";
 import { PromiseDrawer } from "./dashboard/PromiseDrawer";
-import { PromiseIntegrityCard } from "./dashboard/PromiseIntegrityCard";
 import { TakeTabs } from "./dashboard/TakeTabs";
 import { DashboardHeader } from "./dashboard/DashboardHeader";
 // G3.9 loop-close: TabToggle import retained for the future re-enable.
@@ -183,9 +182,6 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
                 <SynthesizerSection />
               </div>
               <HabitsStrip />
-              <div style={{ marginTop: 14 }}>
-                <PromiseIntegrityCard />
-              </div>
               <div style={{ marginTop: 14 }}>
                 <PromiseDrawer />
               </div>
