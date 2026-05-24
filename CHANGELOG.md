@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.168.0 — 2026-05-24 (minor)
+
+- feat(batch): 5am batch processor + LimboItem staging layer (#338) (#363)
+
 ## 0.167.0 — 2026-05-24 (minor)
 
 - feat(persona): master prompt → 4 operating modes + ack variants (v8) (#337) (#362)
