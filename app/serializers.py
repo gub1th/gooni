@@ -378,6 +378,7 @@ def _serialize_capability_facet(f: CapabilityFacet) -> dict:
         "layer": f.layer,
         "facet_key": f.facet_key,
         "facet_text": f.facet_text,
+        "polarity": f.polarity,
         "status": f.status,
         "source": f.source,
         "evidence_json": f.evidence_json,
