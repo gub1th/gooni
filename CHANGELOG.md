@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.166.0 — 2026-05-24 (minor)
+
+- feat(fitness): log calories/protein/weight/exercise via chat + cut table (#316) (#360)
+
 ## 0.165.7 — 2026-05-24 (patch)
 
 - fix(lists): ListView React #300 crash on list delete (hook after early return) (#357)
