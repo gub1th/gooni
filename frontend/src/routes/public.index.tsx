@@ -11,6 +11,7 @@ import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
 import { Skeleton } from "../components/Skeleton";
 import { color as ctok, FONT } from "../ui";
+import { formatLongDate as formatDate, parseServerDate } from "../utils/date";
 import {
   publicNoteQueryOptions,
   publicNotesListQueryOptions,
@@ -198,17 +199,9 @@ function SparkleIcon() {
   );
 }
 
-function formatDate(iso: string | null): string {
-  if (!iso) return "";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-}
-
 function timeAgo(iso: string | null): string {
-  if (!iso) return "";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
+  const d = parseServerDate(iso);
+  if (!d) return "";
   const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
   if (diff === 0) return "today";
   if (diff === 1) return "yesterday";

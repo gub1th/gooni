@@ -4,20 +4,13 @@ import {
   type ApiItemNode, type FocusScale, type FocusStatus,
   updateItem, deleteItem, createItem,
 } from "../services/api";
+import { toDateInputValue } from "../utils/date";
 
 
 export interface FocusModalProps {
   node: ApiItemNode;
   onChange: () => void;
   onClose: () => void;
-}
-
-function toDateInputValue(iso: string | null): string {
-  if (!iso) return "";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function fromDateInputValue(v: string): string | null {

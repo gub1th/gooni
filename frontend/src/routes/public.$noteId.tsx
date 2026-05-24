@@ -10,17 +10,11 @@ import { AttachmentModal } from "../components/notes/AttachmentModal";
 import { useNoteCardStyles } from "../components/notes/noteCardStyles";
 import { ReactionBar } from "../components/ReactionBar";
 import { color as ctok } from "../ui";
+import { formatLongDate as formatPublicDate, parseServerDate } from "../utils/date";
 
 export const Route = createFileRoute("/public/$noteId")({
   component: PublicNotePage,
 });
-
-function formatPublicDate(iso: string | null): string {
-  if (!iso) return "";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-}
 
 function readingTimeMin(html: string | null): number {
   if (!html) return 1;
@@ -33,11 +27,10 @@ function readingTimeMin(html: string | null): number {
 // is meaningful — I use 12h as the cutoff, which feels like a real
 // revisit/edit rather than part of the original authoring session.
 function showUpdated(createdAt: string, updatedAt: string): boolean {
-  const parse = (iso: string) => {
-    const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-    return new Date(hasOffset ? iso : iso + "Z").getTime();
-  };
-  const gapMs = parse(updatedAt) - parse(createdAt);
+  const created = parseServerDate(createdAt);
+  const updated = parseServerDate(updatedAt);
+  if (!created || !updated) return false;
+  const gapMs = updated.getTime() - created.getTime();
   return gapMs > 12 * 60 * 60 * 1000;
 }
 
@@ -336,10 +329,8 @@ function authorAccent(author: string): string {
 }
 
 function formatPublicCommentTime(iso: string | null): string {
-  if (!iso) return "";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  if (isNaN(d.getTime())) return "";
+  const d = parseServerDate(iso);
+  if (!d) return "";
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 

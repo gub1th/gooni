@@ -3,6 +3,7 @@ import { useListsStore } from "../../stores/useListsStore";
 import type { ApiListItem, ListType } from "../../services/api";
 import { ItemModal } from "./ItemModal";
 import { color as ctok, FONT } from "../../ui";
+import { parseServerDate } from "../../utils/date";
 
 const CONTENT_MAX_WIDTH = 720;
 
@@ -41,9 +42,8 @@ function copyForType(type: ListType): { composer: string; doneLabel: string; emp
 //   15–29d → amber dot ("stale")
 //   ≥30d  → red dot ("old")
 function ageIndicator(iso: string | null): { color: string; label: string } | null {
-  if (!iso) return null;
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
+  const d = parseServerDate(iso);
+  if (!d) return null;
   const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
   if (days < 7) return null;
   if (days < 15) return { color: "#FCD34D", label: `${days}d old — aging` };
@@ -52,10 +52,8 @@ function ageIndicator(iso: string | null): { color: string; label: string } | nu
 }
 
 function relativeTime(iso: string | null): string {
-  if (!iso) return "";
-  // Backend ISO strings come without trailing Z — treat them as UTC.
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
+  const d = parseServerDate(iso);
+  if (!d) return "";
   const diffMs = Date.now() - d.getTime();
   const sec = Math.floor(diffMs / 1000);
   if (sec < 45) return "just now";

@@ -5,29 +5,11 @@ import {
   fetchChatAudit, deleteMemory,
   type ChatAuditEntry, type ChatAuditActiveRule,
 } from "../services/api";
+import { relativeTimeShort as relativeTime } from "../utils/date";
 
 export const Route = createFileRoute("/chat-audit")({
   component: ChatAuditPage,
 });
-
-
-function relativeTime(iso: string | null): string {
-  if (!iso) return "—";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  const diff = Date.now() - d.getTime();
-  const sec = Math.floor(diff / 1000);
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const days = Math.floor(hr / 24);
-  if (days < 30) return `${days}d ago`;
-  const mo = Math.floor(days / 30);
-  if (mo < 12) return `${mo}mo ago`;
-  return `${Math.floor(mo / 12)}y ago`;
-}
 
 function ChatAuditPage() {
   const [hasFeedbackOnly, setHasFeedbackOnly] = useState(false);

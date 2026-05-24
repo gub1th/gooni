@@ -1,44 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { color as ctok, FONT } from "../ui";
+import { publicMcpConfigQueryOptions } from "../utils/publicQueries";
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 const MONO = "'SF Mono', 'Menlo', 'Monaco', ui-monospace, monospace";
-
-interface MCPServer {
-  name: string;
-  command: string;
-  script: string | null;
-  env_keys: string[];
-}
-interface MCPToolParam {
-  name: string;
-  required: boolean;
-}
-interface MCPTool {
-  name: string;
-  params: MCPToolParam[];
-  description: string;
-}
-interface MCPConfig {
-  servers: MCPServer[];
-  tools: MCPTool[];
-}
 
 export const Route = createFileRoute("/public/mcp")({
   component: MCPPage,
 });
 
 function MCPPage() {
-  const [data, setData] = useState<MCPConfig | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch(`${BASE}/public/mcp`)
-      .then((r) => r.json() as Promise<MCPConfig>)
-      .then(setData)
-      .catch((e) => setErr(String(e)));
-  }, []);
+  const { data, error } = useQuery(publicMcpConfigQueryOptions());
+  const err = error ? String(error) : null;
 
   return (
     <div style={{ minHeight: "100vh", background: "#fff", fontFamily: FONT, color: "#111" }}>

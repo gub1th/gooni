@@ -13,25 +13,15 @@ import { useProfileStore } from "../../stores/useProfileStore";
 import { CommentAvatar, identityFor, type Identity } from "./CommentAvatar";
 import { ReactionBar } from "../ReactionBar";
 import { color as ctok, FONT } from "../../ui";
+import { parseServerDate } from "../../utils/date";
 
 
 interface NoteCommentsProps {
   noteId: number;
 }
 
-// Server stores naive UTC datetimes (datetime.utcnow). JS's Date constructor
-// reads a naive ISO string as LOCAL time, which gave us the "10am instead
-// of 3am" bug. Append "Z" when there's no timezone marker so it's parsed
-// as UTC and rendered in the user's locale tz.
-function parseServerIso(iso: string | null): Date | null {
-  if (!iso) return null;
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
-  return isNaN(d.getTime()) ? null : d;
-}
-
 function formatTime(iso: string | null): string {
-  const d = parseServerIso(iso);
+  const d = parseServerDate(iso);
   if (!d) return "";
   const now = new Date();
   const sameDay =

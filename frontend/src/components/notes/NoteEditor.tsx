@@ -21,6 +21,7 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { SlashCommand } from "./slash-command";
 import { NoteLink } from "./NoteLinkExtension";
+import { parseServerDate } from "../../utils/date";
 import { PublishButton } from "./PublishButton";
 import { ToggleBlock } from "./ToggleBlockExtension";
 import { OutlinePanel } from "./OutlinePanel";
@@ -397,9 +398,8 @@ function useEditorStyles() {
 // to absolute clock time ("Edited at 11:00 PM" today, or "Edited <date>"
 // for older). Used on the floating top-right activity chip.
 function formatEdited(iso: string | null, nowMs: number): string {
-  if (!iso) return "";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
+  const d = parseServerDate(iso);
+  if (!d) return "";
   const diffMs = nowMs - d.getTime();
   const min = Math.floor(diffMs / 60000);
   if (min < 1) return "Edited just now";
@@ -413,17 +413,15 @@ function formatEdited(iso: string | null, nowMs: number): string {
 }
 
 function formatAbsolute(iso: string | null): string {
-  if (!iso) return "—";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
+  const d = parseServerDate(iso);
+  if (!d) return "—";
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
     ", " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
 function relativeFromNow(iso: string | null, nowMs: number): string {
-  if (!iso) return "—";
-  const hasOffset = iso.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(iso);
-  const d = new Date(hasOffset ? iso : iso + "Z");
+  const d = parseServerDate(iso);
+  if (!d) return "—";
   const diffMs = nowMs - d.getTime();
   const min = Math.floor(diffMs / 60000);
   if (min < 1) return "Just now";
