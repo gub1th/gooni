@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Memory, Message, Note, Space, Todo
+from ..db.models import LimboItem, Memory, Message, Note, Space, Todo
 from ..llm.client import llm_client
 from .note_service import _cosine_similarity
 
@@ -160,6 +160,39 @@ def _gather_todos(db: Session) -> list[dict]:
         items.append({
             "kind": "todo",
             "id": tid,
+            "text": full,
+            "embedding": vec,
+        })
+    return items
+
+
+def _gather_limbo(db: Session) -> list[dict]:
+    """Pull OPEN limbo items as synth signals (PR-8). This is how the
+    ambient loop closes: the 5am batch drops idea/context threads into
+    limbo, and recurring ones (high mention_count, or many distinct items
+    on the same theme) cluster here into FocusCandidates the synth already
+    knows how to surface + promote. Promoted/dismissed items are excluded
+    (they've left the staging layer). No time filter — limbo items persist
+    until triaged, and recurrence across weeks is exactly the signal we
+    want.
+    """
+    rows = (
+        db.query(LimboItem.id, LimboItem.text, LimboItem.embedding)
+        .filter(LimboItem.status == "limbo")
+        .filter(LimboItem.embedding.isnot(None))
+        .all()
+    )
+    items: list[dict] = []
+    for lid, text, emb in rows:
+        full = (text or "").strip()
+        if not full:
+            continue
+        vec = _parse_vec(emb)
+        if not vec:
+            continue
+        items.append({
+            "kind": "limbo",
+            "id": lid,
             "text": full,
             "embedding": vec,
         })
@@ -559,8 +592,9 @@ def synthesize(
     """Run the full synthesis pass and return JSON.
 
     Args:
-        include_kinds: subset of {"note","todo","fact","message"}. Defaults
-            to all four.
+        include_kinds: subset of {"note","todo","fact","message","limbo"}.
+            Defaults to all five (limbo = open LimboItems → recurring ideas
+            cluster into FocusCandidates; this closes the ambient loop).
         threshold: cosine cutoff to join an item to an existing cluster
             during the greedy single-link pass.
         merge_threshold: cosine cutoff for the post-merge pass that
@@ -587,7 +621,7 @@ def synthesize(
             is decisively the home; smaller gaps mean ambiguity and
             the state cluster should orphan rather than be force-bound.
     """
-    include_kinds = include_kinds or ["note", "todo", "fact", "message"]
+    include_kinds = include_kinds or ["note", "todo", "fact", "message", "limbo"]
     items: list[dict] = []
     if "note" in include_kinds:
         items.extend(_gather_notes(db))
@@ -597,6 +631,8 @@ def synthesize(
         items.extend(_gather_facts_deduped(db))
     if "message" in include_kinds:
         items.extend(_gather_messages(db))
+    if "limbo" in include_kinds:
+        items.extend(_gather_limbo(db))
 
     counts: dict[str, int] = {}
     for it in items:
