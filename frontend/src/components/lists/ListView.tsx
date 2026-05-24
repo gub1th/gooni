@@ -101,6 +101,15 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
 
   useEffect(() => { selectList(listId); }, [listId, selectList]);
 
+  // Cancel any in-flight autoscroll rAF on unmount. MUST live up here with
+  // the other hooks — NOT after the `if (!list) return` early return below.
+  // Deleting a list flips `list` undefined on a still-mounted instance, the
+  // early return fires, and a hook placed after it gets skipped → fewer
+  // hooks than the prior render → React error #300 (crashes the whole tree).
+  // stopAutoscroll is a hoisted function declaration, so referencing it here
+  // before its textual definition is fine.
+  useEffect(() => stopAutoscroll, []);
+
   const copy = useMemo(() => copyForType(list?.type || "generic"), [list?.type]);
 
   // Open vs done split — gated by list kind. In an idea list, nothing is
@@ -193,8 +202,6 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       autoscrollFrame.current = null;
     }
   }
-
-  useEffect(() => stopAutoscroll, []);
 
   function handleDrop(targetId: number | null) {
     if (draggingId == null) return;
