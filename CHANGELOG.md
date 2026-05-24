@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.164.0 — 2026-05-24 (minor)
+
+- feat(ui): design system (tokens/Modal/Button) + light/dark themes + ~700 hardcode dedup (#345)
+
 ## 0.163.2 — 2026-05-24 (patch)
 
 - fix(notes): give @-mention its own pluginKey — editor crash on mount (#344)
