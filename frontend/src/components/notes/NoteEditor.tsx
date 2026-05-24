@@ -2424,10 +2424,10 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       { Icon: ItalicIcon,    title: "Italic",      action: () => editor.chain().focus().toggleItalic().run(),  active: editor.isActive("italic") },
                       { Icon: Strikethrough, title: "Strike",      action: () => editor.chain().focus().toggleStrike().run(),  active: editor.isActive("strike") },
                       { Icon: CodeIcon,      title: "Inline code", action: () => editor.chain().focus().toggleCode().run(),    active: editor.isActive("code") },
-                      // Card mark — wraps selection in a pastel "I did this"
-                      // visual card. Clicking again toggles it back off. The
-                      // CheckCircle2 icon next to it cycles the checked state
-                      // (cmd+click on the card body also works).
+                      // Card block — wraps the selected paragraphs in one
+                      // full-width pastel panel. Clicking again lifts them
+                      // back out. CheckCircle2 toggles checked; Droplet cycles
+                      // color (cmd+click on the card body also toggles check).
                       {
                         Icon: StickyNote,
                         title: editor.isActive("noteCard") ? "Remove card" : "Card",
