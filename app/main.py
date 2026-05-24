@@ -5033,6 +5033,15 @@ def mcp_search_notes(q: str, limit: int = 5, db: Session = Depends(get_db)):
     return [_serialize_note(n) for n in related]
 
 
+@app.get("/notes/search-titles")
+def search_note_titles(q: str = "", limit: int = 8, db: Session = Depends(get_db)):
+    """Title-substring search for the @-mention note picker. Cheap (no
+    embedding), prefix-friendly, recency-ordered. Empty q → recent notes.
+    Returns list-shape (no body)."""
+    notes = note_service.search_by_title(q, limit, db)
+    return [_serialize_note_lite(n) for n in notes]
+
+
 # ── Memory dashboard endpoints ──────────────────────────────────────────────────
 # Daniel's UI dashboard at /memories reads + edits memories. Separate from the
 # /mcp/memories/* routes (which Claude Code consumes via MCP) so the two surfaces

@@ -168,6 +168,14 @@ export async function searchNotes(query: string, limit = 12): Promise<ApiNote[]>
   return res.json();
 }
 
+// Title-substring search powering the @-mention note picker. Cheap (no
+// embedding), prefix-friendly, recency-ordered. Empty query → recent notes.
+export async function searchNoteTitles(query: string, limit = 8): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/notes/search-titles?q=${encodeURIComponent(query)}&limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to search note titles");
+  return res.json();
+}
+
 export async function fetchRecentNotes(limit = 5): Promise<ApiNote[]> {
   const res = await apiFetch(`${BASE}/notes/recent?limit=${limit}`);
   if (!res.ok) throw new Error("Failed to fetch recent notes");
