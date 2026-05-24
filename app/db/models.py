@@ -201,6 +201,14 @@ class Note(Base):
     #   }
     # Empty / null when no signals fired or note hasn't been classified yet.
     last_classify_signals = Column(Text, nullable=True)
+    # Session-summary notes (PR-4): the 5am batch writes one Note per
+    # processed session with note_type='session_summary'. Null for normal
+    # notes. session_start/end bound the source window; message_count is the
+    # raw count. The desktop review (PR-5) queries by note_type.
+    note_type = Column(String, nullable=True, index=True)  # None | 'session_summary'
+    session_start = Column(DateTime, nullable=True)
+    session_end = Column(DateTime, nullable=True)
+    message_count = Column(Integer, nullable=True)
     # Set when this note was extracted out of a parent note via the
     # "↗ Extract to new note" BubbleMenu action. The parent's content keeps
     # a clickable chip (TipTap noteLink node) where the selection used to

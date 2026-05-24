@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Message
+from ..db.models import Message, Note, Space
 from ..llm.client import llm_client
 
 
@@ -133,6 +133,91 @@ def _classify_session(msgs: list[Message]) -> list[dict]:
     return out
 
 
+_SUMMARY_PROMPT = """You are Daniel's 5am batch processor writing a 2-3 sentence prose summary of one of his sessions. Dry, honest, a little Alfred — no hype. Reference what actually happened: the shape of the dump, recurring themes, anything notable. Max 3 sentences, no preamble.
+
+Threads (category: text):
+{threads}
+
+Summary:"""
+
+
+def _summarize_session(threads: list[dict]) -> str:
+    """One small LLM call → prose summary. Deterministic fallback on failure."""
+    if not threads:
+        return "Quiet session — nothing worth surfacing."
+    block = "\n".join(f"- {t['category']}: {t['text']}" for t in threads[:30])
+    try:
+        raw = llm_client.generate_simple_completion(
+            _SUMMARY_PROMPT.format(threads=block[:2000]),
+            max_tokens=160, temperature=0.3, model="gpt-5.4-mini",
+        )
+        s = (raw or "").strip()
+        if s:
+            return s[:600]
+    except Exception as e:
+        print(f"[batch] summary LLM error: {e}")
+    n_idea = sum(1 for t in threads if t["category"] == "idea")
+    n_ref = sum(1 for t in threads if t["category"] == "reflection")
+    return f"{len(threads)} threads — {n_idea} ideas, {n_ref} reflections."
+
+
+def _sessions_space_id(db: Session) -> int:
+    """Find-or-create the dedicated 'Sessions' space so summaries don't
+    clutter the working note list."""
+    sp = db.query(Space).filter(Space.name == "Sessions").first()
+    if sp is None:
+        sp = Space(name="Sessions", emoji="🌙")
+        db.add(sp)
+        db.commit()
+        db.refresh(sp)
+    return sp.id
+
+
+def _write_session_summary(
+    db: Session, sess: list[Message], threads: list[dict], counts: dict,
+) -> Note | None:
+    """Persist one session-summary Note (note_type='session_summary')."""
+    if not sess:
+        return None
+    start = sess[0].created_at
+    end = sess[-1].created_at
+    date_str = (start or datetime.utcnow()).strftime("%b %d")
+    t_range = ""
+    if start and end:
+        t_range = f"{start.strftime('%-I:%M%p').lower()}–{end.strftime('%-I:%M%p').lower()} · "
+    prose = _summarize_session(threads)
+
+    idea_lines = "".join(
+        f"<li>{(t['text'])[:120]}</li>" for t in threads if t["category"] == "idea"
+    )
+    ideas_block = f"<h3>Ideas → limbo</h3><ul>{idea_lines}</ul>" if idea_lines else ""
+    content = (
+        f"<p>{t_range}{len(sess)} message(s)</p>"
+        f"<p>{prose}</p>"
+        f"<h3>Captured</h3><ul>"
+        f"<li>{counts['limbo_created']} idea/context → limbo"
+        + (f" ({counts['limbo_bumped']} repeat mentions)" if counts.get('limbo_bumped') else "")
+        + "</li>"
+        f"<li>{counts['memories']} reflection(s) → memory</li>"
+        f"<li>{counts['skipped']} handled live / noise</li>"
+        f"</ul>"
+        f"{ideas_block}"
+    )
+    note = Note(
+        title=f"Session — {date_str}",
+        content=content,
+        space_id=_sessions_space_id(db),
+        note_type="session_summary",
+        session_start=start,
+        session_end=end,
+        message_count=len(sess),
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return note
+
+
 def run(db: Session, window_hours: int = _DEFAULT_WINDOW_HOURS) -> dict:
     """Process all sessions in the window. Idempotency (day-stamp) is the
     caller's job — the loop checks it; the manual trigger forces. Returns
@@ -149,17 +234,21 @@ def run(db: Session, window_hours: int = _DEFAULT_WINDOW_HOURS) -> dict:
         "limbo_bumped": 0,
         "memories": 0,
         "skipped": 0,
+        "summaries": 0,
     }
     for sess in sessions:
         threads = _classify_session(sess)
         # Best-effort source attribution: first message of the session.
         src_id = sess[0].id if sess else None
+        # Per-session counts for the summary note.
+        sc = {"limbo_created": 0, "limbo_bumped": 0, "memories": 0, "skipped": 0}
         for th in threads:
             stats["threads"] += 1
             cat = th["category"]
             text = th["text"]
             if cat not in _WRITE_CATEGORIES:
                 stats["skipped"] += 1
+                sc["skipped"] += 1
                 continue
             try:
                 if cat in ("idea", "context"):
@@ -171,13 +260,23 @@ def run(db: Session, window_hours: int = _DEFAULT_WINDOW_HOURS) -> dict:
                     # mention_count > 1 means capture bumped an existing item.
                     if (item.mention_count or 1) > 1:
                         stats["limbo_bumped"] += 1
+                        sc["limbo_bumped"] += 1
                     else:
                         stats["limbo_created"] += 1
+                        sc["limbo_created"] += 1
                 elif cat == "reflection":
                     if memory_service.add_memory(content=text, type="episode", db=db):
                         stats["memories"] += 1
+                        sc["memories"] += 1
             except Exception as e:
                 print(f"[batch] write error ({cat}): {e}")
                 continue
+        # One reviewable summary note per session (skip pure-noise sessions).
+        if threads:
+            try:
+                if _write_session_summary(db, sess, threads, sc):
+                    stats["summaries"] += 1
+            except Exception as e:
+                print(f"[batch] session summary write error: {e}")
     print(f"[batch] run complete: {stats}", flush=True)
     return stats

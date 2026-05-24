@@ -51,3 +51,28 @@ def batch_run(body: dict | None = None, db: Session = Depends(get_db)):
     from ..services import batch_service
     window = int((body or {}).get("window_hours") or 24)
     return batch_service.run(db, window_hours=window)
+
+
+@router.get("/batch/sessions")
+def batch_sessions(limit: int = 30, db: Session = Depends(get_db)):
+    """Session-summary notes, newest first. Drives the desktop review (PR-5)."""
+    from ..db.models import Note
+    rows = (
+        db.query(Note)
+        .filter(Note.note_type == "session_summary")
+        .order_by(Note.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": n.id,
+            "title": n.title,
+            "content": n.content,
+            "session_start": n.session_start.isoformat() if n.session_start else None,
+            "session_end": n.session_end.isoformat() if n.session_end else None,
+            "message_count": n.message_count,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in rows
+    ]
