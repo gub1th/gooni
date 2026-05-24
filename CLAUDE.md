@@ -92,6 +92,8 @@ See `docs/TODO.md` (gitignored — local only).
 
 Index of files. Internals grep-able.
 
+- **`ui/`** — Design system (single source of truth). `tokens.ts` (`FONT`, `color` object — theme tokens resolve to `--gooni-*` CSS vars w/ light fallback, plus semantic accents; `scrim`, `radius`, `space`, `fontSize`, `z`), `Button` (variants primary/accent/ghost/danger/subtle), `Card`, canonical `Modal` (overlay+card chrome, Esc/backdrop/× close, scroll-lock, autofocus). Barrel `index.ts` — `import { Modal, Button, color, FONT } from "../ui"`. Styling is inline `style={{}}` (no CSS framework; `@emotion` is an unused dep). **Don't hardcode `#hex` or redeclare `FONT` — import tokens.** Migration is partial: foundation + FONT (all files) + the two gray families (`#8e8e93`/`#9ca3af` → `color.muted`) done; most modals + many colors still inline (incremental adoption). Theme-store palette (`useGooniThemeStore`) is the ONE place raw hex lives — it *defines* the tokens.
+- **Themes** — light + dark only (`GooniTheme`, `useGooniThemeStore`). Legacy 5 light variants (cool/warm/mint/rose/slate) collapsed → `light`; stored values normalize. Palette pushes `--gooni-*` vars in `routes/__root.tsx`; both themes define the full token set. SettingsModal Appearance tab toggles them.
 - **`routes/index.tsx`** — Top-level layout. View state: `"notes"|"dashboard"|"chat"|"lists"|"eval"|"stats"`. Fixed top-right icon pair (Globe = public, Plug = MCP).
 - **`routes/public.tsx`, `public.index.tsx`, `public.$noteId.tsx`** — Standalone public portfolio (no sidebar, no auth).
 - **`components/eval/EvalView.tsx`** — Eval tab. Per-source border + badge, filters, segment detail w/ trace cards + ToolCall audit + red-flag popover + dispatch-to-Claude-Code.
