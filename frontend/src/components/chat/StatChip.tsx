@@ -1,4 +1,4 @@
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+import { color as ctok, FONT } from "../../ui";
 
 interface StatChipProps {
   label: string;
@@ -21,7 +21,7 @@ export function StatChip({ label, value }: StatChipProps) {
       }}
     >
       <span style={{ fontWeight: 600 }}>{value}</span>
-      <span style={{ color: "#8E8E93", marginLeft: 5 }}>{label}</span>
+      <span style={{ color: ctok.muted, marginLeft: 5 }}>{label}</span>
     </div>
   );
 }

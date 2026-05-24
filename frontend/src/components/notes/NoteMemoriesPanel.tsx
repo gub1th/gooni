@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import type { ApiMemory } from "../../services/api";
+import { color as ctok, FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Per-note memories panel. Designed to match the redesign mockup
 // (`gooni_memories_section_redesign.html`): a flat list of pills + single-
@@ -203,7 +203,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
                   background: "none",
                   border: "none",
                   cursor: "pointer",
-                  color: "#9CA3AF",
+                  color: ctok.muted,
                   fontSize: 16,
                   lineHeight: 1,
                   padding: 2,
@@ -213,7 +213,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
                 ×
               </button>
             </div>
-            <div style={{ fontSize: 13, color: "#1C1C1E", lineHeight: 1.5, marginBottom: 10 }}>
+            <div style={{ fontSize: 13, color: ctok.text, lineHeight: 1.5, marginBottom: 10 }}>
               {selected.content}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -229,7 +229,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
                   fontFamily: FONT,
                   padding: "5px 12px",
                   borderRadius: 999,
-                  background: "#1C1C1E",
+                  background: ctok.text,
                   color: "#fff",
                   border: "none",
                   cursor: "pointer",

@@ -7,6 +7,7 @@ import {
 } from "../../services/api";
 import { FocusCard } from "./FocusCard";
 import { FocusDrillDown } from "./FocusDrillDown";
+import { FONT } from "../../ui";
 
 // FocusesView — 3-col grid of active focuses w/ drift / dormant /
 // lineage states. Manual creation lives as a small "+ manual"
@@ -18,7 +19,6 @@ import { FocusDrillDown } from "./FocusDrillDown";
 // The top-of-dashboard TakeTabs already shows Gooni's focus take, so
 // this view doesn't duplicate it.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export function FocusesView() {
   const qc = useQueryClient();

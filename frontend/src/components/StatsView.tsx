@@ -20,8 +20,8 @@ import {
   type WhoopToday,
 } from "../services/api";
 import { Skeleton } from "./Skeleton";
+import { color as ctok, FONT } from "../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#30A14E";
 const RED = "#CF222E";
 
@@ -112,7 +112,7 @@ export function WhoopSection() {
 
   // Whoop's standard recovery zones: red <34, yellow 34-66, green ≥67.
   function recoveryColor(score: number | null | undefined): string {
-    if (score == null) return "#AEAEB2";
+    if (score == null) return ctok.faint;
     if (score >= 67) return "#30A14E";
     if (score >= 34) return "#E2A26B";
     return "#C76B6B";
@@ -296,7 +296,7 @@ export function LeetcodeSection() {
             <span><span style={{ color: "#E2A26B", fontWeight: 600 }}>med</span> {fmtInt(data.medium_solved)}</span>
             <span><span style={{ color: "#C76B6B", fontWeight: 600 }}>hard</span> {fmtInt(data.hard_solved)}</span>
             {data.ranking != null && (
-              <span style={{ marginLeft: "auto", color: "#8E8E93" }}>
+              <span style={{ marginLeft: "auto", color: ctok.muted }}>
                 global rank {data.ranking.toLocaleString()}
               </span>
             )}
@@ -368,7 +368,7 @@ function Heatmap({ calendar }: { calendar: Record<string, number> }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{
         position: "relative", height: 12,
-        width: gridWidth, fontSize: 9.5, color: "#8E8E93",
+        width: gridWidth, fontSize: 9.5, color: ctok.muted,
       }}>
         {monthLabels.map((m) => (
           <span
@@ -403,7 +403,7 @@ function Heatmap({ calendar }: { calendar: Record<string, number> }) {
       </div>
       <div style={{
         display: "flex", alignItems: "center", gap: 6,
-        fontSize: 10, color: "#8E8E93", marginTop: 2,
+        fontSize: 10, color: ctok.muted, marginTop: 2,
       }}>
         <span>less</span>
         {[0, 1, 4, 8, 12].map((n) => (
@@ -495,7 +495,7 @@ export function DevSection() {
           }}>
             <div style={{
               fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
-              textTransform: "uppercase", color: "#8E8E93",
+              textTransform: "uppercase", color: ctok.muted,
               marginBottom: 6,
             }}>
               Gooni's dev take · {devTake.day}
@@ -517,7 +517,7 @@ export function DevSection() {
                     <span style={{
                       alignSelf: "flex-start",
                       fontSize: 10.5, fontWeight: 600, letterSpacing: 0.3,
-                      color: "#1C1C1E",
+                      color: ctok.text,
                       background: "rgba(0,0,0,0.05)",
                       padding: "1.5px 7px", borderRadius: 99,
                     }}>
@@ -542,7 +542,7 @@ export function DevSection() {
       <div style={{ marginTop: 18 }}>
         <div style={{
           fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
-          textTransform: "uppercase", color: "#8E8E93", marginBottom: 8,
+          textTransform: "uppercase", color: ctok.muted, marginBottom: 8,
         }}>
           Recent commits
         </div>
@@ -672,7 +672,7 @@ function ActivityTile({
     deltaLine = (
       <div style={{
         fontSize: 10.5,
-        color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
+        color: isFlat ? ctok.faint : isUp ? "#2B8C4D" : "#C76B6B",
         marginTop: 4, fontVariantNumeric: "tabular-nums",
       }}>
         {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
@@ -743,7 +743,7 @@ export function BigStat({
     deltaLine = (
       <div style={{
         fontSize: 10.5,
-        color: isFlat ? "#AEAEB2" : isUp ? "#2B8C4D" : "#C76B6B",
+        color: isFlat ? ctok.faint : isUp ? "#2B8C4D" : "#C76B6B",
         marginTop: 2, fontVariantNumeric: "tabular-nums",
       }}>
         {isFlat ? "→" : isUp ? "↑" : "↓"} {Math.abs(delta)} from last week
@@ -794,7 +794,7 @@ function RepoRow({ repo }: { repo: DevActivityRepo }) {
             <span>· {repo.streak_days ?? 0}d</span>
           </span>
         ) : (
-          <span style={{ fontSize: 11, color: "#8E8E93" }}>
+          <span style={{ fontSize: 11, color: ctok.muted }}>
             0 today · {repo.streak_days ?? 0}d
           </span>
         )}
@@ -814,7 +814,7 @@ function RepoRow({ repo }: { repo: DevActivityRepo }) {
               }}
             >
               <span style={{
-                color: "#AEAEB2", fontFamily: "ui-monospace, monospace",
+                color: ctok.faint, fontFamily: "ui-monospace, monospace",
                 flexShrink: 0,
               }}>─</span>
               <span style={{
@@ -823,7 +823,7 @@ function RepoRow({ repo }: { repo: DevActivityRepo }) {
               }}>
                 {c.subject}
               </span>
-              <span style={{ color: "#AEAEB2", fontSize: 11, flexShrink: 0 }}>
+              <span style={{ color: ctok.faint, fontSize: 11, flexShrink: 0 }}>
                 {relTime(c.committed_at)}
               </span>
             </a>

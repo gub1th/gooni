@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { color as ctok } from "../ui";
 import {
   fetchCalendarStatus, startCalendarOAuth, disconnectCalendar,
   fetchGithubStatus, startGithubOAuth, disconnectGithub,
@@ -40,7 +41,7 @@ const PROVIDERS: Record<Provider, ProviderApi> = {
 const btn: React.CSSProperties = {
   fontSize: 11.5, padding: "4px 9px", borderRadius: 6,
   border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
-  cursor: "pointer", color: "#1C1C1E", fontWeight: 500,
+  cursor: "pointer", color: ctok.text, fontWeight: 500,
   fontFamily: "'Inter', -apple-system, sans-serif",
 };
 
@@ -126,8 +127,8 @@ export function IntegrationSection({
             flexShrink: 0,
           }} />
         )}
-        <span style={{ fontSize: 13.5, fontWeight: 600, color: "#1C1C1E" }}>{label}</span>
-        <span style={{ fontSize: 11, color: "#8E8E93", marginLeft: "auto" }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: ctok.text }}>{label}</span>
+        <span style={{ fontSize: 11, color: ctok.muted, marginLeft: "auto" }}>
           {!status
             ? "…"
             : !status.configured
@@ -149,8 +150,8 @@ export function IntegrationSection({
             disabled={loading || !status?.configured}
             style={{
               ...btn,
-              background: status?.configured ? "#1C1C1E" : "#F2F2F2",
-              color: status?.configured ? "#fff" : "#AEAEB2",
+              background: status?.configured ? ctok.text : "#F2F2F2",
+              color: status?.configured ? "#fff" : ctok.faint,
               border: status?.configured ? "none" : btn.border,
               cursor: status?.configured ? "pointer" : "default",
             }}

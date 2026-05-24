@@ -1,7 +1,7 @@
 import { Bot } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Identity = normalized author shape used by both the comment renderer and
 // the settings preview. Author free-text from the server gets folded down

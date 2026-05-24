@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { X, Edit2, GitBranch, Moon, Trash2 } from "lucide-react";
+import { FONT } from "../../ui";
 import {
   fetchFocusDetail,
   fetchTodosByFocus,
@@ -19,7 +20,6 @@ import {
 // Fork, Mark dormant (= delete the focus row — keeps todos via
 // focus_service.delete which clears focus_id), or Archive (done=true).
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface Props {
   focusId: number | null;

@@ -5,11 +5,11 @@ import {
 } from "../../services/api";
 import { HealthCard } from "./HealthCard";
 import { HealthDrillDown } from "./HealthDrillDown";
+import { FONT } from "../../ui";
 
 // BuildMode — "Gooni Health" surface. 2-col grid of 6 axis cards.
 // Click any → drill-down modal w/ component breakdown.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export function BuildMode() {
   const [drill, setDrill] = useState<HealthAxis | null>(null);

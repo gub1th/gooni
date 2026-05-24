@@ -5,6 +5,7 @@ import {
   type ApiMemory, type MemoryType,
 } from "../services/api";
 import { MemoryBrain } from "../components/notes/MemoryBrain";
+import { color as ctok, FONT } from "../ui";
 
 export const Route = createFileRoute("/memories")({
   // ?focus=<id> deep-links into a specific memory row — fired by the
@@ -20,7 +21,6 @@ export const Route = createFileRoute("/memories")({
   component: MemoriesPage,
 });
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Type → tab color. Mirrors the brand palette so the type column reads at
 // a glance the way Mem0's category dots do.
@@ -172,10 +172,10 @@ function MemoriesPage() {
             {/* Header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18 }}>
               <div>
-                <h1 style={{ fontSize: 26, fontWeight: 700, color: "#1C1C1E", margin: 0, letterSpacing: "-0.4px" }}>
+                <h1 style={{ fontSize: 26, fontWeight: 700, color: ctok.text, margin: 0, letterSpacing: "-0.4px" }}>
                   Memories
                 </h1>
-                <p style={{ fontSize: 13, color: "#8E8E93", margin: "4px 0 0" }}>
+                <p style={{ fontSize: 13, color: ctok.muted, margin: "4px 0 0" }}>
                   Everything Gooni knows about you. {total} active.
                 </p>
               </div>
@@ -219,7 +219,7 @@ function MemoriesPage() {
                       display: "inline-flex", alignItems: "center", gap: 7,
                       padding: "6px 12px",
                       borderRadius: 999,
-                      background: active ? "#1C1C1E" : "#fff",
+                      background: active ? ctok.text : "#fff",
                       color: active ? "#fff" : "#3C3C43",
                       border: active ? "1px solid #1C1C1E" : "1px solid rgba(0,0,0,0.1)",
                       fontFamily: FONT, fontSize: 12.5, fontWeight: 500,
@@ -284,7 +284,7 @@ function MemoriesPage() {
                 gridTemplateColumns: "110px 110px 1fr 90px 110px",
                 gap: 0,
                 padding: "10px 16px",
-                fontSize: 11, color: "#8E8E93", letterSpacing: 0.4,
+                fontSize: 11, color: ctok.muted, letterSpacing: 0.4,
                 textTransform: "uppercase", fontWeight: 600,
                 background: "#F8F8F9",
                 borderBottom: "1px solid rgba(0,0,0,0.06)",
@@ -297,11 +297,11 @@ function MemoriesPage() {
               </div>
 
               {loading && memories.length === 0 ? (
-                <div style={{ padding: 40, textAlign: "center", color: "#AEAEB2", fontSize: 13 }}>
+                <div style={{ padding: 40, textAlign: "center", color: ctok.faint, fontSize: 13 }}>
                   Loading…
                 </div>
               ) : memories.length === 0 ? (
-                <div style={{ padding: 40, textAlign: "center", color: "#AEAEB2", fontSize: 13 }}>
+                <div style={{ padding: 40, textAlign: "center", color: ctok.faint, fontSize: 13 }}>
                   No memories match.
                 </div>
               ) : (
@@ -330,7 +330,7 @@ function MemoriesPage() {
                         transition: "background 0.5s ease, box-shadow 0.5s ease",
                       }}
                     >
-                      <div style={{ color: "#8E8E93", fontSize: 12 }}>
+                      <div style={{ color: ctok.muted, fontSize: 12 }}>
                         {relativeTime(m.created_at)}
                       </div>
                       <div>
@@ -345,7 +345,7 @@ function MemoriesPage() {
                           {m.type}
                         </span>
                       </div>
-                      <div style={{ color: "#1C1C1E", lineHeight: 1.45, paddingRight: 12 }}>
+                      <div style={{ color: ctok.text, lineHeight: 1.45, paddingRight: 12 }}>
                         {isEditing ? (
                           <textarea
                             autoFocus
@@ -369,13 +369,13 @@ function MemoriesPage() {
                             {m.key && (
                               <span style={{
                                 fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                                fontSize: 11, color: "#9CA3AF", marginRight: 6,
+                                fontSize: 11, color: ctok.muted, marginRight: 6,
                               }}>{m.key}</span>
                             )}
                             {m.content}
                             {isInactive && m.superseded_by && (
                               <span style={{
-                                marginLeft: 8, fontSize: 11, color: "#9CA3AF",
+                                marginLeft: 8, fontSize: 11, color: ctok.muted,
                                 fontStyle: "italic",
                               }}>→ superseded by #{m.superseded_by}</span>
                             )}
@@ -424,7 +424,7 @@ function iconBtn(variant?: "primary"): React.CSSProperties {
     padding: "4px 10px",
     fontSize: 11.5, fontFamily: FONT, fontWeight: 500,
     border: primary ? "none" : "1px solid rgba(0,0,0,0.1)",
-    background: primary ? "#1C1C1E" : "transparent",
+    background: primary ? ctok.text : "transparent",
     color: primary ? "#fff" : "#6E6E73",
     borderRadius: 6, cursor: "pointer",
   };

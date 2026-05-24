@@ -25,8 +25,8 @@ import { ModeToggle } from "./dashboard/ModeToggle";
 import { OpsMode } from "./dashboard/OpsMode";
 import { PrimaryBacklogBanner } from "./dashboard/PrimaryBacklogBanner";
 import { StatsMode } from "./dashboard/StatsMode";
+import { FONT } from "../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 // The dashboard itself:

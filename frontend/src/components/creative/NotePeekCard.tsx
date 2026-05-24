@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PublicNote } from "../../services/api";
+import { FONT } from "../../ui";
 
 // Bottom-anchored peek bar — slides up from the bottom of the viewport
 // when the player lands on a note-tile, slides back down on leave.
@@ -12,7 +13,6 @@ import type { PublicNote } from "../../services/api";
 // Rendered via portal to document.body so it sits outside the R3F
 // Canvas tree and shows above all 3D content without z-index fights.
 
-const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
 
 const EXCERPT_MAX = 240;

@@ -1,6 +1,6 @@
 import { HamsterWheel } from "../animations/HamsterWheel";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export function ThinkingIndicator() {
   return (

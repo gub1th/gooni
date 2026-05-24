@@ -1,10 +1,10 @@
 import type { HealthAxis } from "../../services/api";
+import { FONT } from "../../ui";
 
 // HealthCard — single axis on the Build mode dashboard. Composite
 // number + colored ring + axis name + headline component summary.
 // Click → opens drill-down modal.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const AXIS_LABEL: Record<string, string> = {
   memory: "Memory",

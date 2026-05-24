@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { color as ctok, FONT } from "../ui";
 
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 const MONO = "'SF Mono', 'Menlo', 'Monaco', ui-monospace, monospace";
 
 interface MCPServer {
@@ -64,7 +64,7 @@ function MCPPage() {
         {data?.servers && data.servers.length > 0 && (
           <section style={{ marginBottom: 48 }}>
             <div style={{
-              fontSize: 11, fontWeight: 600, color: "#8E8E93",
+              fontSize: 11, fontWeight: 600, color: ctok.muted,
               letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 12,
             }}>
               Servers
@@ -87,7 +87,7 @@ function MCPPage() {
                   </div>
                 </div>
                 {s.env_keys.length > 0 && (
-                  <div style={{ fontSize: 12, color: "#8E8E93", marginTop: 4 }}>
+                  <div style={{ fontSize: 12, color: ctok.muted, marginTop: 4 }}>
                     env:&nbsp;
                     {s.env_keys.map((k, i) => (
                       <span key={k}>
@@ -107,12 +107,12 @@ function MCPPage() {
           <section>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
               <div style={{
-                fontSize: 11, fontWeight: 600, color: "#8E8E93",
+                fontSize: 11, fontWeight: 600, color: ctok.muted,
                 letterSpacing: 0.6, textTransform: "uppercase",
               }}>
                 Tools
               </div>
-              <div style={{ fontSize: 11, color: "#AEAEB2" }}>{data.tools.length} exposed</div>
+              <div style={{ fontSize: 11, color: ctok.faint }}>{data.tools.length} exposed</div>
             </div>
             <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
               {data.tools.map((t) => (
@@ -149,7 +149,7 @@ function MCPPage() {
         {/* Footer note */}
         <div style={{
           marginTop: 48, paddingTop: 18, borderTop: "1px solid rgba(0,0,0,0.06)",
-          fontSize: 12, color: "#AEAEB2", lineHeight: 1.6,
+          fontSize: 12, color: ctok.faint, lineHeight: 1.6,
         }}>
           MCP (Model Context Protocol) lets Claude invoke local tools your account controls.
           This list is scraped from my active config at request time —

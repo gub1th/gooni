@@ -12,8 +12,8 @@ import { renderMarkdown } from "../../utils/markdown";
 import { useProfileStore } from "../../stores/useProfileStore";
 import { CommentAvatar, identityFor, type Identity } from "./CommentAvatar";
 import { ReactionBar } from "../ReactionBar";
+import { color as ctok, FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface NoteCommentsProps {
   noteId: number;
@@ -376,7 +376,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
               height: 28,
               borderRadius: "50%",
               border: "none",
-              background: !hasContent || posting ? "rgba(15,23,42,0.08)" : "#0A84FF",
+              background: !hasContent || posting ? "rgba(15,23,42,0.08)" : ctok.accent,
               color: !hasContent || posting ? "#94A3B8" : "#FFFFFF",
               display: "inline-flex",
               alignItems: "center",
@@ -400,7 +400,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
 function bubbleTintFor(identity: Identity): { bg: string; fg: string } {
   switch (identity.kind) {
     case "owner":
-      return { bg: "#0A84FF", fg: "#FFFFFF" };
+      return { bg: ctok.accent, fg: "#FFFFFF" };
     case "claude":
       return { bg: "rgba(168,85,247,0.14)", fg: "#3B0764" };
     case "gooni":

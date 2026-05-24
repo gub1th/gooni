@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sparkles, RefreshCw, Check, X } from "lucide-react";
+import { FONT } from "../../ui";
 import {
   fetchFocusCandidates,
   promoteFocusCandidate,
@@ -22,7 +23,6 @@ import {
 // shows a spinner during the call. If the synth hasn't been run yet
 // at all, that's the natural prompt to hit the button.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const HIGH_CONF_FLOOR = 0.7;
 
 export function SynthesizerSection() {

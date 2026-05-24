@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { FONT } from "../../ui";
 import {
   fetchWhoopStatus, fetchWhoopToday,
   type WhoopStatus, type WhoopToday,
@@ -14,7 +15,6 @@ import {
 // below the composer; consolidating into the header tightens the
 // fold-of-the-page real estate without dropping any data.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 function getGreeting(): string {
   const h = new Date().getHours();

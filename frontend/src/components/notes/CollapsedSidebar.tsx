@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
+import { FONT } from "../../ui";
 
 /**
  * Claude-style icon rail. Renders when sidebarOpen=false in AppShell.
@@ -22,7 +23,6 @@ import { SettingsModal } from "../SettingsModal";
  * set the full sidebar surfaces, just collapsed to icons.
  */
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface CollapsedSidebarProps {
   isDashboard: boolean;

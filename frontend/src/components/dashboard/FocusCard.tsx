@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { color as ctok, FONT } from "../../ui";
 import {
   renameFocus, forkFocus, reactivateFocus,
   type ApiFocus,
@@ -14,7 +15,6 @@ import {
 //              progress + click → Reactivate / Archive popover
 // Lineage breadcrumb ("evolved from X") below name when set.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface Props {
   focus: ApiFocus;
@@ -86,7 +86,7 @@ export function FocusCard({ focus, onOpen, onArchive }: Props) {
     : 0;
 
   const dotColor = isDormant
-    ? "#9CA3AF"
+    ? ctok.muted
     : (focus.color || "#22C55E");
 
   return (

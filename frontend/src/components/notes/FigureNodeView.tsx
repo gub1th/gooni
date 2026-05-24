@@ -2,6 +2,7 @@ import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlignCenter, AlignLeft, AlignRight } from "lucide-react";
 import type { FigureAlign } from "./FigureExtension";
+import { color as ctok } from "../../ui";
 
 // One image-with-caption block. Renders a <figure> wrapper for both
 // alignment + width, plus selection chrome (resize handle, alignment
@@ -164,7 +165,7 @@ export function FigureNodeView({ node, updateAttributes, selected, editor }: Nod
               transform: "translateX(-50%)",
               display: "flex",
               gap: 1,
-              background: "#1C1C1E",
+              background: ctok.text,
               borderRadius: 8,
               padding: "3px 4px",
               boxShadow: "0 6px 22px rgba(0,0,0,0.22)",

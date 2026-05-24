@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Shield, Flame, AlertTriangle } from "lucide-react";
+import { FONT } from "../../ui";
 import {
   fetchPromiseIntegrity,
   type PromiseIntegrity,
 } from "../../services/api";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // PromiseIntegrityCard — Daniel's accountability scoreboard.
 //

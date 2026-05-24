@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { listGithubRepos, trackRepo, untrackRepo, type GithubRepo } from "../services/api";
+import { color as ctok } from "../ui";
 
 const btn: React.CSSProperties = {
   fontSize: 11, padding: "3px 8px", borderRadius: 6,
   border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
-  cursor: "pointer", color: "#1C1C1E", fontWeight: 500,
+  cursor: "pointer", color: ctok.text, fontWeight: 500,
   fontFamily: "'Inter', -apple-system, sans-serif",
 };
 
@@ -79,9 +80,9 @@ export function RepoPicker() {
         background: "#fff",
       }}>
         {repos === null && loading ? (
-          <div style={{ padding: 10, fontSize: 11.5, color: "#8E8E93" }}>loading…</div>
+          <div style={{ padding: 10, fontSize: 11.5, color: ctok.muted }}>loading…</div>
         ) : filtered.length === 0 ? (
-          <div style={{ padding: 10, fontSize: 11.5, color: "#8E8E93" }}>no repos</div>
+          <div style={{ padding: 10, fontSize: 11.5, color: ctok.muted }}>no repos</div>
         ) : (
           filtered.map((r) => {
             const key = `${r.owner}/${r.name}`;
@@ -103,19 +104,19 @@ export function RepoPicker() {
                   disabled={pending}
                   onChange={() => toggle(r)}
                 />
-                <span style={{ fontSize: 12, color: "#1C1C1E", fontWeight: 500 }}>
+                <span style={{ fontSize: 12, color: ctok.text, fontWeight: 500 }}>
                   {r.full_name}
                 </span>
                 {r.private && (
                   <span style={{
-                    fontSize: 9.5, color: "#8E8E93",
+                    fontSize: 9.5, color: ctok.muted,
                     border: "1px solid rgba(0,0,0,0.1)", borderRadius: 3,
                     padding: "0 4px", letterSpacing: 0.3,
                   }}>private</span>
                 )}
                 {r.description && (
                   <span style={{
-                    fontSize: 11, color: "#8E8E93",
+                    fontSize: 11, color: ctok.muted,
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                     flex: 1,
                   }}>

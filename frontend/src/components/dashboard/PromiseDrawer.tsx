@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, X, AlertTriangle } from "lucide-react";
+import { color as ctok, FONT } from "../../ui";
 import {
   fetchPromises,
   patchPromiseState,
@@ -7,7 +8,6 @@ import {
   type PromiseState,
 } from "../../services/api";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Promise drawer — dashboard widget that surfaces the `promises` table.
 // Daniel can't currently see his soft commitments / slip_count / history
@@ -85,7 +85,7 @@ export function PromiseDrawer() {
                 borderRadius: 999,
                 border: "none",
                 background: tab === t ? "rgba(10,132,255,0.10)" : "transparent",
-                color: tab === t ? "#0A84FF" : "var(--gooni-muted, #8E8E93)",
+                color: tab === t ? ctok.accent : "var(--gooni-muted, #8E8E93)",
                 cursor: "pointer",
                 textTransform: "capitalize",
               }}
@@ -252,7 +252,7 @@ const STATE_ACCENT: Record<PromiseState, string> = {
   // tab + everything for history, so proposed rarely surfaces here yet,
   // but the type-system requires every state to have an accent.
   proposed: "#8B5CF6",
-  pending: "#0A84FF",
+  pending: ctok.accent,
   kept: "#15803D",
   broken: "#B91C1C",
   abandoned: "#6B7280",

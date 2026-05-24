@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardStatus } from "../../services/api";
+import { color as ctok, FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Structural shape — accepts either ApiListItem (generic) or
 // ApiBacklogTicket (board fields filled). Both flows pipe through here so
@@ -171,7 +171,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.5, textTransform: "uppercase" }}>
+            <span style={{ fontSize: 11, color: ctok.muted, letterSpacing: 0.5, textTransform: "uppercase" }}>
               {actionable ? "Task" : "Idea"}
             </span>
             {isPrimary && (
@@ -188,7 +188,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
             onClick={onClose}
             aria-label="Close"
             style={{
-              border: "none", background: "transparent", color: "#9CA3AF",
+              border: "none", background: "transparent", color: ctok.muted,
               cursor: "pointer", fontSize: 22, padding: 0, lineHeight: 1,
             }}
           >
@@ -204,7 +204,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
           style={{
             width: "100%", boxSizing: "border-box",
             border: "none", outline: "none",
-            fontSize: 20, fontWeight: 600, color: "#1C1C1E",
+            fontSize: 20, fontWeight: 600, color: ctok.text,
             background: "transparent",
             padding: "4px 0 8px",
             fontFamily: FONT,
@@ -259,7 +259,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
           {showBoardFields && (
             <>
               <div>
-                <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Status</div>
+                <div style={{ fontSize: 13, color: ctok.text, fontWeight: 500, marginBottom: 6 }}>Status</div>
                 <div style={{ display: "flex", gap: 6 }}>
                   {(["not_yet", "doing", "done"] as BoardStatus[]).map((s) => (
                     <button
@@ -268,7 +268,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
                       style={{
                         padding: "6px 12px", borderRadius: 999,
                         border: boardStatus === s ? "1px solid #1C1C1E" : "1px solid #E5E7EB",
-                        background: boardStatus === s ? "#1C1C1E" : "#FFFFFF",
+                        background: boardStatus === s ? ctok.text : "#FFFFFF",
                         color: boardStatus === s ? "#FFFFFF" : "#3C3C43",
                         fontFamily: FONT, fontSize: 12, fontWeight: 500,
                         cursor: "pointer",
@@ -280,7 +280,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>PR / Reference link</div>
+                <div style={{ fontSize: 13, color: ctok.text, fontWeight: 500, marginBottom: 6 }}>PR / Reference link</div>
                 <input
                   type="url"
                   value={prUrl}
@@ -289,7 +289,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
                   style={{
                     width: "100%", boxSizing: "border-box",
                     fontFamily: FONT, fontSize: 13, padding: "8px 10px",
-                    border: "1px solid #E5E7EB", borderRadius: 8, color: "#1C1C1E",
+                    border: "1px solid #E5E7EB", borderRadius: 8, color: ctok.text,
                     outline: "none",
                   }}
                 />
@@ -314,14 +314,14 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
           )}
           {!showBoardFields && (
             <div>
-              <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Due date</div>
+              <div style={{ fontSize: 13, color: ctok.text, fontWeight: 500, marginBottom: 6 }}>Due date</div>
               <input
                 type="date"
                 value={dueDate}
                 onChange={(e) => setDueDate(e.target.value)}
                 style={{
                   fontFamily: FONT, fontSize: 13, padding: "6px 10px",
-                  border: "1px solid #E5E7EB", borderRadius: 8, color: "#1C1C1E",
+                  border: "1px solid #E5E7EB", borderRadius: 8, color: ctok.text,
                   outline: "none",
                 }}
               />
@@ -330,7 +330,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
                   onClick={() => setDueDate("")}
                   style={{
                     marginLeft: 8, border: "none", background: "transparent",
-                    color: "#9CA3AF", cursor: "pointer", fontSize: 12, fontFamily: FONT,
+                    color: ctok.muted, cursor: "pointer", fontSize: 12, fontFamily: FONT,
                   }}
                 >
                   Clear
@@ -344,7 +344,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
           {onDelete ? (
             confirmDelete ? (
               <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#9CA3AF" }}>Delete?</span>
+                <span style={{ fontSize: 12, color: ctok.muted }}>Delete?</span>
                 <button
                   onClick={() => { onDelete(); onClose(); }}
                   style={{
@@ -369,7 +369,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
               <button
                 onClick={() => setConfirmDelete(true)}
                 style={{
-                  border: "none", background: "transparent", color: "#9CA3AF",
+                  border: "none", background: "transparent", color: ctok.muted,
                   fontFamily: FONT, fontSize: 12, cursor: "pointer", padding: "6px 0",
                 }}
               >
@@ -381,7 +381,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
             <button
               onClick={onClose}
               style={{
-                border: "1px solid #E5E7EB", background: "#FFFFFF", color: "#1C1C1E",
+                border: "1px solid #E5E7EB", background: "#FFFFFF", color: ctok.text,
                 fontFamily: FONT, fontSize: 13, fontWeight: 500,
                 padding: "8px 14px", borderRadius: 8, cursor: "pointer",
               }}
@@ -392,7 +392,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
               onClick={handleSave}
               disabled={saving}
               style={{
-                border: "none", background: saving ? "#6B7280" : "#1C1C1E", color: "#FFFFFF",
+                border: "none", background: saving ? "#6B7280" : ctok.text, color: "#FFFFFF",
                 fontFamily: FONT, fontSize: 13, fontWeight: 600,
                 padding: "8px 16px", borderRadius: 8, cursor: saving ? "default" : "pointer",
               }}
@@ -412,8 +412,8 @@ function ToggleRow({
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500 }}>{label}</div>
-        <div style={{ fontSize: 11.5, color: "#8E8E93", marginTop: 2 }}>{help}</div>
+        <div style={{ fontSize: 13, color: ctok.text, fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 11.5, color: ctok.muted, marginTop: 2 }}>{help}</div>
       </div>
       <button
         role="switch"

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { color as ctok, FONT } from "../ui";
 import {
   type ApiItemNode, type FocusScale, type FocusStatus,
   updateItem, deleteItem, createItem,
 } from "../services/api";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export interface FocusModalProps {
   node: ApiItemNode;
@@ -142,14 +142,14 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <span style={{ fontSize: 11, color: "#8E8E93", letterSpacing: 0.5, textTransform: "uppercase" }}>
+          <span style={{ fontSize: 11, color: ctok.muted, letterSpacing: 0.5, textTransform: "uppercase" }}>
             Focus
           </span>
           <button
             onClick={save}
             aria-label="Close"
             style={{
-              border: "none", background: "transparent", color: "#9CA3AF",
+              border: "none", background: "transparent", color: ctok.muted,
               cursor: "pointer", fontSize: 22, padding: 0, lineHeight: 1,
             }}
           >×</button>
@@ -163,7 +163,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
           style={{
             width: "100%", boxSizing: "border-box",
             border: "none", outline: "none",
-            fontSize: 20, fontWeight: 600, color: "#1C1C1E",
+            fontSize: 20, fontWeight: 600, color: ctok.text,
             background: "transparent",
             padding: "4px 0 8px",
             fontFamily: FONT,
@@ -215,14 +215,14 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
             />
           )}
           <div>
-            <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Due date</div>
+            <div style={{ fontSize: 13, color: ctok.text, fontWeight: 500, marginBottom: 6 }}>Due date</div>
             <input
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
               style={{
                 fontFamily: FONT, fontSize: 13, padding: "6px 10px",
-                border: "1px solid #E5E7EB", borderRadius: 8, color: "#1C1C1E", outline: "none",
+                border: "1px solid #E5E7EB", borderRadius: 8, color: ctok.text, outline: "none",
               }}
             />
             {dueDate && (
@@ -230,13 +230,13 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
                 onClick={() => setDueDate("")}
                 style={{
                   marginLeft: 8, border: "none", background: "transparent",
-                  color: "#9CA3AF", cursor: "pointer", fontSize: 12, fontFamily: FONT,
+                  color: ctok.muted, cursor: "pointer", fontSize: 12, fontFamily: FONT,
                 }}
               >Clear</button>
             )}
           </div>
           <div>
-            <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Status</div>
+            <div style={{ fontSize: 13, color: ctok.text, fontWeight: 500, marginBottom: 6 }}>Status</div>
             <div style={{ display: "inline-flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
               {(["committed", "someday"] as FocusStatus[]).map((s) => (
                 <button
@@ -244,7 +244,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
                   onClick={() => setStatus(s)}
                   style={{
                     padding: "6px 12px", fontSize: 12, fontFamily: FONT,
-                    background: status === s ? "#1C1C1E" : "#FFF",
+                    background: status === s ? ctok.text : "#FFF",
                     color: status === s ? "#FFF" : "#6B6B70",
                     border: "none", cursor: "pointer",
                   }}
@@ -253,13 +253,13 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
             </div>
           </div>
           <div>
-            <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500, marginBottom: 6 }}>Scale</div>
+            <div style={{ fontSize: 13, color: ctok.text, fontWeight: 500, marginBottom: 6 }}>Scale</div>
             <select
               value={scale}
               onChange={(e) => setScale(e.target.value as FocusScale | "")}
               style={{
                 fontFamily: FONT, fontSize: 13, padding: "6px 10px",
-                border: "1px solid #E5E7EB", borderRadius: 8, color: "#1C1C1E",
+                border: "1px solid #E5E7EB", borderRadius: 8, color: ctok.text,
                 outline: "none", background: "#FFF",
               }}
             >
@@ -274,7 +274,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
         <div style={{ marginBottom: 18 }}>
           <div style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
-            fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.6,
+            fontSize: 11, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.6,
             fontWeight: 600, marginBottom: 8,
           }}>
             <span>Steps</span>
@@ -297,7 +297,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
                     style={{ accentColor: "#30D158", flexShrink: 0 }}
                   />
                   <span style={{
-                    fontSize: 13, color: c.done ? "#AEAEB2" : "#1C1C1E",
+                    fontSize: 13, color: c.done ? ctok.faint : ctok.text,
                     textDecoration: c.done ? "line-through" : "none", flex: 1,
                   }}>{c.text}</span>
                   <button
@@ -319,7 +319,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
             <button
               onClick={() => setAdding(true)}
               style={{
-                fontSize: 12, color: "#8E8E93", textAlign: "left",
+                fontSize: 12, color: ctok.muted, textAlign: "left",
                 background: "transparent", border: "none",
                 padding: "4px 0", cursor: "pointer", fontFamily: FONT,
               }}
@@ -330,7 +330,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           {confirmDelete ? (
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: "#9CA3AF" }}>Delete focus?</span>
+              <span style={{ fontSize: 12, color: ctok.muted }}>Delete focus?</span>
               <button
                 onClick={handleDelete}
                 style={{
@@ -351,7 +351,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
             <button
               onClick={() => setConfirmDelete(true)}
               style={{
-                border: "none", background: "transparent", color: "#9CA3AF",
+                border: "none", background: "transparent", color: ctok.muted,
                 fontFamily: FONT, fontSize: 12, cursor: "pointer", padding: "6px 0",
               }}
             >Delete focus</button>
@@ -359,7 +359,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
           <button
             onClick={save}
             style={{
-              border: "none", background: "#1C1C1E", color: "#FFFFFF",
+              border: "none", background: ctok.text, color: "#FFFFFF",
               fontFamily: FONT, fontSize: 13, fontWeight: 600,
               padding: "8px 16px", borderRadius: 8, cursor: "pointer",
             }}
@@ -398,8 +398,8 @@ function ToggleRow({
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, color: "#1C1C1E", fontWeight: 500 }}>{label}</div>
-        <div style={{ fontSize: 11.5, color: "#8E8E93", marginTop: 2 }}>{help}</div>
+        <div style={{ fontSize: 13, color: ctok.text, fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 11.5, color: ctok.muted, marginTop: 2 }}>{help}</div>
       </div>
       <button
         role="switch"

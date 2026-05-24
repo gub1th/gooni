@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, X, Mic } from "lucide-react";
 import { ModelSelector } from "../ModelSelector";
 import { SendButton } from "./SendButton";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface InputBarProps {
   input: string;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Globe, Lock, ChevronDown, Check } from "lucide-react";
+import { color as ctok, FONT } from "../../ui";
 
 /**
  * Confluence-style publish CTA. Sits top-right of the editor as the
@@ -25,7 +26,6 @@ interface PublishButtonProps {
   onUnpublish: () => void;
 }
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export function PublishButton({
   visibility,
@@ -180,7 +180,7 @@ function MenuItem({
         padding: "8px 10px", borderRadius: 7,
         border: "none", background: "transparent",
         cursor: "pointer", textAlign: "left",
-        color: danger ? "#EF4444" : "#1C1C1E",
+        color: danger ? "#EF4444" : ctok.text,
         fontFamily: FONT, fontSize: 13.5, fontWeight: 500,
         transition: "background 0.1s",
       }}

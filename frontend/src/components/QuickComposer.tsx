@@ -4,8 +4,8 @@ import StarterKit from "@tiptap/starter-kit";
 import { Image } from "@tiptap/extension-image";
 import { createNote as apiCreateNote } from "../services/api";
 import { SendButton } from "./chat/SendButton";
+import { FONT } from "../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Cmd+E quick-capture composer. Mounted at root (next to QuickNav) so it
 // works on every view, including /public/* where the sidebar isn't around.

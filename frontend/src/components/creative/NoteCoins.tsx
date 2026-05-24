@@ -10,6 +10,7 @@ import { fireVfx } from "./vfx";
 import { playCoinPickup } from "./sfx";
 import { NoteCoin } from "./NoteCoin";
 import { getPeekState, setPeekState } from "./peekBus";
+import { FONT } from "../../ui";
 
 // Orchestrates note-coins across the plaza:
 //   1. fetches public notes (cached 60s)
@@ -211,7 +212,6 @@ export function NoteCoins({ onSelect }: Props) {
   );
 }
 
-const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
 
 function EmptyPlazaSign() {

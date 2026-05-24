@@ -1,5 +1,6 @@
 import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { hostnameFromUrl } from "./LinkCardExtension";
+import { color as ctok } from "../../ui";
 
 // Editor-side React rendering for LinkCard. Mirrors the static
 // renderHTML output so editor + public look identical, but uses
@@ -60,7 +61,7 @@ export function LinkCardNodeView({ node, selected }: NodeViewProps) {
           className="gooni-link-card-site"
           style={{
             fontSize: 11,
-            color: "#8E8E93",
+            color: ctok.muted,
             letterSpacing: 0.2,
             textTransform: "uppercase",
             fontWeight: 600,
@@ -73,7 +74,7 @@ export function LinkCardNodeView({ node, selected }: NodeViewProps) {
           style={{
             fontSize: 14,
             fontWeight: 600,
-            color: "#1C1C1E",
+            color: ctok.text,
             overflow: "hidden",
             textOverflow: "ellipsis",
             display: "-webkit-box",

@@ -1,16 +1,15 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
+import { FONT, color, radius } from "./tokens";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
-
-// Reusable modal primitive. Wraps the same overlay+card chrome the
-// older one-off modals reinvented (FocusModal, SettingsModal, ItemModal,
-// ExploreModal). Theme tokens flow through via var(--gooni-*) so it
-// renders correctly in dark mode without per-call overrides.
+// Canonical modal primitive. Wraps the overlay+card chrome that ~30 one-off
+// modals (FocusModal, SettingsModal, ItemModal, ExploreModal, …) each
+// reinvented. Theme tokens flow through via the color tokens so it renders
+// correctly in dark mode without per-call overrides.
 //
-// Closing: Esc, × button, and backdrop click all route to onClose.
-// onClose is also responsible for any "save before exiting" semantics —
-// this primitive doesn't try to second-guess persistence shape.
+// Closing: Esc, × button, and backdrop click all route to onClose. onClose
+// also owns any "save before exiting" semantics — this primitive doesn't
+// second-guess persistence shape.
 export interface ModalProps {
   open: boolean;
   onClose: () => void;
@@ -35,9 +34,7 @@ export function Modal({
   const overlayRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Esc to close + scroll-lock the body while the modal is open. The
-  // scroll-lock prevents the page underneath from scrolling on wheel
-  // when the modal card itself doesn't have overflow.
+  // Esc to close + scroll-lock the body while open.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -55,9 +52,8 @@ export function Modal({
     };
   }, [open, onClose]);
 
-  // Auto-focus the first focusable element inside the card on open. This
-  // covers the common "modal opens with a single input" case without
-  // every consumer needing its own ref + autoFocus dance.
+  // Auto-focus the first focusable element on open — covers the common
+  // "modal opens with a single input" case without per-consumer ref dances.
   useEffect(() => {
     if (!open) return;
     requestAnimationFrame(() => {
@@ -102,8 +98,8 @@ export function Modal({
         onMouseDown={(e) => e.stopPropagation()}
         style={{
           width: typeof width === "number" ? `min(${width}px, 100%)` : width,
-          background: "var(--gooni-card, #FFFFFF)",
-          color: "var(--gooni-text, #1C1C1E)",
+          background: color.card,
+          color: color.text,
           borderRadius: 14,
           boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
           fontFamily: FONT,
@@ -119,7 +115,7 @@ export function Modal({
         }}>
           <span style={{
             fontSize: 11,
-            color: "var(--gooni-muted, #8E8E93)",
+            color: color.muted,
             letterSpacing: 0.5, textTransform: "uppercase",
             fontWeight: 600,
           }}>
@@ -130,19 +126,19 @@ export function Modal({
             aria-label="Close"
             style={{
               border: "none", background: "transparent",
-              color: "var(--gooni-muted, #9CA3AF)",
+              color: color.muted,
               cursor: "pointer", padding: 2, lineHeight: 0,
-              borderRadius: 6,
+              borderRadius: radius.sm,
               display: "inline-flex", alignItems: "center", justifyContent: "center",
               transition: "background 0.12s, color 0.12s",
             }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)";
-              (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-text, #1C1C1E)";
+              (e.currentTarget as HTMLButtonElement).style.color = color.text;
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-              (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #9CA3AF)";
+              (e.currentTarget as HTMLButtonElement).style.color = color.muted;
             }}
           >
             <X size={16} strokeWidth={1.8} />
@@ -154,7 +150,7 @@ export function Modal({
             display: "flex", justifyContent: "flex-end", gap: 8,
             marginTop: 18,
             paddingTop: 14,
-            borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.07))",
+            borderTop: `0.5px solid ${color.border}`,
           }}>
             {footer}
           </div>
@@ -163,27 +159,3 @@ export function Modal({
     </div>
   );
 }
-
-// Convenience button styles for modal footers — paired Cancel / Primary
-// so consumers don't reinvent the same pill-button styling per modal.
-export const modalCancelBtn: React.CSSProperties = {
-  padding: "6px 12px",
-  background: "transparent",
-  color: "var(--gooni-text, #1C1C1E)",
-  border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.15))",
-  borderRadius: 8,
-  fontSize: 13, fontWeight: 500,
-  cursor: "pointer",
-  fontFamily: FONT,
-};
-
-export const modalPrimaryBtn: React.CSSProperties = {
-  padding: "6px 14px",
-  background: "var(--gooni-text, #1C1C1E)",
-  color: "var(--gooni-card, #FFF)",
-  border: "none",
-  borderRadius: 8,
-  fontSize: 13, fontWeight: 600,
-  cursor: "pointer",
-  fontFamily: FONT,
-};

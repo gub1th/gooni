@@ -41,6 +41,7 @@ import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { Tooltip } from "../Tooltip";
 import { SpaceIcon } from "./SpaceIcon";
+import { color as ctok } from "../../ui";
 
 type Variant = "full" | "embedded";
 
@@ -497,11 +498,11 @@ function EditedChip({
         >
           <div style={{
             fontSize: 11, fontWeight: 600, letterSpacing: 0.4,
-            textTransform: "uppercase", color: "#8E8E93", marginBottom: 6,
+            textTransform: "uppercase", color: ctok.muted, marginBottom: 6,
           }}>Activity</div>
           <div style={{
             display: "flex", justifyContent: "space-between", gap: 16,
-            fontSize: 12.5, color: "#1C1C1E", padding: "3px 0",
+            fontSize: 12.5, color: ctok.text, padding: "3px 0",
           }}>
             <span>Edited</span>
             <span style={{ color: "#6E6E73" }} title={formatAbsolute(updatedAt)}>
@@ -510,7 +511,7 @@ function EditedChip({
           </div>
           <div style={{
             display: "flex", justifyContent: "space-between", gap: 16,
-            fontSize: 12.5, color: "#1C1C1E", padding: "3px 0",
+            fontSize: 12.5, color: ctok.text, padding: "3px 0",
           }}>
             <span>Created</span>
             <span style={{ color: "#6E6E73" }}>{formatAbsolute(createdAt)}</span>
@@ -1562,7 +1563,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
             style={{
               fontSize: 11.5,
               padding: "0 6px",
-              color: saveStatus === "error" ? "#FF3B30" : "#8E8E93",
+              color: saveStatus === "error" ? ctok.danger : ctok.muted,
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
               transition: "color 0.2s",
               whiteSpace: "nowrap",
@@ -1669,7 +1670,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     width: 30, height: 30, borderRadius: 8, border: "none",
                     background: deleteConfirm ? "rgba(255,59,48,0.10)" : "transparent",
                     cursor: "pointer", fontSize: 13,
-                    color: deleteConfirm ? "#FF3B30" : "#636366",
+                    color: deleteConfirm ? ctok.danger : "#636366",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     padding: 0, flexShrink: 0,
                     transition: "background 0.12s",
@@ -1718,7 +1719,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         navigate({ to: "/", search: { note: neighbor.id, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } });
                       }
                     }}
-                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#FF3B30", textAlign: "left" }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: ctok.danger, textAlign: "left" }}
                     onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.08)")}
                     onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
                   >
@@ -1904,7 +1905,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontSize: 12.5,
                 fontWeight: 500,
-                color: "#1C1C1E",
+                color: ctok.text,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
@@ -2103,7 +2104,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
               <div
                 style={{
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                  minHeight: "70vh", textAlign: "center", color: "#AEAEB2",
+                  minHeight: "70vh", textAlign: "center", color: ctok.faint,
                   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}
               >
@@ -2354,7 +2355,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         >
                           {fr.length > 0 && (
                             <div style={{ marginBottom: memCount ? 6 : 0 }}>
-                              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "#9CA3AF", marginBottom: 2 }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: ctok.muted, marginBottom: 2 }}>
                                 Feature requests — Gooni Backlog
                               </div>
                               {fr.map((f) => (
@@ -2376,7 +2377,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                           )}
                           {memCount > 0 && (
                             <div>
-                              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "#9CA3AF", marginBottom: 2 }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: ctok.muted, marginBottom: 2 }}>
                                 Memories — reconciler
                               </div>
                               <div>

@@ -6,12 +6,12 @@ import {
   type ApiTodo, type ApiFocus, type TodoChainMeta, type TodoState,
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
+import { FONT } from "../../ui";
 
 // Modal surface for editing every persisted field on a Todo. Inline
 // controls (checkbox cycle, crown, age pill, delete) still work in the
 // list; this is the "full details" view per Daniel's ask.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const STATES: { value: TodoState; label: string }[] = [
   { value: "not_yet", label: "Not yet" },

@@ -13,6 +13,7 @@ import {
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { SpaceIcon } from "./SpaceIcon";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
+import { color as ctok } from "../../ui";
 
 // Module-level drag state so Sidebar can read it without prop drilling
 export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
@@ -132,7 +133,7 @@ function FilterPill({
         background: active ? "rgba(10,132,255,0.14)" : "transparent",
         border: `1px solid ${active ? "rgba(10,132,255,0.35)" : "rgba(0,0,0,0.10)"}`,
         cursor: "pointer",
-        color: active ? "#0A84FF" : "#636366",
+        color: active ? ctok.accent : "#636366",
         fontSize: 11,
         fontWeight: active ? 600 : 500,
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -181,7 +182,7 @@ function SpaceMenuItem({
         cursor: "pointer",
         borderRadius: 6,
         fontSize: 12.5,
-        color: active ? "#0A84FF" : "var(--gooni-text, #1C1C1E)",
+        color: active ? ctok.accent : "var(--gooni-text, #1C1C1E)",
         fontWeight: active ? 600 : 400,
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
         textAlign: "left",
@@ -301,7 +302,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
             title="Public"
             style={{
               fontSize: 10,
-              color: "#0A84FF",
+              color: ctok.accent,
               flexShrink: 0,
               lineHeight: 1,
             }}
@@ -370,7 +371,7 @@ function SectionHeader({ label }: { label: string }) {
       padding: "16px 14px 6px",
       fontSize: 10.5,
       fontWeight: 600,
-      color: "#AEAEB2",
+      color: ctok.faint,
       letterSpacing: 0.5,
       textTransform: "uppercase",
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -556,8 +557,8 @@ export function NotesList() {
             title={cleanConfirm ? "Click again to confirm" : "Delete empty untitled notes"}
             style={{
               height: 26, padding: "0 8px", borderRadius: 6,
-              background: cleanConfirm ? "#FF3B30" : "transparent", border: "none",
-              cursor: "pointer", color: cleanConfirm ? "#fff" : "#8E8E93", fontSize: 11.5,
+              background: cleanConfirm ? ctok.danger : "transparent", border: "none",
+              cursor: "pointer", color: cleanConfirm ? "#fff" : ctok.muted, fontSize: 11.5,
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
               fontWeight: 500, flexShrink: 0, transition: "background 0.1s, color 0.1s",
             }}
@@ -810,7 +811,7 @@ export function NotesList() {
         <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
           <svg
             width="12" height="12" viewBox="0 0 14 14" fill="none"
-            style={{ position: "absolute", left: 8, pointerEvents: "none", color: "#AEAEB2" }}
+            style={{ position: "absolute", left: 8, pointerEvents: "none", color: ctok.faint }}
           >
             <circle cx="6" cy="6" r="4" stroke="currentColor" strokeWidth="1.3"/>
             <path d="M9 9L12 12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
@@ -927,7 +928,7 @@ export function NotesList() {
       {/* Note list */}
       <div style={{ flex: 1, overflowY: "auto" }}>
         {noteList.length === 0 && (
-          <div style={{ padding: "32px 14px", textAlign: "center", color: "#AEAEB2", fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+          <div style={{ padding: "32px 14px", textAlign: "center", color: ctok.faint, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
             {searchTrimmed
               ? `No notes match “${search.trim()}”`
               : (isAllNotes && anyFilterActive)
@@ -992,7 +993,7 @@ export function NotesList() {
           {!contextMenu.confirming ? (
             <button
               onClick={handleDelete}
-              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#FF3B30", textAlign: "left" }}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: ctok.danger, textAlign: "left" }}
               onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.08)")}
               onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
             >
@@ -1004,7 +1005,7 @@ export function NotesList() {
               <div style={{ display: "flex", gap: 6 }}>
                 <button
                   onClick={handleDelete}
-                  style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "none", background: "#FF3B30", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                  style={{ flex: 1, padding: "5px 0", borderRadius: 6, border: "none", background: ctok.danger, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
                 >
                   Delete
                 </button>

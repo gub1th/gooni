@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X, GitBranch, Plus, Search } from "lucide-react";
+import { FONT } from "../../ui";
 import {
   fetchTodoChain,
   searchTodos,
@@ -36,7 +37,6 @@ import {
 // "create '<query>' as parent" row at the bottom that creates a fresh
 // todo and wires it as parent in one motion.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface Props {
   todoId: number;

@@ -10,8 +10,8 @@ import {
   type BoardStatus,
 } from "../../services/api";
 import { LiveTimer } from "./LiveTimer";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Banner colors are vivid + saturated — this is the loudest surface on
 // the dashboard on purpose ("this is your one north-star"). Status color
