@@ -942,6 +942,160 @@ function ViewToggle({
 
 // ── Detail view ──────────────────────────────────────────────────────────────
 
+// ── PDF export ───────────────────────────────────────────────────────────────
+// window.print() on the live app DOM clipped to page 1 — the segment lives inside
+// a flex/overflow:hidden shell that print CSS couldn't fully release. Instead we
+// serialize the whole segment to a standalone HTML doc and print THAT in a hidden
+// iframe, so every message + all reviewer feedback paginates cleanly.
+
+function escHtml(value: unknown): string {
+  return String(value ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ] as string,
+  );
+}
+
+function renderPrintMessage(m: EvalMessage): string {
+  const ts = m.created_at ? new Date(m.created_at).toLocaleString() : "";
+  const roleClass = m.role === "assistant" ? "assistant" : "user";
+  const fb = m.is_feedback ? " · feedback" : "";
+  let extras = "";
+
+  if (m.rating && (m.rating.rating != null || m.rating.comment)) {
+    const lbl =
+      m.rating.rating != null ? RATING_LABEL_EVAL[m.rating.rating] : "no rating";
+    extras += `<div class="rating">Rating: <b>${escHtml(lbl)}</b></div>`;
+    if (m.rating.comment)
+      extras += `<div class="comment">${escHtml(m.rating.comment)}</div>`;
+  }
+
+  if (m.reflection) {
+    const rf = m.reflection;
+    extras += `<div class="aside"><b>Self-take</b> · sev ${escHtml(rf.severity)}`;
+    if (rf.gap_exposed) extras += `<div>Gap: ${escHtml(rf.gap_exposed)}</div>`;
+    if (rf.proposed_self_fix)
+      extras += `<div>Fix: ${escHtml(rf.proposed_self_fix)}</div>`;
+    if (rf.critique_summary)
+      extras += `<div>Critique: ${escHtml(rf.critique_summary)}</div>`;
+    extras += `</div>`;
+  }
+
+  if (m.step_feedback?.length) {
+    const lines = m.step_feedback
+      .map(
+        (s) =>
+          `<div>· ${escHtml(s.step_key)}: <b>${escHtml(
+            RATING_LABEL_EVAL[s.rating] ?? s.rating,
+          )}</b>${s.comment ? ` — ${escHtml(s.comment)}` : ""}</div>`,
+      )
+      .join("");
+    extras += `<div class="aside"><b>Step feedback</b>${lines}</div>`;
+  }
+
+  const toolNames = (m.tool_calls ?? []).map((t) => t.tool_name).filter(Boolean);
+  const traceN = m.trace?.length ?? 0;
+  if (toolNames.length || traceN) {
+    const bits: string[] = [];
+    if (traceN) bits.push(`trace: ${traceN} steps`);
+    if (toolNames.length)
+      bits.push(`tools: ${toolNames.map(escHtml).join(", ")}`);
+    extras += `<div class="trace">${bits.join(" · ")}</div>`;
+  }
+
+  return `<div class="msg ${roleClass}">
+    <div class="head"><span class="role ${roleClass}">${escHtml(
+      m.role,
+    )}</span> <span class="ts">#${escHtml(m.id)} · ${escHtml(ts)}${fb}</span></div>
+    <div class="content">${escHtml(m.content)}</div>
+    ${extras}
+  </div>`;
+}
+
+function buildSegmentPrintHtml(data: EvalSegmentFull): string {
+  const seg = data.segment;
+  const msgs = data.messages;
+  const tally: Record<number, number> = { 1: 0, 2: 0, 3: 0 };
+  for (const m of msgs) {
+    const r = m.rating?.rating;
+    if (r === 1 || r === 2 || r === 3) tally[r] += 1;
+  }
+  const sourceLabel = SOURCE_STYLE[seg.source]?.label ?? seg.source;
+  const cost =
+    seg.cost_usd != null ? ` · $${seg.cost_usd.toFixed(4)}` : "";
+  const overall = seg.overall_comment
+    ? `<div class="overall"><div class="lbl">Overall</div><div class="body">${escHtml(
+        seg.overall_comment,
+      )}</div></div>`
+    : "";
+  const cards = msgs.map(renderPrintMessage).join("\n");
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Segment #${seg.id} — eval</title>
+<style>
+  @page { margin: 16mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font: 12px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1c1c1e; margin: 0; }
+  h1 { font-size: 17px; margin: 0 0 2px; }
+  h1 .muted { color: #8e8e93; font-weight: 400; font-size: 13px; }
+  .meta { color: #6b7280; font-size: 11px; margin-bottom: 16px; }
+  .overall { border: 1px solid #d2d2d7; border-radius: 8px; padding: 8px 12px; margin-bottom: 18px; }
+  .overall .lbl { font-weight: 600; font-size: 11px; margin-bottom: 4px; }
+  .overall .body { white-space: pre-wrap; font-size: 12px; }
+  .msg { border: 1px solid #e5e5ea; border-radius: 8px; padding: 9px 12px; margin-bottom: 9px; page-break-inside: avoid; }
+  .msg.assistant { border-left: 3px solid #0a84ff; }
+  .head { margin-bottom: 5px; }
+  .role { font-weight: 600; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: #3c3c43; }
+  .role.assistant { color: #0a84ff; }
+  .ts { color: #aeaeb2; font-size: 10px; }
+  .content { white-space: pre-wrap; word-break: break-word; }
+  .rating { margin-top: 7px; font-size: 11px; }
+  .comment { margin-top: 4px; font-size: 11px; background: #f6f8fa; border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; }
+  .aside { margin-top: 7px; padding-top: 6px; border-top: 1px dashed #e0e0e0; font-size: 11px; color: #444; }
+  .aside div { margin-top: 2px; }
+  .trace { margin-top: 6px; font-size: 10px; color: #8e8e93; }
+</style></head><body>
+  <h1>Segment #${escHtml(seg.id)} <span class="muted">· ${escHtml(
+    sourceLabel,
+  )} · ${escHtml(seg.eval_status)}</span></h1>
+  <div class="meta">${msgs.length} messages · ${tally[3]} good / ${
+    tally[2]
+  } neutral / ${tally[1]} bad${cost}</div>
+  ${overall}
+  ${cards}
+</body></html>`;
+}
+
+function printSegmentPdf(data: EvalSegmentFull): void {
+  const html = buildSegmentPrintHtml(data);
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  Object.assign(iframe.style, {
+    position: "fixed",
+    right: "0",
+    bottom: "0",
+    width: "0",
+    height: "0",
+    border: "0",
+    visibility: "hidden",
+  });
+  iframe.onload = () => {
+    const win = iframe.contentWindow;
+    if (!win) return;
+    const cleanup = () => {
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    };
+    win.onafterprint = cleanup;
+    win.focus();
+    win.print();
+    // Save-as-PDF doesn't always fire onafterprint — fallback sweep.
+    setTimeout(cleanup, 60_000);
+  };
+  document.body.appendChild(iframe);
+  iframe.srcdoc = html;
+}
+
 function EvalDetailView({
   segmentId,
   onClose,
@@ -1045,43 +1199,8 @@ function EvalDetailView({
         overflow: "hidden",
       }}
     >
-      {/* Print stylesheet — hides app chrome (sidebars, header buttons,
-          dispatch / legend / status pill cycle hint) and lets the segment
-          body flow into the printable page. window.print() → "Save as PDF"
-          captures whatever's left visible. The button itself is marked
-          eval-no-print so it doesn't shimmer into the saved PDF. */}
-      <style>{`
-        @media print {
-          /* Let the page grow past viewport — ancestors have overflow:hidden
-             + fixed heights in normal use, both must release for paged media
-             or the printed content gets clipped to page 1. */
-          html, body { height: auto !important; overflow: visible !important; }
-          body * { visibility: hidden !important; }
-          #eval-print-root, #eval-print-root * { visibility: visible !important; }
-          /* Pull print-root to top of page and let height flow naturally.
-             inset:0 locked us to viewport size → only first page rendered. */
-          #eval-print-root {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            height: auto !important;
-            max-height: none !important;
-            overflow: visible !important;
-            background: #fff !important;
-            padding: 24px !important;
-          }
-          /* Neutralize inner scroll containers (transcript body, code blocks)
-             so their content paginates instead of being trapped in a scroller. */
-          #eval-print-root * {
-            overflow: visible !important;
-            max-height: none !important;
-          }
-          .eval-no-print { display: none !important; }
-          /* StatusPill cursor hint isn't useful in a static PDF. */
-          #eval-print-root button[disabled] { opacity: 1 !important; }
-        }
-      `}</style>
+      {/* Export PDF builds a standalone HTML doc + prints it in a hidden iframe
+          (see printSegmentPdf) — no @media print clipping of the live app DOM. */}
       {/* Header */}
       <div
         style={{
@@ -1139,8 +1258,9 @@ function EvalDetailView({
             ⓘ Legend
           </button>
           <button
-            onClick={() => window.print()}
-            title="Save this segment as a PDF (Cmd/Ctrl-P · Save as PDF)"
+            onClick={() => data && printSegmentPdf(data)}
+            disabled={!data}
+            title="Save this segment as a PDF (full transcript + feedback)"
             style={{
               background: "transparent",
               color: ctok.accent,
@@ -2237,8 +2357,8 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
   const [expanded, setExpanded] = useState(false);
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
   // Big payloads (master_prompt, recall) get an expand button → modal that
-  // un-escapes \n / \t into real line breaks so the assembled prompt is
-  // actually readable instead of one JSON-string wall.
+  // decodes JSON string escapes (\n \t \" \\ etc) into real chars so the
+  // assembled prompt is actually readable instead of one JSON-string wall.
   const showExpand = text.length > 200;
   return (
     <div>
@@ -2294,9 +2414,9 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
   );
 }
 
-// Modal that renders a payload with escaped \n / \t turned into real line
-// breaks — the master_prompt step stores the assembled system prompt as a
-// JSON object, so the inline <pre> shows it as one escaped string. Here the
+// Modal that renders a payload with JSON string escapes (\n \t \" \\ …) decoded
+// back to real chars — the master_prompt step stores the assembled system prompt
+// as a JSON object, so the inline <pre> shows it as one escaped string. Here the
 // reviewer can read it laid out.
 function FormattedModal({
   label,
@@ -2307,7 +2427,21 @@ function FormattedModal({
   text: string;
   onClose: () => void;
 }) {
-  const formatted = text.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+  // Decode JSON string escapes in one pass so each \X is consumed exactly once
+  // (chaining .replace per type re-scans output and double-processes backslashes).
+  const formatted = text.replace(/\\(["\\/bfnrt])/g, (_, c) => {
+    const map: Record<string, string> = {
+      '"': '"',
+      "\\": "\\",
+      "/": "/",
+      b: "\b",
+      f: "\f",
+      n: "\n",
+      r: "\r",
+      t: "\t",
+    };
+    return map[c];
+  });
   return (
     <div
       onClick={onClose}
