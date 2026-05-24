@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useChatLauncherRectStore } from "../stores/useChatLauncherRectStore";
 import { useMascotOutStore } from "../stores/useMascotOutStore";
 import { AuraOrb } from "./animations/AuraOrb";
+import { z } from "../ui";
 
 // Public-facing FAB. Same visual + drag-handoff as ChatLauncher, but:
 // - No auth/store dependency on useGooniStore (no chat panel on public route)
@@ -100,8 +101,8 @@ export function PublicChatLauncher() {
     <>
       <style>{`
         @keyframes gooni-public-aura {
-          0%, 100% { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 0 rgba(74,222,128,0.0); }
-          50%      { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 6px rgba(74,222,128,0.18); }
+          0%, 100% { box-shadow: 0 6px 18px rgba(0,0,0,0.22), 0 0 12px 2px rgba(74,222,128,0.12); }
+          50%      { box-shadow: 0 6px 18px rgba(0,0,0,0.22), 0 0 20px 5px rgba(74,222,128,0.28); }
         }
         @keyframes gooni-public-out-glow {
           0%   { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 0 0 0   rgba(74,222,128,0.55), 0 0 14px 2px rgba(74,222,128,0.30); }
@@ -131,7 +132,7 @@ export function PublicChatLauncher() {
             lineHeight: 1.55,
             fontFamily: "'Inter', system-ui, sans-serif",
             boxShadow: "0 10px 26px rgba(0,0,0,0.30)",
-            zIndex: 1001,
+            zIndex: z.overlay,
             animation: "gooni-public-msg-in 0.18s ease-out",
           }}
         >
@@ -159,7 +160,9 @@ export function PublicChatLauncher() {
           background: "transparent",
           border: "none",
           cursor: pressed ? "grabbing" : "pointer",
-          zIndex: 1000,
+          // Below the modal tier (legacy modals sit at 1000) so the orb can't
+          // pierce a full-screen modal's scrim on the public note page.
+          zIndex: z.overlay,
           padding: 0,
           outline: "none",
           transform: `scale(${scale})`,
