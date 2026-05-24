@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.165.3 — 2026-05-24 (patch)
+
+- fix(eval): full-segment PDF export + decode all JSON escapes in trace modal (#352)
+
 ## 0.165.2 — 2026-05-24 (patch)
 
 - fix(capabilities): render negative facets as "Can't:" limits, not bare actions (#351)
