@@ -18,7 +18,7 @@ import { persist } from "zustand/middleware";
 // land users on a now-deleted tab.
 
 export type DashboardTab = "todos" | "focuses";
-export type DashboardMode = "today" | "ops" | "stats";
+export type DashboardMode = "today" | "ops" | "stats" | "review";
 
 interface DashboardState {
   activeTab: DashboardTab;

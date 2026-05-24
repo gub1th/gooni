@@ -10,6 +10,7 @@ import { FONT } from "../../ui";
 
 const MODES: { id: DashboardMode; label: string }[] = [
   { id: "today", label: "Today" },
+  { id: "review", label: "Review" },
   { id: "ops", label: "Ops" },
   { id: "stats", label: "Stats" },
 ];
