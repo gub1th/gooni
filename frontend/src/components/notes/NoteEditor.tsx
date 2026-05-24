@@ -25,6 +25,7 @@ import { PublishButton } from "./PublishButton";
 import { ToggleBlock } from "./ToggleBlockExtension";
 import { OutlinePanel } from "./OutlinePanel";
 import { NoteCard } from "./NoteCardExtension";
+import { NoteMention } from "./note-mention";
 import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
 import { useNoteCardStyles } from "./noteCardStyles";
 import { SendButton } from "../chat/SendButton";
@@ -797,6 +798,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         TableCell,
         SlashCommand,
         NoteLink,
+        NoteMention,
         NoteCard,
         TextColor,
         ToggleBlock,

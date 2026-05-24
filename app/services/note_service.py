@@ -180,6 +180,25 @@ class NoteService:
         by_id = {n.id: n for n in rows}
         return [by_id[nid] for nid in top_ids if nid in by_id]
 
+    def search_by_title(self, query: str, limit: int, db: Session) -> list[Note]:
+        """Cheap title-substring search for the @-mention note picker.
+
+        Deliberately NOT semantic — a mention is a prefix-typing flow ("@goo"
+        → notes titled Gooni…), so case-insensitive substring on the title is
+        both snappier (no per-keystroke embedding) and more intuitive than
+        cosine ranking. Empty query returns most-recent notes so bare `@`
+        surfaces a recency list. Newest-edited first.
+        """
+        q = (query or "").strip()
+        rows = db.query(Note)
+        if q:
+            rows = rows.filter(Note.title.ilike(f"%{q}%"))
+        return (
+            rows.order_by(Note.updated_at.desc())
+            .limit(max(1, min(limit, 25)))
+            .all()
+        )
+
 
 note_service = NoteService()
 

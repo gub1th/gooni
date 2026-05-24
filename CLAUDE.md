@@ -96,7 +96,7 @@ Index of files. Internals grep-able.
 - **`routes/index.tsx`** — Top-level layout. View state: `"notes"|"dashboard"|"chat"|"lists"|"eval"|"stats"`. Fixed top-right icon pair (Globe = public, Plug = MCP).
 - **`routes/public.tsx`, `public.index.tsx`, `public.$noteId.tsx`** — Standalone public portfolio (no sidebar, no auth).
 - **`components/eval/EvalView.tsx`** — Eval tab. Per-source border + badge, filters, segment detail w/ trace cards + ToolCall audit + red-flag popover + dispatch-to-Claude-Code.
-- **`components/notes/Sidebar.tsx`, `NotesList.tsx`, `NoteEditor.tsx`** — Sidebar 200px (draggable Notes/Chat sections), list 260px, editor (TipTap, auto-save 1.5s, image drag/paste).
+- **`components/notes/Sidebar.tsx`, `NotesList.tsx`, `NoteEditor.tsx`** — Sidebar 200px (draggable Notes/Chat sections), list 260px, editor (TipTap, auto-save 1.5s, image drag/paste). TipTap extensions: SlashCommand (`/`), NoteMention (`@` → note picker, `note-mention.ts` + `NoteMentionMenu.tsx`, inserts a `NoteLink` chip via `searchNoteTitles`), NoteCard (block callout — `NoteCardExtension.ts`, full-width panel w/ left check, `toggleWrap`), NoteLink (inline chip → internal nav), LinkCard (URL → OG preview), ToggleBlock, TextColor.
 - **`components/ChatView.tsx`** — Full chat. Text-only streams via SSE (`/messages/stream`); image turns + bots stay blocking.
 - **`components/Dashboard.tsx`** — Single-column. Mode toggle (Today|Ops|Stats, key `gooni-dashboard-v3`, migrate maps legacy `build`→`ops` and `pulse`→`stats`). Today body reacts to `composerFocused` (collapses TakeTabs, dims focuses/todos block).
 - **`components/dashboard/`** — TodoList (3-state cycle), FocusCardsRow (3-col + halo), DashboardHeader, TabToggle, FocusesView (SynthesizerSection + FocusCard grid), FocusCard (normal/drifting/dormant states + lineage), SynthesizerSection (candidate pills, ✓/✗, ↻), FocusDrillDown (modal), HabitsStrip (7-cell tracker + streak), ModeToggle, BuildMode (health cards, folded into OpsMode), OpsMode (no sub-tabs — stacked sections: BacklogSection + BuildMode + CapabilityProfileCard + FailuresSection; eval workflow lives only in `routes/chat-audit.tsx` + `EvalView`), StatsMode (merged Pulse + StatsView page sections: Whoop / Streaks / Dev Activity / LeetCode / Usage / Activity counters), HealthCard, HealthDrillDown.
@@ -179,6 +179,7 @@ DELETE /notes/{id}
 POST   /notes/{id}/embed              → embed + suggest space
 POST   /notes/{id}/touch              → update last_opened_at
 POST   /notes/{id}/memorize           → extract → memory
+GET    /notes/search-titles?q=&limit=8 → cheap title-substring search (no embedding), recency-ordered, list-shape. Powers the @-mention note picker. Empty q → recent notes. Distinct from semantic /mcp/notes/search.
 
 # Comments
 GET    /notes/{id}/comments
