@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useChatLauncherRectStore } from "../stores/useChatLauncherRectStore";
 import { useMascotOutStore } from "../stores/useMascotOutStore";
-import { GooniLauncherCharacter } from "./GooniLauncherCharacter";
+import { AuraOrb } from "./animations/AuraOrb";
 
 // Public-facing FAB. Same visual + drag-handoff as ChatLauncher, but:
 // - No auth/store dependency on useGooniStore (no chat panel on public route)
@@ -16,7 +16,6 @@ const CLICK_MAX_PX = 5;
 export function PublicChatLauncher() {
   const setRect = useChatLauncherRectStore((s) => s.setRect);
   const isOut = useMascotOutStore((s) => s.isOut);
-  const characterHidden = isOut;
   const ref = useRef<HTMLButtonElement>(null);
   const [hovered, setHovered] = useState(false);
   const [pressed, setPressed] = useState(false);
@@ -95,16 +94,11 @@ export function PublicChatLauncher() {
     handedOffRef.current = false;
   }
 
-  const borderColor = hovered ? "#6EE7A0" : "#4ADE80";
   const scale = pressed ? 0.94 : hovered ? 1.08 : 1;
 
   return (
     <>
       <style>{`
-        @keyframes gooni-public-pulse-dot {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50%      { opacity: 0.45; transform: scale(0.7); }
-        }
         @keyframes gooni-public-aura {
           0%, 100% { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 0 rgba(74,222,128,0.0); }
           50%      { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 6px rgba(74,222,128,0.18); }
@@ -113,10 +107,6 @@ export function PublicChatLauncher() {
           0%   { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 0 0 0   rgba(74,222,128,0.55), 0 0 14px 2px rgba(74,222,128,0.30); }
           50%  { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 0 0 10px rgba(74,222,128,0.0),  0 0 26px 6px rgba(74,222,128,0.55); }
           100% { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 0 0 0   rgba(74,222,128,0.55), 0 0 14px 2px rgba(74,222,128,0.30); }
-        }
-        @keyframes gooni-public-out-border {
-          0%, 100% { border-color: #4ADE80; }
-          50%      { border-color: #86EFAC; }
         }
         @keyframes gooni-public-msg-in {
           from { opacity: 0; transform: translateY(6px); }
@@ -166,46 +156,23 @@ export function PublicChatLauncher() {
           width: SIZE,
           height: SIZE,
           borderRadius: "50%",
-          background: "#1A1A1A",
-          border: `2px solid ${borderColor}`,
-          overflow: "hidden",
+          background: "transparent",
+          border: "none",
           cursor: pressed ? "grabbing" : "pointer",
           zIndex: 1000,
           padding: 0,
           outline: "none",
           transform: `scale(${scale})`,
-          transition: "transform 0.15s ease, border-color 0.18s ease",
+          transition: "transform 0.15s ease",
           animation: isOut
-            ? "gooni-public-out-glow 1.4s ease-in-out infinite, gooni-public-out-border 1.4s ease-in-out infinite"
+            ? "gooni-public-out-glow 1.4s ease-in-out infinite"
             : "gooni-public-aura 3.6s ease-in-out infinite",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
       >
-        <GooniLauncherCharacter size={SIZE} characterHidden={characterHidden} />
-
-        <span
-          aria-hidden
-          style={{
-            position: "absolute", inset: 0, borderRadius: "50%",
-            background: "radial-gradient(ellipse at 50% 18%, rgba(255,255,255,0.10), rgba(255,255,255,0) 55%)",
-            pointerEvents: "none",
-          }}
-        />
-
-        <span
-          aria-hidden
-          style={{
-            position: "absolute",
-            top: 5,
-            right: 5,
-            width: 9,
-            height: 9,
-            borderRadius: "50%",
-            background: "#4ADE80",
-            boxShadow: "0 0 6px rgba(74,222,128,0.85)",
-            animation: "gooni-public-pulse-dot 2.2s ease-in-out infinite",
-            pointerEvents: "none",
-          }}
-        />
+        <AuraOrb size={SIZE} intensified={isOut} />
       </button>
     </>
   );
