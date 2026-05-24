@@ -594,6 +594,13 @@ class Todo(Base):
     # talked about this Tue, Thu, and Sun"). Nullable: legacy rows
     # don't get backfilled to keep the migration cheap.
     mention_history = Column(Text, nullable=True)
+    # Procrastination nudge (PR-6). doing_started_at is stamped when the
+    # todo flips INTO state='doing' (cleared when it leaves). The proactive
+    # loop pings if a todo sits in 'doing' past the stale threshold;
+    # last_nudge_sent_at debounces so it doesn't nag more than once per
+    # window.
+    doing_started_at = Column(DateTime, nullable=True)
+    last_nudge_sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

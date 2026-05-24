@@ -37,6 +37,7 @@ async def _proactive_nudge_loop():
     # hoisted out of the per-tick while-loop so it's resolved once, not every
     # 60s.
     from .services.proactive_nudge import (
+        maybe_fire_procrastination_nudge,
         maybe_fire_sleep_nudge,
         process_pending_whoop_nudge,
     )
@@ -48,6 +49,7 @@ async def _proactive_nudge_loop():
             try:
                 process_pending_whoop_nudge(db)
                 maybe_fire_sleep_nudge(db)
+                maybe_fire_procrastination_nudge(db)
             finally:
                 db.close()
         except asyncio.CancelledError:

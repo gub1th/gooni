@@ -286,11 +286,19 @@ class TodoService:
             new_state = patch["state"]
             if new_state not in VALID_STATES:
                 raise ValueError(f"state must be one of {VALID_STATES}")
+            prev_state = t.state
             t.state = new_state
             t.done = _state_to_done(new_state)
             t.completed_at = datetime.utcnow() if new_state == "done" else None
             if new_state == "done":
                 t.is_primary = False
+            # PR-6 procrastination clock: stamp on entry to 'doing', clear
+            # on exit so a stale-doing nudge measures the current sit.
+            if new_state == "doing" and prev_state != "doing":
+                t.doing_started_at = datetime.utcnow()
+                t.last_nudge_sent_at = None
+            elif new_state != "doing":
+                t.doing_started_at = None
         elif "done" in patch:
             new_done = bool(patch["done"])
             t.done = new_done
@@ -298,6 +306,7 @@ class TodoService:
             t.completed_at = datetime.utcnow() if new_done else None
             if new_done:
                 t.is_primary = False
+                t.doing_started_at = None
 
         for key in ("text", "subtitle", "due_date", "sort_order", "focus_id", "is_primary", "closure_note"):
             if key in patch:
