@@ -28,7 +28,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..db.models import (

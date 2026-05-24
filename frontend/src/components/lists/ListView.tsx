@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useListsStore } from "../../stores/useListsStore";
 import type { ApiListItem, ListType } from "../../services/api";
 import { ItemModal } from "./ItemModal";
-import { getPrimaryDragBus } from "../PrimaryFocusCard";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const CONTENT_MAX_WIDTH = 720;
@@ -243,14 +242,10 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
       isDragging={draggingId === it.id}
       onDragStart={() => {
         setDraggingId(it.id);
-        if ((list?.type as string) === "focus") {
-          getPrimaryDragBus().current = { id: it.id };
-        }
       }}
       onDragEnd={() => {
         setDraggingId(null);
         setDropBeforeId(null);
-        getPrimaryDragBus().current = null;
         stopAutoscroll();
       }}
     />

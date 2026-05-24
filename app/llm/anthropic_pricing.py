@@ -1,8 +1,8 @@
 """Anthropic public pricing for cost estimation against local Claude Code
 JSONL session logs.
 
-Numbers are USD per 1,000 tokens (matches MODEL_PRICING in
-app/llm/pricing.py for OpenAI). Cache rules per Anthropic's docs (as of
+Numbers are USD per 1,000 tokens (mirrors MODEL_PRICING in
+app/llm/openai_pricing.py). Cache rules per Anthropic's docs (as of
 Apr 2026):
   - Cache writes (`cache_creation_input_tokens`):    1.25x input price (5 min TTL)
                                                      2.00x input price (1 hour TTL)

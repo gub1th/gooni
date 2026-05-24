@@ -145,7 +145,7 @@ def _segment_cost_usd(seg: EvalSegment, db: Session) -> float:
     on the audit row. Underestimates by ~$0.001-0.002/turn.
     """
     import json as _j
-    from ..llm.pricing import calculate_chat_cost
+    from ..llm.openai_pricing import calculate_chat_cost
 
     rows = (
         db.query(Message.trace)
