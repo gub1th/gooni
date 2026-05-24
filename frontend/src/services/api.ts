@@ -2776,6 +2776,7 @@ export interface ApiCapabilityFacet {
   layer: CapabilityLayer | string;
   facet_key: string;
   facet_text: string;
+  polarity: "positive" | "negative";
   status: CapabilityStatus | string;
   source: string;
   evidence_json: string | null;

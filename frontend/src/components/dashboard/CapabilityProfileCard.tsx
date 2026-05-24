@@ -97,11 +97,15 @@ export function CapabilityProfileCard() {
 }
 
 function FacetLine({ facet }: { facet: ApiCapabilityFacet }) {
-  const dot = STATUS_COLOR[facet.status] || ctok.muted;
+  const isNegative = facet.polarity === "negative";
+  const dot = isNegative ? ctok.muted : STATUS_COLOR[facet.status] || ctok.muted;
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12.5 }}>
-      <span style={{ color: dot, marginTop: 5, fontSize: 8 }}>●</span>
-      <span style={{ color: ctok.text, lineHeight: 1.45 }}>{facet.facet_text}</span>
+      <span style={{ color: dot, marginTop: 5, fontSize: 8 }}>{isNegative ? "⊘" : "●"}</span>
+      <span style={{ color: isNegative ? ctok.muted : ctok.text, lineHeight: 1.45 }}>
+        {isNegative && <strong style={{ fontWeight: 600 }}>Can't: </strong>}
+        {facet.facet_text}
+      </span>
     </div>
   );
 }
@@ -196,7 +200,8 @@ function CapabilityDrawer({
                       <code style={{ fontSize: 11 }}>{r.facet_key}</code>
                       <span style={{ marginLeft: "auto" }}>{r.source}</span>
                     </div>
-                    <div style={{ marginTop: 4, fontSize: 13, color: ctok.text }}>
+                    <div style={{ marginTop: 4, fontSize: 13, color: r.polarity === "negative" ? ctok.muted : ctok.text }}>
+                      {r.polarity === "negative" && <strong style={{ fontWeight: 600 }}>Can't: </strong>}
                       {r.facet_text}
                     </div>
                     <div style={{ marginTop: 6, display: "flex", gap: 4, flexWrap: "wrap" }}>
