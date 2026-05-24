@@ -406,6 +406,13 @@ _BOT_UA_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Only real public PAGE-content fetches count as a visit: the index list
+# (`/public/notes`) and a note detail (`/public/notes/<id>`). Everything else
+# the SPA fires per page load (`/public/profile`, `/public/visits/count`,
+# `.../comments`, `/public/og`) is meta noise that used to pad the count —
+# and fetching `/public/visits/count` was literally self-counting.
+_VISIT_PATH_RE = re.compile(r"^/public/notes(?:/\d+)?$")
+
 
 def _client_ip(request: Request) -> str:
     """Extract the visitor's IP, respecting common reverse-proxy headers."""
@@ -449,28 +456,52 @@ async def mcp_logger(request: Request, call_next):
 
 @app.middleware("http")
 async def visit_logger(request: Request, call_next):
-    """Record hits on /public/* for unique-visitor analytics.
-    Runs AFTER the route (so we only log successful responses) and skips obvious bots.
+    """Record real page views on /public for unique-visitor analytics.
+
+    Counts only content-page fetches (index list + note detail), skips the
+    SPA's meta/data fetches, the owner (anyone carrying the valid auth token),
+    and obvious bots. Dedups to one row per (ip_hash, path, day) so refreshes
+    don't inflate totals. Unique visitors = COUNT(DISTINCT ip_hash).
     """
     response = await call_next(request)
     path = request.url.path
     if (
         request.method == "GET"
-        and path.startswith("/public")
+        and _VISIT_PATH_RE.match(path)
         and response.status_code < 400
     ):
+        # Owner self-exclude: a valid Bearer token means it's Daniel (the
+        # public site shares localStorage with the authed app, so apiFetch
+        # attaches the token on /public when he's logged in). No marker = visitor.
+        is_owner = (
+            bool(_AUTH_PASSWORD)
+            and request.headers.get("Authorization", "") == f"Bearer {_expected_token()}"
+        )
         ua = request.headers.get("user-agent", "")
-        if not _BOT_UA_RE.search(ua):
+        if not is_owner and not _BOT_UA_RE.search(ua):
             ip = _client_ip(request)
             if ip:
+                from datetime import datetime, time as _time
+                ip_hash = _hash_ip(ip)
+                day_start = datetime.combine(datetime.utcnow().date(), _time.min)
                 db = SessionLocal()
                 try:
-                    db.add(Visit(
-                        ip_hash=_hash_ip(ip),
-                        user_agent=ua[:500] or None,
-                        path=path[:500],
-                    ))
-                    db.commit()
+                    already = (
+                        db.query(Visit.id)
+                        .filter(
+                            Visit.ip_hash == ip_hash,
+                            Visit.path == path,
+                            Visit.created_at >= day_start,
+                        )
+                        .first()
+                    )
+                    if not already:
+                        db.add(Visit(
+                            ip_hash=ip_hash,
+                            user_agent=ua[:500] or None,
+                            path=path[:500],
+                        ))
+                        db.commit()
                 except Exception:
                     db.rollback()
                 finally:
