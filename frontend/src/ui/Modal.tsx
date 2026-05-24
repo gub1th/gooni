@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import { FONT, color, radius } from "./tokens";
+import { FONT, color, radius, z } from "./tokens";
 
 // Canonical modal primitive. Wraps the overlay+card chrome that ~30 one-off
 // modals (FocusModal, SettingsModal, ItemModal, ExploreModal, …) each
@@ -77,7 +77,7 @@ export function Modal({
       style={{
         position: "fixed", inset: 0,
         background: "rgba(15, 18, 24, 0.45)",
-        zIndex: 10000,
+        zIndex: z.modalScrim,
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 24,
         animation: "gooni-modal-overlay-in 160ms ease-out",

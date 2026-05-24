@@ -8,7 +8,7 @@ import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { ModelSelector } from "./ModelSelector";
 import { ThinkingIndicator } from "./chat/ThinkingIndicator";
-import { color as ctok, FONT } from "../ui";
+import { color as ctok, FONT, z } from "../ui";
 
 // Plain text → TipTap-friendly HTML. Escapes the string and wraps each
 // non-empty line in <p>; double-newlines become paragraph breaks. Keeps
@@ -810,7 +810,7 @@ function ChatHeader({
                 borderRadius: 10,
                 boxShadow: "0 10px 28px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06)",
                 padding: 4,
-                zIndex: 1300,
+                zIndex: z.dropdown,
               }}
             >
               {menuItems.filter((it) => it.show).map((it) => (

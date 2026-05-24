@@ -87,11 +87,27 @@ export const fontSize = {
   xl: 24,
 } as const;
 
-// z-index ladder — keeps overlays from fighting. Modal backdrop sat at 1000
-// across the old one-off modals; centralized here.
+// z-index ladder — single source of truth so overlays stop fighting. Before
+// this was centralized, modals lived at BOTH 1000 and 10000, the chat orb
+// tied the 1000 tier (so it pierced attachment/eval modals), and one-off
+// surfaces squatted on 1300 / 1500 / 4000 / 9999. Every global layer now maps
+// to one of these rungs; purely-local in-component stacking (small values
+// within a single subtree's own stacking context) is left alone.
+//
+// Order, low → high:
+//   dropdown   menus, popovers, context menus, kebab dropdowns
+//   sticky     sticky section headers
+//   fab        chat launcher orb — deliberately BELOW every modal
+//   modalScrim full-screen modal backdrop (+ single-layer modal cards)
+//   modalCard  modal card when it must layer above its own scrim
+//   panel      docked / floating chat panel (sits above modals)
+//   toast      transient toasts + flying animations, top of the stack
 export const z = {
   dropdown: 100,
-  overlay: 900,
-  modal: 1000,
-  toast: 1100,
+  sticky: 200,
+  fab: 900,
+  modalScrim: 1000,
+  modalCard: 1010,
+  panel: 1100,
+  toast: 1200,
 } as const;

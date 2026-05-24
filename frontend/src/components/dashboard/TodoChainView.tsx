@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X, GitBranch, Plus, Search } from "lucide-react";
-import { FONT } from "../../ui";
+import { FONT, z } from "../../ui";
 import {
   fetchTodoChain,
   searchTodos,
@@ -215,7 +215,7 @@ export function TodoChainView({ todoId, onClose, onMutate }: Props) {
     <div
       onClick={onBackdropClick}
       style={{
-        position: "fixed", inset: 0, zIndex: 1000,
+        position: "fixed", inset: 0, zIndex: z.modalScrim,
         background: "rgba(28,20,12,0.45)",
         display: "flex", alignItems: "flex-start", justifyContent: "center",
         paddingTop: 60, fontFamily: FONT,

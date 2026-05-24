@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardStatus } from "../../services/api";
-import { color as ctok, FONT } from "../../ui";
+import { color as ctok, FONT, z } from "../../ui";
 import { toDateInputValue } from "../../utils/date";
 
 
@@ -126,7 +126,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
         position: "fixed",
         inset: 0,
         background: "rgba(15, 18, 24, 0.45)",
-        zIndex: 10000,
+        zIndex: z.modalScrim,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

@@ -13,7 +13,7 @@ import {
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { SpaceIcon } from "./SpaceIcon";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
-import { color as ctok } from "../../ui";
+import { color as ctok, z } from "../../ui";
 import { parseServerDate } from "../../utils/date";
 
 // Module-level drag state so Sidebar can read it without prop drilling
@@ -976,7 +976,7 @@ export function NotesList() {
             position: "fixed",
             top: contextMenu.y,
             left: contextMenu.x,
-            zIndex: 1000,
+            zIndex: z.dropdown,
             background: "var(--gooni-card, #FFFFFF)",
             borderRadius: 10,
             boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
