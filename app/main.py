@@ -206,12 +206,13 @@ async def _lifespan(app: FastAPI):
     todo_sweeper_task = asyncio.create_task(background._todo_soft_delete_sweeper_loop())
     urgency_task = asyncio.create_task(background._urgency_rollup_loop())
     sleep_nudge_task = asyncio.create_task(background._proactive_nudge_loop())
+    batch_task = asyncio.create_task(background._batch_processor_loop())
     try:
         yield
     finally:
         for t in (
             nudge_task, backfill_task, excerpt_task, mem_task, capability_task,
-            todo_sweeper_task, urgency_task, sleep_nudge_task,
+            todo_sweeper_task, urgency_task, sleep_nudge_task, batch_task,
         ):
             t.cancel()
             try:
