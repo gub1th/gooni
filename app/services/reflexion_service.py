@@ -261,6 +261,34 @@ TONE GAP MUST QUOTE A VOICE-SPEC VIOLATION (hard rule):
     redundant_with_prior = true
     gap_exposed = null
   Daniel does not want sev≥2 grading on impressionistic tone reads.
+
+COMPLETENESS CALIBRATION (hard rule — this is the #1 false-positive):
+- "completeness" fires ONLY when: (a) a tool I actually FIRED didn't
+  surface its result, or (b) Daniel EXPLICITLY asked for X and my reply
+  omitted X. Nothing else.
+- It does NOT fire for "I could have offered more": NONE of these are gaps —
+    * "could have suggested a tool / framework / template"
+    * "lacked actionable follow-up / next steps"
+    * "didn't propose a structure to assess X"
+    * "could have asked a clarifying question"
+  Daniel did NOT ask for those. Inventing a gap because I "could have done
+  more" is moralizing, not evaluation. severity = 1, gap_exposed = null.
+- CAPTURE-ACK IS CORRECT, NOT A GAP. A terse acknowledgement to a
+  statement, brain-dump, fitness log, or commitment ("noted, sir." /
+  "got it, sire." / "on it." / "trained, sir — legs.") is the DESIRED
+  behavior — Daniel built Gooni to shut up and capture, not narrate or
+  advise. Do NOT flag a short ack as incomplete. severity = 1.
+- Brain dumps DO carry real actionables, but the router captures those
+  automatically — the ack staying terse is correct. The ONLY things that
+  still warrant sev≥2 on a capture/ack turn:
+    * a DIRECT QUESTION Daniel asked went unanswered (completeness, real),
+    * an explicit command I claimed done that the audit doesn't back
+      (hallucination / tool_fit),
+    * a tone violation (quote the banned shape),
+    * unsolicited advice / a manifesto I volunteered when Daniel only
+      dumped (that's me over-talking — flag as tone, quote it).
+- When unsure whether a completeness gap is real vs moralizing: it's
+  moralizing. severity = 1.
 """
 
 
@@ -334,11 +362,18 @@ class ReflexionService:
         assistant_reply: str,
         message_id: int,
         conversation_id: int,
+        is_capture_ack: bool = False,
     ) -> None:
         """Spawn a daemon thread that runs reflect() with its own session.
 
         Same fire-and-forget pattern as `_process_wa_message` in main.py.
         The chat path never waits and exceptions never bubble back.
+
+        `is_capture_ack` — set by the orchestrator's capture short-circuit
+        path, where the reply is a terse ack to a router-captured turn
+        (todo/promise/fitness/feature). On those turns a "completeness"
+        self-take is by-definition a false positive (the work landed and
+        the ack is correct), so reflect() suppresses it deterministically.
         """
         t = threading.Thread(
             target=self._run_in_thread,
@@ -347,6 +382,7 @@ class ReflexionService:
                 "assistant_reply": assistant_reply,
                 "message_id": message_id,
                 "conversation_id": conversation_id,
+                "is_capture_ack": is_capture_ack,
             },
             daemon=True,
         )
@@ -369,6 +405,7 @@ class ReflexionService:
         assistant_reply: str,
         message_id: int,
         conversation_id: int,
+        is_capture_ack: bool = False,
     ) -> Reflection | None:
         """Synchronous reflection. Returns the persisted row or None on error.
 
@@ -516,6 +553,28 @@ class ReflexionService:
                 gap_text = doubled_text
             elif "doubled down" not in gap_text:
                 gap_text = f"{gap_text.rstrip('.')}. {doubled_text}"
+
+        # Capture-ack calibration (PR-2a). When this turn was a terse ack to
+        # a router-captured message (todo/promise/fitness/feature hit the
+        # capture short-circuit), a "completeness" self-take is a false
+        # positive by construction — the work landed and the ack is the
+        # correct, desired behavior. Suppress it. Runs AFTER the sev-UP
+        # overrides (voice_drift/attack/doubled-down all stamp
+        # gap_dimension="tone"; hallucination stays "hallucination"), so a
+        # real voice/character/hallucination gap on the ack still fires —
+        # only the moralizing "should've offered more" completeness gap dies.
+        if (
+            is_capture_ack
+            and severity >= 2
+            and parsed.get("gap_dimension") == "completeness"
+        ):
+            print(
+                "[reflexion] capture-ack turn: suppressing completeness "
+                f"sev {severity}→1 (msg {message_id})"
+            )
+            severity = 1
+            gap_text = None
+            parsed["gap_dimension"] = "none"
 
         gap_embedding_json = None
         if severity >= 2 and gap_text:
