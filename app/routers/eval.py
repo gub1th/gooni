@@ -198,12 +198,22 @@ def eval_put_message_rating(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # upsert_message_rating runs _bump_segment_pending (not_yet → pending on
+    # first reviewer touch). Return the post-bump status so the FE can update
+    # the segment pill without a full segment refetch — the per-message save
+    # path patches local state only, so it'd otherwise show stale "not_yet".
+    from ..db.models import EvalSegment as _Seg
+
+    seg_status = (
+        db.query(_Seg.eval_status).filter(_Seg.id == segment_id).scalar()
+    )
     return {
         "id": row.id,
         "message_id": row.message_id,
         "rating": row.rating,
         "comment": row.comment,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "segment_eval_status": seg_status,
     }
 
 

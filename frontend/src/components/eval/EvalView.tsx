@@ -1326,11 +1326,16 @@ function EvalDetailView({
                   segmentId={segmentId}
                   msg={m}
                   onFeedbackChanged={reload}
-                  onRatingPatched={(mid, rating) =>
+                  onRatingPatched={(mid, rating, segmentStatus) =>
                     setData((prev) =>
                       prev
                         ? {
                             ...prev,
+                            // Mirror the server's not_yet→pending bump (one-way)
+                            // so the header pill updates without a full refetch.
+                            segment: segmentStatus
+                              ? { ...prev.segment, eval_status: segmentStatus }
+                              : prev.segment,
                             messages: prev.messages.map((mm) =>
                               mm.id === mid ? { ...mm, rating } : mm,
                             ),
@@ -1607,7 +1612,11 @@ function MessageCard({
   segmentId: number;
   msg: EvalMessage;
   onFeedbackChanged: () => void;
-  onRatingPatched: (messageId: number, rating: EvalMessageRating | null) => void;
+  onRatingPatched: (
+    messageId: number,
+    rating: EvalMessageRating | null,
+    segmentStatus?: EvalStatus,
+  ) => void;
 }) {
   // Trace defaults to collapsed — flipped from the previous "expanded for
   // assistant" default because the wall-of-JSON was the #1 friction source
@@ -2017,7 +2026,11 @@ function MessageRatingRow({
   // parent's local state instead of triggering a full segment refetch
   // (Daniel's "why fetch full on every save" gripe). Pass null to clear
   // the rating row.
-  onRatingPatched: (messageId: number, rating: EvalMessageRating | null) => void;
+  onRatingPatched: (
+    messageId: number,
+    rating: EvalMessageRating | null,
+    segmentStatus?: EvalStatus,
+  ) => void;
 }) {
   const [comment, setComment] = useState(existing?.comment ?? "");
   const [pending, setPending] = useState(false);
@@ -2071,12 +2084,16 @@ function MessageRatingRow({
           rating,
           comment: commentToSend,
         });
-        onRatingPatched(messageId, {
-          id: updated.id,
-          rating: updated.rating,
-          comment: updated.comment,
-          updated_at: updated.updated_at,
-        });
+        onRatingPatched(
+          messageId,
+          {
+            id: updated.id,
+            rating: updated.rating,
+            comment: updated.comment,
+            updated_at: updated.updated_at,
+          },
+          updated.segment_eval_status,
+        );
       }
     } finally {
       setPending(false);
@@ -2091,12 +2108,16 @@ function MessageRatingRow({
         rating: existing?.rating ?? null,
         comment: comment.trim() || null,
       });
-      onRatingPatched(messageId, {
-        id: updated.id,
-        rating: updated.rating,
-        comment: updated.comment,
-        updated_at: updated.updated_at,
-      });
+      onRatingPatched(
+        messageId,
+        {
+          id: updated.id,
+          rating: updated.rating,
+          comment: updated.comment,
+          updated_at: updated.updated_at,
+        },
+        updated.segment_eval_status,
+      );
     } finally {
       setPending(false);
     }

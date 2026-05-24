@@ -2213,7 +2213,7 @@ export async function putMessageRating(
   segmentId: number,
   messageId: number,
   payload: { rating: 1 | 2 | 3 | null; comment?: string | null }
-): Promise<EvalMessageRating & { message_id: number }> {
+): Promise<EvalMessageRating & { message_id: number; segment_eval_status: EvalStatus }> {
   const res = await apiFetch(
     `${BASE}/eval/segments/${segmentId}/messages/${messageId}/rating`,
     {
