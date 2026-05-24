@@ -589,6 +589,10 @@ class Orchestrator:
                     assistant_reply=feedback_ack,
                     message_id=short_assistant_msg.id,
                     conversation_id=conv.id,
+                    # This IS the capture short-circuit: a terse ack to a
+                    # router-captured turn. Tell reflexion so it doesn't
+                    # flag the correct ack as a completeness gap.
+                    is_capture_ack=True,
                 )
                 # G2: auto-detect "I can't X" patterns in Gooni's own reply,
                 # log against nearest backlog ticket. Short-circuit acks are
