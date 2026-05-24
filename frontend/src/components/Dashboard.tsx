@@ -22,6 +22,7 @@ import { FocusesView } from "./dashboard/FocusesView";
 import { SynthesizerSection } from "./dashboard/SynthesizerSection";
 import { ModeToggle } from "./dashboard/ModeToggle";
 import { OpsMode } from "./dashboard/OpsMode";
+import { ReviewMode } from "./dashboard/ReviewMode";
 import { PrimaryBacklogBanner } from "./dashboard/PrimaryBacklogBanner";
 import { StatsMode } from "./dashboard/StatsMode";
 import { FONT } from "../ui";
@@ -187,6 +188,13 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
               </div>
             </div>
           </>
+        )}
+
+        {activeMode === "review" && (
+          /* Review mode = the ambient-loop triage surface: navigable
+             session summaries (5am batch output) + the limbo queue with
+             promote→{todo|focus|promise|memory} / dismiss. Additive. */
+          <ReviewMode />
         )}
 
         {activeMode === "ops" && (
