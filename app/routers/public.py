@@ -1,0 +1,244 @@
+import hashlib
+import hmac
+import json
+import os
+import re
+import time
+
+from typing import Optional
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from sqlalchemy import bindparam, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, aliased
+
+from ..db.database import engine, get_db, SessionLocal
+from ..db.models import (
+    Attachment,
+    CapabilityFacet,
+    Conversation,
+    GooniTake,
+    McpCall,
+    Memory,
+    Message,
+    List as ListModel,
+    ListItem,
+    Note,
+    NoteComment,
+    PublicProfile,
+    Reaction,
+    Reflection,
+    Settings,
+    Space,
+    Visit,
+    WaProcessedId,
+)
+from ..db.schemas import ChatRequest
+from ..llm.client import llm_client
+from ..services.conversation_service import conversation_service
+from ..services.item_service import item_service
+from ..services.memory_service import memory_service
+from ..services.messaging import (
+    dispatch_inbound,
+    imessage_channel,
+    telegram_channel,
+    whatsapp_channel,
+)
+from ..services.note_service import note_service
+from ..services.orchestrator import Orchestrator
+from ..services.todo_nudge import (
+    DEFAULT_PROMPT as NUDGE_DEFAULT_PROMPT,
+    compose_message as compose_nudge_message,
+)
+
+from ..serializers import (
+    _TAG_RE, _IMG_TAG_RE, _WHITESPACE_RE, _EXTERNAL_IMG_SRC_RE, _REACTION_TARGETS, _REACTION_MAX_EMOJI_LEN, _REACTION_MAX_REACTOR_LEN, _excerpt_from_html, _strip_html_to_visible_text, _external_thumb_from_html, _note_excerpt, _parse_tags, _normalize_tags, _serialize_note, _serialize_note_lite, _notes_order, _serialize_list, _serialize_list_item, _serialize_item, _serialize_space, _serialize_settings, _serialize_promise, _serialize_comment, _validate_reaction_target, _serialize_reactions, _serialize_conversation, _serialize_message, _serialize_capability_facet, _serialize_reflection
+)
+from ..common import (
+    _AUTH_PASSWORD, _expected_token, _parse_iso_date, _parse_optional_due, _parse_optional_dt, _validate_health, _validate_status, _validate_scale, _VALID_STATUS, _VALID_SCALE, _unique_viewers_for_note
+)
+from ..deps import _fire_nudge_once, _settings_row, _next_fire
+
+
+router = APIRouter()
+
+
+@router.get("/public/mcp")
+def get_public_mcp_config():
+    """Sanitized snapshot of the project's MCP setup — servers (from .mcp.json) + tools
+    (parsed from mcp/server.py via AST). Dynamic: edit the config or add a @mcp.tool() and
+    this endpoint reflects the change on next request. No secrets returned — absolute paths
+    are reduced to basenames, env values stripped (keys only)."""
+    import ast
+    import json as _json
+    from pathlib import Path as _Path
+
+    repo_root = _Path(__file__).resolve().parent.parent
+
+    # 1) Parse .mcp.json — redact paths and env values
+    servers: list[dict] = []
+    mcp_json = repo_root / ".mcp.json"
+    if mcp_json.exists():
+        try:
+            raw = _json.loads(mcp_json.read_text())
+            for name, scfg in (raw.get("mcpServers") or {}).items():
+                command = scfg.get("command", "")
+                args = scfg.get("args") or []
+                env = scfg.get("env") or {}
+                servers.append({
+                    "name": name,
+                    "command": _Path(command).name if command else "",
+                    "script": _Path(args[0]).name if args else None,
+                    "env_keys": list(env.keys()),
+                })
+        except Exception:
+            pass
+
+    # 2) AST-walk mcp/server.py for @mcp.tool() decorated functions
+    def _dec_name(dec) -> str:
+        if isinstance(dec, ast.Name):
+            return dec.id
+        if isinstance(dec, ast.Attribute):
+            base = _dec_name(dec.value)
+            return f"{base}.{dec.attr}" if base else dec.attr
+        if isinstance(dec, ast.Call):
+            return _dec_name(dec.func)
+        return ""
+
+    tools: list[dict] = []
+    server_py = repo_root / "mcp" / "server.py"
+    if server_py.exists():
+        try:
+            tree = ast.parse(server_py.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    is_tool = any(_dec_name(d) == "mcp.tool" for d in node.decorator_list)
+                    if not is_tool:
+                        continue
+                    params = []
+                    defaults = node.args.defaults or []
+                    default_start = len(node.args.args) - len(defaults)
+                    for i, arg in enumerate(node.args.args):
+                        has_default = i >= default_start
+                        params.append({
+                            "name": arg.arg,
+                            "required": not has_default,
+                        })
+                    doc = ast.get_docstring(node) or ""
+                    # Keep only the first paragraph — keeps the surface tidy
+                    short = doc.split("\n\n", 1)[0].strip().replace("\n", " ")
+                    tools.append({
+                        "name": node.name,
+                        "params": params,
+                        "description": short,
+                    })
+        except Exception:
+            pass
+
+    return {"servers": servers, "tools": tools}
+
+
+def _strip_html(html: str) -> str:
+    import re
+    return re.sub(r"<[^>]+>", " ", html or "").strip()
+
+
+def _read_time_min(html: str) -> int:
+    import re
+    text = re.sub(r"\s+", " ", _strip_html(html)).strip()
+    return max(1, -(-len(text) // 1000))
+
+
+@router.get("/public/notes")
+def get_public_notes(db: Session = Depends(get_db)):
+    """Return all public notes with their space name. Public-pinned first,
+    then newest. No auth."""
+    rows = (
+        db.query(Note, Space)
+        .outerjoin(Space, Note.space_id == Space.id)
+        .filter(Note.is_public == True)  # noqa: E712
+        .order_by(Note.is_public_pinned.desc(), _notes_order())
+        .all()
+    )
+    result = []
+    for n, space in rows:
+        excerpt = _strip_html(n.content or "")[:150]
+        result.append({
+            "id": n.id,
+            "title": n.title,
+            "space_name": space.name if space else None,
+            "excerpt": excerpt,
+            "updated_at": n.updated_at,
+            "read_time_minutes": _read_time_min(n.content or ""),
+            "is_public_pinned": bool(n.is_public_pinned),
+        })
+    return result
+
+
+@router.get("/public/notes/{note_id}")
+def get_public_note(note_id: int, db: Session = Depends(get_db)):
+    """Return a single public note's full content. 404 if not public."""
+    note = db.query(Note).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
+    if not note:
+        raise HTTPException(status_code=404, detail="Not found")
+    space = db.query(Space).filter(Space.id == note.space_id).first() if note.space_id else None
+    return {
+        "id": note.id,
+        "title": note.title,
+        "content": note.content,
+        "space_name": space.name if space else None,
+        "created_at": note.created_at,
+        "updated_at": note.updated_at,
+        "unique_viewers": _unique_viewers_for_note(db, note.id),
+    }
+
+
+@router.get("/public/notes/{note_id}/comments")
+def get_public_note_comments(note_id: int, db: Session = Depends(get_db)):
+    """Read-only comment thread for a public note. 404 if the note isn't
+    public; thread itself has no per-comment visibility flag — if the note
+    is public, all its comments are visible. Auth-bypassed by middleware
+    (path matches /public/* GET)."""
+    note = db.query(Note).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
+    if not note:
+        raise HTTPException(status_code=404, detail="Not found")
+    rows = (
+        db.query(NoteComment)
+        .filter(NoteComment.note_id == note_id)
+        .order_by(NoteComment.created_at.asc(), NoteComment.id.asc())
+        .all()
+    )
+    return [_serialize_comment(c) for c in rows]
+
+
+@router.get("/public/profile")
+def get_public_profile(db: Session = Depends(get_db)):
+    """Return the public bio + avatar + stats."""
+    from sqlalchemy import func as sqlfunc
+    profile = db.query(PublicProfile).first()
+    note_count = db.query(Note).count()
+    last_active = db.query(sqlfunc.max(Note.updated_at)).scalar()
+    return {
+        "bio": profile.bio if profile else None,
+        "avatar_url": profile.avatar_url if profile else None,
+        "note_count": note_count,
+        "last_active": last_active.isoformat() if last_active else None,
+    }
+
+
+@router.patch("/public/profile")
+def update_public_profile(body: dict, db: Session = Depends(get_db)):
+    """Save bio and/or avatar_url. Either field is optional in the body —
+    PATCH semantics: only the keys present overwrite. Pass `avatar_url: null`
+    to clear the avatar back to the goofy default.
+    """
+    profile = db.query(PublicProfile).first()
+    if not profile:
+        profile = PublicProfile()
+        db.add(profile)
+    if "bio" in body:
+        profile.bio = body.get("bio") or ""
+    if "avatar_url" in body:
+        v = body.get("avatar_url")
+        profile.avatar_url = v if isinstance(v, str) and v.strip() else None
+    db.commit()
+    return {"ok": True}
