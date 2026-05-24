@@ -305,7 +305,6 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
     // Bias toward Y-variance from current position so consecutive waypoints noticeably
     // change depth (avoid two targets both near the current Y, which would look "stuck" at one scale).
     const yRange = maxY - minY;
-    let ty: number;
     const attempts = 3;
     let best = minY + Math.random() * yRange;
     let bestDist = -1;
@@ -314,7 +313,7 @@ export function GooniMascot2D({ dashboardRef }: GooniMascotProps) {
       const d = Math.abs(candidate - s.y);
       if (d > bestDist) { best = candidate; bestDist = d; }
     }
-    ty = best;
+    const ty = best;
     s.targetX = tx;
     s.targetY = ty;
   }

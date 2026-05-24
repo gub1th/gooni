@@ -140,8 +140,15 @@ python scripts/telegram_bot.py
 
 ```bash
 cd frontend && npx tsc --noEmit          # zero errors required
+cd frontend && npm run lint              # eslint — react-hooks/rules-of-hooks is error (gates CI); rest are warn
 source venv/bin/activate && python -c "from app.main import app; print('OK')"
 ```
+
+ESLint is flat-config (`frontend/eslint.config.js`): full `@eslint/js` +
+`typescript-eslint` + `react-hooks` recommended. Only `rules-of-hooks` is a
+hard **error** (the gate — runs in CI via `.github/workflows/frontend-lint.yml`);
+pre-existing recommended violations are **warn** and burn down incrementally.
+Don't add new errors; clear warnings in files you touch when cheap.
 
 ## Schema changes (Alembic)
 
