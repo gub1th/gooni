@@ -1180,6 +1180,50 @@ class HabitEntry(Base):
     )
 
 
+class DailyMetric(Base):
+    """Numeric daily fitness/body tracking — the substrate for the cut table.
+
+    Deliberately standalone, NOT folded into Habit/HabitEntry: habits are
+    boolean ("went to gym" → True/False), metrics are numeric (calories,
+    protein, weight). Keeping them apart keeps the habit data model clean
+    and means no migration risk on existing habit rows.
+
+    Row semantics by metric_type:
+      - calories / protein  — ADDITIVE within a day. Each meal Daniel logs
+        = one row; the day's value is SUM(value). No UNIQUE constraint —
+        multiple rows per (type, date) is the intended shape.
+      - weight              — last-write-wins per day. Service reads the
+        most-recent row's value (by created_at); we don't dedupe in the DB.
+      - exercise            — presence sentinel. value=1.0; the real signal
+        is `notes` (the workout label) + the paired `gym` HabitEntry that
+        the fitness handler upserts alongside.
+
+    Corrections ("actually that chicken was ~900 cal") overwrite the
+    most-recent row for (type, today) in place — see
+    daily_metric_service.update_most_recent.
+    """
+
+    __tablename__ = "daily_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # 'calories' | 'protein' | 'weight' | 'exercise'
+    metric_type = Column(String, nullable=False, index=True)
+    value = Column(Float, nullable=False)
+    # 'kcal' | 'g' | 'lb' | 'kg' | None (exercise carries no unit)
+    unit = Column(String, nullable=True)
+    date = Column(Date, nullable=False, index=True)
+    # Raw input breadcrumb: the food string Daniel typed, the workout
+    # label, or a correction trail. Never load-bearing for aggregation.
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        # Every read path (running total, cut table) filters on both
+        # columns — composite index keeps the grouped SUMs cheap.
+        Index("ix_daily_metrics_type_date", "metric_type", "date"),
+    )
+
+
 class WaProcessedId(Base):
     """Idempotency log for inbound WhatsApp messages.
 

@@ -8,7 +8,9 @@ import {
   fetchTimeOnGooni,
   fetchWhoopStatus,
   fetchWhoopToday,
+  fetchCutTable,
   parseDevTake,
+  type CutTable,
   type DashboardStats,
   type DevActivity,
   type DevActivityRepo,
@@ -725,6 +727,100 @@ function ActivityTile({
 }
 
 // ── Atoms ─────────────────────────────────────────────────────────────────
+
+// ── Cut table (fitness/cut pipeline) ───────────────────────────────────
+// Per-day calories/protein/weight/exercise + today's running totals. Data
+// comes from DailyMetric rows Daniel logs via chat ("chicken rice kimchi"
+// → estimated macros). Read-only review surface.
+
+function _fmtCutDate(iso: string): string {
+  // "2026-05-24" → "May 24". Parse as local-naive to avoid TZ drift.
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+export function CutTableSection() {
+  const { data, isFetching, refetch } = useQuery<CutTable>({
+    queryKey: ["cut-table"],
+    queryFn: () => fetchCutTable(30),
+    staleTime: 30_000,
+  });
+
+  const rows = data?.rows ?? [];
+  const today = data?.today ?? { calories: 0, protein: 0 };
+
+  return (
+    <SectionShell
+      label="Cut table"
+      right={
+        <FreshnessActions
+          updatedAt={data?.updated_at}
+          isFetching={isFetching}
+          onRefresh={() => refetch()}
+        />
+      }
+    >
+      {/* Today's running totals — same numbers the chat ack surfaces. */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+        gap: 14, marginBottom: rows.length ? 20 : 0,
+      }}>
+        <BigStat label="calories today" value={fmtInt(today.calories)} />
+        <BigStat label="protein today" value={`${fmtInt(today.protein)}g`} />
+      </div>
+
+      {rows.length === 0 ? (
+        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>
+          nothing logged yet — text Gooni what you ate, your weight, or a workout.
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{
+            width: "100%", borderCollapse: "collapse", fontSize: 13,
+            fontVariantNumeric: "tabular-nums",
+          }}>
+            <thead>
+              <tr style={{ color: "var(--gooni-muted, #8E8E93)", textAlign: "left" }}>
+                <th style={_cutTh}>date</th>
+                <th style={{ ..._cutTh, textAlign: "right" }}>cal</th>
+                <th style={{ ..._cutTh, textAlign: "right" }}>protein</th>
+                <th style={{ ..._cutTh, textAlign: "right" }}>weight</th>
+                <th style={{ ..._cutTh, textAlign: "center" }}>gym</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.date} style={{
+                  borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.06))",
+                  color: "var(--gooni-text, #1C1C1E)",
+                }}>
+                  <td style={_cutTd}>{_fmtCutDate(r.date)}</td>
+                  <td style={{ ..._cutTd, textAlign: "right" }}>{r.calories ? fmtInt(r.calories) : "—"}</td>
+                  <td style={{ ..._cutTd, textAlign: "right" }}>{r.protein ? `${fmtInt(r.protein)}g` : "—"}</td>
+                  <td style={{ ..._cutTd, textAlign: "right" }}>{r.weight != null ? `${r.weight}` : "—"}</td>
+                  <td style={{ ..._cutTd, textAlign: "center" }} title={r.exercise_label ?? undefined}>
+                    {r.exercise
+                      ? <span style={{ color: GREEN, fontWeight: 700 }}>●</span>
+                      : <span style={{ color: "var(--gooni-faint, #C7C7CC)" }}>·</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </SectionShell>
+  );
+}
+
+const _cutTh: React.CSSProperties = {
+  fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
+  textTransform: "uppercase", padding: "0 8px 8px 0",
+};
+const _cutTd: React.CSSProperties = { padding: "8px 8px 8px 0" };
 
 export function BigStat({
   label, value, sub, delta,

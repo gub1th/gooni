@@ -1495,6 +1495,29 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   return res.json() as Promise<DashboardStats>;
 }
 
+// ── Cut table (fitness/cut pipeline) ───────────────────────────────────
+// Per-day calories/protein/weight/exercise rolled up from DailyMetric rows
+// Daniel logs via chat. `today` carries the running daily totals the chat
+// ack also surfaces.
+export interface CutTableRow {
+  date: string;             // YYYY-MM-DD
+  calories: number;
+  protein: number;
+  weight: number | null;    // last weigh-in that day, null if none
+  exercise: boolean;
+  exercise_label: string | null;
+}
+export interface CutTable {
+  rows: CutTableRow[];      // newest day first
+  today: { calories: number; protein: number };
+  updated_at?: string;
+}
+export async function fetchCutTable(days = 30): Promise<CutTable> {
+  const res = await apiFetch(`${BASE}/metrics/cut-table?days=${days}`);
+  if (!res.ok) throw new Error("Failed to fetch cut table");
+  return res.json() as Promise<CutTable>;
+}
+
 // Time spent on the gooni repo today + this week, estimated by clustering
 // commit timestamps from GitHub (server hits the GitHub API). All-zero
 // payload when GitHub OAuth isn't connected.

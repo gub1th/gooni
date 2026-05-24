@@ -12,6 +12,7 @@ import {
 import {
   SectionShell,
   WhoopSection,
+  CutTableSection,
   LeetcodeSection,
   DevSection,
   ActivitySection,
@@ -39,6 +40,7 @@ export function StatsMode() {
   return (
     <div style={{ fontFamily: FONT, color: "var(--gooni-text, #1C1C1E)" }}>
       <WhoopSection />
+      <CutTableSection />
       <StreaksSection />
       <DevSection />
       <LeetcodeSection />

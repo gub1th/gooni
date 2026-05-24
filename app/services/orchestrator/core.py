@@ -391,6 +391,7 @@ class Orchestrator:
         edited_todos: list[dict] = []
         implicit_done_todos: list[dict] = []
         disambiguation_needed: list[dict] = []
+        captured_metrics: list[dict] = []
         tone_rules: list[str] = []
         skip_normal_reply = False
 
@@ -490,6 +491,7 @@ class Orchestrator:
                 edited_todos.extend(routed.edited_todos)
                 implicit_done_todos.extend(routed.implicit_done_todos)
                 disambiguation_needed.extend(routed.disambiguation_needed)
+                captured_metrics.extend(routed.captured_metrics)
                 feedback_tools.extend(routed.tools_used)
 
                 # Stamp the user message as feedback when either a tone
@@ -521,6 +523,7 @@ class Orchestrator:
                     edited_todos=edited_todos,
                     implicit_done_todos=implicit_done_todos,
                     disambiguation_needed=disambiguation_needed,
+                    captured_metrics=captured_metrics,
                 )
                 if feedback_ack is not None:
                     # Skip the LLM reply ONLY when the extractor explicitly
@@ -560,6 +563,7 @@ class Orchestrator:
                             or merged_todos
                             or implicit_done_todos
                             or edited_todos
+                            or captured_metrics
                         )
                         if (
                             capture_happened
@@ -765,6 +769,7 @@ class Orchestrator:
                     edited_todos=edited_todos,
                     implicit_done_todos=implicit_done_todos,
                     disambiguation_needed=disambiguation_needed,
+                    captured_metrics=captured_metrics,
                 )
             except Exception as e:
                 print(f"[just_extracted_block] build failed: {e}")
@@ -899,6 +904,7 @@ class Orchestrator:
                     captured_features=captured_features,
                     captured_promises=captured_promises,
                     captured_todos=captured_todos,
+                    captured_metrics=captured_metrics,
                     tool_call_ids=(usage or {}).get("tool_call_ids") or [],
                     db=db,
                 )
