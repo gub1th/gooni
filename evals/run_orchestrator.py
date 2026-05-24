@@ -162,7 +162,9 @@ def _check_tool_invocations(case: dict, trace: list[dict]) -> tuple[bool, list[s
 # Add a file here if you find it changes pipeline output and isn't being
 # captured. Cost: cache rebuild on edit. Trivial — ~$0.10 full run.
 _PIPELINE_SOURCE_FILES = [
-    "app/services/orchestrator.py",
+    "app/services/orchestrator/core.py",
+    "app/services/orchestrator/prompt_blocks.py",
+    "app/services/orchestrator/steps.py",
     "app/services/conversation_service.py",
     "app/services/memory_service.py",
     "app/services/memory_extraction.py",
