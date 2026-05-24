@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.165.4 — 2026-05-24 (patch)
+
+- fix(promises): reconcile drawer to G3.1 state model + manual add, drop PIS card (#353)
+
 ## 0.165.3 — 2026-05-24 (patch)
 
 - fix(eval): full-segment PDF export + decode all JSON escapes in trace modal (#352)
