@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { FONT } from "../ui";
 import {
   fetchChatAudit, deleteMemory,
   type ChatAuditEntry, type ChatAuditActiveRule,
@@ -9,7 +10,6 @@ export const Route = createFileRoute("/chat-audit")({
   component: ChatAuditPage,
 });
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 function relativeTime(iso: string | null): string {
   if (!iso) return "—";

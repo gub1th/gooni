@@ -1,4 +1,4 @@
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
+import { FONT } from "../../ui";
 
 interface StatChipProps {
   label: string;

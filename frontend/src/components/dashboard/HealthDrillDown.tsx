@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
 import type { HealthAxis } from "../../services/api";
+import { FONT } from "../../ui";
 
 // HealthDrillDown — modal opened by clicking a health card. Lists
 // each component with its score bar + drill-down detail string.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const AXIS_LABEL: Record<string, string> = {
   memory: "Memory",

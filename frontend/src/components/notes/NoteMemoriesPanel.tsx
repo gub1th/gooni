@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import type { ApiMemory } from "../../services/api";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Per-note memories panel. Designed to match the redesign mockup
 // (`gooni_memories_section_redesign.html`): a flat list of pills + single-

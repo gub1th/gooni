@@ -12,6 +12,7 @@ import { resolveFocusColor } from "../../utils/focusColors";
 import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 import { TodoEditModal } from "./TodoEditModal";
 import { TodoChainView } from "./TodoChainView";
+import { FONT } from "../../ui";
 
 // TodoList — dashboard todos block. Mockup-aligned shape:
 //
@@ -25,7 +26,6 @@ import { TodoChainView } from "./TodoChainView";
 // 3-state cycle (not_yet → doing → done) is one click; Done state pops a
 // state-picker so a misclick is recoverable.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const CASCADE_STAGGER_MS = 80;
 

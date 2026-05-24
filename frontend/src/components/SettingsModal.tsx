@@ -9,6 +9,7 @@ import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
 import { RepoPicker } from "./RepoPicker";
 import { CommentAvatar } from "./notes/CommentAvatar";
+import { FONT } from "../ui";
 
 interface SettingsModalProps {
   open: boolean;
@@ -17,7 +18,6 @@ interface SettingsModalProps {
 
 type Tab = "profile" | "appearance" | "notifications" | "integrations" | "deployments";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "profile", label: "Profile" },

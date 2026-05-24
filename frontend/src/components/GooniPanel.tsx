@@ -8,6 +8,7 @@ import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { ModelSelector } from "./ModelSelector";
 import { ThinkingIndicator } from "./chat/ThinkingIndicator";
+import { FONT } from "../ui";
 
 // Plain text → TipTap-friendly HTML. Escapes the string and wraps each
 // non-empty line in <p>; double-newlines become paragraph breaks. Keeps
@@ -663,7 +664,6 @@ function ChatHeader({
   const accentGlow = isNote ? "rgba(250,204,21,0.22)" : "rgba(74,222,128,0.18)";
   const pos = useGooniModalCornerStore((s) => s.pos);
   const resetPos = useGooniModalCornerStore((s) => s.reset);
-  const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
   const isCustomPosition = surface === "modal" && pos !== null;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);

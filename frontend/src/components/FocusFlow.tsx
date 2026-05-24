@@ -9,6 +9,7 @@ import {
 } from "../services/api";
 import { DeriveTodoModal } from "./DeriveTodoModal";
 import { FocusOverlay, loadFocusMode, saveFocusMode, clearFocusMode } from "./FocusOverlay";
+import { FONT } from "../ui";
 
 // Focus Flow — primary spotlight + Quick/Slow sections + add-focus modal +
 // lock animation + completion celebration. Replaces the old ActivityCard
@@ -19,7 +20,6 @@ import { FocusOverlay, loadFocusMode, saveFocusMode, clearFocusMode } from "./Fo
 // pill (existing FocusOverlay distraction mode) is wired on every committed
 // row + the spotlight, not just the primary, per design.
 
-const FONT = "'Inter', -apple-system, sans-serif";
 
 type Tone = "playful" | "warm" | "direct";
 const TONE_COPY: Record<Tone, {

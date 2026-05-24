@@ -10,6 +10,7 @@ import { displayTitle } from "../utils/notePreview";
 import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
 import { Skeleton } from "../components/Skeleton";
+import { FONT } from "../ui";
 import {
   publicNoteQueryOptions,
   publicNotesListQueryOptions,
@@ -21,7 +22,6 @@ export const Route = createFileRoute("/public/")(({
   component: PublicPage,
 }));
 
-const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 // Display serif for the name + hero titles. System serifs only — no webfont
 // network cost. "Iowan Old Style" + "Hoefler Text" are macOS-native and
 // genuinely beautiful at display size; Georgia is a clean fallback elsewhere.

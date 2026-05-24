@@ -12,6 +12,7 @@ import {
   type ApiHabitCell,
 } from "../../services/api";
 import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
+import { FONT } from "../../ui";
 
 // HabitsStrip — bottom-of-dashboard widget for daily binary trackers.
 // Two flavors:
@@ -24,7 +25,6 @@ import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 // mystery boxes. Today's cell + label get a darker ring/weight.
 // Value semantics never invert: ✓ always = "did the literal action".
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const DOW = ["S", "M", "T", "W", "T", "F", "S"];
 
 type Polarity = "positive" | "negative";

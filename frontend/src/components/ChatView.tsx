@@ -5,8 +5,8 @@ import { InputBar } from "./chat/InputBar";
 import { MessageBubble } from "./chat/MessageBubble";
 import { StatChip } from "./chat/StatChip";
 import { ThinkingIndicator } from "./chat/ThinkingIndicator";
+import { FONT } from "../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const DISPLAY_FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const CHIPS = ["Brain dump", "How am I doing?", "What should I focus on?"];

@@ -1,4 +1,5 @@
 import { useDashboardStore, type DashboardMode } from "../../stores/useDashboardStore";
+import { FONT } from "../../ui";
 
 // ModeToggle — top-tier dashboard toggle. Three modes:
 //   Today  — current dashboard (todos/focuses/habits/take)
@@ -6,7 +7,6 @@ import { useDashboardStore, type DashboardMode } from "../../stores/useDashboard
 //   Stats  — life stats (Whoop/LeetCode/Dev/Usage/Activity), merged from
 //            the old Pulse mode + the now-removed Stats sidebar page
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const MODES: { id: DashboardMode; label: string }[] = [
   { id: "today", label: "Today" },

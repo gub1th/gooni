@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, X, AlertTriangle } from "lucide-react";
+import { FONT } from "../../ui";
 import {
   fetchPromises,
   patchPromiseState,
@@ -7,7 +8,6 @@ import {
   type PromiseState,
 } from "../../services/api";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Promise drawer — dashboard widget that surfaces the `promises` table.
 // Daniel can't currently see his soft commitments / slip_count / history

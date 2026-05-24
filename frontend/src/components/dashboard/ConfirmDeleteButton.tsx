@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { FONT } from "../../ui";
 
 // Subtle two-step delete. First click arms the button (turns red, swaps
 // glyph to a question mark, starts a 2.5s timer); second click within the
@@ -10,7 +11,6 @@ import { X } from "lucide-react";
 // Keep it small + visually quiet so the row chrome doesn't shift width
 // when the button morphs.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface Props {
   onConfirm: () => void;

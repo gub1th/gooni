@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X, Volume2, VolumeX, Timer } from "lucide-react";
+import { FONT } from "../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const STORAGE_KEY = "gooni-focus-mode";
 const MUTE_KEY = "gooni-focus-mode-muted";
 const POMODORO_KEY = "gooni-focus-mode-pomodoro";

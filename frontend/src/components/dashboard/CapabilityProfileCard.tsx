@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { FONT } from "../../ui";
 import {
   fetchCapabilityFacets,
   patchCapabilityFacet,
@@ -7,7 +8,6 @@ import {
   type ApiCapabilityFacet,
 } from "../../services/api";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Visible-to-Daniel layers, in render order. Mechanical is implicit in the
 // tool schemas the LLM already sees, so the card foregrounds the layers Daniel

@@ -17,6 +17,7 @@ import {
   ActivitySection,
 } from "../StatsView";
 import { UsageCards } from "../UsageCards";
+import { FONT } from "../../ui";
 
 // StatsMode — the merged Stats tab. Absorbs the old Pulse mode AND
 // the standalone sidebar StatsView page into one surface. Reorganized
@@ -33,7 +34,6 @@ import { UsageCards } from "../UsageCards";
 // reordering. Per-section freshness still renders inside each section
 // where the underlying data exposes `updated_at`.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export function StatsMode() {
   return (

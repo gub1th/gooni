@@ -5,8 +5,8 @@ import type { ApiBacklogTicket, BoardStatus } from "../../services/api";
 import { promoteBacklogTicket, demoteBacklogTicket } from "../../services/api";
 import { useBacklogStore } from "../../stores/useBacklogStore";
 import { ItemModal } from "./ItemModal";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface BacklogBoardProps {
   // listId kept on the props for backward compatibility w/ the route caller

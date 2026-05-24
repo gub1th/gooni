@@ -1,10 +1,10 @@
 import type { DashboardTab } from "../../stores/useDashboardStore";
+import { FONT } from "../../ui";
 
 // TabToggle — segmented pill below the composer. Daniel toggles between
 // "what do I need to do" (Todos) and "what am I orbiting" (Focuses).
 // Persisted via useDashboardStore so the tab survives reloads.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface Props {
   active: DashboardTab;

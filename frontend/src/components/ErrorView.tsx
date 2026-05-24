@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { RefreshCw, Home, ChevronDown, ChevronRight } from "lucide-react";
+import { FONT } from "../ui";
 
 // ErrorView — full-page fallback rendered by Tanstack Router's
 // `errorComponent` slot. Replaces the default "Something went wrong"
@@ -9,7 +10,6 @@ import { RefreshCw, Home, ChevronDown, ChevronRight } from "lucide-react";
 //
 // Mount via __root.tsx `errorComponent: ErrorView`.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface Props {
   // Tanstack Router supplies `error` (unknown) + `reset` (() => void)

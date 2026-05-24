@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchOpenAIUsage, fetchClaudeUsage } from "../services/api";
+import { FONT } from "../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 type Provider = "openai" | "claude";
 

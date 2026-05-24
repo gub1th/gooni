@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { FONT } from "../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Single-tenant privacy page. Required for OAuth provider registration
 // (Whoop, Google, GitHub all ask for a privacy URL during app setup).

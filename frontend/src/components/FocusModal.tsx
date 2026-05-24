@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { FONT } from "../ui";
 import {
   type ApiItemNode, type FocusScale, type FocusStatus,
   updateItem, deleteItem, createItem,
 } from "../services/api";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export interface FocusModalProps {
   node: ApiItemNode;

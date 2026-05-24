@@ -12,8 +12,8 @@ import { renderMarkdown } from "../../utils/markdown";
 import { useProfileStore } from "../../stores/useProfileStore";
 import { CommentAvatar, identityFor, type Identity } from "./CommentAvatar";
 import { ReactionBar } from "../ReactionBar";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface NoteCommentsProps {
   noteId: number;

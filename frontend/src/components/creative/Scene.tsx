@@ -32,8 +32,8 @@ import { setSfxMuted } from "./sfx";
 import { fireVfx } from "./vfx";
 import { useCountryFlag } from "./useCountryFlag";
 import type { PublicNote } from "../../services/api";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
 
 // Spec: FPS HUD hidden unless ?debug=true in the URL.

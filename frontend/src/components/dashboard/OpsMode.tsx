@@ -10,6 +10,7 @@ import { useListsStore } from "../../stores/useListsStore";
 import { BuildMode } from "./BuildMode";
 import { CapabilityProfileCard } from "./CapabilityProfileCard";
 import { BacklogBoard } from "../lists/BacklogBoard";
+import { FONT } from "../../ui";
 
 // OpsMode — single scrollable "operator's console". The Evals/Backlog/
 // Health sub-tab bar was removed in the dashboard restructure: the Audit
@@ -19,7 +20,6 @@ import { BacklogBoard } from "../lists/BacklogBoard";
 //   2. Gooni-health cards (was Build mode) + CapabilityProfileCard
 //   3. Tool-call failures (last 7d)
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 function fmtAgo(iso: string | null): string {
   if (!iso) return "—";

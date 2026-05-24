@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { fetchNotesGraph, type GraphNode, type GraphEdge } from "../services/api";
 import { useSpacesStore } from "../stores/useSpacesStore";
+import { FONT } from "../ui";
 
 // Full-screen modal version of the semantic graph. Rendered as a portal-ish
 // fixed overlay on top of the dashboard. Close via ×, backdrop click, or Esc.
 // Click a node → closes modal and navigates to that note.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface SimNode extends GraphNode {
   x: number;

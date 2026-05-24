@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { ApiMemory } from "../../services/api";
 import { NeuralBrain } from "../animations/NeuralBrain";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface MemoryBrainProps {
   memories: ApiMemory[];

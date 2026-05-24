@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoardStatus } from "../../services/api";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Structural shape — accepts either ApiListItem (generic) or
 // ApiBacklogTicket (board fields filled). Both flows pipe through here so

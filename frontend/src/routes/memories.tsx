@@ -5,6 +5,7 @@ import {
   type ApiMemory, type MemoryType,
 } from "../services/api";
 import { MemoryBrain } from "../components/notes/MemoryBrain";
+import { FONT } from "../ui";
 
 export const Route = createFileRoute("/memories")({
   // ?focus=<id> deep-links into a specific memory row — fired by the
@@ -20,7 +21,6 @@ export const Route = createFileRoute("/memories")({
   component: MemoriesPage,
 });
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Type → tab color. Mirrors the brand palette so the type column reads at
 // a glance the way Mem0's category dots do.

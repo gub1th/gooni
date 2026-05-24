@@ -10,8 +10,8 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
 import { SpaceIcon } from "./SpaceIcon";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface AllNotesDiscoveryProps {
   onSelectNote: (id: number) => void;

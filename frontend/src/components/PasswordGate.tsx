@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { getStoredToken, login } from "../services/api";
 import { GooniLogo } from "./GooniLogo";
+import { FONT } from "../ui";
 
 interface Props {
   children: React.ReactNode;
 }
 
-const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
 
 export function PasswordGate({ children }: Props) {

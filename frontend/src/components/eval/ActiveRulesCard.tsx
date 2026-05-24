@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FONT } from "../../ui";
 import {
   fetchChatAudit, deleteMemory,
   type ChatAuditActiveRule,
@@ -12,7 +13,6 @@ import {
 // Scroll capped at 320px so a growing rule list doesn't push the segment
 // list far down the page.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 function relativeTime(iso: string | null): string {
   if (!iso) return "—";

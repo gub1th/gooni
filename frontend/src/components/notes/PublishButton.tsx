@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Globe, Lock, ChevronDown, Check } from "lucide-react";
+import { FONT } from "../../ui";
 
 /**
  * Confluence-style publish CTA. Sits top-right of the editor as the
@@ -25,7 +26,6 @@ interface PublishButtonProps {
   onUnpublish: () => void;
 }
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export function PublishButton({
   visibility,

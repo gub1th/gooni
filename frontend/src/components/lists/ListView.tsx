@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useListsStore } from "../../stores/useListsStore";
 import type { ApiListItem, ListType } from "../../services/api";
 import { ItemModal } from "./ItemModal";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const CONTENT_MAX_WIDTH = 720;
 
 interface ListViewProps {

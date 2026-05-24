@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
-import { Modal, modalCancelBtn, modalPrimaryBtn } from "./Modal";
+import { Modal, Button, color, FONT } from "../ui";
 import { deriveTodoFromFocus } from "../services/api";
-
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface DeriveTodoModalProps {
   open: boolean;
@@ -59,25 +57,21 @@ export function DeriveTodoModal({
       title="Derive todo"
       footer={
         <>
-          <button onClick={onClose} style={modalCancelBtn} disabled={submitting}>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>
             Cancel
-          </button>
-          <button
-            onClick={submit}
-            style={{ ...modalPrimaryBtn, opacity: text.trim() && !submitting ? 1 : 0.5 }}
-            disabled={!text.trim() || submitting}
-          >
+          </Button>
+          <Button onClick={submit} disabled={!text.trim() || submitting}>
             {submitting ? "Saving…" : "Create"}
-          </button>
+          </Button>
         </>
       }
     >
       {focusTitle && (
         <div style={{
-          fontSize: 12, color: "var(--gooni-muted, #8E8E93)", marginBottom: 10,
+          fontSize: 12, color: color.muted, marginBottom: 10,
           fontFamily: FONT,
         }}>
-          From focus <strong style={{ color: "var(--gooni-text, #1C1C1E)" }}>{focusTitle}</strong>
+          From focus <strong style={{ color: color.text }}>{focusTitle}</strong>
         </div>
       )}
       <input
@@ -90,11 +84,11 @@ export function DeriveTodoModal({
         style={{
           width: "100%", boxSizing: "border-box",
           padding: "10px 12px",
-          border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.15))",
+          border: `0.5px solid ${color.border}`,
           borderRadius: 8,
           fontSize: 14, fontFamily: FONT,
-          color: "var(--gooni-text, #1C1C1E)",
-          background: "var(--gooni-card, #FFF)",
+          color: color.text,
+          background: color.card,
           outline: "none",
         }}
       />
@@ -111,9 +105,9 @@ export function DeriveTodoModal({
               onClick={() => setDue(opt)}
               style={{
                 padding: "4px 11px", borderRadius: 999,
-                border: `0.5px solid ${active ? "rgba(74,222,128,0.55)" : "var(--gooni-border, rgba(0,0,0,0.15))"}`,
+                border: `0.5px solid ${active ? "rgba(74,222,128,0.55)" : color.border}`,
                 background: active ? "rgba(74,222,128,0.14)" : "transparent",
-                color: active ? "#15803D" : "var(--gooni-text, #1C1C1E)",
+                color: active ? "#15803D" : color.text,
                 fontSize: 12, fontWeight: 500, fontFamily: FONT,
                 cursor: "pointer",
                 transition: "background 0.12s, border-color 0.12s, color 0.12s",
@@ -126,7 +120,7 @@ export function DeriveTodoModal({
       </div>
       {error && (
         <div style={{
-          marginTop: 10, fontSize: 12, color: "#C44",
+          marginTop: 10, fontSize: 12, color: color.dangerText,
           fontFamily: FONT,
         }}>
           {error}

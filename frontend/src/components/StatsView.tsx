@@ -20,8 +20,8 @@ import {
   type WhoopToday,
 } from "../services/api";
 import { Skeleton } from "./Skeleton";
+import { FONT } from "../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#30A14E";
 const RED = "#CF222E";
 

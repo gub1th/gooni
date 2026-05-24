@@ -3,8 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { publicNoteQueryOptions } from "../../utils/publicQueries";
 import { sanitizeHtml } from "../../utils/sanitize";
 import { displayTitle } from "../../utils/notePreview";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
 
 type Props = {

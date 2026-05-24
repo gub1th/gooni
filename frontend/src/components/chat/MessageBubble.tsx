@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { renderMarkdown } from "../../utils/markdown";
 import type { RouterSignals, MessageTraceStep } from "../../services/api";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const TOOL_LABELS: Record<string, string> = {
   web_search: "🔍 Searched the web",

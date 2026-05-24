@@ -3,8 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { Search, Home, FileSearch, BarChart3, Brain, Globe, Plug } from "lucide-react";
 import { useListsStore } from "../stores/useListsStore";
 import { ListIcon } from "./notes/ListIcon";
+import { FONT } from "../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface NavTarget {
   key: string;

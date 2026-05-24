@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
 import { fetchGooniTake, type GooniTakePayload } from "../../services/api";
+import { FONT } from "../../ui";
 
 // TakeTabs — single card at the TOP of the dashboard. Used to be a dev
 // take / focus take tab toggle; collapsed down to just the focus take
@@ -11,7 +12,6 @@ import { fetchGooniTake, type GooniTakePayload } from "../../services/api";
 // Take rows live in `gooni_takes` server-side (one row per UTC day per
 // kind); fetching is a cheap DB read after first generation.
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 const QUESTION = "What are my current focuses?";
 const EMPTY_HINT = "Write a few notes — Gooni needs material to read.";

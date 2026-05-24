@@ -1,6 +1,6 @@
 import { HamsterWheel } from "./animations/HamsterWheel";
+import { FONT } from "../ui";
 
-const FONT = "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
 
 interface NoteLoadingStateProps {
   /** Hide the meta-line shimmer (e.g. when caller has its own header). */

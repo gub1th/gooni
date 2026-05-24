@@ -26,8 +26,8 @@ import {
   type MessageTraceStep,
 } from "../../services/api";
 import { Check, Minus, X } from "lucide-react";
+import { FONT } from "../../ui";
 
-const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
 // Per-source visual identity. Tone matches Apple-Notes restraint that the
 // rest of Gooni uses: muted accent dot + label, not loud full-fill badges.
