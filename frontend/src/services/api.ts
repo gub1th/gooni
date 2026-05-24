@@ -2340,7 +2340,11 @@ export async function uploadImage(file: File): Promise<ImageUploadResult> {
 
 // ── Promises ────────────────────────────────────────────────────────────
 
-export type PromiseState = "proposed" | "pending" | "kept" | "broken" | "abandoned";
+// G3.1 lifecycle: promises land `active` on create, then resolve to
+// `kept` or `broken`. The legacy proposed/pending lock-in split + the
+// `abandoned` terminal were removed — service + routes only accept these
+// three. Keep this in sync with promise_service.transition.
+export type PromiseState = "active" | "kept" | "broken";
 
 export interface ApiPromise {
   id: number;
@@ -2375,24 +2379,17 @@ export async function patchPromiseState(id: number, state: PromiseState): Promis
   return res.json();
 }
 
-export interface PromiseIntegrity {
-  // null when fewer than min_sample resolved promises exist — small-N
-  // noise distorts the score, so the backend asks the UI to render a
-  // "not enough data" placeholder.
-  score: number | null;
-  sample_size: number;
-  min_sample: number;
-  kept_streak: number;
-  last_broken_at: string | null;
-  last_broken_summary: string | null;
-  weights: { kept: number; broken: number; abandoned: number };
-  window: number;
-  note?: string;
-}
-
-export async function fetchPromiseIntegrity(): Promise<PromiseIntegrity> {
-  const res = await apiFetch(`${BASE}/promises/pis`);
-  if (!res.ok) throw new Error("Failed to fetch promise integrity");
+// Manual create — promises normally land via chat utterances, but the
+// drawer lets Daniel add one directly. Backend runs the same
+// promise_service.create path (complexity classify, embed, focus edge,
+// habit auto-spawn), just without a source message.
+export async function createPromise(text: string): Promise<ApiPromise> {
+  const res = await apiFetch(`${BASE}/promises`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error("Failed to create promise");
   return res.json();
 }
 
