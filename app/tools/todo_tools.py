@@ -573,7 +573,6 @@ class ShowMyPlateTool(BaseTool):
             return "(no db session)"
         from ..services.todo_service import todo_service
         from ..db.models import Todo
-        from sqlalchemy import and_
 
         primary = todo_service.get_primary(db)
         open_todos = todo_service.list_open(db)

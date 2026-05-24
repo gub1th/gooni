@@ -20,59 +20,14 @@ import {
   type WhoopToday,
 } from "../services/api";
 import { Skeleton } from "./Skeleton";
-import { UsageCards } from "./UsageCards";
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 const GREEN = "#30A14E";
 const RED = "#CF222E";
 
-// Stats / Activity dashboard. Three sections: OpenAI usage (live month-to-
-// date from the Admin API), Dev activity (streak + Gooni's Take + per-repo
-// recent commits — all inline; the old click-into-modal flow is gone), and
-// general counters (notes, messages, todos). Each section pulls its own
-// query so a slow one doesn't block the rest.
-export function StatsView() {
-  return (
-    <div
-      style={{
-        flex: 1,
-        height: "100%",
-        overflowY: "auto",
-        background: "var(--gooni-bg, #FAFAFA)",
-        fontFamily: FONT,
-        color: "var(--gooni-text, #1C1C1E)",
-      }}
-    >
-      <div style={{ maxWidth: 880, margin: "0 auto", padding: "40px 32px 80px" }}>
-        <div style={{
-          fontSize: 13, color: "var(--gooni-muted, #8E8E93)",
-          textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 600,
-          marginBottom: 6,
-        }}>
-          Stats
-        </div>
-        <h1 style={{
-          fontSize: 28, fontWeight: 700, letterSpacing: "-0.5px",
-          margin: 0, marginBottom: 28,
-        }}>
-          What's happening inside Gooni
-        </h1>
-
-        {/* OpenAI/Claude usage — today + this month tiles w/ provider toggle.
-            Replaces the previous OpenAISection + ClaudeSection (rich monthly
-            spend + daily token chart + per-model breakdown) — Daniel preferred
-            the dashboard's compact tile view as the single source of truth. */}
-        <UsageCards />
-        <WhoopSection />
-        <LeetcodeSection />
-        <DevSection />
-        <ActivitySection />
-      </div>
-    </div>
-  );
-}
-
 // ── Sections ──────────────────────────────────────────────────────────────
+// The top-level StatsView page component was removed once the sidebar Stats
+// route was dropped; StatsMode now composes these section exports directly.
 
 export function FreshnessActions({
   updatedAt, isFetching, onRefresh,

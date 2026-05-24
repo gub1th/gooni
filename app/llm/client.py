@@ -8,7 +8,7 @@ from openai import OpenAI
 
 from ..tools import registry as tools
 from ..tools import tool_map
-from .pricing import UsageTracker, calculate_embedding_cost
+from .openai_pricing import UsageTracker, calculate_embedding_cost
 from .prompts import (
     TITLE_GENERATION_PROMPT,
     INTENTION_GENERATION_PROMPT,

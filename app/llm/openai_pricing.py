@@ -96,10 +96,6 @@ class UsageTracker:
     def add(self, usage) -> None:
         self.prompt_tokens += usage.prompt_tokens
         self.completion_tokens += usage.completion_tokens
-        # Also fold into the active cost session if one is open. Lets
-        # callers (eval runner, future per-turn dashboard) sum cost across
-        # ALL llm calls in a logical unit without instrumenting each one.
-        cost_session_add(self.model, usage.prompt_tokens, usage.completion_tokens)
 
     def finalize(self, tools_used: list = None) -> dict:
         costs = calculate_chat_cost(self.model, self.prompt_tokens, self.completion_tokens)
@@ -110,60 +106,3 @@ class UsageTracker:
             **costs,
             "tools_used": tools_used or [],
         }
-
-
-# ── Cost session (used by eval runner to roll up total spend per case) ────────
-# Module-level accumulator that any LLM call site can fold its usage into.
-# Thread-local so concurrent requests don't mix totals. Opt-in via
-# `start_cost_session()` — when no session is open, calls are no-ops.
-
-import threading as _threading
-
-_cost_local = _threading.local()
-
-
-def start_cost_session(label: str = "") -> None:
-    """Reset + open a cost session on the current thread. Existing data
-    is discarded. Subsequent UsageTracker.add() calls fold into this
-    session until end_cost_session() is called.
-    """
-    _cost_local.session = {
-        "label": label,
-        "open": True,
-        "by_model": {},   # model_name -> {"input": int, "output": int}
-    }
-
-
-def cost_session_add(model: str, input_tokens: int, output_tokens: int) -> None:
-    """Fold a call into the active session (if any)."""
-    sess = getattr(_cost_local, "session", None)
-    if not sess or not sess.get("open"):
-        return
-    m = sess["by_model"].setdefault(model, {"input": 0, "output": 0})
-    m["input"] += input_tokens
-    m["output"] += output_tokens
-
-
-def end_cost_session() -> dict:
-    """Close the active session and return a summary:
-        {"by_model": {model: {input, output, cost}}, "total_cost_usd": float}
-    Returns an empty summary if no session was open."""
-    sess = getattr(_cost_local, "session", None)
-    if not sess:
-        return {"by_model": {}, "total_cost_usd": 0.0, "label": ""}
-    sess["open"] = False
-    by_model = {}
-    total = 0.0
-    for model, toks in sess["by_model"].items():
-        c = calculate_chat_cost(model, toks["input"], toks["output"])
-        by_model[model] = {
-            "input_tokens": toks["input"],
-            "output_tokens": toks["output"],
-            "cost_usd": c["total_cost"],
-        }
-        total += c["total_cost"]
-    return {
-        "label": sess.get("label", ""),
-        "by_model": by_model,
-        "total_cost_usd": total,
-    }
