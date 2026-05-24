@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.166.1 — 2026-05-24 (patch)
+
+- fix(reflexion): stop false-positive sev-2 self-takes on correct acks (#336) (#361)
+
 ## 0.166.0 — 2026-05-24 (minor)
 
 - feat(fitness): log calories/protein/weight/exercise via chat + cut table (#316) (#360)
