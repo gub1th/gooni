@@ -23,6 +23,7 @@ import { SynthesizerSection } from "./dashboard/SynthesizerSection";
 import { ModeToggle } from "./dashboard/ModeToggle";
 import { OpsMode } from "./dashboard/OpsMode";
 import { ReviewMode } from "./dashboard/ReviewMode";
+import { TvMode } from "./dashboard/TvMode";
 import { PrimaryBacklogBanner } from "./dashboard/PrimaryBacklogBanner";
 import { StatsMode } from "./dashboard/StatsMode";
 import { FONT } from "../ui";
@@ -195,6 +196,13 @@ export function Dashboard({ onOpenNote: _onOpenNote }: {
              session summaries (5am batch output) + the limbo queue with
              promote→{todo|focus|promise|memory} / dismiss. Additive. */
           <ReviewMode />
+        )}
+
+        {activeMode === "tv" && (
+          /* TV mode = read-only ambient display (todos/promises/cut/whoop),
+             big fonts, 5-min auto-refresh. Additive — new tab, no kiosk
+             route (per Daniel). */
+          <TvMode />
         )}
 
         {activeMode === "ops" && (

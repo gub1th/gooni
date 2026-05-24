@@ -13,6 +13,7 @@ const MODES: { id: DashboardMode; label: string }[] = [
   { id: "review", label: "Review" },
   { id: "ops", label: "Ops" },
   { id: "stats", label: "Stats" },
+  { id: "tv", label: "TV" },
 ];
 
 export function ModeToggle() {
