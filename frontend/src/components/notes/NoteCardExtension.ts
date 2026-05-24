@@ -1,4 +1,4 @@
-import { Mark, getMarkRange, mergeAttributes } from "@tiptap/core";
+import { Node, mergeAttributes } from "@tiptap/core";
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -15,27 +15,32 @@ export type NoteCardColor = "blue" | "pink";
 export const NOTE_CARD_COLORS: NoteCardColor[] = ["blue", "pink"];
 
 /**
- * Inline mark that wraps a selection in a pastel rounded "card." Used as a
- * retroactive "I did this" visual marker inside notes — distinct from a Todo.
+ * Block-level "card" / callout panel (Confluence-style). Wraps one or more
+ * block children (paragraphs, headings, lists) into a single full-width
+ * pastel panel with a check affordance on the LEFT, vertically centered.
  *
- * State carried as attrs:
+ * Was previously an inline Mark — that rendered multi-paragraph selections as
+ * N separate pills (one per block, each with its own check) because a mark
+ * can't span block boundaries. A block node wraps the whole selection range
+ * into ONE container, which is what the Confluence panel vibe needs.
+ *
+ * State carried as node attrs:
  *   - color: "blue" | "pink"
- *   - checked: boolean (when true, card renders dimmed + struck through)
+ *   - checked: boolean (true → content dimmed + struck through, check filled)
  *
- * Rendering: <span data-note-card> wraps a content hole + a clickable check
- * affordance. The check is rendered as a real DOM sibling (not a CSS pseudo)
- * so clicking it can toggle `checked` without keyboard/mouse-target gymnastics.
- * It's `contenteditable="false"` so the editor cursor skips over it. Click
- * delegation in NoteEditor catches the click and routes via posAtDOM.
+ * Rendering: <div data-note-card> → [check span][content div]. The check is a
+ * real DOM child (not a CSS pseudo) so a click delegate in NoteEditor can
+ * target it and toggle `checked` via toggleNoteCardCheckedAtPos. It's
+ * contenteditable="false" so the editor cursor skips it.
  *
- * IMPORTANT: kept as <span role="button">, NOT <button>, because the
- * sanitizer (utils/sanitize.ts) strips <button> tags on the public view.
- * Span + role keeps the affordance accessible while surviving sanitization.
+ * IMPORTANT: check is <span role="button">, NOT <button>, because the public
+ * sanitizer (utils/sanitize.ts) strips <button> tags. Span + role survives.
  */
-export const NoteCard = Mark.create({
+export const NoteCard = Node.create({
   name: "noteCard",
-  inclusive: false,
-  excludes: "",
+  group: "block",
+  content: "block+",
+  defining: true,
 
   addAttributes() {
     return {
@@ -59,7 +64,7 @@ export const NoteCard = Mark.create({
   },
 
   parseHTML() {
-    return [{ tag: "span[data-note-card]" }];
+    return [{ tag: "div[data-note-card]" }];
   },
 
   renderHTML({ HTMLAttributes }) {
@@ -67,7 +72,7 @@ export const NoteCard = Mark.create({
     const color = attrs["data-color"] === "pink" ? "pink" : "blue";
     const checked = attrs["data-checked"] === "true";
     return [
-      "span",
+      "div",
       mergeAttributes(HTMLAttributes, {
         "data-note-card": "true",
         class: [
@@ -78,12 +83,9 @@ export const NoteCard = Mark.create({
           .filter(Boolean)
           .join(" "),
       }),
-      // Content hole — selected text renders here. Wrapped so the check
-      // affordance can sit as a sibling without breaking inline flow.
-      ["span", { class: "gooni-note-card-content" }, 0],
-      // Clickable check affordance. contenteditable=false so the cursor
-      // never lands inside it. Click delegation in NoteEditor handles
-      // toggling `checked` via toggleNoteCardCheckedAtPos.
+      // Check affordance — left, vertically centered via flex. contenteditable
+      // false so the cursor never lands inside. Click delegation in NoteEditor
+      // toggles `checked` via toggleNoteCardCheckedAtPos.
       [
         "span",
         {
@@ -95,62 +97,91 @@ export const NoteCard = Mark.create({
         },
         "✓",
       ],
+      // Block content hole — the wrapped paragraphs render here.
+      ["div", { class: "gooni-note-card-content" }, 0],
     ];
   },
 
   addCommands() {
     return {
+      // Wrap the selected block range in a card, or lift it back out if the
+      // selection is already inside one. toggleWrap handles both directions.
       toggleNoteCard:
         (attrs) =>
         ({ commands }) =>
-          commands.toggleMark(this.name, {
+          commands.toggleWrap(this.name, {
             color: attrs?.color ?? "blue",
             checked: false,
           }),
 
+      // Set checked on the card containing the current selection.
       setNoteCardChecked:
         (checked) =>
-        ({ chain }) =>
-          chain()
-            .extendMarkRange(this.name)
-            .updateAttributes(this.name, { checked })
-            .run(),
-
-      // Toggle checked at a specific doc position. Used by the click
-      // delegate for the inline check button + cmd+click anywhere on card.
-      toggleNoteCardCheckedAtPos:
-        (pos) =>
-        ({ state, chain }) => {
-          const $pos = state.doc.resolve(pos);
-          const markType = state.schema.marks[this.name];
-          if (!markType) return false;
-          const range = getMarkRange($pos, markType);
-          if (!range) return false;
-          const existing = $pos
-            .marks()
-            .find((m) => m.type.name === this.name);
-          const current = existing?.attrs.checked === true;
-          return chain()
-            .setTextSelection(range)
-            .updateAttributes(this.name, { checked: !current })
-            .setTextSelection(state.selection.from)
-            .run();
+        ({ state, dispatch, tr }) => {
+          const found = findCardAt(state, state.selection.from);
+          if (!found) return false;
+          if (dispatch) {
+            tr.setNodeMarkup(found.pos, undefined, {
+              ...found.node.attrs,
+              checked,
+            });
+            dispatch(tr);
+          }
+          return true;
         },
 
-      // Cycle blue → pink → blue. Toolbar button calls this when cursor
-      // is inside an existing card.
+      // Toggle checked on the card whose body contains `pos`. Used by the
+      // click delegate (check pill + cmd+click anywhere on the card body).
+      toggleNoteCardCheckedAtPos:
+        (pos) =>
+        ({ state, dispatch, tr }) => {
+          const found = findCardAt(state, pos);
+          if (!found) return false;
+          if (dispatch) {
+            tr.setNodeMarkup(found.pos, undefined, {
+              ...found.node.attrs,
+              checked: !found.node.attrs.checked,
+            });
+            dispatch(tr);
+          }
+          return true;
+        },
+
+      // Cycle blue → pink → blue on the card at the current selection.
       cycleNoteCardColor:
         () =>
-        ({ chain, editor }) => {
-          const cur = (editor.getAttributes(this.name).color ?? "blue") as
-            | NoteCardColor
-            | undefined;
+        ({ state, dispatch, tr }) => {
+          const found = findCardAt(state, state.selection.from);
+          if (!found) return false;
+          const cur = (found.node.attrs.color ?? "blue") as NoteCardColor;
           const next: NoteCardColor = cur === "blue" ? "pink" : "blue";
-          return chain()
-            .extendMarkRange(this.name)
-            .updateAttributes(this.name, { color: next })
-            .run();
+          if (dispatch) {
+            tr.setNodeMarkup(found.pos, undefined, {
+              ...found.node.attrs,
+              color: next,
+            });
+            dispatch(tr);
+          }
+          return true;
         },
     };
   },
 });
+
+/**
+ * Walk up from a doc position to the nearest enclosing noteCard node.
+ * Returns the node plus its `before` position (where setNodeMarkup expects it).
+ */
+function findCardAt(
+  state: import("@tiptap/pm/state").EditorState,
+  pos: number
+): { node: import("@tiptap/pm/model").Node; pos: number } | null {
+  const $pos = state.doc.resolve(Math.max(0, Math.min(pos, state.doc.content.size)));
+  for (let d = $pos.depth; d >= 0; d--) {
+    const node = $pos.node(d);
+    if (node.type.name === "noteCard") {
+      return { node, pos: $pos.before(d) };
+    }
+  }
+  return null;
+}

@@ -294,9 +294,10 @@ function PublicNotePage() {
               .public-prose > :first-child { margin-top: 0; }
             `}</style>
             {/* data-public-view attribute is consumed by noteCardStyles.ts —
-                hides the interactive check affordance on NoteCard marks
-                since public viewers can't toggle anything. Visual state
-                (checked vs not, color) renders the same as the editor. */}
+                makes the NoteCard check non-interactive (cursor + pointer
+                events off) since public viewers can't toggle anything. The
+                check stays visible to convey checked state; color + checked
+                render the same as the editor. */}
             <div
               ref={proseRef}
               className="public-prose"
