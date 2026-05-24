@@ -1,6 +1,4 @@
 import hashlib
-import hmac
-import json
 import os
 import re
 import time
@@ -10,51 +8,16 @@ from dotenv import load_dotenv
 
 load_dotenv()  # must run before any service imports that read env vars
 
-from typing import Optional
-from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import bindparam, text
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased
 
-from .db.database import engine, get_db
+from .db.database import engine
 from .db.database import SessionLocal
 from .db.models import (
-    Attachment,
-    CapabilityFacet,
-    Conversation,
-    GooniTake,
     McpCall,
-    Memory,
-    Message,
-    List as ListModel,
-    ListItem,
     Note,
-    NoteComment,
-    PublicProfile,
-    Reaction,
-    Reflection,
-    Settings,
-    Space,
     Visit,
-    WaProcessedId,
-)
-from .db.schemas import ChatRequest
-from .llm.client import llm_client
-from .services.conversation_service import conversation_service
-from .services.item_service import item_service
-from .services.memory_service import memory_service
-from .services.messaging import (
-    dispatch_inbound,
-    imessage_channel,
-    telegram_channel,
-    whatsapp_channel,
-)
-from .services.note_service import note_service
-from .services.orchestrator import Orchestrator
-from .services.todo_nudge import (
-    DEFAULT_PROMPT as NUDGE_DEFAULT_PROMPT,
-    compose_message as compose_nudge_message,
 )
 
 
@@ -184,7 +147,7 @@ _dedupe_singleton_lists(engine)
 # if Fly scales to 2 machines.
 
 import asyncio  # noqa: E402 — import after env load + model side-effects above
-from datetime import datetime as _dt, timedelta as _td  # noqa: E402
+from datetime import datetime as _dt  # noqa: E402
 
 try:
     from zoneinfo import ZoneInfo  # py3.9+
