@@ -66,12 +66,15 @@ const KEYFRAMES = `
 
 export function AuraOrb({ size = 80, intensified = false }: AuraOrbProps) {
   const scale = size / 80;
+  // The wrap stays at its class-defined 80×80 box so the absolutely-
+  // positioned blobs (laid out for an 80px box, centered at 40,40) stay
+  // centered on the face. We only scale visually — overriding width/height
+  // to `size` shrank the box while the blobs kept 80px coords, pushing the
+  // glow down-right of the face.
   return (
     <div
       className={`aura-wrap${intensified ? " aura-intensified" : ""}`}
       style={{
-        width: size,
-        height: size,
         transform: scale === 1 ? undefined : `scale(${scale})`,
         transformOrigin: "center",
       }}

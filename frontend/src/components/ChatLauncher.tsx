@@ -3,6 +3,7 @@ import { useGooniStore } from "../stores/useGooniStore";
 import { useChatLauncherRectStore } from "../stores/useChatLauncherRectStore";
 import { useMascotOutStore } from "../stores/useMascotOutStore";
 import { AuraOrb } from "./animations/AuraOrb";
+import { z } from "../ui";
 
 // Floating chat-launcher (FAB) — bottom-right, fixed. Visible on every authed
 // route via GooniLayer. Click toggles the floating GooniPanel.
@@ -96,8 +97,8 @@ export function ChatLauncher() {
     <>
       <style>{`
         @keyframes gooni-fab-aura {
-          0%, 100% { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 0 rgba(74,222,128,0.0); }
-          50%      { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 4px 10px rgba(0,0,0,0.18), 0 0 0 6px rgba(74,222,128,0.18); }
+          0%, 100% { box-shadow: 0 6px 18px rgba(0,0,0,0.22), 0 0 12px 2px rgba(74,222,128,0.12); }
+          50%      { box-shadow: 0 6px 18px rgba(0,0,0,0.22), 0 0 20px 5px rgba(74,222,128,0.28); }
         }
         @keyframes gooni-fab-out-glow {
           0%   { box-shadow: 0 10px 26px rgba(0,0,0,0.30), 0 0 0 0   rgba(74,222,128,0.55), 0 0 14px 2px rgba(74,222,128,0.30); }
@@ -126,7 +127,10 @@ export function ChatLauncher() {
           background: "transparent",
           border: "none",
           cursor: pressed ? "grabbing" : "pointer",
-          zIndex: 1000,
+          // Below the modal tier (legacy app modals sit at 1000) so the orb
+          // can't pierce a full-screen modal's scrim. The chat panel itself
+          // (GooniLayer FloatingModal, z 1100) is the active surface when open.
+          zIndex: z.overlay,
           padding: 0,
           outline: "none",
           transform: `scale(${scale})`,

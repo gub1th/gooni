@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 interface Props {
   url: string;
@@ -27,7 +28,12 @@ export function AttachmentModal({ url, filename, mime, onClose }: Props) {
   const isVideo = lower.startsWith("video/");
   const isAudio = lower.startsWith("audio/");
 
-  return (
+  // Portal to <body>. In the editor this modal mounts inside the
+  // AttachmentNodeView's clickable NodeViewWrapper, so without a portal its
+  // own clicks (Close / overlay / Download) bubble up to the wrapper's
+  // onClick → setOpen(true) and the modal re-opens the instant you try to
+  // close it. Body-level mount also escapes any editor stacking context.
+  return createPortal(
     <div
       onClick={onClose}
       style={{
@@ -141,6 +147,7 @@ export function AttachmentModal({ url, filename, mime, onClose }: Props) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
