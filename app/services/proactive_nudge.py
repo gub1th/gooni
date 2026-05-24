@@ -347,3 +347,68 @@ def maybe_fire_sleep_nudge(db: Session) -> bool:
         except Exception:
             pass
         return False
+
+
+# ── Procrastination nudge (PR-6) ─────────────────────────────────────
+
+_DOING_STALE_MINUTES = 45     # a todo sitting in 'doing' this long is stalled
+_PROCRAST_DEBOUNCE_MINUTES = 120  # don't re-nudge the same todo within 2h
+
+
+def _compose_procrastination_message(text: str, minutes: int) -> str:
+    snippet = (text or "").strip()
+    if len(snippet) > 60:
+        snippet = snippet[:60].rstrip() + "…"
+    return (
+        f"\"{snippet}\" has been doing for {minutes} min, sir. "
+        "started or stalled?"
+    )
+
+
+def maybe_fire_procrastination_nudge(db: Session) -> bool:
+    """Ping when a todo has sat in state='doing' past the stale threshold
+    and we haven't nudged it within the debounce window. Picks the
+    longest-stalled one. Fail-open. Returns True if a ping was sent."""
+    try:
+        from ..db.models import Todo
+        now = datetime.utcnow()
+        stale_before = now - timedelta(minutes=_DOING_STALE_MINUTES)
+        debounce_before = now - timedelta(minutes=_PROCRAST_DEBOUNCE_MINUTES)
+
+        # Longest-stalled doing todo past the threshold, not recently nudged,
+        # not soft-deleted.
+        candidates = (
+            db.query(Todo)
+            .filter(
+                Todo.state == "doing",
+                Todo.deleted_at.is_(None),
+                Todo.doing_started_at.isnot(None),
+                Todo.doing_started_at <= stale_before,
+            )
+            .order_by(Todo.doing_started_at.asc())
+            .all()
+        )
+        target = None
+        for t in candidates:
+            if t.last_nudge_sent_at and t.last_nudge_sent_at > debounce_before:
+                continue
+            target = t
+            break
+        if target is None:
+            return False
+
+        minutes = int((now - target.doing_started_at).total_seconds() // 60)
+        message = _compose_procrastination_message(target.text, minutes)
+        if not _send_wa(message):
+            return False
+
+        target.last_nudge_sent_at = now
+        db.commit()
+        return True
+    except Exception as e:
+        print(f"[proactive_nudge] procrastination nudge errored (ignored): {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return False
