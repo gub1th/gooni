@@ -378,7 +378,7 @@ def _build_ack(
             parts.append(f"{vtxt} {unit} logged, sir.")
         if exercise is not None:
             label = _trim(exercise.get("exercise_label") or "")
-            parts.append(f"gym's down, sir — {label}." if label else "gym's down, sir.")
+            parts.append(f"trained, sir — {label}." if label else "trained, sir.")
 
     if not parts:
         return None
@@ -945,7 +945,7 @@ def _build_just_extracted_block(
             lines.append(f"- DailyMetric logged: weight {m.get('value')}{m.get('unit') or ''}")
         elif lt == "exercise":
             label = m.get("exercise_label") or ""
-            lines.append(f"- DailyMetric logged: exercise \"{label}\" (+ gym HabitEntry)")
+            lines.append(f"- DailyMetric logged: exercise \"{label}\" (+ exercise HabitEntry)")
     if not lines:
         return ""
     return (

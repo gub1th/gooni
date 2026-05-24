@@ -788,7 +788,7 @@ export function CutTableSection() {
                 <th style={{ ..._cutTh, textAlign: "right" }}>cal</th>
                 <th style={{ ..._cutTh, textAlign: "right" }}>protein</th>
                 <th style={{ ..._cutTh, textAlign: "right" }}>weight</th>
-                <th style={{ ..._cutTh, textAlign: "center" }}>gym</th>
+                <th style={_cutTh}>exercise</th>
               </tr>
             </thead>
             <tbody>
@@ -801,10 +801,15 @@ export function CutTableSection() {
                   <td style={{ ..._cutTd, textAlign: "right" }}>{r.calories ? fmtInt(r.calories) : "—"}</td>
                   <td style={{ ..._cutTd, textAlign: "right" }}>{r.protein ? `${fmtInt(r.protein)}g` : "—"}</td>
                   <td style={{ ..._cutTd, textAlign: "right" }}>{r.weight != null ? `${r.weight}` : "—"}</td>
-                  <td style={{ ..._cutTd, textAlign: "center" }} title={r.exercise_label ?? undefined}>
-                    {r.exercise
-                      ? <span style={{ color: GREEN, fontWeight: 700 }}>●</span>
-                      : <span style={{ color: "var(--gooni-faint, #C7C7CC)" }}>·</span>}
+                  <td style={_cutTd} title={r.exercise_label ?? undefined}>
+                    {r.exercise ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ color: GREEN, fontWeight: 700 }}>●</span>
+                        <span>{r.exercise_label ?? "trained"}</span>
+                      </span>
+                    ) : (
+                      <span style={{ color: "var(--gooni-faint, #C7C7CC)" }}>—</span>
+                    )}
                   </td>
                 </tr>
               ))}

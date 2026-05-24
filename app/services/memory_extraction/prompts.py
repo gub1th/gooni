@@ -497,8 +497,15 @@ LOG TYPES — pick per entry:
   if Daniel gave a bare number that's plausibly bodyweight).
     "175 this morning" → {{log_type:"weight", weight:175, weight_unit:"lb"}}
     "weighed in at 79.4kg" → {{log_type:"weight", weight:79.4, weight_unit:"kg"}}
-- exercise — a workout happened. Fill exercise_label with what he trained.
-    "gym today, chest and tris" → {{log_type:"exercise", exercise_label:"chest and tris"}}
+- exercise — ANY training happened: gym (push/pull/legs/upper/etc.), a
+  sport (tennis, soccer), or cardio (run, bike, swim). One log_type for all
+  of it. Fill exercise_label with WHAT it was — name the activity, and keep
+  any sub-detail (the gym split / distance). The label is how Daniel later
+  sees "what exercise was it", so make it self-describing.
+    "gym today, chest and tris" → {{log_type:"exercise", exercise_label:"gym — chest and tris"}}
+    "did legs at the gym" → {{log_type:"exercise", exercise_label:"gym — legs"}}
+    "pull day" → {{log_type:"exercise", exercise_label:"gym — pull"}}
+    "played tennis" → {{log_type:"exercise", exercise_label:"tennis"}}
     "ran 5k this morning" → {{log_type:"exercise", exercise_label:"5k run"}}
 
 CORRECTIONS — Daniel amends an earlier log from the same day:

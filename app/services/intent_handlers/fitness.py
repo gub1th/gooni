@@ -139,17 +139,20 @@ def _handle_weight(ctx, result, entry, dms) -> bool:
 def _handle_exercise(ctx, result, entry, dms, habit_service) -> bool:
     label = entry.get("exercise_label") or (entry.get("raw_text") or None)
     # value=1.0 is a presence sentinel — the cut table treats exercise as a
-    # boolean (did/didn't train); `notes` carries the human label.
+    # boolean (did/didn't train); `notes` carries the human label (the
+    # activity + any sub-detail: "gym — chest and tris", "tennis", "5k run").
     dms.log(ctx.db, "exercise", 1.0, unit=None, notes=label)
 
-    # Dual-write: keep the boolean `gym` HabitEntry in sync so the habit
-    # strip + streak stay correct. Isolated try/except — a habit failure
-    # must never roll back the metric row (metric is the cut-table source
-    # of truth).
+    # Dual-write a single generic `exercise` boolean habit so "how often did
+    # I train" is one streak across ALL modalities (gym/tennis/run) — what
+    # Daniel actually wants to see. The specific activity lives in the label,
+    # not in separate per-activity habits (those would fragment the count).
+    # Isolated try/except — a habit failure must never roll back the metric
+    # row (metric is the cut-table source of truth).
     try:
-        _upsert_gym_habit(ctx.db, habit_service, label)
+        _upsert_exercise_habit(ctx.db, habit_service, label)
     except Exception as e:
-        print(f"[fitness handler] gym habit upsert failed: {e}")
+        print(f"[fitness handler] exercise habit upsert failed: {e}")
 
     result.captured_metrics.append({
         "log_type": "exercise",
@@ -158,14 +161,14 @@ def _handle_exercise(ctx, result, entry, dms, habit_service) -> bool:
     return True
 
 
-def _upsert_gym_habit(db, habit_service, label: str | None) -> None:
-    hits = habit_service.find_by_name_fuzzy(db, "gym")
+def _upsert_exercise_habit(db, habit_service, label: str | None) -> None:
+    hits = habit_service.find_by_name_fuzzy(db, "exercise")
     if not hits:
-        habit = habit_service.create(db, name="gym", polarity="positive")
+        habit = habit_service.create(db, name="exercise", polarity="positive")
     elif len(hits) == 1:
         habit = hits[0]
     else:
-        habit = habit_service.find_by_name(db, "gym") or hits[0]
+        habit = habit_service.find_by_name(db, "exercise") or hits[0]
     habit_service.upsert_entry(db, habit.id, _date.today(), True, note=label)
 
 
