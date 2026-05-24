@@ -16,7 +16,6 @@ from .db.models import (
     Message,
     Note,
     NoteComment,
-    Reaction,
     Reflection,
     Settings,
     Space,
@@ -404,4 +403,23 @@ def _serialize_reflection(r: Reflection) -> dict:
         "prev_reflection_id": getattr(r, "prev_reflection_id", None),
         "score": getattr(r, "score", None),
         "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def _memory_to_dashboard(m) -> dict:
+    """Full row shape for the dashboard table. Skips embedding (huge JSON
+    string) since the table never displays it."""
+    return {
+        "id": m.id,
+        "type": m.type,
+        "key": m.key,
+        "content": m.content,
+        "confidence": m.confidence,
+        "is_active": bool(m.is_active),
+        "superseded_by": m.superseded_by,
+        "focus_id": m.focus_id,
+        "retrieval_count": m.retrieval_count,
+        "last_retrieved_at": m.last_retrieved_at.isoformat() if m.last_retrieved_at else None,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+        "updated_at": m.updated_at.isoformat() if m.updated_at else None,
     }
