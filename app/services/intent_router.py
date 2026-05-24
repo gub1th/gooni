@@ -86,6 +86,13 @@ class RouterResult:
     # Each entry: {"action": "delete"|"complete"|"edit"|"done_signal",
     #              "match": str, "candidates": [{"id", "text", "score"}]}
     disambiguation_needed: list[dict] = field(default_factory=list)
+    # PR-1 fitness pipeline — DailyMetric rows logged this turn. Each entry:
+    #   {"log_type": str, "metric_type": str | None, "value": float | None,
+    #    "unit": str | None, "running_calories": float, "running_protein": float,
+    #    "correction": bool, "exercise_label": str | None}
+    # The ack composer renders the running daily total from these; the
+    # short-circuit + unbacked-check treat them like captured_todos.
+    captured_metrics: list[dict] = field(default_factory=list)
     # Phase 5: extractor's classification of how much reply the user
     # wants. One of "answer" | "acknowledge" | "task_only" | "no_reply".
     # Defaults to "answer" — conservative; callers gate the LLM reply
@@ -99,7 +106,7 @@ def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
     """Fan out signals to per-type handlers. Each handler is wrapped so
     a single handler failure doesn't kill the rest of the routing.
     """
-    from .intent_handlers import features, memories, promises, todos, tones
+    from .intent_handlers import features, fitness, memories, promises, todos, tones
 
     result = RouterResult()
     # Pass through reply_intent (phase 5) — extractor classifies, caller
@@ -142,6 +149,13 @@ def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
         )
     except Exception as e:
         print(f"[intent_router] done_signals handler error: {e}")
+
+    # PR-1: fitness logs → DailyMetric rows + running-total stamp. Real-time
+    # (not batched) — Daniel wants the "1,165 cal so far" ack instantly.
+    try:
+        fitness.handle(signals.get("fitness_logs") or [], ctx, result)
+    except Exception as e:
+        print(f"[intent_router] fitness handler error: {e}")
 
     try:
         memories.handle(signals.get("memories") or [], ctx, result)

@@ -14,6 +14,7 @@ from .parsers import _parse_json_array, _parse_json_object, _validate_candidate
 from .normalizers import (
     _normalize_done_signals,
     _normalize_features,
+    _normalize_fitness,
     _normalize_memories,
     _normalize_promises,
     _normalize_reply_intent,
@@ -59,7 +60,15 @@ _PREFILTER_TRIGGERS = re.compile(
     r"feedback|annoying|too\s+\w+|don'?t\s+\w+|"
     r"todo|to-?do|"
     r"add (a|to|that)|save (this|a)|"
-    r"call|text|email|message|book|schedule"
+    r"call|text|email|message|book|schedule|"
+    # Fitness logging on note-save: chat surfaces bypass the prefilter
+    # entirely (prev_assistant is set), so this only guards notes. Bare
+    # weight ("175 this morning") may still slip through with no trigger
+    # word — acceptable; chat is the primary logging surface.
+    r"cal|cals|calorie|protein|kcal|macro|"
+    r"gym|workout|lifted|ran|run|cardio|"
+    r"ate|eating|breakfast|lunch|dinner|snack|meal|"
+    r"weigh|\d+\s*g\b|\d+\s*lbs?\b|\d+\s*kg\b"
     r")\b",
     re.IGNORECASE,
 )
@@ -92,6 +101,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "soft_promises": [],
         "todos": [],
         "done_signals": [],
+        "fitness_logs": [],
         "reply_intent": "answer",
         "memories": [],
     }
@@ -132,6 +142,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "soft_promises":    _normalize_promises(parsed.get("soft_promises")),
         "todos":            _normalize_todos(parsed.get("todos")),
         "done_signals":     _normalize_done_signals(parsed.get("done_signals")),
+        "fitness_logs":     _normalize_fitness(parsed.get("fitness_logs")),
         "reply_intent":     _normalize_reply_intent(parsed.get("reply_intent")),
         "memories":         _normalize_memories(parsed.get("memories")),
     }

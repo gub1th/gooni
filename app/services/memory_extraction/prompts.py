@@ -153,6 +153,19 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "match":  "<short substring/keyword identifying which existing open todo this corresponds to — Gooni will cosine-resolve against open todos at ≥0.85, ambiguity check on top-2 within 0.05>"
     }}
   ],
+  "fitness_logs": [
+    {{
+      "log_type":         "food|weight|exercise|macros_explicit",
+      "raw_text":         "<verbatim slice Daniel logged, e.g. 'chicken rice kimchi, 2 oranges, yogurt w/ blueberries'>",
+      "needs_estimation": "true|false — true ONLY for log_type=food when NO calorie/protein numbers were given",
+      "metrics":          [{{"metric_type": "calories|protein", "value": 2100, "unit": "kcal|g"}}],
+      "weight":           "<number, for log_type=weight only — e.g. 175>",
+      "weight_unit":      "lb|kg",
+      "exercise_label":   "<for log_type=exercise only — e.g. 'chest and tris'>",
+      "correction":       "true|false — true when Daniel is amending an EARLIER log this day",
+      "correction_target":"calories|protein|weight — which metric the correction overwrites"
+    }}
+  ],
   "reply_intent": "answer|acknowledge|task_only|no_reply",
   "memories": [
     {{
@@ -457,6 +470,56 @@ Emit them ALL as separate entries.
   entries) — let the prefilter handle those.
 - Empty when nothing chore-shaped fires.
 
+fitness_logs:
+- Daniel logging diet / body / training data so Gooni can keep his cut
+  table. These create numeric DailyMetric rows in real time — distinct
+  from todos (chores) and soft_promises (commitments).
+
+  *** HARD GATE — APPLY FIRST ***
+  Questions about food/body ("how many calories in X?", "what's my protein
+  today?", "should I eat more?") → emit [] for fitness_logs. Asking ≠
+  logging. The reply step answers; this field stays empty.
+
+LOG TYPES — pick per entry:
+- food — Daniel names what he ate WITHOUT explicit numbers. Set
+  needs_estimation=true, leave metrics=[]. The handler estimates macros.
+    "chicken rice kimchi, 2 oranges, yogurt w/ blueberries"
+      → {{log_type:"food", raw_text:"chicken rice kimchi, 2 oranges, yogurt w/ blueberries", needs_estimation:true, metrics:[]}}
+    "had a protein shake and a banana" → food, needs_estimation:true
+- macros_explicit — Daniel GIVES the numbers. needs_estimation=false, fill
+  metrics[] directly (no estimation call).
+    "2100 cal, 140g protein"
+      → {{log_type:"macros_explicit", needs_estimation:false,
+          metrics:[{{metric_type:"calories",value:2100,unit:"kcal"}},
+                   {{metric_type:"protein",value:140,unit:"g"}}]}}
+    "just 850 calories so far" → macros_explicit, metrics:[{{calories,850}}]
+- weight — a bodyweight reading. Fill `weight` + `weight_unit` (default lb
+  if Daniel gave a bare number that's plausibly bodyweight).
+    "175 this morning" → {{log_type:"weight", weight:175, weight_unit:"lb"}}
+    "weighed in at 79.4kg" → {{log_type:"weight", weight:79.4, weight_unit:"kg"}}
+- exercise — ANY training happened: gym (push/pull/legs/upper/etc.), a
+  sport (tennis, soccer), or cardio (run, bike, swim). One log_type for all
+  of it. Fill exercise_label with WHAT it was — name the activity, and keep
+  any sub-detail (the gym split / distance). The label is how Daniel later
+  sees "what exercise was it", so make it self-describing.
+    "gym today, chest and tris" → {{log_type:"exercise", exercise_label:"gym — chest and tris"}}
+    "did legs at the gym" → {{log_type:"exercise", exercise_label:"gym — legs"}}
+    "pull day" → {{log_type:"exercise", exercise_label:"gym — pull"}}
+    "played tennis" → {{log_type:"exercise", exercise_label:"tennis"}}
+    "ran 5k this morning" → {{log_type:"exercise", exercise_label:"5k run"}}
+
+CORRECTIONS — Daniel amends an earlier log from the same day:
+  "actually that chicken was more like 900 cal"
+    → {{log_type:"macros_explicit", correction:true, correction_target:"calories",
+        metrics:[{{metric_type:"calories",value:900,unit:"kcal"}}]}}
+  The handler overwrites the most-recent matching row instead of adding.
+
+- A single message can carry MULTIPLE fitness logs (food + weight + gym) —
+  emit each as its own entry.
+- reply_intent for pure fitness-log messages should be "acknowledge" (a
+  brief "noted, sir" ack is all Daniel wants; he's logging, not asking).
+- Empty when the text carries no diet/body/training data.
+
 reply_intent:
 - One-of: "answer" | "acknowledge" | "task_only" | "no_reply".
 - Tells the orchestrator how much reply the user actually wants/needs.
@@ -530,5 +593,17 @@ memories:
   than emitting a near-duplicate (the reconcile step will dedupe).
 
 If no signals across all fields, return all-empty arrays.
+
+JSON:"""
+
+
+# Tier-2 macro estimation — fired by the fitness handler ONLY when an
+# extracted food log has needs_estimation=true (no numbers given). Kept
+# tiny + temperature 0 so it's a sub-second, deterministic-ish add-on.
+_MACRO_ESTIMATE_PROMPT = """Estimate total calories and grams of protein for what Daniel ate. Use realistic typical portions unless he specified amounts. Return ONLY JSON, no prose, no fence:
+
+{{"calories": <int>, "protein_g": <int>}}
+
+Food: "{food}"
 
 JSON:"""

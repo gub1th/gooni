@@ -32,7 +32,7 @@ _CREATE_TOOL_KINDS: dict[str, str] = {
     "request_feature": "BacklogTicket",
     "create_calendar_event": "CalendarEvent",
 }
-_ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise",)
+_ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise", "DailyMetric")
 
 
 def _build_object_kinds_block() -> str:
@@ -74,6 +74,7 @@ def _build_ack(
     edited_todos: list[dict] | None = None,
     implicit_done_todos: list[dict] | None = None,
     disambiguation_needed: list[dict] | None = None,
+    captured_metrics: list[dict] | None = None,
 ) -> str | None:
     """Alfred-voice ack — terse, casual, no clinical receipts.
 
@@ -343,6 +344,41 @@ def _build_ack(
             parts.append(
                 f"which one to {verb} for \"{match}\"? {cand_texts} (both ~{scores})"
             )
+
+    # PR-1 fitness ack. Diet logs render the running daily total (Daniel
+    # wants to know where he stands — the ONE place a number belongs in the
+    # ack). Weight + exercise get their own terse phrasing. A single message
+    # can carry all three (food + weight + gym).
+    captured_metrics = captured_metrics or []
+    if captured_metrics:
+        def _fmt_cal(c) -> str:
+            try:
+                return f"{int(round(float(c))):,}"
+            except (TypeError, ValueError):
+                return "0"
+
+        diet = [m for m in captured_metrics if m.get("log_type") in ("food", "macros_explicit")]
+        weight = next((m for m in captured_metrics if m.get("log_type") == "weight"), None)
+        exercise = next((m for m in captured_metrics if m.get("log_type") == "exercise"), None)
+
+        if diet:
+            last = diet[-1]
+            cal = _fmt_cal(last.get("running_calories", 0))
+            prot = int(round(float(last.get("running_protein", 0) or 0)))
+            corrected = any(m.get("correction") for m in diet)
+            lead = "fixed — " if corrected else "noted, sir. "
+            parts.append(f"{lead}{cal} cal, {prot}g so far today.")
+        if weight is not None:
+            val = weight.get("value")
+            unit = weight.get("unit") or "lb"
+            try:
+                vtxt = f"{float(val):g}"
+            except (TypeError, ValueError):
+                vtxt = str(val)
+            parts.append(f"{vtxt} {unit} logged, sir.")
+        if exercise is not None:
+            label = _trim(exercise.get("exercise_label") or "")
+            parts.append(f"trained, sir — {label}." if label else "trained, sir.")
 
     if not parts:
         return None
@@ -746,6 +782,7 @@ def _build_just_extracted_block(
     edited_todos: list[dict] | None = None,
     implicit_done_todos: list[dict] | None = None,
     disambiguation_needed: list[dict] | None = None,
+    captured_metrics: list[dict] | None = None,
 ) -> str:
     """Tells the LLM what already got routed this turn. Without this the
     LLM either re-announces ("Logged feature request:…") or doesn't know
@@ -891,6 +928,24 @@ def _build_just_extracted_block(
         lines.append(
             f"- AMBIGUOUS {action} for \"{match}\" — candidates within 0.05: {cand_str}. ASK Daniel which one before doing anything."
         )
+    # PR-1 fitness metric surfacing. The ack stub already told Daniel the
+    # running total — these lines just license the LLM to reference it
+    # without re-announcing the log.
+    for m in (captured_metrics or [])[:4]:
+        lt = m.get("log_type")
+        if lt in ("food", "macros_explicit"):
+            cal = m.get("running_calories")
+            prot = m.get("running_protein")
+            verb = "corrected" if m.get("correction") else "logged"
+            lines.append(
+                f"- DailyMetric {verb} (diet) — running today: "
+                f"{cal} cal, {prot}g"
+            )
+        elif lt == "weight":
+            lines.append(f"- DailyMetric logged: weight {m.get('value')}{m.get('unit') or ''}")
+        elif lt == "exercise":
+            label = m.get("exercise_label") or ""
+            lines.append(f"- DailyMetric logged: exercise \"{label}\" (+ exercise HabitEntry)")
     if not lines:
         return ""
     return (
