@@ -26,7 +26,7 @@ import {
   type MessageTraceStep,
 } from "../../services/api";
 import { Check, Minus, X } from "lucide-react";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 
 
 // Per-source visual identity. Tone matches Apple-Notes restraint that the
@@ -51,7 +51,7 @@ const SOURCE_STYLE: Record<
 // Same palette family as the dashboard's age indicator, so the eyes already
 // know which is which.
 const STATUS_STYLE: Record<EvalStatus, { color: string; bg: string; label: string }> = {
-  not_yet: { color: "#8E8E93", bg: "#F2F2F7", label: "Not yet" },
+  not_yet: { color: ctok.muted, bg: "#F2F2F7", label: "Not yet" },
   pending: { color: "#633806", bg: "#FAEEDA", label: "Pending" },
   done: { color: "#085041", bg: "#E1F5EE", label: "Done" },
 };
@@ -366,9 +366,9 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
         }}
       >
         <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "#1C1C1E" }}>Audit</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: ctok.text }}>Audit</h1>
           {tab === "convos" && (
-            <span style={{ fontSize: 12, color: "#8E8E93", fontWeight: 500 }}>
+            <span style={{ fontSize: 12, color: ctok.muted, fontWeight: 500 }}>
               {visible.length}
               {visible.length !== total ? ` of ${total}` : ""} segments
             </span>
@@ -383,7 +383,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                 borderRadius: "50%",
                 border: "1px solid rgba(0,0,0,0.10)",
                 background: showShortcuts ? "rgba(10,132,255,0.10)" : "transparent",
-                color: showShortcuts ? "#0A84FF" : "#8E8E93",
+                color: showShortcuts ? ctok.accent : ctok.muted,
                 fontSize: 11,
                 fontWeight: 700,
                 cursor: "pointer",
@@ -395,7 +395,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
               ?
             </button>
             {showShortcuts && (
-              <span style={{ fontSize: 11, color: "#8E8E93" }}>
+              <span style={{ fontSize: 11, color: ctok.muted }}>
                 j/k · 1/2/3 · n · ⏎
               </span>
             )}
@@ -469,11 +469,11 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                 <FilterPill
                   key={src}
                   active={sourcesFilter.includes(src)}
-                  accent={SOURCE_STYLE[src]?.accent ?? "#8E8E93"}
+                  accent={SOURCE_STYLE[src]?.accent ?? ctok.muted}
                   count={sourcesFilter.includes(src) ? sourceCounts[src] ?? 0 : undefined}
                   onClick={() => toggleSource(src)}
                 >
-                  <Dot color={SOURCE_STYLE[src]?.accent ?? "#8E8E93"} />
+                  <Dot color={SOURCE_STYLE[src]?.accent ?? ctok.muted} />
                   {SOURCE_STYLE[src]?.label}
                 </FilterPill>
               ))}
@@ -495,14 +495,14 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
             <FilterDot />
             <FilterPill
               active={hasFlagOnly}
-              accent="#FF3B30"
+              accent={ctok.danger}
               onClick={() => setHasFlagOnly((v) => !v)}
             >
               Flagged
             </FilterPill>
             <FilterPill
               active={hideRated}
-              accent="#0A84FF"
+              accent={ctok.accent}
               onClick={() => setHideRated((v) => !v)}
             >
               {hideRated ? "Unrated" : "All ratings"}
@@ -520,7 +520,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                   fontFamily: FONT,
                   border: "0.5px solid rgba(0,0,0,0.10)",
                   background: "transparent",
-                  color: "#8E8E93",
+                  color: ctok.muted,
                   padding: "3px 10px",
                   borderRadius: 999,
                   cursor: "pointer",
@@ -566,10 +566,10 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
           {/* Grid */}
           <div style={{ flex: 1, overflow: "auto", padding: 24, background: "#FAFAFA" }}>
             {error && (
-              <div style={{ color: "#FF3B30", fontSize: 13, marginBottom: 12 }}>{error}</div>
+              <div style={{ color: ctok.danger, fontSize: 13, marginBottom: 12 }}>{error}</div>
             )}
             {loading && visible.length === 0 ? (
-              <div style={{ color: "#8E8E93", fontSize: 13 }}>Loading…</div>
+              <div style={{ color: ctok.muted, fontSize: 13 }}>Loading…</div>
             ) : visible.length === 0 ? (
               <div
                 style={{
@@ -579,14 +579,14 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                   justifyContent: "center",
                   textAlign: "center",
                   padding: "60px 20px",
-                  color: "#8E8E93",
+                  color: ctok.muted,
                   gap: 12,
                 }}
               >
-                <div style={{ fontSize: 14, fontWeight: 500, color: "#1C1C1E" }}>
+                <div style={{ fontSize: 14, fontWeight: 500, color: ctok.text }}>
                   No conversations match these filters
                 </div>
-                <div style={{ fontSize: 12, color: "#8E8E93", maxWidth: 360 }}>
+                <div style={{ fontSize: 12, color: ctok.muted, maxWidth: 360 }}>
                   {segments.length === 0
                     ? "Widen your source / status pills, or clear the search."
                     : `All ${segments.length} loaded segment${segments.length === 1 ? "" : "s"} are below the min-msg threshold of ${minMessages}.`}
@@ -598,7 +598,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                     borderRadius: 8,
                     border: "1px solid rgba(0,0,0,0.10)",
                     background: "transparent",
-                    color: "#0A84FF",
+                    color: ctok.accent,
                     fontFamily: FONT,
                     fontSize: 12,
                     fontWeight: 600,
@@ -746,7 +746,7 @@ function SegmentCard({
           WebkitBoxOrient: "vertical",
         }}
       >
-        {seg.preview || <em style={{ color: "#8E8E93" }}>(no user message)</em>}
+        {seg.preview || <em style={{ color: ctok.muted }}>(no user message)</em>}
       </div>
       {/* Bottom — metadata + action indicators. */}
       <div
@@ -756,13 +756,13 @@ function SegmentCard({
           alignItems: "center",
           gap: 8,
           fontSize: 11,
-          color: "#8E8E93",
+          color: ctok.muted,
         }}
       >
         <span>
           {seg.message_count} msg{when ? ` · ${formatDate(when)}` : ""}
           {seg.cost_usd != null && seg.cost_usd > 0 && (
-            <span style={{ color: "#8E8E93" }}> · ${seg.cost_usd.toFixed(4)}</span>
+            <span style={{ color: ctok.muted }}> · ${seg.cost_usd.toFixed(4)}</span>
           )}
         </span>
         <span style={{ display: "flex", gap: 8 }}>
@@ -770,7 +770,7 @@ function SegmentCard({
             <span style={{ color: "#A1742B" }}>{seg.flag_count} flag{seg.flag_count === 1 ? "" : "s"}</span>
           )}
           {seg.dispatched_to_cc_at && (
-            <span style={{ color: "#0A84FF" }}>→ CC</span>
+            <span style={{ color: ctok.accent }}>→ CC</span>
           )}
         </span>
       </div>
@@ -846,7 +846,7 @@ function SegmentRow({
           <Dot color={sourceStyle.accent} />
           {sourceStyle.label}
         </span>
-        <span style={{ fontSize: 11, color: "#8E8E93", flexShrink: 0 }}>
+        <span style={{ fontSize: 11, color: ctok.muted, flexShrink: 0 }}>
           · {seg.message_count} msg{when ? ` · ${formatDate(when)}` : ""}
         </span>
         <span style={{ flex: 1 }} />
@@ -856,7 +856,7 @@ function SegmentRow({
           </span>
         )}
         {seg.dispatched_to_cc_at && (
-          <span style={{ fontSize: 11, color: "#0A84FF", flexShrink: 0 }}>→ CC</span>
+          <span style={{ fontSize: 11, color: ctok.accent, flexShrink: 0 }}>→ CC</span>
         )}
         <span
           style={{
@@ -911,7 +911,7 @@ function ViewToggle({
     fontSize: 12,
     fontFamily: FONT,
     background: active ? "#FFFFFF" : "transparent",
-    color: active ? "#1C1C1E" : "#6E6E73",
+    color: active ? ctok.text : "#6E6E73",
     border: "none",
     borderRadius: 5,
     cursor: "pointer",
@@ -1102,7 +1102,7 @@ function EvalDetailView({
             border: "none",
             cursor: "pointer",
             fontSize: 14,
-            color: "#0A84FF",
+            color: ctok.accent,
             padding: 0,
           }}
         >
@@ -1114,7 +1114,7 @@ function EvalDetailView({
               Segment #{seg.id}
             </span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3C3C43" }}>
-              <Dot color={SOURCE_STYLE[seg.source]?.accent ?? "#8E8E93"} />
+              <Dot color={SOURCE_STYLE[seg.source]?.accent ?? ctok.muted} />
               {SOURCE_STYLE[seg.source]?.label}
             </span>
             {seg.is_active && <ActiveBadge />}
@@ -1143,7 +1143,7 @@ function EvalDetailView({
             title="Save this segment as a PDF (Cmd/Ctrl-P · Save as PDF)"
             style={{
               background: "transparent",
-              color: "#0A84FF",
+              color: ctok.accent,
               border: "1px solid rgba(10,132,255,0.30)",
               borderRadius: 6,
               padding: "5px 12px",
@@ -1159,7 +1159,7 @@ function EvalDetailView({
             onClick={handleDispatch}
             disabled={dispatching}
             style={{
-              background: seg?.dispatched_to_cc_at ? "#34C759" : "#0A84FF",
+              background: seg?.dispatched_to_cc_at ? "#34C759" : ctok.accent,
               color: "#FFFFFF",
               border: "none",
               borderRadius: 6,
@@ -1182,9 +1182,9 @@ function EvalDetailView({
 
       {/* Body: summary editor + transcript */}
       <div style={{ flex: 1, overflow: "auto", padding: 24 }}>
-        {error && <div style={{ color: "#FF3B30" }}>{error}</div>}
+        {error && <div style={{ color: ctok.danger }}>{error}</div>}
         {loading && !data ? (
-          <div style={{ color: "#8E8E93", fontSize: 13 }}>Loading…</div>
+          <div style={{ color: ctok.muted, fontSize: 13 }}>Loading…</div>
         ) : data ? (
           <>
             <SummaryEditor
@@ -1294,7 +1294,7 @@ function DispatchModal({
       >
         {modal.state === "confirm" && (
           <>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#1C1C1E" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: ctok.text }}>
               {alreadyDispatched ? "Re-dispatch this eval?" : "Dispatch this eval to Claude Code?"}
             </div>
             <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.5 }}>
@@ -1315,7 +1315,7 @@ function DispatchModal({
         )}
         {modal.state === "success" && (
           <>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#1C1C1E" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: ctok.text }}>
               {modal.rewrote ? "Note overwritten" : "Note created"}
             </div>
             <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.5 }}>
@@ -1340,7 +1340,7 @@ function DispatchModal({
         )}
         {modal.state === "error" && (
           <>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#FF3B30" }}>Dispatch failed</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: ctok.danger }}>Dispatch failed</div>
             <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.5 }}>{modal.message}</div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
               <ModalButton onClick={onClose} variant="ghost">Close</ModalButton>
@@ -1366,8 +1366,8 @@ function ModalButton({
     <button
       onClick={onClick}
       style={{
-        background: variant === "primary" ? "#0A84FF" : "transparent",
-        color: variant === "primary" ? "#FFFFFF" : "#0A84FF",
+        background: variant === "primary" ? ctok.accent : "transparent",
+        color: variant === "primary" ? "#FFFFFF" : ctok.accent,
         border: variant === "primary" ? "none" : "1px solid #E5E5EA",
         borderRadius: 6,
         padding: "6px 14px",
@@ -1441,8 +1441,8 @@ function SummaryEditor({
           disabled={!dirty || saving}
           style={{
             marginLeft: "auto",
-            background: dirty ? "#0A84FF" : "#E5E5EA",
-            color: dirty ? "#FFFFFF" : "#8E8E93",
+            background: dirty ? ctok.accent : ctok.border,
+            color: dirty ? "#FFFFFF" : ctok.muted,
             border: "none",
             borderRadius: 6,
             padding: "6px 14px",
@@ -1544,9 +1544,9 @@ function MessageCard({
         }}
       >
         <strong>{msg.role}</strong>
-        <span style={{ color: "#8E8E93" }}>· #{msg.id}</span>
+        <span style={{ color: ctok.muted }}>· #{msg.id}</span>
         {msg.created_at && (
-          <span style={{ color: "#8E8E93" }}>
+          <span style={{ color: ctok.muted }}>
             · {new Date(msg.created_at).toLocaleString()}
           </span>
         )}
@@ -1558,7 +1558,7 @@ function MessageCard({
           lineHeight: 1.5,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          color: "#1C1C1E",
+          color: ctok.text,
         }}
       >
         {msg.content}
@@ -1582,7 +1582,7 @@ function MessageCard({
               border: "none",
               padding: 0,
               cursor: "pointer",
-              color: "#0A84FF",
+              color: ctok.accent,
               fontSize: 12,
               fontFamily: FONT,
             }}
@@ -1597,7 +1597,7 @@ function MessageCard({
               style={{
                 marginTop: 6,
                 fontSize: 12,
-                color: "#8E8E93",
+                color: ctok.muted,
                 fontStyle: "italic",
                 lineHeight: 1.4,
               }}
@@ -1691,7 +1691,7 @@ function SelfTakePanel({ messageId }: { messageId: number }) {
             fontSize: 10.5,
             textTransform: "uppercase",
             letterSpacing: 0.4,
-            color: "#8E8E93",
+            color: ctok.muted,
             fontWeight: 600,
           }}
         >
@@ -1708,22 +1708,22 @@ function SelfTakePanel({ messageId }: { messageId: number }) {
         >
           sev {reflection.severity} · {pill.label}
         </span>
-        <span style={{ fontSize: 11, color: "#8E8E93" }}>
+        <span style={{ fontSize: 11, color: ctok.muted }}>
           · {reflection.action_vs_described}
         </span>
       </div>
       {reflection.critique_summary && (
-        <div style={{ fontSize: 13, color: "#1C1C1E", marginBottom: 4 }}>
+        <div style={{ fontSize: 13, color: ctok.text, marginBottom: 4 }}>
           <strong>Daniel pushed back:</strong> {reflection.critique_summary}
         </div>
       )}
       {reflection.gap_exposed && (
-        <div style={{ fontSize: 13, color: "#1C1C1E", marginBottom: 4 }}>
+        <div style={{ fontSize: 13, color: ctok.text, marginBottom: 4 }}>
           <strong>Gap:</strong> {reflection.gap_exposed}
         </div>
       )}
       {reflection.proposed_self_fix && (
-        <div style={{ fontSize: 13, color: "#1C1C1E" }}>
+        <div style={{ fontSize: 13, color: ctok.text }}>
           <strong>Proposed fix:</strong> {reflection.proposed_self_fix}
         </div>
       )}
@@ -1759,7 +1759,7 @@ function ToolCallsSection({ toolCalls }: { toolCalls: EvalToolCall[] }) {
           border: "none",
           padding: 0,
           cursor: "pointer",
-          color: failed > 0 ? "#FF3B30" : "#0A84FF",
+          color: failed > 0 ? ctok.danger : ctok.accent,
           fontSize: 12,
           fontFamily: FONT,
         }}
@@ -1820,11 +1820,11 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
         >
           {tc.status}
         </span>
-        <strong style={{ color: "#1C1C1E" }}>{tc.tool_name}</strong>
+        <strong style={{ color: ctok.text }}>{tc.tool_name}</strong>
         {tc.duration_ms != null && (
-          <span style={{ color: "#8E8E93" }}>· {tc.duration_ms}ms</span>
+          <span style={{ color: ctok.muted }}>· {tc.duration_ms}ms</span>
         )}
-        <span style={{ color: "#8E8E93", marginLeft: "auto" }}>
+        <span style={{ color: ctok.muted, marginLeft: "auto" }}>
           #{tc.id} {expanded ? "▾" : "▸"}
         </span>
       </div>
@@ -1994,7 +1994,7 @@ function MessageRatingRow({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ fontSize: 11, color: "#8E8E93", marginRight: 4 }}>Reply</span>
+        <span style={{ fontSize: 11, color: ctok.muted, marginRight: 4 }}>Reply</span>
         {[1, 2, 3].map((r) => {
           const active = existing?.rating === r;
           const icon = r === 1
@@ -2012,7 +2012,7 @@ function MessageRatingRow({
                 width: 28, height: 28, borderRadius: 8,
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
                 background: active ? RATING_COLOR_EVAL[r] : "transparent",
-                border: `1px solid ${active ? RATING_COLOR_EVAL[r] : "#E5E5EA"}`,
+                border: `1px solid ${active ? RATING_COLOR_EVAL[r] : ctok.border}`,
                 color: active ? "#fff" : RATING_COLOR_EVAL[r],
                 cursor: pending ? "wait" : "pointer",
                 padding: 0, fontFamily: "inherit",
@@ -2044,7 +2044,7 @@ function MessageRatingRow({
           resize: "vertical",
           outline: "none",
           background: "#fff",
-          color: "#1C1C1E",
+          color: ctok.text,
           overflow: "hidden",
         }}
       />
@@ -2070,8 +2070,8 @@ function MessageRatingRow({
           style={{
             padding: "5px 12px", borderRadius: 6,
             border: "none",
-            background: canSave ? "#0A84FF" : "#E5E5EA",
-            color: canSave ? "#fff" : "#8E8E93",
+            background: canSave ? ctok.accent : ctok.border,
+            color: canSave ? "#fff" : ctok.muted,
             fontSize: 11.5, fontWeight: 600,
             cursor: canSave ? "pointer" : "not-allowed",
             fontFamily: FONT,
@@ -2126,7 +2126,7 @@ function StepCard({
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: "#8E8E93" }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: ctok.muted }}>
           {toolName ? `${stepKey}: ${toolName}` : stepKey}
         </span>
         <span style={{ fontSize: 13 }}>{headerLabel}</span>
@@ -2205,7 +2205,7 @@ function StepBody({ step }: { step: MessageTraceStep }) {
   const shouldAutoExpand = totalLen <= STEP_AUTOEXPAND_MAX_CHARS;
   return (
     <details style={{ marginTop: 6 }} open={shouldAutoExpand}>
-      <summary style={{ fontSize: 11, color: "#8E8E93", cursor: "pointer" }}>
+      <summary style={{ fontSize: 11, color: ctok.muted, cursor: "pointer" }}>
         {shouldAutoExpand ? "collapse" : "show details"}
       </summary>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
@@ -2250,7 +2250,7 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
           marginBottom: 2,
         }}
       >
-        <span style={{ fontSize: 10, color: "#8E8E93" }}>{label}</span>
+        <span style={{ fontSize: 10, color: ctok.muted }}>{label}</span>
         {showExpand && (
           <button
             onClick={() => setExpanded(true)}
@@ -2261,7 +2261,7 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
               borderRadius: 5,
               padding: "1px 6px",
               fontSize: 10,
-              color: "#0A84FF",
+              color: ctok.accent,
               cursor: "pointer",
               fontFamily: FONT,
             }}
@@ -2338,7 +2338,7 @@ function FormattedModal({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "#1C1C1E" }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: ctok.text }}>
             {label} — formatted
           </span>
           <button
@@ -2350,7 +2350,7 @@ function FormattedModal({
               borderRadius: 6,
               padding: "4px 12px",
               fontSize: 13,
-              color: "#0A84FF",
+              color: ctok.accent,
               cursor: "pointer",
               fontFamily: FONT,
             }}
@@ -2444,7 +2444,7 @@ function FlagEditor({
             marginLeft: "auto",
             background: "none",
             border: "none",
-            color: "#8E8E93",
+            color: ctok.muted,
             cursor: "pointer",
             fontSize: 12,
           }}
@@ -2474,7 +2474,7 @@ function FlagEditor({
           onClick={submit}
           disabled={saving}
           style={{
-            background: "#FF3B30",
+            background: ctok.danger,
             color: "#FFFFFF",
             border: "none",
             borderRadius: 6,
@@ -2531,7 +2531,7 @@ function ToolLegendPopup({
           <h3 style={{ margin: 0, fontSize: 16 }}>Tool / step legend</h3>
           <button
             onClick={onClose}
-            style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: "#8E8E93" }}
+            style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: ctok.muted }}
           >
             ✕
           </button>
@@ -2540,7 +2540,7 @@ function ToolLegendPopup({
           {entries.map((e) => (
             <div key={e.key}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
-                {e.name} <span style={{ color: "#8E8E93", fontWeight: 400 }}>({e.key})</span>
+                {e.name} <span style={{ color: ctok.muted, fontWeight: 400 }}>({e.key})</span>
               </div>
               <div style={{ fontSize: 12, color: "#3A3A3C", marginTop: 2, lineHeight: 1.5 }}>
                 {e.description}
@@ -2571,7 +2571,7 @@ function FilterGroup({ label, children }: { label: string; children: React.React
   // any selected = show only those.
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ fontSize: 11, color: "#8E8E93", fontWeight: 500 }}>{label}</span>
+      <span style={{ fontSize: 11, color: ctok.muted, fontWeight: 500 }}>{label}</span>
       <div style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
         {children}
       </div>
@@ -2603,7 +2603,7 @@ function FilterPill({
         alignItems: "center",
         gap: 5,
         background: active ? `${accent}1A` : "transparent",
-        color: active ? accent : "#8E8E93",
+        color: active ? accent : ctok.muted,
         border: active ? `0.5px solid ${accent}55` : "0.5px solid rgba(0,0,0,0.10)",
         borderRadius: 999,
         padding: "3px 10px",
@@ -2656,7 +2656,7 @@ function TabButton({
         fontSize: 13,
         fontWeight: active ? 600 : 400,
         fontFamily: FONT,
-        color: active ? "#1C1C1E" : "#8E8E93",
+        color: active ? ctok.text : ctok.muted,
         borderBottom: active ? "2px solid #1C1C1E" : "2px solid transparent",
       }}
     >
@@ -2759,7 +2759,7 @@ function RatedProgressBadge({ data }: { data: EvalSegmentFull }) {
         padding: "2px 8px",
         borderRadius: 10,
         background: done ? "rgba(34,197,94,0.12)" : "rgba(10,132,255,0.10)",
-        color: done ? "#15803D" : "#0A84FF",
+        color: done ? "#15803D" : ctok.accent,
         fontSize: 10,
         fontWeight: 600,
         letterSpacing: 0.3,
@@ -2798,7 +2798,7 @@ function RatingPicker({
           style={{
             background: active ? RATING_COLOR_EVAL[r] : "transparent",
             color: active ? "#FFFFFF" : RATING_COLOR_EVAL[r],
-            border: `1px solid ${active ? RATING_COLOR_EVAL[r] : "#E5E5EA"}`,
+            border: `1px solid ${active ? RATING_COLOR_EVAL[r] : ctok.border}`,
             borderRadius: 6,
             padding: "4px 10px",
             cursor: "pointer",
@@ -3088,11 +3088,11 @@ function EvalRunsPanel() {
             </div>
           )}
         </div>
-        <div style={{ padding: "0 16px 8px", fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
+        <div style={{ padding: "0 16px 8px", fontSize: 11, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>
           Latest baselines
         </div>
         {baselineList.length === 0 ? (
-          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93", lineHeight: 1.5 }}>
+          <div style={{ padding: "0 16px", fontSize: 12, color: ctok.muted, lineHeight: 1.5 }}>
             no baselines yet — click <strong>▶ Run eval on prod snapshot</strong> above to generate one (or run <code>python -m evals.run_orchestrator --baseline</code> locally).
           </div>
         ) : (
@@ -3128,11 +3128,11 @@ function EvalRunsPanel() {
                     {b.composite_score ?? "?"}
                   </span>
                 </div>
-                <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
+                <div style={{ color: ctok.muted, fontSize: 11, marginTop: 2 }}>
                   {b.passed}/{b.n_cases} passed · v{b.pipeline_version} · src={b.pipeline_source_hash?.slice(0, 6)}
                 </div>
                 {(b.total_cost_usd != null) && (
-                  <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
+                  <div style={{ color: ctok.muted, fontSize: 11, marginTop: 2 }}>
                     💰 ${b.total_cost_usd.toFixed(4)} total
                     {(b.cost_per_case_usd != null) && ` · $${b.cost_per_case_usd.toFixed(4)}/case`}
                   </div>
@@ -3141,15 +3141,15 @@ function EvalRunsPanel() {
             );
           })
         )}
-        <div style={{ padding: "16px 16px 8px", fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
+        <div style={{ padding: "16px 16px 8px", fontSize: 11, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>
           Reports ({runs.length})
         </div>
         {loading ? (
-          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93" }}>loading…</div>
+          <div style={{ padding: "0 16px", fontSize: 12, color: ctok.muted }}>loading…</div>
         ) : error ? (
-          <div style={{ padding: "0 16px", fontSize: 12, color: "#FF3B30" }}>error: {error}</div>
+          <div style={{ padding: "0 16px", fontSize: 12, color: ctok.danger }}>error: {error}</div>
         ) : runs.length === 0 ? (
-          <div style={{ padding: "0 16px", fontSize: 12, color: "#8E8E93", lineHeight: 1.5 }}>
+          <div style={{ padding: "0 16px", fontSize: 12, color: ctok.muted, lineHeight: 1.5 }}>
             no reports yet — HTML scorecards are per-run artifacts. Click <strong>▶ Run eval on prod snapshot</strong> to generate one.
           </div>
         ) : (
@@ -3173,10 +3173,10 @@ function EvalRunsPanel() {
                 fontSize: 12,
               }}
             >
-              <div style={{ fontWeight: selected === r.filename ? 600 : 400, color: "#1C1C1E", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ fontWeight: selected === r.filename ? 600 : 400, color: ctok.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {r.filename.replace(/^report_/, "").replace(/\.html$/, "")}
               </div>
-              <div style={{ color: "#8E8E93", fontSize: 11, marginTop: 2 }}>
+              <div style={{ color: ctok.muted, fontSize: 11, marginTop: 2 }}>
                 {formatDate(new Date(r.mtime * 1000))} · {Math.round(r.size_bytes / 1024)} KB
               </div>
             </button>
@@ -3187,26 +3187,26 @@ function EvalRunsPanel() {
       <div style={{ flex: 1, overflow: "auto", background: "#FFFFFF" }}>
         {selectedBaselineFile ? (
           baselineDetailLoading ? (
-            <div style={{ padding: 24, color: "#8E8E93", fontSize: 13, fontFamily: FONT }}>
+            <div style={{ padding: 24, color: ctok.muted, fontSize: 13, fontFamily: FONT }}>
               loading baseline…
             </div>
           ) : baselineDetailError ? (
-            <div style={{ padding: 24, color: "#FF3B30", fontSize: 13, fontFamily: FONT }}>
+            <div style={{ padding: 24, color: ctok.danger, fontSize: 13, fontFamily: FONT }}>
               error: {baselineDetailError}
             </div>
           ) : baselineDetail ? (
             <BaselineDetailPanel detail={baselineDetail} filename={selectedBaselineFile} />
           ) : null
         ) : !selected ? (
-          <div style={{ padding: 24, color: "#8E8E93", fontSize: 13, fontFamily: FONT }}>
+          <div style={{ padding: 24, color: ctok.muted, fontSize: 13, fontFamily: FONT }}>
             Select a baseline or run on the left.
           </div>
         ) : reportLoading ? (
-          <div style={{ padding: 24, color: "#8E8E93", fontSize: 13, fontFamily: FONT }}>
+          <div style={{ padding: 24, color: ctok.muted, fontSize: 13, fontFamily: FONT }}>
             loading report…
           </div>
         ) : reportError ? (
-          <div style={{ padding: 24, color: "#FF3B30", fontSize: 13, fontFamily: FONT }}>
+          <div style={{ padding: 24, color: ctok.danger, fontSize: 13, fontFamily: FONT }}>
             error: {reportError}
           </div>
         ) : (
@@ -3235,8 +3235,8 @@ function BaselineDetailPanel({
   const passedColor = "#0a8a3a";
   const failedColor = "#b3261e";
   return (
-    <div style={{ padding: "20px 24px", fontFamily: FONT, color: "#1C1C1E" }}>
-      <div style={{ fontSize: 11, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
+    <div style={{ padding: "20px 24px", fontFamily: FONT, color: ctok.text }}>
+      <div style={{ fontSize: 11, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>
         Baseline
       </div>
       <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4, wordBreak: "break-all" }}>
@@ -3244,38 +3244,38 @@ function BaselineDetailPanel({
       </div>
       <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>Composite</div>
+          <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Composite</div>
           <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2, color: (detail.composite_score ?? 0) >= 75 ? passedColor : (detail.composite_score ?? 0) >= 60 ? "#9a7a00" : failedColor }}>
             {detail.composite_score ?? "?"}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>Pass / total</div>
+          <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Pass / total</div>
           <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{detail.passed}/{detail.n_cases}</div>
         </div>
         {detail.total_cost_usd != null && (
           <div>
-            <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>Total cost</div>
+            <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Total cost</div>
             <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>${detail.total_cost_usd.toFixed(4)}</div>
             {detail.cost_per_case_usd != null && (
-              <div style={{ fontSize: 11, color: "#8E8E93", marginTop: 1 }}>
+              <div style={{ fontSize: 11, color: ctok.muted, marginTop: 1 }}>
                 ${detail.cost_per_case_usd.toFixed(4)}/case
               </div>
             )}
           </div>
         )}
         <div>
-          <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>Pipeline</div>
+          <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Pipeline</div>
           <div style={{ fontSize: 14, marginTop: 2 }}>
             v{detail.pipeline_version} · {detail.pipeline_model}
           </div>
-          <div style={{ fontSize: 11, color: "#8E8E93" }}>src={detail.pipeline_source_hash?.slice(0, 8)}</div>
+          <div style={{ fontSize: 11, color: ctok.muted }}>src={detail.pipeline_source_hash?.slice(0, 8)}</div>
         </div>
       </div>
 
       {detail.means && Object.keys(detail.means).length > 0 && (
         <div style={{ marginTop: 18, padding: "10px 12px", background: "rgba(0,0,0,0.03)", borderRadius: 8, fontSize: 12.5 }}>
-          <div style={{ fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
+          <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
             Means
           </div>
           {Object.entries(detail.means).map(([k, v]) => (
@@ -3287,7 +3287,7 @@ function BaselineDetailPanel({
         </div>
       )}
 
-      <div style={{ marginTop: 22, fontSize: 10.5, color: "#8E8E93", textTransform: "uppercase", letterSpacing: 0.4 }}>
+      <div style={{ marginTop: 22, fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>
         Per-case results ({results.length})
       </div>
       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -3318,10 +3318,10 @@ function BaselineDetailPanel({
                   </span>
                   <span style={{ fontWeight: 600, wordBreak: "break-all" }}>{r.id}</span>
                   {r.cached && (
-                    <span style={{ fontSize: 10.5, color: "#8E8E93" }}>(cached)</span>
+                    <span style={{ fontSize: 10.5, color: ctok.muted }}>(cached)</span>
                   )}
                 </div>
-                <span style={{ fontSize: 11, color: "#8E8E93", flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: ctok.muted, flexShrink: 0 }}>
                   {r.judge_model || ""}
                   {r.cost?.total_cost_usd != null && ` · $${r.cost.total_cost_usd.toFixed(4)}`}
                 </span>
@@ -3348,7 +3348,7 @@ function BaselineDetailPanel({
                 </div>
               )}
               {r.tools_called && r.tools_called.length > 0 && (
-                <div style={{ marginTop: 6, fontSize: 11, color: "#8E8E93", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+                <div style={{ marginTop: 6, fontSize: 11, color: ctok.muted, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
                   tools: {r.tools_called.filter(Boolean).join(", ")}
                 </div>
               )}

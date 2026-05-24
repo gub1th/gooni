@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { FONT } from "../ui";
+import { color as ctok, FONT } from "../ui";
 import {
   fetchChatAudit, deleteMemory,
   type ChatAuditEntry, type ChatAuditActiveRule,
@@ -72,10 +72,10 @@ function ChatAuditPage() {
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18 }}>
           <div>
-            <h1 style={{ fontSize: 26, fontWeight: 700, color: "#1C1C1E", margin: 0, letterSpacing: "-0.4px" }}>
+            <h1 style={{ fontSize: 26, fontWeight: 700, color: ctok.text, margin: 0, letterSpacing: "-0.4px" }}>
               Chat audit
             </h1>
-            <p style={{ fontSize: 13, color: "#8E8E93", margin: "4px 0 0" }}>
+            <p style={{ fontSize: 13, color: ctok.muted, margin: "4px 0 0" }}>
               Every Gooni reply, with any feedback you gave inline. {total} replies.
             </p>
           </div>
@@ -115,12 +115,12 @@ function ChatAuditPage() {
         }}>
           <div style={{
             fontSize: 11, fontWeight: 600, letterSpacing: 0.4,
-            textTransform: "uppercase", color: "#8E8E93", marginBottom: 10,
+            textTransform: "uppercase", color: ctok.muted, marginBottom: 10,
           }}>
             Active feedback rules ({activeRules.length})
           </div>
           {activeRules.length === 0 ? (
-            <div style={{ fontSize: 13, color: "#AEAEB2" }}>
+            <div style={{ fontSize: 13, color: ctok.faint }}>
               No active rules. Reply to a Gooni message with a correction (e.g. "less teacher-y") to add one.
             </div>
           ) : (
@@ -135,7 +135,7 @@ function ChatAuditPage() {
                     border: "1px solid rgba(22,163,74,0.18)",
                   }}
                 >
-                  <div style={{ fontSize: 13, color: "#1C1C1E", lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 13, color: ctok.text, lineHeight: 1.4 }}>
                     {r.rule}
                     <span style={{ marginLeft: 10, fontSize: 11, color: "#6E6E73" }}>
                       · {relativeTime(r.created_at)}
@@ -172,7 +172,7 @@ function ChatAuditPage() {
             gridTemplateColumns: "110px 80px 1fr",
             gap: 0,
             padding: "10px 16px",
-            fontSize: 11, color: "#8E8E93", letterSpacing: 0.4,
+            fontSize: 11, color: ctok.muted, letterSpacing: 0.4,
             textTransform: "uppercase", fontWeight: 600,
             background: "#F8F8F9",
             borderBottom: "1px solid rgba(0,0,0,0.06)",
@@ -183,11 +183,11 @@ function ChatAuditPage() {
           </div>
 
           {loading && entries.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#AEAEB2", fontSize: 13 }}>
+            <div style={{ padding: 40, textAlign: "center", color: ctok.faint, fontSize: 13 }}>
               Loading…
             </div>
           ) : entries.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#AEAEB2", fontSize: 13 }}>
+            <div style={{ padding: 40, textAlign: "center", color: ctok.faint, fontSize: 13 }}>
               {hasFeedbackOnly ? "No feedback logged yet." : "No replies yet."}
             </div>
           ) : (
@@ -204,7 +204,7 @@ function ChatAuditPage() {
                   alignItems: "flex-start",
                 }}
               >
-                <div style={{ color: "#8E8E93", fontSize: 12 }}>
+                <div style={{ color: ctok.muted, fontSize: 12 }}>
                   {relativeTime(e.created_at)}
                 </div>
                 <div>
@@ -221,7 +221,7 @@ function ChatAuditPage() {
                     {e.conversation_source ?? "—"}
                   </span>
                 </div>
-                <div style={{ color: "#1C1C1E", lineHeight: 1.45, paddingRight: 12 }}>
+                <div style={{ color: ctok.text, lineHeight: 1.45, paddingRight: 12 }}>
                   <div style={{ whiteSpace: "pre-wrap" }}>{e.content}</div>
                   {e.feedback && (
                     <div style={{
@@ -238,7 +238,7 @@ function ChatAuditPage() {
                       }}>
                         ↳ Daniel said
                       </div>
-                      <div style={{ color: "#1C1C1E", whiteSpace: "pre-wrap" }}>
+                      <div style={{ color: ctok.text, whiteSpace: "pre-wrap" }}>
                         {e.feedback.content}
                       </div>
                     </div>

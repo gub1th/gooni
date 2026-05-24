@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { FONT } from "../ui";
+import { color as ctok, FONT } from "../ui";
 
 
 // Single-tenant privacy page. Required for OAuth provider registration
@@ -14,12 +14,12 @@ function PrivacyPage() {
         margin: "0 auto",
         padding: "60px 24px 80px",
         fontFamily: FONT,
-        color: "#1C1C1E",
+        color: ctok.text,
         lineHeight: 1.65,
       }}
     >
       <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>Privacy Policy</h1>
-      <p style={{ fontSize: 12, color: "#8E8E93", marginBottom: 32 }}>Last updated: 2026-05-04</p>
+      <p style={{ fontSize: 12, color: ctok.muted, marginBottom: 32 }}>Last updated: 2026-05-04</p>
 
       <Section title="What Gooni is">
         Gooni is a personal AI notebook + assistant operated as a single-user

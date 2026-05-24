@@ -5,7 +5,7 @@ import { InputBar } from "./chat/InputBar";
 import { MessageBubble } from "./chat/MessageBubble";
 import { StatChip } from "./chat/StatChip";
 import { ThinkingIndicator } from "./chat/ThinkingIndicator";
-import { FONT } from "../ui";
+import { color as ctok, FONT } from "../ui";
 
 const DISPLAY_FONT = "'Inter', -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -62,7 +62,7 @@ function StreamingProgress({
     >
       {stage && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#636366", fontSize: 12.5 }}>
-          <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 3, background: "#0A84FF", animation: "pulse 1.2s ease-in-out infinite" }} />
+          <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 3, background: ctok.accent, animation: "pulse 1.2s ease-in-out infinite" }} />
           <span>{stage}…</span>
         </div>
       )}
@@ -72,7 +72,7 @@ function StreamingProgress({
             const icon =
               t.status === "running" ? "◯" : t.status === "done" ? "✓" : "✗";
             const color =
-              t.status === "running" ? "#0A84FF" : t.status === "done" ? "#34C759" : "#FF3B30";
+              t.status === "running" ? ctok.accent : t.status === "done" ? "#34C759" : ctok.danger;
             return (
               <div
                 key={`${t.id ?? "noid"}-${t.tool_name}-${idx}`}
@@ -80,7 +80,7 @@ function StreamingProgress({
               >
                 <span style={{ color, fontSize: 13, width: 14, display: "inline-block" }}>{icon}</span>
                 <span style={{ fontFamily: "ui-monospace, monospace" }}>{t.tool_name}</span>
-                {t.error && <span style={{ color: "#FF3B30" }}>· {t.error}</span>}
+                {t.error && <span style={{ color: ctok.danger }}>· {t.error}</span>}
               </div>
             );
           })}
@@ -161,18 +161,18 @@ export function ChatView() {
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
             {pendingIntention && (
               <div style={{ marginBottom: 6, maxWidth: "80%" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#AEAEB2", fontSize: 12, fontFamily: FONT, marginBottom: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4, color: ctok.faint, fontSize: 12, fontFamily: FONT, marginBottom: 4 }}>
                   <span>Assessed your intention</span>
                   <span style={{ fontSize: 10 }}>▾</span>
                 </div>
                 <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(0,0,0,0.03)", border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))", fontFamily: FONT }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
-                    <span style={{ color: "#AEAEB2", fontSize: 13, marginTop: 1 }}>⊙</span>
+                    <span style={{ color: ctok.faint, fontSize: 13, marginTop: 1 }}>⊙</span>
                     <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{pendingIntention}</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>
-                    <span style={{ fontSize: 12, color: "#AEAEB2" }}>Done</span>
+                    <span style={{ fontSize: 12, color: ctok.faint }}>Done</span>
                   </div>
                 </div>
               </div>

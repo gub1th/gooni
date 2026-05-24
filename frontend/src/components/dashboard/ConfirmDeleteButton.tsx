@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 
 // Subtle two-step delete. First click arms the button (turns red, swaps
 // glyph to a question mark, starts a 2.5s timer); second click within the
@@ -44,7 +44,7 @@ export function ConfirmDeleteButton({
         onClick={(e) => { e.stopPropagation(); setArmed(true); }}
         style={{
           border: "none", background: "transparent", cursor: "pointer",
-          padding: 2, color: "#9CA3AF", display: "flex",
+          padding: 2, color: ctok.muted, display: "flex",
           fontFamily: FONT,
         }}
       >

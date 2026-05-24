@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 import {
   renameFocus, forkFocus, reactivateFocus,
   type ApiFocus,
@@ -86,7 +86,7 @@ export function FocusCard({ focus, onOpen, onArchive }: Props) {
     : 0;
 
   const dotColor = isDormant
-    ? "#9CA3AF"
+    ? ctok.muted
     : (focus.color || "#22C55E");
 
   return (

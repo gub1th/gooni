@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchOpenAIUsage, fetchClaudeUsage } from "../services/api";
-import { FONT } from "../ui";
+import { color as ctok, FONT } from "../ui";
 
 
 type Provider = "openai" | "claude";
@@ -57,7 +57,7 @@ export function UsageCards() {
                 style={{
                   padding: "3px 10px", borderRadius: 999,
                   border: "none", cursor: "pointer",
-                  background: active ? "#1C1C1E" : "transparent",
+                  background: active ? ctok.text : "transparent",
                   color: active ? "#fff" : "#3C3C43",
                   fontFamily: FONT, fontSize: 11, fontWeight: 600,
                   letterSpacing: 0.2,
@@ -145,7 +145,7 @@ function UsageCard({ label, primary, sub }: { label: string; primary: string; su
         {primary}
       </div>
       {sub && (
-        <div style={{ fontSize: 10.5, color: "#AEAEB2", fontFamily: FONT, marginTop: 2 }}>
+        <div style={{ fontSize: 10.5, color: ctok.faint, fontFamily: FONT, marginTop: 2 }}>
           {sub}
         </div>
       )}

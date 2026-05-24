@@ -12,7 +12,7 @@ import {
   type ApiHabitCell,
 } from "../../services/api";
 import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 
 // HabitsStrip — bottom-of-dashboard widget for daily binary trackers.
 // Two flavors:
@@ -145,12 +145,12 @@ export function HabitsStrip() {
         }}
           onClick={() => { setCreating(true); window.setTimeout(() => inputRef.current?.focus(), 0); }}
         >
-          <Plus size={14} color="#9CA3AF" />
-          <span style={{ flex: 1, fontSize: 13, color: "#9CA3AF" }}>
+          <Plus size={14} color="#8E8E93" />
+          <span style={{ flex: 1, fontSize: 13, color: ctok.muted }}>
             Add a habit...
           </span>
           <span style={{
-            fontSize: 11, color: "#9CA3AF",
+            fontSize: 11, color: ctok.muted,
             background: "rgba(0,0,0,0.05)",
             padding: "2px 8px", borderRadius: 99,
           }}>
@@ -286,7 +286,7 @@ export function HabitsStrip() {
             marginTop: 8,
           }}
         >
-          <Plus size={14} color="#9CA3AF" />
+          <Plus size={14} color="#8E8E93" />
           {creating ? (
             <>
               <input
@@ -326,12 +326,12 @@ export function HabitsStrip() {
               </button>
             </>
           ) : (
-            <span style={{ flex: 1, fontSize: 13, color: "#9CA3AF" }}>
+            <span style={{ flex: 1, fontSize: 13, color: ctok.muted }}>
               Add a habit...
             </span>
           )}
           <span style={{
-            fontSize: 11, color: "#9CA3AF",
+            fontSize: 11, color: ctok.muted,
             background: "rgba(0,0,0,0.05)",
             padding: "2px 8px", borderRadius: 99,
           }}>

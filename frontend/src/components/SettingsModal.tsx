@@ -9,7 +9,7 @@ import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
 import { RepoPicker } from "./RepoPicker";
 import { CommentAvatar } from "./notes/CommentAvatar";
-import { FONT } from "../ui";
+import { color as ctok, FONT } from "../ui";
 
 interface SettingsModalProps {
   open: boolean;
@@ -205,7 +205,7 @@ function AppearanceTab() {
                   <div style={{ flex: 1, background: p.main }} />
                 </div>
                 <div style={{
-                  fontSize: 10.5, color: selected ? "#1C1C1E" : "#8E8E93",
+                  fontSize: 10.5, color: selected ? ctok.text : ctok.muted,
                   textTransform: "lowercase", letterSpacing: 0.2,
                   fontWeight: selected ? 600 : 400,
                 }}>
@@ -242,7 +242,7 @@ function AppearanceTab() {
               >
                 <GooniFacePreview face={f} size={36} />
                 <div style={{
-                  fontSize: 9.5, color: selected ? "#1C1C1E" : "#8E8E93",
+                  fontSize: 9.5, color: selected ? ctok.text : ctok.muted,
                   textTransform: "lowercase", letterSpacing: 0.2, lineHeight: 1.1,
                   textAlign: "center", minHeight: 22, fontWeight: selected ? 600 : 400,
                 }}>
@@ -331,7 +331,7 @@ function ProfileTab() {
                 disabled={uploading}
                 style={{
                   ...btn,
-                  background: "#1C1C1E", color: "#fff",
+                  background: ctok.text, color: "#fff",
                   cursor: uploading ? "default" : "pointer",
                   opacity: uploading ? 0.7 : 1,
                 }}
@@ -485,7 +485,7 @@ async function pingUrl(url: string): Promise<HealthState> {
 }
 
 function StatusDot({ status }: { status: HealthState["status"] }) {
-  const color = status === "ok" ? "#30D158" : status === "down" ? "#FF3B30" : status === "checking" ? "#FFD60A" : "#C7C7CC";
+  const color = status === "ok" ? "#30D158" : status === "down" ? ctok.danger : status === "checking" ? "#FFD60A" : "#C7C7CC";
   return (
     <span style={{
       width: 8, height: 8, borderRadius: "50%", background: color,
@@ -568,7 +568,7 @@ function DeploymentsBlock() {
       />
       {editingVercel ? (
         <div style={{ border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10, padding: 12, background: "#FDFCFA" }}>
-          <div style={{ fontSize: 12, color: "#8E8E93", marginBottom: 6 }}>Vercel deployment URL</div>
+          <div style={{ fontSize: 12, color: ctok.muted, marginBottom: 6 }}>Vercel deployment URL</div>
           <input
             value={vercelDraft}
             onChange={(e) => setVercelDraft(e.target.value)}
@@ -586,7 +586,7 @@ function DeploymentsBlock() {
             }}
           />
           <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={saveVercelUrl} style={{ ...btn, background: "#1C1C1E", color: "#fff", border: "none" }}>save</button>
+            <button onClick={saveVercelUrl} style={{ ...btn, background: ctok.text, color: "#fff", border: "none" }}>save</button>
             <button onClick={() => setEditingVercel(false)} style={btn}>cancel</button>
           </div>
         </div>
@@ -624,8 +624,8 @@ function DeploymentCard({ name, url, dashboardUrl, state, onRecheck, onEditUrl, 
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <StatusDot status={state.status} />
-        <span style={{ fontSize: 13.5, fontWeight: 600, color: "#1C1C1E" }}>{name}</span>
-        <span style={{ fontSize: 11, color: "#8E8E93", marginLeft: "auto" }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, color: ctok.text }}>{name}</span>
+        <span style={{ fontSize: 11, color: ctok.muted, marginLeft: "auto" }}>
           {state.status === "ok" && state.latencyMs != null
             ? `${state.latencyMs} ms`
             : state.status === "down" ? "unreachable"
@@ -640,7 +640,7 @@ function DeploymentCard({ name, url, dashboardUrl, state, onRecheck, onEditUrl, 
       }}>
         {url || "(not configured)"}
       </div>
-      <div style={{ fontSize: 10.5, color: "#AEAEB2", marginBottom: meta && meta.length ? 8 : 10 }}>
+      <div style={{ fontSize: 10.5, color: ctok.faint, marginBottom: meta && meta.length ? 8 : 10 }}>
         {state.checkedAt ? `last checked ${formatRelativeTime(state.checkedAt)}` : "never checked"}
       </div>
       {meta && meta.length > 0 && (
@@ -651,19 +651,19 @@ function DeploymentCard({ name, url, dashboardUrl, state, onRecheck, onEditUrl, 
           {meta.map((m) => (
             <div key={m.label} style={{ display: "contents" }}>
               <span style={{
-                color: "#AEAEB2", textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600,
+                color: ctok.faint, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600,
               }}>
                 {m.label}
               </span>
               {m.href ? (
                 <a href={m.href} target="_blank" rel="noreferrer" style={{
-                  color: "#1C1C1E", fontFamily: "'SF Mono', Menlo, monospace",
+                  color: ctok.text, fontFamily: "'SF Mono', Menlo, monospace",
                   textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
                 }}>{m.value}</a>
               ) : (
                 <span style={{
-                  color: "#1C1C1E", fontFamily: "'SF Mono', Menlo, monospace",
+                  color: ctok.text, fontFamily: "'SF Mono', Menlo, monospace",
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 }}>{m.value}</span>
               )}
@@ -710,7 +710,7 @@ function vercelMeta(): { label: string; value: string; href?: string }[] {
 const btn: React.CSSProperties = {
   fontSize: 11.5, padding: "4px 9px", borderRadius: 6,
   border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
-  cursor: "pointer", color: "#1C1C1E", fontWeight: 500,
+  cursor: "pointer", color: ctok.text, fontWeight: 500,
   fontFamily: FONT,
 };
 

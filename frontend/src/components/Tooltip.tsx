@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import tippy, { type Instance } from "tippy.js";
+import { color as ctok } from "../ui";
 
 interface TooltipProps {
   label: string;
@@ -22,7 +23,7 @@ export function Tooltip({ label, children, placement = "bottom", delay = 200 }: 
     // BubbleMenu / slash menu (dark pill, white text, Manrope).
     const tip = document.createElement("div");
     Object.assign(tip.style, {
-      background: "#1C1C1E",
+      background: ctok.text,
       color: "#fff",
       padding: "4px 9px",
       borderRadius: "6px",

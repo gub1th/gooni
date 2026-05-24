@@ -8,7 +8,7 @@ import { useConversationsStore } from "../stores/useConversationsStore";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { ModelSelector } from "./ModelSelector";
 import { ThinkingIndicator } from "./chat/ThinkingIndicator";
-import { FONT } from "../ui";
+import { color as ctok, FONT } from "../ui";
 
 // Plain text → TipTap-friendly HTML. Escapes the string and wraps each
 // non-empty line in <p>; double-newlines become paragraph breaks. Keeps
@@ -329,10 +329,10 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                 <rect x="24" y="42" width="16" height="12" rx="4" fill={isNoteMode ? "#FACC15" : "#4ADE80"} style={{ transition: "fill 0.25s" }} />
               </svg>
             </div>
-            <div style={{ fontSize: 15, fontWeight: 500, color: "#1C1C1E", marginBottom: 6 }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: ctok.text, marginBottom: 6 }}>
               {isNoteMode ? "Capture a quick note" : "Ask me anything"}
             </div>
-            <div style={{ fontSize: 13, color: "#8E8E93", lineHeight: 1.5, marginBottom: 20, maxWidth: 280 }}>
+            <div style={{ fontSize: 13, color: ctok.muted, lineHeight: 1.5, marginBottom: 20, maxWidth: 280 }}>
               {isNoteMode
                 ? "Saves to your General space. Toggle back to chat in the header anytime."
                 : activeNote
@@ -399,7 +399,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                     border: "none",
                     cursor: "pointer",
                     padding: "2px 0",
-                    color: "#AEAEB2",
+                    color: ctok.faint,
                     fontSize: 12,
                     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                   }}
@@ -419,12 +419,12 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
-                      <span style={{ color: "#AEAEB2", fontSize: 13, marginTop: 1 }}>⊙</span>
+                      <span style={{ color: ctok.faint, fontSize: 13, marginTop: 1 }}>⊙</span>
                       <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{m.intention}</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>
-                      <span style={{ fontSize: 12, color: "#AEAEB2" }}>Done</span>
+                      <span style={{ fontSize: 12, color: ctok.faint }}>Done</span>
                     </div>
                   </div>
                 )}
@@ -614,7 +614,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                   width: 30, height: 30,
                   borderRadius: 8,
                   border: "none",
-                  background: listening ? "#FF3B30" : "rgba(0,0,0,0.04)",
+                  background: listening ? ctok.danger : "rgba(0,0,0,0.04)",
                   color: listening ? "#FFFFFF" : speechSupported ? "#3C3C43" : "#C7C7CC",
                   cursor: speechSupported ? "pointer" : "not-allowed",
                   display: "flex", alignItems: "center", justifyContent: "center",
@@ -882,8 +882,8 @@ function AssistantOrUserBubble({
     borderRadius: 14,
     fontSize: 13.5,
     lineHeight: 1.5,
-    background: m.role === "user" ? "#1C1C1E" : "rgba(0,0,0,0.05)",
-    color: m.role === "user" ? "#FFFFFF" : "#1C1C1E",
+    background: m.role === "user" ? ctok.text : "rgba(0,0,0,0.05)",
+    color: m.role === "user" ? "#FFFFFF" : ctok.text,
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
     fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",

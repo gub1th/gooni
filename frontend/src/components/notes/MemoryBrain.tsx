@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { ApiMemory } from "../../services/api";
 import { NeuralBrain } from "../animations/NeuralBrain";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 
 
 interface MemoryBrainProps {
@@ -114,13 +114,13 @@ export function MemoryBrain({
       `}</style>
 
       <p style={{
-        fontSize: 11, fontWeight: 600, color: "#AEAEB2", letterSpacing: 0.6,
+        fontSize: 11, fontWeight: 600, color: ctok.faint, letterSpacing: 0.6,
         margin: "0 0 6px", fontFamily: FONT, textTransform: "uppercase",
       }}>
         {title}
       </p>
       <p style={{
-        fontSize: 11.5, color: "#9CA3AF", margin: "0 0 6px",
+        fontSize: 11.5, color: ctok.muted, margin: "0 0 6px",
         fontFamily: FONT,
       }}>
         {subtitle}
@@ -259,17 +259,17 @@ export function MemoryBrain({
                 onClick={() => setSelected(null)}
                 style={{
                   marginLeft: "auto", background: "none", border: "none",
-                  cursor: "pointer", color: "#9CA3AF", fontSize: 16, lineHeight: 1,
+                  cursor: "pointer", color: ctok.muted, fontSize: 16, lineHeight: 1,
                   padding: 2,
                 }}
                 aria-label="Close"
               >×</button>
             </div>
-            <div style={{ fontSize: 13, color: "#1C1C1E", lineHeight: 1.5, marginBottom: 10 }}>
+            <div style={{ fontSize: 13, color: ctok.text, lineHeight: 1.5, marginBottom: 10 }}>
               {selected.content}
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <div style={{ fontSize: 10.5, color: "#9CA3AF" }}>
+              <div style={{ fontSize: 10.5, color: ctok.muted }}>
                 conf {Math.round(selected.confidence * 100)}%
               </div>
               <button
@@ -281,7 +281,7 @@ export function MemoryBrain({
                 style={{
                   fontSize: 11.5, fontWeight: 600, fontFamily: FONT,
                   padding: "5px 12px", borderRadius: 999,
-                  background: "#1C1C1E", color: "#fff",
+                  background: ctok.text, color: "#fff",
                   border: "none", cursor: "pointer",
                 }}
               >

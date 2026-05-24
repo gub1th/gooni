@@ -2,6 +2,7 @@ import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import React, { useState } from "react";
 import { AttachmentModal } from "./AttachmentModal";
 import { formatBytes, iconLabelForMime, shortMime } from "./AttachmentExtension";
+import { color as ctok } from "../../ui";
 
 // Card surface for an Attachment node. Click → opens AttachmentModal
 // (image lightbox / PDF iframe / generic download fallback). Same DOM
@@ -77,7 +78,7 @@ export function AttachmentNodeView({ node, selected }: NodeViewProps) {
             style={{
               fontSize: 14,
               fontWeight: 500,
-              color: "#1C1C1E",
+              color: ctok.text,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -87,7 +88,7 @@ export function AttachmentNodeView({ node, selected }: NodeViewProps) {
           </span>
           <span
             className="gooni-attachment-sub"
-            style={{ fontSize: 12, color: "#8E8E93" }}
+            style={{ fontSize: 12, color: ctok.muted }}
           >
             {shortMime(mime)} · {formatBytes(size)}
           </span>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { fetchNotesGraph, type GraphNode, type GraphEdge } from "../services/api";
 import { useSpacesStore } from "../stores/useSpacesStore";
-import { FONT } from "../ui";
+import { color as ctok, FONT } from "../ui";
 
 // Full-screen modal version of the semantic graph. Rendered as a portal-ish
 // fixed overlay on top of the dashboard. Close via ×, backdrop click, or Esc.
@@ -368,7 +368,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         if (intensity > 0) {
           ctx!.fillStyle = flashColor(intensity);
         } else {
-          ctx!.fillStyle = "#1C1C1E";
+          ctx!.fillStyle = ctok.text;
         }
         ctx!.beginPath();
         ctx!.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
@@ -418,7 +418,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         const boxH = 22;
         const boxX = sx - boxW / 2;
         const boxY = sy + hovered.radius + 10;
-        ctx!.fillStyle = "#1C1C1E";
+        ctx!.fillStyle = ctok.text;
         ctx!.beginPath();
         const radius = 6;
         ctx!.moveTo(boxX + radius, boxY);
@@ -462,7 +462,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         backdropFilter: "blur(2px)",
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 40,
-        fontFamily: FONT, color: "#1C1C1E",
+        fontFamily: FONT, color: ctok.text,
       }}
     >
       {/* Centered modal panel — backdrop stays visible around it so you can
@@ -490,7 +490,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
           pointerEvents: "none",
         }}>
           <div style={{
-            fontSize: 12, color: "#8E8E93",
+            fontSize: 12, color: ctok.muted,
             background: "rgba(255,255,255,0.85)", border: "0.5px solid rgba(0,0,0,0.08)",
             padding: "5px 11px", borderRadius: 8, letterSpacing: 0.2,
             fontWeight: 600, textTransform: "uppercase",
@@ -499,7 +499,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
           </div>
           <div style={{ display: "flex", gap: 8, pointerEvents: "auto" }}>
             <div style={{
-              fontSize: 12, color: "#8E8E93",
+              fontSize: 12, color: ctok.muted,
               background: "rgba(255,255,255,0.85)", border: "0.5px solid rgba(0,0,0,0.08)",
               padding: "5px 11px", borderRadius: 8, letterSpacing: 0.2,
             }}>
@@ -531,7 +531,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         {graph && graph.nodes.length === 0 && (
           <div style={{
             position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
-            fontSize: 14, color: "#8E8E93", textAlign: "center", maxWidth: 320,
+            fontSize: 14, color: ctok.muted, textAlign: "center", maxWidth: 320,
           }}>
             No notes with embeddings yet. Open a note and let it save — Gooni
             embeds on blur and the graph fills in.
@@ -540,7 +540,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
 
         <div style={{
           position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)",
-          fontSize: 11, color: "#AEAEB2",
+          fontSize: 11, color: ctok.faint,
           background: "rgba(255,255,255,0.85)", border: "0.5px solid rgba(0,0,0,0.08)",
           padding: "4px 11px", borderRadius: 8, letterSpacing: 0.2,
         }}>
@@ -623,7 +623,7 @@ function BrainLoadingOverlay() {
             style={{ transformOrigin: "center", animation: "gooni-brain-pulse 2.2s ease-in-out infinite" }} />
         </svg>
       </div>
-      <div style={{ fontSize: 12, color: "#8E8E93", letterSpacing: 0.5, textTransform: "uppercase", fontWeight: 600 }}>
+      <div style={{ fontSize: 12, color: ctok.muted, letterSpacing: 0.5, textTransform: "uppercase", fontWeight: 600 }}>
         wiring up your brain
       </div>
     </div>

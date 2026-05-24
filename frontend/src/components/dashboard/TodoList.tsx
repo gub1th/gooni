@@ -12,7 +12,7 @@ import { resolveFocusColor } from "../../utils/focusColors";
 import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 import { TodoEditModal } from "./TodoEditModal";
 import { TodoChainView } from "./TodoChainView";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 
 // TodoList — dashboard todos block. Mockup-aligned shape:
 //
@@ -315,7 +315,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
 
   if (!bundle) {
     return (
-      <div style={{ height: 60, opacity: 0.4, fontFamily: FONT, fontSize: 12, color: "#8E8E93" }}>
+      <div style={{ height: 60, opacity: 0.4, fontFamily: FONT, fontSize: 12, color: ctok.muted }}>
         loading todos…
       </div>
     );
@@ -559,7 +559,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           marginTop: 2,
         }}
       >
-        <Plus size={14} color="#9CA3AF" />
+        <Plus size={14} color="#8E8E93" />
         {creating ? (
           <input
             ref={inputRef}
@@ -933,7 +933,7 @@ function TodoRow({
           title="Drag to reorder"
           style={{
             display: "flex", alignItems: "center",
-            color: hovered || dragHandlers.isDragging ? "#9CA3AF" : "transparent",
+            color: hovered || dragHandlers.isDragging ? ctok.muted : "transparent",
             cursor: "grab",
             transition: "color 0.15s",
             marginLeft: -6, marginRight: -4,
@@ -1000,7 +1000,7 @@ function TodoRow({
           onClick={(e) => { e.stopPropagation(); onPromotePrimary(); }}
           style={{
             border: "none", background: "transparent", cursor: "pointer",
-            padding: 2, color: "#9CA3AF", display: "flex",
+            padding: 2, color: ctok.muted, display: "flex",
           }}
         >
           <Crown size={12} />
@@ -1213,7 +1213,7 @@ function Checkbox({ state, onClick, size = "md" }: {
     return (
       <span onClick={onClick} style={{
         ...common,
-        background: "#9CA3AF", color: "#fff",
+        background: ctok.muted, color: "#fff",
         border: "none",
       }}>✓</span>
     );
@@ -1276,7 +1276,7 @@ function StatePicker({ current, onPick, onClose }: {
             style={{
               border: "none", background: s === current ? "#F3F4F6" : "transparent",
               padding: "4px 8px", fontSize: 11, borderRadius: 6,
-              cursor: "pointer", color: "#1C1C1E", textTransform: "capitalize",
+              cursor: "pointer", color: ctok.text, textTransform: "capitalize",
             }}
           >
             {s.replace("_", " ")}
@@ -1345,7 +1345,7 @@ function DoneSection({ todos, focusById, chainSummary, onOpenEdit, onOpenChain }
             >
               <span style={{
                 width: 14, height: 14, borderRadius: "50%",
-                background: "#9CA3AF", color: "#fff",
+                background: ctok.muted, color: "#fff",
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
                 fontSize: 10, fontFamily: FONT, flexShrink: 0,
               }}>✓</span>
@@ -1464,7 +1464,7 @@ function CloseInlineFlow({
       }}>
         <span style={{
           width: 17, height: 17, borderRadius: "50%",
-          background: "#9CA3AF", color: "#fff",
+          background: ctok.muted, color: "#fff",
           display: "inline-flex", alignItems: "center", justifyContent: "center",
           fontSize: 11, flexShrink: 0,
         }}>✓</span>

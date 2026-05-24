@@ -5,7 +5,7 @@ import type { ApiBacklogTicket, BoardStatus } from "../../services/api";
 import { promoteBacklogTicket, demoteBacklogTicket } from "../../services/api";
 import { useBacklogStore } from "../../stores/useBacklogStore";
 import { ItemModal } from "./ItemModal";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 
 
 interface BacklogBoardProps {
@@ -244,7 +244,7 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
               onClick={() => setSearchRaw("")}
               style={{
                 background: "transparent", border: "none", cursor: "pointer",
-                padding: 0, color: "#8E8E93", display: "inline-flex",
+                padding: 0, color: ctok.muted, display: "inline-flex",
               }}
               title="Clear search"
             >
@@ -835,7 +835,7 @@ function BacklogCard({
             style={{
               display: "inline-flex", alignItems: "center", justifyContent: "center",
               width: 18, height: 18, padding: 0, borderRadius: 4,
-              background: "transparent", color: "#9CA3AF",
+              background: "transparent", color: ctok.muted,
               border: "1px dashed rgba(0,0,0,0.18)",
               cursor: "pointer",
               flexShrink: 0,

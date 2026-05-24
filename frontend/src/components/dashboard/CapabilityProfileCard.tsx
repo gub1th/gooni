@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 import {
   fetchCapabilityFacets,
   patchCapabilityFacet,
@@ -24,9 +24,9 @@ const LAYER_LABEL: Record<string, string> = {
 
 const STATUS_COLOR: Record<string, string> = {
   verified: "#34C759",
-  claimed: "#0A84FF",
-  unverified: "#8E8E93",
-  broken: "#FF3B30",
+  claimed: ctok.accent,
+  unverified: ctok.muted,
+  broken: ctok.danger,
   removed: "#C7C7CC",
 };
 
@@ -42,7 +42,7 @@ export function CapabilityProfileCard() {
     return (
       <div style={cardStyle}>
         <div style={titleStyle}>Who I am right now</div>
-        <div style={{ color: "#8E8E93", fontSize: 12, marginTop: 8 }}>Loading…</div>
+        <div style={{ color: ctok.muted, fontSize: 12, marginTop: 8 }}>Loading…</div>
       </div>
     );
   }
@@ -77,7 +77,7 @@ export function CapabilityProfileCard() {
         {!Object.keys(byLayer).some((L) =>
           ["functional", "behavioral", "architectural"].includes(L),
         ) && (
-          <div style={{ color: "#8E8E93", fontSize: 12 }}>
+          <div style={{ color: ctok.muted, fontSize: 12 }}>
             No functional/behavioral/architectural facets yet — boot scan only populates
             mechanical. Seed via the <code>/capabilities</code> POST route, the
             <code>/capability-audit</code> Claude Code skill, or the
@@ -97,11 +97,11 @@ export function CapabilityProfileCard() {
 }
 
 function FacetLine({ facet }: { facet: ApiCapabilityFacet }) {
-  const dot = STATUS_COLOR[facet.status] || "#8E8E93";
+  const dot = STATUS_COLOR[facet.status] || ctok.muted;
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12.5 }}>
       <span style={{ color: dot, marginTop: 5, fontSize: 8 }}>●</span>
-      <span style={{ color: "#1C1C1E", lineHeight: 1.45 }}>{facet.facet_text}</span>
+      <span style={{ color: ctok.text, lineHeight: 1.45 }}>{facet.facet_text}</span>
     </div>
   );
 }
@@ -170,7 +170,7 @@ function CapabilityDrawer({
           if (rows.length === 0) return null;
           return (
             <div key={L} style={{ marginTop: 18 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#1C1C1E", marginBottom: 6 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: ctok.text, marginBottom: 6 }}>
                 {LAYER_LABEL[L]} ({rows.length})
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -183,10 +183,10 @@ function CapabilityDrawer({
                       opacity: r.status === "removed" ? 0.55 : 1,
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#8E8E93" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: ctok.muted }}>
                       <span
                         style={{
-                          background: STATUS_COLOR[r.status] || "#8E8E93",
+                          background: STATUS_COLOR[r.status] || ctok.muted,
                           color: "#FFF", padding: "1px 6px", borderRadius: 4,
                           fontSize: 10, fontWeight: 600, textTransform: "uppercase",
                         }}
@@ -196,7 +196,7 @@ function CapabilityDrawer({
                       <code style={{ fontSize: 11 }}>{r.facet_key}</code>
                       <span style={{ marginLeft: "auto" }}>{r.source}</span>
                     </div>
-                    <div style={{ marginTop: 4, fontSize: 13, color: "#1C1C1E" }}>
+                    <div style={{ marginTop: 4, fontSize: 13, color: ctok.text }}>
                       {r.facet_text}
                     </div>
                     <div style={{ marginTop: 6, display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -232,22 +232,22 @@ const cardStyle: React.CSSProperties = {
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: 14, fontWeight: 600, color: "#1C1C1E",
+  fontSize: 14, fontWeight: 600, color: ctok.text,
 };
 
 const miniLabelStyle: React.CSSProperties = {
-  fontSize: 11, color: "#8E8E93", textTransform: "uppercase",
+  fontSize: 11, color: ctok.muted, textTransform: "uppercase",
   fontWeight: 600, letterSpacing: 0.3, marginBottom: 4,
 };
 
 const openBtnStyle: React.CSSProperties = {
-  background: "transparent", border: "none", color: "#0A84FF",
+  background: "transparent", border: "none", color: ctok.accent,
   fontSize: 12, cursor: "pointer", padding: 0,
 };
 
 const closeBtnStyle: React.CSSProperties = {
   background: "transparent", border: "none", fontSize: 24, lineHeight: 1,
-  cursor: "pointer", color: "#8E8E93", padding: "0 6px",
+  cursor: "pointer", color: ctok.muted, padding: "0 6px",
 };
 
 const refreshBtnStyle = (disabled: boolean): React.CSSProperties => ({
@@ -257,7 +257,7 @@ const refreshBtnStyle = (disabled: boolean): React.CSSProperties => ({
   borderRadius: 8,
   border: "1px solid rgba(0,0,0,0.1)",
   background: disabled ? "#F2F2F7" : "#FFFFFF",
-  color: "#1C1C1E",
+  color: ctok.text,
   fontSize: 12,
   cursor: disabled ? "default" : "pointer",
   fontFamily: FONT,

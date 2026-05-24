@@ -10,7 +10,7 @@ import { displayTitle } from "../utils/notePreview";
 import { PublicChatLauncher } from "../components/PublicChatLauncher";
 import { GooniMascot } from "../components/GooniMascot";
 import { Skeleton } from "../components/Skeleton";
-import { FONT } from "../ui";
+import { color as ctok, FONT } from "../ui";
 import {
   publicNoteQueryOptions,
   publicNotesListQueryOptions,
@@ -924,7 +924,7 @@ function PublicPage() {
             display: "flex",
             alignItems: "center",
             gap: 14,
-            background: "#1C1C1E",
+            background: ctok.text,
             color: "#FFF",
             padding: "10px 14px 10px 16px",
             borderRadius: 999,

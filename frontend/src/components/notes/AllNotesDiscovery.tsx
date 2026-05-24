@@ -10,7 +10,7 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { useSpacesStore } from "../../stores/useSpacesStore";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
 import { SpaceIcon } from "./SpaceIcon";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 
 
 interface AllNotesDiscoveryProps {
@@ -157,7 +157,7 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
               title={cleanConfirm ? "Click again to confirm" : "Delete empty untitled notes"}
               style={{
                 height: 32, padding: "0 12px", borderRadius: 8,
-                background: cleanConfirm ? "#FF3B30" : "transparent",
+                background: cleanConfirm ? ctok.danger : "transparent",
                 border: cleanConfirm ? "none" : "1px solid rgba(0,0,0,0.10)",
                 cursor: "pointer",
                 color: cleanConfirm ? "#fff" : "var(--gooni-muted, #8E8E93)",
@@ -179,7 +179,7 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
                 height: 32,
                 borderRadius: 8,
                 border: "none",
-                background: "#1C1C1E",
+                background: ctok.text,
                 color: "#FFFFFF",
                 fontFamily: FONT,
                 fontSize: 12.5,

@@ -17,6 +17,7 @@ import {
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
 import { SpaceIcon, SPACE_ICON_OPTIONS, lucideIconValue } from "./SpaceIcon";
+import { color as ctok } from "../../ui";
 
 const ICON_TINT = {
   allNotes: "#6366F1",   // indigo
@@ -160,7 +161,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
           <button
             onClick={onSave}
             style={{
-              fontSize: 12, background: "#1C1C1E", color: "#fff",
+              fontSize: 12, background: ctok.text, color: "#fff",
               border: "none", borderRadius: 6, cursor: "pointer",
               padding: "4px 12px", fontWeight: 500,
             }}
@@ -889,13 +890,13 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 fontWeight: isDashboard ? 600 : 500,
                 fontSize: 13,
-                color: isDashboard ? "#0A84FF" : "var(--gooni-text, #1C1C1E)",
+                color: isDashboard ? ctok.accent : "var(--gooni-text, #1C1C1E)",
                 transition: "background 0.12s, color 0.12s",
               }}
               onMouseEnter={(e) => { if (!isDashboard) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
               onMouseLeave={(e) => { if (!isDashboard) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
-              <Home size={14} strokeWidth={1.8} color={isDashboard ? "#0A84FF" : "#475569"} style={{ flexShrink: 0 }} />
+              <Home size={14} strokeWidth={1.8} color={isDashboard ? ctok.accent : "#475569"} style={{ flexShrink: 0 }} />
               Dashboard
             </button>
           </div>

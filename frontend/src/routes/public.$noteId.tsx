@@ -9,6 +9,7 @@ import { fetchPublicNoteComments, type ApiNoteComment } from "../services/api";
 import { AttachmentModal } from "../components/notes/AttachmentModal";
 import { useNoteCardStyles } from "../components/notes/noteCardStyles";
 import { ReactionBar } from "../components/ReactionBar";
+import { color as ctok } from "../ui";
 
 export const Route = createFileRoute("/public/$noteId")({
   component: PublicNotePage,
@@ -132,7 +133,7 @@ function PublicNotePage() {
             >
               {displayTitle(note)}
             </h1>
-            <p style={{ fontSize: 13, color: "#AEAEB2", margin: "0 0 52px", letterSpacing: 0.1, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <p style={{ fontSize: 13, color: ctok.faint, margin: "0 0 52px", letterSpacing: 0.1, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               {/* clock icon — inline SVG matches the meta line color via currentColor */}
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
                 <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.1" fill="none" />

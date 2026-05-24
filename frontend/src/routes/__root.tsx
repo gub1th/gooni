@@ -31,6 +31,7 @@ function ThemeVarSync() {
       "--gooni-card":      palette.card,
       "--gooni-text":      palette.text,
       "--gooni-muted":     palette.muted,
+      "--gooni-faint":     palette.faint,
       "--gooni-border":    palette.border,
       "--gooni-hover":     palette.hover,
       "--gooni-input-bg":  palette.inputBg,

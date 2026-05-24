@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useListsStore } from "../../stores/useListsStore";
 import type { ApiListItem, ListType } from "../../services/api";
 import { ItemModal } from "./ItemModal";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 
 const CONTENT_MAX_WIDTH = 720;
 
@@ -151,7 +151,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
 
   if (!list) {
     return (
-      <div style={{ flex: 1, padding: 40, fontFamily: FONT, color: "#8E8E93" }}>
+      <div style={{ flex: 1, padding: 40, fontFamily: FONT, color: ctok.muted }}>
         Loading…
       </div>
     );
@@ -326,7 +326,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                 style={{
                   fontSize: 24,
                   fontWeight: 600,
-                  color: "#1C1C1E",
+                  color: ctok.text,
                   fontFamily: FONT,
                   border: "none",
                   outline: "none",
@@ -343,7 +343,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                 style={{
                   fontSize: 24,
                   fontWeight: 600,
-                  color: "#1C1C1E",
+                  color: ctok.text,
                   margin: 0,
                   cursor: "text",
                   padding: "2px 6px",
@@ -373,7 +373,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
                 {confirmingListDelete ? (
                   <>
-                    <span style={{ fontSize: 12, color: "#9CA3AF" }}>Delete this list?</span>
+                    <span style={{ fontSize: 12, color: ctok.muted }}>Delete this list?</span>
                     <button
                       onClick={handleDeleteList}
                       style={{
@@ -438,7 +438,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
               </div>
             )}
           </div>
-          <div style={{ marginTop: 6, fontSize: 13, color: "#8E8E93" }}>
+          <div style={{ marginTop: 6, fontSize: 13, color: ctok.muted }}>
             {open.length} open · {done.length} {copy.doneLabel}
           </div>
         </div>
@@ -458,7 +458,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
               padding: "8px 12px",
             }}
           >
-            <span style={{ color: "#8E8E93", fontSize: 14, lineHeight: 1, marginRight: 2 }}>+</span>
+            <span style={{ color: ctok.muted, fontSize: 14, lineHeight: 1, marginRight: 2 }}>+</span>
             <input
               ref={composerRef}
               value={composer}
@@ -472,7 +472,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                 background: "transparent",
                 fontFamily: FONT,
                 fontSize: 14,
-                color: "#1C1C1E",
+                color: ctok.text,
               }}
             />
             {composer.trim() && (
@@ -480,7 +480,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                 onClick={handleAdd}
                 style={{
                   border: "none",
-                  background: "#1C1C1E",
+                  background: ctok.text,
                   color: "#FFFFFF",
                   padding: "4px 12px",
                   borderRadius: 8,
@@ -497,7 +497,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
 
         <div style={{ padding: "4px 0 24px" }}>
           {items.length === 0 && (
-            <div style={{ padding: "20px 0", color: "#8E8E93", fontSize: 14 }}>
+            <div style={{ padding: "20px 0", color: ctok.muted, fontSize: 14 }}>
               {copy.emptyHint}
             </div>
           )}
@@ -546,7 +546,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
               style={{
                 padding: "18px 0 6px",
                 fontSize: 11,
-                color: "#9CA3AF",
+                color: ctok.muted,
                 textTransform: "uppercase",
                 letterSpacing: 0.5,
               }}
@@ -684,7 +684,7 @@ function ListItemRow({
           style={{
             marginTop: 9,
             width: 6, height: 6, borderRadius: "50%",
-            background: "#9CA3AF",
+            background: ctok.muted,
             flexShrink: 0,
           }}
         />
@@ -697,7 +697,7 @@ function ListItemRow({
           style={{
             display: "flex", alignItems: "center", gap: 6,
             fontSize: 14,
-            color: isTaskList ? "#1C1C1E" : "#3F3F46",
+            color: isTaskList ? ctok.text : "#3F3F46",
             fontStyle: isTaskList ? "normal" : "italic",
             textDecoration: isTaskList && item.done ? "line-through" : "none",
             cursor: "pointer",
@@ -719,7 +719,7 @@ function ListItemRow({
               flexShrink: 0,
               border: "none",
               background: "rgba(0,0,0,0.04)",
-              color: "#8E8E93",
+              color: ctok.muted,
               fontFamily: "'SF Mono', Menlo, monospace",
               fontSize: 10.5,
               padding: "1px 6px",
@@ -735,7 +735,7 @@ function ListItemRow({
         </div>
 
         {item.subtitle && (
-          <div style={{ marginTop: 3, fontSize: 12.5, color: "#8E8E93", lineHeight: 1.45 }}>
+          <div style={{ marginTop: 3, fontSize: 12.5, color: ctok.muted, lineHeight: 1.45 }}>
             {item.subtitle}
           </div>
         )}
@@ -789,7 +789,7 @@ function ListItemRow({
             style={{
               border: "none",
               background: menuOpen ? "rgba(0,0,0,0.06)" : "transparent",
-              color: "#9CA3AF",
+              color: ctok.muted,
               cursor: "pointer",
               padding: "2px 4px",
               borderRadius: 6,
@@ -871,7 +871,7 @@ function ListItemRow({
             </div>
           )}
         </div>
-        <div style={{ fontSize: 11, color: "#9CA3AF", whiteSpace: "nowrap" }}>
+        <div style={{ fontSize: 11, color: ctok.muted, whiteSpace: "nowrap" }}>
           {isTaskList && item.done && item.completed_at
             ? `done ${relativeTime(item.completed_at)}`
             : relativeTime(item.created_at)}
@@ -1086,7 +1086,7 @@ function MenuRow({
       onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
     >
-      <span style={{ fontSize: 13, color: "#1C1C1E" }}>{label}</span>
+      <span style={{ fontSize: 13, color: ctok.text }}>{label}</span>
       <span style={{
         fontSize: 11.5, color: "#3C3C43",
         background: "rgba(0,0,0,0.05)",

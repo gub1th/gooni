@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { renderMarkdown } from "../../utils/markdown";
 import type { RouterSignals, MessageTraceStep } from "../../services/api";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 
 
 const TOOL_LABELS: Record<string, string> = {
@@ -91,7 +91,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           >
             <span>Reasoning</span>
             <span style={{ fontSize: 10 }}>{traceExpanded ? "▾" : "▸"}</span>
-            <span style={{ fontSize: 11, color: "#9CA3AF" }}>
+            <span style={{ fontSize: 11, color: ctok.muted }}>
               · {trace.length} step{trace.length === 1 ? "" : "s"}
             </span>
           </button>
@@ -121,7 +121,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 alignItems: "center",
                 gap: 4,
                 padding: "2px 0",
-                color: "#AEAEB2",
+                color: ctok.faint,
                 fontSize: 12,
                 fontFamily: FONT,
               }}
@@ -144,7 +144,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               border: "none",
               cursor: "pointer",
               padding: "2px 0",
-              color: "#AEAEB2",
+              color: ctok.faint,
               fontSize: 12,
               fontFamily: FONT,
             }}
@@ -164,12 +164,12 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               }}
             >
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
-                <span style={{ color: "#AEAEB2", fontSize: 13, marginTop: 1 }}>⊙</span>
+                <span style={{ color: ctok.faint, fontSize: 13, marginTop: 1 }}>⊙</span>
                 <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{message.intention}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>
-                <span style={{ fontSize: 12, color: "#AEAEB2" }}>Done</span>
+                <span style={{ fontSize: 12, color: ctok.faint }}>Done</span>
               </div>
             </div>
           )}
@@ -187,7 +187,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               border: "none",
               cursor: "pointer",
               padding: "2px 0",
-              color: "#AEAEB2",
+              color: ctok.faint,
               fontSize: 12,
               fontFamily: FONT,
             }}
@@ -211,7 +211,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             >
               {signals.tone_corrections.length > 0 && (
                 <div style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "#9CA3AF", marginBottom: 2 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: ctok.muted, marginBottom: 2 }}>
                     Tone — preference memory
                   </div>
                   {signals.tone_corrections.map((t, i) => (
@@ -221,7 +221,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               )}
               {signals.feature_requests.length > 0 && (
                 <div style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "#9CA3AF", marginBottom: 2 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: ctok.muted, marginBottom: 2 }}>
                     Feature request — Gooni Backlog
                   </div>
                   {signals.feature_requests.map((f, i) => (
@@ -231,7 +231,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               )}
               {signals.memory_count > 0 && (
                 <div>
-                  <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "#9CA3AF", marginBottom: 2 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: ctok.muted, marginBottom: 2 }}>
                     Memory candidates — reconciler
                   </div>
                   <div>· {signals.memory_count} candidate{signals.memory_count > 1 ? "s" : ""} extracted</div>
@@ -247,8 +247,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           maxWidth: "80%",
           padding: "10px 14px",
           borderRadius: isUser ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-          background: isUser ? "#1C1C1E" : "#F2F2F7",
-          color: isUser ? "#FFFFFF" : "#1C1C1E",
+          background: isUser ? ctok.text : "#F2F2F7",
+          color: isUser ? "#FFFFFF" : ctok.text,
           fontSize: 14,
           fontFamily: FONT,
           lineHeight: 1.5,
@@ -359,7 +359,7 @@ function ActionCards({ trace }: { trace: MessageTraceStep[] }) {
       {cards.length > 6 && (
         <span style={{
           padding: "3px 8px", borderRadius: 99,
-          fontSize: 11, color: "#9CA3AF",
+          fontSize: 11, color: ctok.muted,
         }}>
           +{cards.length - 6} more
         </span>
@@ -384,16 +384,16 @@ function TraceStep({ step }: { step: MessageTraceStep }) {
           display: "flex", alignItems: "center", gap: 8,
           background: "none", border: "none",
           cursor: hasDetail ? "pointer" : "default",
-          padding: 0, fontFamily: FONT, color: "#1C1C1E",
+          padding: 0, fontFamily: FONT, color: ctok.text,
           fontSize: 12.5, lineHeight: 1.4, textAlign: "left",
         }}
       >
-        <span style={{ color: "#9CA3AF", fontSize: 11, width: 14, flexShrink: 0 }}>
+        <span style={{ color: ctok.muted, fontSize: 11, width: 14, flexShrink: 0 }}>
           {TRACE_ICON[step.type]}
         </span>
         <span>{step.label}</span>
         {hasDetail && (
-          <span style={{ fontSize: 9, color: "#9CA3AF" }}>{open ? "▾" : "▸"}</span>
+          <span style={{ fontSize: 9, color: ctok.muted }}>{open ? "▾" : "▸"}</span>
         )}
       </button>
       {open && step.detail && (
@@ -413,7 +413,7 @@ function TraceStep({ step }: { step: MessageTraceStep }) {
         <div
           style={{
             marginLeft: 22,
-            fontSize: 11, color: "#8E8E93", lineHeight: 1.5,
+            fontSize: 11, color: ctok.muted, lineHeight: 1.5,
             fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
           }}
         >

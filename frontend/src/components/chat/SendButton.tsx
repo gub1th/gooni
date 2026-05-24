@@ -1,4 +1,5 @@
 import { forwardRef } from "react";
+import { color as ctok } from "../../ui";
 
 interface SendButtonProps {
   onClick: () => void;
@@ -27,7 +28,7 @@ export const SendButton = forwardRef<HTMLButtonElement, SendButtonProps>(
           height: 32,
           borderRadius: "50%",
           border: "none",
-          background: disabled ? "rgba(0,0,0,0.06)" : "#1C1C1E",
+          background: disabled ? "rgba(0,0,0,0.06)" : ctok.text,
           color: disabled ? "#C7C7CC" : "#fff",
           cursor: disabled ? "default" : "pointer",
           display: "flex",

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FONT } from "../../ui";
+import { color as ctok, FONT } from "../../ui";
 import {
   fetchChatAudit, deleteMemory,
   type ChatAuditActiveRule,
@@ -94,23 +94,23 @@ export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: 
           padding: 0,
           cursor: onToggle ? "pointer" : "default",
           fontFamily: FONT,
-          color: "#1C1C1E",
+          color: ctok.text,
         }}
       >
         <span style={{ fontSize: 13, fontWeight: 600 }}>
           Active feedback rules
         </span>
-        <span style={{ fontSize: 12, color: "#8E8E93", fontWeight: 500 }}>
+        <span style={{ fontSize: 12, color: ctok.muted, fontWeight: 500 }}>
           ({rules.length})
         </span>
         {onToggle && (
-          <span style={{ marginLeft: "auto", fontSize: 11, color: "#8E8E93" }}>
+          <span style={{ marginLeft: "auto", fontSize: 11, color: ctok.muted }}>
             {open ? "collapse ▴" : "expand ▾"}
           </span>
         )}
       </button>
       {!open ? null : rules.length === 0 ? (
-        <div style={{ fontSize: 13, color: "#AEAEB2", marginTop: 10 }}>
+        <div style={{ fontSize: 13, color: ctok.faint, marginTop: 10 }}>
           No active rules. Reply to a Gooni message with a correction (e.g. "less teacher-y") to add one.
         </div>
       ) : (
@@ -130,7 +130,7 @@ export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: 
                 border: "1px solid rgba(22,163,74,0.18)",
               }}
             >
-              <div style={{ fontSize: 13, color: "#1C1C1E", lineHeight: 1.4 }}>
+              <div style={{ fontSize: 13, color: ctok.text, lineHeight: 1.4 }}>
                 {r.rule}
                 <span style={{ marginLeft: 10, fontSize: 11, color: "#6E6E73" }}>
                   · {relativeTime(r.created_at)}
