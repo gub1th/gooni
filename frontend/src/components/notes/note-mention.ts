@@ -1,10 +1,18 @@
 import { Extension } from "@tiptap/core";
 import { ReactRenderer } from "@tiptap/react";
 import Suggestion from "@tiptap/suggestion";
+import { PluginKey } from "@tiptap/pm/state";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
 
 import { searchNoteTitles, type ApiNote } from "../../services/api";
 import { NoteMentionMenu, type NoteMentionMenuRef } from "./NoteMentionMenu";
+
+// Distinct plugin key. @tiptap/suggestion registers its ProseMirror plugin
+// under a default key ("suggestion$"); SlashCommand already uses that default,
+// so a second Suggestion without its own key collides ("Adding different
+// instances of a keyed plugin") and crashes the editor on mount. Give the
+// @-mention suggestion its own key so both can coexist in one editor.
+const noteMentionPluginKey = new PluginKey("noteMention");
 
 const LABEL_MAX = 60;
 
@@ -31,6 +39,7 @@ export const NoteMention = Extension.create({
     return {
       suggestion: {
         char: "@",
+        pluginKey: noteMentionPluginKey,
         startOfLine: false,
         // props = the ApiNote chosen in the menu (forwarded via props.command).
         command: ({ editor, range, props }: { editor: any; range: any; props: ApiNote }) => {
