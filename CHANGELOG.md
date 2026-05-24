@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.171.0 — 2026-05-24 (minor)
+
+- feat(nudge): procrastination ping for stalled 'doing' todos (#341) (#366)
+
 ## 0.170.0 — 2026-05-24 (minor)
 
 - feat(review): desktop review mode — triage the limbo queue (#340) (#365)
