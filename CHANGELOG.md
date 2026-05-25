@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.177.1 — 2026-05-25 (patch)
+
+- fix(dark): legible TodoList + Synthesizer in dark mode (#379)
+
 ## 0.177.0 — 2026-05-25 (minor)
 
 - feat(cut): route chat substance mentions to the cut table boolean (#377)
