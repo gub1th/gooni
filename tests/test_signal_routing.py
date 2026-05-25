@@ -100,6 +100,22 @@ def main() -> int:
     print(f"[substance] weed_cell={ct[0].get('weed') if ct else None} "
           f"habit_rows={db.query(_Habit).filter(_Habit.name == 'weed').count()}")
 
+    # ── backdating: log_date routes to that day, not today ──
+    from datetime import timedelta as _td
+    yest = (_date.today() - _td(days=1)).isoformat()
+    sig = _empty_signals()
+    sig["fitness_logs"] = [
+        {"log_type": "weight", "weight": 70.8, "weight_unit": "kg", "log_date": yest},
+    ]
+    intent_router.dispatch({**sig, "memories": []},
+                           intent_router.RouterContext(db=db))
+    ct_by_day = {r["date"]: r for r in _dms.cut_table(db, _date.today() - _td(days=2), _date.today())}
+    if not (ct_by_day.get(yest) and ct_by_day[yest].get("weight") == 70.8):
+        fails.append(f"backdate: expected weight 70.8 on {yest}, got {ct_by_day.get(yest)}")
+    if ct_by_day.get(_date.today().isoformat(), {}).get("weight") is not None:
+        fails.append("backdate: weight leaked onto today")
+    print(f"[backdate] {yest} weight={ct_by_day.get(yest, {}).get('weight')} (today not touched)")
+
     # ── todos → Todo row (a second type, proves it's not fitness-specific) ──
     # Needs OPENAI_API_KEY — the todo handler embeds for cosine-dedup.
     if os.getenv("OPENAI_API_KEY"):

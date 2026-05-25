@@ -19,6 +19,20 @@ from __future__ import annotations
 from datetime import date as _date
 
 
+def _entry_day(entry: dict) -> _date:
+    """The calendar day a fitness log lands on: the extractor-resolved
+    `log_date` (validated YYYY-MM-DD, e.g. from "weighed 70.8 yesterday"),
+    or today when none was given. Backdating writes to the right cell
+    instead of stamping everything as today."""
+    raw = entry.get("log_date")
+    if isinstance(raw, str) and raw:
+        try:
+            return _date.fromisoformat(raw)
+        except ValueError:
+            pass
+    return _date.today()
+
+
 def handle(items: list[dict], ctx, result) -> None:
     if not items:
         return
@@ -90,6 +104,7 @@ def _handle_macros(ctx, result, entry, dms) -> bool:
     correction = bool(entry.get("correction"))
     correction_target = entry.get("correction_target")
     raw_text = entry.get("raw_text") or None
+    day = _entry_day(entry)
     wrote = False
 
     for m in metrics:
@@ -100,13 +115,13 @@ def _handle_macros(ctx, result, entry, dms) -> bool:
             continue
         # A correction amends the most-recent matching row in place rather
         # than adding a new meal. Fall back to a fresh log if there's
-        # nothing to correct yet today.
+        # nothing to correct yet on that day.
         if correction and (correction_target in (None, mt)):
-            updated = dms.update_most_recent(ctx.db, mt, val)
+            updated = dms.update_most_recent(ctx.db, mt, val, day=day)
             if updated is None:
-                dms.log(ctx.db, mt, val, unit=unit, notes=raw_text)
+                dms.log(ctx.db, mt, val, unit=unit, day=day, notes=raw_text)
         else:
-            dms.log(ctx.db, mt, val, unit=unit, notes=raw_text)
+            dms.log(ctx.db, mt, val, unit=unit, day=day, notes=raw_text)
         wrote = True
 
     if wrote:
@@ -131,7 +146,7 @@ def _handle_substance(ctx, result, entry, dms) -> bool:
     sub = (entry.get("substance") or "").strip().lower()
     if sub not in _VALID_SUBSTANCES:
         return False
-    dms.set_cell(ctx.db, _date.today(), sub, value=1.0, notes=entry.get("raw_text") or None)
+    dms.set_cell(ctx.db, _entry_day(entry), sub, value=1.0, notes=entry.get("raw_text") or None)
     result.captured_metrics.append({"log_type": "substance", "substance": sub})
     return True
 
@@ -142,12 +157,13 @@ def _handle_weight(ctx, result, entry, dms) -> bool:
         return False
     unit = entry.get("weight_unit") or "lb"
     correction = bool(entry.get("correction"))
+    day = _entry_day(entry)
     if correction:
-        updated = dms.update_most_recent(ctx.db, "weight", val)
+        updated = dms.update_most_recent(ctx.db, "weight", val, day=day)
         if updated is None:
-            dms.log(ctx.db, "weight", val, unit=unit, notes=entry.get("raw_text") or None)
+            dms.log(ctx.db, "weight", val, unit=unit, day=day, notes=entry.get("raw_text") or None)
     else:
-        dms.log(ctx.db, "weight", val, unit=unit, notes=entry.get("raw_text") or None)
+        dms.log(ctx.db, "weight", val, unit=unit, day=day, notes=entry.get("raw_text") or None)
     result.captured_metrics.append({
         "log_type": "weight",
         "value": val,
@@ -159,10 +175,11 @@ def _handle_weight(ctx, result, entry, dms) -> bool:
 
 def _handle_exercise(ctx, result, entry, dms, habit_service) -> bool:
     label = entry.get("exercise_label") or (entry.get("raw_text") or None)
+    day = _entry_day(entry)
     # value=1.0 is a presence sentinel — the cut table treats exercise as a
     # boolean (did/didn't train); `notes` carries the human label (the
     # activity + any sub-detail: "gym — chest and tris", "tennis", "5k run").
-    dms.log(ctx.db, "exercise", 1.0, unit=None, notes=label)
+    dms.log(ctx.db, "exercise", 1.0, unit=None, day=day, notes=label)
 
     # Dual-write a single generic `exercise` boolean habit so "how often did
     # I train" is one streak across ALL modalities (gym/tennis/run) — what
@@ -171,7 +188,7 @@ def _handle_exercise(ctx, result, entry, dms, habit_service) -> bool:
     # Isolated try/except — a habit failure must never roll back the metric
     # row (metric is the cut-table source of truth).
     try:
-        _upsert_exercise_habit(ctx.db, habit_service, label)
+        _upsert_exercise_habit(ctx.db, habit_service, label, day)
     except Exception as e:
         print(f"[fitness handler] exercise habit upsert failed: {e}")
 
@@ -182,7 +199,7 @@ def _handle_exercise(ctx, result, entry, dms, habit_service) -> bool:
     return True
 
 
-def _upsert_exercise_habit(db, habit_service, label: str | None) -> None:
+def _upsert_exercise_habit(db, habit_service, label: str | None, day: _date) -> None:
     hits = habit_service.find_by_name_fuzzy(db, "exercise")
     if not hits:
         habit = habit_service.create(db, name="exercise", polarity="positive")
@@ -190,7 +207,7 @@ def _upsert_exercise_habit(db, habit_service, label: str | None) -> None:
         habit = hits[0]
     else:
         habit = habit_service.find_by_name(db, "exercise") or hits[0]
-    habit_service.upsert_entry(db, habit.id, _date.today(), True, note=label)
+    habit_service.upsert_entry(db, habit.id, day, True, note=label)
 
 
 def _estimate_macros(food: str) -> list[dict] | None:

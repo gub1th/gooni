@@ -163,6 +163,7 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "weight_unit":      "lb|kg",
       "exercise_label":   "<for log_type=exercise only — e.g. 'chest and tris'>",
       "substance":        "<for log_type=substance only — alcohol|weed|vape>",
+      "date":             "<YYYY-MM-DD if Daniel names a day; omit/null when he means today>",
       "correction":       "true|false — true when Daniel is amending an EARLIER log this day",
       "correction_target":"calories|protein|weight — which metric the correction overwrites"
     }}
@@ -523,6 +524,13 @@ LOG TYPES — pick per entry:
     "drank a ton of water today", "had a coffee", "smoked salmon for lunch"
   POSITIVE occurrence only — DON'T log abstinence ("stayed sober", "no weed
   today"); the absence is the default empty cell. One entry per substance.
+
+DATES — today is {today}. If Daniel names a day for a fitness log, resolve it
+  to an absolute YYYY-MM-DD in `date`. If he says nothing about when, OMIT
+  `date` (defaults to today — the normal case). Never use a future date.
+    "weighed 70.80 yesterday" → {{log_type:"weight", weight:70.80, date:"<today minus 1 day>"}}
+    "smoked on tuesday" → {{log_type:"substance", substance:"weed", date:"<that tuesday>"}}
+    "had 2100 cal" → {{log_type:"macros_explicit", ...}}  (no date → today)
 
 CORRECTIONS — Daniel amends an earlier log from the same day:
   "actually that chicken was more like 900 cal"
