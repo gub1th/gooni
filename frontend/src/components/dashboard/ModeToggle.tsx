@@ -1,8 +1,9 @@
 import { useDashboardStore, type DashboardMode } from "../../stores/useDashboardStore";
 import { FONT } from "../../ui";
 
-// ModeToggle — top-tier dashboard toggle. Three modes:
+// ModeToggle — top-tier dashboard toggle. Four modes:
 //   Today  — current dashboard (todos/focuses/habits/take)
+//   Review — ambient-loop triage (session summaries + limbo queue)
 //   Ops    — Gooni health + backlog + capability profile
 //   Stats  — life stats (Whoop/LeetCode/Dev/Usage/Activity), merged from
 //            the old Pulse mode + the now-removed Stats sidebar page
@@ -13,7 +14,6 @@ const MODES: { id: DashboardMode; label: string }[] = [
   { id: "review", label: "Review" },
   { id: "ops", label: "Ops" },
   { id: "stats", label: "Stats" },
-  { id: "tv", label: "TV" },
 ];
 
 export function ModeToggle() {
