@@ -6,6 +6,7 @@ import {
   type WhoopStatus, type WhoopToday,
   type DashboardStats,
 } from "../../services/api";
+import { parseServerDate } from "../../utils/date";
 
 // DashboardHeader — the top band of the dashboard. Greeting + date on
 // the left; on the right: inline Whoop stats (recovery / sleep / strain
@@ -39,6 +40,20 @@ function recoveryColor(score: number | null): string {
 function fmtSleep(min: number | null | undefined): string {
   if (min == null) return "—";
   return `${Math.floor(min / 60)}h ${min % 60}m`;
+}
+
+// "updated 3h ago" off source_updated_at — when Whoop last had NEW data
+// upstream, not when we last polled (a poll can re-fetch identical data).
+// parseServerDate handles the naive-UTC server timestamp correctly.
+function fmtUpdatedAgo(iso: string | null | undefined): string | null {
+  const d = parseServerDate(iso ?? null);
+  if (!d) return null;
+  const min = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (min < 1) return "updated just now";
+  if (min < 60) return `updated ${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `updated ${hr}h ago`;
+  return `updated ${Math.floor(hr / 24)}d ago`;
 }
 
 export function DashboardHeader({
@@ -76,34 +91,47 @@ export function DashboardHeader({
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-        <GooniAvatar size={36} onClick={onBrainClick} />
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <GooniAvatar size={36} onClick={onBrainClick} />
 
-        {whoopEnabled && (
-          <>
-            <Stat
-              value={whoop?.recovery_score != null ? `${whoop.recovery_score}%` : "—"}
-              label="recovery"
-              color={recoveryColor(whoop?.recovery_score ?? null)}
-            />
-            <Stat
-              value={fmtSleep(whoop?.sleep_minutes)}
-              label="sleep"
-              color="var(--gooni-text, #1C1C1E)"
-            />
-            <Stat
-              value={whoop?.strain != null ? whoop.strain.toFixed(1) : "—"}
-              label="strain"
-              color="#BA7517"
-            />
-          </>
+          {whoopEnabled && (
+            <>
+              <Stat
+                value={whoop?.recovery_score != null ? `${whoop.recovery_score}%` : "—"}
+                label="recovery"
+                color={recoveryColor(whoop?.recovery_score ?? null)}
+              />
+              <Stat
+                value={fmtSleep(whoop?.sleep_minutes)}
+                label="sleep"
+                color="var(--gooni-text, #1C1C1E)"
+              />
+              <Stat
+                value={whoop?.strain != null ? whoop.strain.toFixed(1) : "—"}
+                label="strain"
+                color="#BA7517"
+              />
+            </>
+          )}
+
+          <Stat
+            value={stats?.streak != null ? String(stats.streak) : "—"}
+            label="streak"
+            color="var(--gooni-text, #1C1C1E)"
+          />
+        </div>
+
+        {/* Subtle Whoop freshness — when the strap last produced NEW data
+            (source_updated_at), not when we polled. */}
+        {whoopEnabled && fmtUpdatedAgo(whoop?.source_updated_at) && (
+          <span
+            title={`Whoop data ${fmtUpdatedAgo(whoop?.source_updated_at)}`}
+            style={{ fontSize: 10.5, color: "var(--gooni-faint, #B0B0B5)", letterSpacing: 0.2 }}
+          >
+            whoop · {fmtUpdatedAgo(whoop?.source_updated_at)}
+          </span>
         )}
-
-        <Stat
-          value={stats?.streak != null ? String(stats.streak) : "—"}
-          label="streak"
-          color="var(--gooni-text, #1C1C1E)"
-        />
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..db.database import get_db
+from ..common import _parse_optional_due
 
 from ..serializers import (
     _serialize_promise
@@ -154,17 +155,41 @@ def promise_integrity_score(db: Session = Depends(get_db)):
 
 @router.patch("/promises/{promise_id}")
 def patch_promise(promise_id: int, body: dict, db: Session = Depends(get_db)):
-    """G3.1 state transition only — active | kept | broken. Mirrors
-    `promise_service.transition` so the same idempotency + resolved_at
-    bookkeeping fires regardless of caller. Lock-in is gone — habit
-    auto-spawn now fires at promise create (see promise_service.create).
+    """Edit a promise. Three independent, optional fields:
+
+      - `state`: active | kept | broken (G3.1 transition — same
+        idempotency + resolved_at bookkeeping as `promise_service.transition`).
+      - `text`: rewrites the display `summary` (utterance kept for provenance).
+      - `due`: ISO datetime, or `""`/`null` to clear the deadline.
+
+    Send any subset. text/due are applied first, then the state
+    transition, so the returned row reflects all edits in one round-trip.
+    Lock-in is gone — habit auto-spawn fires at promise create.
     """
     from ..services import promise_service
 
-    new_state = body.get("state")
-    if new_state not in ("active", "kept", "broken"):
-        raise HTTPException(status_code=400, detail="state required (active|kept|broken)")
-    p = promise_service.transition(db, promise_id, new_state)
-    if p is None:
-        raise HTTPException(status_code=404, detail="Promise not found")
+    has_text = "text" in body
+    has_due = "due" in body
+    has_state = "state" in body
+    if not (has_text or has_due or has_state):
+        raise HTTPException(status_code=400, detail="nothing to update")
+
+    if has_text or has_due:
+        kwargs: dict = {}
+        if has_text:
+            kwargs["text"] = body.get("text") or ""
+        if has_due:
+            kwargs["inferred_due"] = _parse_optional_due(body.get("due"))
+        p = promise_service.update(db, promise_id, **kwargs)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Promise not found")
+
+    if has_state:
+        new_state = body.get("state")
+        if new_state not in ("active", "kept", "broken"):
+            raise HTTPException(status_code=400, detail="state must be active|kept|broken")
+        p = promise_service.transition(db, promise_id, new_state)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Promise not found")
+
     return _serialize_promise(p)

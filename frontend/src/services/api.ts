@@ -2451,10 +2451,20 @@ export async function fetchPromises(opts: { state?: PromiseState; limit?: number
 }
 
 export async function patchPromiseState(id: number, state: PromiseState): Promise<ApiPromise> {
+  return patchPromise(id, { state });
+}
+
+// Full promise edit — any subset of {text, due, state}. `due` is an ISO
+// datetime string (UTC, "…Z") or null to clear. Backend applies text/due
+// then the state transition in one round-trip (see promises router).
+export async function patchPromise(
+  id: number,
+  patch: { text?: string; due?: string | null; state?: PromiseState },
+): Promise<ApiPromise> {
   const res = await apiFetch(`${BASE}/promises/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ state }),
+    body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error("Failed to update promise");
   return res.json();

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { parseServerDate } from "../../utils/date";
 
 /**
  * Shared continuously-updating elapsed-time pill. Used on the primary
@@ -22,9 +23,11 @@ export interface LiveTimerProps {
 
 export function LiveTimer({ since, variant = "subtle", title }: LiveTimerProps) {
   const start = useMemo(() => {
-    if (!since) return null;
-    const ms = new Date(since).getTime();
-    return Number.isFinite(ms) ? ms : null;
+    // Server timestamps are naive-UTC; parseServerDate appends the missing
+    // "Z" so they don't get read as local time. Raw new Date(since) parsed a
+    // just-created ticket ~7h into the future (PT), pinning the timer at "0s".
+    const ms = parseServerDate(since)?.getTime();
+    return ms != null && Number.isFinite(ms) ? ms : null;
   }, [since]);
   const [now, setNow] = useState(() => Date.now());
 
