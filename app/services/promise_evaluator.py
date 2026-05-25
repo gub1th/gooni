@@ -118,13 +118,6 @@ def _check_conflicts_active(db: Session, vec: list[float] | None) -> dict[str, A
     if not vec:
         return None
     from ..db.models import Promise
-    from .promise_service import _cos  # type: ignore[attr-defined]
-
-    # Some installs may not export `_cos`; fall back to local cosine.
-    try:
-        cos_fn = _cos
-    except NameError:
-        cos_fn = _cosine
 
     import json
     rows = (
@@ -138,7 +131,7 @@ def _check_conflicts_active(db: Session, vec: list[float] | None) -> dict[str, A
             emb = json.loads(emb_json)
         except Exception:
             continue
-        score = cos_fn(vec, emb)
+        score = _cosine(vec, emb)
         if score >= _CONFLICT_THRESHOLD and (best is None or score > best[1]):
             best = (pid, score, summ or utter or "")
     if best is None:
