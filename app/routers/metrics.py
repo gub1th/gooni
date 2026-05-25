@@ -96,6 +96,49 @@ def metrics_list(start: str | None = None, end: str | None = None, db: Session =
     return [daily_metric_service.serialize(r) for r in rows]
 
 
+@router.get("/metrics/cut-config")
+def cut_config_get(db: Session = Depends(get_db)):
+    """Cut-table config: calorie/protein limits (drive the cell red/green) +
+    the cut start date (anchors the 'Day N' counter)."""
+    from ..deps import _settings_row
+    s = _settings_row(db)
+    return {
+        "calorie_limit": s.cut_calorie_limit,
+        "protein_limit": s.cut_protein_limit,
+        "start_date": s.cut_start_date,
+    }
+
+
+@router.patch("/metrics/cut-config")
+def cut_config_patch(body: dict, db: Session = Depends(get_db)):
+    """Set the calorie/protein limit (Cal/Pro header popup) or cut start date.
+    Each field optional — only provided keys are written."""
+    from ..deps import _settings_row
+    s = _settings_row(db)
+    if "calorie_limit" in body:
+        try:
+            s.cut_calorie_limit = max(0, int(body["calorie_limit"]))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "calorie_limit must be an integer")
+    if "protein_limit" in body:
+        try:
+            s.cut_protein_limit = max(0, int(body["protein_limit"]))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "protein_limit must be an integer")
+    if "start_date" in body:
+        raw = body["start_date"]
+        if raw and _parse_iso_date(raw) is None:
+            raise HTTPException(400, "start_date must be YYYY-MM-DD or null")
+        s.cut_start_date = (raw or None)
+    db.commit()
+    db.refresh(s)
+    return {
+        "calorie_limit": s.cut_calorie_limit,
+        "protein_limit": s.cut_protein_limit,
+        "start_date": s.cut_start_date,
+    }
+
+
 @router.get("/metrics/cut-table")
 def metrics_cut_table(days: int = 30, fill: bool = False, db: Session = Depends(get_db)):
     """Per-day cut table for the dashboard. Returns rows (newest first) +

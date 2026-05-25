@@ -772,6 +772,14 @@ class Settings(Base):
     # 5am batch processor idempotency stamp (YYYY-MM-DD in nudge_tz). Mirrors
     # capability_telemetry_last_run_day — kills a double-run if Fly scales out.
     batch_last_run_day = Column(String, nullable=True)
+    # Cut-table config (the fitness/cut dashboard). Limits drive the cell
+    # red/green (cal green when ≤ limit, protein green when ≥ limit) and are
+    # set via the Cal/Pro header popup. cut_start_date anchors the "Day N"
+    # counter. Server-side (not localStorage) so chat/nudges can read the
+    # limits later ("you're over your cal target, sir").
+    cut_calorie_limit = Column(Integer, nullable=False, default=2100)
+    cut_protein_limit = Column(Integer, nullable=False, default=170)
+    cut_start_date = Column(String, nullable=True)  # YYYY-MM-DD
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
