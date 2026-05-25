@@ -11,7 +11,10 @@ import {
   fetchWhoopToday,
   fetchCutTable,
   setCutCell,
+  fetchCutConfig,
+  setCutConfig,
   parseDevTake,
+  type CutConfig,
   type CutMetricType,
   type CutTable,
   type CutTableRow,
@@ -26,7 +29,7 @@ import {
   type WhoopToday,
 } from "../services/api";
 import { Skeleton } from "./Skeleton";
-import { color as ctok, FONT } from "../ui";
+import { color as ctok, FONT, z } from "../ui";
 
 const GREEN = "#30A14E";
 const RED = "#CF222E";
@@ -748,11 +751,25 @@ function _fmtCutDate(iso: string): string {
 }
 
 const _dash = <span style={{ color: "var(--gooni-faint, #C7C7CC)" }}>—</span>;
+// Cut value semantics: green = good (cal within limit / protein hit), red =
+// off-target / a substance slip. App-tuned hexes (work on both themes) vs the
+// mockup's darker #085041/#791F1F which wash out on dark.
+const CUT_OK = GREEN;
+const CUT_OFF = RED;
 
-// One cut-table cell. Read-only renders `display`; editable turns into an
-// inline input on click that commits on blur/Enter (Escape cancels without
-// saving). The parent maps each metric → {rawValue, display, onSave}, so
-// this stays dumb about metric semantics.
+// "2026-04-02" → day number since the cut started (1-based). Local-naive.
+function _cutDayNumber(startIso: string): number | null {
+  const [y, m, d] = startIso.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const start = new Date(y, m - 1, d).getTime();
+  const n = new Date();
+  const today = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+  return Math.floor((today - start) / 86_400_000) + 1;
+}
+
+// One editable cut-table cell (numeric or text). Read-only renders `display`;
+// editable turns into an inline input on click that commits on blur/Enter
+// (Escape cancels without saving). Parent maps each metric → display/onSave.
 function CutCell({
   editable, align = "right", rawValue, display, onSave,
 }: {
@@ -800,9 +817,9 @@ function CutCell({
         }}
         style={{
           width: "100%", boxSizing: "border-box", font: "inherit",
-          fontSize: 13, fontVariantNumeric: "tabular-nums", textAlign: align,
+          fontSize: 12, fontVariantNumeric: "tabular-nums", textAlign: align,
           border: "1px solid var(--gooni-accent, #534AB7)", borderRadius: 4,
-          padding: "2px 4px", background: "var(--gooni-bg, #fff)",
+          padding: "1px 3px", background: "var(--gooni-bg, #fff)",
           color: "var(--gooni-text, #1C1C1E)", outline: "none",
         }}
       />
@@ -810,15 +827,97 @@ function CutCell({
   );
 }
 
+// Boolean toggle cell (alcohol/weed/vape). ● = did it (a slip, red), — = clean.
+// Click flips it (set value=1 / clear). No streak here — that's derived from
+// row history elsewhere; this cell is the single source of truth.
+function CutBoolCell({ editable, on, onToggle }: {
+  editable: boolean; on: boolean; onToggle: () => void;
+}) {
+  const td: React.CSSProperties = { ..._cutTd, textAlign: "center", padding: "5px 4px" };
+  const dot = on
+    ? <span style={{ color: CUT_OFF, fontWeight: 700 }}>●</span>
+    : <span style={{ color: "var(--gooni-faint, #C7C7CC)" }}>—</span>;
+  if (!editable) return <td style={td}>{dot}</td>;
+  return (
+    <td style={{ ...td, cursor: "pointer", userSelect: "none" }} title="click to toggle" onClick={onToggle}>
+      {dot}
+    </td>
+  );
+}
+
+function CutCard({ label, value, sub, subColor }: {
+  label: string; value: React.ReactNode; sub?: string; subColor?: string;
+}) {
+  return (
+    <div style={{
+      flex: "1 1 110px", minWidth: 96, padding: "10px 12px",
+      background: "var(--gooni-card, #fff)",
+      border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))", borderRadius: 10,
+    }}>
+      <div style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)" }}>{label}</div>
+      <div style={{ fontSize: 19, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", marginTop: 2 }}>
+        {value}
+        {sub && (
+          <span style={{ fontSize: 12, fontWeight: 400, marginLeft: 4, color: subColor ?? "var(--gooni-muted, #8E8E93)" }}>
+            {sub}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Tiny popover anchored under a clickable Cal/Pro header for setting its limit.
+function LimitPopover({ initial, onSave, onClose }: {
+  initial: number; onSave: (v: number) => void; onClose: () => void;
+}) {
+  const [v, setV] = useState(String(initial));
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: "absolute", top: "100%", right: 0, marginTop: 4, zIndex: z.dropdown,
+        display: "flex", gap: 4, padding: 6, background: "var(--gooni-card, #fff)",
+        border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.1))", borderRadius: 8,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.14)",
+      }}
+    >
+      <input
+        autoFocus type="number" value={v} onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { const n = parseInt(v, 10); if (!Number.isNaN(n)) onSave(n); }
+          else if (e.key === "Escape") onClose();
+        }}
+        style={{
+          width: 64, font: "inherit", fontSize: 12, padding: "2px 5px",
+          border: "1px solid var(--gooni-border, rgba(0,0,0,0.15))", borderRadius: 5,
+          background: "var(--gooni-input, #fff)", color: "var(--gooni-text, #1C1C1E)", outline: "none",
+        }}
+      />
+      <button
+        onClick={() => { const n = parseInt(v, 10); if (!Number.isNaN(n)) onSave(n); }}
+        style={{
+          font: "inherit", fontSize: 11, padding: "2px 8px", cursor: "pointer",
+          border: "none", borderRadius: 5, background: CUT_OK, color: "#fff",
+        }}
+      >set</button>
+    </div>
+  );
+}
+
 export function CutTableSection({ editable = false }: { editable?: boolean } = {}) {
-  // Editable view pulls a wider, gap-filled window so every day is a
-  // clickable row (incl. blanks to fill); read-only/ambient stays compact.
-  const days = editable ? 60 : 30;
+  // Editable view pulls a wider, gap-filled window so every day is a clickable
+  // row (incl. blanks); read-only/ambient stays compact. Default shows 7, with
+  // "show more" to expand (the full cut runs long).
+  const days = editable ? 120 : 30;
   const queryClient = useQueryClient();
-  const { data, isFetching, refetch } = useQuery<CutTable>({
+  const { data } = useQuery<CutTable>({
     queryKey: ["cut-table", { days, fill: editable }],
     queryFn: () => fetchCutTable(days, editable),
     staleTime: 30_000,
+  });
+  const { data: cfg } = useQuery<CutConfig>({
+    queryKey: ["cut-config"], queryFn: fetchCutConfig, staleTime: 60_000,
   });
 
   const save = useMutation({
@@ -834,24 +933,48 @@ export function CutTableSection({ editable = false }: { editable?: boolean } = {
     mt: CutMetricType,
     payload: { value?: number | null; text?: string | null },
   ) => save.mutate({ date, mt, payload });
+  const saveCfg = useMutation({
+    mutationFn: (patch: Partial<CutConfig>) => setCutConfig(patch),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cut-config"] }),
+  });
+
+  const [expanded, setExpanded] = useState(false);
+  const [popover, setPopover] = useState<null | "calorie" | "protein">(null);
 
   const rows = data?.rows ?? [];
   const today = data?.today ?? { calories: 0, protein: 0 };
+  const calLimit = cfg?.calorie_limit ?? 2100;
+  const proLimit = cfg?.protein_limit ?? 170;
+  const shown = expanded ? rows : rows.slice(0, 7);
 
-  // Numeric cell: 0/null both render as blank; empty input clears the cell,
-  // non-numeric input is ignored (reverts).
+  // Derived header stats. rows are newest-first.
+  const weights = rows.filter((r) => r.weight != null);
+  const latestW = weights[0]?.weight ?? null;
+  const oldestW = weights.length ? weights[weights.length - 1].weight : null;
+  const wDelta = latestW != null && oldestW != null && weights.length > 1
+    ? +(latestW - oldestW).toFixed(2) : null;
+  const last7 = rows.slice(0, 7).map((r) => r.calories).filter((c) => c > 0);
+  const avg7 = last7.length ? Math.round(last7.reduce((a, b) => a + b, 0) / last7.length) : null;
+  const dayNum = cfg?.start_date ? _cutDayNumber(cfg.start_date) : null;
+
+  const calColor = (v: number) => (v <= 0 ? undefined : v <= calLimit ? CUT_OK : CUT_OFF);
+  const proColor = (v: number) => (v <= 0 ? undefined : v >= proLimit ? CUT_OK : CUT_OFF);
+
+  // Numeric cell: 0/null render blank; empty input clears, non-numeric reverts.
   const numCell = (
     r: CutTableRow,
-    mt: "calories" | "protein" | "weight" | "alcohol" | "weed" | "vape",
+    mt: "calories" | "protein" | "weight",
     fmt: (v: number) => string,
+    color?: (v: number) => string | undefined,
   ) => {
     const v = r[mt];
     const has = v != null && v !== 0;
+    const c = has && color ? color(v) : undefined;
     return (
       <CutCell
         editable={editable}
         rawValue={has ? v : null}
-        display={has ? fmt(v) : _dash}
+        display={has ? <span style={c ? { color: c, fontWeight: 500 } : undefined}>{fmt(v)}</span> : _dash}
         onSave={(draft) => {
           const t = draft.trim();
           if (t === "") return commit(r.date, mt, { value: null });
@@ -863,96 +986,146 @@ export function CutTableSection({ editable = false }: { editable?: boolean } = {
   };
 
   return (
-    <SectionShell
-      label="Cut table"
-      right={
-        <FreshnessActions
-          updatedAt={data?.updated_at}
-          isFetching={isFetching}
-          onRefresh={() => refetch()}
-        />
-      }
-    >
-      {/* Today's running totals — same numbers the chat ack surfaces. */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-        gap: 14, marginBottom: rows.length ? 20 : 0,
-      }}>
-        <BigStat label="calories today" value={fmtInt(today.calories)} />
-        <BigStat label="protein today" value={`${fmtInt(today.protein)}g`} />
+    <div style={{ fontFamily: FONT, marginBottom: 28 }}>
+      {/* Header — "The cut" + day counter */}
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)" }}>The cut</div>
+          <div
+            style={{ fontSize: 11, color: "var(--gooni-muted, #8E8E93)", cursor: editable ? "pointer" : "default" }}
+            title={editable ? "set cut start date" : undefined}
+            onClick={editable ? () => {
+              const next = window.prompt("Cut start date (YYYY-MM-DD):", cfg?.start_date ?? "");
+              if (next !== null) saveCfg.mutate({ start_date: next.trim() || null });
+            } : undefined}
+          >
+            {dayNum != null
+              ? `Day ${dayNum} · started ${_fmtCutDate(cfg!.start_date!)}`
+              : (editable ? "set cut start date →" : "the cut")}
+          </div>
+        </div>
       </div>
 
-      {rows.length === 0 ? (
-        <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)" }}>
-          nothing logged yet — text Gooni what you ate, your weight, or a workout.
-        </div>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{
-            width: "100%", borderCollapse: "collapse", fontSize: 13,
-            fontVariantNumeric: "tabular-nums",
-          }}>
+      {/* Stat cards */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <CutCard label="Today" value={fmtInt(today.calories)} sub={`/ ${fmtInt(calLimit)}`} />
+        <CutCard label="Protein" value={`${fmtInt(today.protein)}g`} sub={`/ ${fmtInt(proLimit)}g`} />
+        <CutCard
+          label="Weight"
+          value={latestW != null ? `${latestW}` : "—"}
+          sub={wDelta != null ? `${wDelta <= 0 ? "↓" : "↑"}${Math.abs(wDelta)}` : undefined}
+          subColor={wDelta != null ? (wDelta <= 0 ? CUT_OK : CUT_OFF) : undefined}
+        />
+        <CutCard label="7d avg" value={avg7 != null ? fmtInt(avg7) : "—"} sub="cal" />
+      </div>
+
+      {/* Table card */}
+      <div style={{
+        background: "var(--gooni-card, #fff)",
+        border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+        borderRadius: 12, overflow: "hidden",
+      }}>
+        {rows.length === 0 ? (
+          <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", padding: 16 }}>
+            nothing logged yet — text Gooni what you ate, your weight, or a workout.
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
             <thead>
               <tr style={{ color: "var(--gooni-muted, #8E8E93)", textAlign: "left" }}>
-                <th style={_cutTh}>date</th>
-                <th style={{ ..._cutTh, textAlign: "right" }}>cal</th>
-                <th style={{ ..._cutTh, textAlign: "right" }}>protein</th>
-                <th style={{ ..._cutTh, textAlign: "right" }}>weight</th>
-                <th style={_cutTh}>exercise</th>
-                <th style={{ ..._cutTh, textAlign: "right" }}>alc</th>
-                <th style={{ ..._cutTh, textAlign: "right" }}>weed</th>
-                <th style={{ ..._cutTh, textAlign: "right" }}>vape</th>
-                <th style={_cutTh}>note</th>
+                <th style={{ ..._cutTh, paddingLeft: 14 }}>Date</th>
+                <th
+                  style={{ ..._cutTh, textAlign: "right", position: "relative", cursor: editable ? "pointer" : "default" }}
+                  title={editable ? "set calorie limit" : undefined}
+                  onClick={editable ? () => setPopover((p) => (p === "calorie" ? null : "calorie")) : undefined}
+                >
+                  Cal{editable && <span style={{ opacity: 0.45 }}> ⌄</span>}
+                  {popover === "calorie" && (
+                    <LimitPopover initial={calLimit} onClose={() => setPopover(null)}
+                      onSave={(n) => { saveCfg.mutate({ calorie_limit: n }); setPopover(null); }} />
+                  )}
+                </th>
+                <th
+                  style={{ ..._cutTh, textAlign: "right", position: "relative", cursor: editable ? "pointer" : "default" }}
+                  title={editable ? "set protein limit" : undefined}
+                  onClick={editable ? () => setPopover((p) => (p === "protein" ? null : "protein")) : undefined}
+                >
+                  Pro{editable && <span style={{ opacity: 0.45 }}> ⌄</span>}
+                  {popover === "protein" && (
+                    <LimitPopover initial={proLimit} onClose={() => setPopover(null)}
+                      onSave={(n) => { saveCfg.mutate({ protein_limit: n }); setPopover(null); }} />
+                  )}
+                </th>
+                <th style={{ ..._cutTh, textAlign: "right" }}>Wt</th>
+                <th style={{ ..._cutTh, textAlign: "left" }}>Gym</th>
+                <th style={{ ..._cutTh, textAlign: "center", padding: "8px 4px" }} title="alcohol">🍺</th>
+                <th style={{ ..._cutTh, textAlign: "center", padding: "8px 4px" }} title="weed">🌿</th>
+                <th style={{ ..._cutTh, textAlign: "center", padding: "8px 4px" }} title="vape">💨</th>
+                <th style={{ ..._cutTh, textAlign: "right", paddingRight: 14 }}>Note</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {shown.map((r, i) => (
                 <tr key={r.date} style={{
-                  borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.06))",
+                  background: i % 2 ? "var(--gooni-hover, rgba(0,0,0,0.025))" : "transparent",
                   color: "var(--gooni-text, #1C1C1E)",
                 }}>
-                  <td style={_cutTd}>{_fmtCutDate(r.date)}</td>
-                  {numCell(r, "calories", (v) => fmtInt(v))}
-                  {numCell(r, "protein", (v) => `${fmtInt(v)}g`)}
+                  <td style={{ ..._cutTd, paddingLeft: 14, fontWeight: r.date === rows[0]?.date ? 600 : 400 }}>
+                    {_fmtCutDate(r.date)}
+                  </td>
+                  {numCell(r, "calories", (v) => fmtInt(v), calColor)}
+                  {numCell(r, "protein", (v) => `${fmtInt(v)}g`, proColor)}
                   {numCell(r, "weight", (v) => `${v}`)}
                   <CutCell
                     editable={editable}
                     align="left"
                     rawValue={r.exercise_label}
-                    display={r.exercise ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ color: GREEN, fontWeight: 700 }}>●</span>
-                        <span>{r.exercise_label ?? "trained"}</span>
-                      </span>
-                    ) : _dash}
+                    display={r.exercise_label
+                      ? <span style={{ color: CUT_OK, fontSize: 11 }}>{r.exercise_label}</span>
+                      : _dash}
                     onSave={(draft) => commit(r.date, "exercise", { text: draft.trim() || null })}
                   />
-                  {numCell(r, "alcohol", (v) => `${fmtInt(v)}`)}
-                  {numCell(r, "weed", (v) => `${fmtInt(v)}`)}
-                  {numCell(r, "vape", (v) => `${fmtInt(v)}`)}
+                  <CutBoolCell editable={editable} on={!!r.alcohol} onToggle={() => commit(r.date, "alcohol", { value: r.alcohol ? null : 1 })} />
+                  <CutBoolCell editable={editable} on={!!r.weed} onToggle={() => commit(r.date, "weed", { value: r.weed ? null : 1 })} />
+                  <CutBoolCell editable={editable} on={!!r.vape} onToggle={() => commit(r.date, "vape", { value: r.vape ? null : 1 })} />
                   <CutCell
                     editable={editable}
-                    align="left"
+                    align="right"
                     rawValue={r.note}
-                    display={r.note ? <span>{r.note}</span> : _dash}
+                    display={r.note
+                      ? <span style={{ fontSize: 10, color: "var(--gooni-muted, #8E8E93)" }}>{r.note}</span>
+                      : <span />}
                     onSave={(draft) => commit(r.date, "note", { text: draft.trim() || null })}
                   />
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-    </SectionShell>
+        )}
+        {rows.length > 7 && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            style={{
+              width: "100%", padding: "8px", border: "none",
+              borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
+              background: "transparent", color: "var(--gooni-muted, #8E8E93)",
+              fontSize: 11, fontFamily: FONT, cursor: "pointer",
+            }}
+          >
+            {expanded ? "show less" : `show ${rows.length - 7} more`}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
 const _cutTh: React.CSSProperties = {
-  fontSize: 10, fontWeight: 700, letterSpacing: 0.4,
-  textTransform: "uppercase", padding: "0 8px 8px 0",
+  fontSize: 10, fontWeight: 500, letterSpacing: 0.2,
+  padding: "8px 6px", whiteSpace: "nowrap",
+  borderBottom: "0.5px solid var(--gooni-border, rgba(0,0,0,0.08))",
 };
-const _cutTd: React.CSSProperties = { padding: "8px 8px 8px 0" };
+const _cutTd: React.CSSProperties = { padding: "5px 6px" };
 
 export function BigStat({
   label, value, sub, delta,

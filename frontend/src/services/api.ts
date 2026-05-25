@@ -1545,6 +1545,28 @@ export async function setCutCell(
   return res.json();
 }
 
+// Cut-table config: limits drive the cell red/green (cal green ≤ limit,
+// protein green ≥ limit); start_date anchors the "Day N" counter.
+export interface CutConfig {
+  calorie_limit: number;
+  protein_limit: number;
+  start_date: string | null; // YYYY-MM-DD
+}
+export async function fetchCutConfig(): Promise<CutConfig> {
+  const res = await apiFetch(`${BASE}/metrics/cut-config`);
+  if (!res.ok) throw new Error("Failed to fetch cut config");
+  return res.json() as Promise<CutConfig>;
+}
+export async function setCutConfig(patch: Partial<CutConfig>): Promise<CutConfig> {
+  const res = await apiFetch(`${BASE}/metrics/cut-config`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to set cut config");
+  return res.json() as Promise<CutConfig>;
+}
+
 // ── Limbo / session review (ambient loop) ──────────────────────────────
 export interface ApiLimboItem {
   id: number;
