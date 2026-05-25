@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.174.0 — 2026-05-25 (minor)
+
+- feat(dashboard): unify habit/promise cards w/ todos + fix tz/timer/calendar bugs (#370)
+
 ## 0.173.0 — 2026-05-24 (minor)
 
 - feat(synth): synthesizer reads limbo items (#343) (#368)
