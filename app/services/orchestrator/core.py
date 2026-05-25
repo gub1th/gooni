@@ -11,7 +11,6 @@ from ..conversation_service import conversation_service
 from ..item_service import item_service
 from ..memory_extraction import extract_signals
 from ..memory_service import memory_service
-from ..list_service import list_service
 from ..trace_builder import TraceBuilder
 from .steps import (
     _run_plan,
@@ -268,8 +267,10 @@ class Orchestrator:
                 }
 
         # ── Unified signal extraction ───────────────────────────────────────
-        # One LLM call per turn surfaces all three signal types (tone
-        # corrections, feature requests, memory candidates).
+        # One LLM call per turn surfaces every signal type: tone corrections,
+        # feature requests, soft promises, todos, done signals, fitness logs,
+        # reply intent, and memory candidates. All routed via intent_router
+        # except memories (reconciled off-thread).
         feedback_ack: str | None = None
         feedback_tools: list[str] = []
         signals_summary: dict = {
@@ -365,19 +366,13 @@ class Orchestrator:
                     prev_assistant_id=prev_assistant.id if prev_assistant is not None else None,
                     on_tool_call=tb.tool_call,
                 )
-                routed = intent_router.dispatch(
-                    {
-                        "tone_corrections": signals["tone_corrections"],
-                        "feature_requests": signals["feature_requests"],
-                        "soft_promises": soft_promises,
-                        "todos": extracted_todos,
-                        "done_signals": signals.get("done_signals", []),
-                        "reply_intent": reply_intent,
-                        # memory_candidates routed separately (off-thread).
-                        "memories": [],
-                    },
-                    ctx,
-                )
+                # Forward the FULL signals dict — never a hand-picked subset.
+                # A subset silently dropped fitness_logs for weeks (extract
+                # emitted them; this call never forwarded them, so fitness.handle
+                # got [] and no DailyMetric ever landed). Any new signal type
+                # extract_signals grows is now routed automatically. `memories`
+                # is the lone exception: reconciled off-thread below, so blank it.
+                routed = intent_router.dispatch({**signals, "memories": []}, ctx)
                 tone_rules.extend(routed.tone_rules)
                 captured_features.extend(routed.captured_features)
                 captured_promises.extend(routed.captured_promises)
