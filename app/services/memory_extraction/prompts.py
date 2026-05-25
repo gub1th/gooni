@@ -155,13 +155,14 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
   ],
   "fitness_logs": [
     {{
-      "log_type":         "food|weight|exercise|macros_explicit",
+      "log_type":         "food|weight|exercise|macros_explicit|substance",
       "raw_text":         "<verbatim slice Daniel logged, e.g. 'chicken rice kimchi, 2 oranges, yogurt w/ blueberries'>",
       "needs_estimation": "true|false — true ONLY for log_type=food when NO calorie/protein numbers were given",
       "metrics":          [{{"metric_type": "calories|protein", "value": 2100, "unit": "kcal|g"}}],
       "weight":           "<number, for log_type=weight only — e.g. 175>",
       "weight_unit":      "lb|kg",
       "exercise_label":   "<for log_type=exercise only — e.g. 'chest and tris'>",
+      "substance":        "<for log_type=substance only — alcohol|weed|vape>",
       "correction":       "true|false — true when Daniel is amending an EARLIER log this day",
       "correction_target":"calories|protein|weight — which metric the correction overwrites"
     }}
@@ -507,6 +508,21 @@ LOG TYPES — pick per entry:
     "pull day" → {{log_type:"exercise", exercise_label:"gym — pull"}}
     "played tennis" → {{log_type:"exercise", exercise_label:"tennis"}}
     "ran 5k this morning" → {{log_type:"exercise", exercise_label:"5k run"}}
+- substance — Daniel used alcohol, weed, or a vape/nicotine. Map to ONE of:
+  alcohol|weed|vape. Read INTENT, not keywords:
+  • alcohol = ALCOHOLIC drinks ONLY (beer/wine/liquor/cocktails/"drinks" out).
+    Water, juice, coffee, soda, energy drinks, protein shakes are NOT alcohol —
+    "drank" alone means nothing; it's WHAT he drank.
+  • weed = cannabis. "smoked salmon"/"smoked brisket" is FOOD, not weed.
+  • vape = nicotine vape/pen/juul. Water "vapor" is not a vape.
+  Slang counts:
+    "smoked last night" / "blazed" / "hit the j" → {{log_type:"substance", substance:"weed"}}
+    "had a few beers" / "got drunk" / "hungover af" → {{log_type:"substance", substance:"alcohol"}}
+    "hit the pen" / "juuled" / "vaped a bunch" → {{log_type:"substance", substance:"vape"}}
+  NOT substance logs (emit nothing for these):
+    "drank a ton of water today", "had a coffee", "smoked salmon for lunch"
+  POSITIVE occurrence only — DON'T log abstinence ("stayed sober", "no weed
+  today"); the absence is the default empty cell. One entry per substance.
 
 CORRECTIONS — Daniel amends an earlier log from the same day:
   "actually that chicken was more like 900 cal"

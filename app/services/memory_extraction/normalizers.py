@@ -229,8 +229,11 @@ def _normalize_done_signals(items: Any) -> list[dict]:
     return out
 
 
-_VALID_FITNESS_LOG_TYPES = ("food", "weight", "exercise", "macros_explicit")
+_VALID_FITNESS_LOG_TYPES = ("food", "weight", "exercise", "macros_explicit", "substance")
 _VALID_METRIC_TYPES = ("calories", "protein")
+# Substance occurrences flip a boolean cut-table column for today (alcohol/
+# weed/vape). DailyMetric only — no Habit; the streak is derived.
+_VALID_SUBSTANCES = ("alcohol", "weed", "vape")
 
 
 def _coerce_bool(v: Any) -> bool:
@@ -301,6 +304,13 @@ def _normalize_fitness(items: Any) -> list[dict]:
         ex_raw = it.get("exercise_label") if log_type == "exercise" else None
         exercise_label = ex_raw.strip()[:120] if isinstance(ex_raw, str) and ex_raw.strip() else None
 
+        sub_raw = it.get("substance") if log_type == "substance" else None
+        substance = (
+            sub_raw.strip().lower()
+            if isinstance(sub_raw, str) and sub_raw.strip().lower() in _VALID_SUBSTANCES
+            else None
+        )
+
         correction = _coerce_bool(it.get("correction"))
         ct_raw = it.get("correction_target")
         correction_target = (
@@ -317,6 +327,8 @@ def _normalize_fitness(items: Any) -> list[dict]:
             continue
         if log_type == "weight" and weight is None:
             continue
+        if log_type == "substance" and substance is None:
+            continue
 
         out.append({
             "log_type": log_type,
@@ -326,6 +338,7 @@ def _normalize_fitness(items: Any) -> list[dict]:
             "weight": weight,
             "weight_unit": weight_unit,
             "exercise_label": exercise_label,
+            "substance": substance,
             "correction": correction,
             "correction_target": correction_target,
         })

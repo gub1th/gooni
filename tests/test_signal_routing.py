@@ -79,6 +79,27 @@ def main() -> int:
     print(f"[fitness] captured_metrics={len(routed.captured_metrics)} "
           f"DailyMetric_rows={n_metrics}")
 
+    # ── substance log → boolean cut-table cell (DailyMetric, no Habit) ──
+    sig = _empty_signals()
+    sig["fitness_logs"] = [
+        {"log_type": "substance", "substance": "weed", "raw_text": "smoked a bit"},
+    ]
+    routed = intent_router.dispatch({**sig, "memories": []},
+                                    intent_router.RouterContext(db=db))
+    from datetime import date as _date
+    from app.services import daily_metric_service as _dms
+    ct = _dms.cut_table(db, _date.today(), _date.today())
+    if not any(m.get("log_type") == "substance" for m in routed.captured_metrics):
+        fails.append("substance: routed.captured_metrics missing substance")
+    if not (ct and ct[0].get("weed") == 1.0):
+        fails.append(f"substance: expected weed=1.0 in cut table, got {ct}")
+    # No Habit row should have been created for the substance.
+    from app.db.models import Habit as _Habit
+    if db.query(_Habit).filter(_Habit.name == "weed").count() != 0:
+        fails.append("substance: a Habit row was created (should be DailyMetric-only)")
+    print(f"[substance] weed_cell={ct[0].get('weed') if ct else None} "
+          f"habit_rows={db.query(_Habit).filter(_Habit.name == 'weed').count()}")
+
     # ── todos → Todo row (a second type, proves it's not fitness-specific) ──
     # Needs OPENAI_API_KEY — the todo handler embeds for cosine-dedup.
     if os.getenv("OPENAI_API_KEY"):
