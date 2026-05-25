@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 import {
   fetchDashboardStats,
   fetchDevActivity,
@@ -9,8 +10,11 @@ import {
   fetchWhoopStatus,
   fetchWhoopToday,
   fetchCutTable,
+  setCutCell,
   parseDevTake,
+  type CutMetricType,
   type CutTable,
+  type CutTableRow,
   type DashboardStats,
   type DevActivity,
   type DevActivityRepo,
@@ -729,9 +733,11 @@ function ActivityTile({
 // ── Atoms ─────────────────────────────────────────────────────────────────
 
 // ── Cut table (fitness/cut pipeline) ───────────────────────────────────
-// Per-day calories/protein/weight/exercise + today's running totals. Data
-// comes from DailyMetric rows Daniel logs via chat ("chicken rice kimchi"
-// → estimated macros). Read-only review surface.
+// Per-day cal/protein/weight/exercise/alcohol/weed/vape/note grid + today's
+// running totals. Data is DailyMetric rows — logged via chat ("chicken rice
+// kimchi" → estimated macros) or typed directly here. `editable` turns each
+// cell into an Excel-style inline input (collapses the day's rows to one
+// value via PUT /metrics/cell); the read-only ambient view (TV) omits it.
 
 function _fmtCutDate(iso: string): string {
   // "2026-05-24" → "May 24". Parse as local-naive to avoid TZ drift.
@@ -741,15 +747,120 @@ function _fmtCutDate(iso: string): string {
   return dt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-export function CutTableSection() {
+const _dash = <span style={{ color: "var(--gooni-faint, #C7C7CC)" }}>—</span>;
+
+// One cut-table cell. Read-only renders `display`; editable turns into an
+// inline input on click that commits on blur/Enter (Escape cancels without
+// saving). The parent maps each metric → {rawValue, display, onSave}, so
+// this stays dumb about metric semantics.
+function _CutCell({
+  editable, align = "right", rawValue, display, onSave,
+}: {
+  editable: boolean;
+  align?: "left" | "right";
+  rawValue: string | number | null;
+  display: React.ReactNode;
+  onSave: (draft: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const cancelled = useRef(false);
+  const td: React.CSSProperties = { ..._cutTd, textAlign: align };
+
+  if (!editable) return <td style={td}>{display}</td>;
+  if (!editing) {
+    return (
+      <td
+        style={{ ...td, cursor: "text" }}
+        title="click to edit"
+        onClick={() => {
+          setDraft(rawValue == null ? "" : String(rawValue));
+          cancelled.current = false;
+          setEditing(true);
+        }}
+      >
+        {display}
+      </td>
+    );
+  }
+  return (
+    <td style={td}>
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          if (cancelled.current) { cancelled.current = false; return; }
+          onSave(draft);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          else if (e.key === "Escape") { cancelled.current = true; e.currentTarget.blur(); }
+        }}
+        style={{
+          width: "100%", boxSizing: "border-box", font: "inherit",
+          fontSize: 13, fontVariantNumeric: "tabular-nums", textAlign: align,
+          border: "1px solid var(--gooni-accent, #534AB7)", borderRadius: 4,
+          padding: "2px 4px", background: "var(--gooni-bg, #fff)",
+          color: "var(--gooni-text, #1C1C1E)", outline: "none",
+        }}
+      />
+    </td>
+  );
+}
+
+export function CutTableSection({ editable = false }: { editable?: boolean } = {}) {
+  // Editable view pulls a wider, gap-filled window so every day is a
+  // clickable row (incl. blanks to fill); read-only/ambient stays compact.
+  const days = editable ? 60 : 30;
+  const queryClient = useQueryClient();
   const { data, isFetching, refetch } = useQuery<CutTable>({
-    queryKey: ["cut-table"],
-    queryFn: () => fetchCutTable(30),
+    queryKey: ["cut-table", { days, fill: editable }],
+    queryFn: () => fetchCutTable(days, editable),
     staleTime: 30_000,
   });
 
+  const save = useMutation({
+    mutationFn: (v: {
+      date: string;
+      mt: CutMetricType;
+      payload: { value?: number | null; text?: string | null };
+    }) => setCutCell(v.date, v.mt, v.payload),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cut-table"] }),
+  });
+  const commit = (
+    date: string,
+    mt: CutMetricType,
+    payload: { value?: number | null; text?: string | null },
+  ) => save.mutate({ date, mt, payload });
+
   const rows = data?.rows ?? [];
   const today = data?.today ?? { calories: 0, protein: 0 };
+
+  // Numeric cell: 0/null both render as blank; empty input clears the cell,
+  // non-numeric input is ignored (reverts).
+  const numCell = (
+    r: CutTableRow,
+    mt: "calories" | "protein" | "weight" | "alcohol" | "weed" | "vape",
+    fmt: (v: number) => string,
+  ) => {
+    const v = r[mt];
+    const has = v != null && v !== 0;
+    return (
+      <_CutCell
+        editable={editable}
+        rawValue={has ? v : null}
+        display={has ? fmt(v) : _dash}
+        onSave={(draft) => {
+          const t = draft.trim();
+          if (t === "") return commit(r.date, mt, { value: null });
+          const n = Number(t);
+          if (!Number.isNaN(n)) commit(r.date, mt, { value: n });
+        }}
+      />
+    );
+  };
 
   return (
     <SectionShell
@@ -789,6 +900,10 @@ export function CutTableSection() {
                 <th style={{ ..._cutTh, textAlign: "right" }}>protein</th>
                 <th style={{ ..._cutTh, textAlign: "right" }}>weight</th>
                 <th style={_cutTh}>exercise</th>
+                <th style={{ ..._cutTh, textAlign: "right" }}>alc</th>
+                <th style={{ ..._cutTh, textAlign: "right" }}>weed</th>
+                <th style={{ ..._cutTh, textAlign: "right" }}>vape</th>
+                <th style={_cutTh}>note</th>
               </tr>
             </thead>
             <tbody>
@@ -798,19 +913,31 @@ export function CutTableSection() {
                   color: "var(--gooni-text, #1C1C1E)",
                 }}>
                   <td style={_cutTd}>{_fmtCutDate(r.date)}</td>
-                  <td style={{ ..._cutTd, textAlign: "right" }}>{r.calories ? fmtInt(r.calories) : "—"}</td>
-                  <td style={{ ..._cutTd, textAlign: "right" }}>{r.protein ? `${fmtInt(r.protein)}g` : "—"}</td>
-                  <td style={{ ..._cutTd, textAlign: "right" }}>{r.weight != null ? `${r.weight}` : "—"}</td>
-                  <td style={_cutTd} title={r.exercise_label ?? undefined}>
-                    {r.exercise ? (
+                  {numCell(r, "calories", (v) => fmtInt(v))}
+                  {numCell(r, "protein", (v) => `${fmtInt(v)}g`)}
+                  {numCell(r, "weight", (v) => `${v}`)}
+                  <_CutCell
+                    editable={editable}
+                    align="left"
+                    rawValue={r.exercise_label}
+                    display={r.exercise ? (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span style={{ color: GREEN, fontWeight: 700 }}>●</span>
                         <span>{r.exercise_label ?? "trained"}</span>
                       </span>
-                    ) : (
-                      <span style={{ color: "var(--gooni-faint, #C7C7CC)" }}>—</span>
-                    )}
-                  </td>
+                    ) : _dash}
+                    onSave={(draft) => commit(r.date, "exercise", { text: draft.trim() || null })}
+                  />
+                  {numCell(r, "alcohol", (v) => `${fmtInt(v)}`)}
+                  {numCell(r, "weed", (v) => `${fmtInt(v)}`)}
+                  {numCell(r, "vape", (v) => `${fmtInt(v)}`)}
+                  <_CutCell
+                    editable={editable}
+                    align="left"
+                    rawValue={r.note}
+                    display={r.note ? <span>{r.note}</span> : _dash}
+                    onSave={(draft) => commit(r.date, "note", { text: draft.trim() || null })}
+                  />
                 </tr>
               ))}
             </tbody>

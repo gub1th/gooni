@@ -40,7 +40,7 @@ export function StatsMode() {
   return (
     <div style={{ fontFamily: FONT, color: "var(--gooni-text, #1C1C1E)" }}>
       <WhoopSection />
-      <CutTableSection />
+      <CutTableSection editable />
       <StreaksSection />
       <DevSection />
       <LeetcodeSection />
