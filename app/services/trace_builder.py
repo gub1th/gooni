@@ -152,20 +152,30 @@ class TraceBuilder:
         )
 
     def extracted_signals(self, message: str, signals: dict) -> None:
-        """`signals` from extract_signals: tone_corrections + feature_requests +
-        memory candidates. Stored as one step instead of fanning out into many
-        tool_call steps so the reviewer can rate the extractor as a unit.
+        """All signal types from extract_signals, in one step so the reviewer
+        rates the extractor as a unit. Covers tone/feature/memory AND the
+        router-routed signals (promises, todos, fitness, done) — without these
+        a dropped promise/fitness log is invisible in the eval UI (the exact
+        blind spot that hid the prod fitness-capture failures).
         """
         tone = signals.get("tone_corrections") or []
         features = signals.get("feature_requests") or []
         memories = signals.get("memories") or []
-        parts = []
-        if tone:
-            parts.append(f"{len(tone)} tone")
-        if features:
-            parts.append(f"{len(features)} feature")
-        if memories:
-            parts.append(f"{len(memories)} memory")
+        promises = signals.get("soft_promises") or []
+        todos = signals.get("todos") or []
+        fitness = signals.get("fitness_logs") or []
+        done = signals.get("done_signals") or []
+        reply_intent = signals.get("reply_intent")
+        counts = {
+            "tone": len(tone),
+            "feature": len(features),
+            "memory": len(memories),
+            "promise": len(promises),
+            "todo": len(todos),
+            "fitness": len(fitness),
+            "done": len(done),
+        }
+        parts = [f"{n} {name}" for name, n in counts.items() if n]
         label = "Extracted signals: " + (", ".join(parts) if parts else "none")
         self.step(
             "extracted_signals",
@@ -175,12 +185,13 @@ class TraceBuilder:
                 "tone_corrections": tone,
                 "feature_requests": features,
                 "memory_candidates": memories,
+                "soft_promises": promises,
+                "todos": todos,
+                "fitness_logs": fitness,
+                "done_signals": done,
+                "reply_intent": reply_intent,
             },
-            meta={
-                "tone_count": len(tone),
-                "feature_count": len(features),
-                "memory_count": len(memories),
-            },
+            meta={f"{name}_count": n for name, n in counts.items()},
         )
 
     def memories_applied(self, applied: dict) -> None:
