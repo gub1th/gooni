@@ -1,7 +1,11 @@
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from ...llm.client import llm_client
+
+if TYPE_CHECKING:
+    from ..intent_router import RouterResult
 
 
 # Above this length, raw note content is summarized before injection so the
@@ -61,21 +65,41 @@ def _build_object_kinds_block() -> str:
 OBJECT_KINDS_BLOCK = _build_object_kinds_block()
 
 
-def _build_ack(
-    *,
-    tone_rules: list[str],
-    captured_features: list[dict],
-    captured_promises: list[dict],
-    captured_todos: list[dict],
-    killed_todos: list[dict] | None = None,
-    completed_todos: list[dict] | None = None,
-    merged_todos: list[dict] | None = None,
-    failed_todo_actions: list[dict] | None = None,
-    edited_todos: list[dict] | None = None,
-    implicit_done_todos: list[dict] | None = None,
-    disambiguation_needed: list[dict] | None = None,
-    captured_metrics: list[dict] | None = None,
-) -> str | None:
+def _summarize_signals(signals: dict, memory_candidates: list) -> dict:
+    """Compact, trace-friendly view of what extract_signals surfaced this
+    turn — the payload returned as usage["signals"] for the eval/debug UI.
+
+    Mirrors the raw extractor output minus the bulky memory-candidate
+    bodies (just the count). Kept in sync with extract_signals' shape; lives
+    here so handle_chat doesn't carry the ~25-line dict literal inline.
+    """
+    return {
+        "tone_corrections": [
+            {
+                "rule": t["rule"],
+                "evidence": t.get("evidence", ""),
+                "anti_pattern": t.get("anti_pattern", ""),
+            }
+            for t in signals.get("tone_corrections", [])
+        ],
+        "feature_requests": [
+            {"title": f["title"], "why": f.get("why", "")}
+            for f in signals.get("feature_requests", [])
+        ],
+        "soft_promises": [
+            {"utterance": p["utterance"], "time_hint": p.get("time_hint")}
+            for p in signals.get("soft_promises", [])
+        ],
+        "todos": [
+            {"text": t["text"], "due_hint": t.get("due_hint")}
+            for t in signals.get("todos", [])
+        ],
+        "reply_intent": signals.get("reply_intent", "answer"),
+        "memory_count": len(memory_candidates),
+    }
+
+
+def _build_ack(routed: "RouterResult") -> str | None:
     """Alfred-voice ack — terse, casual, no clinical receipts.
 
     Contract:
@@ -93,6 +117,23 @@ def _build_ack(
 
     Returns None when no signals fired (caller falls through to LLM).
     """
+    # Unpack the router result into the names the body already uses, so the
+    # rendering logic below is untouched. `routed` is the single source of
+    # truth for what got captured this turn (RouterResult, all-empty-list
+    # defaults — so a no-signal turn renders nothing and returns None).
+    tone_rules = routed.tone_rules
+    captured_features = routed.captured_features
+    captured_promises = routed.captured_promises
+    captured_todos = routed.captured_todos
+    killed_todos = routed.killed_todos
+    completed_todos = routed.completed_todos
+    merged_todos = routed.merged_todos
+    failed_todo_actions = routed.failed_todo_actions
+    edited_todos = routed.edited_todos
+    implicit_done_todos = routed.implicit_done_todos
+    disambiguation_needed = routed.disambiguation_needed
+    captured_metrics = routed.captured_metrics
+
     def _trim(s: str, n: int = 60) -> str:
         s = (s or "").strip()
         return s if len(s) <= n else s[:n].rstrip() + "…"
@@ -769,21 +810,7 @@ def _build_time_block(db) -> str:
     )
 
 
-def _build_just_extracted_block(
-    *,
-    tone_rules: list[str],
-    captured_features: list[dict],
-    captured_promises: list[dict],
-    captured_todos: list[dict],
-    killed_todos: list[dict] | None = None,
-    completed_todos: list[dict] | None = None,
-    merged_todos: list[dict] | None = None,
-    failed_todo_actions: list[dict] | None = None,
-    edited_todos: list[dict] | None = None,
-    implicit_done_todos: list[dict] | None = None,
-    disambiguation_needed: list[dict] | None = None,
-    captured_metrics: list[dict] | None = None,
-) -> str:
+def _build_just_extracted_block(routed: "RouterResult") -> str:
     """Tells the LLM what already got routed this turn. Without this the
     LLM either re-announces ("Logged feature request:…") or doesn't know
     its work was redundant. Used as injected master-prompt context.
@@ -792,6 +819,20 @@ def _build_just_extracted_block(
     without an id this turn" rule has something concrete to cite. Every
     kind+id pair printed here is a write the LLM is licensed to confirm.
     """
+    # See _build_ack — unpack so the rendering body below stays as-is.
+    tone_rules = routed.tone_rules
+    captured_features = routed.captured_features
+    captured_promises = routed.captured_promises
+    captured_todos = routed.captured_todos
+    killed_todos = routed.killed_todos
+    completed_todos = routed.completed_todos
+    merged_todos = routed.merged_todos
+    failed_todo_actions = routed.failed_todo_actions
+    edited_todos = routed.edited_todos
+    implicit_done_todos = routed.implicit_done_todos
+    disambiguation_needed = routed.disambiguation_needed
+    captured_metrics = routed.captured_metrics
+
     lines: list[str] = []
     if tone_rules:
         lines.append(f"- {len(tone_rules)} tone rule(s) logged")
