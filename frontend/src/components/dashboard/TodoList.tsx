@@ -14,6 +14,7 @@ import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 import { TodoEditModal } from "./TodoEditModal";
 import { TodoChainView } from "./TodoChainView";
 import { color as ctok, FONT } from "../../ui";
+import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 
 // TodoList — dashboard todos block. Mockup-aligned shape:
 //
@@ -34,6 +35,15 @@ const AGE_TINTS = {
   today:     { bg: "#E1F5EE", fg: "#085041" },
   yesterday: { bg: "#FAEEDA", fg: "#854F0B" },
   stale:     { bg: "#FCEBEB", fg: "#791F1F" },
+} as const;
+
+// Dark variants: the light tints pair pale bg with DARK text, which is
+// invisible on a dark card. Flip to a translucent tint + bright text so
+// the green/amber/red semantic survives the theme.
+const AGE_TINTS_DARK = {
+  today:     { bg: "rgba(34,197,94,0.16)",  fg: "#4ADE80" },
+  yesterday: { bg: "rgba(245,158,11,0.16)", fg: "#FBBF24" },
+  stale:     { bg: "rgba(239,68,68,0.16)",  fg: "#F87171" },
 } as const;
 
 interface Props {
@@ -352,7 +362,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           100% { opacity: 0; transform: translateX(36px) scaleX(0.8); }
         }
         .gooni-todo-row { transition: background 0.12s; position: relative; }
-        .gooni-todo-row:hover { background: rgba(0,0,0,0.025); }
+        .gooni-todo-row:hover { background: var(--gooni-hover, rgba(0,0,0,0.025)); }
         .gooni-todo-cascade {
           animation: gooni-todo-fade-out 700ms cubic-bezier(0.4, 0.0, 0.2, 1) forwards;
           pointer-events: none;
@@ -555,7 +565,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           padding: "10px 16px",
           display: "flex", alignItems: "center", gap: 12,
           opacity: creating ? 1 : 0.55,
-          borderBottom: "0.5px solid rgba(0,0,0,0.06)",
+          borderBottom: "0.5px solid var(--gooni-border, rgba(0,0,0,0.06))",
           cursor: "text",
           marginTop: 2,
         }}
@@ -589,7 +599,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
         <span style={{
           fontSize: 11,
           color: "var(--gooni-muted, #9CA3AF)",
-          background: "rgba(0,0,0,0.05)",
+          background: "var(--gooni-hover, rgba(0,0,0,0.05))",
           padding: "2px 8px", borderRadius: 99,
         }}>
           todo
@@ -911,7 +921,7 @@ function TodoRow({
       onClick={hasChain ? () => onOpenChain(t.id) : undefined}
       style={{
         position: "relative",
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         border: "0.5px solid var(--gooni-border, rgba(155,130,70,0.15))",
         borderRadius: 8,
         padding: "10px 16px",
@@ -1181,7 +1191,8 @@ function OrphanLinkHint({
 // ── Age pill ─────────────────────────────────────────────────────────────
 
 function AgePill({ age }: { age: { label: string; tint: keyof typeof AGE_TINTS } }) {
-  const { bg, fg } = AGE_TINTS[age.tint];
+  const isDark = useGooniThemeStore((s) => s.theme === "dark");
+  const { bg, fg } = (isDark ? AGE_TINTS_DARK : AGE_TINTS)[age.tint];
   const showWarn = age.tint === "stale";
   return (
     <span style={{
@@ -1246,7 +1257,7 @@ function Checkbox({ state, onClick, size = "md" }: {
     <span onClick={onClick} style={{
       ...common,
       background: "transparent",
-      border: "1.5px solid rgba(0,0,0,0.22)",
+      border: "1.5px solid var(--gooni-faint, rgba(0,0,0,0.22))",
     }} />
   );
 }
@@ -1265,8 +1276,8 @@ function StatePicker({ current, onPick, onClose }: {
       }} />
       <div style={{
         position: "absolute", right: 8, top: "100%", marginTop: 4, zIndex: 51,
-        background: "#fff",
-        border: "1px solid rgba(0,0,0,0.10)",
+        background: "var(--gooni-card, #fff)",
+        border: "1px solid var(--gooni-border, rgba(0,0,0,0.10))",
         borderRadius: 8,
         boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
         padding: 4, display: "flex", gap: 4,
@@ -1277,7 +1288,7 @@ function StatePicker({ current, onPick, onClose }: {
             key={s}
             onClick={() => onPick(s)}
             style={{
-              border: "none", background: s === current ? "#F3F4F6" : "transparent",
+              border: "none", background: s === current ? "var(--gooni-hover, #F3F4F6)" : "transparent",
               padding: "4px 8px", fontSize: 11, borderRadius: 6,
               cursor: "pointer", color: ctok.text, textTransform: "capitalize",
             }}
@@ -1463,7 +1474,7 @@ function CloseInlineFlow({
         padding: "10px 16px",
         display: "flex", alignItems: "center", gap: 10,
         borderBottom: "0.5px solid rgba(155,130,70,0.15)",
-        background: "rgba(243,238,220,0.40)",
+        background: "var(--gooni-hover, rgba(243,238,220,0.40))",
       }}>
         <span style={{
           width: 17, height: 17, borderRadius: "50%",
@@ -1477,13 +1488,13 @@ function CloseInlineFlow({
           textDecoration: "line-through",
           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
         }}>{todo.text}</span>
-        <span style={{ fontSize: 11, color: "#A89D80" }}>closing…</span>
+        <span style={{ fontSize: 11, color: "var(--gooni-faint, #A89D80)" }}>closing…</span>
       </div>
 
       {/* Body */}
       <div style={{ padding: "12px 16px" }}>
         <div style={{
-          fontSize: 11, color: "#8A8270", marginBottom: 6, letterSpacing: 0.02,
+          fontSize: 11, color: "var(--gooni-muted, #8A8270)", marginBottom: 6, letterSpacing: 0.02,
         }}>
           what happened?
         </div>
@@ -1511,9 +1522,9 @@ function CloseInlineFlow({
         />
 
         <div style={{
-          fontSize: 11, color: "#8A8270", marginBottom: 8,
+          fontSize: 11, color: "var(--gooni-muted, #8A8270)", marginBottom: 8,
         }}>
-          next steps <span style={{ color: "#A89D80" }}>· enter adds another</span>
+          next steps <span style={{ color: "var(--gooni-faint, #A89D80)" }}>· enter adds another</span>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
           {spawnList.map((text, i) => (
@@ -1538,7 +1549,7 @@ function CloseInlineFlow({
                 aria-label="remove spawn"
                 style={{
                   border: "none", background: "transparent",
-                  color: "#A89D80", cursor: "pointer", padding: 2,
+                  color: "var(--gooni-faint, #A89D80)", cursor: "pointer", padding: 2,
                   display: "flex",
                 }}
               >
@@ -1552,7 +1563,7 @@ function CloseInlineFlow({
             border: "0.5px dashed rgba(155,130,70,0.30)",
             borderRadius: 7,
           }}>
-            <Plus size={12} color="#A89D80" />
+            <Plus size={12} color="var(--gooni-faint, #A89D80)" />
             <input
               type="text"
               value={draftSpawn}
@@ -1584,14 +1595,14 @@ function CloseInlineFlow({
             onClick={onCancel}
             style={{
               border: "none", background: "transparent",
-              color: "#A89D80", cursor: "pointer", fontSize: 11,
+              color: "var(--gooni-faint, #A89D80)", cursor: "pointer", fontSize: 11,
               padding: "4px 6px", fontFamily: FONT,
             }}
           >
             esc to cancel
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 10, color: "#A89D80" }}>⌘↵</span>
+            <span style={{ fontSize: 10, color: "var(--gooni-faint, #A89D80)" }}>⌘↵</span>
             <button
               type="button"
               onClick={handleSubmit}
