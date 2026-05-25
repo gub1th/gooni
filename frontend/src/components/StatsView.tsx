@@ -753,7 +753,7 @@ const _dash = <span style={{ color: "var(--gooni-faint, #C7C7CC)" }}>—</span>;
 // inline input on click that commits on blur/Enter (Escape cancels without
 // saving). The parent maps each metric → {rawValue, display, onSave}, so
 // this stays dumb about metric semantics.
-function _CutCell({
+function CutCell({
   editable, align = "right", rawValue, display, onSave,
 }: {
   editable: boolean;
@@ -848,7 +848,7 @@ export function CutTableSection({ editable = false }: { editable?: boolean } = {
     const v = r[mt];
     const has = v != null && v !== 0;
     return (
-      <_CutCell
+      <CutCell
         editable={editable}
         rawValue={has ? v : null}
         display={has ? fmt(v) : _dash}
@@ -916,7 +916,7 @@ export function CutTableSection({ editable = false }: { editable?: boolean } = {
                   {numCell(r, "calories", (v) => fmtInt(v))}
                   {numCell(r, "protein", (v) => `${fmtInt(v)}g`)}
                   {numCell(r, "weight", (v) => `${v}`)}
-                  <_CutCell
+                  <CutCell
                     editable={editable}
                     align="left"
                     rawValue={r.exercise_label}
@@ -931,7 +931,7 @@ export function CutTableSection({ editable = false }: { editable?: boolean } = {
                   {numCell(r, "alcohol", (v) => `${fmtInt(v)}`)}
                   {numCell(r, "weed", (v) => `${fmtInt(v)}`)}
                   {numCell(r, "vape", (v) => `${fmtInt(v)}`)}
-                  <_CutCell
+                  <CutCell
                     editable={editable}
                     align="left"
                     rawValue={r.note}
