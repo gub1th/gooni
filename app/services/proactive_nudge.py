@@ -66,10 +66,12 @@ def _send_wa(text: str) -> bool:
         return False
 
 
-def _active_signal_within(db: Session, minutes: int) -> bool:
-    """True if Daniel has done anything Gooni can observe in the last
-    `minutes` minutes. Combines: chat message, claude code turn,
-    note write. Each check is independent so one broken table can't
+def _detect_active_signal(db: Session, minutes: int) -> str | None:
+    """Return which signal proves Daniel's active in the last `minutes`
+    minutes, or None. Kinds: 'chat' (user message), 'claude' (claude code
+    turn), 'note' (note write). First hit wins (chat → claude → note);
+    the sleep nudge cites this so Gooni can name *why* it pinged instead
+    of guessing. Each check is independent so one broken table can't
     silence the whole signal."""
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
     try:
@@ -80,7 +82,7 @@ def _active_signal_within(db: Session, minutes: int) -> bool:
             .first()
         )
         if msg:
-            return True
+            return "chat"
     except Exception as e:
         print(f"[proactive_nudge] msg signal check failed: {e}")
     try:
@@ -90,7 +92,7 @@ def _active_signal_within(db: Session, minutes: int) -> bool:
             .first()
         )
         if turn:
-            return True
+            return "claude"
     except Exception as e:
         print(f"[proactive_nudge] claude turn signal check failed: {e}")
     try:
@@ -100,10 +102,10 @@ def _active_signal_within(db: Session, minutes: int) -> bool:
             .first()
         )
         if note:
-            return True
+            return "note"
     except Exception as e:
         print(f"[proactive_nudge] note signal check failed: {e}")
-    return False
+    return None
 
 
 # ── Whoop nudge ─────────────────────────────────────────────────────
@@ -284,14 +286,17 @@ def _local_now(s: SettingsModel | None) -> datetime:
     return datetime.now(ZoneInfo(tz_name))
 
 
-def _compose_sleep_message(now: datetime) -> str:
-    """Alfred-voice ping for late-night activity. Deliberately concrete —
-    references the actual hour so the ping reads grounded, not robotic."""
+def _compose_sleep_message(now: datetime, signal: str) -> str:
+    """Alfred-voice ping for late-night activity. Names the actual signal
+    (`chat`|`claude`|`note`) so the ping reads grounded, not robotic — and
+    so Gooni can answer 'why now' truthfully if asked."""
     hh = now.strftime("%I:%M %p").lstrip("0").lower()
-    return (
-        f"{hh}, sir. you're still up. fix the sleep sched or own the choice — "
-        "but don't pretend tomorrow won't pay for it."
-    )
+    if signal == "claude":
+        return f"{hh}, sir. claude code's still open. stop being retarded and sleep."
+    if signal == "note":
+        return f"{hh} and you're still in the notes, sir. stop being retarded, sleep."
+    # 'chat' (or any fallback) — the message itself is the evidence
+    return f"{hh}, sir. you're still up. stop being retarded and crash."
 
 
 def maybe_fire_sleep_nudge(db: Session) -> bool:
@@ -329,10 +334,11 @@ def maybe_fire_sleep_nudge(db: Session) -> bool:
 
         if s and s.last_sleep_nudge_day == night_key:
             return False
-        if not _active_signal_within(db, minutes=15):
+        signal = _detect_active_signal(db, minutes=15)
+        if signal is None:
             return False
 
-        message = _compose_sleep_message(now_local)
+        message = _compose_sleep_message(now_local, signal)
         if not _send_wa(message):
             return False
 
