@@ -420,6 +420,12 @@ def _build_ack(routed: "RouterResult") -> str | None:
         if exercise is not None:
             label = _trim(exercise.get("exercise_label") or "")
             parts.append(f"trained, sir — {label}." if label else "trained, sir.")
+        substances = [m.get("substance") for m in captured_metrics if m.get("log_type") == "substance"]
+        substances = [s for s in dict.fromkeys(substances) if s]  # dedupe, keep order
+        if substances:
+            # Terse, named (anti-hallucination: confirm the specific capture).
+            # Persona adds any said-vs-done jab; the ack just marks it down.
+            parts.append(f"marked down — {', '.join(substances)}, sir.")
 
     if not parts:
         return None
@@ -987,6 +993,8 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
         elif lt == "exercise":
             label = m.get("exercise_label") or ""
             lines.append(f"- DailyMetric logged: exercise \"{label}\" (+ exercise HabitEntry)")
+        elif lt == "substance":
+            lines.append(f"- DailyMetric logged: {m.get('substance')} = true today (cut-table boolean)")
     if not lines:
         return ""
     return (

@@ -36,6 +36,8 @@ def handle(items: list[dict], ctx, result) -> None:
                 logged_any = _handle_weight(ctx, result, entry, daily_metric_service) or logged_any
             elif log_type == "exercise":
                 logged_any = _handle_exercise(ctx, result, entry, daily_metric_service, habit_service) or logged_any
+            elif log_type == "substance":
+                logged_any = _handle_substance(ctx, result, entry, daily_metric_service) or logged_any
         except Exception as e:
             print(f"[fitness handler] entry error ({log_type}): {e}")
             continue
@@ -113,6 +115,25 @@ def _handle_macros(ctx, result, entry, dms) -> bool:
             "correction": correction,
         })
     return wrote
+
+
+_VALID_SUBSTANCES = ("alcohol", "weed", "vape")
+
+
+def _handle_substance(ctx, result, entry, dms) -> bool:
+    """Substance occurrence ("i smoked", "had a few beers", "hit the pen")
+    → flip TODAY's DailyMetric boolean (the cut-table column). set_cell
+    collapses the (date, type), so saying it twice in a day stays one row
+    (it's a boolean — no double-count). DailyMetric ONLY: no Habit row; a
+    "days clean" streak is DERIVED from row history if/when surfaced.
+    Positive occurrences only — we don't log "stayed sober" (absence is the
+    default empty cell)."""
+    sub = (entry.get("substance") or "").strip().lower()
+    if sub not in _VALID_SUBSTANCES:
+        return False
+    dms.set_cell(ctx.db, _date.today(), sub, value=1.0, notes=entry.get("raw_text") or None)
+    result.captured_metrics.append({"log_type": "substance", "substance": sub})
+    return True
 
 
 def _handle_weight(ctx, result, entry, dms) -> bool:
