@@ -20,9 +20,20 @@ from sqlalchemy.orm import Session
 from ..db.models import DailyMetric
 
 
-# Metric types that sum within a day (vs weight = last-write-wins,
-# exercise = presence). Used by running_total + cut_table.
+# Metric types that sum within a day. Used by running_total + cut_table.
 _ADDITIVE_TYPES = ("calories", "protein")
+# Numeric types where the newest row wins (vs additive). Weight is a
+# weigh-in; alcohol/weed/vape are per-day counts the cut-table cell edit
+# sets directly (chat doesn't log them, so "newest wins" == "the value
+# you typed"). Substance streaks ("N days no weed") are derivable from
+# row history later — no Habit needed; keeps the cut table one system.
+_LAST_VALUE_TYPES = ("weight", "alcohol", "weed", "vape")
+# `note` = freeform per-day annotation (newest text wins). `exercise` =
+# presence sentinel + label. Full set of columns the cut table renders.
+_CELL_TYPES = (
+    "calories", "protein", "weight", "exercise",
+    "alcohol", "weed", "vape", "note",
+)
 
 
 def log(
@@ -96,14 +107,68 @@ def update_most_recent(
     return row
 
 
-def cut_table(db: Session, start: _date, end: _date) -> list[dict]:
+def set_cell(
+    db: Session,
+    day: _date,
+    metric_type: str,
+    value: float | None = None,
+    unit: str | None = None,
+    notes: str | None = None,
+) -> DailyMetric | None:
+    """Excel-style cell edit / backfill: collapse a (day, metric_type) to a
+    single canonical row.
+
+    Deletes any existing rows for that day+type, then inserts ONE row with
+    the given value/notes. Returns the row, or None when the cell is cleared
+    (value is None AND notes empty → delete only). Distinct from log(), which
+    is additive (chat logging multiple foods sums them): this is the manual
+    override path, so it's naturally idempotent — re-running a backfill sets
+    the same value rather than stacking duplicate rows.
+    """
+    db.query(DailyMetric).filter(
+        DailyMetric.date == day,
+        DailyMetric.metric_type == metric_type,
+    ).delete(synchronize_session=False)
+    cleared = value is None and not (notes and notes.strip())
+    if cleared:
+        db.commit()
+        return None
+    row = DailyMetric(
+        metric_type=metric_type,
+        value=float(value or 0.0),
+        unit=unit,
+        date=day,
+        notes=(notes.strip() if notes else None),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def _empty_bucket() -> dict:
+    return {
+        "calories": 0.0, "protein": 0.0, "weight": None,
+        "exercise": False, "exercise_label": None,
+        "alcohol": None, "weed": None, "vape": None, "note": None,
+    }
+
+
+def cut_table(
+    db: Session, start: _date, end: _date, fill_gaps: bool = False,
+) -> list[dict]:
     """Per-day aggregation over [start, end] inclusive, newest first.
 
-    calories/protein = SUM; weight = the day's most-recent value;
-    exercise = whether any exercise row exists that day (+ its label).
-    The window is bounded (default 30 days) so pulling all rows and
-    folding in Python is cheap and keeps the weight "last value" logic
-    simple (no window-function gymnastics across SQLite).
+    calories/protein = SUM; weight/alcohol/weed/vape = the day's most-recent
+    value; exercise = whether any exercise row exists that day (+ its label);
+    note = the day's most-recent freeform text. The window is bounded
+    (default 30 days) so pulling all rows and folding in Python is cheap and
+    keeps the "last value" logic simple (no window-function gymnastics).
+
+    `fill_gaps=True` emits an empty row for every day in the window that has
+    no data — the continuous grid the editable dashboard view needs so blank
+    days are clickable. The read-only/ambient view leaves it False so it
+    stays compact (only days with data).
     """
     rows = (
         db.query(DailyMetric)
@@ -112,23 +177,24 @@ def cut_table(db: Session, start: _date, end: _date) -> list[dict]:
         .all()
     )
     by_day: dict[_date, dict] = {}
+    if fill_gaps:
+        d = start
+        while d <= end:
+            by_day[d] = _empty_bucket()
+            d += timedelta(days=1)
     for r in rows:
-        bucket = by_day.setdefault(
-            r.date,
-            {"calories": 0.0, "protein": 0.0, "weight": None,
-             "exercise": False, "exercise_label": None},
-        )
-        if r.metric_type == "calories":
-            bucket["calories"] += float(r.value or 0)
-        elif r.metric_type == "protein":
-            bucket["protein"] += float(r.value or 0)
-        elif r.metric_type == "weight":
+        bucket = by_day.setdefault(r.date, _empty_bucket())
+        if r.metric_type in _ADDITIVE_TYPES:
+            bucket[r.metric_type] += float(r.value or 0)
+        elif r.metric_type in _LAST_VALUE_TYPES:
             # rows are asc by created_at, so the last seen wins.
-            bucket["weight"] = float(r.value or 0)
+            bucket[r.metric_type] = float(r.value or 0)
         elif r.metric_type == "exercise":
             bucket["exercise"] = True
             if r.notes:
                 bucket["exercise_label"] = r.notes
+        elif r.metric_type == "note":
+            bucket["note"] = r.notes
 
     out: list[dict] = []
     for d in sorted(by_day.keys(), reverse=True):
@@ -140,6 +206,10 @@ def cut_table(db: Session, start: _date, end: _date) -> list[dict]:
             "weight": b["weight"],
             "exercise": b["exercise"],
             "exercise_label": b["exercise_label"],
+            "alcohol": b["alcohol"],
+            "weed": b["weed"],
+            "vape": b["vape"],
+            "note": b["note"],
         })
     return out
 

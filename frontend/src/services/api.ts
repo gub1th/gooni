@@ -1506,16 +1506,43 @@ export interface CutTableRow {
   weight: number | null;    // last weigh-in that day, null if none
   exercise: boolean;
   exercise_label: string | null;
+  alcohol: number | null;   // per-day count, null if none
+  weed: number | null;
+  vape: number | null;
+  note: string | null;      // freeform per-day annotation
 }
 export interface CutTable {
   rows: CutTableRow[];      // newest day first
   today: { calories: number; protein: number };
   updated_at?: string;
 }
-export async function fetchCutTable(days = 30): Promise<CutTable> {
-  const res = await apiFetch(`${BASE}/metrics/cut-table?days=${days}`);
+// `fill=true` returns an empty row for every day in the window (continuous
+// grid for the editable dashboard view); false keeps only days with data.
+export async function fetchCutTable(days = 30, fill = false): Promise<CutTable> {
+  const res = await apiFetch(`${BASE}/metrics/cut-table?days=${days}&fill=${fill}`);
   if (!res.ok) throw new Error("Failed to fetch cut table");
   return res.json() as Promise<CutTable>;
+}
+
+// Numeric cut-table cells (cal/protein/weight/alcohol/weed/vape) send
+// `value`; text cells (exercise label, note) send `text`. Passing both
+// null clears the cell. Collapses the (date, metric_type) to one row
+// server-side, so it's idempotent.
+export type CutMetricType =
+  | "calories" | "protein" | "weight"
+  | "alcohol" | "weed" | "vape" | "exercise" | "note";
+export async function setCutCell(
+  date: string,
+  metricType: CutMetricType,
+  payload: { value?: number | null; text?: string | null },
+): Promise<{ cleared: boolean; row: unknown }> {
+  const res = await apiFetch(`${BASE}/metrics/cell`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ date, metric_type: metricType, ...payload }),
+  });
+  if (!res.ok) throw new Error("Failed to set cut cell");
+  return res.json();
 }
 
 // ── Limbo / session review (ambient loop) ──────────────────────────────
