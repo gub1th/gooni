@@ -29,7 +29,7 @@ export function AttachmentNodeView({ node, selected }: NodeViewProps) {
         borderRadius: 10,
         padding: 10,
         margin: "10px 0",
-        background: "#FAFAFA",
+        background: ctok.bg,
         cursor: "pointer",
         transition: "background 120ms, border-color 120ms",
         userSelect: "none",

@@ -4,7 +4,7 @@ import { color as ctok } from "../ui";
 
 const btn: React.CSSProperties = {
   fontSize: 11, padding: "3px 8px", borderRadius: 6,
-  border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
+  border: "1px solid rgba(0,0,0,0.1)", background: "var(--gooni-card, #fff)",
   cursor: "pointer", color: ctok.text, fontWeight: 500,
   fontFamily: "'Inter', -apple-system, sans-serif",
 };
@@ -63,7 +63,7 @@ export function RepoPicker() {
           placeholder="filter repos…"
           style={{
             flex: 1, fontSize: 11.5, padding: "4px 8px", borderRadius: 6,
-            border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
+            border: "1px solid rgba(0,0,0,0.1)", background: "var(--gooni-card, #fff)",
             fontFamily: "'Inter', -apple-system, sans-serif",
           }}
         />
@@ -77,7 +77,7 @@ export function RepoPicker() {
         // panel compact instead of letting one repo list dominate the modal.
         maxHeight: 132, overflowY: "auto",
         border: "1px solid rgba(0,0,0,0.06)", borderRadius: 8,
-        background: "#fff",
+        background: "var(--gooni-card, #fff)",
       }}>
         {repos === null && loading ? (
           <div style={{ padding: 10, fontSize: 11.5, color: ctok.muted }}>loading…</div>

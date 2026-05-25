@@ -46,7 +46,7 @@ const sidebarFooterBtn: React.CSSProperties = {
   borderRadius: 6,
   border: "none",
   background: "transparent",
-  color: "#3C3C43",
+  color: "var(--gooni-text, #3C3C43)",
   fontSize: 11,
   fontWeight: 500,
   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -90,7 +90,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
             style={{
               width: 32, height: 32, borderRadius: 6,
               border: `1px solid ${pickerOpen ? "rgba(0,0,0,0.18)" : "rgba(0,0,0,0.1)"}`,
-              background: "#F2F2F7", cursor: "pointer",
+              background: ctok.hover, cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center",
               flexShrink: 0, outline: "none", transition: "border-color 0.1s",
             }}
@@ -134,7 +134,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
                     border: "none", borderRadius: 6, cursor: "pointer",
                     height: 28, padding: 0,
                     display: "flex", alignItems: "center", justifyContent: "center",
-                    color: selected ? "#0F172A" : "#475569",
+                    color: selected ? "var(--gooni-text, #0F172A)" : "var(--gooni-muted, #475569)",
                     transition: "background 0.1s, color 0.1s",
                   }}
                   onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.04)"; }}
@@ -161,7 +161,7 @@ function SpacePopover({ anchor, name, emoji, onNameChange, onEmojiChange, onSave
           <button
             onClick={onSave}
             style={{
-              fontSize: 12, background: ctok.text, color: "#fff",
+              fontSize: 12, background: ctok.text, color: ctok.card,
               border: "none", borderRadius: 6, cursor: "pointer",
               padding: "4px 12px", fontWeight: 500,
             }}
@@ -806,7 +806,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               <button
                 onClick={onCompose}
                 title="New note"
-                style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
+                style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gooni-text, #3C3C43)", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
                 onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
               >
@@ -817,7 +817,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
               <button
                 onClick={onClose}
                 title="Close sidebar"
-                style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
+                style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gooni-text, #3C3C43)", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
                 onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
               >

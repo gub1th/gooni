@@ -83,7 +83,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               border: "none",
               cursor: "pointer",
               padding: "2px 0",
-              color: "#6B7280",
+              color: "var(--gooni-muted, #6B7280)",
               fontSize: 12.5,
               fontFamily: FONT,
               fontWeight: 500,
@@ -165,7 +165,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
             >
               <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
                 <span style={{ color: ctok.faint, fontSize: 13, marginTop: 1 }}>⊙</span>
-                <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{message.intention}</span>
+                <span style={{ fontSize: 12.5, color: "var(--gooni-muted, #636366)", lineHeight: 1.5 }}>{message.intention}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>
@@ -205,7 +205,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 border: "1px solid rgba(0,0,0,0.07)",
                 fontFamily: FONT,
                 fontSize: 12.5,
-                color: "#636366",
+                color: "var(--gooni-muted, #636366)",
                 lineHeight: 1.5,
               }}
             >
@@ -247,7 +247,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           maxWidth: "80%",
           padding: "10px 14px",
           borderRadius: isUser ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-          background: isUser ? ctok.text : "#F2F2F7",
+          background: isUser ? ctok.text : ctok.hover,
           color: isUser ? "#FFFFFF" : ctok.text,
           fontSize: 14,
           fontFamily: FONT,
@@ -400,7 +400,7 @@ function TraceStep({ step }: { step: MessageTraceStep }) {
         <div
           style={{
             marginLeft: 22,
-            fontSize: 12, color: "#636366", lineHeight: 1.5,
+            fontSize: 12, color: "var(--gooni-muted, #636366)", lineHeight: 1.5,
             background: "rgba(0,0,0,0.03)",
             padding: "6px 10px", borderRadius: 6,
             wordBreak: "break-word",

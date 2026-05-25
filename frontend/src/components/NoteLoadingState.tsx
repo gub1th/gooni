@@ -46,7 +46,7 @@ export function NoteLoadingState({ hideMeta, bodySlot }: NoteLoadingStateProps) 
             <span
               style={{
                 fontSize: 13,
-                color: "#9b9b9b",
+                color: "var(--gooni-muted, #9b9b9b)",
                 fontFamily: FONT,
                 animation: "nls-fade 2.5s ease-in-out infinite",
               }}

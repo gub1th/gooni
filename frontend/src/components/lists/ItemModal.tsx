@@ -168,7 +168,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, onSetPri
         aria-modal="true"
         style={{
           width: "min(560px, 100%)",
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           borderRadius: 14,
           boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
           fontFamily: FONT,
@@ -232,7 +232,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, onSetPri
               display: "inline-flex", alignItems: "center", gap: 6,
               padding: "4px 10px", borderRadius: 999,
               border: "1px solid rgba(0,0,0,0.10)",
-              background: "#F5F5F7", color: "#3C3C43",
+              background: "var(--gooni-card, #F5F5F7)", color: "var(--gooni-text, #3C3C43)",
               fontFamily: FONT, fontSize: 11.5, fontWeight: 500,
               cursor: "pointer",
               marginBottom: 12,
@@ -253,8 +253,8 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, onSetPri
           style={{
             width: "100%", boxSizing: "border-box",
             border: "none", outline: "none",
-            fontSize: 14, color: "#3C3C43",
-            background: "#F9FAFB",
+            fontSize: 14, color: "var(--gooni-text, #3C3C43)",
+            background: "var(--gooni-card, #F9FAFB)",
             padding: 12,
             borderRadius: 8,
             resize: "vertical",
@@ -277,7 +277,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, onSetPri
                       style={{
                         padding: "6px 12px", borderRadius: 999,
                         border: boardStatus === s ? "1px solid #1C1C1E" : "1px solid #E5E7EB",
-                        background: boardStatus === s ? ctok.text : "#FFFFFF",
+                        background: boardStatus === s ? ctok.text : "var(--gooni-card, #FFFFFF)",
                         color: boardStatus === s ? "#FFFFFF" : "#3C3C43",
                         fontFamily: FONT, fontSize: 12, fontWeight: 500,
                         cursor: "pointer",
@@ -317,7 +317,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, onSetPri
                       padding: "8px 12px", borderRadius: 8,
                       border: primary ? "1px solid #1C1C1E" : "1px solid #E5E7EB",
                       background: primary ? "rgba(15,23,42,0.05)" : "#FFFFFF",
-                      color: primary ? "#0F172A" : "#3C3C43",
+                      color: primary ? "var(--gooni-text, #0F172A)" : "var(--gooni-muted, #3C3C43)",
                       fontFamily: FONT, fontSize: 13, fontWeight: 500, cursor: "pointer",
                     }}
                   >
@@ -390,7 +390,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, onSetPri
                 <button
                   onClick={() => setConfirmDelete(false)}
                   style={{
-                    border: "none", background: "transparent", color: "#6B7280",
+                    border: "none", background: "transparent", color: "var(--gooni-muted, #6B7280)",
                     fontFamily: FONT, fontSize: 12, padding: "6px 8px", borderRadius: 6, cursor: "pointer",
                   }}
                 >
@@ -413,7 +413,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, onSetPri
             <button
               onClick={onClose}
               style={{
-                border: "1px solid #E5E7EB", background: "#FFFFFF", color: ctok.text,
+                border: "1px solid #E5E7EB", background: "var(--gooni-card, #FFFFFF)", color: ctok.text,
                 fontFamily: FONT, fontSize: 13, fontWeight: 500,
                 padding: "8px 14px", borderRadius: 8, cursor: "pointer",
               }}
@@ -461,7 +461,7 @@ function ToggleRow({
         }}
       >
         <div style={{
-          width: 18, height: 18, borderRadius: 999, background: "#FFFFFF",
+          width: 18, height: 18, borderRadius: 999, background: "var(--gooni-card, #FFFFFF)",
           transform: value ? "translateX(16px)" : "translateX(0)",
           transition: "transform 140ms cubic-bezier(0.22, 1, 0.36, 1)",
           boxShadow: "0 1px 3px rgba(0,0,0,0.2)",

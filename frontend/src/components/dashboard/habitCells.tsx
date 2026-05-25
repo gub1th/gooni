@@ -82,7 +82,7 @@ export function HabitWeekStrip({
                 textAlign: "center",
                 fontSize: 9,
                 fontWeight: isToday ? 700 : 500,
-                color: isToday ? "#0F172A" : "#94A3B8",
+                color: isToday ? "var(--gooni-text, #0F172A)" : "var(--gooni-muted, #94A3B8)",
                 letterSpacing: 0.3,
               }}
             >

@@ -50,7 +50,7 @@ export const NoteMentionMenu = forwardRef<NoteMentionMenuRef, NoteMentionMenuPro
     return (
       <div
         style={{
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           borderRadius: 10,
           padding: 6,
           minWidth: 260,
@@ -61,9 +61,9 @@ export const NoteMentionMenu = forwardRef<NoteMentionMenuRef, NoteMentionMenuPro
         }}
       >
         {loading && items.length === 0 ? (
-          <div style={{ padding: "10px 12px", fontSize: 13, color: "#94A3B8" }}>Searching…</div>
+          <div style={{ padding: "10px 12px", fontSize: 13, color: "var(--gooni-faint, #94A3B8)" }}>Searching…</div>
         ) : items.length === 0 ? (
-          <div style={{ padding: "10px 12px", fontSize: 13, color: "#94A3B8" }}>
+          <div style={{ padding: "10px 12px", fontSize: 13, color: "var(--gooni-faint, #94A3B8)" }}>
             {query ? `No notes matching “${query}”` : "No notes yet"}
           </div>
         ) : (
@@ -86,7 +86,7 @@ export const NoteMentionMenu = forwardRef<NoteMentionMenuRef, NoteMentionMenuPro
                 background: i === selectedIndex ? "rgba(15,23,42,0.06)" : "transparent",
                 cursor: "pointer",
                 textAlign: "left",
-                color: "#0F172A",
+                color: "var(--gooni-text, #0F172A)",
                 fontFamily: "inherit",
                 transition: "background 0.08s",
               }}
@@ -99,10 +99,10 @@ export const NoteMentionMenu = forwardRef<NoteMentionMenuRef, NoteMentionMenuPro
                   width: 28,
                   height: 28,
                   borderRadius: 6,
-                  background: i === selectedIndex ? "#fff" : "rgba(15,23,42,0.04)",
+                  background: i === selectedIndex ? "var(--gooni-card, #fff)" : "rgba(15,23,42,0.04)",
                   border: "1px solid rgba(15,23,42,0.06)",
                   flexShrink: 0,
-                  color: "#475569",
+                  color: "var(--gooni-muted, #475569)",
                 }}
               >
                 <FileText size={15} strokeWidth={1.8} />
@@ -124,7 +124,7 @@ export const NoteMentionMenu = forwardRef<NoteMentionMenuRef, NoteMentionMenuPro
                   <span
                     style={{
                       fontSize: 11.5,
-                      color: "#94A3B8",
+                      color: "var(--gooni-faint, #94A3B8)",
                       lineHeight: 1.3,
                       marginTop: 1,
                       whiteSpace: "nowrap",

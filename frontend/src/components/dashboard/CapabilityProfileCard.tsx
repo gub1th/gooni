@@ -27,7 +27,7 @@ const STATUS_COLOR: Record<string, string> = {
   claimed: ctok.accent,
   unverified: ctok.muted,
   broken: ctok.danger,
-  removed: "#C7C7CC",
+  removed: ctok.disabled,
 };
 
 export function CapabilityProfileCard() {
@@ -147,7 +147,7 @@ function CapabilityDrawer({
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 480, maxWidth: "92vw", height: "100vh",
-          background: "#FFFFFF", overflowY: "auto",
+          background: "var(--gooni-card, #FFFFFF)", overflowY: "auto",
           padding: "20px 24px", boxShadow: "-8px 0 24px rgba(0,0,0,0.15)",
           fontFamily: FONT,
         }}
@@ -156,7 +156,7 @@ function CapabilityDrawer({
           <div style={{ fontSize: 18, fontWeight: 700 }}>Capability inventory</div>
           <button onClick={onClose} style={closeBtnStyle} aria-label="Close">×</button>
         </div>
-        <div style={{ marginTop: 8, fontSize: 12, color: "#636366" }}>
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--gooni-muted, #636366)" }}>
           Boot scan populates mechanical layer from the tool registry + FastAPI
           routes + messaging channels. Behavioral facets are auto-promoted from
           per-turn reflection clusters. Edit status to override.
@@ -183,7 +183,7 @@ function CapabilityDrawer({
                     key={r.id}
                     style={{
                       border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8,
-                      padding: "8px 10px", background: r.status === "removed" ? "#FAFAFA" : "#FFFFFF",
+                      padding: "8px 10px", background: r.status === "removed" ? ctok.bg : "var(--gooni-card, #FFFFFF)",
                       opacity: r.status === "removed" ? 0.55 : 1,
                     }}
                   >
@@ -228,7 +228,7 @@ function CapabilityDrawer({
 }
 
 const cardStyle: React.CSSProperties = {
-  background: "#FFFFFF",
+  background: "var(--gooni-card, #FFFFFF)",
   border: "1px solid rgba(0,0,0,0.08)",
   borderRadius: 12,
   padding: "14px 16px",
@@ -261,7 +261,7 @@ const refreshBtnStyle = (disabled: boolean): React.CSSProperties => ({
   padding: "8px 12px",
   borderRadius: 8,
   border: "1px solid rgba(0,0,0,0.1)",
-  background: disabled ? "#F2F2F7" : "#FFFFFF",
+  background: disabled ? ctok.hover : "var(--gooni-card, #FFFFFF)",
   color: ctok.text,
   fontSize: 12,
   cursor: disabled ? "default" : "pointer",

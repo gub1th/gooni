@@ -13,7 +13,7 @@ export function ThinkingIndicator() {
         <span
           style={{
             fontSize: 13,
-            color: "#636366",
+            color: "var(--gooni-muted, #636366)",
             fontFamily: FONT,
             animation: "th-pulse 2.5s ease-in-out infinite 0.15s",
           }}

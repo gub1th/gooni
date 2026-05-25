@@ -127,7 +127,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
         role="dialog"
         aria-modal="true"
         style={{
-          width: "min(560px, 100%)", background: "#FFFFFF",
+          width: "min(560px, 100%)", background: "var(--gooni-card, #FFFFFF)",
           borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
           fontFamily: FONT, padding: 24,
           maxHeight: "90vh", overflowY: "auto",
@@ -171,7 +171,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
           style={{
             width: "100%", boxSizing: "border-box",
             border: "none", outline: "none",
-            fontSize: 13, color: "#6B6B70",
+            fontSize: 13, color: "var(--gooni-muted, #6B6B70)",
             background: "transparent",
             padding: "0 0 12px", fontFamily: FONT, fontStyle: "italic",
           }}
@@ -185,8 +185,8 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
           style={{
             width: "100%", boxSizing: "border-box",
             border: "none", outline: "none",
-            fontSize: 13, color: "#3C3C43",
-            background: "#F9FAFB", padding: 12, borderRadius: 8,
+            fontSize: 13, color: "var(--gooni-text, #3C3C43)",
+            background: "var(--gooni-card, #F9FAFB)", padding: 12, borderRadius: 8,
             resize: "vertical", fontFamily: FONT, lineHeight: 1.5,
             marginBottom: 16,
           }}
@@ -253,7 +253,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
               style={{
                 fontFamily: FONT, fontSize: 13, padding: "6px 10px",
                 border: "1px solid #E5E7EB", borderRadius: 8, color: ctok.text,
-                outline: "none", background: "#FFF",
+                outline: "none", background: "var(--gooni-card, #FFF)",
               }}
             >
               <option value="">— unspecified —</option>
@@ -298,7 +298,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
                     aria-label="delete"
                     style={{
                       background: "transparent", border: "none",
-                      color: "#C7C7CC", cursor: "pointer",
+                      color: ctok.disabled, cursor: "pointer",
                       fontSize: 12, padding: "0 4px",
                     }}
                   >×</button>
@@ -335,7 +335,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
               <button
                 onClick={() => setConfirmDelete(false)}
                 style={{
-                  border: "none", background: "transparent", color: "#6B7280",
+                  border: "none", background: "transparent", color: "var(--gooni-muted, #6B7280)",
                   fontFamily: FONT, fontSize: 12, padding: "6px 8px", cursor: "pointer",
                 }}
               >Cancel</button>
@@ -352,7 +352,7 @@ export function FocusModal({ node, onChange, onClose }: FocusModalProps) {
           <button
             onClick={save}
             style={{
-              border: "none", background: ctok.text, color: "#FFFFFF",
+              border: "none", background: ctok.text, color: ctok.card,
               fontFamily: FONT, fontSize: 13, fontWeight: 600,
               padding: "8px 16px", borderRadius: 8, cursor: "pointer",
             }}
@@ -378,7 +378,7 @@ function StepInput({ onSubmit, onCancel }: { onSubmit: (t: string) => void; onCa
       placeholder="step…"
       style={{
         fontSize: 13, padding: "6px 10px", borderRadius: 6,
-        border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
+        border: "1px solid rgba(0,0,0,0.1)", background: "var(--gooni-card, #fff)",
         fontFamily: FONT, width: "100%", boxSizing: "border-box",
       }}
     />
@@ -408,7 +408,7 @@ function ToggleRow({
         }}
       >
         <div style={{
-          width: 18, height: 18, borderRadius: 999, background: "#FFFFFF",
+          width: 18, height: 18, borderRadius: 999, background: "var(--gooni-card, #FFFFFF)",
           transform: value ? "translateX(16px)" : "translateX(0)",
           transition: "transform 140ms cubic-bezier(0.22, 1, 0.36, 1)",
           boxShadow: "0 1px 3px rgba(0,0,0,0.2)",

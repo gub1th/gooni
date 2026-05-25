@@ -49,7 +49,7 @@ function ChatAuditPage() {
   }
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", fontFamily: FONT, background: "#FAFAFA" }}>
+    <div style={{ flex: 1, overflowY: "auto", fontFamily: FONT, background: ctok.bg }}>
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "32px 32px 80px" }}>
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18 }}>
@@ -63,7 +63,7 @@ function ChatAuditPage() {
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <label style={{
-              fontSize: 12, color: "#6E6E73",
+              fontSize: 12, color: "var(--gooni-muted, #6E6E73)",
               display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
               userSelect: "none",
             }}>
@@ -79,7 +79,7 @@ function ChatAuditPage() {
               style={{
                 padding: "6px 12px", borderRadius: 8,
                 border: "1px solid rgba(0,0,0,0.1)",
-                background: "#fff", cursor: "pointer", fontSize: 12, fontFamily: FONT,
+                background: "var(--gooni-card, #fff)", cursor: "pointer", fontSize: 12, fontFamily: FONT,
               }}
             >
               Refresh
@@ -89,7 +89,7 @@ function ChatAuditPage() {
 
         {/* Active feedback rules — what's currently steering Gooni */}
         <div style={{
-          background: "#fff",
+          background: "var(--gooni-card, #fff)",
           border: "1px solid rgba(0,0,0,0.08)",
           borderRadius: 12,
           padding: "14px 16px",
@@ -119,7 +119,7 @@ function ChatAuditPage() {
                 >
                   <div style={{ fontSize: 13, color: ctok.text, lineHeight: 1.4 }}>
                     {r.rule}
-                    <span style={{ marginLeft: 10, fontSize: 11, color: "#6E6E73" }}>
+                    <span style={{ marginLeft: 10, fontSize: 11, color: "var(--gooni-muted, #6E6E73)" }}>
                       · {relativeTime(r.created_at)}
                     </span>
                   </div>
@@ -129,7 +129,7 @@ function ChatAuditPage() {
                       padding: "4px 10px", fontSize: 11.5,
                       fontFamily: FONT, fontWeight: 500,
                       border: "1px solid rgba(0,0,0,0.1)",
-                      background: "transparent", color: "#6E6E73",
+                      background: "transparent", color: "var(--gooni-muted, #6E6E73)",
                       borderRadius: 6, cursor: "pointer",
                     }}
                     title="Deactivate this rule"
@@ -144,7 +144,7 @@ function ChatAuditPage() {
 
         {/* Audit feed */}
         <div style={{
-          background: "#fff",
+          background: "var(--gooni-card, #fff)",
           border: "1px solid rgba(0,0,0,0.08)",
           borderRadius: 12,
           overflow: "hidden",
@@ -156,7 +156,7 @@ function ChatAuditPage() {
             padding: "10px 16px",
             fontSize: 11, color: ctok.muted, letterSpacing: 0.4,
             textTransform: "uppercase", fontWeight: 600,
-            background: "#F8F8F9",
+            background: "var(--gooni-card, #F8F8F9)",
             borderBottom: "1px solid rgba(0,0,0,0.06)",
           }}>
             <div>Time</div>

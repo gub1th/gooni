@@ -88,7 +88,7 @@ export function HabitsStrip() {
                     <HabitWeekStrip habit={h} onCellClick={(c) => handleCellClick(h, c)} />
 
                     <span style={{
-                      fontSize: 12, color: "#475569", fontVariantNumeric: "tabular-nums",
+                      fontSize: 12, color: "var(--gooni-muted, #475569)", fontVariantNumeric: "tabular-nums",
                       minWidth: 44, textAlign: "right", flexShrink: 0,
                     }}>
                       {streakLabel(h)}

@@ -466,7 +466,7 @@ function EditedChip({
           height: 26, padding: "0 10px",
           borderRadius: 8,
           fontSize: 12, fontWeight: 500,
-          color: "#6E6E73",
+          color: "var(--gooni-muted, #6E6E73)",
           background: "rgba(255,255,255,0.82)",
           backdropFilter: "blur(22px) saturate(1.8)",
           WebkitBackdropFilter: "blur(22px) saturate(1.8)",
@@ -485,7 +485,7 @@ function EditedChip({
             top: "calc(100% + 6px)",
             right: 0,
             minWidth: 240,
-            background: "#fff",
+            background: "var(--gooni-card, #fff)",
             borderRadius: 10,
             padding: "10px 12px",
             boxShadow:
@@ -503,7 +503,7 @@ function EditedChip({
             fontSize: 12.5, color: ctok.text, padding: "3px 0",
           }}>
             <span>Edited</span>
-            <span style={{ color: "#6E6E73" }} title={formatAbsolute(updatedAt)}>
+            <span style={{ color: "var(--gooni-muted, #6E6E73)" }} title={formatAbsolute(updatedAt)}>
               {relativeFromNow(updatedAt, nowMs)}
             </span>
           </div>
@@ -512,7 +512,7 @@ function EditedChip({
             fontSize: 12.5, color: ctok.text, padding: "3px 0",
           }}>
             <span>Created</span>
-            <span style={{ color: "#6E6E73" }}>{formatAbsolute(createdAt)}</span>
+            <span style={{ color: "var(--gooni-muted, #6E6E73)" }}>{formatAbsolute(createdAt)}</span>
           </div>
         </div>
       )}
@@ -1599,7 +1599,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     background: movePicker ? "rgba(0,0,0,0.08)" : "transparent",
                     cursor: "pointer",
                     fontSize: 13,
-                    color: "#636366",
+                    color: "var(--gooni-muted, #636366)",
                     display: "flex", alignItems: "center", justifyContent: "center",
                     padding: 0, flexShrink: 0,
                     transition: "background 0.12s",
@@ -1687,7 +1687,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                   padding: 6, minWidth: 160, zIndex: 100,
                   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 }}>
-                  <div style={{ padding: "6px 10px 8px", fontSize: 12.5, color: "#636366" }}>
+                  <div style={{ padding: "6px 10px 8px", fontSize: 12.5, color: "var(--gooni-muted, #636366)" }}>
                     Delete this note?
                   </div>
                   <button
@@ -1725,7 +1725,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                   </button>
                   <button
                     onClick={() => setDeleteConfirm(false)}
-                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "#636366", textAlign: "left" }}
+                    style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "var(--gooni-muted, #636366)", textAlign: "left" }}
                     onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
                     onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
                   >
@@ -1865,7 +1865,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
             <div style={{
               display: "inline-flex", alignItems: "center", gap: 4,
               padding: "0 8px", height: 30, borderRadius: 8,
-              fontSize: 12, color: "#6E6E73",
+              fontSize: 12, color: "var(--gooni-muted, #6E6E73)",
               fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
               userSelect: "none",
             }}>
@@ -2108,7 +2108,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
               >
                 <div style={{ fontSize: 28, marginBottom: 12 }}>📝</div>
                 <div style={{ fontSize: 15, color: "var(--gooni-muted, #8E8E93)", marginBottom: 4 }}>No note selected</div>
-                <div style={{ fontSize: 13, color: "#C7C7CC" }}>
+                <div style={{ fontSize: 13, color: ctok.disabled }}>
                   Pick one from the list, or press <kbd style={{ padding: "1px 5px", borderRadius: 4, background: "rgba(0,0,0,0.06)", fontSize: 12, fontFamily: "inherit" }}>⌘N</kbd> to start a new one.
                 </div>
               </div>
@@ -2346,7 +2346,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                             border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))",
                             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                             fontSize: 12.5,
-                            color: "#3C3C43",
+                            color: "var(--gooni-text, #3C3C43)",
                             lineHeight: 1.5,
                             display: "inline-block",
                           }}
@@ -2403,7 +2403,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      background: "#FFFFFF",
+                      background: "var(--gooni-card, #FFFFFF)",
                       borderRadius: 12,
                       padding: "5px 6px",
                       gap: 2,
@@ -2470,7 +2470,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                           borderRadius: 8,
                           border: "none",
                           background: item.active ? "rgba(15,23,42,0.08)" : "transparent",
-                          color: item.active ? "#0F172A" : "#475569",
+                          color: item.active ? "var(--gooni-text, #0F172A)" : "var(--gooni-muted, #475569)",
                           cursor: "pointer",
                           transition: "background 0.12s, color 0.12s",
                         }}

@@ -230,7 +230,7 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
           padding: "5px 10px",
           minWidth: 220,
         }}>
-          <Search size={13} strokeWidth={1.8} color="#8E8E93" />
+          <Search size={13} strokeWidth={1.8} color={ctok.muted} />
           <input
             value={searchRaw}
             onChange={(e) => setSearchRaw(e.target.value)}
@@ -765,7 +765,7 @@ function BacklogCard({
           left: 4, top: 7,
           width: 14, height: 14,
           display: "inline-flex", alignItems: "center", justifyContent: "center",
-          color: "#B0B0B5",
+          color: "var(--gooni-faint, #B0B0B5)",
           pointerEvents: "none",
         }}
       >

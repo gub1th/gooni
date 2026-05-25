@@ -336,7 +336,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
       step(nodes, graph!.edges, nodeIndex, panelW, panelH);
 
       ctx!.clearRect(0, 0, panelW, panelH);
-      ctx!.fillStyle = "#FAFAFA";
+      ctx!.fillStyle = ctok.bg;
       ctx!.fillRect(0, 0, panelW, panelH);
 
       const v = viewRef.current;
@@ -474,7 +474,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
           position: "relative",
           width: "min(1100px, 95vw)",
           height: "min(720px, 88vh)",
-          background: "#FAFAFA",
+          background: ctok.bg,
           borderRadius: 14,
           border: "0.5px solid rgba(0,0,0,0.12)",
           boxShadow: "0 24px 72px rgba(0,0,0,0.25)",
@@ -513,7 +513,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
                 width: 28, height: 28, borderRadius: 8,
                 border: "0.5px solid rgba(0,0,0,0.08)",
                 background: "rgba(255,255,255,0.85)",
-                color: "#6B6B70", fontSize: 16, lineHeight: 1,
+                color: "var(--gooni-muted, #6B6B70)", fontSize: 16, lineHeight: 1,
                 cursor: "pointer", fontFamily: FONT,
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}
@@ -599,7 +599,7 @@ function BrainLoadingOverlay() {
               <line
                 key={`l${i}`}
                 x1={d.x} y1={d.y} x2={next.x} y2={next.y}
-                stroke="#1C1C1E" strokeWidth="0.6"
+                stroke={ctok.text} strokeWidth="0.6"
                 strokeDasharray="200" strokeDashoffset="200"
                 style={{
                   animation: `gooni-brain-line 2.4s ease-in-out ${d.delay}ms infinite`,
@@ -611,7 +611,7 @@ function BrainLoadingOverlay() {
             <circle
               key={`c${i}`}
               cx={d.x} cy={d.y} r={3}
-              fill="#1C1C1E"
+              fill={ctok.text}
               style={{
                 transformOrigin: `${d.x}px ${d.y}px`,
                 animation: `gooni-brain-pulse 1.6s ease-in-out ${d.delay}ms infinite`,

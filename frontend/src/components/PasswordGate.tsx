@@ -47,7 +47,7 @@ export function PasswordGate({ children }: Props) {
         background:
           "radial-gradient(ellipse 1100px 600px at 50% -10%, rgba(74,222,128,0.08), transparent 70%), linear-gradient(180deg, #fbfaf7 0%, #ffffff 45%)",
         fontFamily: FONT,
-        color: "#111",
+        color: "var(--gooni-text, #111)",
         padding: 24,
       }}
     >
@@ -77,12 +77,12 @@ export function PasswordGate({ children }: Props) {
               fontSize: 26,
               fontWeight: 500,
               letterSpacing: "-0.4px",
-              color: "#111",
+              color: "var(--gooni-text, #111)",
             }}
           >
             welcome back
           </div>
-          <div style={{ fontSize: 13, color: "#8a8a8a", marginTop: -6 }}>
+          <div style={{ fontSize: 13, color: "var(--gooni-muted, #8a8a8a)", marginTop: -6 }}>
             sign in to gooni
           </div>
         </div>
@@ -100,8 +100,8 @@ export function PasswordGate({ children }: Props) {
             padding: "12px 14px",
             borderRadius: 12,
             border: `1px solid ${focused ? "#9FE1CB" : "rgba(0,0,0,0.10)"}`,
-            background: "#ffffff",
-            color: "#111",
+            background: "var(--gooni-card, #ffffff)",
+            color: "var(--gooni-text, #111)",
             fontSize: 14.5,
             fontFamily: FONT,
             outline: "none",
@@ -164,7 +164,7 @@ export function PasswordGate({ children }: Props) {
           style={{
             marginTop: 6,
             fontSize: 11.5,
-            color: "#b5b5b5",
+            color: "var(--gooni-faint, #b5b5b5)",
             textAlign: "center",
             letterSpacing: "0.02em",
           }}

@@ -232,7 +232,7 @@ export function MemoryBrain({
               bottom: BRAIN_SIZE + 24,
               transform: "translateX(-50%)",
               width: 320, maxWidth: "90%",
-              background: "#fff",
+              background: "var(--gooni-card, #fff)",
               borderRadius: 12,
               border: "1px solid rgba(0,0,0,0.10)",
               boxShadow: "0 10px 30px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.06)",
@@ -281,7 +281,7 @@ export function MemoryBrain({
                 style={{
                   fontSize: 11.5, fontWeight: 600, fontFamily: FONT,
                   padding: "5px 12px", borderRadius: 999,
-                  background: ctok.text, color: "#fff",
+                  background: ctok.text, color: ctok.card,
                   border: "none", cursor: "pointer",
                 }}
               >

@@ -160,7 +160,7 @@ export function ReactionBar({
             borderRadius: 999,
             border: "1px dashed rgba(15,23,42,0.18)",
             background: "transparent",
-            color: "#94A3B8",
+            color: "var(--gooni-faint, #94A3B8)",
             cursor: "pointer",
           }}
         >
@@ -173,7 +173,7 @@ export function ReactionBar({
               top: "calc(100% + 6px)",
               left: 0,
               zIndex: 30,
-              background: "#fff",
+              background: "var(--gooni-card, #fff)",
               borderRadius: 10,
               padding: 6,
               boxShadow: "0 8px 22px rgba(15,23,42,0.14), 0 1px 3px rgba(15,23,42,0.10), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
