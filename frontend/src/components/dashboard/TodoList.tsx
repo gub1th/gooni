@@ -9,6 +9,7 @@ import {
   type TodoChainMeta, type SpawnedTodoSpec,
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
+import { parseServerDate } from "../../utils/date";
 import { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 import { TodoEditModal } from "./TodoEditModal";
 import { TodoChainView } from "./TodoChainView";
@@ -782,9 +783,11 @@ function PrimaryCard({
 // surface a different signal, not a bigger number).
 function LiveTimer({ since }: { since: string | null }) {
   const start = useMemo(() => {
-    if (!since) return null;
-    const ms = new Date(since).getTime();
-    return Number.isFinite(ms) ? ms : null;
+    // Naive-UTC server timestamps must go through parseServerDate (appends
+    // the missing "Z"); raw new Date() reads them as local and pins the
+    // timer at "0s" for ~7h on a fresh todo. Matches the banner LiveTimer.
+    const ms = parseServerDate(since)?.getTime();
+    return ms != null && Number.isFinite(ms) ? ms : null;
   }, [since]);
   const [now, setNow] = useState(() => Date.now());
 

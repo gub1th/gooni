@@ -487,9 +487,12 @@ def _connectors_health(db: Session) -> dict[str, Any]:
         gh_detail = f"{n_repos} tracked repos" if n_repos else "no tracked repos"
     components.append({"name": "GitHub", "score": gh_score, "weight": 1/3, "detail": gh_detail})
 
-    # Google
+    # Google Calendar. NOTE: the OAuth flow stores this token under
+    # provider="google_calendar" (see google_calendar.py), NOT "google" —
+    # querying the wrong string made a connected calendar read as "not
+    # connected" forever.
     google_token = (
-        db.query(OAuthToken).filter(OAuthToken.provider == "google").first()
+        db.query(OAuthToken).filter(OAuthToken.provider == "google_calendar").first()
     )
     if google_token is None:
         google_score = 50.0

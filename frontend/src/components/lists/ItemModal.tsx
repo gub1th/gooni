@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Crown } from "lucide-react";
 import type { BoardStatus } from "../../services/api";
 import { color as ctok, FONT, z } from "../../ui";
 import { toDateInputValue } from "../../utils/date";
@@ -38,6 +39,10 @@ export interface ItemModalProps {
   onClose: () => void;
   // True when this item is the primary focus — surfaces a small badge.
   isPrimary?: boolean;
+  // Backlog-only: pin/unpin this ticket as the singleton primary that drives
+  // the dashboard north-star banner. Applied on save. When omitted, the
+  // "Make primary" control hides (e.g. generic lists don't have a primary).
+  onSetPrimary?: (next: boolean) => Promise<void> | void;
   // True for backlog items — surfaces the Jira board fields (status select +
   // PR link). Hidden for todo / focus / generic lists where they'd just be
   // noise.
@@ -54,11 +59,12 @@ function fromDateInputValue(v: string): string | null {
   return new Date(`${v}T00:00:00`).toISOString();
 }
 
-export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoardFields, onOpenSourceNote }: ItemModalProps) {
+export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, onSetPrimary, showBoardFields, onOpenSourceNote }: ItemModalProps) {
   const [text, setText] = useState(item.text);
   const [subtitle, setSubtitle] = useState(item.subtitle ?? "");
   const [actionable, setActionable] = useState(item.actionable ?? true);
   const [done, setDone] = useState(item.done);
+  const [primary, setPrimary] = useState(isPrimary ?? false);
   const [dueDate, setDueDate] = useState(toDateInputValue(item.due_date ?? null));
   const [boardStatus, setBoardStatus] = useState<BoardStatus>(
     (item.board_status as BoardStatus | null) || (item.done ? "done" : "not_yet")
@@ -70,7 +76,16 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
   const textRef = useRef<HTMLInputElement>(null);
 
   // Focus the title input on mount so users can immediately start typing.
-  useEffect(() => { textRef.current?.focus(); }, []);
+  // Long titles: a plain focus() drops the caret at the END, which scrolls
+  // the input left so only the tail shows. Snap the caret + scroll back to
+  // the start so the title reads from the beginning.
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(0, 0);
+    el.scrollLeft = 0;
+  }, []);
 
   // ESC closes. Capture phase so it beats anything else listening on body.
   useEffect(() => {
@@ -103,13 +118,17 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
       const trimmedPr = prUrl.trim();
       if ((trimmedPr || null) !== (item.pr_url || null)) patch.pr_url = trimmedPr || null;
     }
-    if (Object.keys(patch).length === 0) {
+    const primaryChanged = showBoardFields && !!onSetPrimary && primary !== (isPrimary ?? false);
+    if (Object.keys(patch).length === 0 && !primaryChanged) {
       onClose();
       return;
     }
     setSaving(true);
     try {
-      await onSave(patch);
+      // Primary is a singleton handled by its own promote/clear endpoints,
+      // so it's applied separately from the field patch.
+      if (primaryChanged) await onSetPrimary!(primary);
+      if (Object.keys(patch).length > 0) await onSave(patch);
       onClose();
     } catch (e) {
       console.error("ItemModal save failed", e);
@@ -164,7 +183,7 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
             <span style={{ fontSize: 11, color: ctok.muted, letterSpacing: 0.5, textTransform: "uppercase" }}>
               {actionable ? "Task" : "Idea"}
             </span>
-            {isPrimary && (
+            {primary && (
               <span style={{
                 fontSize: 10, color: "#92400E", background: "#FEF3C7",
                 padding: "2px 8px", borderRadius: 999,
@@ -284,6 +303,29 @@ export function ItemModal({ item, onSave, onDelete, onClose, isPrimary, showBoar
                   }}
                 />
               </div>
+              {/* Make primary — pins this ticket to the dashboard north-star
+                  banner. Was only reachable via the banner's picker before;
+                  surfacing it here so the ticket modal can pin/unpin directly.
+                  Singleton: promoting clears any other primary server-side. */}
+              {onSetPrimary && (
+                <div>
+                  <div style={{ fontSize: 13, color: ctok.text, fontWeight: 500, marginBottom: 6 }}>Primary</div>
+                  <button
+                    onClick={() => setPrimary((v) => !v)}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 8,
+                      padding: "8px 12px", borderRadius: 8,
+                      border: primary ? "1px solid #1C1C1E" : "1px solid #E5E7EB",
+                      background: primary ? "rgba(15,23,42,0.05)" : "#FFFFFF",
+                      color: primary ? "#0F172A" : "#3C3C43",
+                      fontFamily: FONT, fontSize: 13, fontWeight: 500, cursor: "pointer",
+                    }}
+                  >
+                    <Crown size={14} fill={primary ? "currentColor" : "none"} />
+                    {primary ? "Pinned as primary" : "Make primary"}
+                  </button>
+                </div>
+              )}
             </>
           )}
           {!showBoardFields && (

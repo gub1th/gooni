@@ -15,10 +15,28 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Habit, HabitEntry
+from ..db.models import Habit, HabitEntry, Settings
+
+
+def _today(db: Session) -> date:
+    """Today's calendar date in Daniel's timezone — NOT server UTC.
+
+    Fly runs in UTC; Daniel is Pacific. Using `date.today()` directly
+    rolled the strip + streak to "tomorrow" every evening (e.g. Sun 8pm
+    PT is already Mon in UTC), so the 7-day strip highlighted the wrong
+    "today" and streaks could break a day early. Anchor on the same
+    `Settings.nudge_tz` the daily scheduler uses.
+    """
+    s = db.query(Settings).filter(Settings.id == 1).first()
+    tz_name = (s.nudge_tz if s and s.nudge_tz else "America/Los_Angeles")
+    try:
+        return datetime.now(ZoneInfo(tz_name)).date()
+    except Exception:
+        return datetime.utcnow().date()
 
 
 # 10-color palette mirroring focus_service. Each new habit cycles through
@@ -211,7 +229,7 @@ def compute_streak(db: Session, habit_id: int) -> int:
     Lookup is bounded to the last 400 days — well past any practical
     streak length. Avoids unbounded scan.
     """
-    today = date.today()
+    today = _today(db)
     cutoff = today - timedelta(days=400)
     h = get(db, habit_id)
     if not h:
@@ -250,7 +268,7 @@ def recent_strip(
        {"date": "YYYY-MM-DD", "value": True | False | None}.
     None = unlogged.
     """
-    today = date.today()
+    today = _today(db)
     earliest = today - timedelta(days=days - 1)
     entries = _entries_by_date(db, habit_id, earliest)
     out: list[dict] = []

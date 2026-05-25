@@ -2266,15 +2266,20 @@ function StepCard({
         padding: 12,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: ctok.muted }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: ctok.muted, flexShrink: 0, paddingTop: 1 }}>
           {toolName ? `${stepKey}: ${toolName}` : stepKey}
         </span>
-        <span style={{ fontSize: 13 }}>{headerLabel}</span>
+        {/* Take the remaining width and wrap — long verify/critique labels
+            used to overflow the card and get hard-clipped with no ellipsis. */}
+        <span style={{ fontSize: 13, flex: 1, minWidth: 0, lineHeight: 1.4, overflowWrap: "anywhere" }}>
+          {headerLabel}
+        </span>
         <button
           onClick={() => setFlagOpen((v) => !v)}
           style={{
             marginLeft: "auto",
+            flexShrink: 0,
             background: existing ? "#FFE5E5" : "transparent",
             border: existing ? "1px solid #FF3B30" : "1px solid #E5E5EA",
             borderRadius: 6,

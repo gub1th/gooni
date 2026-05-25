@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GripVertical, ExternalLink, ListChecks, Plus, Search, X, Bot } from "lucide-react";
 import type { ApiBacklogTicket, BoardStatus } from "../../services/api";
-import { promoteBacklogTicket, demoteBacklogTicket } from "../../services/api";
+import {
+  promoteBacklogTicket, demoteBacklogTicket,
+  promoteBacklogToPrimary, clearPrimaryBacklog,
+} from "../../services/api";
 import { useBacklogStore } from "../../stores/useBacklogStore";
 import { ItemModal } from "./ItemModal";
 import { color as ctok, FONT } from "../../ui";
@@ -437,8 +440,17 @@ export function BacklogBoard({ onOpenSourceNote }: BacklogBoardProps) {
         <ItemModal
           item={openItem}
           showBoardFields
+          isPrimary={openItem.is_primary}
           onOpenSourceNote={onOpenSourceNote}
           onClose={() => setOpenItemId(null)}
+          onSetPrimary={async (next) => {
+            if (next) await promoteBacklogToPrimary(openItem.id);
+            else await clearPrimaryBacklog();
+            // Refresh the board store + the dashboard banner cache so the
+            // north-star pin reflects the change without a reload.
+            await refresh();
+            qc.invalidateQueries({ queryKey: ["primary-backlog"] });
+          }}
           onSave={async (patch) => {
             await updateTicket(openItem.id, {
               text: patch.text,

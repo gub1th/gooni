@@ -365,6 +365,40 @@ def transition(db: Session, promise_id: int, new_state: str) -> Promise | None:
     return p
 
 
+# Sentinel so `update` can tell "field omitted" apart from "explicitly
+# set to None" (clearing a deadline).
+_UNSET: Any = object()
+
+
+def update(
+    db: Session,
+    promise_id: int,
+    *,
+    text: str | None = None,
+    inferred_due: Any = _UNSET,
+) -> Promise | None:
+    """Edit a promise's display text and/or deadline.
+
+    `text` rewrites `summary` (the display field the dashboard shows);
+    the raw `utterance` is left untouched as the original-capture record
+    for provenance. `inferred_due` is tri-state: omit to leave unchanged,
+    pass a `datetime` to set, pass `None` to clear. Returns the row or
+    None if the promise doesn't exist.
+    """
+    p = get(db, promise_id)
+    if p is None:
+        return None
+    if text is not None:
+        cleaned = text.strip()
+        if cleaned:
+            p.summary = cleaned
+    if inferred_due is not _UNSET:
+        p.inferred_due = inferred_due
+    db.commit()
+    db.refresh(p)
+    return p
+
+
 # ── Habit auto-spawn (G3.1: fires at Promise create, not lock-in) ──────
 # When a new promise's utterance describes a recurring action
 # (daily/weekly/for-N-days/every-X), we spawn a Habit row so Daniel gets
