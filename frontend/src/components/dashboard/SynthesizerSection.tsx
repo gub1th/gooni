@@ -25,6 +25,15 @@ import {
 
 const HIGH_CONF_FLOOR = 0.7;
 
+// Mid-weight purple — legible on BOTH the light card (#FFF) and the dark
+// card (#2A2A2C), same way the promise-card greens/ambers read on both.
+// The old #534AB7 was tuned for light only (≈3.3:1 on dark = washed out).
+const SYNTH_PURPLE = "#7C6FE8";
+// Translucent tint reads as pale lavender over a light card, subtle purple
+// glow over a dark one — no solid light hex that turns into a glaring box.
+const SYNTH_TINT = "rgba(124,111,232,0.13)";
+const SYNTH_BORDER = "rgba(124,111,232,0.38)";
+
 export function SynthesizerSection() {
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
@@ -71,7 +80,7 @@ export function SynthesizerSection() {
         marginBottom: 6,
       }}>
         <div style={{
-          fontSize: 11, fontWeight: 500, color: "#534AB7",
+          fontSize: 11, fontWeight: 500, color: SYNTH_PURPLE,
           letterSpacing: 0.3, display: "flex", alignItems: "center", gap: 4,
         }}>
           <Sparkles size={11} /> SYNTHESIZER
@@ -148,9 +157,9 @@ function Pill({ candidate, tone, onPromote, onDismiss }: {
   onPromote: () => void;
   onDismiss: () => void;
 }) {
-  const bg = tone === "primary" ? "#EEEDFE" : "rgba(0,0,0,0.04)";
-  const titleColor = tone === "primary" ? "#3C3489" : "var(--gooni-text, #1C1C1E)";
-  const subColor = tone === "primary" ? "#534AB7" : "var(--gooni-muted, #8E8E93)";
+  const bg = tone === "primary" ? SYNTH_TINT : "var(--gooni-hover, rgba(0,0,0,0.04))";
+  const titleColor = "var(--gooni-text, #1C1C1E)";
+  const subColor = tone === "primary" ? SYNTH_PURPLE : "var(--gooni-muted, #8E8E93)";
   const evidenceCount = candidate.evidence?.length ?? 0;
   return (
     <div style={{
@@ -184,8 +193,8 @@ function Pill({ candidate, tone, onPromote, onDismiss }: {
 function ActionBtn({ icon, tone, onClick, title }: {
   icon: React.ReactNode; tone: "primary" | "secondary"; onClick: () => void; title: string;
 }) {
-  const borderColor = tone === "primary" ? "#CECBF6" : "rgba(0,0,0,0.10)";
-  const color = tone === "primary" ? "#534AB7" : "var(--gooni-text, #1C1C1E)";
+  const borderColor = tone === "primary" ? SYNTH_BORDER : "var(--gooni-border, rgba(0,0,0,0.10))";
+  const color = tone === "primary" ? SYNTH_PURPLE : "var(--gooni-text, #1C1C1E)";
   return (
     <button
       onClick={onClick}
