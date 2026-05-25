@@ -7,6 +7,7 @@ from ...db.models import ToolCall as ToolCallModel
 from ...db.database import SessionLocal
 from ...db.models import Conversation as ConvModel
 from ...llm.client import llm_client
+from .. import intent_router
 from ..conversation_service import conversation_service
 from ..item_service import item_service
 from ..memory_extraction import extract_signals
@@ -26,6 +27,7 @@ from .prompt_blocks import (
     _build_just_extracted_block,
     _build_time_block,
     _summarize_entry,
+    _summarize_signals,
 )
 
 
@@ -271,27 +273,26 @@ class Orchestrator:
         # feature requests, soft promises, todos, done signals, fitness logs,
         # reply intent, and memory candidates. All routed via intent_router
         # except memories (reconciled off-thread).
+        # State carried across the extract / undo / image branches below.
+        # `routed` (RouterResult, all-empty-list defaults) is the single
+        # source of truth for "what got captured this turn" — downstream
+        # ack/block/verify steps read routed.<field> directly instead of
+        # mirroring it into a dozen locals. On paths that don't extract
+        # (undo command, image-only, blank message) it stays the empty
+        # default, so every routed.X reads as [].
         feedback_ack: str | None = None
         feedback_tools: list[str] = []
+        memory_candidates: list[dict] = []
+        routed = intent_router.RouterResult()
         signals_summary: dict = {
             "tone_corrections": [],
             "feature_requests": [],
             "soft_promises": [],
             "memory_count": 0,
         }
-        memory_candidates: list[dict] = []
-        captured_promises: list[dict] = []
-        captured_features: list[dict] = []
-        captured_todos: list[dict] = []
-        killed_todos: list[dict] = []
-        completed_todos: list[dict] = []
-        merged_todos: list[dict] = []
-        failed_todo_actions: list[dict] = []
-        edited_todos: list[dict] = []
-        implicit_done_todos: list[dict] = []
-        disambiguation_needed: list[dict] = []
-        captured_metrics: list[dict] = []
-        tone_rules: list[str] = []
+        # Plan-gate input — set in the extract branch where both the raw
+        # signals dict and the routed result are in scope (see below).
+        _has_action_signals = False
         skip_normal_reply = False
 
         if not image_url and saved_message.strip():
@@ -321,33 +322,7 @@ class Orchestrator:
                 )
                 signals = extract_signals(saved_message, prev_assistant=prev_text)
                 memory_candidates = signals["memories"]
-                soft_promises = signals.get("soft_promises", [])
-                extracted_todos = signals.get("todos", [])
-                reply_intent = signals.get("reply_intent", "answer")
-                signals_summary = {
-                    "tone_corrections": [
-                        {
-                            "rule": t["rule"],
-                            "evidence": t.get("evidence", ""),
-                            "anti_pattern": t.get("anti_pattern", ""),
-                        }
-                        for t in signals["tone_corrections"]
-                    ],
-                    "feature_requests": [
-                        {"title": f["title"], "why": f.get("why", "")}
-                        for f in signals["feature_requests"]
-                    ],
-                    "soft_promises": [
-                        {"utterance": p["utterance"], "time_hint": p.get("time_hint")}
-                        for p in soft_promises
-                    ],
-                    "todos": [
-                        {"text": t["text"], "due_hint": t.get("due_hint")}
-                        for t in extracted_todos
-                    ],
-                    "reply_intent": reply_intent,
-                    "memory_count": len(memory_candidates),
-                }
+                signals_summary = _summarize_signals(signals, memory_candidates)
                 tb.extracted_signals(saved_message, signals)
 
                 # Unified routing: one dispatch point fans signals out to
@@ -358,7 +333,6 @@ class Orchestrator:
                 # the short-circuit path — we don't route them through the
                 # router here so the existing background-thread shape
                 # survives.
-                from .. import intent_router
                 ctx = intent_router.RouterContext(
                     db=db,
                     source_message_id=user_msg.id,
@@ -373,19 +347,25 @@ class Orchestrator:
                 # extract_signals grows is now routed automatically. `memories`
                 # is the lone exception: reconciled off-thread below, so blank it.
                 routed = intent_router.dispatch({**signals, "memories": []}, ctx)
-                tone_rules.extend(routed.tone_rules)
-                captured_features.extend(routed.captured_features)
-                captured_promises.extend(routed.captured_promises)
-                captured_todos.extend(routed.captured_todos)
-                killed_todos.extend(routed.killed_todos)
-                completed_todos.extend(routed.completed_todos)
-                merged_todos.extend(routed.merged_todos)
-                failed_todo_actions.extend(routed.failed_todo_actions)
-                edited_todos.extend(routed.edited_todos)
-                implicit_done_todos.extend(routed.implicit_done_todos)
-                disambiguation_needed.extend(routed.disambiguation_needed)
-                captured_metrics.extend(routed.captured_metrics)
                 feedback_tools.extend(routed.tools_used)
+
+                # Plan-gate input: did this turn carry actionable signals?
+                # Reads the raw extracted dict for signal types the router
+                # may dedup away (features/tones/promises/memories) and the
+                # routed result for the todo actions it executed — both are
+                # in scope only here. Drives _should_plan further down.
+                _has_action_signals = bool(
+                    signals.get("feature_requests")
+                    or signals.get("tone_corrections")
+                    or memory_candidates
+                    or signals.get("soft_promises")
+                    or routed.captured_promises
+                    or routed.captured_todos
+                    or routed.killed_todos
+                    or routed.completed_todos
+                    or routed.merged_todos
+                    or routed.failed_todo_actions
+                )
 
                 # Stamp the user message as feedback when either a tone
                 # correction OR a feature request fired AND we have a
@@ -404,20 +384,7 @@ class Orchestrator:
                 # clinical. Each signal contributes a natural phrase; we
                 # join with light punctuation so multi-signal turns still
                 # read like one breath.
-                feedback_ack = _build_ack(
-                    tone_rules=tone_rules,
-                    captured_features=captured_features,
-                    captured_promises=captured_promises,
-                    captured_todos=captured_todos,
-                    killed_todos=killed_todos,
-                    completed_todos=completed_todos,
-                    merged_todos=merged_todos,
-                    failed_todo_actions=failed_todo_actions,
-                    edited_todos=edited_todos,
-                    implicit_done_todos=implicit_done_todos,
-                    disambiguation_needed=disambiguation_needed,
-                    captured_metrics=captured_metrics,
-                )
+                feedback_ack = _build_ack(routed)
                 if feedback_ack is not None:
                     # Skip the LLM reply ONLY when the extractor explicitly
                     # classified the message as task_only or no_reply. The
@@ -449,14 +416,14 @@ class Orchestrator:
                         }
                         looks_like_question = first_word in _QUESTION_WORDS
                         capture_happened = bool(
-                            captured_promises
-                            or captured_todos
-                            or completed_todos
-                            or killed_todos
-                            or merged_todos
-                            or implicit_done_todos
-                            or edited_todos
-                            or captured_metrics
+                            routed.captured_promises
+                            or routed.captured_todos
+                            or routed.completed_todos
+                            or routed.killed_todos
+                            or routed.merged_todos
+                            or routed.implicit_done_todos
+                            or routed.edited_todos
+                            or routed.captured_metrics
                         )
                         if (
                             capture_happened
@@ -654,20 +621,7 @@ class Orchestrator:
             except Exception as e:
                 print(f"[state_block] build failed: {e}")
             try:
-                just_extracted_block = _build_just_extracted_block(
-                    tone_rules=tone_rules,
-                    captured_features=captured_features,
-                    captured_promises=captured_promises,
-                    captured_todos=captured_todos,
-                    killed_todos=killed_todos,
-                    completed_todos=completed_todos,
-                    merged_todos=merged_todos,
-                    failed_todo_actions=failed_todo_actions,
-                    edited_todos=edited_todos,
-                    implicit_done_todos=implicit_done_todos,
-                    disambiguation_needed=disambiguation_needed,
-                    captured_metrics=captured_metrics,
-                )
+                just_extracted_block = _build_just_extracted_block(routed)
             except Exception as e:
                 print(f"[just_extracted_block] build failed: {e}")
             try:
@@ -687,18 +641,6 @@ class Orchestrator:
         # that ate context without value). Only fire when the turn is
         # multi-part OR carries actionable extracted signals.
         plan_block = ""
-        _has_action_signals = bool(
-            (signals_summary or {}).get("feature_requests")
-            or (signals_summary or {}).get("tone_corrections")
-            or ((signals_summary or {}).get("memory_count") or 0)
-            or (signals_summary or {}).get("soft_promises")
-            or captured_promises
-            or captured_todos
-            or killed_todos
-            or completed_todos
-            or merged_todos
-            or failed_todo_actions
-        )
         _should_plan = (
             len(message) > 80
             or _has_action_signals
@@ -798,10 +740,10 @@ class Orchestrator:
                 # tracked" with no audit. Runs even when LLM said ok=True.
                 det_critique = _deterministic_unbacked_check(
                     draft=response,
-                    captured_features=captured_features,
-                    captured_promises=captured_promises,
-                    captured_todos=captured_todos,
-                    captured_metrics=captured_metrics,
+                    captured_features=routed.captured_features,
+                    captured_promises=routed.captured_promises,
+                    captured_todos=routed.captured_todos,
+                    captured_metrics=routed.captured_metrics,
                     tool_call_ids=(usage or {}).get("tool_call_ids") or [],
                     db=db,
                 )
@@ -876,8 +818,7 @@ class Orchestrator:
         tool_call_ids = usage.get("tool_call_ids") or []
         if tool_call_ids and assistant_msg is not None:
             try:
-                from ...db.models import ToolCall
-                db.query(ToolCall).filter(ToolCall.id.in_(tool_call_ids)).update(
+                db.query(ToolCallModel).filter(ToolCallModel.id.in_(tool_call_ids)).update(
                     {"message_id": assistant_msg.id}, synchronize_session=False,
                 )
                 db.commit()
