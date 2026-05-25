@@ -1,9 +1,26 @@
 """Pure dict->dict normalizers for each signal type emitted by
 extract_signals. No DB, no LLM, no I/O — just shape coercion + clamping."""
 
+from datetime import date as _date, timedelta
 from typing import Any
 
 from .parsers import _validate_candidate
+
+
+def _coerce_log_date(raw: Any) -> str | None:
+    """Validate an extractor-supplied fitness-log date (YYYY-MM-DD). Must
+    parse, not be in the future, and not >1yr back — clamps LLM date math
+    mistakes. None means "use today" (the handler's default)."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        d = _date.fromisoformat(raw.strip()[:10])
+    except ValueError:
+        return None
+    today = _date.today()
+    if d > today or d < today - timedelta(days=366):
+        return None
+    return d.isoformat()
 
 
 def _normalize_tone(items: Any) -> list[dict]:
@@ -339,6 +356,7 @@ def _normalize_fitness(items: Any) -> list[dict]:
             "weight_unit": weight_unit,
             "exercise_label": exercise_label,
             "substance": substance,
+            "log_date": _coerce_log_date(it.get("date")),
             "correction": correction,
             "correction_target": correction_target,
         })

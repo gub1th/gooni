@@ -6,6 +6,7 @@ extract_candidates, extract_signals, reconcile_candidate.
 
 import json
 import re
+from datetime import date as _date
 from typing import Any
 
 from ...llm.client import llm_client
@@ -117,6 +118,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
     prompt = _SIGNALS_PROMPT.format(
         prev_assistant=(prev_assistant or "")[:1200],
         text=text[:2000],
+        today=_date.today().isoformat(),
     )
     try:
         raw = llm_client.generate_simple_completion(prompt, max_tokens=500, temperature=0.0, model="gpt-5.4-mini")
