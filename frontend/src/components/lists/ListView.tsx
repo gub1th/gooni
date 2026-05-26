@@ -299,7 +299,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
         display: "flex",
         flexDirection: "column",
         height: "100%",
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         fontFamily: FONT,
         overflowY: "auto",
       }}
@@ -312,7 +312,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
             position:sticky resolves against the outer overflow-y:auto. */}
         <div style={{
           position: "sticky", top: 0, zIndex: 5,
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           padding: "32px 0 16px",
           borderBottom: "1px solid #F2F2F7",
         }}>
@@ -335,7 +335,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                   fontFamily: FONT,
                   border: "none",
                   outline: "none",
-                  background: "#F2F2F7",
+                  background: ctok.hover,
                   borderRadius: 6,
                   padding: "2px 6px",
                   minWidth: 200,
@@ -356,7 +356,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                   borderRadius: 6,
                   transition: "background 120ms",
                 }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLHeadingElement).style.background = "#F2F2F7"; }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLHeadingElement).style.background = ctok.hover; }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLHeadingElement).style.background = "transparent"; }}
               >
                 {list.name}
@@ -400,7 +400,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                       style={{
                         border: "none",
                         background: "transparent",
-                        color: "#6B7280",
+                        color: "var(--gooni-muted, #6B7280)",
                         fontFamily: FONT,
                         fontSize: 12,
                         padding: "4px 8px",
@@ -427,7 +427,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                     style={{
                       border: "none",
                       background: "transparent",
-                      color: "#6B7280",
+                      color: "var(--gooni-muted, #6B7280)",
                       cursor: "pointer",
                       padding: 6,
                       borderRadius: 6,
@@ -458,7 +458,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
               display: "flex",
               gap: 8,
               alignItems: "center",
-              background: "#F2F2F7",
+              background: ctok.hover,
               borderRadius: 12,
               padding: "8px 12px",
             }}
@@ -486,7 +486,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                 style={{
                   border: "none",
                   background: ctok.text,
-                  color: "#FFFFFF",
+                  color: ctok.card,
                   padding: "4px 12px",
                   borderRadius: 8,
                   fontSize: 13,
@@ -702,7 +702,7 @@ function ListItemRow({
           style={{
             display: "flex", alignItems: "center", gap: 6,
             fontSize: 14,
-            color: isTaskList ? ctok.text : "#3F3F46",
+            color: isTaskList ? ctok.text : "var(--gooni-text, #3F3F46)",
             fontStyle: isTaskList ? "normal" : "italic",
             textDecoration: isTaskList && item.done ? "line-through" : "none",
             cursor: "pointer",
@@ -815,7 +815,7 @@ function ListItemRow({
                 top: "calc(100% + 4px)",
                 right: 0,
                 minWidth: 160,
-                background: "#FFFFFF",
+                background: "var(--gooni-card, #FFFFFF)",
                 border: "0.5px solid rgba(0,0,0,0.10)",
                 borderRadius: 8,
                 boxShadow: "0 8px 20px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.04)",
@@ -829,7 +829,7 @@ function ListItemRow({
                   rows can't be primary. */}
               {confirmingDelete ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "6px 8px" }}>
-                  <span style={{ fontSize: 12, color: "#6B7280" }}>Delete this item?</span>
+                  <span style={{ fontSize: 12, color: "var(--gooni-muted, #6B7280)" }}>Delete this item?</span>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button
                       onClick={() => { setMenuOpen(false); setConfirmingDelete(false); onDelete(); }}
@@ -853,7 +853,7 @@ function ListItemRow({
                       style={{
                         border: "none",
                         background: "transparent",
-                        color: "#6B7280",
+                        color: "var(--gooni-muted, #6B7280)",
                         cursor: "pointer",
                         fontSize: 12,
                         fontFamily: FONT,
@@ -1022,7 +1022,7 @@ function ListSettingsMenu({
           width: 28, height: 28, borderRadius: 6,
           border: "none",
           background: open ? "rgba(0,0,0,0.06)" : "transparent",
-          color: "#6B7280",
+          color: "var(--gooni-muted, #6B7280)",
           cursor: "pointer",
           display: "inline-flex", alignItems: "center", justifyContent: "center",
           padding: 0,
@@ -1093,7 +1093,7 @@ function MenuRow({
     >
       <span style={{ fontSize: 13, color: ctok.text }}>{label}</span>
       <span style={{
-        fontSize: 11.5, color: "#3C3C43",
+        fontSize: 11.5, color: "var(--gooni-text, #3C3C43)",
         background: "rgba(0,0,0,0.05)",
         padding: "2px 8px", borderRadius: 999,
         fontWeight: 500,

@@ -79,7 +79,7 @@ export function PublishButton({
         }
       : {
           background: "rgba(255,255,255,0.92)",
-          color: "#475569",
+          color: "var(--gooni-muted, #475569)",
           backdropFilter: "blur(10px) saturate(1.6)",
           WebkitBackdropFilter: "blur(10px) saturate(1.6)",
         };
@@ -122,7 +122,7 @@ export function PublishButton({
           style={{
             position: "absolute", top: "calc(100% + 6px)", right: 0,
             minWidth: 220,
-            background: "#fff", borderRadius: 10,
+            background: "var(--gooni-card, #fff)", borderRadius: 10,
             padding: 5,
             boxShadow:
               "0 12px 28px rgba(15,23,42,0.16), 0 2px 6px rgba(15,23,42,0.10), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
@@ -194,7 +194,7 @@ function MenuItem({
           {active && <Check size={12} strokeWidth={2.2} color="#0F6E56" />}
         </span>
         {description && (
-          <span style={{ fontSize: 11.5, fontWeight: 400, color: "#94A3B8" }}>{description}</span>
+          <span style={{ fontSize: 11.5, fontWeight: 400, color: "var(--gooni-faint, #94A3B8)" }}>{description}</span>
         )}
       </span>
     </button>

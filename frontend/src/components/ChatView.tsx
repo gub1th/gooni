@@ -18,7 +18,7 @@ const chipStyle: React.CSSProperties = {
   background: "rgba(0,0,0,0.03)",
   fontSize: 13,
   fontFamily: FONT,
-  color: "#3C3C43",
+  color: "var(--gooni-text, #3C3C43)",
   cursor: "pointer",
   transition: "background 0.1s",
 };
@@ -61,7 +61,7 @@ function StreamingProgress({
       }}
     >
       {stage && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#636366", fontSize: 12.5 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--gooni-muted, #636366)", fontSize: 12.5 }}>
           <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 3, background: ctok.accent, animation: "pulse 1.2s ease-in-out infinite" }} />
           <span>{stage}…</span>
         </div>
@@ -76,7 +76,7 @@ function StreamingProgress({
             return (
               <div
                 key={`${t.id ?? "noid"}-${t.tool_name}-${idx}`}
-                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#636366" }}
+                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--gooni-muted, #636366)" }}
               >
                 <span style={{ color, fontSize: 13, width: 14, display: "inline-block" }}>{icon}</span>
                 <span style={{ fontFamily: "ui-monospace, monospace" }}>{t.tool_name}</span>
@@ -168,7 +168,7 @@ export function ChatView() {
                 <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(0,0,0,0.03)", border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))", fontFamily: FONT }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
                     <span style={{ color: ctok.faint, fontSize: 13, marginTop: 1 }}>⊙</span>
-                    <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{pendingIntention}</span>
+                    <span style={{ fontSize: 12.5, color: "var(--gooni-muted, #636366)", lineHeight: 1.5 }}>{pendingIntention}</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>

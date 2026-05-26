@@ -223,7 +223,7 @@ export function AddItemRow({
         marginTop: 2,
       }}
     >
-      <Plus size={14} color="#8E8E93" />
+      <Plus size={14} color={ctok.muted} />
       {open ? (
         <input
           ref={inputRef}

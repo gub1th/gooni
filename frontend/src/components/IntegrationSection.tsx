@@ -40,7 +40,7 @@ const PROVIDERS: Record<Provider, ProviderApi> = {
 
 const btn: React.CSSProperties = {
   fontSize: 11.5, padding: "4px 9px", borderRadius: 6,
-  border: "1px solid rgba(0,0,0,0.1)", background: "#fff",
+  border: "1px solid rgba(0,0,0,0.1)", background: "var(--gooni-card, #fff)",
   cursor: "pointer", color: ctok.text, fontWeight: 500,
   fontFamily: "'Inter', -apple-system, sans-serif",
 };
@@ -115,7 +115,7 @@ export function IntegrationSection({
   return (
     <div style={{
       border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10,
-      padding: "12px 14px", background: "#FDFCFA",
+      padding: "12px 14px", background: "var(--gooni-card, #FDFCFA)",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
         {icon ? (
@@ -123,7 +123,7 @@ export function IntegrationSection({
         ) : (
           <span style={{
             width: 8, height: 8, borderRadius: "50%",
-            background: status?.connected ? "#30D158" : (status?.configured ? "#C7C7CC" : "#FF9500"),
+            background: status?.connected ? "#30D158" : (status?.configured ? ctok.disabled : "#FF9500"),
             flexShrink: 0,
           }} />
         )}
@@ -138,7 +138,7 @@ export function IntegrationSection({
             : "not connected"}
         </span>
       </div>
-      <div style={{ fontSize: 11.5, color: "#6B6B70", marginBottom: 10, lineHeight: 1.55 }}>
+      <div style={{ fontSize: 11.5, color: "var(--gooni-muted, #6B6B70)", marginBottom: 10, lineHeight: 1.55 }}>
         {status?.configured ? blurbConfigured : blurbNotConfigured}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

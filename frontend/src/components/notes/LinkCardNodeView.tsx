@@ -32,7 +32,7 @@ export function LinkCardNodeView({ node, selected }: NodeViewProps) {
         border: selected ? "1.5px solid #2D7DFF" : "1px solid rgba(0,0,0,0.12)",
         borderRadius: 8,
         margin: "12px 0",
-        background: "#FAFAFA",
+        background: ctok.bg,
         textDecoration: "none",
         color: "inherit",
         overflow: "hidden",
@@ -43,7 +43,7 @@ export function LinkCardNodeView({ node, selected }: NodeViewProps) {
         e.currentTarget.style.background = "#F2F2F4";
       }}
       onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
-        e.currentTarget.style.background = "#FAFAFA";
+        e.currentTarget.style.background = ctok.bg;
       }}
     >
       <span
@@ -90,7 +90,7 @@ export function LinkCardNodeView({ node, selected }: NodeViewProps) {
             className="gooni-link-card-desc"
             style={{
               fontSize: 12.5,
-              color: "#6E6E73",
+              color: "var(--gooni-muted, #6E6E73)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               display: "-webkit-box",

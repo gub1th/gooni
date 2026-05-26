@@ -15,7 +15,7 @@ export function StatChip({ label, value }: StatChipProps) {
         borderRadius: 20,
         background: "rgba(0,0,0,0.05)",
         fontSize: 13,
-        color: "#3C3C43",
+        color: "var(--gooni-text, #3C3C43)",
         fontFamily: FONT,
         whiteSpace: "nowrap",
       }}

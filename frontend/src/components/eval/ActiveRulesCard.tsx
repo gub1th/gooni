@@ -58,7 +58,7 @@ export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: 
 
   return (
     <div style={{
-      background: "#fff",
+      background: "var(--gooni-card, #fff)",
       border: "1px solid rgba(0,0,0,0.08)",
       borderRadius: 12,
       padding: "12px 16px",
@@ -116,7 +116,7 @@ export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: 
             >
               <div style={{ fontSize: 13, color: ctok.text, lineHeight: 1.4 }}>
                 {r.rule}
-                <span style={{ marginLeft: 10, fontSize: 11, color: "#6E6E73" }}>
+                <span style={{ marginLeft: 10, fontSize: 11, color: "var(--gooni-muted, #6E6E73)" }}>
                   · {relativeTime(r.created_at)}
                 </span>
               </div>
@@ -126,7 +126,7 @@ export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: 
                   padding: "4px 10px", fontSize: 11.5,
                   fontFamily: FONT, fontWeight: 500,
                   border: "1px solid rgba(0,0,0,0.1)",
-                  background: "transparent", color: "#6E6E73",
+                  background: "transparent", color: "var(--gooni-muted, #6E6E73)",
                   borderRadius: 6, cursor: "pointer",
                 }}
                 title="Deactivate this rule"

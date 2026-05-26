@@ -103,7 +103,7 @@ export function AttachmentModal({ url, filename, mime, onClose }: Props) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#fff",
+          background: "var(--gooni-card, #fff)",
           borderRadius: 12,
           overflow: "hidden",
           minHeight: 0,
@@ -126,7 +126,7 @@ export function AttachmentModal({ url, filename, mime, onClose }: Props) {
         ) : isAudio ? (
           <audio controls src={url} style={{ width: "60%" }} />
         ) : (
-          <div style={{ textAlign: "center", padding: 32, color: "#444" }}>
+          <div style={{ textAlign: "center", padding: 32, color: "var(--gooni-text, #444)" }}>
             <p style={{ fontSize: 15, marginBottom: 12 }}>No inline preview for this file type.</p>
             <a
               href={url}

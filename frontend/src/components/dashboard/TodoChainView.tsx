@@ -246,11 +246,11 @@ export function TodoChainView({ todoId, onClose, onMutate }: Props) {
               fontFamily: "Georgia, 'Times New Roman', serif",
               color: "var(--gooni-text, #2A2620)",
             }}>
-              <GitBranch size={14} style={{ color: "#8A8270" }} />
+              <GitBranch size={14} style={{ color: "var(--gooni-muted, #8A8270)" }} />
               Thread
             </div>
             {meta && (
-              <div style={{ fontSize: 11, color: "#8A8270", marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: "var(--gooni-muted, #8A8270)", marginTop: 4 }}>
                 {meta.closed} closed · {meta.open} open
                 {meta.startedISO && (
                   <> · started {fmtShortDate(meta.startedISO)}</>
@@ -333,7 +333,7 @@ export function TodoChainView({ todoId, onClose, onMutate }: Props) {
               <>
                 <div style={{
                   marginLeft: -18, marginBottom: 8, marginTop: 4,
-                  fontSize: 11, color: "#8A8270",
+                  fontSize: 11, color: "var(--gooni-muted, #8A8270)",
                   letterSpacing: 0.02,
                 }}>
                   ↗ spawned {directChildren.length} next step{directChildren.length === 1 ? "" : "s"}
@@ -420,11 +420,11 @@ function CollapsedTailPill({
           borderRadius: 99,
           border: "0.5px solid rgba(155,130,70,0.20)",
           cursor: "pointer",
-          fontSize: 11, color: "#6B6557",
+          fontSize: 11, color: "var(--gooni-muted, #6B6557)",
           fontFamily: FONT,
         }}
       >
-        <span style={{ color: "#8A8270" }}>{expanded ? "▾" : "▸"}</span>
+        <span style={{ color: "var(--gooni-muted, #8A8270)" }}>{expanded ? "▾" : "▸"}</span>
         {ancestors.length} earlier step{ancestors.length === 1 ? "" : "s"}
         {!expanded && peek && (
           <>
@@ -451,7 +451,7 @@ function CollapsedTailPill({
                 background: "transparent",
                 cursor: "pointer",
                 fontSize: 12,
-                color: "#6B6557",
+                color: "var(--gooni-muted, #6B6557)",
                 opacity: a.todo.state === "done" ? 0.55 : 1,
                 textDecoration: a.todo.state === "done" ? "line-through" : "none",
                 fontFamily: FONT,
@@ -539,7 +539,7 @@ function PredecessorCard({
           )}
         </div>
         {todo.created_at && (
-          <div style={{ fontSize: 11, color: "#8A8270", marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: "var(--gooni-muted, #8A8270)", marginBottom: 8 }}>
             {fmtShortDate(todo.created_at)}
             {done && todo.completed_at && <> → {fmtShortDate(todo.completed_at)}</>}
           </div>
@@ -589,7 +589,7 @@ function FocusCard({
           }}
         />
         {todo.created_at && (
-          <div style={{ fontSize: 11, color: "#8A8270", marginTop: 4 }}>
+          <div style={{ fontSize: 11, color: "var(--gooni-muted, #8A8270)", marginTop: 4 }}>
             {fmtShortDate(todo.created_at)} · {done ? "closed" : (doing ? "doing" : "open")}
           </div>
         )}
@@ -683,7 +683,7 @@ function ChildCard({
           display: "flex", alignItems: "center", justifyContent: "space-between",
           marginTop: 6,
         }}>
-          <span style={{ fontSize: 10, color: "#8A8270" }}>
+          <span style={{ fontSize: 10, color: "var(--gooni-muted, #8A8270)" }}>
             {done ? "done" : (doing ? "doing" : "open")}
           </span>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -748,7 +748,7 @@ function ParentLinkAffordance({
             borderRadius: 8,
             background: "transparent",
             cursor: "pointer",
-            fontSize: 12, color: "#8A8270",
+            fontSize: 12, color: "var(--gooni-muted, #8A8270)",
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
             fontFamily: FONT,
           }}
@@ -867,10 +867,10 @@ function ParentLinkAffordance({
                 }}>
                   <Plus size={8} color="#C9A961" />
                 </span>
-                <span style={{ flex: 1, color: "#4A4538" }}>
+                <span style={{ flex: 1, color: "var(--gooni-text, #4A4538)" }}>
                   create <span style={{ fontWeight: 500 }}>"{trimText(trimmedQuery, 40)}"</span> as parent
                 </span>
-                <span style={{ fontSize: 10, color: "#8A8270" }}>new todo</span>
+                <span style={{ fontSize: 10, color: "var(--gooni-muted, #8A8270)" }}>new todo</span>
               </button>
             </>
           )}
@@ -1001,7 +1001,7 @@ function EditableNote({
       <div
         onClick={() => setEditing(true)}
         style={{
-          fontSize: 12, color: "#4A4538",
+          fontSize: 12, color: "var(--gooni-text, #4A4538)",
           padding: "9px 11px",
           background: "rgba(243,238,220,0.55)",
           borderLeft: "2px solid #C9A961",

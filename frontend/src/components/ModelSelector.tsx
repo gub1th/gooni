@@ -37,7 +37,7 @@ export function ModelSelector() {
         title={current.tagline}
         style={{
           fontSize: 12, fontFamily: FONT, fontWeight: 500,
-          color: "#3C3C43",
+          color: "var(--gooni-text, #3C3C43)",
           background: "transparent",
           border: "none",
           borderRadius: 6,

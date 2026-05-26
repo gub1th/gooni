@@ -170,7 +170,7 @@ function FloatingModal({ isSmall }: { isSmall: boolean }) {
           maxWidth: 420,
           height: isSmall ? "calc(100vh - 130px)" : 560,
           maxHeight: "calc(100vh - 130px)",
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           borderRadius: 18,
           boxShadow: dragging
             ? undefined

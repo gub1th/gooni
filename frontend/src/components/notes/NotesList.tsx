@@ -304,7 +304,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
           >🌐</span>
         )}
         <span style={{
-          fontSize: 10.5, color: "#C7C7CC", flexShrink: 0,
+          fontSize: 10.5, color: ctok.disabled, flexShrink: 0,
           fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
           fontVariantNumeric: "tabular-nums",
         }}>
@@ -322,7 +322,7 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
             overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
             minWidth: 0,
           }}>
-            {preview || (thumbSrc ? <span style={{ fontStyle: "italic", color: "#C7C7CC" }}>image</span> : null)}
+            {preview || (thumbSrc ? <span style={{ fontStyle: "italic", color: ctok.disabled }}>image</span> : null)}
           </div>
           {thumbSrc && (
             <div style={{
@@ -535,7 +535,7 @@ export function NotesList() {
 
   return (
     <div
-      style={{ width: 280, minWidth: 280, height: "100vh", background: "#FAFAFA", display: "flex", flexDirection: "column", borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box" }}
+      style={{ width: 280, minWidth: 280, height: "100vh", background: ctok.bg, display: "flex", flexDirection: "column", borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box" }}
     >
       {/* Header */}
       <div style={{ height: 52, padding: "0 10px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 6 }}>
@@ -565,7 +565,7 @@ export function NotesList() {
         <button
           onClick={() => createNote(spaceId)}
           title="New note"
-          style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(0,0,0,0.06)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "#3C3C43", padding: 0, flexShrink: 0, transition: "background 0.1s" }}
+          style={{ width: 28, height: 28, borderRadius: 7, background: "rgba(0,0,0,0.06)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gooni-text, #3C3C43)", padding: 0, flexShrink: 0, transition: "background 0.1s" }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.12)")}
           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
         >
@@ -666,7 +666,7 @@ export function NotesList() {
               title="Click to edit description"
               style={{
                 fontSize: 12,
-                color: currentSpace.description ? "#475569" : "rgba(142,142,147,0.85)",
+                color: currentSpace.description ? "var(--gooni-muted, #475569)" : "rgba(142,142,147,0.85)",
                 lineHeight: 1.4,
                 cursor: "pointer",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",

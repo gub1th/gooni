@@ -96,7 +96,7 @@ export function ErrorView({ error, reset }: Props) {
             borderRadius: 8,
             padding: 12,
             fontSize: 11, lineHeight: 1.45,
-            color: "#3A3A3C",
+            color: "var(--gooni-text, #3A3A3C)",
             overflow: "auto", maxHeight: 240,
             whiteSpace: "pre-wrap", wordBreak: "break-word",
           }}>

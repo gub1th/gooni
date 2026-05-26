@@ -352,7 +352,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                       background: "rgba(0,0,0,0.025)",
                       textAlign: "left",
                       fontSize: 13,
-                      color: "#3C3C43",
+                      color: "var(--gooni-text, #3C3C43)",
                       cursor: "pointer",
                       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                       transition: "background 0.15s, border-color 0.15s",
@@ -420,7 +420,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                   >
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
                       <span style={{ color: ctok.faint, fontSize: 13, marginTop: 1 }}>⊙</span>
-                      <span style={{ fontSize: 12.5, color: "#636366", lineHeight: 1.5 }}>{m.intention}</span>
+                      <span style={{ fontSize: 12.5, color: "var(--gooni-muted, #636366)", lineHeight: 1.5 }}>{m.intention}</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>
@@ -475,7 +475,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
             <span
               style={{
                 fontSize: 12,
-                color: "#636366",
+                color: "var(--gooni-muted, #636366)",
                 fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -492,7 +492,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
             display: "flex",
             flexDirection: "column",
             gap: 8,
-            background: "#FFFFFF",
+            background: "var(--gooni-card, #FFFFFF)",
             borderRadius: 14,
             padding: "10px 12px",
             border: isNoteMode
@@ -615,7 +615,7 @@ export function GooniPanel({ fullscreen = false, floating = false }: GooniPanelP
                   borderRadius: 8,
                   border: "none",
                   background: listening ? ctok.danger : "rgba(0,0,0,0.04)",
-                  color: listening ? "#FFFFFF" : speechSupported ? "#3C3C43" : "#C7C7CC",
+                  color: listening ? "#FFFFFF" : speechSupported ? "var(--gooni-text, #3C3C43)" : ctok.disabled,
                   cursor: speechSupported ? "pointer" : "not-allowed",
                   display: "flex", alignItems: "center", justifyContent: "center",
                   flexShrink: 0,

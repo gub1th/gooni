@@ -148,7 +148,7 @@ export function HabitDetailModal({
                     flex: 1, padding: "8px 10px", borderRadius: 8,
                     border: active ? "1px solid rgba(15,23,42,0.85)" : "0.5px solid rgba(0,0,0,0.10)",
                     background: active ? "rgba(15,23,42,0.05)" : "transparent",
-                    color: active ? "#0F172A" : ctok.muted,
+                    color: active ? "var(--gooni-text, #0F172A)" : ctok.muted,
                     fontWeight: active ? 600 : 500, fontSize: 13,
                     cursor: "pointer", fontFamily: FONT,
                   }}
@@ -192,7 +192,7 @@ export function HabitDetailModal({
           <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
             <HabitWeekStrip habit={habit} onCellClick={onCellClick} />
             <span style={{
-              fontSize: 13, color: "#475569", fontVariantNumeric: "tabular-nums",
+              fontSize: 13, color: "var(--gooni-muted, #475569)", fontVariantNumeric: "tabular-nums",
               paddingBottom: 2,
             }}>
               {streakLabel(habit)}

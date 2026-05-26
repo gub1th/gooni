@@ -316,7 +316,7 @@ export function PrimaryBacklogBanner() {
               fontWeight: 700,
               fontFamily: FONT,
               color: palette.bg,
-              background: "#FFFFFF",
+              background: "var(--gooni-card, #FFFFFF)",
               border: "none",
               borderRadius: 8,
               cursor: "pointer",

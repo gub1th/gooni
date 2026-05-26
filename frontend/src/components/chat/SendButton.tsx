@@ -29,7 +29,7 @@ export const SendButton = forwardRef<HTMLButtonElement, SendButtonProps>(
           borderRadius: "50%",
           border: "none",
           background: disabled ? "rgba(0,0,0,0.06)" : ctok.text,
-          color: disabled ? "#C7C7CC" : "#fff",
+          color: disabled ? ctok.disabled : "#fff",
           cursor: disabled ? "default" : "pointer",
           display: "flex",
           alignItems: "center",

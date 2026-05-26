@@ -24,7 +24,7 @@ export function Tooltip({ label, children, placement = "bottom", delay = 200 }: 
     const tip = document.createElement("div");
     Object.assign(tip.style, {
       background: ctok.text,
-      color: "#fff",
+      color: ctok.card,
       padding: "4px 9px",
       borderRadius: "6px",
       fontSize: "11.5px",

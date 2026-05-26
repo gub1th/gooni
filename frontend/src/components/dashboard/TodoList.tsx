@@ -570,7 +570,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
           marginTop: 2,
         }}
       >
-        <Plus size={14} color="#8E8E93" />
+        <Plus size={14} color={ctok.muted} />
         {creating ? (
           <input
             ref={inputRef}

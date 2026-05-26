@@ -50,7 +50,7 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(({ items, comm
   return (
     <div
       style={{
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         borderRadius: 10,
         padding: 6,
         minWidth: 240,
@@ -61,7 +61,7 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(({ items, comm
       }}
     >
       {items.length === 0 ? (
-        <div style={{ padding: "10px 12px", fontSize: 13, color: "#94A3B8" }}>No matches</div>
+        <div style={{ padding: "10px 12px", fontSize: 13, color: "var(--gooni-faint, #94A3B8)" }}>No matches</div>
       ) : (
         items.map((item, i) => (
           <button
@@ -76,7 +76,7 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(({ items, comm
               background: i === selectedIndex ? "rgba(15,23,42,0.06)" : "transparent",
               cursor: "pointer",
               textAlign: "left",
-              color: "#0F172A",
+              color: "var(--gooni-text, #0F172A)",
               fontFamily: "inherit",
               transition: "background 0.08s",
             }}
@@ -84,17 +84,17 @@ export const SlashMenu = forwardRef<SlashMenuRef, SlashMenuProps>(({ items, comm
             <span style={{
               display: "flex", alignItems: "center", justifyContent: "center",
               width: 28, height: 28, borderRadius: 6,
-              background: i === selectedIndex ? "#fff" : "rgba(15,23,42,0.04)",
+              background: i === selectedIndex ? "var(--gooni-card, #fff)" : "rgba(15,23,42,0.04)",
               border: "1px solid rgba(15,23,42,0.06)",
               flexShrink: 0,
-              color: "#475569",
+              color: "var(--gooni-muted, #475569)",
             }}>
               <item.Icon size={15} strokeWidth={1.8} />
             </span>
             <span style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
               <span style={{ fontSize: 13.5, fontWeight: 500, lineHeight: 1.3 }}>{item.title}</span>
               {item.description && (
-                <span style={{ fontSize: 11.5, color: "#94A3B8", lineHeight: 1.3, marginTop: 1 }}>
+                <span style={{ fontSize: 11.5, color: "var(--gooni-faint, #94A3B8)", lineHeight: 1.3, marginTop: 1 }}>
                   {item.description}
                 </span>
               )}

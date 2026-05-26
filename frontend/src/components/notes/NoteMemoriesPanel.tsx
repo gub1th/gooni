@@ -65,7 +65,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
           fontWeight: 500,
           letterSpacing: "0.06em",
           textTransform: "uppercase",
-          color: "#94A3B8",
+          color: "var(--gooni-faint, #94A3B8)",
           marginBottom: 8,
         }}
       >
@@ -117,7 +117,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
               <span
                 style={{
                   fontSize: 13,
-                  color: "#1E293B",
+                  color: "var(--gooni-text, #1E293B)",
                   flex: 1,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
@@ -132,7 +132,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
         })}
       </div>
 
-      <div style={{ marginTop: 8, padding: "0 4px", fontSize: 12, color: "#94A3B8" }}>
+      <div style={{ marginTop: 8, padding: "0 4px", fontSize: 12, color: "var(--gooni-faint, #94A3B8)" }}>
         Click a row to peek.{" "}
         <button
           onClick={() => navigate({ to: "/memories", search: { focus: undefined } })}
@@ -172,7 +172,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
               right: 0,
               top: "100%",
               marginTop: 6,
-              background: "#fff",
+              background: "var(--gooni-card, #fff)",
               borderRadius: 12,
               border: "1px solid rgba(0,0,0,0.10)",
               boxShadow: "0 10px 30px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.06)",
@@ -193,7 +193,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
               >
                 {selected.type}
               </span>
-              <span style={{ fontSize: 11, color: "#94A3B8" }}>
+              <span style={{ fontSize: 11, color: "var(--gooni-faint, #94A3B8)" }}>
                 conf {Math.round(selected.confidence * 100)}%
               </span>
               <button
@@ -230,7 +230,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
                   padding: "5px 12px",
                   borderRadius: 999,
                   background: ctok.text,
-                  color: "#fff",
+                  color: ctok.card,
                   border: "none",
                   cursor: "pointer",
                 }}

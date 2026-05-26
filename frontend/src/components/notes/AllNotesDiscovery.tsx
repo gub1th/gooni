@@ -180,7 +180,7 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
                 borderRadius: 8,
                 border: "none",
                 background: ctok.text,
-                color: "#FFFFFF",
+                color: ctok.card,
                 fontFamily: FONT,
                 fontSize: 12.5,
                 fontWeight: 500,
@@ -393,7 +393,7 @@ function NoteRow({
         >
           {space ? (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <SpaceIcon emoji={space.emoji} size={10} color="#8E8E93" />
+              <SpaceIcon emoji={space.emoji} size={10} color={ctok.muted} />
               {space.name}
             </span>
           ) : (

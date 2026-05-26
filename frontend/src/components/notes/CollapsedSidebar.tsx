@@ -72,7 +72,7 @@ function RailButton({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        color: color ?? "#475569",
+        color: color ?? "var(--gooni-muted, #475569)",
         transition: "background 0.12s",
         flexShrink: 0,
       }}

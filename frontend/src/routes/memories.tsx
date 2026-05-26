@@ -150,7 +150,7 @@ function MemoriesPage() {
 
   // Sidebar + GooniLayer + PasswordGate live in __root.tsx's AppShell.
   return (
-        <div style={{ flex: 1, overflowY: "auto", fontFamily: FONT, background: "#FAFAFA" }}>
+        <div style={{ flex: 1, overflowY: "auto", fontFamily: FONT, background: ctok.bg }}>
           <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 32px 80px" }}>
             {/* Header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18 }}>
@@ -165,7 +165,7 @@ function MemoriesPage() {
 
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <label style={{
-                  fontSize: 12, color: "#6E6E73",
+                  fontSize: 12, color: "var(--gooni-muted, #6E6E73)",
                   display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
                   userSelect: "none",
                 }}>
@@ -181,7 +181,7 @@ function MemoriesPage() {
                   style={{
                     padding: "6px 12px", borderRadius: 8,
                     border: "1px solid rgba(0,0,0,0.1)",
-                    background: "#fff", cursor: "pointer", fontSize: 12, fontFamily: FONT,
+                    background: "var(--gooni-card, #fff)", cursor: "pointer", fontSize: 12, fontFamily: FONT,
                   }}
                 >
                   Refresh
@@ -202,7 +202,7 @@ function MemoriesPage() {
                       display: "inline-flex", alignItems: "center", gap: 7,
                       padding: "6px 12px",
                       borderRadius: 999,
-                      background: active ? ctok.text : "#fff",
+                      background: active ? ctok.text : "var(--gooni-card, #fff)",
                       color: active ? "#fff" : "#3C3C43",
                       border: active ? "1px solid #1C1C1E" : "1px solid rgba(0,0,0,0.1)",
                       fontFamily: FONT, fontSize: 12.5, fontWeight: 500,
@@ -250,14 +250,14 @@ function MemoriesPage() {
                   padding: "9px 14px", borderRadius: 10,
                   border: "1px solid rgba(0,0,0,0.1)",
                   fontSize: 13, fontFamily: FONT, outline: "none",
-                  background: "#fff",
+                  background: "var(--gooni-card, #fff)",
                 }}
               />
             </div>
 
             {/* Table */}
             <div style={{
-              background: "#fff",
+              background: "var(--gooni-card, #fff)",
               border: "1px solid rgba(0,0,0,0.08)",
               borderRadius: 12,
               overflow: "hidden",
@@ -269,7 +269,7 @@ function MemoriesPage() {
                 padding: "10px 16px",
                 fontSize: 11, color: ctok.muted, letterSpacing: 0.4,
                 textTransform: "uppercase", fontWeight: 600,
-                background: "#F8F8F9",
+                background: "var(--gooni-card, #F8F8F9)",
                 borderBottom: "1px solid rgba(0,0,0,0.06)",
               }}>
                 <div>Time</div>
@@ -365,7 +365,7 @@ function MemoriesPage() {
                           </>
                         )}
                       </div>
-                      <div style={{ color: "#6E6E73", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                      <div style={{ color: "var(--gooni-muted, #6E6E73)", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
                         {(m.confidence * 100).toFixed(0)}%
                       </div>
                       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>

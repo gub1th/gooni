@@ -51,7 +51,7 @@ const SOURCE_STYLE: Record<
 // Same palette family as the dashboard's age indicator, so the eyes already
 // know which is which.
 const STATUS_STYLE: Record<EvalStatus, { color: string; bg: string; label: string }> = {
-  not_yet: { color: ctok.muted, bg: "#F2F2F7", label: "Not yet" },
+  not_yet: { color: ctok.muted, bg: ctok.hover, label: "Not yet" },
   pending: { color: "#633806", bg: "#FAEEDA", label: "Pending" },
   done: { color: "#085041", bg: "#E1F5EE", label: "Done" },
 };
@@ -350,7 +350,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
         display: "flex",
         flexDirection: "column",
         minWidth: 0,
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         fontFamily: FONT,
         overflow: "hidden",
       }}
@@ -361,7 +361,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
         style={{
           padding: "20px 24px 0",
           borderBottom: "1px solid rgba(0,0,0,0.06)",
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           flexShrink: 0,
         }}
       >
@@ -445,7 +445,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                 fontSize: 13,
                 fontFamily: FONT,
                 outline: "none",
-                background: "#FAFAFA",
+                background: ctok.bg,
               }}
             />
             <ViewToggle mode={viewMode} onChange={setViewMode} />
@@ -535,7 +535,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                     top: "calc(100% + 6px)",
                     left: 0,
                     zIndex: 20,
-                    background: "#FFFFFF",
+                    background: "var(--gooni-card, #FFFFFF)",
                     border: "1px solid rgba(0,0,0,0.10)",
                     borderRadius: 10,
                     padding: "10px 12px",
@@ -564,7 +564,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
           </div>
 
           {/* Grid */}
-          <div style={{ flex: 1, overflow: "auto", padding: 24, background: "#FAFAFA" }}>
+          <div style={{ flex: 1, overflow: "auto", padding: 24, background: ctok.bg }}>
             {error && (
               <div style={{ color: ctok.danger, fontSize: 13, marginBottom: 12 }}>{error}</div>
             )}
@@ -613,7 +613,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  background: "#FFFFFF",
+                  background: "var(--gooni-card, #FFFFFF)",
                   border: "1px solid #E5E5EA",
                   borderRadius: 8,
                   overflow: "hidden",
@@ -702,7 +702,7 @@ function SegmentCard({
       }}
       onMouseEnter={(e) => {
         if (focused) return;
-        e.currentTarget.style.background = "#FAFAFA";
+        e.currentTarget.style.background = ctok.bg;
         e.currentTarget.style.borderColor = "rgba(0,0,0,0.18)";
       }}
       onMouseLeave={(e) => {
@@ -737,7 +737,7 @@ function SegmentCard({
       <div
         style={{
           fontSize: 13,
-          color: "#475569",
+          color: "var(--gooni-muted, #475569)",
           lineHeight: 1.45,
           flex: 1,
           overflow: "hidden",
@@ -820,7 +820,7 @@ function SegmentRow({
       }}
       onMouseEnter={(e) => {
         if (focused) return;
-        e.currentTarget.style.background = "#FAFAFA";
+        e.currentTarget.style.background = ctok.bg;
       }}
       onMouseLeave={(e) => {
         if (focused) return;
@@ -881,7 +881,7 @@ function SegmentRow({
         <div
           style={{
             fontSize: 12.5,
-            color: "#6E6E73",
+            color: "var(--gooni-muted, #6E6E73)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -910,7 +910,7 @@ function ViewToggle({
     padding: "3px 10px",
     fontSize: 12,
     fontFamily: FONT,
-    background: active ? "#FFFFFF" : "transparent",
+    background: active ? "var(--gooni-card, #FFFFFF)" : "transparent",
     color: active ? ctok.text : "#6E6E73",
     border: "none",
     borderRadius: 5,
@@ -926,7 +926,7 @@ function ViewToggle({
       style={{
         display: "inline-flex",
         padding: 2,
-        background: "#F2F2F7",
+        background: ctok.hover,
         borderRadius: 7,
       }}
     >
@@ -1194,7 +1194,7 @@ function EvalDetailView({
         display: "flex",
         flexDirection: "column",
         minWidth: 0,
-        background: "#FAFAFA",
+        background: ctok.bg,
         fontFamily: FONT,
         overflow: "hidden",
       }}
@@ -1206,7 +1206,7 @@ function EvalDetailView({
         style={{
           padding: "16px 24px",
           borderBottom: "1px solid rgba(0,0,0,0.06)",
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           display: "flex",
           alignItems: "center",
           gap: 12,
@@ -1232,7 +1232,7 @@ function EvalDetailView({
             <span style={{ fontSize: 13, fontWeight: 600 }}>
               Segment #{seg.id}
             </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#3C3C43" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--gooni-text, #3C3C43)" }}>
               <Dot color={SOURCE_STYLE[seg.source]?.accent ?? ctok.muted} />
               {SOURCE_STYLE[seg.source]?.label}
             </span>
@@ -1406,7 +1406,7 @@ function DispatchModal({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           borderRadius: 12,
           padding: "20px 22px",
           width: 420,
@@ -1422,7 +1422,7 @@ function DispatchModal({
             <div style={{ fontSize: 15, fontWeight: 600, color: ctok.text }}>
               {alreadyDispatched ? "Re-dispatch this eval?" : "Dispatch this eval to Claude Code?"}
             </div>
-            <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.5 }}>
+            <div style={{ fontSize: 13, color: "var(--gooni-text, #3C3C43)", lineHeight: 1.5 }}>
               {alreadyDispatched
                 ? "Overwrites the existing Claude Code note with the latest transcript + flags. Backlog item stays."
                 : "Creates a note in the Claude Code space and a backlog item linking back to this segment."}
@@ -1436,14 +1436,14 @@ function DispatchModal({
           </>
         )}
         {modal.state === "running" && (
-          <div style={{ fontSize: 14, color: "#3C3C43" }}>Dispatching…</div>
+          <div style={{ fontSize: 14, color: "var(--gooni-text, #3C3C43)" }}>Dispatching…</div>
         )}
         {modal.state === "success" && (
           <>
             <div style={{ fontSize: 15, fontWeight: 600, color: ctok.text }}>
               {modal.rewrote ? "Note overwritten" : "Note created"}
             </div>
-            <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.5 }}>
+            <div style={{ fontSize: 13, color: "var(--gooni-text, #3C3C43)", lineHeight: 1.5 }}>
               Eval bundled into note <strong>#{modal.noteId}</strong> in the Claude Code space.
               Backlog item added.
             </div>
@@ -1466,7 +1466,7 @@ function DispatchModal({
         {modal.state === "error" && (
           <>
             <div style={{ fontSize: 15, fontWeight: 600, color: ctok.danger }}>Dispatch failed</div>
-            <div style={{ fontSize: 13, color: "#3C3C43", lineHeight: 1.5 }}>{modal.message}</div>
+            <div style={{ fontSize: 13, color: "var(--gooni-text, #3C3C43)", lineHeight: 1.5 }}>{modal.message}</div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
               <ModalButton onClick={onClose} variant="ghost">Close</ModalButton>
               <ModalButton onClick={onConfirm} variant="primary">Retry</ModalButton>
@@ -1550,7 +1550,7 @@ function SummaryEditor({
   return (
     <div
       style={{
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         border: "1px solid #E5E5EA",
         borderRadius: 12,
         padding: 16,
@@ -1642,12 +1642,12 @@ function MessageCard({
   // what without bright bubbles fighting the trace cards.
   const cardStyle = isAssistant
     ? {
-        background: "#F5F8FB",
+        background: "var(--gooni-card, #F5F8FB)",
         border: "1px solid #E2E9F0",
         borderLeft: "3px solid #B6CFE8",
       }
     : {
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         border: "1px solid #E5E5EA",
         borderLeft: "3px solid #D1D1D6",
       };
@@ -1802,7 +1802,7 @@ function SelfTakePanel({ messageId }: { messageId: number }) {
       style={{
         marginTop: 12,
         padding: "10px 12px",
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         border: "1px solid #E5E5EA",
         borderRadius: 8,
       }}
@@ -1926,7 +1926,7 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
         border: "1px solid #E5E5EA",
         borderRadius: 8,
         padding: 8,
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         fontFamily: FONT,
         fontSize: 12,
       }}
@@ -1971,7 +1971,7 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
                 style={{
                   margin: "4px 0 0 0",
                   padding: 8,
-                  background: "#F5F8FB",
+                  background: "var(--gooni-card, #F5F8FB)",
                   borderRadius: 6,
                   fontSize: 11,
                   overflowX: "auto",
@@ -1990,7 +1990,7 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
                 style={{
                   margin: "4px 0 0 0",
                   padding: 8,
-                  background: "#F5F8FB",
+                  background: "var(--gooni-card, #F5F8FB)",
                   borderRadius: 6,
                   fontSize: 11,
                   overflowX: "auto",
@@ -2184,7 +2184,7 @@ function MessageRatingRow({
           borderRadius: 8,
           resize: "vertical",
           outline: "none",
-          background: "#fff",
+          background: "var(--gooni-card, #fff)",
           color: ctok.text,
           overflow: "hidden",
         }}
@@ -2197,7 +2197,7 @@ function MessageRatingRow({
             style={{
               padding: "5px 12px", borderRadius: 6,
               border: "1px solid #E5E5EA", background: "transparent",
-              color: "#6E6E73", fontSize: 11.5, fontWeight: 500,
+              color: "var(--gooni-muted, #6E6E73)", fontSize: 11.5, fontWeight: 500,
               cursor: pending ? "wait" : "pointer", fontFamily: FONT,
             }}
           >
@@ -2260,7 +2260,7 @@ function StepCard({
   return (
     <div
       style={{
-        background: "#FAFAFA",
+        background: ctok.bg,
         border: "1px solid #E5E5EA",
         borderRadius: 8,
         padding: 12,
@@ -2420,7 +2420,7 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
         style={{
           margin: 0,
           padding: 8,
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           border: "1px solid #E5E5EA",
           borderRadius: 6,
           fontSize: 11,
@@ -2485,7 +2485,7 @@ function FormattedModal({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           borderRadius: 12,
           padding: "16px 18px",
           width: "80vw",
@@ -2522,7 +2522,7 @@ function FormattedModal({
           style={{
             margin: 0,
             padding: 12,
-            background: "#FAFAFA",
+            background: ctok.bg,
             border: "1px solid #E5E5EA",
             borderRadius: 8,
             fontSize: 12,
@@ -2590,7 +2590,7 @@ function FlagEditor({
     <div
       style={{
         marginTop: 10,
-        background: "#FFFFFF",
+        background: "var(--gooni-card, #FFFFFF)",
         border: "1px solid #FF3B30",
         borderRadius: 8,
         padding: 10,
@@ -2677,7 +2677,7 @@ function ToolLegendPopup({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "#FFFFFF",
+          background: "var(--gooni-card, #FFFFFF)",
           borderRadius: 12,
           padding: 24,
           maxWidth: 600,
@@ -2702,7 +2702,7 @@ function ToolLegendPopup({
               <div style={{ fontSize: 13, fontWeight: 600 }}>
                 {e.name} <span style={{ color: ctok.muted, fontWeight: 400 }}>({e.key})</span>
               </div>
-              <div style={{ fontSize: 12, color: "#3A3A3C", marginTop: 2, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 12, color: "var(--gooni-text, #3A3A3C)", marginTop: 2, lineHeight: 1.5 }}>
                 {e.description}
               </div>
             </div>
@@ -3192,7 +3192,7 @@ function EvalRunsPanel() {
   const baselineList = Object.values(baselines);
 
   return (
-    <div style={{ flex: 1, display: "flex", overflow: "hidden", background: "#FAFAFA" }}>
+    <div style={{ flex: 1, display: "flex", overflow: "hidden", background: ctok.bg }}>
       {/* Left rail: run list */}
       <div style={{ width: 320, borderRight: "1px solid rgba(0,0,0,0.06)", overflowY: "auto", padding: "12px 0", flexShrink: 0 }}>
         {/* Run-against-live-prod-snapshot button. Triggers a backend subprocess
@@ -3325,7 +3325,7 @@ function EvalRunsPanel() {
                 width: "100%",
                 textAlign: "left",
                 padding: "8px 16px",
-                background: selected === r.filename ? "#E8E8ED" : "transparent",
+                background: selected === r.filename ? "var(--gooni-hover, #E8E8ED)" : "transparent",
                 border: "none",
                 borderBottom: "1px solid rgba(0,0,0,0.04)",
                 cursor: "pointer",
@@ -3344,7 +3344,7 @@ function EvalRunsPanel() {
         )}
       </div>
       {/* Right pane: baseline-detail (priority) OR report iframe (fallback). */}
-      <div style={{ flex: 1, overflow: "auto", background: "#FFFFFF" }}>
+      <div style={{ flex: 1, overflow: "auto", background: "var(--gooni-card, #FFFFFF)" }}>
         {selectedBaselineFile ? (
           baselineDetailLoading ? (
             <div style={{ padding: 24, color: ctok.muted, fontSize: 13, fontFamily: FONT }}>
@@ -3440,7 +3440,7 @@ function BaselineDetailPanel({
           </div>
           {Object.entries(detail.means).map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
-              <span style={{ color: "#636366" }}>{k}</span>
+              <span style={{ color: "var(--gooni-muted, #636366)" }}>{k}</span>
               <span style={{ fontWeight: 600 }}>{Number(v).toFixed(2)}</span>
             </div>
           ))}
@@ -3489,7 +3489,7 @@ function BaselineDetailPanel({
               {Object.keys(r.scores || {}).length > 0 && (
                 <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 10 }}>
                   {Object.entries(r.scores).map(([dim, score]) => (
-                    <span key={dim} style={{ fontSize: 11.5, color: "#636366" }}>
+                    <span key={dim} style={{ fontSize: 11.5, color: "var(--gooni-muted, #636366)" }}>
                       {dim}: <strong>{score}</strong>
                     </span>
                   ))}
@@ -3503,7 +3503,7 @@ function BaselineDetailPanel({
                 </div>
               )}
               {r.judge_notes && (
-                <div style={{ marginTop: 6, fontSize: 11.5, color: "#636366", lineHeight: 1.45 }}>
+                <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--gooni-muted, #636366)", lineHeight: 1.45 }}>
                   {r.judge_notes}
                 </div>
               )}

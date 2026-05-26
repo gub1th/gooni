@@ -216,7 +216,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
       </div>
 
       {comments.length === 0 && (
-        <div style={{ fontSize: 13, color: "#94A3B8", marginBottom: 18 }}>
+        <div style={{ fontSize: 13, color: "var(--gooni-faint, #94A3B8)", marginBottom: 18 }}>
           No comments.
         </div>
       )}
@@ -292,11 +292,11 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
                   }}
                 >
                   {!isOwner && (
-                    <span style={{ fontSize: 11, color: "#94A3B8", fontWeight: 500 }}>
+                    <span style={{ fontSize: 11, color: "var(--gooni-faint, #94A3B8)", fontWeight: 500 }}>
                       {identity.display}
                     </span>
                   )}
-                  <span style={{ fontSize: 11, color: "#94A3B8" }}>
+                  <span style={{ fontSize: 11, color: "var(--gooni-faint, #94A3B8)" }}>
                     {formatTime(c.created_at)}
                   </span>
                   <button

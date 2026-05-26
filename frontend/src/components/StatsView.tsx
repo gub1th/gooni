@@ -297,7 +297,7 @@ export function LeetcodeSection() {
         {(data.easy_solved != null || data.medium_solved != null || data.hard_solved != null) && (
           <div style={{
             display: "flex", gap: 14, flexWrap: "wrap",
-            fontSize: 12, color: "#3A3A3C",
+            fontSize: 12, color: "var(--gooni-text, #3A3A3C)",
             paddingTop: 12,
             borderTop: "0.5px solid var(--gooni-border, rgba(0,0,0,0.06))",
           }}>
@@ -521,7 +521,7 @@ export function DevSection() {
                 {view.themes.map((t) => (
                   <li key={t.theme} style={{
                     display: "flex", flexDirection: "column", gap: 4,
-                    fontSize: 13, lineHeight: 1.5, color: "#3A3A3C",
+                    fontSize: 13, lineHeight: 1.5, color: "var(--gooni-text, #3A3A3C)",
                   }}>
                     <span style={{
                       alignSelf: "flex-start",
@@ -538,7 +538,7 @@ export function DevSection() {
               </ul>
             ) : (
               <div style={{
-                fontSize: 13, color: "#3A3A3C", lineHeight: 1.55,
+                fontSize: 13, color: "var(--gooni-text, #3A3A3C)", lineHeight: 1.55,
                 whiteSpace: "pre-wrap",
               }}>
                 {devTake.take}
@@ -1188,7 +1188,7 @@ function RepoRow({ repo }: { repo: DevActivityRepo }) {
       }}>
         <span style={{ fontWeight: 600 }}>{repo.owner}/{repo.name}</span>
         {today && today.commits > 0 ? (
-          <span style={{ fontSize: 11, color: "#6B6B70", display: "flex", gap: 6 }}>
+          <span style={{ fontSize: 11, color: "var(--gooni-muted, #6B6B70)", display: "flex", gap: 6 }}>
             <span>{today.commits} today</span>
             <span style={{ color: GREEN }}>+{today.additions}</span>
             <span style={{ color: RED }}>−{today.deletions}</span>
@@ -1219,7 +1219,7 @@ function RepoRow({ repo }: { repo: DevActivityRepo }) {
                 flexShrink: 0,
               }}>─</span>
               <span style={{
-                color: "#3A3A3C", flex: 1,
+                color: "var(--gooni-text, #3A3A3C)", flex: 1,
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
               }}>
                 {c.subject}
