@@ -25,13 +25,11 @@ from . import github as gh
 
 
 def _local_today(db: Session):
-    settings = db.query(SettingsModel).first()
-    tz_name = (settings.nudge_tz if settings else None) or "America/Los_Angeles"
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = ZoneInfo("America/Los_Angeles")
-    return datetime.now(tz).date()
+    """Thin alias over common.local_today (the shared helper). Local name
+    kept so the one call site below reads cleanly; the module still needs
+    ZoneInfo + SettingsModel for _local_day_key's per-commit bucketing."""
+    from ..common import local_today
+    return local_today(db)
 
 
 def _local_day_key(iso_ts: str, tz: ZoneInfo) -> str:

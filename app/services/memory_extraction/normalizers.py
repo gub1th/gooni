@@ -7,17 +7,19 @@ from typing import Any
 from .parsers import _validate_candidate
 
 
-def _coerce_log_date(raw: Any) -> str | None:
+def _coerce_log_date(raw: Any, today: _date | None = None) -> str | None:
     """Validate an extractor-supplied fitness-log date (YYYY-MM-DD). Must
     parse, not be in the future, and not >1yr back — clamps LLM date math
-    mistakes. None means "use today" (the handler's default)."""
+    mistakes. None means "use today" (the handler's default). `today` is the
+    user's local date (passed down from extract_signals); falls back to
+    date.today() which is server-UTC, so prefer passing it."""
     if not isinstance(raw, str) or not raw.strip():
         return None
     try:
         d = _date.fromisoformat(raw.strip()[:10])
     except ValueError:
         return None
-    today = _date.today()
+    today = today or _date.today()
     if d > today or d < today - timedelta(days=366):
         return None
     return d.isoformat()
@@ -269,7 +271,7 @@ def _coerce_float(v: Any) -> float | None:
         return None
 
 
-def _normalize_fitness(items: Any) -> list[dict]:
+def _normalize_fitness(items: Any, today: _date | None = None) -> list[dict]:
     """Normalize fitness_logs entries from the extractor (PR-1 fitness
     pipeline). Each entry logs diet/body/training data → DailyMetric rows.
     Drops malformed entries silently — never crash the extractor.
@@ -356,7 +358,7 @@ def _normalize_fitness(items: Any) -> list[dict]:
             "weight_unit": weight_unit,
             "exercise_label": exercise_label,
             "substance": substance,
-            "log_date": _coerce_log_date(it.get("date")),
+            "log_date": _coerce_log_date(it.get("date"), today),
             "correction": correction,
             "correction_target": correction_target,
         })

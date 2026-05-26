@@ -320,7 +320,10 @@ class Orchestrator:
                     if prev_assistant and prev_assistant.id != user_msg.id
                     else None
                 )
-                signals = extract_signals(saved_message, prev_assistant=prev_text)
+                from ...common import local_today
+                signals = extract_signals(
+                    saved_message, prev_assistant=prev_text, today=local_today(db)
+                )
                 memory_candidates = signals["memories"]
                 signals_summary = _summarize_signals(signals, memory_candidates)
                 tb.extracted_signals(saved_message, signals)

@@ -257,7 +257,8 @@ def classify_note(note_id: int) -> None:
                 # fall through and re-classify
 
         text_for_llm = f"{(note.title or '').strip()}\n\n{plaintext}".strip()
-        signals = extract_signals(text_for_llm, prev_assistant=None)
+        from ..common import local_today
+        signals = extract_signals(text_for_llm, prev_assistant=None, today=local_today(db))
 
         # Unified routing via intent_router — same dispatch point chat
         # uses, eliminates the two-layer drift that caused the
