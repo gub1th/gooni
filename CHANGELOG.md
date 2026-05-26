@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.178.1 — 2026-05-26 (patch)
+
+- fix(creative): pinned coin stays purple, spawn peek surfaces, add read-notes link (#384)
+
 ## 0.178.0 — 2026-05-25 (minor)
 
 - feat: unify tracker cards + sleep nudge names its signal (#380)
