@@ -2570,10 +2570,12 @@ export type FileUploadResult =
 export async function uploadAttachment(
   file: File,
   noteId?: number,
+  todoId?: number,
 ): Promise<FileUploadResult> {
   const form = new FormData();
   form.append("file", file, file.name || "attachment");
-  if (noteId != null) form.append("note_id", String(noteId));
+  if (todoId != null) form.append("todo_id", String(todoId));
+  else if (noteId != null) form.append("note_id", String(noteId));
   const res = await apiFetch(`${BASE}/uploads/file`, { method: "POST", body: form });
   if (res.ok) {
     const data = await res.json();
@@ -2598,6 +2600,28 @@ export async function uploadAttachment(
     // body wasn't JSON — keep status text
   }
   return { kind: "error", status: res.status, message };
+}
+
+// Persisted attachment row (note- or todo-owned). Shape matches the
+// GET /{owner}/attachments list response.
+export interface AttachmentMeta {
+  id: number;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  url: string;
+  created_at: string;
+}
+
+export async function fetchTodoAttachments(todoId: number): Promise<AttachmentMeta[]> {
+  const res = await apiFetch(`${BASE}/todos/${todoId}/attachments`);
+  if (!res.ok) throw new Error("Failed to load attachments");
+  return res.json();
+}
+
+export async function deleteAttachment(attachmentId: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/attachments/${attachmentId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete attachment");
 }
 
 // ── Habits (daily binary trackers) ─────────────────────────────────────

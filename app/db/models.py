@@ -1614,14 +1614,20 @@ class Edge(Base):
 
 
 class Attachment(Base):
-    """File attached to a Note (PDF, doc, archive, etc.). Stored on R2; the
-    DB row carries metadata + the public URL. Distinct from inline <img>
-    figures, which live in note HTML."""
+    """File attached to a Note OR a Todo (PDF, doc, archive, etc.). Stored on
+    R2; the DB row carries metadata + the public URL. Distinct from inline
+    <img> figures, which live in note HTML.
+
+    Owner is exactly one of note_id / todo_id (both nullable; each row sets
+    one). A nullable FK per owner-kind keeps read paths trivial; if focuses /
+    promises ever need attachments too, revisit a polymorphic owner then —
+    one extra owner doesn't justify that rework yet."""
 
     __tablename__ = "attachments"
 
     id = Column(Integer, primary_key=True, index=True)
-    note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
+    note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
+    todo_id = Column(Integer, ForeignKey("todos.id"), nullable=True, index=True)
     filename = Column(Text, nullable=False)
     mime_type = Column(String, nullable=False)
     size_bytes = Column(Integer, nullable=False, default=0)
