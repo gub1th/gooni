@@ -59,7 +59,7 @@ export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: 
   return (
     <div style={{
       background: "var(--gooni-card, #fff)",
-      border: "1px solid rgba(0,0,0,0.08)",
+      border: `1px solid ${ctok.border}`,
       borderRadius: 12,
       padding: "12px 16px",
       margin: "16px 24px 0",
@@ -125,7 +125,7 @@ export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: 
                 style={{
                   padding: "4px 10px", fontSize: 11.5,
                   fontFamily: FONT, fontWeight: 500,
-                  border: "1px solid rgba(0,0,0,0.1)",
+                  border: `1px solid ${ctok.border}`,
                   background: "transparent", color: "var(--gooni-muted, #6E6E73)",
                   borderRadius: 6, cursor: "pointer",
                 }}

@@ -71,7 +71,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
           "font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
           "font-size: 14px",
           "line-height: 1.55",
-          "color: #1E293B",
+          "color: var(--gooni-text, #1E293B)",
           "outline: none",
           "min-height: 24px",
         ].join("; "),
@@ -147,7 +147,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
       style={{
         marginTop: 32,
         padding: "20px 0 8px",
-        borderTop: "1px solid rgba(0,0,0,0.08)",
+        borderTop: `1px solid ${ctok.border}`,
         fontFamily: FONT,
       }}
     >
@@ -158,7 +158,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
         .gooni-comment-body h2 { font-size: 16px; font-weight: 700; margin: 10px 0 6px; }
         .gooni-comment-body h3 { font-size: 14px; font-weight: 700; margin: 8px 0 4px; }
         .gooni-comment-body code {
-          background: rgba(15,23,42,0.06);
+          background: var(--gooni-hover, rgba(15,23,42,0.06));
           padding: 1px 5px;
           border-radius: 4px;
           font-size: 0.9em;
@@ -179,10 +179,10 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
         .gooni-comment-body em { font-style: italic; }
         .gooni-comment-body a { color: #2563EB; text-decoration: underline; }
         .gooni-comment-body blockquote {
-          border-left: 3px solid rgba(15,23,42,0.20);
+          border-left: 3px solid var(--gooni-border, rgba(15,23,42,0.20));
           padding-left: 10px;
           margin: 6px 0;
-          color: #475569;
+          color: var(--gooni-muted, #475569);
         }
 
         /* Composer mirrors the body styles but trimmed for inline use. */
@@ -191,10 +191,10 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
         .gooni-comment-composer ul, .gooni-comment-composer ol { margin: 4px 0; padding-left: 20px; }
         .gooni-comment-composer code {
           font-family: 'SF Mono', Menlo, monospace; font-size: 12.5px;
-          background: rgba(15,23,42,0.06); padding: 1px 4px; border-radius: 3px;
+          background: var(--gooni-hover, rgba(15,23,42,0.06)); padding: 1px 4px; border-radius: 3px;
         }
         .gooni-comment-composer pre {
-          background: rgba(15,23,42,0.06); padding: 8px 10px; border-radius: 6px;
+          background: var(--gooni-hover, rgba(15,23,42,0.06)); padding: 8px 10px; border-radius: 6px;
           font-family: 'SF Mono', Menlo, monospace; font-size: 12.5px;
           margin: 6px 0;
         }
@@ -207,7 +207,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
           fontSize: 12,
           fontWeight: 600,
           letterSpacing: 0.4,
-          color: "#64748B",
+          color: ctok.muted,
           textTransform: "uppercase",
           marginBottom: 14,
         }}
@@ -306,7 +306,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
                       opacity: 0,
                       border: "none",
                       background: "transparent",
-                      color: "#CBD5E1",
+                      color: ctok.faint,
                       fontSize: 12,
                       cursor: "pointer",
                       padding: "0 4px",
@@ -317,7 +317,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
                       (e.currentTarget as HTMLButtonElement).style.color = "#EF4444";
                     }}
                     onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.color = "#CBD5E1";
+                      (e.currentTarget as HTMLButtonElement).style.color = ctok.faint;
                     }}
                   >
                     ×
@@ -347,7 +347,7 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
             flex: 1,
             display: "flex",
             alignItems: "flex-end",
-            background: "rgba(15,23,42,0.04)",
+            background: ctok.hover,
             borderRadius: 18,
             padding: "8px 8px 8px 14px",
             transition: "background 0.15s",
@@ -366,8 +366,8 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
               height: 28,
               borderRadius: "50%",
               border: "none",
-              background: !hasContent || posting ? "rgba(15,23,42,0.08)" : ctok.accent,
-              color: !hasContent || posting ? "#94A3B8" : "#FFFFFF",
+              background: "transparent",
+              color: !hasContent || posting ? ctok.faint : ctok.text,
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
@@ -375,6 +375,16 @@ export function NoteComments({ noteId }: NoteCommentsProps) {
               cursor: !hasContent || posting ? "default" : "pointer",
               transition: "background 0.12s, color 0.12s",
               flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              if (hasContent && !posting) {
+                (e.currentTarget as HTMLButtonElement).style.color = ctok.accent;
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (hasContent && !posting) {
+                (e.currentTarget as HTMLButtonElement).style.color = ctok.text;
+              }
             }}
           >
             <ArrowUp size={15} strokeWidth={2.6} />
@@ -392,10 +402,10 @@ function bubbleTintFor(identity: Identity): { bg: string; fg: string } {
     case "owner":
       return { bg: ctok.accent, fg: "#FFFFFF" };
     case "claude":
-      return { bg: "rgba(168,85,247,0.14)", fg: "#3B0764" };
+      return { bg: "rgba(168,85,247,0.14)", fg: "#C084FC" };
     case "gooni":
-      return { bg: "rgba(16,185,129,0.16)", fg: "#064E3B" };
+      return { bg: "rgba(16,185,129,0.16)", fg: "#5EEAD4" };
     default:
-      return { bg: "rgba(15,23,42,0.06)", fg: "#0F172A" };
+      return { bg: ctok.hover, fg: ctok.text };
   }
 }

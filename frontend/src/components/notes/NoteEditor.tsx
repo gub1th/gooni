@@ -234,7 +234,7 @@ function useEditorStyles() {
         font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
         font-size: 14.5px;
         line-height: 1.55;
-        color: #1C1C1E;
+        color: var(--gooni-text, #1C1C1E);
         -webkit-font-smoothing: antialiased;
       }
       .gooni-note-editor p { margin: 0 0 10px; }
@@ -244,8 +244,8 @@ function useEditorStyles() {
       .gooni-note-editor h1:first-child,
       .gooni-note-editor h2:first-child,
       .gooni-note-editor h3:first-child { margin-top: 0; }
-      .gooni-note-editor blockquote { border-left: 3px solid rgba(0,0,0,0.10); padding-left: 14px; color: #475569; margin: 12px 0; }
-      .gooni-note-editor code { background: rgba(15,23,42,0.06); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+      .gooni-note-editor blockquote { border-left: 3px solid var(--gooni-border, rgba(0,0,0,0.10)); padding-left: 14px; color: var(--gooni-muted, #475569); margin: 12px 0; }
+      .gooni-note-editor code { background: var(--gooni-hover, rgba(15,23,42,0.06)); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
       .gooni-note-editor pre { background: #0F172A; color: #F1F5F9; padding: 14px 16px; border-radius: 8px; margin: 12px 0; overflow-x: auto; }
       .gooni-note-editor pre code { background: transparent; padding: 0; color: inherit; font-size: 0.92em; }
       .gooni-note-editor ul,
@@ -266,7 +266,7 @@ function useEditorStyles() {
       .gooni-note-editor.is-empty > p:first-child { position: relative; }
       .gooni-note-editor.is-empty > p:first-child::before {
         content: "Start writing — press '/' for blocks";
-        color: #AEAEB2;
+        color: var(--gooni-faint, #AEAEB2);
         pointer-events: none;
         position: absolute;
         top: 0;
@@ -346,7 +346,7 @@ function useEditorStyles() {
         width: 15px;
         height: 15px;
         cursor: pointer;
-        accent-color: #1C1C1E;
+        accent-color: var(--gooni-text, #1C1C1E);
         margin: 0;
         vertical-align: middle;
       }
@@ -357,13 +357,13 @@ function useEditorStyles() {
       .gooni-note-editor ul[data-type="taskList"] li > div > p { margin: 0; }
       .gooni-note-editor ul[data-type="taskList"] li[data-checked="true"] > div {
         text-decoration: line-through;
-        color: #AEAEB2;
+        color: var(--gooni-faint, #AEAEB2);
       }
       .gooni-note-editor ul[data-type="taskList"] ul[data-type="taskList"] {
         margin: 2px 0 0;
       }
       .gooni-toolbar-btn { transition: background 0.1s; }
-      .gooni-toolbar-btn:hover { background: rgba(0,0,0,0.05) !important; }
+      .gooni-toolbar-btn:hover { background: var(--gooni-hover, rgba(0,0,0,0.05)) !important; }
       /* NoteCard + TextColor CSS lives in ./noteCardStyles.ts so the public
          read view can mount the same rules (visual parity). See
          useNoteCardStyles() call in this component. */
@@ -375,13 +375,13 @@ function useEditorStyles() {
       }
       .gooni-note-editor table td,
       .gooni-note-editor table th {
-        border: 1px solid rgba(0,0,0,0.12);
+        border: 1px solid var(--gooni-border, rgba(0,0,0,0.12));
         padding: 6px 10px;
         min-width: 80px;
         vertical-align: top;
       }
       .gooni-note-editor table th {
-        background: rgba(0,0,0,0.04);
+        background: var(--gooni-hover, rgba(0,0,0,0.04));
         font-weight: 600;
       }
       .gooni-note-editor table .selectedCell {
@@ -467,7 +467,7 @@ function EditedChip({
           borderRadius: 8,
           fontSize: 12, fontWeight: 500,
           color: "var(--gooni-muted, #6E6E73)",
-          background: "rgba(255,255,255,0.82)",
+          background: ctok.card,
           backdropFilter: "blur(22px) saturate(1.8)",
           WebkitBackdropFilter: "blur(22px) saturate(1.8)",
           boxShadow: "0 1px 2px rgba(15,23,42,0.05), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
@@ -1524,7 +1524,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           right: 0,
           height: 84,
           background:
-            "linear-gradient(to bottom, var(--gooni-card, #FFFFFF) 35%, rgba(255,255,255,0) 100%)",
+            "linear-gradient(to bottom, var(--gooni-card, #FFFFFF) 35%, transparent 100%)",
           pointerEvents: "none",
           zIndex: 5,
         }}
@@ -1545,7 +1545,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           gap: 4,
           padding: "3px 6px",
           borderRadius: 999,
-          background: "rgba(255,255,255,0.82)",
+          background: ctok.card,
+          border: `1px solid ${ctok.border}`,
           backdropFilter: "blur(22px) saturate(1.8)",
           WebkitBackdropFilter: "blur(22px) saturate(1.8)",
           boxShadow:
@@ -1596,7 +1597,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                   style={{
                     width: 30, height: 30, borderRadius: 8,
                     border: "none",
-                    background: movePicker ? "rgba(0,0,0,0.08)" : "transparent",
+                    background: movePicker ? ctok.hover : "transparent",
                     cursor: "pointer",
                     fontSize: 13,
                     color: "var(--gooni-muted, #636366)",
@@ -1604,7 +1605,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     padding: 0, flexShrink: 0,
                     transition: "background 0.12s",
                   }}
-                  onMouseEnter={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+                  onMouseEnter={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
                   onMouseLeave={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
                 >
                   <FolderInput size={15} strokeWidth={1.7} />
@@ -1646,7 +1647,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         color: "var(--gooni-text, #1C1C1E)",
                         textAlign: "left",
                       }}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = ctok.hover)}
                       onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
                     >
                       <SpaceIcon emoji={space.emoji} size={14} />
@@ -1668,7 +1669,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     width: 30, height: 30, borderRadius: 8, border: "none",
                     background: deleteConfirm ? "rgba(255,59,48,0.10)" : "transparent",
                     cursor: "pointer", fontSize: 13,
-                    color: deleteConfirm ? ctok.danger : "#636366",
+                    color: deleteConfirm ? ctok.danger : ctok.muted,
                     display: "flex", alignItems: "center", justifyContent: "center",
                     padding: 0, flexShrink: 0,
                     transition: "background 0.12s",
@@ -1726,7 +1727,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                   <button
                     onClick={() => setDeleteConfirm(false)}
                     style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: "var(--gooni-muted, #636366)", textAlign: "left" }}
-                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = ctok.hover)}
                     onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
                   >
                     Cancel
@@ -1750,13 +1751,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 padding: 0, flexShrink: 0,
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+              onMouseEnter={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
               onMouseLeave={(e) => { if (!activeNote.is_pinned) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
               <PinIcon
                 size={15}
                 strokeWidth={1.7}
-                color={activeNote.is_pinned ? "#F59E0B" : "#636366"}
+                color={activeNote.is_pinned ? "#F59E0B" : ctok.muted}
                 fill={activeNote.is_pinned ? "#F59E0B" : "none"}
               />
             </button>
@@ -1815,12 +1816,12 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 padding: 0, flexShrink: 0,
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => { if (taggedNoteId !== activeNoteId) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+              onMouseEnter={(e) => { if (taggedNoteId !== activeNoteId) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
               onMouseLeave={(e) => { if (taggedNoteId !== activeNoteId) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
               {taggedNoteId === activeNoteId
                 ? <Check size={15} strokeWidth={2} color="#16A34A" />
-                : <ListPlus size={15} strokeWidth={1.7} color="#636366" />}
+                : <ListPlus size={15} strokeWidth={1.7} color={ctok.muted} />}
             </button>
           </Tooltip>
         )}
@@ -1842,13 +1843,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 padding: 0, flexShrink: 0,
                 transition: "background 0.12s",
               }}
-              onMouseEnter={(e) => { if (!activeNote.is_draft) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+              onMouseEnter={(e) => { if (!activeNote.is_draft) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
               onMouseLeave={(e) => { if (!activeNote.is_draft) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
             >
               <PencilIcon
                 size={15}
                 strokeWidth={1.7}
-                color={activeNote.is_draft ? "#8B5CF6" : "#636366"}
+                color={activeNote.is_draft ? "#8B5CF6" : ctok.muted}
               />
             </button>
           </Tooltip>
@@ -1888,7 +1889,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           <>
             <div style={{
               width: 1, height: 16,
-              background: "rgba(15,23,42,0.10)",
+              background: ctok.border,
               flexShrink: 0,
               margin: "0 4px",
             }} />
@@ -2054,7 +2055,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 7,
                   padding: "4px 11px", borderRadius: 999,
-                  border: "1px solid rgba(0,0,0,0.08)",
+                  border: `1px solid ${ctok.border}`,
                   background: "var(--gooni-surface, rgba(0,0,0,0.03))",
                   color: "var(--gooni-text, #1C1C1E)",
                   fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
@@ -2063,12 +2064,12 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                   transition: "background 0.12s, border-color 0.12s",
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)";
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.12)";
+                  (e.currentTarget as HTMLButtonElement).style.background = ctok.hover;
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = ctok.border;
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLButtonElement).style.background = "var(--gooni-surface, rgba(0,0,0,0.03))";
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(0,0,0,0.08)";
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = ctok.border;
                 }}
               >
                 <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16A34A" }} />
@@ -2109,7 +2110,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 <div style={{ fontSize: 28, marginBottom: 12 }}>📝</div>
                 <div style={{ fontSize: 15, color: "var(--gooni-muted, #8E8E93)", marginBottom: 4 }}>No note selected</div>
                 <div style={{ fontSize: 13, color: ctok.disabled }}>
-                  Pick one from the list, or press <kbd style={{ padding: "1px 5px", borderRadius: 4, background: "rgba(0,0,0,0.06)", fontSize: 12, fontFamily: "inherit" }}>⌘N</kbd> to start a new one.
+                  Pick one from the list, or press <kbd style={{ padding: "1px 5px", borderRadius: 4, background: ctok.hover, fontSize: 12, fontFamily: "inherit" }}>⌘N</kbd> to start a new one.
                 </div>
               </div>
             )}
@@ -2208,7 +2209,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         fontSize: 11.5,
                         fontWeight: 500,
                         color: "var(--gooni-muted, #8E8E93)",
-                        background: "rgba(15,23,42,0.04)",
+                        background: ctok.hover,
                         border: "none",
                         padding: "2px 8px",
                         borderRadius: 999,
@@ -2221,7 +2222,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         (e.currentTarget as HTMLButtonElement).style.color = "#B91C1C";
                       }}
                       onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.04)";
+                        (e.currentTarget as HTMLButtonElement).style.background = ctok.hover;
                         (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)";
                       }}
                     >
@@ -2249,7 +2250,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         fontSize: 11.5,
                         fontWeight: 500,
                         color: "var(--gooni-text, #1C1C1E)",
-                        background: "rgba(15,23,42,0.06)",
+                        background: ctok.hover,
                         border: "none",
                         outline: "none",
                         padding: "2px 8px",
@@ -2275,7 +2276,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                       }}
                       onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.04)";
+                        (e.currentTarget as HTMLButtonElement).style.background = ctok.hover;
                         (e.currentTarget as HTMLButtonElement).style.color = "var(--gooni-muted, #8E8E93)";
                       }}
                       onMouseLeave={(e) => {
@@ -2342,7 +2343,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                             marginTop: 6,
                             padding: "8px 12px",
                             borderRadius: 8,
-                            background: "rgba(0,0,0,0.03)",
+                            background: ctok.hover,
                             border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))",
                             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
                             fontSize: 12.5,
@@ -2469,13 +2470,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                           padding: 0,
                           borderRadius: 8,
                           border: "none",
-                          background: item.active ? "rgba(15,23,42,0.08)" : "transparent",
+                          background: item.active ? ctok.hover : "transparent",
                           color: item.active ? "var(--gooni-text, #0F172A)" : "var(--gooni-muted, #475569)",
                           cursor: "pointer",
                           transition: "background 0.12s, color 0.12s",
                         }}
                         onMouseEnter={(e) => {
-                          if (!item.active) (e.currentTarget as HTMLButtonElement).style.background = "rgba(15,23,42,0.05)";
+                          if (!item.active) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover;
                         }}
                         onMouseLeave={(e) => {
                           if (!item.active) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
@@ -2489,7 +2490,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         mark. Active color shows a ring. Always visible —
                         Daniel didn't want a popover, wants the picker flat
                         in the toolbar. */}
-                    <span style={{ width: 1, height: 18, background: "rgba(15,23,42,0.10)", margin: "0 4px" }} />
+                    <span style={{ width: 1, height: 18, background: ctok.border, margin: "0 4px" }} />
                     {TEXT_COLOR_PALETTE.map((sw) => {
                       const isActive = sw.value == null
                         ? !editor.isActive("textColor")
@@ -2518,8 +2519,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                               width: 14, height: 14, borderRadius: "50%",
                               background: sw.value ?? "transparent",
                               border: sw.value
-                                ? (isActive ? "2px solid #0F172A" : "0.5px solid rgba(15,23,42,0.18)")
-                                : "1.5px solid rgba(15,23,42,0.35)",
+                                ? (isActive ? `2px solid ${ctok.text}` : `0.5px solid ${ctok.border}`)
+                                : `1.5px solid ${ctok.muted}`,
                               boxSizing: "border-box",
                               // Diagonal slash on the "default" (null) swatch so
                               // it reads as "clear" not "white".
@@ -2531,7 +2532,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                                 style={{
                                   position: "absolute", left: "50%", top: "50%",
                                   transform: "translate(-50%, -50%) rotate(-45deg)",
-                                  width: 12, height: 1.5, background: "rgba(15,23,42,0.5)",
+                                  width: 12, height: 1.5, background: ctok.muted,
                                 }}
                               />
                             )}
@@ -2543,7 +2544,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                         the formatting marks visually grouped. */}
                     {activeNoteId && activeNoteId > 0 && (
                       <>
-                        <span style={{ width: 1, height: 18, background: "rgba(15,23,42,0.10)", margin: "0 4px" }} />
+                        <span style={{ width: 1, height: 18, background: ctok.border, margin: "0 4px" }} />
                         <button
                           title={extractInFlight ? "Extracting…" : "Extract to new linked note"}
                           disabled={extractInFlight}
@@ -2560,7 +2561,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                             borderRadius: 8,
                             border: "none",
                             background: "transparent",
-                            color: extractInFlight ? "#94A3B8" : "#475569",
+                            color: extractInFlight ? ctok.disabled : ctok.muted,
                             cursor: extractInFlight ? "wait" : "pointer",
                             fontSize: 12,
                             fontWeight: 500,
@@ -2569,13 +2570,13 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                           }}
                           onMouseEnter={(e) => {
                             if (extractInFlight) return;
-                            e.currentTarget.style.background = "rgba(15,23,42,0.05)";
-                            e.currentTarget.style.color = "#0F172A";
+                            e.currentTarget.style.background = ctok.hover;
+                            e.currentTarget.style.color = ctok.text;
                           }}
                           onMouseLeave={(e) => {
                             if (extractInFlight) return;
                             e.currentTarget.style.background = "transparent";
-                            e.currentTarget.style.color = "#475569";
+                            e.currentTarget.style.color = ctok.muted;
                           }}
                         >
                           {extractInFlight ? (

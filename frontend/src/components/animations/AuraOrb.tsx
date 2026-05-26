@@ -6,11 +6,12 @@ interface AuraOrbProps {
 }
 
 const KEYFRAMES = `
+  /* Symmetric breathe — scale-only so the glow stays perfectly centered on
+     the face. The old morph rotated an asymmetric-radius blob, which made
+     each layer bulge to one side and the stacked glow drift off-center. */
   @keyframes auraMorph {
-    0%, 100% { border-radius: 50% 40% 50% 40%; transform: rotate(0deg) scale(1); }
-    25%      { border-radius: 40% 50% 40% 50%; transform: rotate(90deg) scale(1.05); }
-    50%      { border-radius: 50% 40% 50% 40%; transform: rotate(180deg) scale(0.95); }
-    75%      { border-radius: 40% 50% 40% 50%; transform: rotate(270deg) scale(1.02); }
+    0%, 100% { transform: scale(0.94); }
+    50%      { transform: scale(1.08); }
   }
   @keyframes auraLook {
     0%, 45%, 55%, 100% { transform: translateX(0); }
@@ -29,20 +30,20 @@ const KEYFRAMES = `
     position: absolute; border-radius: 50%;
     animation: auraMorph 4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
   }
-  .aura-blob-1 { width: 70px; height: 70px; top: 5px;  left: 5px;  background: #4ADE80; opacity: 0.12; }
+  /* Two concentric inner blobs only (outer ring removed). Opacities bumped
+     to compensate for the dropped outer layer so the glow still reads. */
   .aura-blob-2 {
     width: 56px; height: 56px; top: 12px; left: 12px; background: #4ADE80;
-    opacity: 0.10; animation-direction: reverse; animation-duration: 3s;
+    opacity: 0.18; animation-direction: reverse; animation-duration: 3s;
   }
   .aura-blob-3 {
     width: 44px; height: 44px; top: 18px; left: 18px; background: #4ADE80;
-    opacity: 0.08; animation-duration: 5s;
+    opacity: 0.14; animation-duration: 5s;
   }
   /* Intensified state — mascot is out, FAB is acting as drop target. Bump the
      blob opacities up so the orb glows brighter against the page. */
-  .aura-wrap.aura-intensified .aura-blob-1 { opacity: 0.32; }
-  .aura-wrap.aura-intensified .aura-blob-2 { opacity: 0.28; }
-  .aura-wrap.aura-intensified .aura-blob-3 { opacity: 0.22; }
+  .aura-wrap.aura-intensified .aura-blob-2 { opacity: 0.36; }
+  .aura-wrap.aura-intensified .aura-blob-3 { opacity: 0.28; }
 
   .aura-head {
     width: 36px; height: 36px; border-radius: 50%; background: #1a1a1a;
@@ -80,7 +81,6 @@ export function AuraOrb({ size = 80, intensified = false }: AuraOrbProps) {
       }}
     >
       <style>{KEYFRAMES}</style>
-      <div className="aura-blob aura-blob-1" />
       <div className="aura-blob aura-blob-2" />
       <div className="aura-blob aura-blob-3" />
       <div className="aura-head">

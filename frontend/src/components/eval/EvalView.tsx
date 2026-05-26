@@ -52,8 +52,8 @@ const SOURCE_STYLE: Record<
 // know which is which.
 const STATUS_STYLE: Record<EvalStatus, { color: string; bg: string; label: string }> = {
   not_yet: { color: ctok.muted, bg: ctok.hover, label: "Not yet" },
-  pending: { color: "#633806", bg: "#FAEEDA", label: "Pending" },
-  done: { color: "#085041", bg: "#E1F5EE", label: "Done" },
+  pending: { color: "#B8860B", bg: "rgba(245,158,11,0.16)", label: "Pending" },
+  done: { color: "#15A06E", bg: "rgba(22,163,74,0.16)", label: "Done" },
 };
 
 const SOURCES = ["web", "telegram", "whatsapp", "imessage"] as const;
@@ -360,7 +360,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
       <div
         style={{
           padding: "20px 24px 0",
-          borderBottom: "1px solid rgba(0,0,0,0.06)",
+          borderBottom: `1px solid ${ctok.border}`,
           background: "var(--gooni-card, #FFFFFF)",
           flexShrink: 0,
         }}
@@ -381,7 +381,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                 width: 22,
                 height: 22,
                 borderRadius: "50%",
-                border: "1px solid rgba(0,0,0,0.10)",
+                border: `1px solid ${ctok.border}`,
                 background: showShortcuts ? "rgba(10,132,255,0.10)" : "transparent",
                 color: showShortcuts ? ctok.accent : ctok.muted,
                 fontSize: 11,
@@ -440,7 +440,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
               style={{
                 flex: 1,
                 padding: "7px 14px",
-                border: "1px solid #E5E5EA",
+                border: `1px solid ${ctok.border}`,
                 borderRadius: 10,
                 fontSize: 13,
                 fontFamily: FONT,
@@ -455,7 +455,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
           <div
             style={{
               padding: "0 24px 14px",
-              borderBottom: "1px solid rgba(0,0,0,0.04)",
+              borderBottom: `1px solid ${ctok.border}`,
               display: "flex",
               flexWrap: "wrap",
               gap: 10,
@@ -518,7 +518,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                   fontSize: 11,
                   fontWeight: 500,
                   fontFamily: FONT,
-                  border: "0.5px solid rgba(0,0,0,0.10)",
+                  border: `0.5px solid ${ctok.border}`,
                   background: "transparent",
                   color: ctok.muted,
                   padding: "3px 10px",
@@ -536,7 +536,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                     left: 0,
                     zIndex: 20,
                     background: "var(--gooni-card, #FFFFFF)",
-                    border: "1px solid rgba(0,0,0,0.10)",
+                    border: `1px solid ${ctok.border}`,
                     borderRadius: 10,
                     padding: "10px 12px",
                     boxShadow: "0 4px 18px rgba(15,23,42,0.10)",
@@ -596,7 +596,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                   style={{
                     padding: "6px 14px",
                     borderRadius: 8,
-                    border: "1px solid rgba(0,0,0,0.10)",
+                    border: `1px solid ${ctok.border}`,
                     background: "transparent",
                     color: ctok.accent,
                     fontFamily: FONT,
@@ -614,7 +614,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                   display: "flex",
                   flexDirection: "column",
                   background: "var(--gooni-card, #FFFFFF)",
-                  border: "1px solid #E5E5EA",
+                  border: `1px solid ${ctok.border}`,
                   borderRadius: 8,
                   overflow: "hidden",
                 }}
@@ -689,8 +689,8 @@ function SegmentCard({
         textAlign: "left",
         padding: "14px 16px",
         borderRadius: 12,
-        background: focused ? "#EAF3FF" : "#FFFFFF",
-        border: focused ? "1px solid #0A84FF" : "0.5px solid rgba(0,0,0,0.10)",
+        background: focused ? "rgba(10,132,255,0.14)" : ctok.card,
+        border: focused ? `1px solid ${ctok.accent}` : `0.5px solid ${ctok.border}`,
         cursor: "pointer",
         fontFamily: FONT,
         display: "flex",
@@ -703,12 +703,12 @@ function SegmentCard({
       onMouseEnter={(e) => {
         if (focused) return;
         e.currentTarget.style.background = ctok.bg;
-        e.currentTarget.style.borderColor = "rgba(0,0,0,0.18)";
+        e.currentTarget.style.borderColor = ctok.border;
       }}
       onMouseLeave={(e) => {
         if (focused) return;
-        e.currentTarget.style.background = "#FFFFFF";
-        e.currentTarget.style.borderColor = "rgba(0,0,0,0.10)";
+        e.currentTarget.style.background = ctok.card;
+        e.currentTarget.style.borderColor = ctok.border;
       }}
     >
       {/* Top — source + status pill. Source reads as the primary id of
@@ -806,10 +806,10 @@ function SegmentRow({
       style={{
         textAlign: "left",
         padding: "10px 14px",
-        background: focused ? "#EAF3FF" : "#FFFFFF",
+        background: focused ? "rgba(10,132,255,0.14)" : ctok.card,
         border: "none",
-        borderTop: isFirst ? "none" : "1px solid #F2F2F7",
-        borderLeft: focused ? "3px solid #0A84FF" : "3px solid transparent",
+        borderTop: isFirst ? "none" : `1px solid ${ctok.border}`,
+        borderLeft: focused ? `3px solid ${ctok.accent}` : "3px solid transparent",
         cursor: "pointer",
         fontFamily: FONT,
         display: "flex",
@@ -824,7 +824,7 @@ function SegmentRow({
       }}
       onMouseLeave={(e) => {
         if (focused) return;
-        e.currentTarget.style.background = "#FFFFFF";
+        e.currentTarget.style.background = ctok.card;
       }}
     >
       {/* Primary row — source + msg count + time on the left, status pill
@@ -911,7 +911,7 @@ function ViewToggle({
     fontSize: 12,
     fontFamily: FONT,
     background: active ? "var(--gooni-card, #FFFFFF)" : "transparent",
-    color: active ? ctok.text : "#6E6E73",
+    color: active ? ctok.text : ctok.muted,
     border: "none",
     borderRadius: 5,
     cursor: "pointer",
@@ -1205,7 +1205,7 @@ function EvalDetailView({
       <div
         style={{
           padding: "16px 24px",
-          borderBottom: "1px solid rgba(0,0,0,0.06)",
+          borderBottom: `1px solid ${ctok.border}`,
           background: "var(--gooni-card, #FFFFFF)",
           display: "flex",
           alignItems: "center",
@@ -1247,7 +1247,7 @@ function EvalDetailView({
             title="Tool legend — what each step means"
             style={{
               background: "none",
-              border: "1px solid #E5E5EA",
+              border: `1px solid ${ctok.border}`,
               borderRadius: 6,
               padding: "4px 10px",
               cursor: "pointer",
@@ -1493,7 +1493,7 @@ function ModalButton({
       style={{
         background: variant === "primary" ? ctok.accent : "transparent",
         color: variant === "primary" ? "#FFFFFF" : ctok.accent,
-        border: variant === "primary" ? "none" : "1px solid #E5E5EA",
+        border: variant === "primary" ? "none" : `1px solid ${ctok.border}`,
         borderRadius: 6,
         padding: "6px 14px",
         fontSize: 13,
@@ -1551,7 +1551,7 @@ function SummaryEditor({
     <div
       style={{
         background: "var(--gooni-card, #FFFFFF)",
-        border: "1px solid #E5E5EA",
+        border: `1px solid ${ctok.border}`,
         borderRadius: 12,
         padding: 16,
       }}
@@ -1588,7 +1588,7 @@ function SummaryEditor({
         style={{
           width: "100%",
           padding: 8,
-          border: "1px solid #E5E5EA",
+          border: `1px solid ${ctok.border}`,
           borderRadius: 6,
           fontSize: 13,
           fontFamily: FONT,
@@ -1643,13 +1643,13 @@ function MessageCard({
   const cardStyle = isAssistant
     ? {
         background: "var(--gooni-card, #F5F8FB)",
-        border: "1px solid #E2E9F0",
-        borderLeft: "3px solid #B6CFE8",
+        border: `1px solid ${ctok.border}`,
+        borderLeft: `3px solid ${ctok.border}`,
       }
     : {
         background: "var(--gooni-card, #FFFFFF)",
-        border: "1px solid #E5E5EA",
-        borderLeft: "3px solid #D1D1D6",
+        border: `1px solid ${ctok.border}`,
+        borderLeft: `3px solid ${ctok.border}`,
       };
 
   return (
@@ -1669,7 +1669,7 @@ function MessageCard({
           fontSize: 11,
           textTransform: "uppercase",
           letterSpacing: 0.3,
-          color: isAssistant ? "#3A6AA1" : "#6E6E73",
+          color: isAssistant ? ctok.accent : ctok.muted,
         }}
       >
         <strong>{msg.role}</strong>
@@ -1794,8 +1794,8 @@ function SelfTakePanel({ messageId }: { messageId: number }) {
   // the header (green/amber for sev 2/3) instead of bleeding into the
   // whole card surface.
   const pill = reflection.severity === 3
-    ? { bg: "rgba(220,38,38,0.10)", color: "#B91C1C", label: "load-bearing" }
-    : { bg: "rgba(245,158,11,0.12)", color: "#92400E", label: "notable" };
+    ? { bg: "rgba(220,38,38,0.14)", color: "#FF6B6B", label: "load-bearing" }
+    : { bg: "rgba(245,158,11,0.14)", color: "#F5C451", label: "notable" };
 
   return (
     <div
@@ -1803,7 +1803,7 @@ function SelfTakePanel({ messageId }: { messageId: number }) {
         marginTop: 12,
         padding: "10px 12px",
         background: "var(--gooni-card, #FFFFFF)",
-        border: "1px solid #E5E5EA",
+        border: `1px solid ${ctok.border}`,
         borderRadius: 8,
       }}
     >
@@ -1910,20 +1910,20 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const pillBg =
     tc.status === "done"
-      ? "#E8F5E9"
+      ? "rgba(22,163,74,0.16)"
       : tc.status === "failed"
-      ? "#FFEBEE"
-      : "#FFF8E1";
+      ? "rgba(255,59,48,0.16)"
+      : "rgba(245,158,11,0.16)";
   const pillColor =
     tc.status === "done"
-      ? "#1B5E20"
+      ? "#4ADE80"
       : tc.status === "failed"
-      ? "#B71C1C"
-      : "#8D6E00";
+      ? "#FF6B6B"
+      : "#F5C451";
   return (
     <div
       style={{
-        border: "1px solid #E5E5EA",
+        border: `1px solid ${ctok.border}`,
         borderRadius: 8,
         padding: 8,
         background: "var(--gooni-card, #FFFFFF)",
@@ -1958,7 +1958,7 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
         </span>
       </div>
       {tc.error && (
-        <div style={{ marginTop: 6, color: "#B71C1C", fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap" }}>
+        <div style={{ marginTop: 6, color: "#FF6B6B", fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap" }}>
           {tc.error}
         </div>
       )}
@@ -1966,7 +1966,7 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
           {tc.args_json && (
             <details>
-              <summary style={{ cursor: "pointer", color: "#3A6AA1" }}>args</summary>
+              <summary style={{ cursor: "pointer", color: ctok.accent }}>args</summary>
               <pre
                 style={{
                   margin: "4px 0 0 0",
@@ -1985,7 +1985,7 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
           )}
           {tc.result_json && (
             <details>
-              <summary style={{ cursor: "pointer", color: "#3A6AA1" }}>result</summary>
+              <summary style={{ cursor: "pointer", color: ctok.accent }}>result</summary>
               <pre
                 style={{
                   margin: "4px 0 0 0",
@@ -2010,7 +2010,7 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
 
 // ── Per-message rating row (👎/😐/👍 + optional comment) ─────────────────────
 
-const RATING_COLOR_EVAL: Record<number, string> = { 1: "#791F1F", 2: "#6B7280", 3: "#0F6E56" };
+const RATING_COLOR_EVAL: Record<number, string> = { 1: "#F87171", 2: "#9CA3AF", 3: "#34D399" };
 const RATING_LABEL_EVAL: Record<number, string> = { 1: "bad", 2: "neutral", 3: "good" };
 
 function MessageRatingRow({
@@ -2128,7 +2128,7 @@ function MessageRatingRow({
       style={{
         marginTop: 10,
         paddingTop: 10,
-        borderTop: "1px dashed rgba(0,0,0,0.06)",
+        borderTop: `1px dashed ${ctok.border}`,
         display: "flex",
         flexDirection: "column",
         gap: 8,
@@ -2180,7 +2180,7 @@ function MessageRatingRow({
           fontFamily: FONT,
           lineHeight: 1.5,
           padding: "8px 10px",
-          border: "1px solid #E5E5EA",
+          border: `1px solid ${ctok.border}`,
           borderRadius: 8,
           resize: "vertical",
           outline: "none",
@@ -2196,7 +2196,7 @@ function MessageRatingRow({
             disabled={pending}
             style={{
               padding: "5px 12px", borderRadius: 6,
-              border: "1px solid #E5E5EA", background: "transparent",
+              border: `1px solid ${ctok.border}`, background: "transparent",
               color: "var(--gooni-muted, #6E6E73)", fontSize: 11.5, fontWeight: 500,
               cursor: pending ? "wait" : "pointer", fontFamily: FONT,
             }}
@@ -2261,7 +2261,7 @@ function StepCard({
     <div
       style={{
         background: ctok.bg,
-        border: "1px solid #E5E5EA",
+        border: `1px solid ${ctok.border}`,
         borderRadius: 8,
         padding: 12,
       }}
@@ -2280,8 +2280,8 @@ function StepCard({
           style={{
             marginLeft: "auto",
             flexShrink: 0,
-            background: existing ? "#FFE5E5" : "transparent",
-            border: existing ? "1px solid #FF3B30" : "1px solid #E5E5EA",
+            background: existing ? "rgba(255,59,48,0.14)" : "transparent",
+            border: existing ? "1px solid #FF3B30" : `1px solid ${ctok.border}`,
             borderRadius: 6,
             padding: "2px 8px",
             cursor: "pointer",
@@ -2403,7 +2403,7 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
             title="View formatted (newlines expanded)"
             style={{
               background: "transparent",
-              border: "1px solid #E5E5EA",
+              border: `1px solid ${ctok.border}`,
               borderRadius: 5,
               padding: "1px 6px",
               fontSize: 10,
@@ -2421,7 +2421,7 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
           margin: 0,
           padding: 8,
           background: "var(--gooni-card, #FFFFFF)",
-          border: "1px solid #E5E5EA",
+          border: `1px solid ${ctok.border}`,
           borderRadius: 6,
           fontSize: 11,
           fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
@@ -2506,7 +2506,7 @@ function FormattedModal({
             style={{
               marginLeft: "auto",
               background: "transparent",
-              border: "1px solid #E5E5EA",
+              border: `1px solid ${ctok.border}`,
               borderRadius: 6,
               padding: "4px 12px",
               fontSize: 13,
@@ -2523,7 +2523,7 @@ function FormattedModal({
             margin: 0,
             padding: 12,
             background: ctok.bg,
-            border: "1px solid #E5E5EA",
+            border: `1px solid ${ctok.border}`,
             borderRadius: 8,
             fontSize: 12,
             lineHeight: 1.5,
@@ -2620,7 +2620,7 @@ function FlagEditor({
         style={{
           width: "100%",
           padding: 6,
-          border: "1px solid #E5E5EA",
+          border: `1px solid ${ctok.border}`,
           borderRadius: 6,
           fontSize: 12,
           fontFamily: FONT,
@@ -2719,7 +2719,7 @@ function FilterDot() {
   // Subtle separator between filter groups. Pure decoration — matches the
   // spec's "Source: [..] · Status: [..] · [Flagged]" cadence.
   return (
-    <span style={{ color: "#D1D1D6", fontSize: 12, padding: "0 2px", userSelect: "none" }}>·</span>
+    <span style={{ color: ctok.faint, fontSize: 12, padding: "0 2px", userSelect: "none" }}>·</span>
   );
 }
 
@@ -2764,7 +2764,7 @@ function FilterPill({
         gap: 5,
         background: active ? `${accent}1A` : "transparent",
         color: active ? accent : ctok.muted,
-        border: active ? `0.5px solid ${accent}55` : "0.5px solid rgba(0,0,0,0.10)",
+        border: active ? `0.5px solid ${accent}55` : `0.5px solid ${ctok.border}`,
         borderRadius: 999,
         padding: "3px 10px",
         cursor: "pointer",
@@ -2817,7 +2817,7 @@ function TabButton({
         fontWeight: active ? 600 : 400,
         fontFamily: FONT,
         color: active ? ctok.text : ctok.muted,
-        borderBottom: active ? "2px solid #1C1C1E" : "2px solid transparent",
+        borderBottom: active ? `2px solid ${ctok.text}` : "2px solid transparent",
       }}
     >
       {children}
@@ -2848,7 +2848,7 @@ function ActiveBadge() {
       title="Active conversation — last message <30 min ago"
       style={{
         display: "inline-flex", alignItems: "center", gap: 4,
-        fontSize: 10, color: "#0F6E56", fontWeight: 600,
+        fontSize: 10, color: "#15A06E", fontWeight: 600,
         letterSpacing: 0.4, textTransform: "uppercase",
       }}
     >
@@ -2919,7 +2919,7 @@ function RatedProgressBadge({ data }: { data: EvalSegmentFull }) {
         padding: "2px 8px",
         borderRadius: 10,
         background: done ? "rgba(34,197,94,0.12)" : "rgba(10,132,255,0.10)",
-        color: done ? "#15803D" : ctok.accent,
+        color: done ? "#15A06E" : ctok.accent,
         fontSize: 10,
         fontWeight: 600,
         letterSpacing: 0.3,
@@ -3194,7 +3194,7 @@ function EvalRunsPanel() {
   return (
     <div style={{ flex: 1, display: "flex", overflow: "hidden", background: ctok.bg }}>
       {/* Left rail: run list */}
-      <div style={{ width: 320, borderRight: "1px solid rgba(0,0,0,0.06)", overflowY: "auto", padding: "12px 0", flexShrink: 0 }}>
+      <div style={{ width: 320, borderRight: `1px solid ${ctok.border}`, overflowY: "auto", padding: "12px 0", flexShrink: 0 }}>
         {/* Run-against-live-prod-snapshot button. Triggers a backend subprocess
             that copies the live DB and runs the eval harness against the copy.
             Streams stdout SSE so we render per-case progress in the log box. */}
@@ -3207,7 +3207,7 @@ function EvalRunsPanel() {
               width: "100%",
               padding: "8px 12px",
               borderRadius: 8,
-              border: "1px solid rgba(0,0,0,0.08)",
+              border: `1px solid ${ctok.border}`,
               background: evalRunning ? "#f0f0f0" : "#111",
               color: evalRunning ? "#999" : "#fff",
               fontSize: 12.5,
@@ -3275,8 +3275,8 @@ function EvalRunsPanel() {
                   textAlign: "left",
                   padding: "8px 16px",
                   border: "none",
-                  borderBottom: "1px solid rgba(0,0,0,0.04)",
-                  background: isSelected ? "rgba(0,0,0,0.04)" : "transparent",
+                  borderBottom: `1px solid ${ctok.border}`,
+                  background: isSelected ? ctok.hover : "transparent",
                   cursor: b.filename ? "pointer" : "default",
                   fontFamily: FONT,
                   fontSize: 12,
@@ -3327,7 +3327,7 @@ function EvalRunsPanel() {
                 padding: "8px 16px",
                 background: selected === r.filename ? "var(--gooni-hover, #E8E8ED)" : "transparent",
                 border: "none",
-                borderBottom: "1px solid rgba(0,0,0,0.04)",
+                borderBottom: `1px solid ${ctok.border}`,
                 cursor: "pointer",
                 fontFamily: FONT,
                 fontSize: 12,
@@ -3434,7 +3434,7 @@ function BaselineDetailPanel({
       </div>
 
       {detail.means && Object.keys(detail.means).length > 0 && (
-        <div style={{ marginTop: 18, padding: "10px 12px", background: "rgba(0,0,0,0.03)", borderRadius: 8, fontSize: 12.5 }}>
+        <div style={{ marginTop: 18, padding: "10px 12px", background: ctok.hover, borderRadius: 8, fontSize: 12.5 }}>
           <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
             Means
           </div>

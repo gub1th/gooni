@@ -524,15 +524,26 @@ function DeploymentsBlock() {
   const [flyInfo, setFlyInfo] = useState<FlyInfo | null>(null);
 
   async function checkFly() {
+    // Drive Fly status off the SAME-ORIGIN backend /health (API_BASE), not a
+    // cross-origin ping to gooni-bot.fly.dev — that host sits behind auth
+    // (401) and CORS-blocks /health, which spammed the console with
+    // ERR_FAILED/CORS even though no-cors swallowed the result. The backend
+    // /health already reports Fly machine info in `j.fly`, so a reachable
+    // backend IS the Fly signal (and in prod API_BASE points at the Fly app).
     setFlyState((s) => ({ ...s, status: "checking" }));
-    setFlyState(await pingUrl(FLY_APP_URL));
+    const t0 = performance.now();
     try {
       const r = await fetch(`${API_BASE}/health`, { cache: "no-store" });
       if (r.ok) {
         const j = await r.json();
         if (j?.fly) setFlyInfo(j.fly);
+        setFlyState({ status: "ok", latencyMs: Math.round(performance.now() - t0), error: null, checkedAt: new Date() });
+      } else {
+        setFlyState({ status: "down", latencyMs: null, error: `HTTP ${r.status}`, checkedAt: new Date() });
       }
-    } catch { /* swallow */ }
+    } catch (e) {
+      setFlyState({ status: "down", latencyMs: null, error: String(e), checkedAt: new Date() });
+    }
   }
   async function checkVercel() {
     setVercelState((s) => ({ ...s, status: "checking" }));
