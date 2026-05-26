@@ -88,16 +88,16 @@ function PublicNotePage() {
     <div
       style={{
         minHeight: "100vh",
-        background: "#fff",
+        background: "var(--gooni-card, #fff)",
         fontFamily: "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-        color: "#111",
+        color: "var(--gooni-text, #111)",
       }}
     >
       <div style={{ maxWidth: 680, margin: "0 auto", padding: "60px 24px 120px" }}>
         {/* Back link */}
         <Link
           to="/public"
-          style={{ fontSize: 13.5, color: "#888", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 40 }}
+          style={{ fontSize: 13.5, color: "var(--gooni-muted, #888)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 40 }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#111")}
           onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#888")}
         >
@@ -105,13 +105,13 @@ function PublicNotePage() {
         </Link>
 
         {notFound ? (
-          <p style={{ color: "#aaa", fontSize: 15 }}>Note not found or not public.</p>
+          <p style={{ color: "var(--gooni-faint, #aaa)", fontSize: 15 }}>Note not found or not public.</p>
         ) : isLoading || !note ? (
           <NoteLoadingState />
         ) : (
           <>
             {note.space_name && (
-              <span style={{ fontSize: 11.5, color: "#888", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12, padding: "2px 8px", marginBottom: 16, display: "inline-block" }}>
+              <span style={{ fontSize: 11.5, color: "var(--gooni-muted, #888)", border: "1px solid rgba(0,0,0,0.15)", borderRadius: 12, padding: "2px 8px", marginBottom: 16, display: "inline-block" }}>
                 {note.space_name}
               </span>
             )}
@@ -409,12 +409,12 @@ function PublicNoteCommentsThread({ noteId }: { noteId: number }) {
                   fontSize: 12,
                 }}
               >
-                <span style={{ fontWeight: 600, color: "#0F172A" }}>{c.author}</span>
-                <span style={{ color: "#94A3B8" }}>{formatPublicCommentTime(c.created_at)}</span>
+                <span style={{ fontWeight: 600, color: "var(--gooni-text, #0F172A)" }}>{c.author}</span>
+                <span style={{ color: "var(--gooni-faint, #94A3B8)" }}>{formatPublicCommentTime(c.created_at)}</span>
               </div>
               <div
                 className="public-prose"
-                style={{ fontSize: 13.5, lineHeight: 1.55, color: "#1E293B" }}
+                style={{ fontSize: 13.5, lineHeight: 1.55, color: "var(--gooni-text, #1E293B)" }}
                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(c.content) }}
               />
               <div style={{ marginTop: 6 }}>

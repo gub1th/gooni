@@ -34,9 +34,10 @@ import sys
 
 ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "src")
 
-# Paths that aren't themed DOM (Three.js / canvas materials choke on a CSS
-# var()) or are intentionally standalone-light (public portfolio). Skipped.
-EXCLUDE = ("/creative/", "/animations/", "/public.", "/privacy.")
+# Paths that aren't themed DOM — Three.js / canvas materials choke on a CSS
+# var(). (Public portfolio used to be excluded as "always-light"; Daniel opted
+# to theme it dark too, so it's now in scope.)
+EXCLUDE = ("/creative/", "/animations/")
 
 COLOR_PROPS = {"color", "fill", "stroke", "caretColor", "textDecorationColor", "WebkitTextFillColor"}
 BG_PROPS = {"background", "backgroundColor"}

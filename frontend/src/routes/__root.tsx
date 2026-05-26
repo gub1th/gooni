@@ -257,6 +257,25 @@ function AppShell() {
         *::-webkit-scrollbar-corner {
           background: transparent;
         }
+
+        /* Dark-mode safety net for form controls. Many inputs/textareas
+           set no inline background, so in dark they fell back to the
+           browser default (white box + black text → unreadable). A
+           stylesheet rule NEVER overrides an inline style, so this only
+           touches BARE controls — any input that sets its own inline
+           background/color keeps it. Scoped to dark so light can't
+           regress (a transparent blend-in input stays transparent in
+           light). inputBg ≈ card in dark, so blend-in inputs still blend. */
+        body[data-gooni-theme="dark"] input,
+        body[data-gooni-theme="dark"] textarea,
+        body[data-gooni-theme="dark"] select {
+          background-color: var(--gooni-input-bg, #2A2A2C);
+          color: var(--gooni-text, #E5E5E7);
+        }
+        body[data-gooni-theme="dark"] input::placeholder,
+        body[data-gooni-theme="dark"] textarea::placeholder {
+          color: var(--gooni-faint, #6E6E73);
+        }
       `}</style>
       <div
         style={{
