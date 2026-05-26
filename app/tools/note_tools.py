@@ -89,7 +89,7 @@ class AddNoteTool(BaseTool):
         **kwargs,
     ) -> str:
         from ..db.models import Note, Space
-        from ..main import _excerpt_from_html
+        from ..serializers import _excerpt_from_html
 
         if db is None:
             return "(no db session)"

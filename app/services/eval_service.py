@@ -698,7 +698,7 @@ def dispatch_to_cc(db: Session, segment_id: int) -> dict:
     # preview in the notes-list endpoint immediately. Without this the
     # row rendered blank until the lazy backfill job ran (PR #134) and
     # made the dispatched note look empty in the sidebar.
-    from app.main import _excerpt_from_html
+    from app.serializers import _excerpt_from_html
     excerpt = _excerpt_from_html(body)
     note: Note
     if seg.dispatched_note_id:
