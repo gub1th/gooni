@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.178.4 — 2026-05-26 (patch)
+
+- fix(cut): resolve "today" in user TZ, not server UTC (#387)
+
 ## 0.178.3 — 2026-05-26 (patch)
 
 - fix(sidebar): clicking a space switches to notes view (#386)
