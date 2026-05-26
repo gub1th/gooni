@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.178.2 — 2026-05-26 (patch)
+
+- fix(dark): round 2 — inputs, canvas map, public pages, ghost pills (#385)
+
 ## 0.178.1 — 2026-05-26 (patch)
 
 - fix(creative): pinned coin stays purple, spawn peek surfaces, add read-notes link (#384)
