@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowUpRight, Crown, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Crown, FileText, Paperclip, Trash2, X } from "lucide-react";
 import {
   deleteTodo, updateTodo, promoteTodoToPrimary,
-  type ApiTodo, type ApiFocus, type TodoChainMeta, type TodoState,
+  uploadAttachment, fetchTodoAttachments, deleteAttachment,
+  type ApiTodo, type ApiFocus, type AttachmentMeta, type TodoChainMeta, type TodoState,
 } from "../../services/api";
 import { resolveFocusColor } from "../../utils/focusColors";
 import { FONT } from "../../ui";
@@ -37,6 +38,64 @@ export function TodoEditModal({ todo, focuses, chainMeta, onClose, onOpenChain }
   const [isPrimary, setIsPrimary] = useState(todo.is_primary);
   const [saving, setSaving] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+
+  // ── Attachments ──────────────────────────────────────────────────────
+  // Fetched lazily when the modal opens (dedicated endpoint, not shipped in
+  // the bulk todos bundle — avoids an N+1 across the list). Upload routes a
+  // file straight to this todo via uploadAttachment(_, _, todo.id).
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+  const [attLoading, setAttLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [attError, setAttError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let live = true;
+    setAttLoading(true);
+    fetchTodoAttachments(todo.id)
+      .then((rows) => { if (live) setAttachments(rows); })
+      .catch(() => { if (live) setAttachments([]); })
+      .finally(() => { if (live) setAttLoading(false); });
+    return () => { live = false; };
+  }, [todo.id]);
+
+  async function doUpload(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0 || uploading) return;
+    setUploading(true);
+    setAttError(null);
+    try {
+      for (const f of list) {
+        const res = await uploadAttachment(f, undefined, todo.id);
+        if (res.kind === "fallback") {
+          setAttError("File storage isn't configured (R2). Can't attach here.");
+          break;
+        }
+        if (res.kind === "error") {
+          setAttError(res.message || "Upload failed");
+          continue;
+        }
+      }
+      // Refetch the canonical list (covers multi-file + skips local-shape drift).
+      const rows = await fetchTodoAttachments(todo.id);
+      setAttachments(rows);
+    } catch {
+      setAttError("Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removeAttachment(id: number) {
+    setAttachments((prev) => prev.filter((a) => a.id !== id)); // optimistic
+    try {
+      await deleteAttachment(id);
+    } catch {
+      // Re-sync on failure so a transient error doesn't leave a ghost gone.
+      try { setAttachments(await fetchTodoAttachments(todo.id)); } catch { /* keep optimistic */ }
+    }
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -249,6 +308,86 @@ export function TodoEditModal({ todo, focuses, chainMeta, onClose, onOpenChain }
             </button>
           </Field>
 
+          <Field label="Attachments">
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); void doUpload(e.dataTransfer.files); }}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                border: dragOver
+                  ? "1.5px dashed var(--gooni-accent, #0A84FF)"
+                  : "1.5px dashed var(--gooni-border, rgba(0,0,0,0.18))",
+                borderRadius: 10,
+                padding: "14px 12px",
+                cursor: uploading ? "default" : "pointer",
+                background: dragOver ? "rgba(10,132,255,0.06)" : "transparent",
+                transition: "border-color 0.12s, background 0.12s",
+                fontSize: 12,
+                color: "var(--gooni-muted, #8E8E93)",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+              }}
+            >
+              <Paperclip size={14} />
+              {uploading ? "Uploading…" : dragOver ? "Drop to attach" : "Drag files here, or click to browse"}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={(e) => { if (e.target.files) void doUpload(e.target.files); e.target.value = ""; }}
+              style={{ display: "none" }}
+            />
+            {attError && (
+              <div style={{ fontSize: 11, color: "#C76B6B", marginTop: 2 }}>{attError}</div>
+            )}
+            {!attLoading && attachments.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                {attachments.map((a) => (
+                  <div
+                    key={a.id}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "7px 10px", borderRadius: 8,
+                      border: "0.5px solid var(--gooni-border, rgba(0,0,0,0.10))",
+                      background: "var(--gooni-hover, rgba(0,0,0,0.02))",
+                    }}
+                  >
+                    <FileText size={14} style={{ flexShrink: 0, color: "var(--gooni-muted, #8E8E93)" }} />
+                    <a
+                      href={a.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title={a.filename}
+                      style={{
+                        flex: 1, minWidth: 0,
+                        fontSize: 12.5, color: "var(--gooni-text, #1C1C1E)",
+                        textDecoration: "none",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}
+                    >
+                      {a.filename}
+                    </a>
+                    <span style={{ fontSize: 10.5, color: "var(--gooni-muted, #8E8E93)", flexShrink: 0 }}>
+                      {fmtBytes(a.size_bytes)}
+                    </span>
+                    <button
+                      onClick={() => void removeAttachment(a.id)}
+                      title="Remove attachment"
+                      style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        padding: 2, color: "var(--gooni-muted, #8E8E93)", display: "flex", flexShrink: 0,
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Field>
+
           {/* G3.5-polish: Lineage section. Shows parent + spawned-children
               when chainMeta is present, with a single click-through to
               the full chain view for inline editing (link/unlink/add).
@@ -426,6 +565,12 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </label>
   );
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function fmtMeta(iso: string): string {
