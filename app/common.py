@@ -31,6 +31,25 @@ def _parse_iso_date(s: str | None):
         return None
 
 
+def local_today(db: Session):
+    """Today in Daniel's configured TZ (Settings.nudge_tz, default
+    America/Los_Angeles) — the canonical "what day is it for the user"
+    helper. NEVER use `date.today()` for user-facing calendar days: the
+    server runs UTC (Fly), so after ~5pm PT the UTC date has already
+    rolled to tomorrow and a log/lookup keyed to it lands on the wrong day.
+    """
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    from .db.models import Settings as _Settings
+    s = db.query(_Settings).first()
+    tz_name = (s.nudge_tz if s else None) or "America/Los_Angeles"
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("America/Los_Angeles")
+    return _dt.now(tz).date()
+
+
 def _parse_optional_due(raw):
     from datetime import datetime as _dt
     if raw is None or raw == "":

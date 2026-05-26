@@ -19,18 +19,20 @@ from __future__ import annotations
 from datetime import date as _date
 
 
-def _entry_day(entry: dict) -> _date:
+def _entry_day(entry: dict, db) -> _date:
     """The calendar day a fitness log lands on: the extractor-resolved
     `log_date` (validated YYYY-MM-DD, e.g. from "weighed 70.8 yesterday"),
-    or today when none was given. Backdating writes to the right cell
-    instead of stamping everything as today."""
+    or today (in Daniel's TZ) when none was given. Backdating writes to the
+    right cell instead of stamping everything as today. local_today (not
+    date.today) so a 6pm-PT log doesn't land on tomorrow's UTC date."""
     raw = entry.get("log_date")
     if isinstance(raw, str) and raw:
         try:
             return _date.fromisoformat(raw)
         except ValueError:
             pass
-    return _date.today()
+    from ...common import local_today
+    return local_today(db)
 
 
 def handle(items: list[dict], ctx, result) -> None:
@@ -104,7 +106,7 @@ def _handle_macros(ctx, result, entry, dms) -> bool:
     correction = bool(entry.get("correction"))
     correction_target = entry.get("correction_target")
     raw_text = entry.get("raw_text") or None
-    day = _entry_day(entry)
+    day = _entry_day(entry, ctx.db)
     wrote = False
 
     for m in metrics:
@@ -146,7 +148,7 @@ def _handle_substance(ctx, result, entry, dms) -> bool:
     sub = (entry.get("substance") or "").strip().lower()
     if sub not in _VALID_SUBSTANCES:
         return False
-    dms.set_cell(ctx.db, _entry_day(entry), sub, value=1.0, notes=entry.get("raw_text") or None)
+    dms.set_cell(ctx.db, _entry_day(entry, ctx.db), sub, value=1.0, notes=entry.get("raw_text") or None)
     result.captured_metrics.append({"log_type": "substance", "substance": sub})
     return True
 
@@ -157,7 +159,7 @@ def _handle_weight(ctx, result, entry, dms) -> bool:
         return False
     unit = entry.get("weight_unit") or "lb"
     correction = bool(entry.get("correction"))
-    day = _entry_day(entry)
+    day = _entry_day(entry, ctx.db)
     if correction:
         updated = dms.update_most_recent(ctx.db, "weight", val, day=day)
         if updated is None:
@@ -175,7 +177,7 @@ def _handle_weight(ctx, result, entry, dms) -> bool:
 
 def _handle_exercise(ctx, result, entry, dms, habit_service) -> bool:
     label = entry.get("exercise_label") or (entry.get("raw_text") or None)
-    day = _entry_day(entry)
+    day = _entry_day(entry, ctx.db)
     # value=1.0 is a presence sentinel — the cut table treats exercise as a
     # boolean (did/didn't train); `notes` carries the human label (the
     # activity + any sub-detail: "gym — chest and tris", "tennis", "5k run").

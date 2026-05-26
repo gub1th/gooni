@@ -27,27 +27,19 @@ import time
 import urllib.parse
 from datetime import date as date_cls, datetime, timedelta, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
-
 import httpx
 from sqlalchemy.orm import Session
 
-from ..db.models import OAuthToken, Settings as SettingsModel, WhoopSnapshot
+from ..db.models import OAuthToken, WhoopSnapshot
 
 
 def _local_today(db: Session) -> date_cls:
-    """Today in Daniel's configured TZ (Settings.nudge_tz, defaults to
-    America/Los_Angeles). UTC date would key snapshots to the wrong day
-    after ~5pm PT, at 11pm local on May 11, UTC is already May 12 and
-    the snapshot row would land on tomorrow's date.
-    """
-    settings = db.query(SettingsModel).first()
-    tz_name = (settings.nudge_tz if settings else None) or "America/Los_Angeles"
-    try:
-        tz = ZoneInfo(tz_name)
-    except Exception:
-        tz = ZoneInfo("America/Los_Angeles")
-    return datetime.now(tz).date()
+    """Today in Daniel's configured TZ — thin alias over common.local_today
+    (the shared helper). Kept as a local name so existing call sites in this
+    module + the whoop router don't have to change. UTC date would key
+    snapshots to the wrong day after ~5pm PT."""
+    from ..common import local_today
+    return local_today(db)
 
 
 AUTHORIZE_URL = "https://api.prod.whoop.com/oauth/oauth2/auth"

@@ -5,9 +5,10 @@ Module-style (no class), mirroring habit_service — callers do
 
 The fitness handler (intent_handlers/fitness.py) writes rows in real time
 as Daniel logs food/weight/exercise on chat. The metrics router exposes
-the aggregated cut table for the dashboard. All time math is on the
-server's local calendar date (same convention as habit_service) — `date`
-is a calendar Date, so timezones don't shift which day a log lands on.
+the aggregated cut table for the dashboard. "Today" defaults resolve in
+Daniel's configured TZ via `common.local_today` — NOT `date.today()`,
+which on the UTC server rolls to tomorrow after ~5pm PT and lands logs on
+the wrong calendar day.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from datetime import date as _date, datetime, timedelta
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..common import local_today
 from ..db.models import DailyMetric
 
 
@@ -44,12 +46,12 @@ def log(
     day: _date | None = None,
     notes: str | None = None,
 ) -> DailyMetric:
-    """Insert one metric row. `day` defaults to today (server local)."""
+    """Insert one metric row. `day` defaults to today in Daniel's TZ."""
     row = DailyMetric(
         metric_type=metric_type,
         value=float(value),
         unit=unit,
-        date=day or _date.today(),
+        date=day or local_today(db),
         notes=notes,
     )
     db.add(row)
@@ -61,7 +63,7 @@ def log(
 def running_total_for_today(db: Session, day: _date | None = None) -> dict:
     """Sum of additive metrics for `day` (default today). The number the
     fitness ack renders ("1,165 cal, 77g so far today")."""
-    d = day or _date.today()
+    d = day or local_today(db)
     rows = (
         db.query(DailyMetric.metric_type, func.sum(DailyMetric.value))
         .filter(
@@ -89,7 +91,7 @@ def update_most_recent(
     the most-recent (metric_type, day) row's value in place and leaves a
     breadcrumb in notes. Returns the row, or None if there's nothing to
     correct (caller falls back to a fresh log)."""
-    d = day or _date.today()
+    d = day or local_today(db)
     row = (
         db.query(DailyMetric)
         .filter(DailyMetric.metric_type == metric_type, DailyMetric.date == d)

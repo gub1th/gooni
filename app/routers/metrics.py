@@ -1,10 +1,10 @@
-from datetime import date as _date, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..db.database import get_db
-from ..common import _parse_iso_date
+from ..common import _parse_iso_date, local_today
 
 
 router = APIRouter()
@@ -85,7 +85,7 @@ def metrics_list(start: str | None = None, end: str | None = None, db: Session =
     """Raw rows in [start, end] (defaults to last 30 days). Debug/detail."""
     from ..services import daily_metric_service
     from ..db.models import DailyMetric
-    end_d = _parse_iso_date(end) or _date.today()
+    end_d = _parse_iso_date(end) or local_today(db)
     start_d = _parse_iso_date(start) or (end_d - timedelta(days=29))
     rows = (
         db.query(DailyMetric)
@@ -147,7 +147,7 @@ def metrics_cut_table(days: int = 30, fill: bool = False, db: Session = Depends(
     from ..services import daily_metric_service
     from datetime import datetime as _dt
     days = max(1, min(days, 365))
-    end_d = _date.today()
+    end_d = local_today(db)
     start_d = end_d - timedelta(days=days - 1)
     rows = daily_metric_service.cut_table(db, start_d, end_d, fill_gaps=fill)
     today = daily_metric_service.running_total_for_today(db)

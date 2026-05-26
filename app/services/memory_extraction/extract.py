@@ -75,7 +75,11 @@ _PREFILTER_TRIGGERS = re.compile(
 )
 
 
-def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, Any]:
+def extract_signals(
+    text: str,
+    prev_assistant: str | None = None,
+    today: _date | None = None,
+) -> dict[str, Any]:
     """Single LLM call that emits all signal types from one input.
 
     Returns:
@@ -89,6 +93,12 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
     All-empty on parse failure or no signal — never raises.
     Pass prev_assistant when this text is a chat reply (helps tone detection);
     leave None for note saves (tone usually empty for those).
+
+    `today` is the user's local calendar date (callers pass
+    common.local_today(db)); it anchors relative-date resolution
+    ("weighed 70.8 yesterday") in the prompt AND the future-clamp on
+    fitness log_dates. Falls back to date.today() when None — but that's
+    server-UTC, so DB-backed callers should always pass it.
 
     Cost optimization (phase 4): regex pre-filter skips the LLM entirely
     when text contains no signal-trigger phrases. Pure-capture text
@@ -115,10 +125,11 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
     if prev_assistant is None and not _PREFILTER_TRIGGERS.search(text):
         return empty
 
+    today_d = today or _date.today()
     prompt = _SIGNALS_PROMPT.format(
         prev_assistant=(prev_assistant or "")[:1200],
         text=text[:2000],
-        today=_date.today().isoformat(),
+        today=today_d.isoformat(),
     )
     try:
         raw = llm_client.generate_simple_completion(prompt, max_tokens=500, temperature=0.0, model="gpt-5.4-mini")
@@ -144,7 +155,7 @@ def extract_signals(text: str, prev_assistant: str | None = None) -> dict[str, A
         "soft_promises":    _normalize_promises(parsed.get("soft_promises")),
         "todos":            _normalize_todos(parsed.get("todos")),
         "done_signals":     _normalize_done_signals(parsed.get("done_signals")),
-        "fitness_logs":     _normalize_fitness(parsed.get("fitness_logs")),
+        "fitness_logs":     _normalize_fitness(parsed.get("fitness_logs"), today_d),
         "reply_intent":     _normalize_reply_intent(parsed.get("reply_intent")),
         "memories":         _normalize_memories(parsed.get("memories")),
     }
