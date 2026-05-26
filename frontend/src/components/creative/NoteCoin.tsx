@@ -74,23 +74,29 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
 
   const isPinned = Boolean(note.is_public_pinned);
 
-  // Color choice cascades: read > pinned > regular gold.
-  const coinColor = isRead ? READ_COIN_COLOR : isPinned ? PINNED_COIN_COLOR : COIN_COLOR;
-  const coinEmissive = isRead ? READ_COIN_EMISSIVE : isPinned ? PINNED_COIN_EMISSIVE : COIN_EMISSIVE;
-  const beamColor = isRead ? READ_BEAM_COLOR : isPinned ? PINNED_BEAM_COLOR : BEAM_COLOR;
+  // The pinned "start here" coin is the permanent plaza anchor — it must
+  // stay vibrant violet even after Daniel has opened it once. So pinned
+  // OUTRANKS read: a pinned coin never desaturates to the visited-gray
+  // state. effRead drops read styling whenever the coin is pinned.
+  const effRead = isRead && !isPinned;
+
+  // Color choice cascades: pinned > read > regular paper.
+  const coinColor = isPinned ? PINNED_COIN_COLOR : effRead ? READ_COIN_COLOR : COIN_COLOR;
+  const coinEmissive = isPinned ? PINNED_COIN_EMISSIVE : effRead ? READ_COIN_EMISSIVE : COIN_EMISSIVE;
+  const beamColor = isPinned ? PINNED_BEAM_COLOR : effRead ? READ_BEAM_COLOR : BEAM_COLOR;
 
   // Emissive intensity: paper-quiet by default. Hover/proximity warms
   // the edge slightly, never bright. Numbers tuned to keep the coin
   // from outshining the mushrooms + trees.
-  const baseEmissive = isRead ? 0.04 : isPinned ? 0.18 : 0.10;
-  const hoverEmissive = isRead ? 0.10 : isPinned ? 0.32 : 0.24;
-  const nearBoost = isRead ? 0.0 : 0.08;
+  const baseEmissive = isPinned ? 0.18 : effRead ? 0.04 : 0.10;
+  const hoverEmissive = isPinned ? 0.32 : effRead ? 0.10 : 0.24;
+  const nearBoost = effRead ? 0.0 : 0.08;
   const activeEmissive = (hovered ? hoverEmissive : baseEmissive) + (isNear ? nearBoost : 0);
 
-  const spinSpeed = reduceMotion ? 0.2 : isRead ? SPIN_SPEED * 0.5 : SPIN_SPEED;
-  const bobAmp = reduceMotion || isRead ? 0 : BOB_AMP;
-  const beamOpacityBase = isRead ? 0.04 : 0.10;
-  const beamOpacityBoost = isRead ? 0 : (isNear ? 0.06 : 0);
+  const spinSpeed = reduceMotion ? 0.2 : effRead ? SPIN_SPEED * 0.5 : SPIN_SPEED;
+  const bobAmp = reduceMotion || effRead ? 0 : BOB_AMP;
+  const beamOpacityBase = effRead ? 0.04 : 0.10;
+  const beamOpacityBoost = effRead ? 0 : (isNear ? 0.06 : 0);
 
   useEffect(() => {
     return subscribeTileState((e) => {

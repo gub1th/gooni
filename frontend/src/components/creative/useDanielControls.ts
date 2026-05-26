@@ -30,9 +30,33 @@ export type LandingEvent = {
 
 type LandingListener = (e: LandingEvent) => void;
 const landingListeners = new Set<LandingListener>();
+
+// Retained value: where the player currently stands. The landing stream
+// is transient, so a consumer that mounts AFTER a landing (e.g. NoteCoins,
+// which only mounts once the intro finishes) would miss the spawn entirely
+// and never resolve its peek. Holding the last player landing lets late
+// mounters seed off the player's real position.
+let lastPlayerLanding: LandingEvent | null = null;
+export function getLastPlayerLanding(): LandingEvent | null {
+  return lastPlayerLanding;
+}
+
 export function fireLanding(e: LandingEvent) {
+  if (e.actor === "player") lastPlayerLanding = e.fellOff ? null : e;
   landingListeners.forEach((l) => l(e));
 }
+
+// Record the spawn tile WITHOUT notifying listeners. The intro ends with
+// the avatar standing on (0,0) but never hops there, so no landing fires.
+// We want late mounters to see the spawn position, but firing a real
+// landing here would trip the landing chime / sparkle / tile-break side
+// effects — so this only updates the retained value.
+export function recordPlayerSpawn(gx: number, gz: number, world: { x: number; z: number }) {
+  lastPlayerLanding = {
+    gx, gz, world, from: null, fellOff: false, impactVel: 0, actor: "player",
+  };
+}
+
 export function subscribeLandings(fn: LandingListener): () => void {
   landingListeners.add(fn);
   return () => landingListeners.delete(fn);
