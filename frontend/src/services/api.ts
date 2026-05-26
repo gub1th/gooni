@@ -881,6 +881,10 @@ export interface ApiTodo {
   // G3.5: short inline outcome text captured at close. Null when no
   // outcome was given. Longer outcomes use a Note + `outcome_of` edge.
   closure_note?: string | null;
+  // Count of files attached to this todo. Computed in one grouped query on
+  // the bundle (GET /todos) — NOT shipped by the single-todo serializer, so
+  // it may be undefined right after a create/patch until the bundle refetches.
+  attachment_count?: number;
   created_at: string | null;
   updated_at: string | null;
 }

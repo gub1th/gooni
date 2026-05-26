@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crown, GripVertical, Plus, X, AlertTriangle, ArrowUpRight, ArrowLeft } from "lucide-react";
+import { Crown, GripVertical, Plus, X, AlertTriangle, ArrowUpRight, ArrowLeft, Paperclip } from "lucide-react";
 import {
   fetchTodos, createTodo, updateTodo, cycleTodoState, deleteTodo,
   promoteTodoToPrimary, fetchFocuses,
-  closeTodoWithOutcome,
+  closeTodoWithOutcome, uploadAttachment,
   type ApiTodo, type ApiTodoBundle, type ApiFocus, type TodoState,
   type TodoChainMeta, type SpawnedTodoSpec,
 } from "../../services/api";
@@ -171,6 +171,20 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
   }, []);
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["todos-bundle"] });
+
+  // Phase-2: drop a file straight onto a todo row → upload it to that todo
+  // and refresh so the paperclip count updates. Distinct from the row's
+  // reorder drag (which carries no Files in dataTransfer).
+  async function handleFileDropOnTodo(todoId: number, files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    try {
+      for (const f of list) await uploadAttachment(f, undefined, todoId);
+      refresh();
+    } catch (e) {
+      console.error("todo attachment drop failed", e);
+    }
+  }
 
   async function handleReorderDrop() {
     if (!bundle || draggedId === null || !dragOver) {
@@ -473,6 +487,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
             onDelete={() => onDelete(bundle.primary!.id)}
             onOpenEdit={() => setEditingId(bundle.primary!.id)}
             onOpenChain={(id) => setChainViewId(id)}
+            onDropFiles={(files) => handleFileDropOnTodo(bundle.primary!.id, files)}
           />
         )
       )}
@@ -548,6 +563,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
                       onOpenEdit={() => setEditingId(t.id)}
                       onOpenChain={(id) => setChainViewId(id)}
                       dragHandlers={makeDragHandlers(t.id)}
+                      onDropFiles={(files) => handleFileDropOnTodo(t.id, files)}
                     />
                   )
                 ))}
@@ -641,7 +657,7 @@ export function TodoList({ onOpenSourceNote: _onOpenSourceNote }: Props) {
 
 function PrimaryCard({
   t, focus, cascade, chainMeta,
-  onCycle, onPickState, onDemote, onDelete, onOpenEdit, onOpenChain,
+  onCycle, onPickState, onDemote, onDelete, onOpenEdit, onOpenChain, onDropFiles,
 }: {
   t: ApiTodo;
   focus: ApiFocus | null;
@@ -653,10 +669,13 @@ function PrimaryCard({
   onDelete: () => void;
   onOpenEdit: () => void;
   onOpenChain: (id: number) => void;
+  // Phase-2: drop OS files on the card to attach them to this todo.
+  onDropFiles?: (files: FileList) => void;
 }) {
   const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [fileOver, setFileOver] = useState(false);
   // Trace-border lives forever once the card is primary, but we key it
   // on todo id so promoting a different todo re-runs the draw animation
   // from scratch (the React key flip forces a remount of the SVG layer).
@@ -669,18 +688,38 @@ function PrimaryCard({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={hasChain ? () => onOpenChain(t.id) : undefined}
+      onDragOver={(e) => {
+        if (onDropFiles && dragHasFiles(e)) {
+          e.preventDefault();
+          if (!fileOver) setFileOver(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        if (fileOver && !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+          setFileOver(false);
+        }
+      }}
+      onDrop={(e) => {
+        if (onDropFiles && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          e.preventDefault();
+          setFileOver(false);
+          onDropFiles(e.dataTransfer.files);
+        }
+      }}
       style={{
         position: "relative",
         background: "var(--gooni-card, #FFFCF3)",
         // No terracotta border or glow at mount — the SVG trace paints
         // both in as it draws. A whisper-faint warm elevation shadow
         // keeps the card legible against the dashboard backdrop.
-        border: "0.5px solid rgba(155,130,70,0.15)",
+        border: fileOver
+          ? "0.5px dashed var(--gooni-accent, #0A84FF)"
+          : "0.5px solid rgba(155,130,70,0.15)",
         borderRadius: 12,
         padding: "12px 16px",
         display: "flex", alignItems: "center", gap: 12,
         fontFamily: FONT,
-        boxShadow: "0 1px 3px rgba(155,130,70,0.06)",
+        boxShadow: fileOver ? "0 0 0 3px rgba(10,132,255,0.12)" : "0 1px 3px rgba(155,130,70,0.06)",
         cursor: hasChain ? "pointer" : "default",
       }}
     >
@@ -757,6 +796,8 @@ function PrimaryCard({
           scales with elapsed time so we don't re-render every second
           forever. Hidden when done since the primary auto-clears on done. */}
       {t.state !== "done" && <LiveTimer since={t.created_at} />}
+
+      <AttachmentBadge count={t.attachment_count ?? 0} />
 
       {focus && (
         <span
@@ -850,7 +891,7 @@ function LiveTimer({ since }: { since: string | null }) {
 function TodoRow({
   t, focus, cascade, chainMeta,
   onCycle, onPickState, onPromotePrimary, onDelete, onOpenEdit, onOpenChain,
-  dragHandlers,
+  dragHandlers, onDropFiles,
 }: {
   t: ApiTodo;
   focus: ApiFocus | null;
@@ -875,9 +916,12 @@ function TodoRow({
     showInsertionBelow: boolean;
     isDragging: boolean;
   };
+  // Phase-2: drop OS files on the row to attach them to this todo.
+  onDropFiles?: (files: FileList) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [fileOver, setFileOver] = useState(false);
   const dotColor = resolveFocusColor(focus?.color ?? null, focus?.id ?? null);
   const age = ageHint(t.created_at);
   const hasChain = !!chainMeta && chainMeta.children_total > 0;
@@ -892,6 +936,13 @@ function TodoRow({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onDragOver={(e) => {
+        // File drag from the OS → attach-to-todo affordance (takes
+        // priority over reorder; a reorder drag carries no Files).
+        if (onDropFiles && dragHasFiles(e)) {
+          e.preventDefault();
+          if (!fileOver) setFileOver(true);
+          return;
+        }
         if (!dragHandlers) return;
         // Split target into top-half (insert above) vs bottom-half
         // (insert below) so the user can choose either side w/o
@@ -901,7 +952,20 @@ function TodoRow({
         const pos = e.clientY < midY ? "above" : "below";
         dragHandlers.onDragOver(e, pos);
       }}
+      onDragLeave={(e) => {
+        // Only clear when the cursor truly leaves the row (not on entering
+        // a child element), else the highlight flickers.
+        if (fileOver && !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) {
+          setFileOver(false);
+        }
+      }}
       onDrop={(e) => {
+        if (onDropFiles && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          e.preventDefault();
+          setFileOver(false);
+          onDropFiles(e.dataTransfer.files);
+          return;
+        }
         if (!dragHandlers) return;
         e.preventDefault();
         dragHandlers.onDrop();
@@ -922,11 +986,15 @@ function TodoRow({
       style={{
         position: "relative",
         background: "var(--gooni-card, #FFFFFF)",
-        border: "0.5px solid var(--gooni-border, rgba(155,130,70,0.15))",
+        border: fileOver
+          ? "1px dashed var(--gooni-accent, #0A84FF)"
+          : "0.5px solid var(--gooni-border, rgba(155,130,70,0.15))",
         borderRadius: 8,
         padding: "10px 16px",
         display: "flex", alignItems: "center", gap: 12,
         cursor: hasChain ? "pointer" : "default",
+        boxShadow: fileOver ? "0 0 0 3px rgba(10,132,255,0.12)" : undefined,
+        transition: "box-shadow 0.12s, border-color 0.12s",
       }}
     >
       {/* Drag grip — visible on hover (or always during a drag). Carries
@@ -996,6 +1064,8 @@ function TodoRow({
       )}
 
       {age && t.state !== "done" && <AgePill age={age} />}
+
+      <AttachmentBadge count={t.attachment_count ?? 0} />
 
       {focus && (
         <span
@@ -1185,6 +1255,32 @@ function OrphanLinkHint({
       <ArrowLeft size={10} />
       <span style={{ fontStyle: "italic" }}>link to parent todo…</span>
     </div>
+  );
+}
+
+// True when a drag carries OS files (vs an internal reorder drag, which
+// carries no "Files" type). Lets a row tell "drop a PDF here" apart from
+// "reorder me".
+function dragHasFiles(e: React.DragEvent): boolean {
+  const types = e.dataTransfer?.types;
+  return !!types && Array.from(types).includes("Files");
+}
+
+// Paperclip + count, shown on a row when it has attachments.
+function AttachmentBadge({ count }: { count: number }) {
+  if (!count) return null;
+  return (
+    <span
+      title={`${count} attachment${count === 1 ? "" : "s"}`}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 3,
+        fontSize: 11, color: "var(--gooni-muted, #6B7280)",
+        flexShrink: 0, fontVariantNumeric: "tabular-nums",
+      }}
+    >
+      <Paperclip size={11} />
+      {count}
+    </span>
   );
 }
 

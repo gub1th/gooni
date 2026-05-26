@@ -107,10 +107,32 @@ def todos_list(db: Session = Depends(get_db)):
         print(f"[todos chain_summary] failed: {e}")
         chain_summary = {}
 
+    # Attachment counts for the paperclip badge — ONE grouped query over the
+    # visible ids (not per-row → no N+1). Failure degrades to no badges.
+    from sqlalchemy import func
+    from ..db.models import Attachment
+    att_counts: dict[int, int] = {}
+    try:
+        if relevant_ids:
+            att_counts = {
+                tid: cnt
+                for tid, cnt in db.query(Attachment.todo_id, func.count(Attachment.id))
+                .filter(Attachment.todo_id.in_(relevant_ids))
+                .group_by(Attachment.todo_id)
+                .all()
+            }
+    except Exception as e:
+        print(f"[todos attachment_counts] failed: {e}")
+        att_counts = {}
+
+    def _with_att(d: dict) -> dict:
+        d["attachment_count"] = att_counts.get(d["id"], 0)
+        return d
+
     return {
-        "primary": serialize_todo(primary) if primary else None,
-        "open": [serialize_todo(t) for t in open_rows if not t.is_primary],
-        "done_today": [serialize_todo(t) for t in done_today],
+        "primary": _with_att(serialize_todo(primary)) if primary else None,
+        "open": [_with_att(serialize_todo(t)) for t in open_rows if not t.is_primary],
+        "done_today": [_with_att(serialize_todo(t)) for t in done_today],
         "chain_summary": chain_summary,
     }
 
