@@ -101,6 +101,25 @@ class RouterResult:
     reply_intent: str = "answer"
     tools_used: list[str] = field(default_factory=list)
 
+    def wrote_anything(self) -> bool:
+        """True if this turn produced any durable write (a captured/mutated
+        primitive or a saved preference). The reflexion hallucination check
+        uses this — router captures aren't ToolCall rows, so the audit alone
+        can't see them. memories_written excluded: reconcile runs off-thread,
+        so it isn't a reliable same-turn signal."""
+        return bool(
+            self.captured_features
+            or self.tone_rules
+            or self.captured_promises
+            or self.captured_todos
+            or self.captured_metrics
+            or self.completed_todos
+            or self.killed_todos
+            or self.merged_todos
+            or self.edited_todos
+            or self.implicit_done_todos
+        )
+
 
 def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
     """Fan out signals to per-type handlers. Each handler is wrapped so

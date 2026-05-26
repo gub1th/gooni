@@ -449,10 +449,10 @@ class Orchestrator:
                     assistant_reply=feedback_ack,
                     message_id=short_assistant_msg.id,
                     conversation_id=conv.id,
-                    # This IS the capture short-circuit: a terse ack to a
-                    # router-captured turn. Tell reflexion so it doesn't
-                    # flag the correct ack as a completeness gap.
-                    is_capture_ack=True,
+                    # Short-circuit fires because the router captured/handled
+                    # this turn — so a write happened. Tell reflexion so the
+                    # hallucination cross-ref doesn't false-positive on the ack.
+                    router_wrote=routed.wrote_anything(),
                 )
                 # G2: auto-detect "I can't X" patterns in Gooni's own reply,
                 # log against nearest backlog ticket. Short-circuit acks are
@@ -847,6 +847,7 @@ class Orchestrator:
                 assistant_reply=response,
                 message_id=assistant_msg.id,
                 conversation_id=conv.id,
+                router_wrote=routed.wrote_anything(),
             )
             # G2 self-PM: auto-detect "I can't X" / "not yet supported" /
             # "no tool for Y" patterns in this reply. If Gooni acknowledged
