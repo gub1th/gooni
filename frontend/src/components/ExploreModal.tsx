@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { fetchNotesGraph, type GraphNode, type GraphEdge } from "../services/api";
 import { useSpacesStore } from "../stores/useSpacesStore";
+import { useGooniThemeStore } from "../stores/useGooniThemeStore";
 import { color as ctok, FONT } from "../ui";
 
 // Full-screen modal version of the semantic graph. Rendered as a portal-ish
@@ -37,11 +38,13 @@ function buildSimNodes(nodes: GraphNode[], width: number, height: number): SimNo
 
 // Lerp a dark node color toward the accent green for flash intensity `t`
 // in [0, 1]. Written inline so the render loop doesn't allocate.
-function flashColor(t: number): string {
-  // Dark base: #1C1C1E = (28, 28, 30). Accent: #4ADE80 = (74, 222, 128).
-  const r = Math.round(28 + (74 - 28) * t);
-  const g = Math.round(28 + (222 - 28) * t);
-  const b = Math.round(30 + (128 - 30) * t);
+function flashColor(t: number, base: readonly [number, number, number] = [28, 28, 30]): string {
+  // Interpolate the node's resting color → accent #4ADE80 (74,222,128) as the
+  // flash intensity rises. `base` is the resting node color so a flashing node
+  // stays visible in BOTH themes (dark base in light, light base in dark).
+  const r = Math.round(base[0] + (74 - base[0]) * t);
+  const g = Math.round(base[1] + (222 - base[1]) * t);
+  const b = Math.round(base[2] + (128 - base[2]) * t);
   return `rgb(${r},${g},${b})`;
 }
 
@@ -123,6 +126,10 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
   const navigate = useNavigate();
   const viewRef = useRef({ scale: 1, tx: 0, ty: 0 });
   const dragState = useRef<{ startX: number; startY: number; tx: number; ty: number } | null>(null);
+  // Canvas can't read CSS vars (ctx.fillStyle won't parse `var(--gooni-*)`),
+  // so resolve concrete hex from the active theme and pass it into the draw
+  // loop. Theme is in the effect deps below so a toggle rebuilds the colors.
+  const theme = useGooniThemeStore((s) => s.theme);
 
   // Load graph only when opened; keep between opens so you don't re-fetch
   // every time, but re-fetch if explicitly requested via state reset (future).
@@ -331,12 +338,33 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.style.cursor = "grab";
 
+    // Resolved canvas palette for the active theme (hex/rgb only — no vars).
+    const C = theme === "dark"
+      ? {
+          bg: "#1E1E1F",
+          node: "#E5E5E7",
+          nodeRGB: [229, 229, 231] as const,
+          edgeRGB: "255,255,255",
+          labelFill: "rgba(255,255,255,0.40)",
+          boxBg: "#E5E5E7",
+          boxText: "#1C1C1E",
+        }
+      : {
+          bg: "#FAFAFA",
+          node: "#1C1C1E",
+          nodeRGB: [28, 28, 30] as const,
+          edgeRGB: "28,28,30",
+          labelFill: "rgba(28,28,30,0.32)",
+          boxBg: "#1C1C1E",
+          boxText: "#FFFFFF",
+        };
+
     let raf = 0;
     function frame() {
       step(nodes, graph!.edges, nodeIndex, panelW, panelH);
 
       ctx!.clearRect(0, 0, panelW, panelH);
-      ctx!.fillStyle = ctok.bg;
+      ctx!.fillStyle = C.bg;
       ctx!.fillRect(0, 0, panelW, panelH);
 
       const v = viewRef.current;
@@ -349,7 +377,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         const a = nodeIndex.get(e.from);
         const b = nodeIndex.get(e.to);
         if (!a || !b) continue;
-        ctx!.strokeStyle = `rgba(28,28,30,${0.08 + (e.weight - 0.6) * 0.5})`;
+        ctx!.strokeStyle = `rgba(${C.edgeRGB},${0.08 + (e.weight - 0.6) * 0.5})`;
         ctx!.lineWidth = 0.6 + (e.weight - 0.6) * 2.2;
         ctx!.beginPath();
         ctx!.moveTo(a.x, a.y);
@@ -366,9 +394,9 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         const intensity = isHover ? 1 : flashT;
 
         if (intensity > 0) {
-          ctx!.fillStyle = flashColor(intensity);
+          ctx!.fillStyle = flashColor(intensity, C.nodeRGB);
         } else {
-          ctx!.fillStyle = ctok.text;
+          ctx!.fillStyle = C.node;
         }
         ctx!.beginPath();
         ctx!.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
@@ -400,7 +428,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         ctx!.font = `700 11px ${FONT}`;
         ctx!.textAlign = "center";
         ctx!.textBaseline = "middle";
-        ctx!.fillStyle = "rgba(28,28,30,0.32)";
+        ctx!.fillStyle = C.labelFill;
         ctx!.fillText(clusterLabel.toUpperCase(), labelX, labelY);
         // Reset to defaults so the hover label below isn't affected.
         ctx!.textAlign = "start";
@@ -418,7 +446,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         const boxH = 22;
         const boxX = sx - boxW / 2;
         const boxY = sy + hovered.radius + 10;
-        ctx!.fillStyle = ctok.text;
+        ctx!.fillStyle = C.boxBg;
         ctx!.beginPath();
         const radius = 6;
         ctx!.moveTo(boxX + radius, boxY);
@@ -428,7 +456,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         ctx!.arcTo(boxX, boxY, boxX + boxW, boxY, radius);
         ctx!.closePath();
         ctx!.fill();
-        ctx!.fillStyle = "#fff";
+        ctx!.fillStyle = C.boxText;
         ctx!.textBaseline = "middle";
         ctx!.fillText(label, boxX + padX, boxY + boxH / 2 + 0.5);
       }
@@ -447,7 +475,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
       canvas.removeEventListener("pointerleave", onUp);
       canvas.removeEventListener("wheel", onWheel);
     };
-  }, [open, graph, navigate, onClose]);
+  }, [open, graph, navigate, onClose, theme]);
 
   if (!open) return null;
 
@@ -476,7 +504,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
           height: "min(720px, 88vh)",
           background: ctok.bg,
           borderRadius: 14,
-          border: "0.5px solid rgba(0,0,0,0.12)",
+          border: theme === "dark" ? "0.5px solid rgba(255,255,255,0.10)" : "0.5px solid rgba(0,0,0,0.12)",
           boxShadow: "0 24px 72px rgba(0,0,0,0.25)",
           overflow: "hidden",
         }}
@@ -491,7 +519,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         }}>
           <div style={{
             fontSize: 12, color: ctok.muted,
-            background: "rgba(255,255,255,0.85)", border: "0.5px solid rgba(0,0,0,0.08)",
+            background: theme === "dark" ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.85)", border: theme === "dark" ? "0.5px solid rgba(255,255,255,0.12)" : "0.5px solid rgba(0,0,0,0.08)",
             padding: "5px 11px", borderRadius: 8, letterSpacing: 0.2,
             fontWeight: 600, textTransform: "uppercase",
           }}>
@@ -500,7 +528,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
           <div style={{ display: "flex", gap: 8, pointerEvents: "auto" }}>
             <div style={{
               fontSize: 12, color: ctok.muted,
-              background: "rgba(255,255,255,0.85)", border: "0.5px solid rgba(0,0,0,0.08)",
+              background: theme === "dark" ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.85)", border: theme === "dark" ? "0.5px solid rgba(255,255,255,0.12)" : "0.5px solid rgba(0,0,0,0.08)",
               padding: "5px 11px", borderRadius: 8, letterSpacing: 0.2,
             }}>
               {graph ? `${graph.nodes.length} notes · ${graph.edges.length} links` : "loading…"}
@@ -511,8 +539,8 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
               title="Close (Esc)"
               style={{
                 width: 28, height: 28, borderRadius: 8,
-                border: "0.5px solid rgba(0,0,0,0.08)",
-                background: "rgba(255,255,255,0.85)",
+                border: theme === "dark" ? "0.5px solid rgba(255,255,255,0.12)" : "0.5px solid rgba(0,0,0,0.08)",
+                background: theme === "dark" ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.85)",
                 color: "var(--gooni-muted, #6B6B70)", fontSize: 16, lineHeight: 1,
                 cursor: "pointer", fontFamily: FONT,
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -541,7 +569,7 @@ export function ExploreModal({ open, onClose }: ExploreModalProps) {
         <div style={{
           position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)",
           fontSize: 11, color: ctok.faint,
-          background: "rgba(255,255,255,0.85)", border: "0.5px solid rgba(0,0,0,0.08)",
+          background: theme === "dark" ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.85)", border: theme === "dark" ? "0.5px solid rgba(255,255,255,0.12)" : "0.5px solid rgba(0,0,0,0.08)",
           padding: "4px 11px", borderRadius: 8, letterSpacing: 0.2,
         }}>
           drag · scroll to zoom · click a node to open · esc to close

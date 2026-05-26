@@ -76,7 +76,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   return (
     <section style={{ marginBottom: 28 }}>
       <h2 style={{ fontSize: 17, fontWeight: 600, marginBottom: 8 }}>{title}</h2>
-      <div style={{ fontSize: 14, color: "#3C3C43" }}>{children}</div>
+      <div style={{ fontSize: 14, color: "var(--gooni-text, #3C3C43)" }}>{children}</div>
     </section>
   );
 }

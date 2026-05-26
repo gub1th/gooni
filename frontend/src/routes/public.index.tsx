@@ -40,7 +40,7 @@ function PlazaCta() {
         gap: 14,
         padding: "16px 24px",
         borderRadius: 18,
-        background: "#ffffff",
+        background: "var(--gooni-card, #ffffff)",
         border: "1.5px solid #9FE1CB",
         color: "#085041",
         textDecoration: "none",
@@ -413,7 +413,7 @@ function PublicPage() {
       // mascot palette without screaming "themed."
       background: "radial-gradient(ellipse 1100px 600px at 50% -10%, rgba(74,222,128,0.06), transparent 70%), linear-gradient(180deg, #fbfaf7 0%, #ffffff 40%)",
       fontFamily: FONT,
-      color: "#111",
+      color: "var(--gooni-text, #111)",
     }}>
       <div style={{ maxWidth: 680, margin: "0 auto", padding: "60px 24px 120px" }}>
 
@@ -425,11 +425,11 @@ function PublicPage() {
             fontWeight: 500,
             letterSpacing: "-0.6px",
             marginBottom: 14,
-            color: "#111",
+            color: "var(--gooni-text, #111)",
           }}>
             hi, my name is daniel
           </div>
-          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", color: "#8a8a8a", fontSize: 13.5, minHeight: 18 }}>
+          <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", color: "var(--gooni-muted, #8a8a8a)", fontSize: 13.5, minHeight: 18 }}>
             {profileLoading ? (
               <>
                 <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -450,7 +450,7 @@ function PublicPage() {
                     <span>
                       {noteCount} notes written
                       {notes.length > 0 && noteCount > notes.length && (
-                        <span style={{ color: "#c5c5c5", marginLeft: 4 }}>· {notes.length} public</span>
+                        <span style={{ color: "var(--gooni-faint, #c5c5c5)", marginLeft: 4 }}>· {notes.length} public</span>
                       )}
                     </span>
                   </div>
@@ -471,7 +471,7 @@ function PublicPage() {
             <a
               href="/"
               style={{
-                fontSize: 13, color: "#8a8a8a", textDecoration: "none",
+                fontSize: 13, color: "var(--gooni-muted, #8a8a8a)", textDecoration: "none",
                 fontFamily: FONT,
                 display: "inline-flex", alignItems: "center", gap: 5,
                 borderBottom: "1px dashed rgba(0,0,0,0.18)",
@@ -485,7 +485,7 @@ function PublicPage() {
             <Link
               to="/public/mcp"
               style={{
-                fontSize: 13, color: "#8a8a8a", textDecoration: "none",
+                fontSize: 13, color: "var(--gooni-muted, #8a8a8a)", textDecoration: "none",
                 fontFamily: FONT,
                 display: "inline-flex", alignItems: "center", gap: 5,
                 borderBottom: "1px dashed rgba(0,0,0,0.18)",
@@ -506,7 +506,7 @@ function PublicPage() {
                   style={{
                     padding: "3px 10px", borderRadius: 999,
                     border: "1px solid rgba(0,0,0,0.12)",
-                    background: "transparent", color: "#555",
+                    background: "transparent", color: "var(--gooni-muted, #555)",
                     fontSize: 12, fontFamily: FONT, cursor: "pointer",
                     display: "inline-flex", alignItems: "center", gap: 5,
                   }}
@@ -515,7 +515,7 @@ function PublicPage() {
                 </button>
               </div>
               <EditorContent editor={bioEditor} />
-              <div style={{ fontSize: 11.5, color: "#999", marginTop: 6, fontFamily: FONT }}>
+              <div style={{ fontSize: 11.5, color: "var(--gooni-muted, #999)", marginTop: 6, fontFamily: FONT }}>
                 Tip: select text → 🔗 Link, or paste a URL onto selected text.
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
@@ -535,7 +535,7 @@ function PublicPage() {
                   style={{
                     padding: "6px 14px", borderRadius: 8,
                     border: "1px solid rgba(0,0,0,0.12)",
-                    background: "transparent", color: "#555", fontSize: 12.5,
+                    background: "transparent", color: "var(--gooni-muted, #555)", fontSize: 12.5,
                     fontFamily: FONT, cursor: "pointer",
                   }}
                 >
@@ -555,16 +555,16 @@ function PublicPage() {
                 bioIsHtml ? (
                   <div
                     className="gooni-public-bio"
-                    style={{ fontSize: 15.5, color: "#444", lineHeight: 1.7, flex: 1 }}
+                    style={{ fontSize: 15.5, color: "var(--gooni-text, #444)", lineHeight: 1.7, flex: 1 }}
                     dangerouslySetInnerHTML={{ __html: bio }}
                   />
                 ) : (
-                  <p style={{ fontSize: 15.5, color: "#444", lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap", flex: 1 }}>
+                  <p style={{ fontSize: 15.5, color: "var(--gooni-text, #444)", lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap", flex: 1 }}>
                     {bio}
                   </p>
                 )
               ) : isOwner ? (
-                <p style={{ fontSize: 15, color: "#bbb", fontStyle: "italic", margin: 0, flex: 1 }}>
+                <p style={{ fontSize: 15, color: "var(--gooni-faint, #bbb)", fontStyle: "italic", margin: 0, flex: 1 }}>
                   No bio yet.
                 </p>
               ) : null}
@@ -575,7 +575,7 @@ function PublicPage() {
                   style={{
                     flexShrink: 0, padding: "3px 10px", borderRadius: 12,
                     border: "1px solid rgba(0,0,0,0.12)", background: "transparent",
-                    color: "#555", fontSize: 12, cursor: "pointer", fontFamily: FONT,
+                    color: "var(--gooni-muted, #555)", fontSize: 12, cursor: "pointer", fontFamily: FONT,
                   }}
                 >
                   Edit
@@ -626,7 +626,7 @@ function PublicPage() {
                   border: "1px solid rgba(74,222,128,0.30)",
                   boxShadow: "0 4px 14px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.03)",
                   textDecoration: "none",
-                  color: "#111",
+                  color: "var(--gooni-text, #111)",
                   transition: "transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease",
                   position: "relative",
                 }}
@@ -668,7 +668,7 @@ function PublicPage() {
                 </div>
                 <div style={{
                   fontSize: 14.5,
-                  color: "#555",
+                  color: "var(--gooni-muted, #555)",
                   lineHeight: 1.6,
                   display: "-webkit-box",
                   WebkitLineClamp: 3,
@@ -677,7 +677,7 @@ function PublicPage() {
                 }}>
                   {note.excerpt}
                 </div>
-                <div style={{ marginTop: 12, fontSize: 12.5, color: "#999" }}>
+                <div style={{ marginTop: 12, fontSize: 12.5, color: "var(--gooni-muted, #999)" }}>
                   {formatDate(note.updated_at)} · {note.read_time_minutes} min read
                 </div>
                 {isOwner && (
@@ -701,7 +701,7 @@ function PublicPage() {
                       display: "inline-flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: "#666",
+                      color: "var(--gooni-muted, #666)",
                       cursor: "pointer",
                     }}
                   >
@@ -722,7 +722,7 @@ function PublicPage() {
             fontWeight: 600,
             letterSpacing: "0.14em",
             textTransform: "uppercase",
-            color: "#a8a8a8",
+            color: "var(--gooni-faint, #a8a8a8)",
             marginBottom: 6,
           }}>
             more notes
@@ -737,7 +737,7 @@ function PublicPage() {
             ))}
           </ul>
         ) : displayed.length === 0 ? (
-          <p style={{ color: "#aaa", fontSize: 14 }}>No posts yet.</p>
+          <p style={{ color: "var(--gooni-faint, #aaa)", fontSize: 14 }}>No posts yet.</p>
         ) : rest.length === 0 ? null : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {rest.map((note) => (
@@ -773,7 +773,7 @@ function PublicPage() {
                       fontFamily: DISPLAY,
                       fontSize: 18,
                       fontWeight: 500,
-                      color: "#111",
+                      color: "var(--gooni-text, #111)",
                       display: "block",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -786,7 +786,7 @@ function PublicPage() {
                   >
                     {displayTitle({ title: note.title, content: note.excerpt })}
                   </Link>
-                  <span style={{ fontSize: 13, color: "#a0a0a0", marginTop: 4, display: "block" }}>
+                  <span style={{ fontSize: 13, color: "var(--gooni-muted, #a0a0a0)", marginTop: 4, display: "block" }}>
                     {formatDate(note.updated_at)}
                     <span style={{ color: "#cfcfcf" }}> · {note.read_time_minutes} min</span>
                   </span>
@@ -808,7 +808,7 @@ function PublicPage() {
                         borderRadius: 999,
                         width: 26, height: 26,
                         display: "inline-flex", alignItems: "center", justifyContent: "center",
-                        color: "#444",
+                        color: "var(--gooni-text, #444)",
                         cursor: "pointer",
                         opacity: hoveredId === note.id ? 1 : 0,
                         transition: "opacity 0.15s ease",
@@ -836,7 +836,7 @@ function PublicPage() {
                         borderRadius: 999,
                         width: 26, height: 26,
                         display: "inline-flex", alignItems: "center", justifyContent: "center",
-                        color: "#444",
+                        color: "var(--gooni-text, #444)",
                         cursor: "pointer",
                         opacity: hoveredId === note.id ? 1 : 0,
                         transition: "opacity 0.15s ease, background 0.15s ease, color 0.15s ease",
@@ -857,7 +857,7 @@ function PublicPage() {
                     </button>
                   )}
                   {note.space_name && (
-                    <span style={{ fontSize: 11.5, color: "#9a9a9a", border: "1px solid rgba(0,0,0,0.10)", borderRadius: 10, padding: "2px 8px", fontWeight: 500 }}>
+                    <span style={{ fontSize: 11.5, color: "var(--gooni-muted, #9a9a9a)", border: "1px solid rgba(0,0,0,0.10)", borderRadius: 10, padding: "2px 8px", fontWeight: 500 }}>
                       {note.space_name}
                     </span>
                   )}
@@ -874,7 +874,7 @@ function PublicPage() {
           paddingTop: 22,
           borderTop: "1px solid rgba(0,0,0,0.06)",
           fontSize: 12,
-          color: "#b5b5b5",
+          color: "var(--gooni-faint, #b5b5b5)",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
@@ -886,7 +886,7 @@ function PublicPage() {
             href="https://github.com/gub1th/gooni"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ color: "#b5b5b5", textDecoration: "none", borderBottom: "1px dashed rgba(0,0,0,0.12)" }}
+            style={{ color: "var(--gooni-faint, #b5b5b5)", textDecoration: "none", borderBottom: "1px dashed rgba(0,0,0,0.12)" }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#777")}
             onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#b5b5b5")}
           >

@@ -527,7 +527,7 @@ export function DevSection() {
                       alignSelf: "flex-start",
                       fontSize: 10.5, fontWeight: 600, letterSpacing: 0.3,
                       color: ctok.text,
-                      background: "rgba(0,0,0,0.05)",
+                      background: "var(--gooni-hover, rgba(0,0,0,0.05))",
                       padding: "1.5px 7px", borderRadius: 99,
                     }}>
                       {t.theme}

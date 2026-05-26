@@ -14,17 +14,17 @@ function MCPPage() {
   const err = error ? String(error) : null;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#fff", fontFamily: FONT, color: "#111" }}>
+    <div style={{ minHeight: "100vh", background: "var(--gooni-card, #fff)", fontFamily: FONT, color: "var(--gooni-text, #111)" }}>
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "60px 24px 120px" }}>
         {/* Header */}
         <div style={{ marginBottom: 40 }}>
           <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: "-0.5px", marginBottom: 10 }}>
             Gooni's MCP setup
           </div>
-          <p style={{ fontSize: 14, color: "#6B6B70", lineHeight: 1.65, margin: 0, maxWidth: 620 }}>
+          <p style={{ fontSize: 14, color: "var(--gooni-muted, #6B6B70)", lineHeight: 1.65, margin: 0, maxWidth: 620 }}>
             The Model Context Protocol servers I've wired into my Claude Code — how Claude
             reaches into Gooni to read notes, manage memories, and hit todos. Auto-generated
-            from my local <code style={{ fontFamily: MONO, fontSize: 13, color: "#444" }}>.mcp.json</code>{" "}
+            from my local <code style={{ fontFamily: MONO, fontSize: 13, color: "var(--gooni-text, #444)" }}>.mcp.json</code>{" "}
             and the MCP server source. Updates as I add tools.
           </p>
         </div>
@@ -50,12 +50,12 @@ function MCPPage() {
                   borderRadius: 12,
                   padding: "14px 18px",
                   marginBottom: 10,
-                  background: "#FDFCFA",
+                  background: "var(--gooni-card, #FDFCFA)",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
-                  <div style={{ fontSize: 15.5, fontWeight: 600, color: "#111" }}>{s.name}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 12, color: "#888" }}>
+                  <div style={{ fontSize: 15.5, fontWeight: 600, color: "var(--gooni-text, #111)" }}>{s.name}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 12, color: "var(--gooni-muted, #888)" }}>
                     {s.command}{s.script ? ` ${s.script}` : ""}
                   </div>
                 </div>
@@ -64,7 +64,7 @@ function MCPPage() {
                     env:&nbsp;
                     {s.env_keys.map((k, i) => (
                       <span key={k}>
-                        <code style={{ fontFamily: MONO, color: "#555" }}>{k}</code>
+                        <code style={{ fontFamily: MONO, color: "var(--gooni-muted, #555)" }}>{k}</code>
                         {i < s.env_keys.length - 1 ? ", " : ""}
                       </span>
                     ))}
@@ -96,20 +96,20 @@ function MCPPage() {
                     borderBottom: "1px solid rgba(0,0,0,0.06)",
                   }}
                 >
-                  <div style={{ fontFamily: MONO, fontSize: 13, color: "#111", marginBottom: 4 }}>
+                  <div style={{ fontFamily: MONO, fontSize: 13, color: "var(--gooni-text, #111)", marginBottom: 4 }}>
                     <span style={{ fontWeight: 600 }}>{t.name}</span>
-                    <span style={{ color: "#888" }}>(</span>
+                    <span style={{ color: "var(--gooni-muted, #888)" }}>(</span>
                     {t.params.map((p, i) => (
                       <span key={p.name}>
                         <span style={{ color: p.required ? "#111" : "#999" }}>{p.name}</span>
                         {!p.required && <span style={{ color: "#ccc" }}>?</span>}
-                        {i < t.params.length - 1 && <span style={{ color: "#aaa" }}>, </span>}
+                        {i < t.params.length - 1 && <span style={{ color: "var(--gooni-faint, #aaa)" }}>, </span>}
                       </span>
                     ))}
-                    <span style={{ color: "#888" }}>)</span>
+                    <span style={{ color: "var(--gooni-muted, #888)" }}>)</span>
                   </div>
                   {t.description && (
-                    <div style={{ fontSize: 13.5, color: "#555", lineHeight: 1.6 }}>
+                    <div style={{ fontSize: 13.5, color: "var(--gooni-muted, #555)", lineHeight: 1.6 }}>
                       {t.description}
                     </div>
                   )}
