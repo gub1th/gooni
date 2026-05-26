@@ -278,7 +278,8 @@ def _normalize_fitness(items: Any, today: _date | None = None) -> list[dict]:
 
     Output entry shape:
       {log_type, raw_text, needs_estimation, metrics:[{metric_type,value,unit}],
-       weight, weight_unit, exercise_label, correction, correction_target}
+       weight, weight_unit, exercise_label, correction, correction_target,
+       correction_scope}
     """
     out = []
     if not isinstance(items, list):
@@ -338,6 +339,15 @@ def _normalize_fitness(items: Any, today: _date | None = None) -> list[dict]:
             and ct_raw.strip().lower() in (*_VALID_METRIC_TYPES, "weight")
             else None
         )
+        # item (default) = fix one earlier food; day = reset the whole day's
+        # total. "day" routes to set_cell (collapse), so anything we can't
+        # confidently read as "day" stays "item" — the safe default.
+        cs_raw = it.get("correction_scope")
+        correction_scope = (
+            cs_raw.strip().lower()
+            if isinstance(cs_raw, str) and cs_raw.strip().lower() == "day"
+            else "item"
+        )
 
         # Per-type sanity: drop entries that carry no actionable payload.
         if log_type in ("food", "macros_explicit") and not metrics and not (
@@ -361,6 +371,7 @@ def _normalize_fitness(items: Any, today: _date | None = None) -> list[dict]:
             "log_date": _coerce_log_date(it.get("date"), today),
             "correction": correction,
             "correction_target": correction_target,
+            "correction_scope": correction_scope,
         })
     return out
 

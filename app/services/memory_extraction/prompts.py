@@ -165,7 +165,8 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "substance":        "<for log_type=substance only — alcohol|weed|vape>",
       "date":             "<YYYY-MM-DD if Daniel names a day; omit/null when he means today>",
       "correction":       "true|false — true when Daniel is amending an EARLIER log this day",
-      "correction_target":"calories|protein|weight — which metric the correction overwrites"
+      "correction_target":"calories|protein|weight — which metric the correction overwrites",
+      "correction_scope": "item|day — 'item' fixes one earlier food (default); 'day' RESETS the whole day's total to these numbers"
     }}
   ],
   "reply_intent": "answer|acknowledge|task_only|no_reply",
@@ -532,11 +533,27 @@ DATES — today is {today}. If Daniel names a day for a fitness log, resolve it
     "smoked on tuesday" → {{log_type:"substance", substance:"weed", date:"<that tuesday>"}}
     "had 2100 cal" → {{log_type:"macros_explicit", ...}}  (no date → today)
 
-CORRECTIONS — Daniel amends an earlier log from the same day:
-  "actually that chicken was more like 900 cal"
-    → {{log_type:"macros_explicit", correction:true, correction_target:"calories",
-        metrics:[{{metric_type:"calories",value:900,unit:"kcal"}}]}}
-  The handler overwrites the most-recent matching row instead of adding.
+CORRECTIONS — Daniel amends a log from the same day. TWO scopes:
+
+  • correction_scope="item" (DEFAULT) — fixes ONE earlier food. Overwrites the
+    most-recent matching row. Use when he names/refers to a single item.
+    "actually that chicken was more like 900 cal"
+      → {{log_type:"macros_explicit", correction:true, correction_target:"calories",
+          correction_scope:"item", metrics:[{{metric_type:"calories",value:900,unit:"kcal"}}]}}
+
+  • correction_scope="day" — RESETS the WHOLE day's total to the numbers given.
+    Use when he restates the day total, not a single food. Telltale: he gives a
+    cal/protein PAIR as "the total", or references what the running number should
+    be. The handler COLLAPSES the day to exactly these numbers (no compounding).
+    "change to 1,740 / 127g"  (restating the day, not one meal)
+      → {{log_type:"macros_explicit", correction:true, correction_scope:"day",
+          metrics:[{{metric_type:"calories",value:1740,unit:"kcal"}},
+                   {{metric_type:"protein",value:127,unit:"g"}}]}}
+    "the total should be 1900", "you're at 1900 not 2600", "make today 1740"
+      → correction_scope:"day"
+  When unsure between the two, prefer "item" — "day" wipes the day, so reserve it
+  for clear whole-day restatements. (A regex guard also force-flags the obvious
+  "change to N / Mg" phrasings as day, so you don't have to catch every variant.)
 
 - A single message can carry MULTIPLE fitness logs (food + weight + gym) —
   emit each as its own entry.

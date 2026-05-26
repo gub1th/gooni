@@ -105,6 +105,7 @@ def _handle_macros(ctx, result, entry, dms) -> bool:
 
     correction = bool(entry.get("correction"))
     correction_target = entry.get("correction_target")
+    scope = entry.get("correction_scope") or "item"
     raw_text = entry.get("raw_text") or None
     day = _entry_day(entry, ctx.db)
     wrote = False
@@ -115,10 +116,17 @@ def _handle_macros(ctx, result, entry, dms) -> bool:
         unit = m.get("unit") or ("kcal" if mt == "calories" else "g")
         if mt not in ("calories", "protein") or val is None:
             continue
-        # A correction amends the most-recent matching row in place rather
-        # than adding a new meal. Fall back to a fresh log if there's
-        # nothing to correct yet on that day.
-        if correction and (correction_target in (None, mt)):
+        # Three intents (see prompts.py CORRECTIONS):
+        #   day-scope correction → RESET the day. set_cell collapses (day, mt)
+        #     to one canonical row, so a restated total lands exactly with no
+        #     compounding (this is the running-total-explosion fix). Later
+        #     meal logs append on top of the reset baseline.
+        #   item-scope correction → amend the most-recent matching row; fall
+        #     back to a fresh log if there's nothing to correct yet that day.
+        #   no correction → additive meal log.
+        if correction and scope == "day":
+            dms.set_cell(ctx.db, day, mt, value=val, unit=unit, notes=raw_text)
+        elif correction and (correction_target in (None, mt)):
             updated = dms.update_most_recent(ctx.db, mt, val, day=day)
             if updated is None:
                 dms.log(ctx.db, mt, val, unit=unit, day=day, notes=raw_text)

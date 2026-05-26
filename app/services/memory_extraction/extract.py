@@ -75,6 +75,24 @@ _PREFILTER_TRIGGERS = re.compile(
 )
 
 
+# Hybrid day-total override (high-precision half). The gpt-5.4-mini extractor
+# emits `correction_scope` for paraphrases, but the destructive "collapse the
+# whole day" path shouldn't be left solely to a mini-model's judgment — the
+# running-total explosion (logged 501g protein) came from exactly that
+# misclassification. So these unambiguous whole-day restatements force
+# correction_scope="day" deterministically, regardless of what the LLM said.
+# Precision over recall: only the clearest shapes; the LLM widens coverage.
+_DAY_TOTAL_OVERRIDE_RE = re.compile(
+    # "change/set/make/update ... to 1,740 / 127" — Daniel's slash restatement
+    r"\b(?:change|set|make|update)\b[^.\n]{0,15}\bto\s+\d[\d,]*\s*/\s*\d+"
+    # "(daily) total should be / is / to 1740"
+    r"|\b(?:daily\s+)?total\s+(?:should\s+be|is|to)\s+\d[\d,]+"
+    # "you're at 1740"
+    r"|\b(?:you'?re|your)\s+at\s+\d[\d,]+",
+    re.IGNORECASE,
+)
+
+
 def extract_signals(
     text: str,
     prev_assistant: str | None = None,
@@ -149,13 +167,23 @@ def extract_signals(
         return empty
     if not isinstance(parsed, dict):
         return empty
+    fitness = _normalize_fitness(parsed.get("fitness_logs"), today_d)
+    # Hybrid override: a clear whole-day restatement in the raw text force-flags
+    # the calorie/protein-bearing entries as day-scope corrections, so the
+    # handler collapses (set_cell) instead of appending — even if the LLM read
+    # it as an item fix or a fresh log.
+    if fitness and _DAY_TOTAL_OVERRIDE_RE.search(text):
+        for f in fitness:
+            if f["log_type"] in ("food", "macros_explicit"):
+                f["correction"] = True
+                f["correction_scope"] = "day"
     return {
         "tone_corrections": _normalize_tone(parsed.get("tone_corrections")),
         "feature_requests": _normalize_features(parsed.get("feature_requests")),
         "soft_promises":    _normalize_promises(parsed.get("soft_promises")),
         "todos":            _normalize_todos(parsed.get("todos")),
         "done_signals":     _normalize_done_signals(parsed.get("done_signals")),
-        "fitness_logs":     _normalize_fitness(parsed.get("fitness_logs"), today_d),
+        "fitness_logs":     fitness,
         "reply_intent":     _normalize_reply_intent(parsed.get("reply_intent")),
         "memories":         _normalize_memories(parsed.get("memories")),
     }
