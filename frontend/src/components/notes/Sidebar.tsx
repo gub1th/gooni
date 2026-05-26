@@ -346,8 +346,7 @@ function SidebarChildRow({
   );
 }
 
-export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect: _unusedOnSpaceSelect, onAllNotes, onSelectNote, onCompose, onNewChat, onSelectList, onOpenEval, onClose }: SidebarProps) {
-  void _unusedOnSpaceSelect;
+export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeListId, showCompose, onLogoClick, onSpaceSelect, onAllNotes, onSelectNote, onCompose, onNewChat, onSelectList, onOpenEval, onClose }: SidebarProps) {
   // Dead helpers retained for now (referenced via `void` so tsc accepts
   // them) — they wired the dropped DRAFTS/UNPROCESSED/SPACES sections.
   // Sweep in a follow-up if the redesign sticks.
@@ -955,7 +954,7 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
                   label={space.name}
                   prefix={space.is_pinned ? "★ " : ""}
                   selected={isSelected}
-                  onClick={() => { selectSpace(spaceId); loadNotes(spaceId); }}
+                  onClick={() => { selectSpace(spaceId); loadNotes(spaceId); onSpaceSelect(); }}
                 />
               );
             })}
