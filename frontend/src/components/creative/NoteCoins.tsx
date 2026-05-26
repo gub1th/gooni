@@ -5,7 +5,7 @@ import { Html } from "@react-three/drei";
 import { fetchPublicNotes, type PublicNote } from "../../services/api";
 import { buildTileGrid, tileKey } from "./tileGrid";
 import { buildNoteTileMap } from "./noteTileMap";
-import { subscribeLandings, subscribeTileState } from "./useDanielControls";
+import { getLastPlayerLanding, subscribeLandings, subscribeTileState } from "./useDanielControls";
 import { fireVfx } from "./vfx";
 import { playCoinPickup } from "./sfx";
 import { NoteCoin } from "./NoteCoin";
@@ -80,7 +80,14 @@ export function NoteCoins({ onSelect }: Props) {
   // lives on the module bus so a sibling-of-Canvas host renders it as
   // real DOM (createPortal from inside R3F throws "Span is not part
   // of THREE namespace").
-  const [playerGrid, setPlayerGrid] = useState<{ gx: number; gz: number } | null>(null);
+  // Seed from the retained player landing: this component mounts only
+  // after the intro finishes, so it misses the spawn landing. Reading the
+  // last player position lets the re-resolve effect below surface the
+  // START HERE peek on world-entry without a step-off/step-on.
+  const [playerGrid, setPlayerGrid] = useState<{ gx: number; gz: number } | null>(() => {
+    const last = getLastPlayerLanding();
+    return last ? { gx: last.gx, gz: last.gz } : null;
+  });
 
   // Refs let the landing subscriber read current assignment + read
   // state without re-subscribing on every change.

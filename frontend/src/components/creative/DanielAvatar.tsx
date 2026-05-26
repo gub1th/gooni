@@ -8,6 +8,7 @@ import {
   gridToWorld,
   isTileBlocked,
   isTileSolid,
+  recordPlayerSpawn,
   tileWithin,
 } from "./useDanielControls";
 import { playJumpGrunt, playLandThud, playFallOff, playInvalidMove } from "./sfx";
@@ -370,6 +371,11 @@ export const DanielAvatar = forwardRef<DanielHandle, Props>(function DanielAvata
         inner.scale.set(1, 1, 1);
         if (!stoodFiredRef.current) {
           stoodFiredRef.current = true;
+          // Record the spawn tile so NoteCoins (which mounts only after
+          // introDone) can seed the player position + surface the
+          // START HERE peek immediately. No-notify, so no chime/glow —
+          // honoring "NO glow on the starting tile".
+          recordPlayerSpawn(0, 0, { x: w.x, z: w.z });
           onIntroComplete();
           // Spec: NO glow on the starting tile.
         }

@@ -586,6 +586,7 @@ function StartOverlay({
   const { progress, active } = useProgress();
   const ready = !active || progress >= 99;
   const [titleHovered, setTitleHovered] = useState(false);
+  const [readHovered, setReadHovered] = useState(false);
   const [name, setName] = useState("");
   const [color, setColor] = useState(defaultColor);
 
@@ -715,6 +716,30 @@ function StartOverlay({
               animation: "plaza-cta-ring 2.8s ease-in-out infinite",
             }} />
           </button>
+
+          {/* Quiet secondary path: skip the 3D plaza, read the notebook
+              directly. Plain anchor (full nav) so the Canvas tears down.
+              stopPropagation keeps the overlay-wide submit from firing. */}
+          <a
+            href="/public/"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseEnter={() => setReadHovered(true)}
+            onMouseLeave={() => setReadHovered(false)}
+            style={{
+              marginTop: 2,
+              fontSize: 12.5,
+              fontFamily: FONT,
+              letterSpacing: "0.04em",
+              color: readHovered ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.5)",
+              textDecoration: "none",
+              textShadow: "0 1px 8px rgba(0,0,0,0.5)",
+              cursor: "inherit",
+              transition: "color 200ms ease",
+            }}
+          >
+            or just read the notes →
+          </a>
         </>
       ) : (
         <>
