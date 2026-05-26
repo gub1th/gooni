@@ -498,8 +498,8 @@ export function DevSection() {
         return (
           <div style={{
             marginTop: 18,
-            background: "linear-gradient(180deg, #FAFBFC, #F4F6F8)",
-            border: "0.5px solid rgba(0,0,0,0.06)",
+            background: ctok.card,
+            border: `0.5px solid ${ctok.border}`,
             borderRadius: 10, padding: "12px 14px",
           }}>
             <div style={{

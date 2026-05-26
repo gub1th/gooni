@@ -46,7 +46,7 @@ export function UsageCards() {
         </div>
         <div style={{
           display: "inline-flex", alignItems: "center",
-          background: "rgba(0,0,0,0.05)", borderRadius: 999, padding: 2, gap: 0,
+          background: ctok.hover, borderRadius: 999, padding: 2, gap: 0,
         }}>
           {(["openai", "claude"] as const).map((p) => {
             const active = provider === p;
@@ -57,8 +57,8 @@ export function UsageCards() {
                 style={{
                   padding: "3px 10px", borderRadius: 999,
                   border: "none", cursor: "pointer",
-                  background: active ? ctok.text : "transparent",
-                  color: active ? "#fff" : "#3C3C43",
+                  background: active ? ctok.accent : "transparent",
+                  color: active ? "#fff" : ctok.muted,
                   fontFamily: FONT, fontSize: 11, fontWeight: 600,
                   letterSpacing: 0.2,
                   transition: "background 0.12s, color 0.12s",

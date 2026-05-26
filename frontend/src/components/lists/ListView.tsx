@@ -314,7 +314,7 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
           position: "sticky", top: 0, zIndex: 5,
           background: "var(--gooni-card, #FFFFFF)",
           padding: "32px 0 16px",
-          borderBottom: "1px solid #F2F2F7",
+          borderBottom: `1px solid ${ctok.border}`,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {list.emoji && <span style={{ fontSize: 22 }}>{list.emoji}</span>}
@@ -417,12 +417,12 @@ export function ListView({ listId, onOpenSourceNote }: ListViewProps) {
                     title="Delete list"
                     aria-label="Delete list"
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background = "#FEE2E2";
+                      (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,59,48,0.16)";
                       (e.currentTarget as HTMLButtonElement).style.color = "#DC2626";
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                      (e.currentTarget as HTMLButtonElement).style.color = "#6B7280";
+                      (e.currentTarget as HTMLButtonElement).style.color = ctok.muted;
                     }}
                     style={{
                       border: "none",
@@ -645,7 +645,7 @@ function ListItemRow({
         alignItems: "flex-start",
         gap: 12,
         padding: "10px 8px",
-        borderBottom: "1px solid #F2F2F7",
+        borderBottom: `1px solid ${ctok.border}`,
         opacity: isDragging ? 0.55 : (isTaskList && item.done ? 0.55 : 1),
         borderRadius: 6,
         // Lift the dragged row visually: subtle scale-down + tinted background
@@ -669,7 +669,7 @@ function ListItemRow({
             width: 18,
             height: 18,
             borderRadius: 999,
-            border: item.done ? "none" : "1.5px solid #C7C7CC",
+            border: item.done ? "none" : `1.5px solid ${ctok.border}`,
             background: item.done ? "#34C759" : "transparent",
             color: "#FFFFFF",
             fontSize: 11,
@@ -723,7 +723,7 @@ function ListItemRow({
             style={{
               flexShrink: 0,
               border: "none",
-              background: "rgba(0,0,0,0.04)",
+              background: ctok.hover,
               color: ctok.muted,
               fontFamily: "'SF Mono', Menlo, monospace",
               fontSize: 10.5,
@@ -732,8 +732,8 @@ function ListItemRow({
               cursor: "pointer",
               lineHeight: 1.4,
             }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.08)"; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)"; }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
           >
             #{item.id}
           </button>
@@ -793,7 +793,7 @@ function ListItemRow({
             title="Item actions"
             style={{
               border: "none",
-              background: menuOpen ? "rgba(0,0,0,0.06)" : "transparent",
+              background: menuOpen ? ctok.hover : "transparent",
               color: ctok.muted,
               cursor: "pointer",
               padding: "2px 4px",
@@ -816,7 +816,7 @@ function ListItemRow({
                 right: 0,
                 minWidth: 160,
                 background: "var(--gooni-card, #FFFFFF)",
-                border: "0.5px solid rgba(0,0,0,0.10)",
+                border: `0.5px solid ${ctok.border}`,
                 borderRadius: 8,
                 boxShadow: "0 8px 20px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.04)",
                 padding: 4,
@@ -906,7 +906,7 @@ function MenuItem({
         textAlign: "left",
         transition: "background 100ms",
       }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
     >
       <span style={{ width: 16, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{icon}</span>
@@ -1021,14 +1021,14 @@ function ListSettingsMenu({
         style={{
           width: 28, height: 28, borderRadius: 6,
           border: "none",
-          background: open ? "rgba(0,0,0,0.06)" : "transparent",
+          background: open ? ctok.hover : "transparent",
           color: "var(--gooni-muted, #6B7280)",
           cursor: "pointer",
           display: "inline-flex", alignItems: "center", justifyContent: "center",
           padding: 0,
           transition: "background 120ms",
         }}
-        onMouseEnter={(e) => { if (!open) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+        onMouseEnter={(e) => { if (!open) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
         onMouseLeave={(e) => { if (!open) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -1044,7 +1044,7 @@ function ListSettingsMenu({
             top: "calc(100% + 4px)",
             left: 0,
             background: "var(--gooni-card, #FFFFFF)",
-            border: "1px solid rgba(0,0,0,0.08)",
+            border: `1px solid ${ctok.border}`,
             borderRadius: 10,
             boxShadow: "0 12px 32px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06)",
             minWidth: 220,
@@ -1088,13 +1088,13 @@ function MenuRow({
         cursor: "pointer",
         fontFamily: FONT,
       }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)"; }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
     >
       <span style={{ fontSize: 13, color: ctok.text }}>{label}</span>
       <span style={{
         fontSize: 11.5, color: "var(--gooni-text, #3C3C43)",
-        background: "rgba(0,0,0,0.05)",
+        background: ctok.hover,
         padding: "2px 8px", borderRadius: 999,
         fontWeight: 500,
       }}>
