@@ -13,6 +13,7 @@ the wrong calendar day.
 
 from __future__ import annotations
 
+import re
 from datetime import date as _date, datetime, timedelta
 
 from sqlalchemy import func
@@ -24,6 +25,10 @@ from ..db.models import DailyMetric
 
 # Metric types that sum within a day. Used by running_total + cut_table.
 _ADDITIVE_TYPES = ("calories", "protein")
+# update_most_recent appends a "(corrected X→Y)" breadcrumb to a row's
+# notes. Strip it before grouping the food ledger so a corrected row stays
+# folded with its original item instead of splitting into a phantom entry.
+_CORRECTION_TRAIL_RE = re.compile(r"\s*\(corrected [^)]*\)\s*$")
 # Numeric types where the newest row wins (vs additive). Weight is a
 # weigh-in; alcohol/weed/vape are per-day counts the cut-table cell edit
 # sets directly (chat doesn't log them, so "newest wins" == "the value
@@ -78,6 +83,55 @@ def running_total_for_today(db: Session, day: _date | None = None) -> dict:
         "date": d.isoformat(),
         "calories": totals.get("calories", 0.0),
         "protein": totals.get("protein", 0.0),
+    }
+
+
+def today_food_ledger(db: Session, day: _date | None = None) -> dict:
+    """Per-item food breakdown for `day` (default today): every logged food
+    with its calories + protein, plus the day total.
+
+    The read-back surface the chat fitness loop was missing (conv #1412-1417,
+    5/27): Gooni could stamp a running total but had no way to SEE what it
+    contained, so it said "i can't verify" or hallucinated from scrollback,
+    and silently-dropped items (an orange, a handful of cherries) hid inside
+    an opaque number. This rebuilds the item list so state_block + the ack
+    can name what landed.
+
+    Reconstruction: a food `log()` writes a calories row and a protein row
+    sharing the same `notes` (the raw_text it was captured from), so we fold
+    on notes (correction trail stripped). Same-notes foods merge — fine for a
+    ledger. A day-scope reset (`set_cell`) collapses to one row whose notes is
+    the restated phrasing; that renders as a single line, which is correct —
+    per-item history is intentionally gone after a restate. Total matches
+    `running_total_for_today` (both SUM the same additive rows)."""
+    d = day or local_today(db)
+    rows = (
+        db.query(DailyMetric)
+        .filter(
+            DailyMetric.date == d,
+            DailyMetric.metric_type.in_(_ADDITIVE_TYPES),
+        )
+        .order_by(DailyMetric.created_at.asc(), DailyMetric.id.asc())
+        .all()
+    )
+    items: list[dict] = []
+    by_label: dict[str, dict] = {}
+    for r in rows:
+        label = _CORRECTION_TRAIL_RE.sub("", (r.notes or "").strip()).strip() or "(unlabeled)"
+        item = by_label.get(label)
+        if item is None:
+            item = {"label": label, "calories": 0.0, "protein": 0.0}
+            by_label[label] = item
+            items.append(item)
+        item[r.metric_type] += float(r.value or 0)
+    for it in items:
+        it["calories"] = round(it["calories"], 1)
+        it["protein"] = round(it["protein"], 1)
+    return {
+        "date": d.isoformat(),
+        "items": items,
+        "calories": round(sum(i["calories"] for i in items), 1),
+        "protein": round(sum(i["protein"] for i in items), 1),
     }
 
 
