@@ -109,6 +109,11 @@ def _handle_macros(ctx, result, entry, dms) -> bool:
     raw_text = entry.get("raw_text") or None
     day = _entry_day(entry, ctx.db)
     wrote = False
+    # This entry's own cal/protein delta, so the ack can name the item
+    # ("noted — popcorn +50 cal") instead of only nudging the opaque total —
+    # a silently dropped/misvalued food then shows in the ack (conv #1398).
+    item_cal = 0.0
+    item_prot = 0.0
 
     for m in metrics:
         mt = m.get("metric_type")
@@ -116,6 +121,10 @@ def _handle_macros(ctx, result, entry, dms) -> bool:
         unit = m.get("unit") or ("kcal" if mt == "calories" else "g")
         if mt not in ("calories", "protein") or val is None:
             continue
+        if mt == "calories":
+            item_cal += float(val)
+        elif mt == "protein":
+            item_prot += float(val)
         # Three intents (see prompts.py CORRECTIONS):
         #   day-scope correction → RESET the day. set_cell collapses (day, mt)
         #     to one canonical row, so a restated total lands exactly with no
@@ -138,6 +147,9 @@ def _handle_macros(ctx, result, entry, dms) -> bool:
         result.captured_metrics.append({
             "log_type": entry.get("log_type"),
             "correction": correction,
+            "item_label": (raw_text or "").strip() or None,
+            "item_calories": round(item_cal, 1) if item_cal else None,
+            "item_protein": round(item_prot, 1) if item_prot else None,
         })
     return wrote
 

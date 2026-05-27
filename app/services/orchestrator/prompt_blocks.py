@@ -407,8 +407,25 @@ def _build_ack(routed: "RouterResult") -> str | None:
             cal = _fmt_cal(last.get("running_calories", 0))
             prot = int(round(float(last.get("running_protein", 0) or 0)))
             corrected = any(m.get("correction") for m in diet)
-            lead = "fixed — " if corrected else "noted, sir. "
-            parts.append(f"{lead}{cal} cal, {prot}g so far today.")
+            # Name the item(s) just logged so a dropped/misvalued food is
+            # visible in the ack rather than hidden inside the total (conv
+            # #1398 orange silently vanished). Additive logs get a "+cal"
+            # delta; corrections keep the terser "fixed — total" phrasing.
+            item_bits: list[str] = []
+            for m in diet:
+                label = _trim(m.get("item_label") or "", 32)
+                ic = m.get("item_calories")
+                if not label:
+                    continue
+                item_bits.append(f"{label} +{_fmt_cal(ic)} cal" if ic else label)
+            if not corrected and item_bits:
+                shown = ", ".join(item_bits[:3])
+                if len(item_bits) > 3:
+                    shown += f", +{len(item_bits) - 3} more"
+                parts.append(f"noted, sir — {shown}. day so far: {cal} cal, {prot}g.")
+            else:
+                lead = "fixed — " if corrected else "noted, sir. "
+                parts.append(f"{lead}{cal} cal, {prot}g so far today.")
         if weight is not None:
             val = weight.get("value")
             unit = weight.get("unit") or "lb"
@@ -689,6 +706,26 @@ def _build_state_block(db) -> str:
                 lines.append(f"- {rl}")
     except Exception as e:
         print(f"[state_block] recent_activity surface failed: {e}")
+
+    # Today's food ledger — the read-back surface chat was missing (conv
+    # #1412-1417, 5/27). A fresh SUM each turn, so even on a turn with no new
+    # fitness log Gooni can answer "did you add the cherries?" / cite the
+    # running total instead of "i can't verify" or hallucinating from
+    # scrollback. Item lines let it confirm a specific food landed.
+    try:
+        from .. import daily_metric_service as _dms
+        ledger = _dms.today_food_ledger(db)
+        if ledger["items"]:
+            cal = f"{ledger['calories']:g}"
+            prot = f"{ledger['protein']:g}"
+            lines.append(f"- today's food so far: {cal} cal / {prot}g (items below)")
+            for it in ledger["items"][:12]:
+                lbl = (it["label"] or "")[:40]
+                ic = f"{it['calories']:g}" if it["calories"] else "?"
+                ip = f" / {it['protein']:g}g" if it["protein"] else ""
+                lines.append(f"  · {lbl}: {ic} cal{ip}")
+    except Exception as e:
+        print(f"[state_block] food ledger failed: {e}")
 
     if not lines:
         return ""
@@ -984,8 +1021,11 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
             cal = m.get("running_calories")
             prot = m.get("running_protein")
             verb = "corrected" if m.get("correction") else "logged"
+            label = (m.get("item_label") or "")[:40]
+            ic = m.get("item_calories")
+            item_tag = f" [{label}{f' +{ic:g} cal' if ic else ''}]" if label else ""
             lines.append(
-                f"- DailyMetric {verb} (diet) — running today: "
+                f"- DailyMetric {verb} (diet){item_tag} — running today: "
                 f"{cal} cal, {prot}g"
             )
         elif lt == "weight":
