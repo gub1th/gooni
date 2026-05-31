@@ -18,6 +18,7 @@ from .steps import (
     _run_verify,
     _deterministic_unbacked_check,
     _strip_memory_anchors,
+    _UNBACKED_CLAIM_RE,
 )
 from .prompt_blocks import (
     ENTRY_SUMMARIZE_THRESHOLD,
@@ -692,19 +693,19 @@ class Orchestrator:
         # regenerate ONCE with the critique embedded in the prompt so the
         # model corrects itself. Image path skipped (no audit semantics
         # on vision turns, and the regenerate cost is real).
-        if not image_url:
+        # B5/audit 2026-05-31: gate the verify step on a cheap regex. The
+        # verify scope is PURELY fact-of-action (steps.py::_VERIFY_PROMPT —
+        # "Empty audit + no action-claim = ok=true"). So when the draft has
+        # no claim-verb (tracked/logged/saved/added/…), the LLM verifier
+        # would return ok=true anyway — skipping it is behavior-preserving
+        # and kills the gpt-4o-mini call on every pure-answer turn (the
+        # majority). When a claim IS present we run the DETERMINISTIC rail
+        # first (it's a hard override that used to run AFTER the LLM verify
+        # and clobber it) — if it flags, we skip the LLM call entirely;
+        # only an unflagged-but-claim-bearing draft pays for the LLM verify
+        # to catch the subtler wrong-action-backed case.
+        if not image_url and response and _UNBACKED_CLAIM_RE.search(response):
             try:
-                verify_ok, verify_critique = _run_verify(
-                    response,
-                    user_msg=message,
-                    tool_call_ids=(usage or {}).get("tool_call_ids") or [],
-                    db=db,
-                )
-                # Deterministic backstop — overrides the LLM verify when
-                # the draft contains an unbacked "tracked/logged/saved"
-                # claim. Catches the conv #1136-1137 failure mode where
-                # the LLM verifier shrugged off "do a little leetcode
-                # tracked" with no audit. Runs even when LLM said ok=True.
                 det_critique = _deterministic_unbacked_check(
                     draft=response,
                     captured_features=routed.captured_features,
@@ -715,8 +716,15 @@ class Orchestrator:
                     db=db,
                 )
                 if det_critique:
-                    verify_ok = False
-                    verify_critique = det_critique
+                    # Hard rail tripped — authoritative. Skip the LLM verify.
+                    verify_ok, verify_critique = False, det_critique
+                else:
+                    verify_ok, verify_critique = _run_verify(
+                        response,
+                        user_msg=message,
+                        tool_call_ids=(usage or {}).get("tool_call_ids") or [],
+                        db=db,
+                    )
                 # Phase 2 (backlog #313): the old _deterministic_denied_success_check
                 # backstop (reply denies a state change that actually landed —
                 # WA seg 319 msg 1171) was deleted here. Structured tool returns
