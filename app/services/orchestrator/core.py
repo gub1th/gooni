@@ -508,9 +508,13 @@ class Orchestrator:
             except Exception as e:
                 print(f"[event_cb] stage {stage} failed: {e}")
 
-        _emit("intent", "Reading your message")
-        intention_context = llm_client.generate_intention_context(query, recent_history[-6:], model="gpt-5.4-mini")
-        tb.intent(query, intention_context)
+        # B3/audit 2026-05-31: the pre-generate intention call (a whole extra
+        # gpt-5.4-mini round-trip producing one "Daniel's current intent: X"
+        # line) was dropped. The main gpt-5.4 model infers intent from the
+        # message + history + PERSONA mode-detection rules on its own — the
+        # explicit hint wasn't earning its latency/cost. BEHAVIORAL: eval-gate.
+        # (generate_intention_context stays for the /chat intention-preview
+        # endpoint in routers/chat.py.)
         _emit("memory_recall", "Pulling related memories")
         memory_context, recalled_memories = memory_service.build_memory_context_with_debug(query, db=db)
         tb.memory_recall(query, recalled_memories)
@@ -538,12 +542,6 @@ class Orchestrator:
         # cases like eval 007.
         focus_context = item_service.get_active_context(
             db, query_text=message, top_k=2
-        )
-        # Promote intention into the prompt so the LLM knows what Daniel is
-        # trying to do right now. Previously this was computed and discarded.
-        intention_block = (
-            f"Daniel's current intent: {intention_context}"
-            if intention_context else ""
         )
         # Bot-channel delivery mechanics ONLY. Voice/identity/tone rules
         # (including temporal grounding) now live in PERSONA_BLOCK so every
@@ -617,8 +615,9 @@ class Orchestrator:
             try:
                 from ...tools import registry as _tools_registry
                 _tool_names = [t.name for t in _tools_registry]
-                _plan_state = intention_block or ""
-                _plan = _run_plan(message, _plan_state, _tool_names)
+                # Plan seed was the intention_block (dropped in B3) — plan now
+                # derives goal/action straight from the message + tool list.
+                _plan = _run_plan(message, "", _tool_names)
                 if _plan:
                     tb.step("plan", _plan.get("goal") or "(plan)", meta=_plan)
                     _goal = _plan.get("goal") or ""
@@ -652,13 +651,11 @@ class Orchestrator:
             print(f"[rollup_block] build failed: {e}")
 
         # PERSONA leads — locked identity, all channels, overrides memory prefs.
-        # Intention next so the model frames action against the user's goal.
         # cadence_block (bot mechanics) only fires on bot channels and is
         # appended via filter(None, ...) when empty on web.
         full_context = "\n\n".join(filter(None, [
             PERSONA_BLOCK,
             OBJECT_KINDS_BLOCK,
-            intention_block,
             plan_block,
             cadence_block,
             time_block,
@@ -844,7 +841,7 @@ class Orchestrator:
             daemon=True,
         ).start()
 
-        usage["intention"] = intention_context
+        usage["intention"] = ""  # B3: intention pre-call dropped
         usage["signals"] = signals_summary
         if feedback_tools:
             existing_tools = list(usage.get("tools_used") or [])
