@@ -216,7 +216,13 @@ class LLMClient:
                 response = self.client.chat.completions.create(
                     model=active_model,
                     messages=messages,
-                    temperature=0.7,
+                    # Lowered 0.7 → 0.5 (B/audit 2026-05-31): this is a
+                    # tool-calling, state-grounded assistant — high temp drives
+                    # both hallucination and voice drift. The Alfred texture
+                    # comes from PERSONA, not sampling noise. 0.5 keeps warmth
+                    # while tightening tool-use + factual grounding. EVAL-GATE
+                    # this: A/B the ladder before trusting.
+                    temperature=0.5,
                     # 500 was truncating mid-sentence on longer technical
                     # explanations (eval case 006 cut off explaining memory
                     # decay). Bot channel split_for_bots still caps bubbles
