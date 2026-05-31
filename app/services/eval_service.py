@@ -903,14 +903,6 @@ TOOL_LEGEND: list[dict] = [
         ),
     },
     {
-        "key": "undo_feedback",
-        "name": "Undo last feedback",
-        "description": (
-            "Triggered by the explicit undo regex (e.g. 'undo last feedback'). "
-            "Deactivates the most recent feedback-derived preference memory."
-        ),
-    },
-    {
         "key": "memory_recall",
         "name": "Memory retrieval",
         "description": (

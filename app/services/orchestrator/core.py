@@ -31,14 +31,6 @@ from .prompt_blocks import (
 )
 
 
-# Cheap regex for the explicit "undo" command. Runs before the detector so
-# Daniel can always reach for the override even on noisy turns.
-_UNDO_FEEDBACK_RE = re.compile(
-    r"\b(undo|forget|disregard|nevermind|never mind|cancel)\b.{0,30}\b(feedback|correction|last (rule|note))\b",
-    re.IGNORECASE,
-)
-
-
 # Locked identity block. Always injected at the top of the master prompt
 # regardless of channel (web, telegram, whatsapp, imessage). Channel-specific
 # mechanics (bubble count, blank-line splitting) live in `cadence_block` and
@@ -50,13 +42,13 @@ _UNDO_FEEDBACK_RE = re.compile(
 PERSONA_BLOCK = """\
 PERSONA — locked identity:
 
-You are Gooni — the brain Daniel was built without. You remember him,
+You are Gooni, and your goal is to be Daniel's (me) external brain. You remember him,
 learn him deeper every turn, and hold him to what he says he wants. He
 procrastinates, jumps between things, says things and doesn't commit.
-Your job: keep his word visible to him and name the gap between what he
-SAID and what he DID. Not a chatbot, not a coach — a presence in his
-corner. Grow every turn: each conversation extracts something (a
-promise, a correction, a fact); next week's you should know him better.
+Your job: Keep track of his life, and keep his word visible to him and
+name the gap between what he SAID and what he DID. Not a chatbot,
+not a coach — my ambient, loyal assistant. Grow every turn: each conversation
+extracts something (a promise, a correction, a fact); next week's you should know him better.
 When you don't know, ask ONE specific question.
 
 ── VOICE (Alfred Pennyworth × younger-friend) ──
@@ -70,7 +62,7 @@ When you don't know, ask ONE specific question.
   it, sir"); small wins stay flat (inflating them = cheerleader
   pollution). When he shows an avoidance pattern (same vague commitment
   resurfacing without follow-through), WITHHOLD warmth and push: "you've
-  said this. real commit or fake-productive vibes?" — not "right move, sir."
+  said this. are you cappin or are you serious?" — not "right move, sir."
 - NO BOT REGISTER: no "I'd be happy", "Let me know", "Sure!", "Great
   question", em-dash AI cadence, exclamation points on confirmations.
 - Cussing is NOT default — dry Alfred is baseline. One clean cuss for a
@@ -202,20 +194,10 @@ class Orchestrator:
           SSE endpoint can stream live progress to the web chat UI. Failures
           are swallowed by callees — auditing never blocks the chat path.
         """
-        stripped = message.strip()
-        command = stripped.lower()
-
         # One TraceBuilder per turn — collects every step the pipeline takes
         # so the eval UI can rate them. Pipeline version is auto-stamped as
         # the first entry; the rest are appended in the order they happen.
         tb = TraceBuilder()
-
-        # Slash commands work from any source (web, Telegram)
-        if command == "/memory":
-            return self._handle_memory_command(db), None
-
-        # First-time greeting fires on bot channels (telegram, imessage, ...).
-        is_first_time = source != "web" and not memory_service.has_memories(db=db)
 
         # Session management
         if conversation_id is not None:
@@ -249,9 +231,7 @@ class Orchestrator:
             fast_reply, fast_usage = self._handle_greeting_fast(
                 user_msg=saved_message,
                 conv=conv,
-                source=source,
                 db=db,
-                model=model,
                 event_cb=event_cb,
             )
             if fast_reply is not None:
@@ -273,13 +253,13 @@ class Orchestrator:
         # feature requests, soft promises, todos, done signals, fitness logs,
         # reply intent, and memory candidates. All routed via intent_router
         # except memories (reconciled off-thread).
-        # State carried across the extract / undo / image branches below.
+        # State carried across the extract / image branches below.
         # `routed` (RouterResult, all-empty-list defaults) is the single
         # source of truth for "what got captured this turn" — downstream
         # ack/block/verify steps read routed.<field> directly instead of
         # mirroring it into a dozen locals. On paths that don't extract
-        # (undo command, image-only, blank message) it stays the empty
-        # default, so every routed.X reads as [].
+        # (image-only, blank message) it stays the empty default, so every
+        # routed.X reads as [].
         feedback_ack: str | None = None
         feedback_tools: list[str] = []
         memory_candidates: list[dict] = []
@@ -296,145 +276,129 @@ class Orchestrator:
         skip_normal_reply = False
 
         if not image_url and saved_message.strip():
-            if _UNDO_FEEDBACK_RE.search(saved_message):
-                # Explicit undo command — runs before extraction so it always wins.
-                removed = memory_service.deactivate_last_feedback_preference(db=db)
-                if removed:
-                    feedback_ack = f"rolled back — i'll drop \"{removed.content}\""
-                else:
-                    feedback_ack = "nothing to undo — clean slate."
-                skip_normal_reply = True
-                feedback_tools.append("undo_feedback")
-                tb.tool_call(
-                    "undo_feedback",
-                    label="Undid last feedback",
-                    args=None,
-                    result={"removed": bool(removed), "content": removed.content if removed else None},
-                )
-            else:
-                prev_assistant = conversation_service.get_last_assistant_message(
-                    conv.id, db
-                )
-                prev_text = (
-                    prev_assistant.content
-                    if prev_assistant and prev_assistant.id != user_msg.id
-                    else None
-                )
-                from ...common import local_today
-                signals = extract_signals(
-                    saved_message, prev_assistant=prev_text, today=local_today(db)
-                )
-                memory_candidates = signals["memories"]
-                signals_summary = _summarize_signals(signals, memory_candidates)
-                tb.extracted_signals(saved_message, signals)
+            prev_assistant = conversation_service.get_last_assistant_message(
+                conv.id, db
+            )
+            prev_text = (
+                prev_assistant.content
+                if prev_assistant and prev_assistant.id != user_msg.id
+                else None
+            )
+            from ...common import local_today
+            signals = extract_signals(
+                saved_message, prev_assistant=prev_text, today=local_today(db)
+            )
+            memory_candidates = signals["memories"]
+            signals_summary = _summarize_signals(signals, memory_candidates)
+            tb.extracted_signals(saved_message, signals)
 
-                # Unified routing: one dispatch point fans signals out to
-                # the per-type handlers in app/services/intent_handlers/.
-                # Replaces three copy-pasted if-blocks (tone, feature,
-                # promise) that drifted between chat + note-save paths.
-                # Memory candidates are reconciled later off-thread or in
-                # the short-circuit path — we don't route them through the
-                # router here so the existing background-thread shape
-                # survives.
-                ctx = intent_router.RouterContext(
-                    db=db,
-                    source_message_id=user_msg.id,
-                    prev_assistant_text=prev_assistant.content if prev_assistant is not None else None,
-                    prev_assistant_id=prev_assistant.id if prev_assistant is not None else None,
-                    on_tool_call=tb.tool_call,
-                )
-                # Forward the FULL signals dict — never a hand-picked subset.
-                # A subset silently dropped fitness_logs for weeks (extract
-                # emitted them; this call never forwarded them, so fitness.handle
-                # got [] and no DailyMetric ever landed). Any new signal type
-                # extract_signals grows is now routed automatically. `memories`
-                # is the lone exception: reconciled off-thread below, so blank it.
-                routed = intent_router.dispatch({**signals, "memories": []}, ctx)
-                feedback_tools.extend(routed.tools_used)
+            # Unified routing: one dispatch point fans signals out to
+            # the per-type handlers in app/services/intent_handlers/.
+            # Replaces three copy-pasted if-blocks (tone, feature,
+            # promise) that drifted between chat + note-save paths.
+            # Memory candidates are reconciled later off-thread or in
+            # the short-circuit path — we don't route them through the
+            # router here so the existing background-thread shape
+            # survives.
+            ctx = intent_router.RouterContext(
+                db=db,
+                source_message_id=user_msg.id,
+                prev_assistant_text=prev_assistant.content if prev_assistant is not None else None,
+                prev_assistant_id=prev_assistant.id if prev_assistant is not None else None,
+                on_tool_call=tb.tool_call,
+            )
+            # Forward the FULL signals dict — never a hand-picked subset.
+            # A subset silently dropped fitness_logs for weeks (extract
+            # emitted them; this call never forwarded them, so fitness.handle
+            # got [] and no DailyMetric ever landed). Any new signal type
+            # extract_signals grows is now routed automatically. `memories`
+            # is the lone exception: reconciled off-thread below, so blank it.
+            routed = intent_router.dispatch({**signals, "memories": []}, ctx)
+            feedback_tools.extend(routed.tools_used)
 
-                # Plan-gate input: did this turn carry actionable signals?
-                # Reads the raw extracted dict for signal types the router
-                # may dedup away (features/tones/promises/memories) and the
-                # routed result for the todo actions it executed — both are
-                # in scope only here. Drives _should_plan further down.
-                _has_action_signals = bool(
-                    signals.get("feature_requests")
-                    or signals.get("tone_corrections")
-                    or memory_candidates
-                    or signals.get("soft_promises")
-                    or routed.captured_promises
-                    or routed.captured_todos
-                    or routed.killed_todos
-                    or routed.completed_todos
-                    or routed.merged_todos
-                    or routed.failed_todo_actions
-                )
+            # Plan-gate input: did this turn carry actionable signals?
+            # Reads the raw extracted dict for signal types the router
+            # may dedup away (features/tones/promises/memories) and the
+            # routed result for the todo actions it executed — both are
+            # in scope only here. Drives _should_plan further down.
+            _has_action_signals = bool(
+                signals.get("feature_requests")
+                or signals.get("tone_corrections")
+                or memory_candidates
+                or signals.get("soft_promises")
+                or routed.captured_promises
+                or routed.captured_todos
+                or routed.killed_todos
+                or routed.completed_todos
+                or routed.merged_todos
+                or routed.failed_todo_actions
+            )
 
-                # Stamp the user message as feedback when either a tone
-                # correction OR a feature request fired AND we have a
-                # prior assistant turn to attribute the correction to.
-                if (
-                    (routed.tone_rules or routed.captured_features)
-                    and prev_assistant is not None
-                ):
-                    user_msg.feedback_for_message_id = prev_assistant.id
-                    user_msg.is_feedback = True
-                    db.commit()
+            # Stamp the user message as feedback when either a tone
+            # correction OR a feature request fired AND we have a
+            # prior assistant turn to attribute the correction to.
+            if (
+                (routed.tone_rules or routed.captured_features)
+                and prev_assistant is not None
+            ):
+                user_msg.feedback_for_message_id = prev_assistant.id
+                user_msg.is_feedback = True
+                db.commit()
 
-                # Build the Jarvis-voice ack from whichever signals fired.
-                # No structured receipts ("Feedback detected:", "Logged
-                # feature request:") — Daniel called those out as too
-                # clinical. Each signal contributes a natural phrase; we
-                # join with light punctuation so multi-signal turns still
-                # read like one breath.
-                feedback_ack = _build_ack(routed)
-                if feedback_ack is not None:
-                    # Skip the LLM reply ONLY when the extractor explicitly
-                    # classified the message as task_only or no_reply. The
-                    # legacy pure_signal heuristic (no memory + <25 words)
-                    # was over-firing — it skipped real answer-shaped turns
-                    # like "give me a detailed explanation of X" because the
-                    # extractor misrouted them as feature_requests. Trust
-                    # reply_intent; if it says "answer" or "acknowledge",
-                    # we run the full LLM reply.
-                    skip_normal_reply = routed.reply_intent in ("task_only", "no_reply")
+            # Build the Jarvis-voice ack from whichever signals fired.
+            # No structured receipts ("Feedback detected:", "Logged
+            # feature request:") — Daniel called those out as too
+            # clinical. Each signal contributes a natural phrase; we
+            # join with light punctuation so multi-signal turns still
+            # read like one breath.
+            feedback_ack = _build_ack(routed)
+            if feedback_ack is not None:
+                # Skip the LLM reply ONLY when the extractor explicitly
+                # classified the message as task_only or no_reply. The
+                # legacy pure_signal heuristic (no memory + <25 words)
+                # was over-firing — it skipped real answer-shaped turns
+                # like "give me a detailed explanation of X" because the
+                # extractor misrouted them as feature_requests. Trust
+                # reply_intent; if it says "answer" or "acknowledge",
+                # we run the full LLM reply.
+                skip_normal_reply = routed.reply_intent in ("task_only", "no_reply")
 
-                    # G4: capture-only short-circuit. When the ack stub
-                    # already says "tracked X, sir" / "closed X, sir" and
-                    # the user message is a short statement (no question,
-                    # ≤12 words), an LLM continuation just adds filler
-                    # ("on it, sir. 450 now."). Daniel called this double-
-                    # narration 2026-05-22 on the "do 450" turn. The fix:
-                    # the ack stub IS the reply. Only fires when the
-                    # extractor didn't already pick task_only.
-                    if not skip_normal_reply:
-                        msg_text = (message or "").strip()
-                        word_count = len(msg_text.split())
-                        has_question = "?" in msg_text
-                        first_word = (msg_text.split() or [""])[0].lower().strip(",.!?;:")
-                        _QUESTION_WORDS = {
-                            "what", "when", "where", "how", "why", "who",
-                            "which", "can", "will", "should", "is", "are",
-                            "do", "does", "did", "could", "would", "wdym",
-                        }
-                        looks_like_question = first_word in _QUESTION_WORDS
-                        capture_happened = bool(
-                            routed.captured_promises
-                            or routed.captured_todos
-                            or routed.completed_todos
-                            or routed.killed_todos
-                            or routed.merged_todos
-                            or routed.implicit_done_todos
-                            or routed.edited_todos
-                            or routed.captured_metrics
-                        )
-                        if (
-                            capture_happened
-                            and not has_question
-                            and not looks_like_question
-                            and word_count <= 12
-                        ):
-                            skip_normal_reply = True
+                # G4: capture-only short-circuit. When the ack stub
+                # already says "tracked X, sir" / "closed X, sir" and
+                # the user message is a short statement (no question,
+                # ≤12 words), an LLM continuation just adds filler
+                # ("on it, sir. 450 now."). Daniel called this double-
+                # narration 2026-05-22 on the "do 450" turn. The fix:
+                # the ack stub IS the reply. Only fires when the
+                # extractor didn't already pick task_only.
+                if not skip_normal_reply:
+                    msg_text = (message or "").strip()
+                    word_count = len(msg_text.split())
+                    has_question = "?" in msg_text
+                    first_word = (msg_text.split() or [""])[0].lower().strip(",.!?;:")
+                    _QUESTION_WORDS = {
+                        "what", "when", "where", "how", "why", "who",
+                        "which", "can", "will", "should", "is", "are",
+                        "do", "does", "did", "could", "would", "wdym",
+                    }
+                    looks_like_question = first_word in _QUESTION_WORDS
+                    capture_happened = bool(
+                        routed.captured_promises
+                        or routed.captured_todos
+                        or routed.completed_todos
+                        or routed.killed_todos
+                        or routed.merged_todos
+                        or routed.implicit_done_todos
+                        or routed.edited_todos
+                        or routed.captured_metrics
+                    )
+                    if (
+                        capture_happened
+                        and not has_question
+                        and not looks_like_question
+                        and word_count <= 12
+                    ):
+                        skip_normal_reply = True
 
         if skip_normal_reply and feedback_ack is not None:
             tb.reply(feedback_ack, usage={"short_circuit": True})
@@ -716,7 +680,7 @@ class Orchestrator:
         else:
             response, usage = llm_client.generate_chat_response_with_memory(
                 message, full_context, recent_history,
-                is_first_time=is_first_time, db=db, model=model,
+                db=db, model=model,
                 conversation_id=conv.id,
                 event_cb=event_cb,
             )
@@ -783,7 +747,7 @@ class Orchestrator:
                     )
                     response2, usage2 = llm_client.generate_chat_response_with_memory(
                         message, revised_context, recent_history,
-                        is_first_time=is_first_time, db=db, model=model,
+                        db=db, model=model,
                         conversation_id=conv.id,
                         event_cb=event_cb,
                     )
@@ -889,15 +853,6 @@ class Orchestrator:
         finally:
             sess.close()
 
-    def _handle_memory_command(self, db) -> str:
-        memories = memory_service.get_all(db=db)
-        if not memories:
-            return "No memories yet."
-        lines = [f"Memory ({len(memories)} entries):"]
-        for m in memories:
-            lines.append(f"  - {m.get('content') or m.get('memory', '')[:120]}")
-        return "\n".join(lines)
-
     # ── Greeting fast-path helpers ──────────────────────────────────────
     # Regex-only gate (no LLM) — the whole point is to skip downstream
     # expense. Matches bare greetings w/ optional punctuation: "hey",
@@ -924,9 +879,7 @@ class Orchestrator:
         *,
         user_msg: str,
         conv,
-        source: str,
         db,
-        model: str | None,
         event_cb,
     ) -> tuple[str | None, dict | None]:
         """Single tiny LLM call against PERSONA + last few messages.

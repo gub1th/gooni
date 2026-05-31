@@ -183,14 +183,13 @@ class LLMClient:
         message: str,
         memory_context: str,
         history: list = None,
-        is_first_time: bool = False,
         db=None,
         model: str = None,
         conversation_id: int | None = None,
         event_cb=None,
     ) -> tuple[str, dict]:
         """Generate response with memory context and tool use."""
-        messages = [{"role": "system", "content": system_prompt(memory_context, is_first_time)}]
+        messages = [{"role": "system", "content": system_prompt(memory_context)}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": message})

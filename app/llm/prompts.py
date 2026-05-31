@@ -3,7 +3,7 @@ from datetime import datetime
 
 # Static prefix — kept stable across every chat turn so OpenAI's automatic
 # prompt cache (≥1024-tok shared prefix → 50% off cached tokens) hits.
-# Dynamic content (current time, memory context, first-time intro) is
+# Dynamic content (current time, memory context) is
 # appended AFTER this block in system_prompt() so the prefix matches
 # byte-for-byte across sessions. Touch this block at your peril: any edit
 # busts the cache for everyone until prompts settle for ~5-10 min.
@@ -293,8 +293,8 @@ _STATIC_SYSTEM_BLOCK = """MASTER RULES — non-negotiable, override every other 
             """
 
 
-def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
-    # Dynamic tail. Time + memory + first-time greeting all live here so
+def system_prompt(memory_context: str) -> str:
+    # Dynamic tail. Time + memory live here so
     # the static prefix above stays byte-stable across turns (OpenAI auto-
     # cache prefix-match dies the moment the prefix bytes diverge — even
     # a single timestamp char shift kills it).
@@ -309,8 +309,6 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
                 {memory_context}
             """
     prompt = _STATIC_SYSTEM_BLOCK + tail
-    if is_first_time:
-        prompt += "\n\nYou're meeting this user for the first time. Introduce yourself briefly and ask for their name."
     return prompt
 
 
