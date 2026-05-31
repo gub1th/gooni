@@ -34,7 +34,10 @@ from typing import Any
 # Bump this when the chat pipeline changes in a way that should invalidate
 # (or at least segregate) prior eval ratings. Stays a manual constant rather
 # than a git SHA so unrelated commits don't churn the version.
-PROMPT_VERSION = "v8"
+# v9 (audit 2026-05-31): dropped pre-gen intention call (B3), split system
+# prompt into cached static prefix + volatile tail (B1), temp 0.7→0.5 (C1),
+# verify gated on claim-regex + deterministic-first (B5). Segregate ratings.
+PROMPT_VERSION = "v9"
 
 
 class TraceBuilder:

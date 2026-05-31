@@ -650,12 +650,28 @@ class Orchestrator:
         except Exception as e:
             print(f"[rollup_block] build failed: {e}")
 
-        # PERSONA leads — locked identity, all channels, overrides memory prefs.
-        # cadence_block (bot mechanics) only fires on bot channels and is
-        # appended via filter(None, ...) when empty on web.
-        full_context = "\n\n".join(filter(None, [
+        # B1/audit 2026-05-31: the system prompt is split into a CACHED
+        # static prefix and a volatile dynamic tail so OpenAI's auto
+        # prompt-cache covers the stable identity blocks.
+        #
+        # static_context = byte-stable identity (PERSONA + OBJECT_KINDS).
+        #   Same bytes every turn → lands in the cached prefix (before the
+        #   timestamp) via system_prompt(static_context=...). Previously
+        #   these rode in the volatile context AFTER the timestamp and were
+        #   re-billed full price each turn.
+        # dynamic_context = everything per-turn (plan, bot mechanics, state,
+        #   memory, note, focus). Never cacheable — kept in the tail.
+        #
+        # B4 NOTE: PERSONA + MASTER RULES (prompts._STATIC_SYSTEM_BLOCK) now
+        # sit adjacent in the cached prefix — one identity region. Content
+        # dedup of their overlapping rules (no-lists / verify-before-claim /
+        # no-bot-register) is a follow-up; co-locating without deleting
+        # guard lines keeps this commit behavior-preserving.
+        static_context = "\n\n".join(filter(None, [
             PERSONA_BLOCK,
             OBJECT_KINDS_BLOCK,
+        ]))
+        dynamic_context = "\n\n".join(filter(None, [
             plan_block,
             cadence_block,
             time_block,
@@ -667,20 +683,32 @@ class Orchestrator:
             list_context,
             focus_context,
         ]))
-        tb.master_prompt(full_context, recent_history)
+        # Trace records the full assembled prompt (static + dynamic) so the
+        # eval UI sees exactly what the model saw.
+        tb.master_prompt(
+            "\n\n".join(filter(None, [static_context, dynamic_context])),
+            recent_history,
+        )
         _emit("generate", "Thinking")
 
         if image_url:
+            # Vision path doesn't thread static_context — gpt-4o vision turns
+            # are low-traffic and don't meaningfully cache. Pass the combined
+            # context as before.
             response, usage = llm_client.generate_response_with_image(
-                message, image_url, full_context, recent_history,
+                message,
+                image_url,
+                "\n\n".join(filter(None, [static_context, dynamic_context])),
+                recent_history,
                 db=db, conversation_id=conv.id,
             )
         else:
             response, usage = llm_client.generate_chat_response_with_memory(
-                message, full_context, recent_history,
+                message, dynamic_context, recent_history,
                 db=db, model=model,
                 conversation_id=conv.id,
                 event_cb=event_cb,
+                static_context=static_context,
             )
 
         # ── ReAct VERIFY step ──────────────────────────────────────────
@@ -741,8 +769,10 @@ class Orchestrator:
                 # trust the draft over the gate. Cuts down on regenerate-thrash
                 # that was causing the v6/v7 eval pass-count dip.
                 if not verify_ok and len((verify_critique or "").strip()) >= 30:
+                    # Correction appends to the volatile dynamic context; the
+                    # static identity prefix stays cached across the regen.
                     revised_context = (
-                        full_context
+                        dynamic_context
                         + "\n\n[VERIFY CORRECTION — your draft reply claimed "
                         + "something your tool calls didn't back. Be accurate:]\n"
                         + f"- specific issue: {verify_critique}\n"
@@ -755,6 +785,7 @@ class Orchestrator:
                         db=db, model=model,
                         conversation_id=conv.id,
                         event_cb=event_cb,
+                        static_context=static_context,
                     )
                     response = response2
                     # Merge tool_call_ids across draft + revision.

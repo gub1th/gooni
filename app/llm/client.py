@@ -187,9 +187,15 @@ class LLMClient:
         model: str = None,
         conversation_id: int | None = None,
         event_cb=None,
+        static_context: str = "",
     ) -> tuple[str, dict]:
-        """Generate response with memory context and tool use."""
-        messages = [{"role": "system", "content": system_prompt(memory_context)}]
+        """Generate response with memory context and tool use.
+
+        static_context = byte-stable identity blocks (PERSONA + OBJECT_KINDS)
+        placed in the cached system-prompt prefix; memory_context = the
+        volatile per-turn blocks. See prompts.system_prompt.
+        """
+        messages = [{"role": "system", "content": system_prompt(memory_context, static_context)}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": message})
