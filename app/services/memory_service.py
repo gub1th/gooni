@@ -16,18 +16,19 @@ import json
 import re
 from datetime import datetime
 
-from sqlalchemy import text as sa_text, update as sa_update
+from sqlalchemy import text as sa_text
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from ..db.database import SessionLocal
 from ..db.models import Memory
 from ..llm.client import llm_client
-from .memory_extraction import extract_candidates, reconcile_candidate
+from .memory_extraction import extract_candidates
 from .note_service import _cosine_similarity
 
 # Strip FTS5 operators before passing user input to MATCH. Same shape as
 # note_service / todo_service.
-_FTS_MEMORY_STRIP = re.compile(r'[\"\'()+*\-:\\^~]')
+_FTS_MEMORY_STRIP = re.compile(r"[\"\'()+*\-:\\^~]")
 
 # How many FTS-only memory hits to ALSO inject alongside cosine results.
 # Small on purpose — cosine is the primary signal here; FTS just catches
@@ -85,11 +86,11 @@ RETRIEVAL_TOP_K = 5
 #   that haven't graduated to a focus row. See #213 (type deprecation pending
 #   Model D decision) and #215 (constraint extraction never fires).
 RETRIEVAL_PER_TYPE: dict[str, dict[str, float | int]] = {
-    "fact":       {"top_k": 3, "floor": 0.25},
-    "routine":    {"top_k": 2, "floor": 0.30},
+    "fact": {"top_k": 3, "floor": 0.25},
+    "routine": {"top_k": 2, "floor": 0.30},
     "constraint": {"top_k": 2, "floor": 0.30},
-    "goal":       {"top_k": 2, "floor": 0.30},
-    "episode":    {"top_k": 3, "floor": 0.35},
+    "goal": {"top_k": 2, "floor": 0.30},
+    "episode": {"top_k": 3, "floor": 0.35},
     # Preferences are no longer always-inject. After the audit/cleanup pass
     # via MCP, the survivors get cosine-retrieved like any other memory.
     # Lower floor than fact/episode because preferences paraphrase (same
@@ -108,8 +109,8 @@ FEEDBACK_PREF_CAP = 8
 # Max content length for an extracted candidate before we drop it as garbage.
 MAX_CANDIDATE_LEN = 600
 
-# Prefix on the `key` column used for feedback-derived preferences. Lets the
-# undo command find feedback memories without touching user-curated ones.
+# Prefix on the `key` column used for feedback-derived preferences. Lets
+# retrieval tell feedback memories apart from user-curated ones.
 _FEEDBACK_KEY_PREFIX = "feedback__"
 
 # Stopwords stripped during the deterministic dedup normalize. Tiny set —
@@ -117,9 +118,25 @@ _FEEDBACK_KEY_PREFIX = "feedback__"
 # ("user prefers X" vs "X" should dedupe). Bigger lists risk collapsing
 # meaningfully different rules together.
 _DEDUP_STOPWORDS = {
-    "a", "an", "the", "is", "to", "be", "of",
-    "user", "daniel", "i", "my", "me",
-    "prefers", "prefer", "wants", "want", "likes", "like", "enjoys",
+    "a",
+    "an",
+    "the",
+    "is",
+    "to",
+    "be",
+    "of",
+    "user",
+    "daniel",
+    "i",
+    "my",
+    "me",
+    "prefers",
+    "prefer",
+    "wants",
+    "want",
+    "likes",
+    "like",
+    "enjoys",
 }
 
 
@@ -131,6 +148,7 @@ def _normalize_for_dedup(text: str) -> str:
     if not text:
         return ""
     import re as _re
+
     t = text.lower()
     t = _re.sub(r"[^a-z0-9\s]", " ", t)
     tokens = [w for w in t.split() if w and w not in _DEDUP_STOPWORDS]
@@ -140,6 +158,7 @@ def _normalize_for_dedup(text: str) -> str:
 def _slug_rule(rule: str) -> str:
     """Stable snake_case key for a feedback rule, prefixed for filtering."""
     import re as _re
+
     slug = _re.sub(r"[^a-z0-9]+", "_", rule.lower()).strip("_")[:60]
     if not slug:
         slug = "rule"
@@ -479,36 +498,6 @@ class MemoryService:
             if owns:
                 sess.close()
 
-    def deactivate_last_feedback_preference(
-        self, db: Session | None = None
-    ) -> Memory | None:
-        """Mark the most recently added feedback-derived preference inactive.
-
-        Used by the orchestrator's "undo last feedback" command. Only affects
-        active preferences whose key starts with the feedback prefix used by
-        `_slug_rule` — leaves user-curated preferences alone.
-        """
-        sess, owns = self._scoped(db)
-        try:
-            row = (
-                sess.query(Memory)
-                .filter(
-                    Memory.type == "preference",
-                    Memory.is_active == True,
-                    Memory.key.like(f"{_FEEDBACK_KEY_PREFIX}%"),
-                )
-                .order_by(Memory.id.desc())
-                .first()
-            )
-            if not row:
-                return None
-            row.is_active = False
-            sess.commit()
-            return row
-        finally:
-            if owns:
-                sess.close()
-
     def add_memory(
         self,
         content: str,
@@ -537,9 +526,7 @@ class MemoryService:
             if owns:
                 sess.close()
 
-    def build_memory_context(
-        self, query: str, db: Session | None = None
-    ) -> str:
+    def build_memory_context(self, query: str, db: Session | None = None) -> str:
         """Format the system-prompt memory block. Preferences always go in;
         facts + episodes ride semantic similarity to the query.
         """
@@ -586,7 +573,9 @@ class MemoryService:
             facts: list[Memory] = []
             episodes: list[Memory] = []
             scored: list[tuple[Memory, float]] = []
-            fts_only_ids: set[int] = set()  # debug: which rows came in via FTS, not cosine
+            fts_only_ids: set[int] = (
+                set()
+            )  # debug: which rows came in via FTS, not cosine
             if query and len(query.strip()) >= MIN_EXCHANGE_LEN:
                 query_vec = self._embed(query)
                 if query_vec:
@@ -641,24 +630,30 @@ class MemoryService:
             sim_lookup = {m.id: s for m, s in scored}
             debug: list[dict] = []
             for m in prefs:
-                debug.append({
-                    "id": m.id,
-                    "type": m.type,
-                    "content": m.content,
-                    "similarity": None,
-                    "always_inject": True,
-                })
+                debug.append(
+                    {
+                        "id": m.id,
+                        "type": m.type,
+                        "content": m.content,
+                        "similarity": None,
+                        "always_inject": True,
+                    }
+                )
             for m in facts + episodes:
-                debug.append({
-                    "id": m.id,
-                    "type": m.type,
-                    "content": m.content,
-                    # FTS-only hits have no similarity score. Distinct from
-                    # always-injected prefs (which carry always_inject=True).
-                    "similarity": None if m.id in fts_only_ids else sim_lookup.get(m.id),
-                    "always_inject": False,
-                    "source": "fts" if m.id in fts_only_ids else "cosine",
-                })
+                debug.append(
+                    {
+                        "id": m.id,
+                        "type": m.type,
+                        "content": m.content,
+                        # FTS-only hits have no similarity score. Distinct from
+                        # always-injected prefs (which carry always_inject=True).
+                        "similarity": None
+                        if m.id in fts_only_ids
+                        else sim_lookup.get(m.id),
+                        "always_inject": False,
+                        "source": "fts" if m.id in fts_only_ids else "cosine",
+                    }
+                )
             # G3: format the block FIRST so [stale] tags reflect pre-turn
             # state, then bump retrieval tracking. If the bump happened
             # before formatting, the just-bumped last_retrieved_at would
@@ -690,6 +685,7 @@ class MemoryService:
             # import at module load (capability_service → main → memory).
             try:
                 from .capability_service import capability_service
+
                 cap_block = capability_service.build_prompt_block(sess)
             except Exception as e:
                 print(f"capability prompt block error: {e}")
@@ -720,6 +716,7 @@ class MemoryService:
         (they always inject; stale doesn't apply).
         """
         from datetime import datetime, timedelta
+
         if not preferences and not facts and not episodes:
             return ""
         STALE_THRESHOLD = timedelta(days=60)
@@ -811,9 +808,7 @@ class MemoryService:
             if owns:
                 sess.close()
 
-    def update_memory(
-        self, memory_id, content: str, db: Session | None = None
-    ) -> bool:
+    def update_memory(self, memory_id, content: str, db: Session | None = None) -> bool:
         """Replace a memory's content via supersede chain. Old is_active
         flips to False, new row inherits type/key. Used by MCP edit_memory.
         """
@@ -852,11 +847,7 @@ class MemoryService:
             return self._has_memories_cache
         sess, owns = self._scoped(db)
         try:
-            n = (
-                sess.query(Memory)
-                .filter(Memory.is_active == True)
-                .count()
-            )
+            n = sess.query(Memory).filter(Memory.is_active == True).count()
             self._has_memories_cache = n > 0
             return self._has_memories_cache
         finally:

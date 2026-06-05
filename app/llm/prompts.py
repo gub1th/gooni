@@ -3,7 +3,7 @@ from datetime import datetime
 
 # Static prefix — kept stable across every chat turn so OpenAI's automatic
 # prompt cache (≥1024-tok shared prefix → 50% off cached tokens) hits.
-# Dynamic content (current time, memory context, first-time intro) is
+# Dynamic content (current time, memory context) is
 # appended AFTER this block in system_prompt() so the prefix matches
 # byte-for-byte across sessions. Touch this block at your peril: any edit
 # busts the cache for everyone until prompts settle for ~5-10 min.
@@ -293,11 +293,21 @@ _STATIC_SYSTEM_BLOCK = """MASTER RULES — non-negotiable, override every other 
             """
 
 
-def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
-    # Dynamic tail. Time + memory + first-time greeting all live here so
-    # the static prefix above stays byte-stable across turns (OpenAI auto-
-    # cache prefix-match dies the moment the prefix bytes diverge — even
-    # a single timestamp char shift kills it).
+def system_prompt(memory_context: str, static_context: str = "") -> str:
+    # CACHED PREFIX — everything before the volatile timestamp must stay
+    # byte-stable across turns or OpenAI's auto prompt-cache prefix-match
+    # dies (even a single timestamp char shift kills it).
+    #
+    # static_context (B1/audit 2026-05-31): byte-stable identity blocks the
+    # orchestrator assembles — PERSONA + OBJECT_KINDS. They USED to ride in
+    # memory_context (the volatile arg), landing AFTER the timestamp, so the
+    # cache prefix stopped at _STATIC_SYSTEM_BLOCK and ~1k tokens of stable
+    # identity got re-billed full price every turn. Hoisting them into the
+    # prefix (before the timestamp) extends the cached span across them.
+    prefix = _STATIC_SYSTEM_BLOCK
+    if static_context:
+        prefix = prefix + "\n\n" + static_context
+    # Dynamic tail. Time + memory live here — genuinely per-turn, never cached.
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
     tail = f"""
 
@@ -308,10 +318,7 @@ def system_prompt(memory_context: str, is_first_time: bool = False) -> str:
                 What you know about Daniel:
                 {memory_context}
             """
-    prompt = _STATIC_SYSTEM_BLOCK + tail
-    if is_first_time:
-        prompt += "\n\nYou're meeting this user for the first time. Introduce yourself briefly and ask for their name."
-    return prompt
+    return prefix + tail
 
 
 def vision_prompt(memory_context: str) -> str:

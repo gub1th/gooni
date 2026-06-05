@@ -18,6 +18,7 @@ from .steps import (
     _run_verify,
     _deterministic_unbacked_check,
     _strip_memory_anchors,
+    _UNBACKED_CLAIM_RE,
 )
 from .prompt_blocks import (
     ENTRY_SUMMARIZE_THRESHOLD,
@@ -28,14 +29,6 @@ from .prompt_blocks import (
     _build_time_block,
     _summarize_entry,
     _summarize_signals,
-)
-
-
-# Cheap regex for the explicit "undo" command. Runs before the detector so
-# Daniel can always reach for the override even on noisy turns.
-_UNDO_FEEDBACK_RE = re.compile(
-    r"\b(undo|forget|disregard|nevermind|never mind|cancel)\b.{0,30}\b(feedback|correction|last (rule|note))\b",
-    re.IGNORECASE,
 )
 
 
@@ -50,13 +43,13 @@ _UNDO_FEEDBACK_RE = re.compile(
 PERSONA_BLOCK = """\
 PERSONA — locked identity:
 
-You are Gooni — the brain Daniel was built without. You remember him,
+You are Gooni, and your goal is to be Daniel's (me) external brain. You remember him,
 learn him deeper every turn, and hold him to what he says he wants. He
 procrastinates, jumps between things, says things and doesn't commit.
-Your job: keep his word visible to him and name the gap between what he
-SAID and what he DID. Not a chatbot, not a coach — a presence in his
-corner. Grow every turn: each conversation extracts something (a
-promise, a correction, a fact); next week's you should know him better.
+Your job: Keep track of his life, and keep his word visible to him and
+name the gap between what he SAID and what he DID. Not a chatbot,
+not a coach — my ambient, loyal assistant. Grow every turn: each conversation
+extracts something (a promise, a correction, a fact); next week's you should know him better.
 When you don't know, ask ONE specific question.
 
 ── VOICE (Alfred Pennyworth × younger-friend) ──
@@ -70,7 +63,7 @@ When you don't know, ask ONE specific question.
   it, sir"); small wins stay flat (inflating them = cheerleader
   pollution). When he shows an avoidance pattern (same vague commitment
   resurfacing without follow-through), WITHHOLD warmth and push: "you've
-  said this. real commit or fake-productive vibes?" — not "right move, sir."
+  said this. are you cappin or are you serious?" — not "right move, sir."
 - NO BOT REGISTER: no "I'd be happy", "Let me know", "Sure!", "Great
   question", em-dash AI cadence, exclamation points on confirmations.
 - Cussing is NOT default — dry Alfred is baseline. One clean cuss for a
@@ -202,20 +195,10 @@ class Orchestrator:
           SSE endpoint can stream live progress to the web chat UI. Failures
           are swallowed by callees — auditing never blocks the chat path.
         """
-        stripped = message.strip()
-        command = stripped.lower()
-
         # One TraceBuilder per turn — collects every step the pipeline takes
         # so the eval UI can rate them. Pipeline version is auto-stamped as
         # the first entry; the rest are appended in the order they happen.
         tb = TraceBuilder()
-
-        # Slash commands work from any source (web, Telegram)
-        if command == "/memory":
-            return self._handle_memory_command(db), None
-
-        # First-time greeting fires on bot channels (telegram, imessage, ...).
-        is_first_time = source != "web" and not memory_service.has_memories(db=db)
 
         # Session management
         if conversation_id is not None:
@@ -249,9 +232,7 @@ class Orchestrator:
             fast_reply, fast_usage = self._handle_greeting_fast(
                 user_msg=saved_message,
                 conv=conv,
-                source=source,
                 db=db,
-                model=model,
                 event_cb=event_cb,
             )
             if fast_reply is not None:
@@ -273,13 +254,13 @@ class Orchestrator:
         # feature requests, soft promises, todos, done signals, fitness logs,
         # reply intent, and memory candidates. All routed via intent_router
         # except memories (reconciled off-thread).
-        # State carried across the extract / undo / image branches below.
+        # State carried across the extract / image branches below.
         # `routed` (RouterResult, all-empty-list defaults) is the single
         # source of truth for "what got captured this turn" — downstream
         # ack/block/verify steps read routed.<field> directly instead of
         # mirroring it into a dozen locals. On paths that don't extract
-        # (undo command, image-only, blank message) it stays the empty
-        # default, so every routed.X reads as [].
+        # (image-only, blank message) it stays the empty default, so every
+        # routed.X reads as [].
         feedback_ack: str | None = None
         feedback_tools: list[str] = []
         memory_candidates: list[dict] = []
@@ -296,145 +277,129 @@ class Orchestrator:
         skip_normal_reply = False
 
         if not image_url and saved_message.strip():
-            if _UNDO_FEEDBACK_RE.search(saved_message):
-                # Explicit undo command — runs before extraction so it always wins.
-                removed = memory_service.deactivate_last_feedback_preference(db=db)
-                if removed:
-                    feedback_ack = f"rolled back — i'll drop \"{removed.content}\""
-                else:
-                    feedback_ack = "nothing to undo — clean slate."
-                skip_normal_reply = True
-                feedback_tools.append("undo_feedback")
-                tb.tool_call(
-                    "undo_feedback",
-                    label="Undid last feedback",
-                    args=None,
-                    result={"removed": bool(removed), "content": removed.content if removed else None},
-                )
-            else:
-                prev_assistant = conversation_service.get_last_assistant_message(
-                    conv.id, db
-                )
-                prev_text = (
-                    prev_assistant.content
-                    if prev_assistant and prev_assistant.id != user_msg.id
-                    else None
-                )
-                from ...common import local_today
-                signals = extract_signals(
-                    saved_message, prev_assistant=prev_text, today=local_today(db)
-                )
-                memory_candidates = signals["memories"]
-                signals_summary = _summarize_signals(signals, memory_candidates)
-                tb.extracted_signals(saved_message, signals)
+            prev_assistant = conversation_service.get_last_assistant_message(
+                conv.id, db
+            )
+            prev_text = (
+                prev_assistant.content
+                if prev_assistant and prev_assistant.id != user_msg.id
+                else None
+            )
+            from ...common import local_today
+            signals = extract_signals(
+                saved_message, prev_assistant=prev_text, today=local_today(db)
+            )
+            memory_candidates = signals["memories"]
+            signals_summary = _summarize_signals(signals, memory_candidates)
+            tb.extracted_signals(saved_message, signals)
 
-                # Unified routing: one dispatch point fans signals out to
-                # the per-type handlers in app/services/intent_handlers/.
-                # Replaces three copy-pasted if-blocks (tone, feature,
-                # promise) that drifted between chat + note-save paths.
-                # Memory candidates are reconciled later off-thread or in
-                # the short-circuit path — we don't route them through the
-                # router here so the existing background-thread shape
-                # survives.
-                ctx = intent_router.RouterContext(
-                    db=db,
-                    source_message_id=user_msg.id,
-                    prev_assistant_text=prev_assistant.content if prev_assistant is not None else None,
-                    prev_assistant_id=prev_assistant.id if prev_assistant is not None else None,
-                    on_tool_call=tb.tool_call,
-                )
-                # Forward the FULL signals dict — never a hand-picked subset.
-                # A subset silently dropped fitness_logs for weeks (extract
-                # emitted them; this call never forwarded them, so fitness.handle
-                # got [] and no DailyMetric ever landed). Any new signal type
-                # extract_signals grows is now routed automatically. `memories`
-                # is the lone exception: reconciled off-thread below, so blank it.
-                routed = intent_router.dispatch({**signals, "memories": []}, ctx)
-                feedback_tools.extend(routed.tools_used)
+            # Unified routing: one dispatch point fans signals out to
+            # the per-type handlers in app/services/intent_handlers/.
+            # Replaces three copy-pasted if-blocks (tone, feature,
+            # promise) that drifted between chat + note-save paths.
+            # Memory candidates are reconciled later off-thread or in
+            # the short-circuit path — we don't route them through the
+            # router here so the existing background-thread shape
+            # survives.
+            ctx = intent_router.RouterContext(
+                db=db,
+                source_message_id=user_msg.id,
+                prev_assistant_text=prev_assistant.content if prev_assistant is not None else None,
+                prev_assistant_id=prev_assistant.id if prev_assistant is not None else None,
+                on_tool_call=tb.tool_call,
+            )
+            # Forward the FULL signals dict — never a hand-picked subset.
+            # A subset silently dropped fitness_logs for weeks (extract
+            # emitted them; this call never forwarded them, so fitness.handle
+            # got [] and no DailyMetric ever landed). Any new signal type
+            # extract_signals grows is now routed automatically. `memories`
+            # is the lone exception: reconciled off-thread below, so blank it.
+            routed = intent_router.dispatch({**signals, "memories": []}, ctx)
+            feedback_tools.extend(routed.tools_used)
 
-                # Plan-gate input: did this turn carry actionable signals?
-                # Reads the raw extracted dict for signal types the router
-                # may dedup away (features/tones/promises/memories) and the
-                # routed result for the todo actions it executed — both are
-                # in scope only here. Drives _should_plan further down.
-                _has_action_signals = bool(
-                    signals.get("feature_requests")
-                    or signals.get("tone_corrections")
-                    or memory_candidates
-                    or signals.get("soft_promises")
-                    or routed.captured_promises
-                    or routed.captured_todos
-                    or routed.killed_todos
-                    or routed.completed_todos
-                    or routed.merged_todos
-                    or routed.failed_todo_actions
-                )
+            # Plan-gate input: did this turn carry actionable signals?
+            # Reads the raw extracted dict for signal types the router
+            # may dedup away (features/tones/promises/memories) and the
+            # routed result for the todo actions it executed — both are
+            # in scope only here. Drives _should_plan further down.
+            _has_action_signals = bool(
+                signals.get("feature_requests")
+                or signals.get("tone_corrections")
+                or memory_candidates
+                or signals.get("soft_promises")
+                or routed.captured_promises
+                or routed.captured_todos
+                or routed.killed_todos
+                or routed.completed_todos
+                or routed.merged_todos
+                or routed.failed_todo_actions
+            )
 
-                # Stamp the user message as feedback when either a tone
-                # correction OR a feature request fired AND we have a
-                # prior assistant turn to attribute the correction to.
-                if (
-                    (routed.tone_rules or routed.captured_features)
-                    and prev_assistant is not None
-                ):
-                    user_msg.feedback_for_message_id = prev_assistant.id
-                    user_msg.is_feedback = True
-                    db.commit()
+            # Stamp the user message as feedback when either a tone
+            # correction OR a feature request fired AND we have a
+            # prior assistant turn to attribute the correction to.
+            if (
+                (routed.tone_rules or routed.captured_features)
+                and prev_assistant is not None
+            ):
+                user_msg.feedback_for_message_id = prev_assistant.id
+                user_msg.is_feedback = True
+                db.commit()
 
-                # Build the Jarvis-voice ack from whichever signals fired.
-                # No structured receipts ("Feedback detected:", "Logged
-                # feature request:") — Daniel called those out as too
-                # clinical. Each signal contributes a natural phrase; we
-                # join with light punctuation so multi-signal turns still
-                # read like one breath.
-                feedback_ack = _build_ack(routed)
-                if feedback_ack is not None:
-                    # Skip the LLM reply ONLY when the extractor explicitly
-                    # classified the message as task_only or no_reply. The
-                    # legacy pure_signal heuristic (no memory + <25 words)
-                    # was over-firing — it skipped real answer-shaped turns
-                    # like "give me a detailed explanation of X" because the
-                    # extractor misrouted them as feature_requests. Trust
-                    # reply_intent; if it says "answer" or "acknowledge",
-                    # we run the full LLM reply.
-                    skip_normal_reply = routed.reply_intent in ("task_only", "no_reply")
+            # Build the Jarvis-voice ack from whichever signals fired.
+            # No structured receipts ("Feedback detected:", "Logged
+            # feature request:") — Daniel called those out as too
+            # clinical. Each signal contributes a natural phrase; we
+            # join with light punctuation so multi-signal turns still
+            # read like one breath.
+            feedback_ack = _build_ack(routed)
+            if feedback_ack is not None:
+                # Skip the LLM reply ONLY when the extractor explicitly
+                # classified the message as task_only or no_reply. The
+                # legacy pure_signal heuristic (no memory + <25 words)
+                # was over-firing — it skipped real answer-shaped turns
+                # like "give me a detailed explanation of X" because the
+                # extractor misrouted them as feature_requests. Trust
+                # reply_intent; if it says "answer" or "acknowledge",
+                # we run the full LLM reply.
+                skip_normal_reply = routed.reply_intent in ("task_only", "no_reply")
 
-                    # G4: capture-only short-circuit. When the ack stub
-                    # already says "tracked X, sir" / "closed X, sir" and
-                    # the user message is a short statement (no question,
-                    # ≤12 words), an LLM continuation just adds filler
-                    # ("on it, sir. 450 now."). Daniel called this double-
-                    # narration 2026-05-22 on the "do 450" turn. The fix:
-                    # the ack stub IS the reply. Only fires when the
-                    # extractor didn't already pick task_only.
-                    if not skip_normal_reply:
-                        msg_text = (message or "").strip()
-                        word_count = len(msg_text.split())
-                        has_question = "?" in msg_text
-                        first_word = (msg_text.split() or [""])[0].lower().strip(",.!?;:")
-                        _QUESTION_WORDS = {
-                            "what", "when", "where", "how", "why", "who",
-                            "which", "can", "will", "should", "is", "are",
-                            "do", "does", "did", "could", "would", "wdym",
-                        }
-                        looks_like_question = first_word in _QUESTION_WORDS
-                        capture_happened = bool(
-                            routed.captured_promises
-                            or routed.captured_todos
-                            or routed.completed_todos
-                            or routed.killed_todos
-                            or routed.merged_todos
-                            or routed.implicit_done_todos
-                            or routed.edited_todos
-                            or routed.captured_metrics
-                        )
-                        if (
-                            capture_happened
-                            and not has_question
-                            and not looks_like_question
-                            and word_count <= 12
-                        ):
-                            skip_normal_reply = True
+                # G4: capture-only short-circuit. When the ack stub
+                # already says "tracked X, sir" / "closed X, sir" and
+                # the user message is a short statement (no question,
+                # ≤12 words), an LLM continuation just adds filler
+                # ("on it, sir. 450 now."). Daniel called this double-
+                # narration 2026-05-22 on the "do 450" turn. The fix:
+                # the ack stub IS the reply. Only fires when the
+                # extractor didn't already pick task_only.
+                if not skip_normal_reply:
+                    msg_text = (message or "").strip()
+                    word_count = len(msg_text.split())
+                    has_question = "?" in msg_text
+                    first_word = (msg_text.split() or [""])[0].lower().strip(",.!?;:")
+                    _QUESTION_WORDS = {
+                        "what", "when", "where", "how", "why", "who",
+                        "which", "can", "will", "should", "is", "are",
+                        "do", "does", "did", "could", "would", "wdym",
+                    }
+                    looks_like_question = first_word in _QUESTION_WORDS
+                    capture_happened = bool(
+                        routed.captured_promises
+                        or routed.captured_todos
+                        or routed.completed_todos
+                        or routed.killed_todos
+                        or routed.merged_todos
+                        or routed.implicit_done_todos
+                        or routed.edited_todos
+                        or routed.captured_metrics
+                    )
+                    if (
+                        capture_happened
+                        and not has_question
+                        and not looks_like_question
+                        and word_count <= 12
+                    ):
+                        skip_normal_reply = True
 
         if skip_normal_reply and feedback_ack is not None:
             tb.reply(feedback_ack, usage={"short_circuit": True})
@@ -480,324 +445,96 @@ class Orchestrator:
                 "signals": signals_summary,
             }
 
-        # Build recent history. If a rolling summary exists, prepend it as a
-        # system-style message so long sessions retain early context past the
-        # 10-message truncation window.
-        recent_messages = conversation_service.get_recent_messages(conv.id, limit=10, db=db)
-
-        # Attach a per-message tool-call summary to each assistant turn
-        # so the LLM can see its own audit trail in history. Without
-        # this the model hallucinates whether it called tools earlier
-        # in the conv (conv #1155 / 2026-05-22: Gooni denied calling
-        # `list_recent_notes` despite the audit showing 2 calls that
-        # turn). Recent_history strips tool calls by default — only
-        # assistant text survives — so the model has amnesia about
-        # its own actions one turn later. Inline-appending the summary
-        # to the assistant content is the cheapest fix.
-        assistant_msg_ids = [m.id for m in recent_messages if m.role == "assistant"]
-        tool_names_by_msg: dict[int, list[str]] = {}
-        if assistant_msg_ids:
-            try:
-                tc_rows = (
-                    db.query(ToolCallModel)
-                    .filter(ToolCallModel.message_id.in_(assistant_msg_ids))
-                    .filter(ToolCallModel.status == "done")
-                    .order_by(ToolCallModel.id.asc())
-                    .all()
-                )
-                for tc in tc_rows:
-                    bucket = tool_names_by_msg.setdefault(tc.message_id, [])
-                    if tc.tool_name and tc.tool_name not in bucket:
-                        bucket.append(tc.tool_name)
-            except Exception as e:
-                print(f"[recent_history] tool audit attach failed: {e}")
-
-        recent_history = []
-        for m in recent_messages:
-            content = m.content or ""
-            if m.role == "assistant":
-                tools = tool_names_by_msg.get(m.id) or []
-                if tools:
-                    content = (
-                        f"{content}\n[tools you actually called this turn: "
-                        f"{', '.join(tools)}]"
-                    )
-            recent_history.append({"role": m.role, "content": content})
-
-        if conv.summary:
-            recent_history.insert(0, {
-                "role": "system",
-                "content": f"Conversation summary so far:\n{conv.summary}",
-            })
+        recent_history = self._build_recent_history(conv, db)
 
         query = message if message.strip() else "image"
 
-        # Pipeline-step events for the streaming UI. Each step fires its
-        # event right after it produces its data — gives the web chat
-        # progress dots like "Figuring out intent…" → "Pulling memories…".
-        def _emit(stage: str, label: str):
-            if event_cb is None:
-                return
-            try:
-                event_cb({"type": "stage", "stage": stage, "label": label})
-            except Exception as e:
-                print(f"[event_cb] stage {stage} failed: {e}")
-
-        _emit("intent", "Reading your message")
-        intention_context = llm_client.generate_intention_context(query, recent_history[-6:], model="gpt-5.4-mini")
-        tb.intent(query, intention_context)
-        _emit("memory_recall", "Pulling related memories")
-        memory_context, recalled_memories = memory_service.build_memory_context_with_debug(query, db=db)
-        tb.memory_recall(query, recalled_memories)
-        # If the active note is large, summarize it before injection to keep
-        # the prompt focused. Below threshold, dump it raw as before.
-        if entry_content.strip():
-            if len(entry_content) > ENTRY_SUMMARIZE_THRESHOLD:
-                entry_summary = _summarize_entry(entry_content)
-                entry_context = (
-                    "Note the user wrote (summarized):\n\"\"\""
-                    f"{entry_summary}\"\"\""
-                )
-            else:
-                entry_context = f"Note the user wrote:\n\"\"\"{entry_content}\"\"\""
-        else:
-            entry_context = ""
-        # list_context dump REMOVED — model fetches list contents on demand
-        # via show_list tool. Was burning ~80 tokens/turn dumping titles even
-        # when no list was relevant to the conversation. Tool surface already
-        # covers it (app/tools/list_tools.py: ShowListTool).
-        list_context = ""
-        # Cosine-rank active focuses against the user's current message so we
-        # only inject the top 2 most-relevant instead of dumping all 5. Avoids
-        # the "every focus visible every turn" bloat that confuses multi-focus
-        # cases like eval 007.
-        focus_context = item_service.get_active_context(
-            db, query_text=message, top_k=2
+        static_context, dynamic_context = self._assemble_context(
+            message=message,
+            query=query,
+            source=source,
+            conv=conv,
+            recent_history=recent_history,
+            routed=routed,
+            has_action_signals=_has_action_signals,
+            entry_content=entry_content,
+            event_cb=event_cb,
+            tb=tb,
+            db=db,
         )
-        # Promote intention into the prompt so the LLM knows what Daniel is
-        # trying to do right now. Previously this was computed and discarded.
-        intention_block = (
-            f"Daniel's current intent: {intention_context}"
-            if intention_context else ""
-        )
-        # Bot-channel delivery mechanics ONLY. Voice/identity/tone rules
-        # (including temporal grounding) now live in PERSONA_BLOCK so every
-        # channel — web + bots — enforces them. This block carries only:
-        # bubble count + blank-line splitting (split_for_bots regex needs
-        # explicit blank-line separators) + the "context blocks are private"
-        # rule (those blocks are bot-only, so this rule is too).
-        cadence_block = ""
-        if source != "web":
-            cadence_block = (
-                "BOT DELIVERY:\n"
-                "- 1 bubble default. Add a 2nd ONLY when asking a real "
-                "question or surfacing state. Never more than 2.\n"
-                "- ~2 sentences max per bubble.\n"
-                "- For multi-bubble: separate bubbles with a BLANK LINE "
-                "(\\n\\n). Never pack thoughts into one paragraph with "
-                "internal single-line breaks.\n"
-                "- PROSE ONLY. NEVER use numbered lists (#1, #2, …), "
-                "bullet lists (- foo / • foo), or bracketed meta tags "
-                "([← from: …], [×N mentions], [doing], etc.) in your "
-                "reply. State_block uses that format INTERNALLY — you "
-                "paraphrase it into natural sentences. Allowed exceptions: "
-                "(a) Daniel explicitly asks (\"list them out\", \"show as "
-                "bullets\", \"give me the bullet points\"); (b) you're "
-                "surfacing 5+ discrete items where prose would be "
-                "unreadable (grooming flow, full todo dump on request). "
-                "When in doubt: prose.\n"
-                "- BLOCK CONTENT IS PRIVATE: the [your state right now], "
-                "[current time], and [just extracted…] blocks are CONTEXT "
-                "for you, not lines to echo back. Never paste rule text "
-                "(\"make explanations shorter\") or block headers into your "
-                "reply. Use the info, don't copy it."
-            )
-        # State-grounded openers — fixes T1 of segment #209 where "Yo" got
-        # a scolding guess instead of a state-grounded reply. Bot channels
-        # only (web has its own UI showing this state).
-        state_block = ""
-        just_extracted_block = ""
-        time_block = ""
-        if source != "web":
-            try:
-                state_block = _build_state_block(db)
-            except Exception as e:
-                print(f"[state_block] build failed: {e}")
-            try:
-                just_extracted_block = _build_just_extracted_block(routed)
-            except Exception as e:
-                print(f"[just_extracted_block] build failed: {e}")
-            try:
-                time_block = _build_time_block(db)
-            except Exception as e:
-                print(f"[time_block] build failed: {e}")
-
-        # ── ReAct PLAN step ────────────────────────────────────────────
-        # Pre-reply LLM call that emits explicit goal + minimum_action +
-        # intended_tools, injected back into the chat prompt so the model
-        # follows a derived plan instead of ad-hoc reasoning.
-        #
-        # GATING: skip plan on short non-actionable turns. Empirically the
-        # plan over-anchors short eval cases (Daniel's eval ladder dipped
-        # v6→v7 because plan_block was firing on 1-line "what's the diff
-        # between X and Y" turns and producing a "Goal: explain X vs Y"
-        # that ate context without value). Only fire when the turn is
-        # multi-part OR carries actionable extracted signals.
-        plan_block = ""
-        _should_plan = (
-            len(message) > 80
-            or _has_action_signals
-        )
-        if _should_plan:
-            try:
-                from ...tools import registry as _tools_registry
-                _tool_names = [t.name for t in _tools_registry]
-                _plan_state = intention_block or ""
-                _plan = _run_plan(message, _plan_state, _tool_names)
-                if _plan:
-                    tb.step("plan", _plan.get("goal") or "(plan)", meta=_plan)
-                    _goal = _plan.get("goal") or ""
-                    _action = _plan.get("minimum_action") or ""
-                    if _goal or _action:
-                        plan_block = (
-                            "YOUR PLAN THIS TURN (self-derived — follow it, "
-                            "don't echo it back):\n"
-                            + (f"- Goal: {_goal}\n" if _goal else "")
-                            + (f"- Action: {_action}" if _action else "")
-                        )
-            except Exception as e:
-                print(f"[plan_block] failed: {e}")
-
-        # Conv-level rollup of recent self-reflections — one compressed
-        # paragraph of recurring failure modes in THIS conversation. Built
-        # offline by reflexion_service.rollup_conversation (manual trigger
-        # or periodic), injected here as a "self-aware preamble" so Gooni
-        # can adapt mid-conv instead of repeating the same mistake.
-        rollup_block = ""
-        try:
-            from ..reflexion_service import reflexion_service
-            rollup = reflexion_service.latest_rollup_for(db, conv.id)
-            if rollup and rollup.gap_exposed:
-                rollup_block = (
-                    "Recent patterns in this conversation "
-                    "(self-observed, don't echo back):\n"
-                    f"- {rollup.gap_exposed.strip()}"
-                )
-        except Exception as e:
-            print(f"[rollup_block] build failed: {e}")
-
-        # PERSONA leads — locked identity, all channels, overrides memory prefs.
-        # Intention next so the model frames action against the user's goal.
-        # cadence_block (bot mechanics) only fires on bot channels and is
-        # appended via filter(None, ...) when empty on web.
-        full_context = "\n\n".join(filter(None, [
-            PERSONA_BLOCK,
-            OBJECT_KINDS_BLOCK,
-            intention_block,
-            plan_block,
-            cadence_block,
-            time_block,
-            state_block,
-            just_extracted_block,
-            rollup_block,
-            memory_context,
-            entry_context,
-            list_context,
-            focus_context,
-        ]))
-        tb.master_prompt(full_context, recent_history)
-        _emit("generate", "Thinking")
+        self._emit_stage(event_cb, "generate", "Thinking")
 
         if image_url:
+            # Vision path doesn't thread static_context — gpt-4o vision turns
+            # are low-traffic and don't meaningfully cache. Pass the combined
+            # context as before.
             response, usage = llm_client.generate_response_with_image(
-                message, image_url, full_context, recent_history,
+                message,
+                image_url,
+                "\n\n".join(filter(None, [static_context, dynamic_context])),
+                recent_history,
                 db=db, conversation_id=conv.id,
             )
         else:
             response, usage = llm_client.generate_chat_response_with_memory(
-                message, full_context, recent_history,
-                is_first_time=is_first_time, db=db, model=model,
+                message, dynamic_context, recent_history,
+                db=db, model=model,
                 conversation_id=conv.id,
                 event_cb=event_cb,
+                static_context=static_context,
             )
 
-        # ── ReAct VERIFY step ──────────────────────────────────────────
-        # Catches the msg #999 / msg #1011 class: assistant claims an
-        # action ("tracked", "saved", "added") that no tool_call actually
-        # backs. Compare draft reply against ToolCall audit; if mismatch,
-        # regenerate ONCE with the critique embedded in the prompt so the
-        # model corrects itself. Image path skipped (no audit semantics
-        # on vision turns, and the regenerate cost is real).
-        if not image_url:
-            try:
-                verify_ok, verify_critique = _run_verify(
-                    response,
-                    user_msg=message,
-                    tool_call_ids=(usage or {}).get("tool_call_ids") or [],
-                    db=db,
-                )
-                # Deterministic backstop — overrides the LLM verify when
-                # the draft contains an unbacked "tracked/logged/saved"
-                # claim. Catches the conv #1136-1137 failure mode where
-                # the LLM verifier shrugged off "do a little leetcode
-                # tracked" with no audit. Runs even when LLM said ok=True.
-                det_critique = _deterministic_unbacked_check(
-                    draft=response,
-                    captured_features=routed.captured_features,
-                    captured_promises=routed.captured_promises,
-                    captured_todos=routed.captured_todos,
-                    captured_metrics=routed.captured_metrics,
-                    tool_call_ids=(usage or {}).get("tool_call_ids") or [],
-                    db=db,
-                )
-                if det_critique:
-                    verify_ok = False
-                    verify_critique = det_critique
-                # Phase 2 (backlog #313): the old _deterministic_denied_success_check
-                # backstop (reply denies a state change that actually landed —
-                # WA seg 319 msg 1171) was deleted here. Structured tool returns
-                # fix that class at the source: set_todo_state now returns a typed
-                # status='already_in_state'|'closed' the LLM can't misread as
-                # failure, so there's nothing left to contradict. Eval cases
-                # 015/016 regression-lock the behavior.
-                tb.step(
-                    "verify",
-                    "OK" if verify_ok else f"REVISE: {verify_critique[:120]}",
-                    meta={"ok": verify_ok, "critique": verify_critique},
-                )
-                # Skip regenerate when critique is too short — under 30 chars
-                # is almost always vague noise ("may be misleading", "could be
-                # clearer"). The verify prompt now requires a verbatim quoted
-                # phrase + named missing tool; if it didn't deliver that, we
-                # trust the draft over the gate. Cuts down on regenerate-thrash
-                # that was causing the v6/v7 eval pass-count dip.
-                if not verify_ok and len((verify_critique or "").strip()) >= 30:
-                    revised_context = (
-                        full_context
-                        + "\n\n[VERIFY CORRECTION — your draft reply claimed "
-                        + "something your tool calls didn't back. Be accurate:]\n"
-                        + f"- specific issue: {verify_critique}\n"
-                        + "- If you didn't actually call the tool, SAY so "
-                        + "honestly (\"only in convo context, not formally tracked\"). "
-                        + "Don't double down."
-                    )
-                    response2, usage2 = llm_client.generate_chat_response_with_memory(
-                        message, revised_context, recent_history,
-                        is_first_time=is_first_time, db=db, model=model,
-                        conversation_id=conv.id,
-                        event_cb=event_cb,
-                    )
-                    response = response2
-                    # Merge tool_call_ids across draft + revision.
-                    merged_ids = list(
-                        ((usage or {}).get("tool_call_ids") or [])
-                    ) + list(((usage2 or {}).get("tool_call_ids") or []))
-                    usage = (usage2 or {})
-                    usage["tool_call_ids"] = merged_ids
-            except Exception as e:
-                # Fail-open: never break chat on a verify failure.
-                print(f"[verify] step failed (ignored): {e}")
+        response, usage = self._verify_and_regenerate(
+            response=response,
+            usage=usage,
+            message=message,
+            image_url=image_url,
+            routed=routed,
+            dynamic_context=dynamic_context,
+            static_context=static_context,
+            recent_history=recent_history,
+            conv=conv,
+            model=model,
+            event_cb=event_cb,
+            tb=tb,
+            db=db,
+        )
 
+        return self._finalize_turn(
+            response=response,
+            usage=usage,
+            feedback_ack=feedback_ack,
+            memory_candidates=memory_candidates,
+            saved_message=saved_message,
+            signals_summary=signals_summary,
+            feedback_tools=feedback_tools,
+            routed=routed,
+            conv=conv,
+            tb=tb,
+            db=db,
+        )
+
+    def _finalize_turn(
+        self,
+        *,
+        response: str,
+        usage: dict,
+        feedback_ack: str | None,
+        memory_candidates: list[dict],
+        saved_message: str,
+        signals_summary: dict,
+        feedback_tools: list[str],
+        routed,
+        conv,
+        tb,
+        db,
+    ) -> tuple[str, dict]:
+        """Shape + persist the final reply and fire the off-thread side
+        effects. Prepends the feedback ack on a mixed turn, strips internal
+        [M#N] anchors, saves the assistant Message + trace, backfills
+        message_id on this turn's ToolCall audit rows, then kicks the
+        daemon threads (memory reconcile, reflexion, friction, conv-summary).
+        Returns the final (response, usage)."""
         # Mixed turn (feedback + new question): prepend the ack so Daniel
         # sees that the correction was logged before the actual answer.
         if feedback_ack is not None:
@@ -872,13 +609,390 @@ class Orchestrator:
             daemon=True,
         ).start()
 
-        usage["intention"] = intention_context
+        usage["intention"] = ""  # B3: intention pre-call dropped
         usage["signals"] = signals_summary
         if feedback_tools:
             existing_tools = list(usage.get("tools_used") or [])
             usage["tools_used"] = existing_tools + feedback_tools
 
         return response, usage
+
+    # ── handle_chat phase helpers ───────────────────────────────────────
+    # handle_chat is the orchestrator; these own one phase each. Extracted
+    # from the former ~670-line god-method (audit 2026-05-31) — behavior-
+    # identical, just legible. Each takes explicit inputs / returns explicit
+    # outputs so turn state is visible at the call site, not smeared across
+    # 400 lines of shared locals.
+
+    @staticmethod
+    def _emit_stage(event_cb, stage: str, label: str) -> None:
+        """Fire a pipeline-step event for the streaming UI (web chat progress
+        dots like "Pulling memories…" → "Thinking"). No-op when no callback;
+        failures swallowed — telemetry never blocks the chat path."""
+        if event_cb is None:
+            return
+        try:
+            event_cb({"type": "stage", "stage": stage, "label": label})
+        except Exception as e:
+            print(f"[event_cb] stage {stage} failed: {e}")
+
+    def _assemble_context(
+        self,
+        *,
+        message: str,
+        query: str,
+        source: str,
+        conv,
+        recent_history: list[dict],
+        routed,
+        has_action_signals: bool,
+        entry_content: str,
+        event_cb,
+        tb,
+        db,
+    ) -> tuple[str, str]:
+        """Build the system-prompt context for this turn.
+
+        Returns (static_context, dynamic_context):
+        - static_context = byte-stable identity (PERSONA + OBJECT_KINDS) for
+          the cached prompt prefix (see B1 in prompts.system_prompt).
+        - dynamic_context = the volatile per-turn blocks (memory, plan, bot
+          delivery mechanics, state, note, focus) — never cacheable.
+
+        Records the memory-recall, plan, and master-prompt trace steps.
+        """
+        self._emit_stage(event_cb, "memory_recall", "Pulling related memories")
+        memory_context, recalled_memories = memory_service.build_memory_context_with_debug(query, db=db)
+        tb.memory_recall(query, recalled_memories)
+
+        # If the active note is large, summarize it before injection to keep
+        # the prompt focused. Below threshold, dump it raw as before.
+        if entry_content.strip():
+            if len(entry_content) > ENTRY_SUMMARIZE_THRESHOLD:
+                entry_summary = _summarize_entry(entry_content)
+                entry_context = (
+                    "Note the user wrote (summarized):\n\"\"\""
+                    f"{entry_summary}\"\"\""
+                )
+            else:
+                entry_context = f"Note the user wrote:\n\"\"\"{entry_content}\"\"\""
+        else:
+            entry_context = ""
+
+        # list_context dump REMOVED — model fetches list contents on demand
+        # via show_list tool. Was burning ~80 tokens/turn dumping titles even
+        # when no list was relevant to the conversation. Tool surface already
+        # covers it (app/tools/list_tools.py: ShowListTool).
+        list_context = ""
+
+        # Cosine-rank active focuses against the user's current message so we
+        # only inject the top 2 most-relevant instead of dumping all 5. Avoids
+        # the "every focus visible every turn" bloat that confuses multi-focus
+        # cases like eval 007.
+        focus_context = item_service.get_active_context(
+            db, query_text=message, top_k=2
+        )
+
+        # Bot-channel delivery mechanics ONLY. Voice/identity/tone rules
+        # (including temporal grounding) now live in PERSONA_BLOCK so every
+        # channel — web + bots — enforces them. This block carries only:
+        # bubble count + blank-line splitting (split_for_bots regex needs
+        # explicit blank-line separators) + the "context blocks are private"
+        # rule (those blocks are bot-only, so this rule is too).
+        cadence_block = ""
+        if source != "web":
+            cadence_block = (
+                "BOT DELIVERY:\n"
+                "- 1 bubble default. Add a 2nd ONLY when asking a real "
+                "question or surfacing state. Never more than 2.\n"
+                "- ~2 sentences max per bubble.\n"
+                "- For multi-bubble: separate bubbles with a BLANK LINE "
+                "(\\n\\n). Never pack thoughts into one paragraph with "
+                "internal single-line breaks.\n"
+                "- PROSE ONLY. NEVER use numbered lists (#1, #2, …), "
+                "bullet lists (- foo / • foo), or bracketed meta tags "
+                "([← from: …], [×N mentions], [doing], etc.) in your "
+                "reply. State_block uses that format INTERNALLY — you "
+                "paraphrase it into natural sentences. Allowed exceptions: "
+                "(a) Daniel explicitly asks (\"list them out\", \"show as "
+                "bullets\", \"give me the bullet points\"); (b) you're "
+                "surfacing 5+ discrete items where prose would be "
+                "unreadable (grooming flow, full todo dump on request). "
+                "When in doubt: prose.\n"
+                "- BLOCK CONTENT IS PRIVATE: the [your state right now], "
+                "[current time], and [just extracted…] blocks are CONTEXT "
+                "for you, not lines to echo back. Never paste rule text "
+                "(\"make explanations shorter\") or block headers into your "
+                "reply. Use the info, don't copy it."
+            )
+
+        # State-grounded openers — fixes T1 of segment #209 where "Yo" got
+        # a scolding guess instead of a state-grounded reply. Bot channels
+        # only (web has its own UI showing this state).
+        state_block = ""
+        just_extracted_block = ""
+        time_block = ""
+        if source != "web":
+            try:
+                state_block = _build_state_block(db)
+            except Exception as e:
+                print(f"[state_block] build failed: {e}")
+            try:
+                just_extracted_block = _build_just_extracted_block(routed)
+            except Exception as e:
+                print(f"[just_extracted_block] build failed: {e}")
+            try:
+                time_block = _build_time_block(db)
+            except Exception as e:
+                print(f"[time_block] build failed: {e}")
+
+        # ── ReAct PLAN step ────────────────────────────────────────────
+        # Pre-reply LLM call that emits explicit goal + minimum_action +
+        # intended_tools, injected back into the chat prompt so the model
+        # follows a derived plan instead of ad-hoc reasoning.
+        #
+        # GATING: skip plan on short non-actionable turns. Empirically the
+        # plan over-anchors short eval cases (Daniel's eval ladder dipped
+        # v6→v7 because plan_block was firing on 1-line "what's the diff
+        # between X and Y" turns and producing a "Goal: explain X vs Y"
+        # that ate context without value). Only fire when the turn is
+        # multi-part OR carries actionable extracted signals.
+        plan_block = ""
+        _should_plan = (
+            len(message) > 80
+            or has_action_signals
+        )
+        if _should_plan:
+            try:
+                from ...tools import registry as _tools_registry
+                _tool_names = [t.name for t in _tools_registry]
+                # Plan seed was the intention_block (dropped in B3) — plan now
+                # derives goal/action straight from the message + tool list.
+                _plan = _run_plan(message, "", _tool_names)
+                if _plan:
+                    tb.step("plan", _plan.get("goal") or "(plan)", meta=_plan)
+                    _goal = _plan.get("goal") or ""
+                    _action = _plan.get("minimum_action") or ""
+                    if _goal or _action:
+                        plan_block = (
+                            "YOUR PLAN THIS TURN (self-derived — follow it, "
+                            "don't echo it back):\n"
+                            + (f"- Goal: {_goal}\n" if _goal else "")
+                            + (f"- Action: {_action}" if _action else "")
+                        )
+            except Exception as e:
+                print(f"[plan_block] failed: {e}")
+
+        # Conv-level rollup of recent self-reflections — one compressed
+        # paragraph of recurring failure modes in THIS conversation. Built
+        # offline by reflexion_service.rollup_conversation (manual trigger
+        # or periodic), injected here as a "self-aware preamble" so Gooni
+        # can adapt mid-conv instead of repeating the same mistake.
+        rollup_block = ""
+        try:
+            from ..reflexion_service import reflexion_service
+            rollup = reflexion_service.latest_rollup_for(db, conv.id)
+            if rollup and rollup.gap_exposed:
+                rollup_block = (
+                    "Recent patterns in this conversation "
+                    "(self-observed, don't echo back):\n"
+                    f"- {rollup.gap_exposed.strip()}"
+                )
+        except Exception as e:
+            print(f"[rollup_block] build failed: {e}")
+
+        # B1/audit 2026-05-31: the system prompt is split into a CACHED static
+        # prefix and a volatile dynamic tail so OpenAI's auto prompt-cache
+        # covers the stable identity blocks.
+        #
+        # static_context = byte-stable identity (PERSONA + OBJECT_KINDS). Same
+        #   bytes every turn → lands in the cached prefix (before the
+        #   timestamp) via system_prompt(static_context=...). Previously these
+        #   rode in the volatile context AFTER the timestamp and were re-billed
+        #   full price each turn.
+        # dynamic_context = everything per-turn (plan, bot mechanics, state,
+        #   memory, note, focus). Never cacheable — kept in the tail.
+        #
+        # B4 NOTE: PERSONA + MASTER RULES (prompts._STATIC_SYSTEM_BLOCK) now
+        # sit adjacent in the cached prefix — one identity region. Content
+        # dedup of their overlapping rules (no-lists / verify-before-claim /
+        # no-bot-register) is a follow-up; co-locating without deleting guard
+        # lines keeps this behavior-preserving.
+        static_context = "\n\n".join(filter(None, [
+            PERSONA_BLOCK,
+            OBJECT_KINDS_BLOCK,
+        ]))
+        dynamic_context = "\n\n".join(filter(None, [
+            plan_block,
+            cadence_block,
+            time_block,
+            state_block,
+            just_extracted_block,
+            rollup_block,
+            memory_context,
+            entry_context,
+            list_context,
+            focus_context,
+        ]))
+        # Trace records the full assembled prompt (static + dynamic) so the
+        # eval UI sees exactly what the model saw.
+        tb.master_prompt(
+            "\n\n".join(filter(None, [static_context, dynamic_context])),
+            recent_history,
+        )
+        return static_context, dynamic_context
+
+    def _verify_and_regenerate(
+        self,
+        *,
+        response: str,
+        usage: dict,
+        message: str,
+        image_url: str | None,
+        routed,
+        dynamic_context: str,
+        static_context: str,
+        recent_history: list[dict],
+        conv,
+        model: str | None,
+        event_cb,
+        tb,
+        db,
+    ) -> tuple[str, dict]:
+        """ReAct VERIFY step — catch the msg #999/#1011 class where the
+        assistant claims an action ("tracked"/"saved"/"added") that no tool
+        call backs, and regenerate ONCE with the critique embedded. Image
+        path skipped (no audit semantics on vision turns, regen cost is real).
+
+        B5/audit 2026-05-31: gated on a cheap claim-regex. Verify scope is
+        PURELY fact-of-action (steps.py::_VERIFY_PROMPT — "Empty audit + no
+        action-claim = ok=true"), so a draft with no claim-verb would pass
+        anyway → skip it (kills the gpt-4o-mini call on every pure-answer
+        turn). When a claim IS present, the DETERMINISTIC rail runs first
+        (it's a hard override that used to run AFTER the LLM verify and
+        clobber it) — if it flags, the LLM call is skipped entirely; only an
+        unflagged claim-bearing draft pays for the LLM verify to catch the
+        subtler wrong-action-backed case.
+
+        Returns the (possibly regenerated) (response, usage). Fail-open.
+        """
+        if not (not image_url and response and _UNBACKED_CLAIM_RE.search(response)):
+            return response, usage
+        try:
+            det_critique = _deterministic_unbacked_check(
+                draft=response,
+                captured_features=routed.captured_features,
+                captured_promises=routed.captured_promises,
+                captured_todos=routed.captured_todos,
+                captured_metrics=routed.captured_metrics,
+                tool_call_ids=(usage or {}).get("tool_call_ids") or [],
+                db=db,
+            )
+            if det_critique:
+                # Hard rail tripped — authoritative. Skip the LLM verify.
+                verify_ok, verify_critique = False, det_critique
+            else:
+                verify_ok, verify_critique = _run_verify(
+                    response,
+                    user_msg=message,
+                    tool_call_ids=(usage or {}).get("tool_call_ids") or [],
+                    db=db,
+                )
+            # Phase 2 (backlog #313): the old _deterministic_denied_success_check
+            # backstop (reply denies a state change that actually landed —
+            # WA seg 319 msg 1171) was deleted here. Structured tool returns
+            # fix that class at the source: set_todo_state now returns a typed
+            # status='already_in_state'|'closed' the LLM can't misread as
+            # failure, so there's nothing left to contradict. Eval cases
+            # 015/016 regression-lock the behavior.
+            tb.step(
+                "verify",
+                "OK" if verify_ok else f"REVISE: {verify_critique[:120]}",
+                meta={"ok": verify_ok, "critique": verify_critique},
+            )
+            # Skip regenerate when critique is too short — under 30 chars
+            # is almost always vague noise ("may be misleading", "could be
+            # clearer"). The verify prompt now requires a verbatim quoted
+            # phrase + named missing tool; if it didn't deliver that, we
+            # trust the draft over the gate. Cuts down on regenerate-thrash
+            # that was causing the v6/v7 eval pass-count dip.
+            if not verify_ok and len((verify_critique or "").strip()) >= 30:
+                # Correction appends to the volatile dynamic context; the
+                # static identity prefix stays cached across the regen.
+                revised_context = (
+                    dynamic_context
+                    + "\n\n[VERIFY CORRECTION — your draft reply claimed "
+                    + "something your tool calls didn't back. Be accurate:]\n"
+                    + f"- specific issue: {verify_critique}\n"
+                    + "- If you didn't actually call the tool, SAY so "
+                    + "honestly (\"only in convo context, not formally tracked\"). "
+                    + "Don't double down."
+                )
+                response2, usage2 = llm_client.generate_chat_response_with_memory(
+                    message, revised_context, recent_history,
+                    db=db, model=model,
+                    conversation_id=conv.id,
+                    event_cb=event_cb,
+                    static_context=static_context,
+                )
+                response = response2
+                # Merge tool_call_ids across draft + revision.
+                merged_ids = list(
+                    ((usage or {}).get("tool_call_ids") or [])
+                ) + list(((usage2 or {}).get("tool_call_ids") or []))
+                usage = (usage2 or {})
+                usage["tool_call_ids"] = merged_ids
+        except Exception as e:
+            # Fail-open: never break chat on a verify failure.
+            print(f"[verify] step failed (ignored): {e}")
+        return response, usage
+
+    def _build_recent_history(self, conv, db) -> list[dict]:
+        """Last 10 messages as LLM history. Each assistant turn is annotated
+        with the tools it actually called (anti-amnesia — conv #1155, where
+        Gooni denied calling list_recent_notes despite the audit showing it;
+        recent_history strips tool calls by default so the model forgets its
+        own actions one turn later). A rolling conversation summary is
+        prepended as a system turn when present, so long sessions retain
+        early context past the 10-message truncation window.
+        """
+        recent_messages = conversation_service.get_recent_messages(conv.id, limit=10, db=db)
+        assistant_msg_ids = [m.id for m in recent_messages if m.role == "assistant"]
+        tool_names_by_msg: dict[int, list[str]] = {}
+        if assistant_msg_ids:
+            try:
+                tc_rows = (
+                    db.query(ToolCallModel)
+                    .filter(ToolCallModel.message_id.in_(assistant_msg_ids))
+                    .filter(ToolCallModel.status == "done")
+                    .order_by(ToolCallModel.id.asc())
+                    .all()
+                )
+                for tc in tc_rows:
+                    bucket = tool_names_by_msg.setdefault(tc.message_id, [])
+                    if tc.tool_name and tc.tool_name not in bucket:
+                        bucket.append(tc.tool_name)
+            except Exception as e:
+                print(f"[recent_history] tool audit attach failed: {e}")
+
+        recent_history = []
+        for m in recent_messages:
+            content = m.content or ""
+            if m.role == "assistant":
+                tools = tool_names_by_msg.get(m.id) or []
+                if tools:
+                    content = (
+                        f"{content}\n[tools you actually called this turn: "
+                        f"{', '.join(tools)}]"
+                    )
+            recent_history.append({"role": m.role, "content": content})
+
+        if conv.summary:
+            recent_history.insert(0, {
+                "role": "system",
+                "content": f"Conversation summary so far:\n{conv.summary}",
+            })
+        return recent_history
 
     def _summarize_conv_async(self, conversation_id: int) -> None:
         sess = SessionLocal()
@@ -888,15 +1002,6 @@ class Orchestrator:
             print(f"conv summarize async error: {e}")
         finally:
             sess.close()
-
-    def _handle_memory_command(self, db) -> str:
-        memories = memory_service.get_all(db=db)
-        if not memories:
-            return "No memories yet."
-        lines = [f"Memory ({len(memories)} entries):"]
-        for m in memories:
-            lines.append(f"  - {m.get('content') or m.get('memory', '')[:120]}")
-        return "\n".join(lines)
 
     # ── Greeting fast-path helpers ──────────────────────────────────────
     # Regex-only gate (no LLM) — the whole point is to skip downstream
@@ -924,9 +1029,7 @@ class Orchestrator:
         *,
         user_msg: str,
         conv,
-        source: str,
         db,
-        model: str | None,
         event_cb,
     ) -> tuple[str | None, dict | None]:
         """Single tiny LLM call against PERSONA + last few messages.

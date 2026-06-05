@@ -183,14 +183,19 @@ class LLMClient:
         message: str,
         memory_context: str,
         history: list = None,
-        is_first_time: bool = False,
         db=None,
         model: str = None,
         conversation_id: int | None = None,
         event_cb=None,
+        static_context: str = "",
     ) -> tuple[str, dict]:
-        """Generate response with memory context and tool use."""
-        messages = [{"role": "system", "content": system_prompt(memory_context, is_first_time)}]
+        """Generate response with memory context and tool use.
+
+        static_context = byte-stable identity blocks (PERSONA + OBJECT_KINDS)
+        placed in the cached system-prompt prefix; memory_context = the
+        volatile per-turn blocks. See prompts.system_prompt.
+        """
+        messages = [{"role": "system", "content": system_prompt(memory_context, static_context)}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": message})
@@ -217,7 +222,13 @@ class LLMClient:
                 response = self.client.chat.completions.create(
                     model=active_model,
                     messages=messages,
-                    temperature=0.7,
+                    # Lowered 0.7 → 0.5 (B/audit 2026-05-31): this is a
+                    # tool-calling, state-grounded assistant — high temp drives
+                    # both hallucination and voice drift. The Alfred texture
+                    # comes from PERSONA, not sampling noise. 0.5 keeps warmth
+                    # while tightening tool-use + factual grounding. EVAL-GATE
+                    # this: A/B the ladder before trusting.
+                    temperature=0.5,
                     # 500 was truncating mid-sentence on longer technical
                     # explanations (eval case 006 cut off explaining memory
                     # decay). Bot channel split_for_bots still caps bubbles
