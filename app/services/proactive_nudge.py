@@ -358,7 +358,9 @@ def maybe_fire_sleep_nudge(db: Session) -> bool:
 # ── Procrastination nudge (PR-6) ─────────────────────────────────────
 
 _DOING_STALE_MINUTES = 45     # a todo sitting in 'doing' this long is stalled
-_PROCRAST_DEBOUNCE_MINUTES = 120  # don't re-nudge the same todo within 2h
+# Nudge a stalled todo AT MOST ONCE, ever. The 2h re-nudge loop spammed
+# (14 pings for one todo on 2026-06-04). Once `last_nudge_sent_at` is set,
+# we never re-ping that todo.
 
 
 def _compose_procrastination_message(text: str, minutes: int) -> str:
@@ -379,27 +381,21 @@ def maybe_fire_procrastination_nudge(db: Session) -> bool:
         from ..db.models import Todo
         now = datetime.utcnow()
         stale_before = now - timedelta(minutes=_DOING_STALE_MINUTES)
-        debounce_before = now - timedelta(minutes=_PROCRAST_DEBOUNCE_MINUTES)
 
-        # Longest-stalled doing todo past the threshold, not recently nudged,
-        # not soft-deleted.
-        candidates = (
+        # Longest-stalled doing todo past the threshold, NEVER nudged before,
+        # not soft-deleted. `last_nudge_sent_at IS NULL` = once-per-todo cap.
+        target = (
             db.query(Todo)
             .filter(
                 Todo.state == "doing",
                 Todo.deleted_at.is_(None),
                 Todo.doing_started_at.isnot(None),
                 Todo.doing_started_at <= stale_before,
+                Todo.last_nudge_sent_at.is_(None),
             )
             .order_by(Todo.doing_started_at.asc())
-            .all()
+            .first()
         )
-        target = None
-        for t in candidates:
-            if t.last_nudge_sent_at and t.last_nudge_sent_at > debounce_before:
-                continue
-            target = t
-            break
         if target is None:
             return False
 
