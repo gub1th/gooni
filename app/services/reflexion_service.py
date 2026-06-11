@@ -35,27 +35,18 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from ..common import WRITE_CLAIM_RE
 from ..db.database import SessionLocal
 from ..db.models import Reflection, ToolCall
 from ..llm.client import llm_client
 from .capability_service import capability_service
 
 
-# Durable-write claim verbs. If the reply asserts one of these but the audit
-# (ToolCall rows) AND the turn's router captures are both empty, it's a
-# hallucinated write — the #1317-class failure. Kept TIGHT on purpose: bare
-# "noted, sir" / "got it" are valid terse capture-acks, NOT write claims, so
-# they're excluded. Tighten further (claim → specific tool) only if needed.
-_WRITE_CLAIM_RE = re.compile(
-    r"\b("
-    r"tracked|logged|saved|recorded|stored|"
-    r"added (?:it|that|this|a|the|to)|"
-    r"created (?:a |the )?(?:todo|task|promise|note|reminder|focus)|"
-    r"marked \w+ (?:done|complete|completed)|"
-    r"set (?:a |the )?reminder"
-    r")\b",
-    re.IGNORECASE,
-)
+# Durable-write claim verbs — shared single source in app/common.py (also
+# used by the orchestrator verify rail, which historically carried a looser
+# bare-verb copy that contradicted this one). Kept TIGHT on purpose: bare
+# "noted, sir" / "got it" are valid terse capture-acks, NOT write claims.
+_WRITE_CLAIM_RE = WRITE_CLAIM_RE
 
 
 def _detect_write_claim(reply: str) -> str | None:

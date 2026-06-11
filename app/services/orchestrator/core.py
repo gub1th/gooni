@@ -14,7 +14,6 @@ from ..memory_extraction import extract_signals
 from ..memory_service import memory_service
 from ..trace_builder import TraceBuilder
 from .steps import (
-    _run_plan,
     _run_verify,
     _deterministic_unbacked_check,
     _strip_memory_anchors,
@@ -271,9 +270,6 @@ class Orchestrator:
             "soft_promises": [],
             "memory_count": 0,
         }
-        # Plan-gate input — set in the extract branch where both the raw
-        # signals dict and the routed result are in scope (see below).
-        _has_action_signals = False
         skip_normal_reply = False
 
         if not image_url and saved_message.strip():
@@ -317,24 +313,6 @@ class Orchestrator:
             routed = intent_router.dispatch({**signals, "memories": []}, ctx)
             feedback_tools.extend(routed.tools_used)
 
-            # Plan-gate input: did this turn carry actionable signals?
-            # Reads the raw extracted dict for signal types the router
-            # may dedup away (features/tones/promises/memories) and the
-            # routed result for the todo actions it executed — both are
-            # in scope only here. Drives _should_plan further down.
-            _has_action_signals = bool(
-                signals.get("feature_requests")
-                or signals.get("tone_corrections")
-                or memory_candidates
-                or signals.get("soft_promises")
-                or routed.captured_promises
-                or routed.captured_todos
-                or routed.killed_todos
-                or routed.completed_todos
-                or routed.merged_todos
-                or routed.failed_todo_actions
-            )
-
             # Stamp the user message as feedback when either a tone
             # correction OR a feature request fired AND we have a
             # prior assistant turn to attribute the correction to.
@@ -371,8 +349,12 @@ class Orchestrator:
                 # ("on it, sir. 450 now."). Daniel called this double-
                 # narration 2026-05-22 on the "do 450" turn. The fix:
                 # the ack stub IS the reply. Only fires when the
-                # extractor didn't already pick task_only.
-                if not skip_normal_reply:
+                # extractor didn't already pick task_only — and NEVER
+                # when it explicitly classified the turn as "answer"
+                # (the word-count heuristic alone ate real questions
+                # like "wait why'd you close that": 5 words, starts
+                # "wait", no question mark — audit 2026-06-10).
+                if not skip_normal_reply and routed.reply_intent != "answer":
                     msg_text = (message or "").strip()
                     word_count = len(msg_text.split())
                     has_question = "?" in msg_text
@@ -456,7 +438,6 @@ class Orchestrator:
             conv=conv,
             recent_history=recent_history,
             routed=routed,
-            has_action_signals=_has_action_signals,
             entry_content=entry_content,
             event_cb=event_cb,
             tb=tb,
@@ -645,7 +626,6 @@ class Orchestrator:
         conv,
         recent_history: list[dict],
         routed,
-        has_action_signals: bool,
         entry_content: str,
         event_cb,
         tb,
@@ -656,10 +636,10 @@ class Orchestrator:
         Returns (static_context, dynamic_context):
         - static_context = byte-stable identity (PERSONA + OBJECT_KINDS) for
           the cached prompt prefix (see B1 in prompts.system_prompt).
-        - dynamic_context = the volatile per-turn blocks (memory, plan, bot
+        - dynamic_context = the volatile per-turn blocks (memory, bot
           delivery mechanics, state, note, focus) — never cacheable.
 
-        Records the memory-recall, plan, and master-prompt trace steps.
+        Records the memory-recall and master-prompt trace steps.
         """
         self._emit_stage(event_cb, "memory_recall", "Pulling related memories")
         memory_context, recalled_memories = memory_service.build_memory_context_with_debug(query, db=db)
@@ -746,42 +726,13 @@ class Orchestrator:
             except Exception as e:
                 print(f"[time_block] build failed: {e}")
 
-        # ── ReAct PLAN step ────────────────────────────────────────────
-        # Pre-reply LLM call that emits explicit goal + minimum_action +
-        # intended_tools, injected back into the chat prompt so the model
-        # follows a derived plan instead of ad-hoc reasoning.
-        #
-        # GATING: skip plan on short non-actionable turns. Empirically the
-        # plan over-anchors short eval cases (Daniel's eval ladder dipped
-        # v6→v7 because plan_block was firing on 1-line "what's the diff
-        # between X and Y" turns and producing a "Goal: explain X vs Y"
-        # that ate context without value). Only fire when the turn is
-        # multi-part OR carries actionable extracted signals.
-        plan_block = ""
-        _should_plan = (
-            len(message) > 80
-            or has_action_signals
-        )
-        if _should_plan:
-            try:
-                from ...tools import registry as _tools_registry
-                _tool_names = [t.name for t in _tools_registry]
-                # Plan seed was the intention_block (dropped in B3) — plan now
-                # derives goal/action straight from the message + tool list.
-                _plan = _run_plan(message, "", _tool_names)
-                if _plan:
-                    tb.step("plan", _plan.get("goal") or "(plan)", meta=_plan)
-                    _goal = _plan.get("goal") or ""
-                    _action = _plan.get("minimum_action") or ""
-                    if _goal or _action:
-                        plan_block = (
-                            "YOUR PLAN THIS TURN (self-derived — follow it, "
-                            "don't echo it back):\n"
-                            + (f"- Goal: {_goal}\n" if _goal else "")
-                            + (f"- Action: {_action}" if _action else "")
-                        )
-            except Exception as e:
-                print(f"[plan_block] failed: {e}")
+        # ReAct PLAN step REMOVED (audit 2026-06-10). It was a serial
+        # gpt-4o-mini call whose state_summary arg was hardcoded "" — the
+        # planner saw only the message + tool names and emitted a 2-line
+        # goal/action the main model derives itself. It already hurt the
+        # eval ladder once (v6→v7 dip) and cost ~0.5-1s per qualifying
+        # turn. If planning ever returns, it belongs inside the main
+        # call's reasoning, not a pre-call.
 
         # Conv-level rollup of recent self-reflections — one compressed
         # paragraph of recurring failure modes in THIS conversation. Built
@@ -810,7 +761,7 @@ class Orchestrator:
         #   timestamp) via system_prompt(static_context=...). Previously these
         #   rode in the volatile context AFTER the timestamp and were re-billed
         #   full price each turn.
-        # dynamic_context = everything per-turn (plan, bot mechanics, state,
+        # dynamic_context = everything per-turn (bot mechanics, state,
         #   memory, note, focus). Never cacheable — kept in the tail.
         #
         # B4 NOTE: PERSONA + MASTER RULES (prompts._STATIC_SYSTEM_BLOCK) now
@@ -823,7 +774,6 @@ class Orchestrator:
             OBJECT_KINDS_BLOCK,
         ]))
         dynamic_context = "\n\n".join(filter(None, [
-            plan_block,
             cadence_block,
             time_block,
             state_block,
