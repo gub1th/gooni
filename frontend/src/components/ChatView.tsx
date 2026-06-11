@@ -91,7 +91,7 @@ function StreamingProgress({
 }
 
 export function ChatView() {
-  const { activeId, messages, sending, pendingIntention, streamingStage, streamingTools, send } = useConversationsStore();
+  const { activeId, messages, sending, streamingStage, streamingTools, send } = useConversationsStore();
   const [input, setInput] = useState("");
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -159,24 +159,6 @@ export function ChatView() {
         {messages.map(m => <MessageBubble key={m.id} message={m} />)}
         {sending && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-            {pendingIntention && (
-              <div style={{ marginBottom: 6, maxWidth: "80%" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, color: ctok.faint, fontSize: 12, fontFamily: FONT, marginBottom: 4 }}>
-                  <span>Assessed your intention</span>
-                  <span style={{ fontSize: 10 }}>▾</span>
-                </div>
-                <div style={{ padding: "8px 10px", borderRadius: 8, background: "rgba(0,0,0,0.03)", border: "1px solid var(--gooni-border, rgba(0,0,0,0.07))", fontFamily: FONT }}>
-                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
-                    <span style={{ color: ctok.faint, fontSize: 13, marginTop: 1 }}>⊙</span>
-                    <span style={{ fontSize: 12.5, color: "var(--gooni-muted, #636366)", lineHeight: 1.5 }}>{pendingIntention}</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ color: "#34C759", fontSize: 13 }}>✓</span>
-                    <span style={{ fontSize: 12, color: ctok.faint }}>Done</span>
-                  </div>
-                </div>
-              </div>
-            )}
             <StreamingProgress stage={streamingStage} tools={streamingTools} />
             {!streamingStage && streamingTools.length === 0 && <ThinkingIndicator />}
           </div>

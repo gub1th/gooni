@@ -24,11 +24,42 @@ from ..services import whoop
 router = APIRouter()
 
 
+def _process_imessage_message(handle: str, text: str) -> None:
+    """Run the inbound iMessage through the orchestrator + send replies.
+
+    Spawned via BackgroundTasks (mirrors _process_wa_message below): a chat
+    turn takes 30s+, and running it inline in the async route — plus the
+    bare time.sleep between bubbles — froze the entire event loop including
+    /healthz (audit 2026-06-10; latent until BlueBubbles goes live). Owns
+    its own SessionLocal — the request-scoped session is gone by the time
+    this runs.
+    """
+    bg_db = SessionLocal()
+    try:
+        result = dispatch_inbound(imessage_channel, handle, text, bg_db)
+        if result is None:
+            return  # not allowlisted; silent drop
+        _raw, segments = result
+        # Multi-bubble cadence: each segment goes out as its own iMessage
+        # with a short delay so the reply feels like texting, not bot dump.
+        for idx, segment in enumerate(segments):
+            if idx > 0:
+                time.sleep(0.6)
+            try:
+                imessage_channel.send(handle, segment)
+            except Exception as e:
+                print(f"[imessage] send failed for {handle}: {e}")
+    except Exception as e:
+        print(f"[imessage] orchestrator failed for {handle}: {e}")
+    finally:
+        bg_db.close()
+
+
 @router.post("/webhooks/imessage")
 async def imessage_webhook(
     payload: dict,
+    background_tasks: BackgroundTasks,
     x_secret: str | None = Header(None, alias="X-Secret"),
-    db: Session = Depends(get_db),
 ):
     """Receive a BlueBubbles 'new-message' event, route it through the
     orchestrator, and POST a reply back via BlueBubbles. Auth: shared-secret
@@ -54,17 +85,8 @@ async def imessage_webhook(
     if not handle or not text:
         return {"ok": True, "skipped": "missing handle or text"}
 
-    result = dispatch_inbound(imessage_channel, handle, text, db)
-    if result is None:
-        return {"ok": True, "skipped": "not_allowlisted"}
-    _raw, segments = result
-    # Multi-bubble cadence: each segment goes out as its own iMessage with a
-    # short delay so the reply feels like texting, not bot dump.
-    for idx, segment in enumerate(segments):
-        if idx > 0:
-            time.sleep(0.6)
-        imessage_channel.send(handle, segment)
-    return {"ok": True}
+    background_tasks.add_task(_process_imessage_message, handle, text)
+    return {"ok": True, "queued": True}
 
 
 @router.get("/webhooks/whatsapp")

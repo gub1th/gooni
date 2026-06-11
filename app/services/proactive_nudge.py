@@ -52,15 +52,18 @@ def _wa_recipient() -> str | None:
 
 
 def _send_wa(text: str) -> bool:
-    """Format + send via WhatsApp. Returns True on success."""
+    """Format + send via WhatsApp. Returns True only on CONFIRMED delivery
+    acceptance — channel.send now propagates the Cloud API result, so a
+    4xx/network failure no longer counts as success (it used to: the
+    client swallowed errors, this returned True, and callers stamped
+    their idempotency tokens for pings that never went out)."""
     recipient = _wa_recipient()
     if not recipient:
         print("[proactive_nudge] no WhatsApp recipient configured — skipped")
         return False
     try:
         formatted = whatsapp_channel.format_outbound(text)
-        whatsapp_channel.send(recipient, formatted)
-        return True
+        return bool(whatsapp_channel.send(recipient, formatted))
     except Exception as e:
         print(f"[proactive_nudge] WhatsApp send failed: {e}")
         return False

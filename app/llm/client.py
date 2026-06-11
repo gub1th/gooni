@@ -2,7 +2,7 @@ import hashlib
 import json
 import os
 from datetime import datetime
-from typing import List, Dict
+from typing import List
 
 from openai import OpenAI
 
@@ -11,7 +11,6 @@ from ..tools import tool_map
 from .openai_pricing import UsageTracker, calculate_embedding_cost
 from .prompts import (
     TITLE_GENERATION_PROMPT,
-    INTENTION_GENERATION_PROMPT,
     system_prompt,
     vision_prompt,
 )
@@ -414,22 +413,5 @@ class LLMClient:
         except Exception as e:
             print(f"Completion error: {e}")
             return ""
-
-    def generate_intention_context(self, query: str, recent_history: List[Dict[str, str]], model: str | None = None) -> str:
-        """Generate intention context for the given query and recent history."""
-        try:
-            response = self.client.chat.completions.create(
-                model=model or self.chat_model,
-                messages=[{"role": "system", "content": INTENTION_GENERATION_PROMPT}] + recent_history + [
-                    {"role": "user", "content": query},
-                ],
-                temperature=0.3,
-                max_completion_tokens=150,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"Intention generation error: {e}")
-            return ""
-
 
 llm_client = LLMClient()

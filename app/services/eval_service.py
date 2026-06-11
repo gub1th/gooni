@@ -913,15 +913,6 @@ TOOL_LEGEND: list[dict] = [
         ),
     },
     {
-        "key": "intention",
-        "name": "Intent inference",
-        "description": (
-            "LLM call to summarize Daniel's current intent given the latest "
-            "message + last 6 messages. Result is injected into the master prompt "
-            "so the reply LLM knows what Daniel is trying to do."
-        ),
-    },
-    {
         "key": "extracted_signals",
         "name": "Unified signal extraction",
         "description": (

@@ -449,11 +449,6 @@ def _build_ack(routed: "RouterResult") -> str | None:
     return " · ".join(parts)
 
 
-# Back-compat alias. _build_jarvis_ack name retained for any external imports;
-# the alfred-voice rewrite happens in _build_ack above.
-_build_jarvis_ack = _build_ack
-
-
 def _build_state_block(db) -> str:
     """Snapshot of Daniel's actionable state, injected into the master
     prompt for bot channels. Fixes the segment-#209 failure mode where
