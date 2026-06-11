@@ -117,6 +117,14 @@ class AddNoteTool(BaseTool):
         db.add(note)
         db.commit()
         db.refresh(note)
+        # Embed immediately — the HTTP save path schedules this as a
+        # background task, but this tool bypasses that route entirely.
+        # Without it, notes Gooni creates are invisible to its own
+        # search_notes cosine pass ("save a note about X" → "what did I
+        # say about X" missed). update_embedding opens its own session
+        # and swallows failures.
+        from ..services.note_service import note_service
+        note_service.update_embedding(note.id)
         return f"Created note #{note.id}: {note.title or '(untitled)'} in {space_name or 'General'}."
 
 

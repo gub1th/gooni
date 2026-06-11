@@ -83,11 +83,13 @@ _ANCHOR_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Conflict similarity threshold — same near-duplicate bar promise_service
-# uses for its own dedup, but here we only FLAG (we don't dedup; that's
-# already done elsewhere). The flag fires when the existing pending
-# promise wasn't quite close enough for dedup but still feels redundant.
-_CONFLICT_THRESHOLD = 0.85
+# Conflict similarity band — fires when an existing pending promise
+# wasn't close enough for promise_service's dedup (0.85, which returns
+# the existing row and never reaches this evaluator) but still feels
+# redundant. Must sit BELOW the dedup bar: at ==0.85 the band was
+# logically empty — anything that close was already deduped away
+# (audit 2026-06-10).
+_CONFLICT_THRESHOLD = 0.72
 
 # Track-record doubt threshold — number of past broken promises matching
 # this utterance pattern (≥ 0.80 cosine, computed in promise_service via
@@ -112,19 +114,31 @@ def _check_too_vague(text: str) -> bool:
     return True
 
 
-def _check_conflicts_active(db: Session, vec: list[float] | None) -> dict[str, Any] | None:
+def _check_conflicts_active(
+    db: Session,
+    vec: list[float] | None,
+    exclude_id: int | None = None,
+) -> dict[str, Any] | None:
     """Return {'id', 'summary', 'score'} of the best conflicting active
-    pending promise, or None. Skip silently when no vector available."""
+    pending promise, or None. Skip silently when no vector available.
+
+    exclude_id MUST be the just-created promise's own id — it's committed
+    before evaluate() runs, so without the exclusion every promise
+    cosine-matched ITSELF at 1.0 and the ack told Daniel each new promise
+    "overlaps an existing pending promise: <its own text>" (audit
+    2026-06-10)."""
     if not vec:
         return None
     from ..db.models import Promise
 
     import json
-    rows = (
+    q = (
         db.query(Promise.id, Promise.embedding, Promise.summary, Promise.utterance)
         .filter(Promise.state == "active", Promise.embedding.is_not(None))
-        .all()
     )
+    if exclude_id is not None:
+        q = q.filter(Promise.id != exclude_id)
+    rows = q.all()
     best: tuple[int, float, str] | None = None
     for pid, emb_json, summ, utter in rows:
         try:
@@ -161,6 +175,7 @@ def evaluate(
     summary: str | None,
     slip_count: int,
     vec: list[float] | None,
+    exclude_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Run all four checks. Return the evaluation payload — or None when
     nothing fires (silent pass-through). Caller surfaces the payload via
@@ -189,7 +204,7 @@ def evaluate(
     if _check_coupled_reward(text):
         flags.append("coupled_reward")
 
-    conflict = _check_conflicts_active(db, vec)
+    conflict = _check_conflicts_active(db, vec, exclude_id=exclude_id)
     if conflict is not None:
         flags.append("conflicts_active")
         details["conflict_id"] = conflict["id"]

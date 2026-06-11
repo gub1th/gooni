@@ -16,12 +16,11 @@ Reconcile is what makes memory self-clean. Without it, contradictory facts
 pile up forever and confidence numbers stop meaning anything.
 """
 
-from .extract import extract_candidates, extract_signals, reconcile_candidate
+from .extract import extract_signals, reconcile_candidate
 from .parsers import VALID_TYPES, _parse_json_object
 
 __all__ = [
     "VALID_TYPES",
-    "extract_candidates",
     "extract_signals",
     "reconcile_candidate",
     "_parse_json_object",

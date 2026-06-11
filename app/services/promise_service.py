@@ -207,6 +207,9 @@ def create(
             summary=p.summary,
             slip_count=p.slip_count or 0,
             vec=vec,
+            # p is already committed — without this every promise
+            # cosine-matches itself at 1.0 and flags conflicts_active.
+            exclude_id=p.id,
         )
         if verdict is not None:
             p._voice_of_reason = verdict

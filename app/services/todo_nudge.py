@@ -55,116 +55,17 @@ DEFAULT_PROMPT = (
 )
 
 
-def _today_bounds() -> tuple[datetime, datetime]:
-    now = datetime.now()
-    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return today, today + timedelta(days=1)
+def _today_bounds(db: Session) -> tuple[datetime, datetime]:
+    """Daniel's LOCAL day bounds, converted to naive UTC (storage
+    convention). The old naive datetime.now() ran on the server's UTC
+    clock — after ~5pm PT "today" was already tomorrow."""
+    from datetime import timezone
+    from ..common import local_now
 
-
-def gather_context(db: Session) -> dict[str, Any]:
-    """Pull the data the LLM needs to render a personalized digest.
-
-    Returns a dict with three todo buckets: overdue, due-today, and a small
-    slice of open-no-due-date todos so a digest still has material on a day
-    where nothing is explicitly scheduled (most of Daniel's todos carry no
-    due_date, so omitting this bucket left the nudge effectively empty).
-    Caller is responsible for deciding whether the context is empty enough
-    to skip the send entirely (see compose_message)."""
-    today, tomorrow = _today_bounds()
-
-    overdue = (
-        db.query(Todo)
-        .filter(
-            Todo.done.is_(False),
-            Todo.due_date.is_not(None),
-            Todo.due_date < today,
-            Todo.deleted_at.is_(None),
-        )
-        .order_by(Todo.due_date.asc(), Todo.sort_order.asc())
-        .all()
-    )
-    due_today = (
-        db.query(Todo)
-        .filter(
-            Todo.done.is_(False),
-            Todo.due_date.is_not(None),
-            Todo.due_date >= today,
-            Todo.due_date < tomorrow,
-            Todo.deleted_at.is_(None),
-        )
-        .order_by(Todo.sort_order.asc())
-        .all()
-    )
-
-    # Open todos with no due_date. Capped — surfacing 30+ items would dump
-    # the whole backlog into every digest. Primary-first so the singleton
-    # gets prioritized; ties broken by manual sort_order.
-    open_no_due = (
-        db.query(Todo)
-        .filter(
-            Todo.done.is_(False),
-            Todo.due_date.is_(None),
-            Todo.deleted_at.is_(None),
-        )
-        .order_by(Todo.is_primary.desc(), Todo.sort_order.asc(), Todo.id.asc())
-        .limit(_OPEN_TODO_CAP)
-        .all()
-    )
-
-    # Primary singleton, surfaced separately so the LLM can star it even
-    # when it's also in overdue / today / open buckets.
-    primary_todo = (
-        db.query(Todo)
-        .filter(
-            Todo.is_primary.is_(True),
-            Todo.done.is_(False),
-            Todo.deleted_at.is_(None),
-        )
-        .first()
-    )
-    return {
-        "overdue": [
-            {
-                "text": t.text,
-                "days_late": (
-                    today
-                    - t.due_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                ).days,
-            }
-            for t in overdue
-        ],
-        "today": [{"text": t.text} for t in due_today],
-        "open": [{"text": t.text} for t in open_no_due],
-        "primary_todo": primary_todo.text if primary_todo else None,
-    }
-
-
-def _has_anything(ctx: dict) -> bool:
-    return bool(ctx["overdue"] or ctx["today"] or ctx["open"])
-
-
-def _format_context_block(ctx: dict) -> str:
-    """Render the context dict into a plain-text block for the LLM. Same shape
-    every fire so Daniel's prompt can rely on the structure."""
-    lines: list[str] = []
-    if ctx["overdue"]:
-        lines.append("OVERDUE:")
-        for t in ctx["overdue"]:
-            tail = f" ({t['days_late']}d late)" if t["days_late"] > 0 else ""
-            lines.append(f"  - {t['text']}{tail}")
-    if ctx["today"]:
-        lines.append("DUE TODAY:")
-        for t in ctx["today"]:
-            lines.append(f"  - {t['text']}")
-    if ctx.get("primary_todo"):
-        lines.append(f"PRIMARY TODO: {ctx['primary_todo']}")
-    if ctx["open"]:
-        lines.append("OPEN (no due date):")
-        for t in ctx["open"]:
-            lines.append(f"  - {t['text']}")
-    if not lines:
-        lines.append("(nothing scheduled, no open todos)")
-    return "\n".join(lines)
+    local = local_now(db)
+    start_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+    return start, start + timedelta(days=1)
 
 
 def _pick_focus_item(db: Session) -> dict[str, Any] | None:
@@ -181,7 +82,7 @@ def _pick_focus_item(db: Session) -> dict[str, Any] | None:
     Returns a dict shaped {kind, ...item fields} or None when nothing
     qualifies (truly quiet day → skip the send).
     """
-    today, tomorrow = _today_bounds()
+    today, tomorrow = _today_bounds(db)
     cutoff_soon = tomorrow + timedelta(days=1)
 
     # Promise tier — sweep stale pending → broken before picking so a
