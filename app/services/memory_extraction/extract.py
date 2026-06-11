@@ -1,7 +1,7 @@
 """LLM orchestration for memory extraction + reconciliation.
 
 Ties prompts + parsers + normalizers together. Public entry points:
-extract_candidates, extract_signals, reconcile_candidate.
+extract_signals, reconcile_candidate.
 """
 
 import json
@@ -10,8 +10,8 @@ from datetime import date as _date
 from typing import Any
 
 from ...llm.client import llm_client
-from .prompts import _EXTRACTION_PROMPT, _RECONCILE_PROMPT, _SIGNALS_PROMPT
-from .parsers import _parse_json_array, _parse_json_object, _validate_candidate
+from .prompts import _RECONCILE_PROMPT, _SIGNALS_PROMPT
+from .parsers import _parse_json_object
 from .normalizers import (
     _normalize_done_signals,
     _normalize_features,
@@ -22,24 +22,6 @@ from .normalizers import (
     _normalize_todos,
     _normalize_tone,
 )
-
-
-def extract_candidates(user_message: str, assistant_reply: str) -> list[dict[str, Any]]:
-    """Run the extraction LLM call. Returns validated list of candidate dicts.
-    Empty list on parse failure or no signal — never raises.
-
-    Kept for backwards compatibility; prefer `extract_signals` which also
-    surfaces tone corrections and feature requests in the same call.
-    """
-    if not user_message or not user_message.strip():
-        return []
-    prompt = _EXTRACTION_PROMPT.format(
-        user=user_message[:1500],
-        assistant=(assistant_reply or "")[:1500],
-    )
-    raw = llm_client.generate_simple_completion(prompt, max_tokens=600, model="gpt-5.4-mini")
-    parsed = _parse_json_array(raw)
-    return [c for c in parsed if _validate_candidate(c)]
 
 
 # Regex pre-filter for extract_signals. If the text has NONE of these
@@ -150,7 +132,11 @@ def extract_signals(
         today=today_d.isoformat(),
     )
     try:
-        raw = llm_client.generate_simple_completion(prompt, max_tokens=500, temperature=0.0, model="gpt-5.4-mini")
+        # max_tokens is a CAP, not a spend — but at 500 a multi-signal burst
+        # ("did gym, 2100 cal, close X, imma Y, also my brother moved")
+        # truncated the JSON mid-array → parse fail → ALL signals silently
+        # dropped (audit 2026-06-10). 1500 covers the 8-array schema.
+        raw = llm_client.generate_simple_completion(prompt, max_tokens=1500, temperature=0.0, model="gpt-5.4-mini")
     except Exception as e:
         print(f"extract_signals LLM error: {e}")
         return empty

@@ -52,8 +52,15 @@ _DUE_HINTS = {
 }
 
 
-def _parse_due(hint):
-    """Resolve a due-hint phrase to a concrete datetime (UTC, EOD-anchored).
+def _parse_due(hint, db=None):
+    """Resolve a due-hint phrase to a concrete datetime (stored naive UTC,
+    EOD-anchored in Daniel's LOCAL day).
+
+    Anchoring is LOCAL (Settings.nudge_tz via common.local_now), then
+    converted to the storage convention (naive UTC). The old utcnow()
+    anchor made "tonight" at 6pm PT resolve to 23:59 *UTC* — 4:59pm PT
+    the NEXT day (audit 2026-06-10). When db is None (shouldn't happen
+    from real callers) we degrade to the old UTC behavior.
 
     Two-tier strategy:
       1. Regex map (_DUE_HINTS) handles the canonical phrases the LLM
@@ -71,19 +78,38 @@ def _parse_due(hint):
         return None
     h = hint.strip().lower()
     rule = _DUE_HINTS.get(h)
-    now = datetime.utcnow()
+
+    from datetime import timezone as _tz
+    tzinfo = None
+    if db is not None:
+        from ...common import local_now
+        now = local_now(db)
+        tzinfo = now.tzinfo
+    else:
+        now = datetime.utcnow()
+
+    def _to_storage(dt):
+        # tz-aware local → naive UTC (storage convention). Naive passes
+        # through (degraded no-db path).
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(_tz.utc).replace(tzinfo=None)
+
     if rule:
         kind, arg = rule
         if kind == "today_eod":
-            return now.replace(hour=23, minute=59, second=0, microsecond=0)
+            return _to_storage(now.replace(hour=23, minute=59, second=0, microsecond=0))
         if kind == "plus_days" and isinstance(arg, int):
-            return (now + timedelta(days=arg)).replace(
-                hour=23, minute=59, second=0, microsecond=0
+            return _to_storage(
+                (now + timedelta(days=arg)).replace(
+                    hour=23, minute=59, second=0, microsecond=0
+                )
             )
 
     # Regex map missed — try dateparser. PREFER_DATES_FROM='future' so
-    # "friday" resolves to the NEXT friday, not last. RETURN_AS_TIMEZONE_AWARE
-    # off because the rest of the codebase stores naive UTC.
+    # "friday" resolves to the NEXT friday, not last. RELATIVE_BASE anchors
+    # relative phrases to Daniel's local clock; result is interpreted as
+    # local then converted to naive UTC for storage.
     try:
         import dateparser
         parsed = dateparser.parse(
@@ -91,6 +117,7 @@ def _parse_due(hint):
             settings={
                 "PREFER_DATES_FROM": "future",
                 "RETURN_AS_TIMEZONE_AWARE": False,
+                "RELATIVE_BASE": now.replace(tzinfo=None),
             },
         )
         if parsed is not None:
@@ -98,30 +125,12 @@ def _parse_due(hint):
             # todos due "next friday" don't expire at 00:00.
             if parsed.hour == 0 and parsed.minute == 0:
                 parsed = parsed.replace(hour=23, minute=59, second=0, microsecond=0)
-            return parsed
+            if tzinfo is not None:
+                parsed = parsed.replace(tzinfo=tzinfo)
+            return _to_storage(parsed)
     except Exception as e:
         print(f"[todos handler] dateparser failed on '{h}': {e}")
     return None
-
-
-def _find_open_duplicate(sess, vec, todo_service):
-    """Cosine-match candidate against open todos for CREATE-side dedup.
-    Returns (Todo, score) or (None, 0.0). Tuple-walks to avoid hydrating
-    every open todo row."""
-    from ..list_service import _cosine, list_service
-
-    open_todos = todo_service.list_open(sess)
-    best = None
-    best_score = 0.0
-    for t in open_todos:
-        emb = list_service._embed_item_text(t.text)
-        if not emb:
-            continue
-        score = _cosine(vec, emb)
-        if score >= DEDUP_THRESHOLD and score > best_score:
-            best = t
-            best_score = score
-    return best, best_score
 
 
 def _cosine_top_open(db, query_text: str, floor: float):
@@ -339,7 +348,7 @@ def _handle_edit(it, ctx, result, todo_service) -> None:
         update_kwargs["subtitle"] = patch["subtitle"]
         changes.append("subtitle set")
     if "due_hint" in patch:
-        new_due = _parse_due(patch["due_hint"])
+        new_due = _parse_due(patch["due_hint"], db=ctx.db)
         if new_due is not None:
             update_kwargs["due_date"] = new_due
             changes.append(f"due → {patch['due_hint']}")
@@ -480,7 +489,7 @@ def _unlink_parent(db, child_id: int) -> None:
     Edge model: child IS the src, parent IS the dst. Removes ALL parent
     edges — Daniel can re-link a specific parent in a follow-up turn.
     """
-    from ..db.models import Edge
+    from ...db.models import Edge
     db.query(Edge).filter(
         Edge.src_kind == "todo",
         Edge.src_id == child_id,
@@ -500,8 +509,6 @@ def _apply_position(db, todo_service, todo_id: int, position: str) -> bool:
                          then renormalize to ints
       "below:<match>" → same w/ +0.5
     """
-    from ..db.models import Todo
-
     pos = (position or "").strip().lower()
     if not pos:
         return False
@@ -546,7 +553,7 @@ def _renormalize_sort_orders(db, todo_service) -> None:
     their current ordering. Runs after any fractional-position write so
     sort_order stays well-behaved long-term.
     """
-    from ..db.models import Todo
+    from ...db.models import Todo
     rows = (
         db.query(Todo)
         .filter(Todo.done.is_(False), Todo.deleted_at.is_(None))
@@ -563,7 +570,7 @@ def _handle_create(it, ctx, result, todo_service) -> None:
     text = (it.get("text") or "").strip()
     if not text:
         return
-    due_at = _parse_due(it.get("due_hint"))
+    due_at = _parse_due(it.get("due_hint"), db=ctx.db)
 
     # G3: dedup + mention-bump moved into todo_service.create itself. When
     # the new text cosine-matches an open todo at ≥0.85, the service bumps

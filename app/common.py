@@ -4,6 +4,7 @@ App-level (same dir as main.py): relative imports stay at main.py depth.
 """
 import hashlib
 import os
+import re
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -12,6 +13,24 @@ from .db.models import Visit
 
 
 _AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "").strip()
+
+
+# Durable-write claim verbs — the SINGLE source of truth shared by the
+# verify rail (orchestrator/steps.py) and reflexion's hallucination
+# cross-ref. Verb+object shape on purpose: bare "noted, sir" / "got it"
+# are valid terse capture-acks the persona mandates, NOT write claims.
+# History: steps.py carried a bare-verb copy that contradicted this one
+# and force-regenerated clean persona acks (audit 2026-06-10).
+WRITE_CLAIM_RE = re.compile(
+    r"\b("
+    r"tracked|logged|saved|recorded|stored|"
+    r"added (?:it|that|this|a|the|to)|"
+    r"created (?:a |the )?(?:todo|task|promise|note|reminder|focus)|"
+    r"marked \w+ (?:done|complete|completed)|"
+    r"set (?:a |the )?reminder"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 def _expected_token() -> str:
@@ -31,13 +50,12 @@ def _parse_iso_date(s: str | None):
         return None
 
 
-def local_today(db: Session):
-    """Today in Daniel's configured TZ (Settings.nudge_tz, default
-    America/Los_Angeles) — the canonical "what day is it for the user"
-    helper. NEVER use `date.today()` for user-facing calendar days: the
-    server runs UTC (Fly), so after ~5pm PT the UTC date has already
-    rolled to tomorrow and a log/lookup keyed to it lands on the wrong day.
-    """
+def local_now(db: Session):
+    """Timezone-aware "now" in Daniel's configured TZ (Settings.nudge_tz,
+    default America/Los_Angeles). Use for any user-facing clock math
+    (due-date anchoring, day bounds). Convert to storage convention with
+    `.astimezone(timezone.utc).replace(tzinfo=None)` — the DB stores
+    naive UTC."""
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo
     from .db.models import Settings as _Settings
@@ -47,7 +65,17 @@ def local_today(db: Session):
         tz = ZoneInfo(tz_name)
     except Exception:
         tz = ZoneInfo("America/Los_Angeles")
-    return _dt.now(tz).date()
+    return _dt.now(tz)
+
+
+def local_today(db: Session):
+    """Today in Daniel's configured TZ (Settings.nudge_tz, default
+    America/Los_Angeles) — the canonical "what day is it for the user"
+    helper. NEVER use `date.today()` for user-facing calendar days: the
+    server runs UTC (Fly), so after ~5pm PT the UTC date has already
+    rolled to tomorrow and a log/lookup keyed to it lands on the wrong day.
+    """
+    return local_now(db).date()
 
 
 def _parse_optional_due(raw):

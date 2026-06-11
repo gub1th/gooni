@@ -1,7 +1,9 @@
 """Local SQL-backed memory store. Replaces the Mem0 hosted service.
 
 Pipeline per chat exchange:
-  1. extract_candidates  (LLM)  — pull typed memory dicts from the turn
+  1. extract_signals (LLM, one call upstream) — emits memory candidates
+     alongside the other signal types; orchestrator feeds them here via
+     apply_memory_candidates
   2. for each candidate:
        cosine-search similar active memories of the same type
        reconcile_candidate (LLM) — decide ADD / UPDATE / DELETE / NONE
@@ -23,7 +25,6 @@ from sqlalchemy.orm import Session
 from ..db.database import SessionLocal
 from ..db.models import Memory
 from ..llm.client import llm_client
-from .memory_extraction import extract_candidates
 from .note_service import _cosine_similarity
 
 # Strip FTS5 operators before passing user input to MATCH. Same shape as
@@ -36,9 +37,13 @@ _FTS_MEMORY_STRIP = re.compile(r"[\"\'()+*\-:\\^~]")
 FTS_EXTRA_TOP_K = 3
 
 
-# Below this length, an exchange is too short to carry a memorable signal
-# ("ok", "got it"). Skips the extraction LLM call entirely.
-MIN_EXCHANGE_LEN = 30
+# READ-side gate: minimum query length worth embedding for retrieval.
+# Deliberately tiny — most bot recall queries are short ("what do i owe",
+# "wheres my tax note"). The old MIN_EXCHANGE_LEN=30 write-side constant
+# used to gate this path too, which blinded fact/episode retrieval on
+# exactly the recall-shaped queries it exists for (audit 2026-06-10;
+# the write-side gate died with add_exchange).
+MIN_QUERY_LEN = 4
 
 # Cosine cutoff for "similar enough to be a candidate for reconcile". Lower
 # than the dedup threshold (0.85) used previously, since reconcile needs to
@@ -356,40 +361,6 @@ class MemoryService:
 
     # ── public interface ────────────────────────────────────────────────────
 
-    def add_exchange(
-        self,
-        user_message: str,
-        assistant_reply: str,
-        db: Session | None = None,
-    ) -> None:
-        """Extract → reconcile → apply for a single chat turn. Failures are
-        logged but never raised, since this runs after the response is sent.
-
-        Legacy path. The orchestrator now uses the unified `extract_signals`
-        and feeds candidates into `apply_memory_candidates` directly so we
-        don't run two LLM extractions per turn. Kept for any callers that
-        still want the old extract+apply convenience.
-        """
-        if not user_message or len(user_message.strip()) < MIN_EXCHANGE_LEN:
-            return
-        from .intent_handlers.memories import _reconcile_one
-
-        sess, owns = self._scoped(db)
-        try:
-            candidates = extract_candidates(user_message, assistant_reply)
-            for c in candidates:
-                try:
-                    _reconcile_one(sess, c)
-                except Exception as e:
-                    print(f"add_exchange per-candidate error: {e}")
-            if candidates:
-                self._has_memories_cache = True
-        except Exception as e:
-            print(f"memory add_exchange error: {e}")
-        finally:
-            if owns:
-                sess.close()
-
     def apply_memory_candidates(
         self,
         candidates: list[dict],
@@ -439,8 +410,9 @@ class MemoryService:
     ) -> Memory | None:
         """Persist a tone-correction rule from chat feedback.
 
-        Goes through the same reconcile path as `add_exchange` so a repeated
-        rule supersedes the older row instead of stacking. Stored as
+        Goes through the same per-candidate reconcile path as
+        `apply_memory_candidates` so a repeated rule supersedes the older
+        row instead of stacking. Stored as
         type='preference' so it's always injected into the system prompt by
         `build_memory_context`.
 
@@ -576,7 +548,7 @@ class MemoryService:
             fts_only_ids: set[int] = (
                 set()
             )  # debug: which rows came in via FTS, not cosine
-            if query and len(query.strip()) >= MIN_EXCHANGE_LEN:
+            if query and len(query.strip()) >= MIN_QUERY_LEN:
                 query_vec = self._embed(query)
                 if query_vec:
                     for mem_type, cfg in RETRIEVAL_PER_TYPE.items():

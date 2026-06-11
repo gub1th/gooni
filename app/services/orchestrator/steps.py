@@ -1,79 +1,9 @@
 import json
 import re
 
+from ...common import WRITE_CLAIM_RE
 from ...db.models import ToolCall as ToolCallModel
 from ...llm.client import llm_client
-
-
-_PLAN_PROMPT = """You are Gooni's pre-action planner. Read the user's message + state and decide what should happen this turn.
-
-USER MESSAGE: {user_msg}
-
-YOUR CURRENT STATE:
-{state}
-
-CHAT-SURFACE TOOLS AVAILABLE: {tools_list}
-
-ROUTER SIGNALS (auto-extracted upstream BEFORE the chat model runs — these
-fire whether or not the chat model calls a tool):
-  router:promise, router:todo, router:feature_request, router:tone_correction
-
-Return strict JSON. No prose, no markdown fence.
-
-{{
-  "goal": "<one short sentence — what does Daniel actually want this turn>",
-  "intended_tools": ["tool_name", ...] or [],
-  "minimum_action": "<one sentence — smallest sufficient response>",
-  "reasoning": "<one sentence — why this plan>"
-}}
-
-Rules:
-- Venting / thinking-aloud / vague intent → intended_tools=[], minimum_action="terse empathic response, push back if commitment is fuzzy"
-- Commitment statements ("i won't smoke for a week" / "imma X tonight") → router:promise fires upstream; chat reply acknowledges, optional add_focus if arc
-- "remember/track Y" → save_memory or appropriate persistent tool
-- "what did I commit to / show my X" → READ tool (show_list, list_todos, list_focuses, search_notes)
-- Recurring-reminder asks ("remind me daily") → request_feature (capability gap)
-- Don't propose tools not in TOOLS AVAILABLE
-- Plan is allowed to be empty if no action is required."""
-
-
-def _run_plan(
-    user_msg: str,
-    state_summary: str,
-    tools_list: list[str],
-) -> dict | None:
-    """Pre-reply plan step. Returns parsed dict or None on failure.
-    Single gpt-4o-mini call (~$0.0001). Fail-open."""
-    if not user_msg:
-        return None
-    try:
-        prompt = _PLAN_PROMPT.format(
-            user_msg=user_msg[:600],
-            state=state_summary[:500] or "(no state)",
-            tools_list=", ".join(tools_list[:50]),
-        )
-        raw = llm_client.generate_simple_completion(
-            prompt, max_tokens=300, temperature=0.0, model="gpt-4o-mini",
-        )
-        s = (raw or "").strip()
-        if s.startswith("```"):
-            s = re.sub(r"^```(?:json)?\s*", "", s).rstrip("`").rstrip()
-        parsed = json.loads(s)
-        if not isinstance(parsed, dict):
-            return None
-        return {
-            "goal": str(parsed.get("goal") or "").strip()[:200],
-            "intended_tools": [
-                str(t).strip()
-                for t in (parsed.get("intended_tools") or [])
-                if isinstance(t, str)
-            ][:8],
-            "minimum_action": str(parsed.get("minimum_action") or "").strip()[:240],
-            "reasoning": str(parsed.get("reasoning") or "").strip()[:200],
-        }
-    except Exception as e:
-        print(f"[plan] failed: {e}")
-        return None
 
 
 _VERIFY_PROMPT = """Compare this assistant reply against the actual tool audit. Did the reply make a CONCRETE state-changing claim that the audit doesn't back?
@@ -112,29 +42,25 @@ Rules — be CONSERVATIVE (default ok=true):
 """
 
 
-# Verbs the LLM uses to claim a persisted side-effect. If any of these
-# appear in a draft reply on a turn where nothing was actually persisted
-# (no captured_* router writes, no state-changing chat tool call), the
-# claim is unbacked — force a regen. Deterministic backstop for the LLM
-# verifier, which has historically missed the "tracked"-class lie
-# (conv #1136-1137: "do a little leetcode" tracked with no audit).
-_UNBACKED_CLAIM_RE = re.compile(
-    r"\b(tracked|logged|saved|added|noted|created|recorded)\b",
-    re.IGNORECASE,
-)
+# Write-claim detector shared with reflexion (single source of truth in
+# app/common.py). Verb+object shape on purpose: bare "noted, sir" is the
+# persona's mandated capture-ack, NOT a write claim — the old bare-verb
+# pattern here tripped the regen rail on exactly the vocabulary PERSONA
+# requires, while reflexion's copy deliberately excluded it. One regex,
+# one opinion.
+_UNBACKED_CLAIM_RE = WRITE_CLAIM_RE
 
-# Read-only tools whose presence in the audit doesn't justify a
-# "tracked/saved" claim. Used by the deterministic precheck.
+# Read-only CHAT-registry tools whose presence in the audit doesn't justify
+# a "tracked/saved" claim. Must track app/tools/__init__.py registry names —
+# the previous set was copied from the MCP surface (~15 nonexistent names,
+# 7 real read tools missing), which let read-only turns pass as writes.
 _READ_ONLY_TOOLS = {
-    "list_todos", "list_focuses", "list_promises", "list_habits",
-    "list_recent_notes", "list_recent_commits", "list_recent_backlog",
-    "read_note", "read_todos", "read_focus", "read_list",
-    "find_note", "search_notes", "search_memories",
-    "find_similar_items", "find_similar_backlog",
+    "list_todos", "list_focuses", "list_recent_notes",
+    "show_my_plate", "show_chain", "show_due_window", "show_list",
+    "read_note", "find_note", "search_notes",
+    "read_recent_commits", "read_recent_backlog",
     "web_search", "fetch_url",
-    "check_calendar_busy", "get_calendar_event", "list_calendar_events",
-    "get_context", "read_capability_facets",
-    "get_leetcode_activity", "list_comments", "list_focus_signals",
+    "check_calendar_busy", "list_upcoming_events",
 }
 
 def _deterministic_unbacked_check(

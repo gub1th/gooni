@@ -37,7 +37,11 @@ from typing import Any
 # v9 (audit 2026-05-31): dropped pre-gen intention call (B3), split system
 # prompt into cached static prefix + volatile tail (B1), temp 0.7→0.5 (C1),
 # verify gated on claim-regex + deterministic-first (B5). Segregate ratings.
-PROMPT_VERSION = "v9"
+# v10 (2026-06-10 P0 audit fixes): plan pre-call removed, verify rail regex
+# tightened to shared WRITE_CLAIM_RE, G4 gate respects reply_intent=answer,
+# master-rule #6 names real tools, add_to_list todo-misroute line fixed,
+# extract max_tokens 500→1500, MIN_QUERY_LEN read gate.
+PROMPT_VERSION = "v10"
 
 
 class TraceBuilder:
@@ -101,16 +105,6 @@ class TraceBuilder:
         })
 
     # ── Typed helpers ─────────────────────────────────────────────────────────
-    def intent(self, query: str, intention_text: str | None) -> None:
-        # Step key intentionally `intention` (not `intent`) so the existing
-        # MessageBubble TRACE_ICON map matches.
-        self.step(
-            "intention",
-            "Read intent" if intention_text else "(intent skipped)",
-            input={"query": query},
-            output=intention_text,
-        )
-
     def memory_recall(self, query: str, recalled: list[dict]) -> None:
         """`recalled` comes from memory_service.build_memory_context_with_debug —
         a list of {id, type, content, similarity, always_inject}. Stored

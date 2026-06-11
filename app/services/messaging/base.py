@@ -22,10 +22,13 @@ class MessagingChannel(ABC):
         """Render orchestrator markdown for this channel (HTML / plain / ...)."""
 
     @abstractmethod
-    def send(self, recipient: str, text: str) -> None:
+    def send(self, recipient: str, text: str) -> bool | None:
         """Push a message. Used for proactive sends (daily nudge, etc).
-        For inline replies, callers may bypass this and reply via the inbound
-        transport's native primitive (e.g. Telegram Update.reply_text)."""
+        Channels SHOULD return True/False for delivery success so callers
+        can gate idempotency stamps (WhatsApp does); legacy channels may
+        still return None. For inline replies, callers may bypass this and
+        reply via the inbound transport's native primitive (e.g. Telegram
+        Update.reply_text)."""
 
     @abstractmethod
     def is_allowed(self, sender_handle: str) -> bool:

@@ -65,13 +65,18 @@ class WhatsAppCloudClient:
     def configured(self) -> bool:
         return bool(self._pnid and self._token)
 
-    def send_text(self, recipient: str, text: str) -> None:
+    def send_text(self, recipient: str, text: str) -> bool:
+        """Return True only when Meta accepted the message. Failures used
+        to be swallowed (print + None), which made every caller's success
+        check pass — proactive nudges stamped their idempotency tokens on
+        messages Meta rejected and the layer could die silently (audit
+        2026-06-10)."""
         if not self.configured:
             print(
                 f"[whatsapp] cloud api not configured; would send to "
                 f"{recipient}: {text[:60]}"
             )
-            return
+            return False
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
@@ -88,8 +93,11 @@ class WhatsAppCloudClient:
             )
             if r.status_code >= 400:
                 print(f"[whatsapp] send failed {r.status_code}: {r.text[:200]}")
+                return False
+            return True
         except Exception as e:
             print(f"[whatsapp] send error: {e}")
+            return False
 
 
 class WhatsAppChannel(MessagingChannel):
@@ -107,8 +115,8 @@ class WhatsAppChannel(MessagingChannel):
             return False
         return _normalize_handle(sender_handle) in self._allowed
 
-    def send(self, recipient: str, text: str) -> None:
-        self._client.send_text(_normalize_handle(recipient), text)
+    def send(self, recipient: str, text: str) -> bool:
+        return self._client.send_text(_normalize_handle(recipient), text)
 
 
 def _build_default() -> WhatsAppChannel:

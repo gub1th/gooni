@@ -2172,26 +2172,6 @@ export async function testNudge(): Promise<NudgeTestResult> {
   return res.json();
 }
 
-// ── Gooni ─────────────────────────────────────────────────────────────────────
-
-export async function fetchIntention(
-  content: string,
-  conversationId?: number
-): Promise<{ intention: string }> {
-  try {
-    const res = await apiFetch(`${BASE}/chat/intention`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, conversation_id: conversationId }),
-    });
-    if (!res.ok) return { intention: "" };
-    return res.json();
-  } catch {
-    return { intention: "" };
-  }
-}
-
-
 // ── Eval loop ────────────────────────────────────────────────────────────────
 
 export type EvalSource = "web" | "telegram" | "whatsapp" | "imessage";

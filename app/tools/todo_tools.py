@@ -506,16 +506,27 @@ class ShowDueWindowTool(BaseTool):
     }
 
     def execute(self, db=None, range: str = "today", **kwargs) -> str:
-        from datetime import datetime, timedelta
+        from datetime import timedelta, timezone
+        from ..common import local_now
         from ..db.models import Todo
 
         if db is None:
             return "(no db session)"
-        now = datetime.utcnow()
-        today_eod = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        tomorrow_start = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        tomorrow_eod = tomorrow_start.replace(hour=23, minute=59, second=59)
-        week_eod = (now + timedelta(days=7)).replace(hour=23, minute=59, second=59, microsecond=0)
+        # Day bounds in Daniel's LOCAL tz, converted to naive UTC to match
+        # the storage convention. Plain utcnow() bounds made "due today"
+        # return tomorrow's todos after ~5pm PT (audit 2026-06-10).
+        local = local_now(db)
+
+        def _utc(dt):
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+        now = _utc(local)
+        today_eod = _utc(local.replace(hour=23, minute=59, second=59, microsecond=0))
+        today_start = _utc(local.replace(hour=0, minute=0, second=0, microsecond=0))
+        tomorrow_local = (local + timedelta(days=1))
+        tomorrow_start = _utc(tomorrow_local.replace(hour=0, minute=0, second=0, microsecond=0))
+        tomorrow_eod = _utc(tomorrow_local.replace(hour=23, minute=59, second=59, microsecond=0))
+        week_eod = _utc((local + timedelta(days=7)).replace(hour=23, minute=59, second=59, microsecond=0))
 
         q = db.query(Todo).filter(
             Todo.done.is_(False),
@@ -524,7 +535,7 @@ class ShowDueWindowTool(BaseTool):
         )
 
         if range == "today":
-            q = q.filter(Todo.due_date <= today_eod, Todo.due_date >= now.replace(hour=0, minute=0, second=0, microsecond=0))
+            q = q.filter(Todo.due_date <= today_eod, Todo.due_date >= today_start)
             label = "due today"
         elif range == "tomorrow":
             q = q.filter(Todo.due_date >= tomorrow_start, Todo.due_date <= tomorrow_eod)

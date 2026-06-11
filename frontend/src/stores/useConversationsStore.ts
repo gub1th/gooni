@@ -5,7 +5,6 @@ import {
   sendConversationMessage as apiSendMessage,
   sendConversationMessageStream as apiSendMessageStream,
   fetchConversationMessages as apiFetchMessages,
-  fetchIntention,
   type ApiConversation,
   type RouterSignals,
 } from "../services/api";
@@ -35,7 +34,6 @@ interface ConversationsStore {
   activeId: number | null;
   messages: ConversationMessage[];
   sending: boolean;
-  pendingIntention: string | null;
   // Streaming UI state — live during a turn, cleared on done. UI reads
   // these to render the "Gooni is …" stage label + in-flight tool cards.
   streamingStage: string | null;
@@ -52,7 +50,6 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
   activeId: null,
   messages: [],
   sending: false,
-  pendingIntention: null,
   streamingStage: null,
   streamingTools: [],
 
@@ -95,7 +92,6 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
     set((s) => ({
       messages: [...s.messages, optimistic],
       sending: true,
-      pendingIntention: null,
       streamingStage: null,
       streamingTools: [],
     }));
@@ -109,11 +105,6 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
         set({ activeId: convId });
       }
 
-      // Fire intention fetch immediately — don't await, just update state when it resolves
-      fetchIntention(content, convId).then(({ intention }) => {
-        if (intention && get().sending) set({ pendingIntention: intention });
-      });
-
       const model = useModelStore.getState().model;
 
       // Image path stays on the blocking endpoint — vision orchestrator
@@ -122,7 +113,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
       if (imageUrl) {
         const { messages: allMessages, intention: fallbackIntention, tools_used, signals } =
           await apiSendMessage(convId, content, noteContent, model, imageUrl);
-        const intentionToUse = get().pendingIntention || fallbackIntention || "";
+        const intentionToUse = fallbackIntention || "";
         const hasSignals = !!signals && (
           signals.tone_corrections.length > 0
           || signals.feature_requests.length > 0
@@ -140,7 +131,6 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
         set({
           messages: messagesWithMeta,
           sending: false,
-          pendingIntention: null,
           streamingStage: null,
           streamingTools: [],
         });
@@ -176,7 +166,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
             ),
           }));
         } else if (evt.type === "done") {
-          const intentionToUse = get().pendingIntention || evt.intention || "";
+          const intentionToUse = evt.intention || "";
           const hasSignals = !!evt.signals && (
             evt.signals.tone_corrections.length > 0
             || evt.signals.feature_requests.length > 0
@@ -194,7 +184,6 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
           set({
             messages: messagesWithMeta,
             sending: false,
-            pendingIntention: null,
             streamingStage: null,
             streamingTools: [],
           });
@@ -208,7 +197,7 @@ export const useConversationsStore = create<ConversationsStore>((set, get) => ({
       set({ conversations: convos });
     } catch (e) {
       console.error(e);
-      set({ sending: false, pendingIntention: null, streamingStage: null, streamingTools: [] });
+      set({ sending: false, streamingStage: null, streamingTools: [] });
     }
   },
 }));

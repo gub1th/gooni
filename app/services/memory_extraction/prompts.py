@@ -4,69 +4,6 @@ Pure string data — split out of the package body so the extraction logic
 isn't buried under a ~430-line _SIGNALS_PROMPT literal.
 """
 
-_EXTRACTION_PROMPT = """Extract structured user-profile updates from this chat exchange.
-
-User message: {user}
-Gooni reply:  {assistant}
-
-Return ONLY a JSON array. No preamble, no markdown fence.
-
-Schema per item:
-{{
-  "type": "fact" | "routine" | "constraint" | "episode",
-  "key": "snake_case_key" | null,
-  "content": "natural-language description of the memory",
-  "context": {{"time": null|str, "location": null|str, "scope": "global"|"contextual"}},
-  "confidence": 0.0-1.0
-}}
-
-Rules:
-- Only extract PERSISTENT info — not temporary states or one-off remarks
-- "fact" = declarative truth about Daniel. Includes long-term aspirations
-  expressed as identity ("Daniel wants to be a thoughtful engineer"), AND
-  stable interests / tastes / dislikes ("Daniel prefers hot coffee",
-  "Daniel is interested in robotics perception"). Use cosine retrieval to
-  surface these when conversation context matches.
-- "routine" = recurring habit/pattern
-- "constraint" = hard limit (allergies, schedule blockers, dealbreakers)
-- "episode" = a notable moment from the chat itself (no key, just content)
-- DO NOT extract behavioral rules about how Gooni should ACT (tone, length,
-  format, voice, "be more concise", "don't use emojis"). Those belong in
-  the locked PERSONA prompt, not in memory. The "preference" type used to
-  catch these — it's been removed for that reason. If the candidate is a
-  behavior-shaping rule for the assistant, emit [] and let the user's
-  feedback flow into tone_corrections separately.
-- DO NOT extract feature requests (UI changes, keyboard shortcuts,
-  capability gaps). Those route to feature_requests in extract_signals,
-  not into memory.
-- DO NOT emit "goal" — action-shaped aspirations belong in the focuses
-  list (list_items), not memory. If Daniel says "I want to ship X this
-  week" / "I'm going to learn Y" with action + timeframe, skip extraction
-  entirely — that's focus material, surfaced separately.
-- key is snake_case (e.g. "coffee_temperature"); null for episodes
-- scope: "global" = always applies; "contextual" = situation-specific
-- confidence: 0.85+ for explicit statements; 0.6-0.7 for inferences
-- Return [] if nothing extractable
-
-Anti-examples — DO NOT extract these:
-- A chat transcript snippet recapping the assistant's reply. Skip.
-- A todo list / planning bullet ("Finish resume / Email George"). Skip.
-- The assistant restating its own behavior ("I will adjust as needed"). Skip.
-- "User wants Gooni to handle Markdown formatting" — behavior rule for the
-  assistant. Skip (it'll get caught by tone_corrections / feature_requests
-  upstream if it's a real ask).
-- "Daniel wants the Publish button to be the primary CTA" — feature
-  request, not a memory. Skip.
-
-Examples:
-- "I prefer hot coffee" → fact, coffee_temperature, "prefers hot coffee", global, 0.9
-- "I work from home Tuesdays" → routine, tuesday_location, home, contextual, 0.85
-- "Just shipped Gooni v2!" → episode, null, "shipped Gooni v2", global, 0.9
-- "I'm into robotics perception" → fact, robotics_focus, "interested in robotics perception", global, 0.9
-
-JSON array:"""
-
-
 _RECONCILE_PROMPT = """Decide what to do with this CANDIDATE memory given EXISTING similar memories.
 
 CANDIDATE:

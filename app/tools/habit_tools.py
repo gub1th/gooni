@@ -60,6 +60,7 @@ class LogHabitTool(BaseTool):
         **kwargs,
     ) -> str:
         from datetime import date as _date
+        from ..common import local_today
         from ..services import habit_service
 
         if db is None:
@@ -79,7 +80,9 @@ class LogHabitTool(BaseTool):
                 return f"(ambiguous — '{name}' matches multiple: {names})"
             habit = matches[0]
 
-        day = _date.today()
+        # local_today, not date.today(): server runs UTC — after ~5pm PT a
+        # bare "log it" would land the entry on tomorrow's date.
+        day = local_today(db)
         if date:
             try:
                 y, m, d = date.split("-")
