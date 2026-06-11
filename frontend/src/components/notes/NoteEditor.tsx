@@ -15,6 +15,8 @@ import {
   Heading1, Heading2,
   Trash2, FolderInput, Pin as PinIcon, ListPlus, Check, Pencil as PencilIcon,
   StickyNote, CheckCircle2, Droplet,
+  ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, ArrowDownToLine,
+  Columns3, Rows3, Heading as HeadingIcon, Trash,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -2597,6 +2599,78 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                           {extractInFlight ? "Extracting…" : "Extract"}
                         </button>
                       </>
+                    )}
+                  </BubbleMenu>
+                )}
+
+                {/* Table controls. A SECOND BubbleMenu, shown only while the
+                    cursor sits inside a table — the @tiptap/extension-table
+                    commands (addRow/addColumn/delete…) ship with the extension
+                    but have no UI, so an inserted table was read-only-shaped.
+                    Distinct pluginKey is REQUIRED: two BubbleMenus on one
+                    editor share a ProseMirror plugin slot otherwise and the
+                    later one silently wins. Confluence-style: structural
+                    actions grouped col | row | header | delete. */}
+                {editor && (
+                  <BubbleMenu
+                    editor={editor}
+                    pluginKey="tableMenu"
+                    shouldShow={({ editor }) => editor.isActive("table")}
+                    // Pin BELOW the cell. The text-format BubbleMenu above
+                    // defaults to "top"; selecting text inside a cell shows
+                    // both, so dropping this one underneath stops them
+                    // stacking on the same spot.
+                    options={{ placement: "bottom", offset: 8 }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      background: "var(--gooni-card, #FFFFFF)",
+                      borderRadius: 12,
+                      padding: "5px 6px",
+                      gap: 2,
+                      boxShadow:
+                        "0 8px 22px rgba(15,23,42,0.14), 0 1px 3px rgba(15,23,42,0.10), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
+                    }}
+                  >
+                    {([
+                      { Icon: ArrowLeftToLine,  title: "Add column left",  action: () => editor.chain().focus().addColumnBefore().run() },
+                      { Icon: ArrowRightToLine, title: "Add column right", action: () => editor.chain().focus().addColumnAfter().run() },
+                      { Icon: Columns3,         title: "Delete column",    action: () => editor.chain().focus().deleteColumn().run() },
+                      { sep: true },
+                      { Icon: ArrowUpToLine,    title: "Add row above",    action: () => editor.chain().focus().addRowBefore().run() },
+                      { Icon: ArrowDownToLine,  title: "Add row below",    action: () => editor.chain().focus().addRowAfter().run() },
+                      { Icon: Rows3,            title: "Delete row",       action: () => editor.chain().focus().deleteRow().run() },
+                      { sep: true },
+                      { Icon: HeadingIcon,      title: "Toggle header row", action: () => editor.chain().focus().toggleHeaderRow().run() },
+                      { sep: true },
+                      { Icon: Trash,            title: "Delete table",     action: () => editor.chain().focus().deleteTable().run(), danger: true },
+                    ] as const).map((item, i) =>
+                      "sep" in item ? (
+                        <span key={`sep-${i}`} style={{ width: 1, height: 18, background: ctok.border, margin: "0 4px" }} />
+                      ) : (
+                        <button
+                          key={item.title}
+                          title={item.title}
+                          onMouseDown={(e) => { e.preventDefault(); item.action(); }}
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            width: 30, height: 30,
+                            padding: 0,
+                            borderRadius: 8,
+                            border: "none",
+                            background: "transparent",
+                            color: "danger" in item && item.danger
+                              ? "var(--gooni-danger, #DC2626)"
+                              : "var(--gooni-muted, #475569)",
+                            cursor: "pointer",
+                            transition: "background 0.12s, color 0.12s",
+                          }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                        >
+                          <item.Icon size={15} strokeWidth={1.9} />
+                        </button>
+                      )
                     )}
                   </BubbleMenu>
                 )}
