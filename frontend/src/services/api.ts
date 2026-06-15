@@ -1571,63 +1571,6 @@ export async function setCutConfig(patch: Partial<CutConfig>): Promise<CutConfig
   return res.json() as Promise<CutConfig>;
 }
 
-// ── Limbo / session review (ambient loop) ──────────────────────────────
-export interface ApiLimboItem {
-  id: number;
-  text: string;
-  source_message_id: number | null;
-  kind_hint: string | null;
-  mention_count: number;
-  status: "limbo" | "promoted" | "dismissed";
-  promoted_to_type: string | null;
-  promoted_to_id: number | null;
-  created_at: string | null;
-  updated_at: string | null;
-}
-export interface ApiSessionSummary {
-  id: number;
-  title: string | null;
-  content: string | null;
-  session_start: string | null;
-  session_end: string | null;
-  message_count: number | null;
-  created_at: string | null;
-}
-export type LimboPromoteTarget = "focus" | "todo" | "promise" | "memory";
-
-export async function fetchLimbo(limit = 100): Promise<ApiLimboItem[]> {
-  const res = await apiFetch(`${BASE}/limbo?limit=${limit}`);
-  if (!res.ok) throw new Error("Failed to fetch limbo items");
-  return res.json();
-}
-export async function promoteLimboItem(id: number, target: LimboPromoteTarget): Promise<unknown> {
-  const res = await apiFetch(`${BASE}/limbo/${id}/promote`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ target_type: target }),
-  });
-  if (!res.ok) throw new Error("Failed to promote limbo item");
-  return res.json();
-}
-export async function dismissLimboItem(id: number): Promise<unknown> {
-  const res = await apiFetch(`${BASE}/limbo/${id}/dismiss`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to dismiss limbo item");
-  return res.json();
-}
-export async function fetchSessionSummaries(limit = 30): Promise<ApiSessionSummary[]> {
-  const res = await apiFetch(`${BASE}/batch/sessions?limit=${limit}`);
-  if (!res.ok) throw new Error("Failed to fetch session summaries");
-  return res.json();
-}
-export async function runBatch(windowHours = 24): Promise<unknown> {
-  const res = await apiFetch(`${BASE}/batch/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ window_hours: windowHours }),
-  });
-  if (!res.ok) throw new Error("Failed to run batch");
-  return res.json();
-}
 
 // Time spent on the gooni repo today + this week, estimated by clustering
 // commit timestamps from GitHub (server hits the GitHub API). All-zero

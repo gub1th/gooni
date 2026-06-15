@@ -18,7 +18,7 @@ import { persist } from "zustand/middleware";
 // land users on a now-deleted tab.
 
 export type DashboardTab = "todos" | "focuses";
-export type DashboardMode = "today" | "ops" | "stats" | "review";
+export type DashboardMode = "today" | "ops" | "stats";
 
 interface DashboardState {
   activeTab: DashboardTab;
@@ -50,6 +50,7 @@ export const useDashboardStore = create<DashboardState>()(
         if (s.activeMode === "build") s.activeMode = "ops";
         if (s.activeMode === "pulse") s.activeMode = "stats";
         if (s.activeMode === "tv") s.activeMode = "today";
+        if (s.activeMode === "review") s.activeMode = "today";
         return s as unknown as DashboardState;
       },
     },

@@ -785,50 +785,6 @@ class Settings(Base):
     )
 
 
-class LimboItem(Base):
-    """Raw staging primitive — the antecedent layer the typed primitives are
-    born from. The 5am batch classifies a session's brain-dump threads and
-    drops the ambiguous ones (ideas, project seeds, context worth revisiting)
-    here. From the desktop review, Daniel promotes each into a real Focus /
-    Todo / Promise / Memory, or dismisses it.
-
-    Composes with `FocusCandidate` (does NOT replace it): a LimboItem is a
-    single raw thought; the synthesizer clusters limbo items across sessions
-    into FocusCandidates. Limbo feeds the synth; FocusCandidate stays the
-    clustered focus-proposal output.
-
-    Real-time captures (todo/promise/fitness) do NOT pass through here — they
-    land as their typed primitive immediately. Limbo holds only what the batch
-    couldn't confidently type. The raw `Message` rows remain the durable
-    capture; LimboItems are derived, so a failed batch loses nothing.
-
-    `mention_count` bumps (instead of inserting a dup) when a new thought
-    cosine-matches an existing limbo item — that recurrence is the promote
-    signal ("3rd mention → promote?").
-    """
-
-    __tablename__ = "limbo_items"
-
-    id = Column(Integer, primary_key=True, index=True)
-    text = Column(Text, nullable=False)
-    source_message_id = Column(
-        Integer, ForeignKey("messages.id"), nullable=True, index=True
-    )
-    # Classifier's guess at the thread category: 'idea' | 'context'. Advisory
-    # — drives nothing load-bearing, just colours the review surface.
-    kind_hint = Column(String, nullable=True)
-    mention_count = Column(Integer, default=1, nullable=False)
-    # 'limbo' (awaiting triage) | 'promoted' | 'dismissed'
-    status = Column(String, nullable=False, default="limbo", index=True)
-    # Lineage when promoted: which typed primitive it became.
-    promoted_to_type = Column(String, nullable=True)  # focus|todo|promise|memory
-    promoted_to_id = Column(Integer, nullable=True)
-    embedding = deferred(Column(Text, nullable=True))  # JSON list[float]
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-    )
-
 
 class TrackedRepo(Base):
     """A repo the user wants surfaced on the Dev Activity dashboard. The
