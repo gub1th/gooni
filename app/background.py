@@ -332,52 +332,6 @@ async def _urgency_rollup_loop():
             await asyncio.sleep(60)
 
 
-async def _batch_processor_loop():
-    """Daily 5am session-batch processor — the ambient-loop engine.
-
-    Sleep to the next 05:00 in nudge_tz, then classify the day's sessions
-    into LimboItems + memories (batch_service.run). Idempotency via
-    Settings.batch_last_run_day (YYYY-MM-DD in nudge_tz) so a Fly
-    horizontal-scale race can't double-run. Same shape as
-    _capability_telemetry_loop. Fails open — sleep a minute and retry.
-    """
-    from .services.batch_service import run as _batch_run
-    while True:
-        try:
-            db = SessionLocal()
-            try:
-                s = _settings_row(db)
-                tz_name = s.nudge_tz or "America/Los_Angeles"
-            finally:
-                db.close()
-            now = _dt.now(ZoneInfo(tz_name) if ZoneInfo else None)
-            target = _next_fire(now, hour=5, minute=0, tz_name=tz_name)
-            wait = max(1.0, (target - now).total_seconds())
-            await asyncio.sleep(wait)
-            # Idempotency check after wakeup — re-read in case another
-            # machine already stamped today.
-            db = SessionLocal()
-            try:
-                s = _settings_row(db)
-                today_str = _dt.now(
-                    ZoneInfo(tz_name) if ZoneInfo else None
-                ).strftime("%Y-%m-%d")
-                if s.batch_last_run_day == today_str:
-                    await asyncio.sleep(70)
-                    continue
-                s.batch_last_run_day = today_str
-                db.commit()
-                result = _batch_run(db)
-                print(f"[batch] daily run: {result}", flush=True)
-            finally:
-                db.close()
-            await asyncio.sleep(70)
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            print(f"[batch] loop error: {e}", flush=True)
-            await asyncio.sleep(60)
-
 
 async def _todo_soft_delete_sweeper_loop():
     """Hourly hard-purge of soft-deleted todos past the 24h undo window.

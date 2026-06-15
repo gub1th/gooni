@@ -17,7 +17,7 @@ def focus_synthesis_run(body: dict | None = None, db: Session = Depends(get_db))
 
     Body (all optional):
       {
-        "include_kinds": ["note","todo","fact","message","limbo"],
+        "include_kinds": ["note","todo","fact","message"],
         "threshold": float (cosine join floor, default 0.48),
         "merge_threshold": float (centroid-merge floor, default 0.62; set
             to 1.1 to disable the merge pass),
