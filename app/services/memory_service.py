@@ -791,7 +791,6 @@ class MemoryService:
                 context=old.context,
                 confidence=old.confidence,
                 embedding=json.dumps(embedding) if embedding else None,
-                focus_id=old.focus_id,
                 is_active=True,
             )
             sess.add(new_m)
