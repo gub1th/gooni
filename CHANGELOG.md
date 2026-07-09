@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.183.0 — 2026-07-09 (minor)
+
+- feat(trackables): ambient-loop v2 Slice 2 — Trackable + TrackableEntry primitive (#400)
+
 ## 0.182.0 — 2026-07-09 (minor)
 
 - feat(promises): ambient-loop v2 Slice 1 — Promise refactor + unified extract_signals emit (#399)
