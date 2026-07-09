@@ -366,6 +366,12 @@ def _serialize_message(m: Message) -> dict:
             parsed_trace = json.loads(m.trace)
         except (ValueError, TypeError):
             parsed_trace = None
+    preview = None
+    if m.signal_preview:
+        try:
+            preview = json.loads(m.signal_preview)
+        except (ValueError, TypeError):
+            preview = None
     return {
         "id": m.id,
         "conversation_id": m.conversation_id,
@@ -373,6 +379,8 @@ def _serialize_message(m: Message) -> dict:
         "content": m.content,
         "created_at": m.created_at,
         "trace": parsed_trace,
+        "has_actionable_signal": bool(m.has_actionable_signal),
+        "signal_preview": preview,
     }
 
 

@@ -790,6 +790,19 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
             )
         else:
             lines.append(f"- Promise {verb}: \"{summary}\"{cad_tail}{slip_tail}{voice_tail}")
+    # Slice 3 glow: commitments NOTICED but NOT tracked. The log view
+    # shows the dot; Daniel promotes. The reply may acknowledge seeing
+    # the commitment conversationally but must NEVER claim it's tracked/
+    # logged/saved — no row exists yet.
+    for sp in (routed.noticed_promises or [])[:3]:
+        summary = (sp.get("summary") or sp.get("utterance") or "").strip()
+        if len(summary) > 60:
+            summary = summary[:60].rstrip() + "…"
+        lines.append(
+            f"- Commitment NOTICED (glow annotation, NOT tracked): \"{summary}\". "
+            "No Promise row exists — do NOT say 'tracked'/'logged'/'noted "
+            "down'. Daniel promotes it from the log if he wants it held."
+        )
     # Ambient-loop v2 lifecycle lines. Each names kind+id so the PERSONA
     # "never claim without id this turn" rule has the anchor to cite.
     # Reply must NOT recite the id number — speak plainly.

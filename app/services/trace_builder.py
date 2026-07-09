@@ -44,7 +44,11 @@ from typing import Any
 # v11 (2026-07-08 ambient-loop v2 Slice 1): unified `promises` emit replaces
 # soft_promises/todos/done_signals; Promise gains cadence/importance/parent;
 # todos intent handler deleted; chat-side promise complete/break added.
-PROMPT_VERSION = "v11"
+# v12 (2026-07-09 Slice 3 glow): promise CREATES no longer auto-insert —
+# they annotate the source Message (has_actionable_signal + signal_preview)
+# for 1-click promote from the log. complete/break stay automatic. Uniform
+# ack for capture turns; just_extracted gains the NOTICED-not-tracked line.
+PROMPT_VERSION = "v12"
 
 
 class TraceBuilder:

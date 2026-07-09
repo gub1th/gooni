@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { ChatView } from "../components/ChatView";
+import { ChatLogView } from "../components/ChatLogView";
 import { Dashboard } from "../components/Dashboard";
 import { EvalView } from "../components/eval/EvalView";
 import { BacklogBoard } from "../components/lists/BacklogBoard";
@@ -29,7 +30,7 @@ export const Route = createFileRoute("/")({
     // ?view=notes|chat → force a view that has no other URL signal.
     // Sidebar uses this to drive All Notes / space-row / new-chat clicks
     // now that it lives in __root's AppShell and can't call setView().
-    view: search.view === "notes" || search.view === "chat" ? (search.view as "notes" | "chat") : undefined,
+    view: search.view === "notes" || search.view === "chat" || search.view === "log" ? (search.view as "notes" | "chat" | "log") : undefined,
   }),
   component: NotesPage,
 });
@@ -54,13 +55,14 @@ function NotesPage() {
   // handleCompose writes ?view=notes to the URL so the view derivation
   // reads "notes" through that gap; the effect further down replaces
   // ?view=notes with ?note=<id> once the real positive id lands.
-  const view: "notes" | "dashboard" | "chat" | "lists" | "eval" =
+  const view: "notes" | "dashboard" | "chat" | "lists" | "eval" | "log" =
     search.audit ? "eval" :
     search.note ? "notes" :
     search.conv ? "chat" :
     search.list ? "lists" :
     search.view === "notes" ? "notes" :
     search.view === "chat" ? "chat" :
+    search.view === "log" ? "log" :
     "dashboard";
 
   const activeListId: number | null = search.list ?? null;
@@ -190,7 +192,7 @@ function NotesPage() {
   }, [view]);
 
   function setViewAndUrl(
-    v: "notes" | "dashboard" | "chat" | "lists" | "eval",
+    v: "notes" | "dashboard" | "chat" | "lists" | "eval" | "log",
     noteId?: number,
     convId?: number,
     listId?: number,
@@ -246,6 +248,8 @@ function NotesPage() {
           />
         ) : view === "chat" ? (
           <ChatView />
+        ) : view === "log" ? (
+          <ChatLogView />
         ) : view === "lists" && activeListId != null ? (() => {
           // Backlog gets the Jira-style 3-column board with drag + modal.
           // Other list types stay on the original flat ListView. Decision

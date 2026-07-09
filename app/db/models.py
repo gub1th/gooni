@@ -103,6 +103,15 @@ class Message(Base):
     # cache never goes stale). Deferred so list/read queries don't hydrate
     # the ~31KB-per-row vector — same pattern as Note.embedding.
     embedding = deferred(Column(Text, nullable=True))
+    # Ambient-loop v2 Slice 3 (glow): extract_signals found a promise-shaped
+    # commitment in this user message. The log view renders a gutter dot;
+    # Daniel promotes or dismisses. True is sticky (extractor verdict) —
+    # the pending/promoted/dismissed lifecycle lives in signal_preview.
+    has_actionable_signal = Column(Boolean, nullable=False, default=False)
+    # JSON: {"signals": [<normalized promise-create signals>],
+    #        "status": "pending"|"promoted"|"dismissed",
+    #        "promise_ids": [..]}   (promise_ids set on promote — undo's target)
+    signal_preview = Column(Text, nullable=True)
 
 
 class ToolCall(Base):

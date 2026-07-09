@@ -167,6 +167,17 @@ def promise_integrity_score(db: Session = Depends(get_db)):
     }
 
 
+@router.delete("/promises/{promise_id}")
+def delete_promise(promise_id: int, db: Session = Depends(get_db)):
+    """Hard-delete a promise + its edges. Backs the log-view promote-undo
+    and manual cleanup — distinct from `broken` (which is a tracked slip)."""
+    from ..services import promise_service
+
+    if not promise_service.delete(db, promise_id):
+        raise HTTPException(status_code=404, detail="Promise not found")
+    return {"deleted": True, "id": promise_id}
+
+
 @router.patch("/promises/{promise_id}")
 def patch_promise(promise_id: int, body: dict, db: Session = Depends(get_db)):
     """Edit a promise. Independent, optional fields:

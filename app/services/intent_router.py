@@ -54,8 +54,15 @@ class RouterResult:
     # hallucination layer for the "tracked without id" failure mode.
     captured_features: list[dict] = field(default_factory=list)
     tone_rules: list[str] = field(default_factory=list)
-    # Serialized Promise rows created this turn (kind=create).
+    # Serialized Promise rows created this turn. Slice 3: chat-side
+    # auto-create is gone (creates glow instead) — this only populates
+    # from explicit creation paths (promote route re-dispatch, future
+    # tools). Kept because ack/verify plumbing reads it.
     captured_promises: list[dict] = field(default_factory=list)
+    # Slice 3 glow: promise-create signals NOTICED on this turn's message
+    # (annotation only — NOT rows). just_extracted uses this to license
+    # "i see the commitment" phrasing while forbidding "tracked" claims.
+    noticed_promises: list[dict] = field(default_factory=list)
     # Ambient-loop v2: chat-side promise lifecycle results. Serialized
     # Promise rows flipped kept (kind=complete) / broken (kind=break).
     completed_promises: list[dict] = field(default_factory=list)
