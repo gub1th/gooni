@@ -1854,6 +1854,46 @@ export async function dismissMessageGlow(messageId: number): Promise<{ message: 
   return res.json();
 }
 
+// ── Ambient overlay (Slice 4) ───────────────────────────────────────────
+
+export interface OverlayHorizonEntry extends ApiPromise {
+  reason: "overdue" | "due_soon" | "important";
+}
+
+export interface OverlayTrackableEntry {
+  id: number;
+  name: string;
+  kind: string;
+  unit: string | null;
+  target: number | null;
+  is_important: boolean;
+  value: number | boolean | Record<string, unknown> | null;
+  status: "pending" | "logged" | "met" | "missed";
+  reason: string;
+}
+
+export interface OverlayData {
+  action_horizon: OverlayHorizonEntry[];
+  trackables_today: OverlayTrackableEntry[];
+  anchor: { id: number; title: string | null; excerpt: string | null } | null;
+  whoop_select: { id: number; name: string; unit: string | null; value: unknown }[];
+}
+
+export async function fetchOverlay(): Promise<OverlayData> {
+  const res = await apiFetch(`${BASE}/overlay`);
+  if (!res.ok) throw new Error("Failed to fetch overlay");
+  return res.json();
+}
+
+export async function setOverlayAnchorNote(noteId: number | null): Promise<void> {
+  const res = await apiFetch(`${BASE}/settings`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ overlay_anchor_note_id: noteId }),
+  });
+  if (!res.ok) throw new Error("Failed to set anchor note");
+}
+
 export async function fetchConversations(): Promise<ApiConversation[]> {
   const res = await apiFetch(`${BASE}/feed`);
   if (!res.ok) throw new Error("Failed to fetch conversations");

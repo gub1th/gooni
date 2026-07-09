@@ -60,6 +60,20 @@ def patch_settings(body: dict, db: Session = Depends(get_db)):
         # No length cap server-side — Daniel writes whatever instruction he
         # wants and the LLM cost scales with it. Empty string == use default.
         s.nudge_prompt = (body["nudge_prompt"] or "").strip()
+    if "overlay_anchor_note_id" in body:
+        raw = body["overlay_anchor_note_id"]
+        if raw is None:
+            s.overlay_anchor_note_id = None
+        else:
+            try:
+                s.overlay_anchor_note_id = int(raw)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="overlay_anchor_note_id must be int or null")
+    if "overlay_whoop_keys" in body:
+        keys = body["overlay_whoop_keys"]
+        if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+            raise HTTPException(status_code=400, detail="overlay_whoop_keys must be list[str]")
+        s.overlay_whoop_keys = json.dumps(keys)
     db.commit()
     db.refresh(s)
     return _serialize_settings(s)
