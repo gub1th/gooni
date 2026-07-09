@@ -267,7 +267,7 @@ class Orchestrator:
         signals_summary: dict = {
             "tone_corrections": [],
             "feature_requests": [],
-            "soft_promises": [],
+            "promises": [],
             "memory_count": 0,
         }
         skip_normal_reply = False
@@ -367,12 +367,8 @@ class Orchestrator:
                     looks_like_question = first_word in _QUESTION_WORDS
                     capture_happened = bool(
                         routed.captured_promises
-                        or routed.captured_todos
-                        or routed.completed_todos
-                        or routed.killed_todos
-                        or routed.merged_todos
-                        or routed.implicit_done_todos
-                        or routed.edited_todos
+                        or routed.completed_promises
+                        or routed.broken_promises
                         or routed.captured_metrics
                     )
                     if (
@@ -833,7 +829,7 @@ class Orchestrator:
                 draft=response,
                 captured_features=routed.captured_features,
                 captured_promises=routed.captured_promises,
-                captured_todos=routed.captured_todos,
+                resolved_promises=routed.completed_promises + routed.broken_promises,
                 captured_metrics=routed.captured_metrics,
                 tool_call_ids=(usage or {}).get("tool_call_ids") or [],
                 db=db,

@@ -1,13 +1,13 @@
 """Promise CRUD + lifecycle over the `promises` table.
 
-Promises = soft commitments uttered in chat ("imma X tonight" /
-"i'll Y this week"). Distinct from Todo (chore-shaped) and Focus
-(long arc). Gooni's accountability surface: captures verbatim, infers
-deadlines, follows up conversationally, tracks slip patterns.
+Ambient-loop v2: Promise = THE actionable primitive. One-shot chores
+(cadence=once), recurring habits (daily / n_per_week), standing rules
+(permanent_do / permanent_never) — all one table. Captures verbatim,
+infers deadlines, follows up conversationally, tracks slip patterns.
 
-Lifecycle: pending → kept | broken | abandoned. State transitions
-fire from user replies to follow-up nudges OR from time-anchored
-auto-broken (when inferred_due passes with no confirmed kept).
+Lifecycle: active → kept | broken. State transitions fire from chat
+("did it" → kept via find_active_match), dashboard PATCH, OR
+time-anchored auto-broken (when inferred_due passes unconfirmed).
 
 Cross-entity links live in `edges` (see edge_service). At create
 time we wire:
@@ -83,6 +83,9 @@ def _embed(text: str) -> list[float] | None:
     return list_service._embed_item_text(text.strip())
 
 
+VALID_CADENCES = ("once", "daily", "n_per_week", "permanent_do", "permanent_never")
+
+
 def create(
     db: Session,
     *,
@@ -90,8 +93,12 @@ def create(
     summary: str | None = None,
     source_message_id: int | None = None,
     inferred_due: datetime | None = None,
+    cadence: str = "once",
+    cadence_target: int | None = None,
+    is_important: bool = False,
+    parent_promise_id: int | None = None,
 ) -> Promise:
-    """Insert a new ACTIVE promise (G3.1: no more `proposed` / `pending`).
+    """Insert a new ACTIVE promise (ambient-loop v2 shape).
     Wires `utters` edge from source Message, best-effort `supports` edge
     to closest active Focus, sets slip_count from cosine match against
     past broken promises.
@@ -107,10 +114,9 @@ def create(
     pushback (Gooni asks one sharp clarifier in the same turn) and
     seeds future weekly-digest stats.
 
-    Habit auto-spawn: runs at CREATE time when the utterance has a
-    recurring shape ("no weed for 7 days", "leetcode daily"). Previously
-    deferred to the proposed→pending lock-in flip — flip is gone, so
-    auto-spawn fires here. Same outcome, no waiting state.
+    Cadence replaces the old Habit auto-spawn: a recurring commitment IS
+    the Promise now (cadence=daily / n_per_week / permanent_*) — no
+    shadow Habit row.
     """
     cleaned = utterance.strip()
     if not cleaned:
@@ -119,9 +125,13 @@ def create(
     # G3.1 complexity classification — pure-regex, no LLM. The bool
     # determines `needs_clarification` metadata, NOT the state. Both
     # vague and concrete utterances land as `active` immediately.
+    # v2: an explicit recurring cadence answers the "how often counts?"
+    # clarifier by construction — don't flag those as vague.
     try:
         from . import promise_complexity
         needs_clarification = promise_complexity.needs_game_plan(cleaned)
+        if cadence in ("daily", "n_per_week"):
+            needs_clarification = False
     except Exception as e:
         print(f"[promise complexity] classifier error: {e}")
         needs_clarification = False
@@ -130,7 +140,17 @@ def create(
         f"for: {cleaned[:80]}"
     )
 
-    inferred = inferred_due or _infer_due_from_text(cleaned)
+    if cadence not in VALID_CADENCES:
+        cadence = "once"
+    if cadence != "n_per_week":
+        cadence_target = None
+
+    # Recurring commitments carry no single deadline (see normalizer note:
+    # a due on a daily/weekly promise is a parse artifact).
+    if cadence == "once":
+        inferred = inferred_due or _infer_due_from_text(cleaned)
+    else:
+        inferred = None
     vec = _embed(cleaned)
 
     # Active dedup BEFORE insert. Skip when no embedding — cosine match
@@ -161,6 +181,10 @@ def create(
         summary=(summary or cleaned)[:200],
         inferred_due=inferred,
         state="active",
+        cadence=cadence,
+        cadence_target=cadence_target,
+        is_important=bool(is_important),
+        parent_promise_id=parent_promise_id,
         needs_clarification=needs_clarification,
         slip_count=slip,
         source_message_id=source_message_id,
@@ -219,16 +243,6 @@ def create(
             )
     except Exception as e:
         print(f"[promise voice-of-reason] evaluator failed: {e}")
-
-    # G3.1 Habit auto-spawn — fires at CREATE time on recurring-shape
-    # promises ("no weed for 7 days", "leetcode daily"). Was deferred to
-    # proposed→pending lock-in; lock-in is gone so we spawn now. Same
-    # outcome, no waiting state. Errors swallowed — habit creation
-    # never blocks the promise insert.
-    try:
-        _maybe_auto_create_habit(db, p)
-    except Exception as e:
-        print(f"[promise create] habit auto-create failed: {e}")
 
     return p
 
@@ -379,14 +393,17 @@ def update(
     *,
     text: str | None = None,
     inferred_due: Any = _UNSET,
+    is_important: bool | None = None,
+    cadence: str | None = None,
+    cadence_target: Any = _UNSET,
 ) -> Promise | None:
-    """Edit a promise's display text and/or deadline.
+    """Edit a promise's display text, deadline, importance, or cadence.
 
     `text` rewrites `summary` (the display field the dashboard shows);
     the raw `utterance` is left untouched as the original-capture record
     for provenance. `inferred_due` is tri-state: omit to leave unchanged,
-    pass a `datetime` to set, pass `None` to clear. Returns the row or
-    None if the promise doesn't exist.
+    pass a `datetime` to set, pass `None` to clear. Same for
+    `cadence_target`. Returns the row or None if the promise doesn't exist.
     """
     p = get(db, promise_id)
     if p is None:
@@ -397,78 +414,119 @@ def update(
             p.summary = cleaned
     if inferred_due is not _UNSET:
         p.inferred_due = inferred_due
+    if is_important is not None:
+        p.is_important = bool(is_important)
+    if cadence is not None and cadence in VALID_CADENCES:
+        p.cadence = cadence
+        if cadence != "n_per_week":
+            p.cadence_target = None
+    if cadence_target is not _UNSET:
+        p.cadence_target = cadence_target
     db.commit()
     db.refresh(p)
     return p
 
 
-# ── Habit auto-spawn (G3.1: fires at Promise create, not lock-in) ──────
-# When a new promise's utterance describes a recurring action
-# (daily/weekly/for-N-days/every-X), we spawn a Habit row so Daniel gets
-# the daily scoreboard alongside the term contract. Previously deferred
-# to proposed→pending lock-in; lock-in is gone so this runs at create.
-# The Habit name is derived from the utterance, polarity from a small
-# negation-prefix regex. Cosine dedup against existing habits prevents
-# a re-uttered promise from spawning a duplicate.
+# ── Chat-side promise matching (complete / break via utterance) ────────
 
-_NEGATION_RE = __import__("re").compile(
-    r"^\s*(no|don'?t|stop|avoid|quit|cut|skip|kill)\s+", __import__("re").IGNORECASE,
-)
+MATCH_THRESHOLD = 0.60   # floor for "did the gym thing" → active promise
+AMBIGUITY_GAP = 0.05     # top-2 within this gap → refuse, ask Daniel
 
 
-def _derive_habit(utterance: str, summary: str | None) -> tuple[str, str]:
-    """Return (name, polarity) for an auto-created Habit derived from a
-    locked-in Promise. Polarity is `negative` (avoidance) when the
-    utterance starts with a negation verb, else `positive` (do this).
-    Name is the summary if present, else the utterance — capped at 60
-    chars to fit the Habit display.
+def find_active_match(
+    db: Session, text: str
+) -> tuple[Promise | None, list[dict]]:
+    """Resolve a complete/break `match` phrase against ACTIVE promises.
+
+    Returns (promise, ambiguous_candidates):
+      - (row, [])      — confident single match, act on it
+      - (None, [a, b]) — two candidates within AMBIGUITY_GAP; caller
+                         surfaces a "which one?" ack instead of acting
+      - (None, [])     — nothing above MATCH_THRESHOLD
+
+    Three deterministic-first tiers:
+      1. full-phrase substring ("call paip" in "call paip about rent")
+      2. unique content-word overlap ("the gym thing" → the only active
+         promise containing "gym") — catches terse referents cosine
+         under-scores
+      3. cosine ≥ MATCH_THRESHOLD for true paraphrases
     """
-    raw = (summary or utterance or "").strip()
-    polarity = "negative" if _NEGATION_RE.match(raw) else "positive"
-    # For positive habits we keep the leading verb; for negative we keep
-    # the "no X" form so the daily scoreboard renders unambiguously
-    # ("no weed" toggled True/False per day reads cleanly).
-    name = raw[:60].rstrip()
-    return name, polarity
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None, []
+
+    rows = (
+        db.query(Promise.id, Promise.summary, Promise.utterance, Promise.embedding)
+        .filter(Promise.state == "active")
+        .all()
+    )
+    if not rows:
+        return None, []
+
+    lowered = cleaned.lower()
+    sub_hits = [
+        r for r in rows
+        if lowered in (r.summary or "").lower()
+        or lowered in (r.utterance or "").lower()
+    ]
+    if len(sub_hits) == 1:
+        return get(db, sub_hits[0].id), []
+
+    # Tier 2: content-word overlap, unique-hit only. Filler words
+    # ("thing", "stuff", "one") carry no referent signal — strip them.
+    _FILLER = {
+        "the", "a", "an", "my", "that", "this", "thing", "things",
+        "stuff", "one", "promise", "todo", "and", "for", "with", "about",
+    }
+    words = [
+        w for w in re.findall(r"[a-z0-9']+", lowered)
+        if len(w) >= 3 and w not in _FILLER
+    ]
+    if words:
+        word_hits = []
+        for r in rows:
+            haystack = f"{(r.summary or '').lower()} {(r.utterance or '').lower()}"
+            if any(w in haystack for w in words):
+                word_hits.append(r)
+        if len(word_hits) == 1:
+            return get(db, word_hits[0].id), []
+
+    vec = _embed(cleaned)
+    if vec is None:
+        return None, []
+    scored: list[tuple[float, Any]] = []
+    for r in rows:
+        if not r.embedding:
+            continue
+        try:
+            emb = json.loads(r.embedding)
+        except (TypeError, ValueError):
+            continue
+        s = _cosine(vec, emb)
+        if s >= MATCH_THRESHOLD:
+            scored.append((s, r))
+    if not scored:
+        return None, []
+    scored.sort(key=lambda t: t[0], reverse=True)
+    if len(scored) >= 2 and (scored[0][0] - scored[1][0]) < AMBIGUITY_GAP:
+        cands = [
+            {"id": r.id, "text": r.summary or r.utterance, "score": round(s, 3)}
+            for s, r in scored[:2]
+        ]
+        return None, cands
+    return get(db, scored[0][1].id), []
 
 
-def _maybe_auto_create_habit(db: Session, p: Promise) -> None:
-    """Spawn a Habit + measured_by edge for a recurring-shape promise.
-    Skipped when (a) the utterance isn't recurring-shaped, (b) a
-    near-name Habit already exists, or (c) the habit_service call
-    blows up — never breaks the promise create path.
-    """
-    from . import promise_complexity, habit_service
-
-    text = p.utterance or p.summary or ""
-    if not promise_complexity.is_recurring(text):
-        return  # not recurring — Promise alone is the right shape
-
-    name, polarity = _derive_habit(p.utterance, p.summary)
-    if not name:
-        return
-
-    # Cheap dedup: exact-name match (case-insensitive) wins. Fuzzy match
-    # is intentionally not used — for habit creation we want to be
-    # conservative; if the user has "no weed" already, lock-in just
-    # links to it rather than risking a misfire on a near-name.
-    existing = habit_service.find_by_name(db, name)
-    if existing is not None:
-        habit = existing
-    else:
-        habit = habit_service.create(db, name=name, polarity=polarity)
-
-    try:
-        edge_service.link(
-            db,
-            src_kind="promise",
-            src_id=p.id,
-            dst_kind="habit",
-            dst_id=habit.id,
-            kind="measured_by",
-        )
-    except Exception as e:
-        print(f"[promise lock-in] measured_by edge link failed: {e}")
+def resolve_parent_hint(db: Session, hint: str) -> int | None:
+    """Resolve a `parent_hint` phrase to an active Promise id — substring
+    first, cosine ≥ SUPPORTS_THRESHOLD fallback. None when nothing lands."""
+    p, ambiguous = find_active_match(db, hint)
+    if p is not None:
+        return p.id
+    if ambiguous:
+        # Ambiguity on a parent link is low-stakes — take the top hit.
+        return ambiguous[0]["id"]
+    return None
 
 
 def auto_mark_overdue(db: Session, now: datetime | None = None) -> int:
@@ -484,6 +542,9 @@ def auto_mark_overdue(db: Session, now: datetime | None = None) -> int:
         db.query(Promise)
         .filter(Promise.state == "active", Promise.inferred_due.is_not(None))
         .filter(Promise.inferred_due < now)
+        # Recurring promises never auto-break on a date — a deadline on a
+        # daily/weekly commitment is a parse artifact, not a term end.
+        .filter(Promise.cadence == "once")
         .all()
     )
     n = 0
@@ -509,6 +570,10 @@ def serialize(p: Promise) -> dict[str, Any]:
         "summary": p.summary,
         "inferred_due": p.inferred_due.isoformat() if p.inferred_due else None,
         "state": p.state,
+        "cadence": p.cadence or "once",
+        "cadence_target": p.cadence_target,
+        "is_important": bool(p.is_important),
+        "parent_promise_id": p.parent_promise_id,
         "needs_clarification": bool(p.needs_clarification),
         "voice_of_reason": voice,
         "slip_count": p.slip_count,

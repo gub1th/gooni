@@ -64,30 +64,18 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "why":   "<one sentence describing what's missing today>"
     }}
   ],
-  "soft_promises": [
+  "promises": [
     {{
-      "utterance":    "<verbatim quote of Daniel's commitment phrase, no rewriting>",
-      "summary":      "<short 3rd-person description, max 10 words — for nudge subjects>",
-      "time_hint":    "tonight|today|tomorrow|this week|this weekend|next week|by friday|null",
-      "spawns_todo":  "true|false — true ONLY when the promise is action-shaped (concrete one-shot verb + object, e.g. 'imma text david', 'i'll fix the auth bug tonight'). false for chronic / avoidance / vague promises ('no smoke for 7 days', 'i'll be better about X', 'imma start working out more'). When true, the router auto-creates a linked Todo so the promise has a concrete actionable shadow."
-    }}
-  ],
-  "todos": [
-    {{
-      "kind":         "create|delete|complete|merge|edit",
-      "text":         "<for create — short imperative chore, max 12 words>",
-      "due_hint":     "tonight|today|tomorrow|this week|null",
-      "match":        "<for delete/complete/merge/edit — substring of the existing todo Daniel is acting on>",
-      "merge_into":   "<for merge only — substring identifying the keep-target>",
-      "closure_note": "<for complete only — optional short outcome text Daniel said about how it went>",
-      "spawned":      [{{"text": "<follow-up chore>", "due_hint": "..."}}],
-      "patch":        "<for edit only — JSON-like object with fields to change. Supported keys: text (rename), subtitle (notes), due_hint (snooze/reschedule), primary (true/false to toggle), parent_match (substring of parent todo to link as child of), unlink_parent (true to clear parent link), position ('top' | 'bottom' | 'above:<match>' | 'below:<match>'), focus_name (link this todo to the named active focus — cosine-resolved). Emit ONLY the fields Daniel actually changed. Examples: 'push X to friday' → {{patch: {{due_hint: 'this week'}}}}; 'make X primary' → {{patch: {{primary: true}}}}; 'X is a follow-up to Y' on X → {{patch: {{parent_match: 'Y'}}}}; 'X is more important than Y' on X → {{patch: {{position: 'above:Y'}}}}; 'add note about Z to X' on X → {{patch: {{subtitle: 'Z'}}}}; 'this is for forge prep' on X → {{patch: {{focus_name: 'forge prep'}}}}>"
-    }}
-  ],
-  "done_signals": [
-    {{
-      "phrase": "<the verbatim done-utterance Daniel said, e.g. 'just called papi', 'finished the auth bug', 'did the gym thing'>",
-      "match":  "<short substring/keyword identifying which existing open todo this corresponds to — Gooni will cosine-resolve against open todos at ≥0.85, ambiguity check on top-2 within 0.05>"
+      "kind":           "create|complete|break",
+      "utterance":      "<for create — verbatim quote of Daniel's commitment/chore phrase, no rewriting>",
+      "summary":        "<for create — short 3rd-person description, max 10 words>",
+      "cadence":        "once|daily|n_per_week|permanent_do|permanent_never",
+      "cadence_target": "<int — N for n_per_week only (6 for '6x a week'). null for every other cadence>",
+      "due_date":       "<YYYY-MM-DD — resolve uttered deadlines ('by friday', 'tomorrow') from today's date. null when no deadline uttered>",
+      "due_hint":       "tonight|today|tomorrow|this week|this weekend|next week|null",
+      "is_important":   "true|false — true ONLY when Daniel explicitly flags importance ('this is important', 'top priority')",
+      "parent_hint":    "<substring of an existing bigger commitment this nests under, ONLY when Daniel says so ('part of the cut'). null otherwise>",
+      "match":          "<for complete/break — substring identifying the existing promise Daniel is closing or cancelling>"
     }}
   ],
   "fitness_logs": [
@@ -240,180 +228,116 @@ feature_requests:
     "you don't have a scheduler"        → [{{title:"Add scheduler", ...}}]
 - Empty when text is a question, or isn't asserting a missing capability.
 
-soft_promises:
-- Daniel committing TO HIMSELF — distinct from feature_requests (which
-  target Gooni). Phrasing cues: "imma X", "i'm gonna X", "i'll X",
-  "i wanna X by Y", "trying to X", "gonna X tonight", "i need to X
-  before Z", "promise myself i'll X". The shared signal: a self-declared
-  intent with a verb + (often) a time anchor.
-- DO emit when Daniel states a real intent — even if he doesn't explicitly
-  say "promise". Capture the moment of declaration; that's what makes the
-  accountability surface work.
-- DO NOT emit when:
-  - The verb is asking Gooni for help ("can you remind me to call mom" =
-    feature_request shape, not a promise).
-  - Daniel is reporting a completed action ("just shipped X" = episode
-    memory, not a promise).
-  - Daniel is venting an aspiration without a verb ("man, leetcode would
-    be nice" → empty; "i'm gonna leetcode daily" → promise).
+promises:
+- THE unified actionable signal. A Promise = anything Daniel commits to
+  doing (or avoiding) — one-shot chores, timed commitments, recurring
+  habits, standing rules. THREE kinds — pick per entry by reading the verb.
+
+KIND DISPATCH:
+- CREATE — a new commitment is being declared.
+- COMPLETE — an existing commitment is done. Verbs: "did X", "finished X",
+  "close X", "done with X", "just called papi", "X is done".
+- BREAK — Daniel is cancelling / giving up an existing commitment. Verbs:
+  "not gonna X anymore", "scratch X", "kill X", "drop X", "skipping X",
+  "gave up on X".
+
+CREATE — `{{kind:"create", utterance, summary, cadence, cadence_target,
+due_date, due_hint, is_important, parent_hint}}`:
+- Fires on self-declared intent: "imma X", "i'm gonna X", "i'll X",
+  "i wanna X by Y", "trying to X", "i need to X", "remind me to X",
+  "add to todos: X", "todo: X", "no more X", "gym 6x a week".
+- CADENCE — read the recurrence shape:
+    once            → one-shot ("ship the eval by friday", "call mom
+                      tomorrow", "buy milk"). THE DEFAULT when no
+                      recurrence phrasing is present.
+    daily           → every day ("leetcode daily", "stretch every morning")
+    n_per_week      → N times weekly. cadence_target = N.
+                      ("gym 6x a week" → cadence_target: 6;
+                       "run 3 times a week" → cadence_target: 3)
+    permanent_do    → standing do-rule with no end ("always take the
+                      stairs", "im a morning person now — 6am wakeups")
+    permanent_never → standing avoid-rule ("no weed", "quitting alcohol",
+                      "no more doomscrolling")
 - `utterance` MUST be a verbatim quote — Daniel's words, not paraphrased.
   Preserves voice for the follow-up ("you said 'X' — still on?").
-- `summary` is a clean 3rd-person rewrite for surfaces where the raw
-  utterance is too long / unclear without context ("finish DSA video
-  tonight").
-- `time_hint` mirrors the natural-language phrase Daniel used; the
-  backend parses it into an actual datetime. Use `null` when no time
-  anchor was uttered.
+- `summary` = clean 3rd-person rewrite, max 10 words.
+- `due_date`: when Daniel utters a deadline, resolve it to an absolute
+  YYYY-MM-DD using today's date (given below). "by friday" → that friday;
+  "tomorrow" → today+1. null when no deadline was uttered. Never a past
+  date. Recurring cadences usually have null due_date (no single deadline).
+- `due_hint` mirrors the natural-language phrase used ("tonight",
+  "this week") — backend fallback parser. null when no time anchor.
+- `is_important`: true ONLY on explicit importance flagging ("this is
+  important", "top priority", "big one"). NEVER inferred from content.
+- `parent_hint`: ONLY when Daniel explicitly nests it under a bigger
+  running commitment ("part of the cut", "for the gooni rewrite") —
+  substring identifying that parent. null otherwise.
+- DO NOT emit create when:
+  - The verb is asking Gooni for a capability ("can you remind me at 8am
+    every day" = Gooni has no scheduled outbound pings — feature_request).
+    BUT a bare self-commitment with recurrence ("imma drink water every
+    morning") IS a create with cadence=daily — the ask/self-commit line
+    is who does the work: Gooni-does-it → feature_request; Daniel-does-it
+    → promise.
+  - Daniel reports a completed action ("just shipped X" — that's either
+    kind=complete on an existing promise, or an episode memory).
+  - Aspiration with no commitment verb ("man, leetcode would be nice").
 - Examples (fires):
-    Text "imma finish that DSA video tonight and solve the leetcode" →
-      {{utterance:"imma finish that DSA video tonight and solve the leetcode",
-        summary:"finish DSA video + solve daily leetcode",
-        time_hint:"tonight"}}
-    Text "i'm gonna leetcode every day this week" →
-      {{utterance:"i'm gonna leetcode every day this week",
-        summary:"leetcode daily this week",
-        time_hint:"this week"}}
-    Text "i'll call my mom tomorrow" →
-      {{utterance:"i'll call my mom tomorrow", summary:"call mom",
-        time_hint:"tomorrow"}}
+    Text "imma finish that DSA video tonight" →
+      {{kind:"create", utterance:"imma finish that DSA video tonight",
+        summary:"finish DSA video", cadence:"once", due_hint:"tonight"}}
+    Text "gym 6x a week starting now" →
+      {{kind:"create", utterance:"gym 6x a week starting now",
+        summary:"gym six times a week", cadence:"n_per_week",
+        cadence_target:6}}
+    Text "ship the memory eval by friday" →
+      {{kind:"create", utterance:"ship the memory eval by friday",
+        summary:"ship memory eval", cadence:"once",
+        due_date:"<that friday as YYYY-MM-DD>"}}
+    Text "no more weed" →
+      {{kind:"create", utterance:"no more weed", summary:"no weed",
+        cadence:"permanent_never"}}
+    Text "remind me to take out trash tonight" →
+      {{kind:"create", utterance:"remind me to take out trash tonight",
+        summary:"take out trash", cadence:"once", due_hint:"tonight"}}
 - Examples (skip):
     "Can you remind me to call mom?" → feature_request, not promise.
-    "Just finished the leetcode" → episode memory, not promise.
-    "Wish i could leetcode more" → null (no commitment verb).
-- Empty when no self-committal verb fired.
+    "Wish i could leetcode more" → [] (no commitment verb).
+    "saw a cool paper today" → [] (passive dump — no signal).
 
-todos:
-- Chore-shaped actionable items. FOUR action kinds — pick correctly per entry.
-  Distinct from soft_promises (first-person commitments).
-
-KIND DISPATCH — read the verb to pick:
-- CREATE — new chore. Verbs: "add", "remind me to", "i need to", "todo:"
-- DELETE — kill existing. Verbs: "kill", "delete", "remove", "drop",
-  "scratch", "cut", "get rid of"
-- COMPLETE — close existing. Verbs: "close", "done with", "finished",
-  "completed", "marked done", "move X to done", "X is done", "did X"
-- MERGE — combine two existing. Verbs: "merge", "combine", "X and Y are
-  the same thing"
-
-CREATE — `{{kind:"create", text:"...", due_hint:"..."}}`:
-- SURFACE RULE: when `prev_assistant` is non-empty (chat surface), prefer
-  soft_promises for "imma X" / "i'll X" / "i'm gonna X". Emit create on
-  chat ONLY when text is explicit: "add to todos: X", "remind me to X",
-  "todo: X".
-- When prev_assistant is empty (note save), emit create freely for chore-
-  shaped imperatives.
-- The dashboard composer's "demo for gooni" use case lives here.
-- RECURRING-REMINDER CARVE-OUT (READ CAREFULLY):
-  "remind me to X" is a CREATE only when X happens ONCE (no time-recurrence
-  modifier). Recurring-shape phrasings — "every day", "daily", "weekly",
-  "every morning", "at 8am every", "every N hours", "every N days" — are
-  CAPABILITY GAPS, not todos. Gooni has no recurring outbound reminder
-  surface. These belong in `feature_requests`, NOT `todos`. Emit [] here
-  for recurring shapes; the feature_requests handler will catch them.
-  Examples (recurring → feature_request, NOT todos):
-    "remind me every day at 8am to log my workout" → todos=[]
-    "remind me daily to drink water" → todos=[]
-    "every morning send me a focus list" → todos=[]
-    "weekly digest of my todos please" → todos=[]
-- Examples (single-shot → CREATE):
-    Text "i need to create a demo for gooni" → [{{kind:"create", text:"create demo for gooni"}}]
-    Text "call dentist tomorrow" → [{{kind:"create", text:"call dentist", due_hint:"tomorrow"}}]
-    Text "buy milk + eggs" → [{{kind:"create", text:"buy milk + eggs"}}]
-    Text "remind me to take out trash tonight" → [{{kind:"create", text:"take out trash", due_hint:"tonight"}}]
-- Examples (chat context, skip → emits as soft_promise instead):
-    Text "imma call mom tomorrow" → soft_promises, NOT todos
-    Text "i'll fix the auth bug tonight" → soft_promises, NOT todos
-
-DELETE — `{{kind:"delete", match:"..."}}`:
-- Daniel signals to KILL an existing todo. The router cosine-matches `match`
-  against open todos and soft-deletes the hit (24h undo).
-- `match` MUST be the OBJECT of the kill — the noun phrase identifying which
-  todo. DO NOT include the verb. DO NOT capture the kill as a new todo text.
+COMPLETE — `{{kind:"complete", match:"..."}}`:
+- Daniel signals an existing commitment is DONE. The router cosine-matches
+  `match` against active promises and flips it to kept.
+- `match` = the OBJECT (the existing promise's text or close paraphrase).
+  DO NOT include the done-verb.
 - Examples:
-    Text "kill texting curtis bout houselympics" →
-      [{{kind:"delete", match:"texting Curtis about Houselympics"}}]
-    Text "delete the trim-list-title stuff" →
-      [{{kind:"delete", match:"trim-list-title"}}]
-    Text "scratch call mom" → [{{kind:"delete", match:"call mom"}}]
-    Text "drop the leetcode todo" → [{{kind:"delete", match:"leetcode"}}]
-- NEVER emit a create alongside — the user is killing, not adding.
-
-COMPLETE — `{{kind:"complete", match:"...", closure_note?:"...", spawned?:[{{text, due_hint?}}]}}`:
-- Daniel signals an existing todo is DONE. Router cosine-matches against
-  open todos and cycles state to done.
-- `match` = the OBJECT (the existing todo's text or close paraphrase).
-- `closure_note` (optional) — short outcome text Daniel said about HOW it went,
-  what happened, the takeaway. Captures continuity ("closure ≠ end-of-thread").
-- `spawned` (optional) — list of follow-up todos Daniel mentioned in the same
-  message ("close X, gonna do Y next"). Each becomes a new Todo linked to the
-  closed one via a spawned_from edge. NEVER emit these as separate kind=create
-  entries when they're follow-ups to a close — bundle them inside the complete
-  entry's spawned[] so the lineage edge gets wired.
-- Examples (close only):
     Text "close call paip" → [{{kind:"complete", match:"call paip"}}]
-    Text "lets close call paip" → [{{kind:"complete", match:"call paip"}}]
-    Text "move filter active focuses to done" →
-      [{{kind:"complete", match:"filter active focuses"}}]
     Text "finished the auth bug fix" → [{{kind:"complete", match:"auth bug"}}]
-    Text "i did the dentist call" → [{{kind:"complete", match:"dentist"}}]
-- Examples (close + outcome, no spawn):
-    Text "closed forge prep, went well" →
-      [{{kind:"complete", match:"forge prep", closure_note:"went well"}}]
-    Text "did the dentist appointment. great visit." →
-      [{{kind:"complete", match:"dentist", closure_note:"great visit"}}]
-- Examples (close + outcome + spawn — the chain-continuity case):
-    Text "close forge prep, went well, gonna schedule technical next" →
-      [{{kind:"complete", match:"forge prep", closure_note:"went well",
-         spawned:[{{text:"schedule technical round", due_hint:null}}]}}]
-    Text "leg appointment done. now need to provide my info" →
-      [{{kind:"complete", match:"leg appointment",
-         spawned:[{{text:"provide info for appointment", due_hint:null}}]}}]
-    Text "closed taxes prep. gonna file tonight and call cpa tomorrow" →
-      [{{kind:"complete", match:"taxes prep",
-         spawned:[
-           {{text:"file taxes", due_hint:"tonight"}},
-           {{text:"call cpa", due_hint:"tomorrow"}}
-         ]}}]
-- NEVER emit a create alongside — the user is closing existing work, and any
-  follow-ups belong INSIDE the complete entry's spawned[] field.
+    Text "just called papi" → [{{kind:"complete", match:"call papi"}}]
+    Text "did the gym thing" → [{{kind:"complete", match:"gym"}}]
+- NEVER emit a create alongside for the same commitment.
 
-MERGE — `{{kind:"merge", match:"...", merge_into:"..."}}`:
-- Daniel signals two existing todos should combine. `merge_into` = the
-  KEEP-target (text stays); `match` = the MERGED-IN target (soft-deleted,
-  its text appended to merge_into's subtitle).
+BREAK — `{{kind:"break", match:"..."}}`:
+- Daniel cancels / abandons an existing commitment. Router matches and
+  flips it to broken.
 - Examples:
-    Text "merge leg doctor and dermatologist todos" →
-      [{{kind:"merge", merge_into:"leg doctor", match:"dermatologist"}}]
-    Text "the gym and workout todos are the same — combine" →
-      [{{kind:"merge", merge_into:"gym", match:"workout"}}]
+    Text "scratch the leetcode thing" → [{{kind:"break", match:"leetcode"}}]
+    Text "not doing the 5k anymore" → [{{kind:"break", match:"5k"}}]
+    Text "kill call mom" → [{{kind:"break", match:"call mom"}}]
 
-BATCHING — a single message can carry MULTIPLE actions of DIFFERENT kinds.
-Emit them ALL as separate entries.
-- Example: "kill texting curtis bout houselympics, and plan the 100/200/400m
-  one. lets move filter active focuses to done. and lets close call paip" →
-    [
-      {{kind:"delete",   match:"texting Curtis about Houselympics"}},
-      {{kind:"create",   text:"plan the 100/200/400m event"}},
-      {{kind:"complete", match:"filter active focuses"}},
-      {{kind:"complete", match:"call paip"}}
-    ]
-- Eval-segment-280 anti-pattern (NEVER emit this shape — wrong):
-    [
-      {{kind:"create", text:"stop texting Curtis about Houselympics"}},
-      {{kind:"create", text:"plan the 100/200/400m event"}},
-      {{kind:"create", text:"move filter active focuses to done"}}
-    ]
-  All 3 state-changes got captured as create — that's the bug this dispatch
-  fixes. Verbs first, then objects. Never paraphrase a kill into a new todo.
-
-- Skip when text is pure capture (groceries lists, design ideas, journal
-  entries) — let the prefilter handle those.
-- Empty when nothing chore-shaped fires.
+BATCHING — one message can carry MULTIPLE entries of different kinds.
+Emit them ALL:
+    "close call paip, and imma plan the track event tomorrow" →
+      [{{kind:"complete", match:"call paip"}},
+       {{kind:"create", utterance:"imma plan the track event tomorrow",
+         summary:"plan track event", cadence:"once", due_hint:"tomorrow"}}]
+- Empty when nothing commitment-shaped fires. Passive dumps, questions,
+  journal entries, groceries lists → [].
 
 fitness_logs:
 - Daniel logging diet / body / training data so Gooni can keep his cut
   table. These create numeric DailyMetric rows in real time — distinct
-  from todos (chores) and soft_promises (commitments).
+  from promises (commitments).
 
   *** HARD GATE — APPLY FIRST ***
   Questions about food/body ("how many calories in X?", "what's my protein

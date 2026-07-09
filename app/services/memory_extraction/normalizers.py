@@ -68,52 +68,47 @@ def _normalize_memories(items: Any) -> list[dict]:
     return [c for c in items if _validate_candidate(c)]
 
 
-def _normalize_promises(items: Any) -> list[dict]:
-    out = []
-    if not isinstance(items, list):
-        return out
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        utt = it.get("utterance")
-        if not (isinstance(utt, str) and utt.strip()):
-            continue
-        summary = it.get("summary")
-        time_hint = it.get("time_hint")
-        spawns_raw = it.get("spawns_todo")
-        if isinstance(spawns_raw, bool):
-            spawns_todo = spawns_raw
-        elif isinstance(spawns_raw, str):
-            spawns_todo = spawns_raw.strip().lower() == "true"
-        else:
-            spawns_todo = False
-        out.append({
-            "utterance": utt.strip()[:500],
-            "summary": summary.strip()[:200] if isinstance(summary, str) and summary.strip() else None,
-            "time_hint": time_hint.strip()[:60] if isinstance(time_hint, str) and time_hint.strip() and time_hint.strip().lower() != "null" else None,
-            "spawns_todo": spawns_todo,
-        })
-    return out
-
-
-_VALID_TODO_KINDS = ("create", "delete", "complete", "merge", "edit")
-_VALID_EDIT_PATCH_KEYS = (
-    "text", "subtitle", "due_hint", "primary",
-    "parent_match", "unlink_parent", "position",
-    "focus_name",
+_VALID_PROMISE_KINDS = ("create", "complete", "break")
+_VALID_CADENCES = (
+    "once", "daily", "n_per_week", "permanent_do", "permanent_never"
 )
 
 
-def _normalize_todos(items: Any) -> list[dict]:
-    """Normalize todo action entries from the extractor.
+def _coerce_due_date(raw: Any, today: _date | None = None) -> str | None:
+    """Validate an extractor-supplied promise due_date (YYYY-MM-DD).
+    Deadlines point FORWARD — accept today..+366d; clamp LLM date-math
+    mistakes (past dates, multi-year hallucinations) to None so the
+    due_hint regex fallback takes over."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        d = _date.fromisoformat(raw.strip()[:10])
+    except ValueError:
+        return None
+    today = today or _date.today()
+    if d < today or d > today + timedelta(days=366):
+        return None
+    return d.isoformat()
 
-    Each entry carries a `kind` (create | delete | complete | merge) + the
-    kind-specific payload fields. Defaults to `create` for backwards-compat
-    with extractor outputs that pre-date G1.1. Validates per-kind required
-    fields and drops malformed entries silently (failure mode: never crash
-    the extractor, ever).
+
+def _coerce_int(v: Any) -> int | None:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if 0 < n <= 100 else None
+
+
+def _normalize_promise_signals(items: Any, today: _date | None = None) -> list[dict]:
+    """Normalize the unified `promises` emit (ambient-loop v2 Slice 1 —
+    replaces the old soft_promises / todos / done_signals trio).
+
+    Entry shape out:
+      {kind, utterance, summary, cadence, cadence_target, due_date,
+       due_hint, is_important, parent_hint, match}
+    Malformed entries dropped silently — never crash the extractor.
     """
-    out = []
+    out: list[dict] = []
     if not isinstance(items, list):
         return out
     for it in items:
@@ -125,125 +120,57 @@ def _normalize_todos(items: Any) -> list[dict]:
             if isinstance(kind_raw, str) and kind_raw.strip()
             else "create"
         )
-        if kind not in _VALID_TODO_KINDS:
+        if kind not in _VALID_PROMISE_KINDS:
             kind = "create"
 
-        text_raw = it.get("text")
-        text = text_raw.strip() if isinstance(text_raw, str) else ""
+        utt_raw = it.get("utterance")
+        utterance = utt_raw.strip()[:500] if isinstance(utt_raw, str) else ""
         match_raw = it.get("match")
-        match = match_raw.strip() if isinstance(match_raw, str) else ""
-        merge_into_raw = it.get("merge_into")
-        merge_into = (
-            merge_into_raw.strip()
-            if isinstance(merge_into_raw, str)
-            else ""
+        match = match_raw.strip()[:200] if isinstance(match_raw, str) else ""
+
+        # Per-kind required fields.
+        if kind == "create" and not utterance:
+            continue
+        if kind in ("complete", "break") and not match:
+            continue
+
+        cadence_raw = it.get("cadence")
+        cadence = (
+            cadence_raw.strip().lower()
+            if isinstance(cadence_raw, str)
+            and cadence_raw.strip().lower() in _VALID_CADENCES
+            else "once"
         )
-
-        # Per-kind required-field validation. Drop malformed entries.
-        if kind == "create" and not text:
-            continue
-        if kind in ("delete", "complete", "edit") and not match:
-            continue
-        if kind == "merge" and (not match or not merge_into):
-            continue
-
-        due_hint = it.get("due_hint")
-
-        # G3.5: COMPLETE kind can carry closure_note + spawned follow-ups.
-        # Only meaningful when kind=complete; silently dropped for other
-        # kinds so the schema stays consistent.
-        closure_note_raw = it.get("closure_note") if kind == "complete" else None
-        closure_note = (
-            closure_note_raw.strip()
-            if isinstance(closure_note_raw, str)
-            and closure_note_raw.strip()
-            and closure_note_raw.strip().lower() != "null"
+        cadence_target = (
+            _coerce_int(it.get("cadence_target"))
+            if cadence == "n_per_week"
             else None
         )
 
-        spawned_raw = it.get("spawned") if kind == "complete" else None
-        spawned: list[dict] = []
-        if isinstance(spawned_raw, list):
-            for sp in spawned_raw:
-                if not isinstance(sp, dict):
-                    continue
-                sp_text = sp.get("text")
-                if not isinstance(sp_text, str) or not sp_text.strip():
-                    continue
-                sp_due = sp.get("due_hint")
-                spawned.append({
-                    "text": sp_text.strip()[:200],
-                    "due_hint": (
-                        sp_due.strip()[:40]
-                        if isinstance(sp_due, str)
-                        and sp_due.strip()
-                        and sp_due.strip().lower() != "null"
-                        else None
-                    ),
-                })
+        summary = it.get("summary")
+        due_hint = it.get("due_hint")
+        parent_hint = it.get("parent_hint")
 
-        # G3.9 EDIT kind: validate + normalize the patch object. Drop
-        # unknown keys, coerce types, leave empty values out so handlers
-        # know which fields the user actually intended.
-        patch_raw = it.get("patch") if kind == "edit" else None
-        patch: dict = {}
-        if isinstance(patch_raw, dict):
-            for k, v in patch_raw.items():
-                if k not in _VALID_EDIT_PATCH_KEYS:
-                    continue
-                if k in ("text", "subtitle", "due_hint", "parent_match", "position", "focus_name") and isinstance(v, str):
-                    s = v.strip()
-                    if s and s.lower() != "null":
-                        patch[k] = s[:200]
-                elif k in ("primary", "unlink_parent"):
-                    if isinstance(v, bool):
-                        patch[k] = v
-                    elif isinstance(v, str):
-                        patch[k] = v.strip().lower() == "true"
-        if kind == "edit" and not patch:
-            # Edit with no actionable patch fields is noise — drop.
-            continue
+        def _opt_str(v: Any, cap: int) -> str | None:
+            if isinstance(v, str) and v.strip() and v.strip().lower() != "null":
+                return v.strip()[:cap]
+            return None
 
+        # Recurring cadences have no single deadline — a due on a daily/
+        # weekly promise would get auto_mark_overdue'd into `broken` the
+        # day after creation ("gym 6x a week starting today" ≠ due today).
+        recurring = cadence != "once"
         out.append({
             "kind": kind,
-            "text": text[:200] if text else None,
-            "due_hint": (
-                due_hint.strip()[:40]
-                if isinstance(due_hint, str)
-                and due_hint.strip()
-                and due_hint.strip().lower() != "null"
-                else None
-            ),
-            "match": match[:200] if match else None,
-            "merge_into": merge_into[:200] if merge_into else None,
-            "closure_note": closure_note[:500] if closure_note else None,
-            "spawned": spawned,
-            "patch": patch if kind == "edit" else None,
-        })
-    return out
-
-
-def _normalize_done_signals(items: Any) -> list[dict]:
-    """Normalize done_signals entries from the extractor (G3.9 atom #2).
-    Each entry is an implicit done-utterance ("just called papi") that
-    Gooni should fuzzy-match against an open todo at ≥0.85 cosine and
-    auto-close. Bad entries silently dropped.
-    """
-    out = []
-    if not isinstance(items, list):
-        return out
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        phrase = it.get("phrase")
-        match = it.get("match")
-        if not (isinstance(phrase, str) and phrase.strip()):
-            continue
-        if not (isinstance(match, str) and match.strip()):
-            continue
-        out.append({
-            "phrase": phrase.strip()[:200],
-            "match": match.strip()[:200],
+            "utterance": utterance or None,
+            "summary": _opt_str(summary, 200),
+            "cadence": cadence,
+            "cadence_target": cadence_target,
+            "due_date": None if recurring else _coerce_due_date(it.get("due_date"), today),
+            "due_hint": None if recurring else _opt_str(due_hint, 60),
+            "is_important": _coerce_bool(it.get("is_important")),
+            "parent_hint": _opt_str(parent_hint, 200),
+            "match": match or None,
         })
     return out
 

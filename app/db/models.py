@@ -1453,25 +1453,42 @@ class CapabilityFacet(Base):
 
 
 class Promise(Base):
-    """A soft commitment extracted from a Daniel WA/chat message — "imma X
-    tonight" / "i'll Y this week" / "trying to Z daily". Distinct primitive
-    from Todo (chore-shaped) and Focus (long arc). Captures the *uttered*
-    intent so Gooni can act as accountability partner: follow up
-    conversationally, count slips, retire stale promises with consent.
+    """A forward-looking commitment — THE actionable primitive post
+    ambient-loop v2. Absorbs the old Todo (a Promise with cadence=once),
+    Habit (cadence=daily / n_per_week / permanent_*), and eventually Focus
+    (a Promise with children via parent_promise_id).
 
-    Lifecycle: pending → kept | broken | abandoned. State transitions
-    happen on user response to the follow-up nudge ("yeah did it" → kept,
-    "nah lost steam" → abandoned) or on time-anchored auto-broken when
-    inferred_due passes and the user never confirmed completion.
+    Lifecycle: active → kept | broken. State transitions fire from chat
+    ("did it" → kept, "not doing it" → broken), the dashboard PATCH, or
+    time-anchored auto-broken when inferred_due passes unconfirmed.
 
-    Cross-entity links (supports Focus, closes Todo, utters from Message)
-    live in the `edges` table — Promise can semantically connect to many
-    things and adding an FK column per relation would explode the schema.
+    Cross-entity links (supports Focus, utters from Message) live in the
+    `edges` table — Promise can semantically connect to many things and
+    adding an FK column per relation would explode the schema. The one
+    exception is parent_promise_id: parent-child nesting is 1-to-many
+    ownership, so a self-FK is the right tool.
     """
 
     __tablename__ = "promises"
 
     id = Column(Integer, primary_key=True, index=True)
+    # Ambient-loop v2: how often this commitment recurs.
+    #   once           — one-shot ("ship the eval by friday")
+    #   daily          — every day ("leetcode daily")
+    #   n_per_week     — N times a week; N lives in cadence_target ("gym 6x/wk")
+    #   permanent_do   — standing do-rule ("always stretch after runs")
+    #   permanent_never— standing avoid-rule ("no weed")
+    cadence = Column(String, nullable=False, default="once", index=True)
+    # N for n_per_week; null for every other cadence.
+    cadence_target = Column(Integer, nullable=True)
+    # User-set importance flag ("that's important" in chat / star tap).
+    # Deterministic overlay ranking input — never LLM-inferred.
+    is_important = Column(Boolean, nullable=False, default=False)
+    # Parent-child nesting: a Focus-shaped Promise owns child Promises
+    # ("The Cut" owns the daily-calorie child). Nullable self-FK.
+    parent_promise_id = Column(
+        Integer, ForeignKey("promises.id"), nullable=True, index=True
+    )
     # Verbatim quote of what Daniel said. Preserves his words for the
     # follow-up ("you said 'imma finish the video tonight' — still on?").
     utterance = Column(Text, nullable=False)

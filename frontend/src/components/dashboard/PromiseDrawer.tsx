@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { Check, X, AlertTriangle } from "lucide-react";
+import { Check, X, AlertTriangle, Star } from "lucide-react";
 import { color as ctok, FONT } from "../../ui";
 import {
   fetchPromises,
+  patchPromise,
   patchPromiseState,
   createPromise,
   type ApiPromise,
+  type PromiseCadence,
   type PromiseState,
 } from "../../services/api";
 import { parseServerDate } from "../../utils/date";
@@ -25,6 +27,23 @@ const STATE_COLOR: Record<PromiseState, string> = {
   kept: "#15803D",
   broken: "#B91C1C",
 };
+
+// Ambient-loop v2 cadence pill labels. `once` renders no pill — one-shot
+// is the default shape and the due label already carries the timing.
+function cadenceLabel(cadence: PromiseCadence, target: number | null): string | null {
+  switch (cadence) {
+    case "daily":
+      return "daily";
+    case "n_per_week":
+      return `${target ?? "?"}x/wk`;
+    case "permanent_do":
+      return "always";
+    case "permanent_never":
+      return "never";
+    default:
+      return null;
+  }
+}
 
 export function PromiseDrawer() {
   const [tab, setTab] = useState<"active" | "history">("active");
@@ -166,6 +185,19 @@ function PromiseRow({
   const dueLabel = formatDue(promise.inferred_due);
   const stateColor = STATE_COLOR[promise.state];
   const slipHigh = promise.slip_count >= 2;
+  const cadPill = cadenceLabel(promise.cadence, promise.cadence_target);
+  const [important, setImportant] = useState(promise.is_important);
+
+  async function toggleImportant() {
+    // Optimistic star flip; server is source of truth on next reload.
+    setImportant((v) => !v);
+    try {
+      await patchPromise(promise.id, { is_important: !important });
+    } catch {
+      setImportant(important);
+    }
+  }
+
   return (
     <ItemCard onClick={onOpen} style={{ alignItems: "flex-start" }}>
       <StatusDot color={stateColor} title={promise.state} size={8} />
@@ -184,6 +216,14 @@ function PromiseRow({
           <span style={{ fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.3, color: stateColor }}>
             {promise.state}
           </span>
+          {cadPill && (
+            <span style={{
+              fontWeight: 600, padding: "1px 7px", borderRadius: 999,
+              background: "rgba(10,132,255,0.10)", color: ctok.accent,
+            }}>
+              {cadPill}
+            </span>
+          )}
           {dueLabel && <span>· {dueLabel}</span>}
           {slipHigh && (
             <span
@@ -198,6 +238,13 @@ function PromiseRow({
       </div>
       {showActions && (
         <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          <ActionBtn
+            label={important ? "important (click to unstar)" : "important"}
+            color={important ? "#D97706" : "var(--gooni-muted, #8E8E93)"}
+            onClick={() => void toggleImportant()}
+          >
+            <Star size={13} strokeWidth={2.2} fill={important ? "#D97706" : "none"} />
+          </ActionBtn>
           <ActionBtn label="kept" color="#15803D" onClick={() => onTransition(promise.id, "kept")}>
             <Check size={13} strokeWidth={2.4} />
           </ActionBtn>

@@ -52,7 +52,9 @@ CASES = [
             "tone_max": 0,
             "feature_max": 0,
             "memories_min": 1,
-            "memory_types": {"preference"},
+            # "preference" type was retired — stable tastes emit as "fact"
+            # (see _SIGNALS_PROMPT memories rules).
+            "memory_types": {"fact"},
         },
     },
     {
@@ -60,6 +62,31 @@ CASES = [
         "text": "how many calories in an apple?",
         "prev": None,
         "expect": {"tone_max": 0, "feature_max": 0, "memories_max": 0},
+    },
+    # ── ambient-loop v2 unified promise emit ──
+    {
+        "label": "PROMISE_NXWK",
+        "text": "imma hit the gym 6x a week starting now",
+        "prev": "understood, sir.",
+        "expect": {
+            "promise_min": 1, "feature_max": 0,
+            "promise_cadence": "n_per_week", "promise_target": 6,
+        },
+    },
+    {
+        "label": "PROMISE_ONCE",
+        "text": "i'll ship the memory eval by friday",
+        "prev": "understood, sir.",
+        "expect": {
+            "promise_min": 1, "feature_max": 0,
+            "promise_cadence": "once", "promise_has_due": True,
+        },
+    },
+    {
+        "label": "PROMISE_NONE",
+        "text": "saw a cool paper on attention sparsity today",
+        "prev": "understood, sir.",
+        "expect": {"promise_max": 0, "feature_max": 0},
     },
 ]
 
@@ -69,6 +96,25 @@ def check(actual: dict, expect: dict, label: str) -> list[str]:
     n_tone = len(actual["tone_corrections"])
     n_feat = len(actual["feature_requests"])
     n_mem = len(actual["memories"])
+    proms = actual.get("promises") or []
+    creates = [p for p in proms if p.get("kind") == "create"]
+
+    if "promise_min" in expect and len(creates) < expect["promise_min"]:
+        fails.append(f"promise_min={expect['promise_min']} got {len(creates)}")
+    if "promise_max" in expect and len(creates) > expect["promise_max"]:
+        fails.append(f"promise_max={expect['promise_max']} got {len(creates)}")
+    if "promise_cadence" in expect:
+        cads = {p.get("cadence") for p in creates}
+        if expect["promise_cadence"] not in cads:
+            fails.append(f"promise_cadence={expect['promise_cadence']} got {cads}")
+    if "promise_target" in expect:
+        targets = {p.get("cadence_target") for p in creates}
+        if expect["promise_target"] not in targets:
+            fails.append(f"promise_target={expect['promise_target']} got {targets}")
+    if expect.get("promise_has_due") and not any(
+        p.get("due_date") or p.get("due_hint") for p in creates
+    ):
+        fails.append("promise_has_due: no due_date/due_hint on any create")
 
     if "tone_min" in expect and n_tone < expect["tone_min"]:
         fails.append(f"tone_min={expect['tone_min']} got {n_tone}")
@@ -103,7 +149,12 @@ def main() -> int:
         print(f"[{status}] {case['label']:14s} {case['text']!r}")
         print(f"         tone={len(sig['tone_corrections'])}  "
               f"feature={len(sig['feature_requests'])}  "
-              f"memories={len(sig['memories'])}")
+              f"memories={len(sig['memories'])}  "
+              f"promises={len(sig.get('promises') or [])}")
+        for p in (sig.get("promises") or []):
+            print(f"           promise  · [{p.get('kind')}] {p.get('utterance') or p.get('match')} "
+                  f"(cadence={p.get('cadence')}, target={p.get('cadence_target')}, "
+                  f"due={p.get('due_date') or p.get('due_hint')})")
         if sig["tone_corrections"]:
             for t in sig["tone_corrections"]:
                 print(f"           tone     · {t['rule']}")

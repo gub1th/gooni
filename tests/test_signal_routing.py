@@ -33,7 +33,7 @@ _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 
 from app.db.database import SessionLocal, engine  # noqa: E402
-from app.db.models import Base, DailyMetric, Todo  # noqa: E402
+from app.db.models import Base, DailyMetric, Promise  # noqa: E402
 from app.services import intent_router  # noqa: E402
 
 Base.metadata.create_all(bind=engine)
@@ -46,9 +46,7 @@ def _empty_signals() -> dict:
     return {
         "tone_corrections": [],
         "feature_requests": [],
-        "soft_promises": [],
-        "todos": [],
-        "done_signals": [],
+        "promises": [],
         "fitness_logs": [],
         "reply_intent": "acknowledge",
         "memories": [],
@@ -116,19 +114,82 @@ def main() -> int:
         fails.append("backdate: weight leaked onto today")
     print(f"[backdate] {yest} weight={ct_by_day.get(yest, {}).get('weight')} (today not touched)")
 
-    # ── todos → Todo row (a second type, proves it's not fitness-specific) ──
-    # Needs OPENAI_API_KEY — the todo handler embeds for cosine-dedup.
-    if os.getenv("OPENAI_API_KEY"):
-        sig = _empty_signals()
-        sig["todos"] = [{"kind": "create", "text": "call the dentist", "due_hint": None}]
-        intent_router.dispatch({**sig, "memories": []},
-                               intent_router.RouterContext(db=db))
-        n_todos = db.query(Todo).count()
-        if n_todos < 1:
-            fails.append(f"todos: expected >=1 Todo row, got {n_todos}")
-        print(f"[todos] Todo_rows={n_todos}")
-    else:
-        print("[todos] SKIP — no OPENAI_API_KEY (embedding-dependent)")
+    # ── promises: unified emit (ambient-loop v2 slice 1) ──
+    # Hand-built signals — no LLM. Embedding calls fail gracefully to None
+    # without OPENAI_API_KEY; create + substring-match paths still work.
+    from datetime import date as _d, timedelta as _t
+    next_friday = _d.today() + _t(days=(4 - _d.today().weekday()) % 7 or 7)
+
+    def _create_sig(**kw) -> dict:
+        base = {
+            "kind": "create", "utterance": None, "summary": None,
+            "cadence": "once", "cadence_target": None, "due_date": None,
+            "due_hint": None, "is_important": False, "parent_hint": None,
+            "match": None,
+        }
+        base.update(kw)
+        return base
+
+    # (a) recurring cadence lands on the row
+    sig = _empty_signals()
+    sig["promises"] = [
+        _create_sig(utterance="gym 6x a week", summary="gym six times a week",
+                    cadence="n_per_week", cadence_target=6),
+    ]
+    routed = intent_router.dispatch(
+        {**sig, "memories": []},
+        intent_router.RouterContext(db=db, source_message_id=1),
+    )
+    gym = db.query(Promise).filter(Promise.utterance == "gym 6x a week").first()
+    if gym is None or gym.cadence != "n_per_week" or gym.cadence_target != 6:
+        fails.append(f"promise n_per_week: bad row {gym and (gym.cadence, gym.cadence_target)}")
+    if not routed.captured_promises:
+        fails.append("promise n_per_week: routed.captured_promises empty")
+    print(f"[promise a] cadence={gym and gym.cadence} target={gym and gym.cadence_target}")
+
+    # (b) once-cadence with an absolute due_date → inferred_due set;
+    #     is_important flag persists
+    sig = _empty_signals()
+    sig["promises"] = [
+        _create_sig(utterance="ship the eval by friday", summary="ship the eval",
+                    cadence="once", due_date=next_friday.isoformat(),
+                    is_important=True),
+    ]
+    intent_router.dispatch({**sig, "memories": []},
+                           intent_router.RouterContext(db=db, source_message_id=1))
+    ship = db.query(Promise).filter(Promise.utterance == "ship the eval by friday").first()
+    if ship is None or ship.cadence != "once" or ship.inferred_due is None:
+        fails.append(f"promise once+due: bad row {ship and (ship.cadence, ship.inferred_due)}")
+    if ship is not None and not ship.is_important:
+        fails.append("promise once+due: is_important not persisted")
+    print(f"[promise b] due={ship and ship.inferred_due} important={ship and ship.is_important}")
+
+    # (c) no-signal turn → no new Promise rows
+    before = db.query(Promise).count()
+    intent_router.dispatch({**_empty_signals(), "memories": []},
+                           intent_router.RouterContext(db=db, source_message_id=1))
+    after = db.query(Promise).count()
+    if after != before:
+        fails.append(f"promise no-signal: row count moved {before} -> {after}")
+    print(f"[promise c] no-signal rows {before} -> {after}")
+
+    # (d) complete via chat match → state flips to kept
+    sig = _empty_signals()
+    sig["promises"] = [{"kind": "complete", "match": "gym 6x a week",
+                        "utterance": None, "summary": None, "cadence": "once",
+                        "cadence_target": None, "due_date": None, "due_hint": None,
+                        "is_important": False, "parent_hint": None}]
+    routed = intent_router.dispatch(
+        {**sig, "memories": []},
+        intent_router.RouterContext(db=db, source_message_id=1),
+    )
+    db.expire_all()
+    gym = db.query(Promise).filter(Promise.utterance == "gym 6x a week").first()
+    if gym is None or gym.state != "kept":
+        fails.append(f"promise complete: expected kept, got {gym and gym.state}")
+    if not routed.completed_promises:
+        fails.append("promise complete: routed.completed_promises empty")
+    print(f"[promise d] state={gym and gym.state}")
 
     db.close()
     os.unlink(_tmp.name)

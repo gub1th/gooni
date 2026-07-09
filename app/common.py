@@ -91,6 +91,91 @@ def _parse_optional_due(raw):
         raise HTTPException(status_code=400, detail="invalid due_date")
 
 
+_DUE_HINTS = {
+    "tonight": ("today_eod", None),
+    "today": ("today_eod", None),
+    "tomorrow": ("plus_days", 1),
+    "this week": ("plus_days", 7),
+}
+
+
+def parse_due_hint(hint, db=None):
+    """Resolve a due-hint phrase to a concrete datetime (stored naive UTC,
+    EOD-anchored in Daniel's LOCAL day). Moved here from the (deleted)
+    todos intent handler — promises and todos share deadline parsing now.
+
+    Anchoring is LOCAL (Settings.nudge_tz via local_now), then converted
+    to the storage convention (naive UTC). A utcnow() anchor makes
+    "tonight" at 6pm PT resolve to 23:59 *UTC* — 4:59pm PT the NEXT day.
+    When db is None we degrade to the UTC behavior.
+
+    Two-tier strategy:
+      1. Regex map (_DUE_HINTS) handles the canonical enum-shaped phrases
+         the LLM emits ("tomorrow", "tonight"). Deterministic, no call.
+      2. `dateparser` fallback for free-form phrases ("in 3 days",
+         "next friday", "by aug 5"). Pure Python, ~3ms.
+
+    Stays None for context-dependent phrases ("soon", "before the trip").
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    if not hint:
+        return None
+    h = hint.strip().lower()
+    rule = _DUE_HINTS.get(h)
+
+    tzinfo = None
+    if db is not None:
+        now = local_now(db)
+        tzinfo = now.tzinfo
+    else:
+        now = _dt.utcnow()
+
+    def _to_storage(dt):
+        # tz-aware local → naive UTC (storage convention). Naive passes
+        # through (degraded no-db path).
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(_tz.utc).replace(tzinfo=None)
+
+    if rule:
+        kind, arg = rule
+        if kind == "today_eod":
+            return _to_storage(now.replace(hour=23, minute=59, second=0, microsecond=0))
+        if kind == "plus_days" and isinstance(arg, int):
+            return _to_storage(
+                (now + _td(days=arg)).replace(
+                    hour=23, minute=59, second=0, microsecond=0
+                )
+            )
+
+    # Regex map missed — try dateparser. PREFER_DATES_FROM='future' so
+    # "friday" resolves to the NEXT friday, not last. RELATIVE_BASE anchors
+    # relative phrases to Daniel's local clock; result is interpreted as
+    # local then converted to naive UTC for storage.
+    try:
+        import dateparser
+        parsed = dateparser.parse(
+            h,
+            settings={
+                "PREFER_DATES_FROM": "future",
+                "RETURN_AS_TIMEZONE_AWARE": False,
+                "RELATIVE_BASE": now.replace(tzinfo=None),
+            },
+        )
+        if parsed is not None:
+            # Date-only (midnight) nudges to EOD so a "next friday"
+            # deadline doesn't expire at 00:00.
+            if parsed.hour == 0 and parsed.minute == 0:
+                parsed = parsed.replace(hour=23, minute=59, second=0, microsecond=0)
+            if tzinfo is not None:
+                parsed = parsed.replace(tzinfo=tzinfo)
+            return _to_storage(parsed)
+    except Exception as e:
+        print(f"[parse_due_hint] dateparser failed on '{h}': {e}")
+    return None
+
+
 _VALID_STATUS = {"committed", "someday"}
 
 
