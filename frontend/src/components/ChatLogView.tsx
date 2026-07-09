@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, RotateCcw, X } from "lucide-react";
 import { FONT, color as ctok } from "../ui";
+import { AmbientOverlay } from "./AmbientOverlay";
 import {
   dismissMessageGlow,
   fetchMessageLog,
@@ -136,6 +137,7 @@ export function ChatLogView() {
         background: "var(--gooni-bg, #FFFFFF)",
       }}
     >
+      <AmbientOverlay />
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 20px" }}>
         <div style={{
           fontSize: 12, fontWeight: 600, letterSpacing: 1.2,

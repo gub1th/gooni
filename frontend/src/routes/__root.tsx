@@ -38,6 +38,10 @@ function ThemeVarSync() {
       "--gooni-disabled":  palette.disabled,
       "--gooni-sidebar":   palette.sidebar,
       "--gooni-main":      palette.main,
+      // Ambient overlay tokens (Slice 4). Blur is theme-invariant; the
+      // glow dot brightens slightly on dark so it reads through the frost.
+      "--gooni-overlay-blur": "18px",
+      "--gooni-glow-dot":  theme === "dark" ? "#3B9CFF" : "#0A84FF",
     };
     for (const [k, v] of Object.entries(tokens)) {
       if (v == null) root.style.removeProperty(k);

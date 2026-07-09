@@ -9,6 +9,7 @@ ROUTER_MODULES = [
     "habits",
     "metrics",
     "trackables",
+    "overlay",
     "focuses",
     "focus_candidates",
     "todos",

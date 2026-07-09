@@ -65,6 +65,15 @@ vi.mock("../services/api", () => ({
   promoteMessage: (id: number) => promoteMock(id),
   undoPromoteMessage: vi.fn(),
   dismissMessageGlow: vi.fn(),
+  // AmbientOverlay mounts inside ChatLogView — give it empty zones.
+  fetchOverlay: vi.fn(async () => ({
+    action_horizon: [],
+    trackables_today: [],
+    anchor: null,
+    whoop_select: [],
+  })),
+  setOverlayAnchorNote: vi.fn(),
+  searchNoteTitles: vi.fn(async () => []),
 }));
 
 afterEach(cleanup);

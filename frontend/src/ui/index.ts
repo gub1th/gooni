@@ -1,6 +1,6 @@
 // Gooni design system. Import primitives + tokens from here:
 //   import { Modal, Button, Card, color, FONT } from "@/ui";  (or relative)
-export { FONT, color, scrim, radius, space, fontSize, z } from "./tokens";
+export { FONT, color, scrim, radius, space, fontSize, z, ambient } from "./tokens";
 export { Button } from "./Button";
 export type { ButtonProps, ButtonVariant, ButtonSize } from "./Button";
 export { Card } from "./Card";

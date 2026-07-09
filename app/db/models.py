@@ -789,6 +789,13 @@ class Settings(Base):
     cut_calorie_limit = Column(Integer, nullable=False, default=2100)
     cut_protein_limit = Column(Integer, nullable=False, default=170)
     cut_start_date = Column(String, nullable=True)  # YYYY-MM-DD
+    # Ambient overlay (Slice 4). anchor = the single pinned Note the
+    # overlay's anchor zone shows (Daniel's north-star doc). whoop_keys =
+    # JSON list[str] of whoop-source Trackable names the whoop-select zone
+    # renders (Daniel picks the metrics he actually reads; empty = zone
+    # hidden). Server-side so the selection survives devices.
+    overlay_anchor_note_id = Column(Integer, nullable=True)
+    overlay_whoop_keys = Column(Text, nullable=False, default="[]")
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )

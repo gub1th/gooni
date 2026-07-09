@@ -106,8 +106,19 @@ export const z = {
   dropdown: 100,
   sticky: 200,
   fab: 900,
+  // Ambient overlay (Slice 4): frosted edge panels — above the log +
+  // the fab, deliberately BELOW every modal so a modal always wins.
+  overlay: 950,
   modalScrim: 1000,
   modalCard: 1010,
   panel: 1100,
   toast: 1200,
+} as const;
+
+// Ambient-surface visual tokens (Slice 4). Read via the CSS vars
+// (--gooni-overlay-blur / --gooni-glow-dot, pushed per-theme in
+// __root's ThemeVarSync) with these as light-theme fallbacks.
+export const ambient = {
+  overlayBlur: "18px",
+  glowDot: "#0A84FF",
 } as const;
