@@ -125,11 +125,24 @@ def main() -> int:
         fails.append("backdate: weight leaked onto today")
     print(f"[backdate] {yest} weight={ct_by_day.get(yest, {}).get('weight')} (today not touched)")
 
-    # ── promises: unified emit (ambient-loop v2 slice 1) ──
+    # ── promises: unified emit (slice 1) + glow/promote (slice 3) ──
     # Hand-built signals — no LLM. Embedding calls fail gracefully to None
-    # without OPENAI_API_KEY; create + substring-match paths still work.
+    # without OPENAI_API_KEY; glow + substring-match paths still work.
+    import json as _json
     from datetime import date as _d, timedelta as _t
+    from app.db.models import Conversation, Message
     next_friday = _d.today() + _t(days=(4 - _d.today().weekday()) % 7 or 7)
+
+    conv = Conversation(source="web")
+    db.add(conv)
+    db.commit()
+
+    def _msg(text: str) -> Message:
+        m = Message(conversation_id=conv.id, role="user", content=text)
+        db.add(m)
+        db.commit()
+        db.refresh(m)
+        return m
 
     def _create_sig(**kw) -> dict:
         base = {
@@ -141,7 +154,8 @@ def main() -> int:
         base.update(kw)
         return base
 
-    # (a) recurring cadence lands on the row
+    # (a) create signal → GLOW annotation, NOT a Promise row (slice 3)
+    m1 = _msg("gym 6x a week")
     sig = _empty_signals()
     sig["promises"] = [
         _create_sig(utterance="gym 6x a week", summary="gym six times a week",
@@ -149,17 +163,41 @@ def main() -> int:
     ]
     routed = intent_router.dispatch(
         {**sig, "memories": []},
-        intent_router.RouterContext(db=db, source_message_id=1),
+        intent_router.RouterContext(db=db, source_message_id=m1.id),
     )
+    db.refresh(m1)
+    n_promises = db.query(Promise).count()
+    if n_promises != 0:
+        fails.append(f"glow: create should NOT insert a Promise, got {n_promises} rows")
+    if not m1.has_actionable_signal or not m1.signal_preview:
+        fails.append("glow: message not annotated")
+    if not routed.noticed_promises:
+        fails.append("glow: routed.noticed_promises empty")
+    preview = _json.loads(m1.signal_preview or "{}")
+    if preview.get("status") != "pending":
+        fails.append(f"glow: expected pending status, got {preview.get('status')}")
+    print(f"[promise a] glow={m1.has_actionable_signal} status={preview.get('status')} rows={n_promises}")
+
+    # (b) promote → Promise row with the parsed cadence; undo → row gone,
+    #     glow restored (the full 1-click loop, straight through the routes)
+    from app.routers.conversations import promote_message, undo_promote
+    out = promote_message(m1.id, db=db)
     gym = db.query(Promise).filter(Promise.utterance == "gym 6x a week").first()
     if gym is None or gym.cadence != "n_per_week" or gym.cadence_target != 6:
-        fails.append(f"promise n_per_week: bad row {gym and (gym.cadence, gym.cadence_target)}")
-    if not routed.captured_promises:
-        fails.append("promise n_per_week: routed.captured_promises empty")
-    print(f"[promise a] cadence={gym and gym.cadence} target={gym and gym.cadence_target}")
+        fails.append(f"promote: bad row {gym and (gym.cadence, gym.cadence_target)}")
+    if (out["message"]["signal_preview"] or {}).get("status") != "promoted":
+        fails.append("promote: preview status not promoted")
+    undo_promote(m1.id, db=db)
+    db.expire_all()
+    if db.query(Promise).count() != 0:
+        fails.append("undo: promoted Promise row survived")
+    db.refresh(m1)
+    if (_json.loads(m1.signal_preview or "{}")).get("status") != "pending":
+        fails.append("undo: glow not restored to pending")
+    print(f"[promise b] promote_cadence={gym and gym.cadence} undo_rows={db.query(Promise).count()}")
 
-    # (b) once-cadence with an absolute due_date → inferred_due set;
-    #     is_important flag persists
+    # (c) once-cadence + absolute due_date + importance survive promote
+    m2 = _msg("ship the eval by friday")
     sig = _empty_signals()
     sig["promises"] = [
         _create_sig(utterance="ship the eval by friday", summary="ship the eval",
@@ -167,40 +205,44 @@ def main() -> int:
                     is_important=True),
     ]
     intent_router.dispatch({**sig, "memories": []},
-                           intent_router.RouterContext(db=db, source_message_id=1))
+                           intent_router.RouterContext(db=db, source_message_id=m2.id))
+    promote_message(m2.id, db=db)
     ship = db.query(Promise).filter(Promise.utterance == "ship the eval by friday").first()
     if ship is None or ship.cadence != "once" or ship.inferred_due is None:
         fails.append(f"promise once+due: bad row {ship and (ship.cadence, ship.inferred_due)}")
     if ship is not None and not ship.is_important:
         fails.append("promise once+due: is_important not persisted")
-    print(f"[promise b] due={ship and ship.inferred_due} important={ship and ship.is_important}")
+    print(f"[promise c] due={ship and ship.inferred_due} important={ship and ship.is_important}")
 
-    # (c) no-signal turn → no new Promise rows
+    # (d) no-signal turn → no glow, no rows
+    m3 = _msg("saw a cool paper today")
     before = db.query(Promise).count()
     intent_router.dispatch({**_empty_signals(), "memories": []},
-                           intent_router.RouterContext(db=db, source_message_id=1))
-    after = db.query(Promise).count()
-    if after != before:
-        fails.append(f"promise no-signal: row count moved {before} -> {after}")
-    print(f"[promise c] no-signal rows {before} -> {after}")
+                           intent_router.RouterContext(db=db, source_message_id=m3.id))
+    db.refresh(m3)
+    if m3.has_actionable_signal:
+        fails.append("no-signal: message wrongly glowed")
+    if db.query(Promise).count() != before:
+        fails.append("no-signal: promise count moved")
+    print(f"[promise d] no-signal glow={m3.has_actionable_signal}")
 
-    # (d) complete via chat match → state flips to kept
+    # (e) complete via chat match → state flips to kept (still automatic)
     sig = _empty_signals()
-    sig["promises"] = [{"kind": "complete", "match": "gym 6x a week",
+    sig["promises"] = [{"kind": "complete", "match": "ship the eval",
                         "utterance": None, "summary": None, "cadence": "once",
                         "cadence_target": None, "due_date": None, "due_hint": None,
                         "is_important": False, "parent_hint": None}]
     routed = intent_router.dispatch(
         {**sig, "memories": []},
-        intent_router.RouterContext(db=db, source_message_id=1),
+        intent_router.RouterContext(db=db, source_message_id=m3.id),
     )
     db.expire_all()
-    gym = db.query(Promise).filter(Promise.utterance == "gym 6x a week").first()
-    if gym is None or gym.state != "kept":
-        fails.append(f"promise complete: expected kept, got {gym and gym.state}")
+    ship = db.query(Promise).filter(Promise.utterance == "ship the eval by friday").first()
+    if ship is None or ship.state != "kept":
+        fails.append(f"promise complete: expected kept, got {ship and ship.state}")
     if not routed.completed_promises:
         fails.append("promise complete: routed.completed_promises empty")
-    print(f"[promise d] state={gym and gym.state}")
+    print(f"[promise e] state={ship and ship.state}")
 
     # ── trackables: generic primitive (slice 2) ──
     # JSON-payload trackable accepts an arbitrary schema — no migration,

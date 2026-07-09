@@ -325,6 +325,81 @@ def _closest_focus(db: Session, vec: list[float]) -> tuple[int | None, float]:
     return best_id, best_score
 
 
+def create_from_signal(
+    db: Session, sp: dict, source_message_id: int | None = None
+) -> Promise | None:
+    """Create a Promise from one normalized extractor `promises` create
+    signal (the shape stored in Message.signal_preview). Shared by the
+    log-view promote route and any auto-create path: resolves the due
+    (absolute due_date wins, local-EOD anchored; due_hint phrase falls
+    back to common.parse_due_hint) and the parent_hint, then runs the
+    full create pipeline (dedup, slip_count, edges, evaluator)."""
+    from datetime import datetime as _dt, time as _time, timezone as _tz
+
+    from ..common import local_now, parse_due_hint
+
+    utterance = (sp.get("utterance") or "").strip()
+    if not utterance:
+        return None
+
+    inferred = None
+    due_date = sp.get("due_date")
+    if due_date:
+        try:
+            d = _dt.strptime(due_date, "%Y-%m-%d").date()
+            try:
+                tzinfo = local_now(db).tzinfo
+                local_eod = _dt.combine(d, _time(23, 59), tzinfo=tzinfo)
+                inferred = local_eod.astimezone(_tz.utc).replace(tzinfo=None)
+            except Exception:
+                inferred = _dt.combine(d, _time(23, 59))
+        except ValueError:
+            inferred = None
+    if inferred is None:
+        try:
+            inferred = parse_due_hint(sp.get("due_hint"), db=db)
+        except Exception:
+            inferred = None
+
+    parent_id = None
+    parent_hint = (sp.get("parent_hint") or "").strip()
+    if parent_hint:
+        try:
+            parent_id = resolve_parent_hint(db, parent_hint)
+        except Exception as e:
+            print(f"[promise create_from_signal] parent resolve error: {e}")
+
+    return create(
+        db,
+        utterance=utterance,
+        summary=sp.get("summary"),
+        source_message_id=source_message_id,
+        inferred_due=inferred,
+        cadence=sp.get("cadence") or "once",
+        cadence_target=sp.get("cadence_target"),
+        is_important=bool(sp.get("is_important")),
+        parent_promise_id=parent_id,
+    )
+
+
+def delete(db: Session, promise_id: int) -> bool:
+    """Hard-delete a promise + its edges. Backs the promote-undo flow
+    (a just-promoted Promise vanishes without leaving a broken tombstone)
+    and DELETE /promises/{id}."""
+    from ..db.models import Edge
+
+    p = get(db, promise_id)
+    if p is None:
+        return False
+    db.query(Edge).filter(
+        ((Edge.src_kind == "promise") & (Edge.src_id == promise_id))
+        | ((Edge.dst_kind == "promise") & (Edge.dst_id == promise_id))
+    ).delete(synchronize_session=False)
+    db.delete(p)
+    db.commit()
+    return True
+
+
 def get(db: Session, promise_id: int) -> Promise | None:
     return db.query(Promise).filter(Promise.id == promise_id).first()
 

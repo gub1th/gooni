@@ -205,3 +205,120 @@ def get_conversation_graph(conversation_id: int, db: Session = Depends(get_db)):
     """Topic graph for the chat-flow visualization in GooniPanel. Cached on
     the conversation row by message count — a new turn invalidates."""
     return conversation_service.build_topic_graph(conversation_id, db)
+
+
+# ── Ambient-loop v2 Slice 3: the log + glow surface ─────────────────────
+
+
+@router.get("/messages/log")
+def messages_log(
+    limit: int = 100,
+    before_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """Flat append-only message log across ALL conversations/sources —
+    the ChatLogView substrate. Newest first; paginate with before_id.
+    Each row carries the conversation source so the log can badge
+    where a thought came from (web / whatsapp / telegram)."""
+    from ..db.models import Message
+
+    limit = max(1, min(limit, 300))
+    q = (
+        db.query(Message, Conversation.source)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+    )
+    if before_id is not None:
+        q = q.filter(Message.id < before_id)
+    rows = q.order_by(Message.id.desc()).limit(limit).all()
+    out = []
+    for m, source in rows:
+        d = _serialize_message(m)
+        d["source"] = source
+        out.append(d)
+    return out
+
+
+def _glow_message(db: Session, message_id: int):
+    from ..db.models import Message
+
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if msg is None:
+        raise HTTPException(404, "Message not found")
+    if not msg.has_actionable_signal or not msg.signal_preview:
+        raise HTTPException(400, "message carries no actionable signal")
+    try:
+        preview = json.loads(msg.signal_preview)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "signal_preview unreadable")
+    return msg, preview
+
+
+@router.post("/messages/{message_id}/promote")
+def promote_message(message_id: int, db: Session = Depends(get_db)):
+    """1-click promote: create Promise(s) from the glow's parsed drafts.
+    Runs the full promise_service create pipeline (due resolution, parent
+    hint, dedup, evaluator) with this message as the source utterance.
+    Stamps promise_ids on the preview so undo can reverse exactly."""
+    from ..services import promise_service
+
+    msg, preview = _glow_message(db, message_id)
+    if preview.get("status") == "promoted":
+        raise HTTPException(409, "already promoted (undo first)")
+
+    created = []
+    for sp in preview.get("signals") or []:
+        try:
+            p = promise_service.create_from_signal(db, sp, source_message_id=msg.id)
+        except Exception as e:
+            print(f"[promote] create_from_signal failed: {e}")
+            p = None
+        if p is not None:
+            created.append(p)
+    if not created:
+        raise HTTPException(400, "no promotable signals on this message")
+
+    preview["status"] = "promoted"
+    preview["promise_ids"] = [p.id for p in created]
+    msg.signal_preview = json.dumps(preview)
+    db.commit()
+
+    from ..serializers import _serialize_promise
+    return {
+        "message": _serialize_message(msg),
+        "promises": [_serialize_promise(p) for p in created],
+    }
+
+
+@router.post("/messages/{message_id}/undo-promote")
+def undo_promote(message_id: int, db: Session = Depends(get_db)):
+    """Undo a promote within the FE's countdown window: hard-delete the
+    created promises (+ their edges) and restore the glow-untapped state.
+    Idempotent-ish — undoing a non-promoted glow 409s."""
+    from ..services import promise_service
+
+    msg, preview = _glow_message(db, message_id)
+    if preview.get("status") != "promoted":
+        raise HTTPException(409, "message is not in promoted state")
+    for pid in preview.get("promise_ids") or []:
+        try:
+            promise_service.delete(db, pid)
+        except Exception as e:
+            print(f"[undo-promote] delete {pid} failed: {e}")
+    preview["status"] = "pending"
+    preview["promise_ids"] = []
+    msg.signal_preview = json.dumps(preview)
+    db.commit()
+    return {"message": _serialize_message(msg)}
+
+
+@router.post("/messages/{message_id}/dismiss-glow")
+def dismiss_glow(message_id: int, db: Session = Depends(get_db)):
+    """Dismiss without acting — the glow dot clears, the parse is kept
+    for provenance. Signals Gooni that Daniel didn't care about this one."""
+    msg, preview = _glow_message(db, message_id)
+    if preview.get("status") == "promoted":
+        raise HTTPException(409, "already promoted (undo first)")
+    preview["status"] = "dismissed"
+    msg.signal_preview = json.dumps(preview)
+    db.commit()
+    return {"message": _serialize_message(msg)}

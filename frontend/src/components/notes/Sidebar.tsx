@@ -11,7 +11,7 @@ import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeSt
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText, Brain, ClipboardList, Settings as SettingsIcon,
-  Globe, Plug, PanelLeftClose, Plus,
+  Globe, Plug, PanelLeftClose, Plus, Radio,
   Home, Folder as FolderIcon, List as ListIcon, MessageSquare, Pin as PinIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
@@ -25,6 +25,7 @@ const ICON_TINT = {
   draft:    "#8B5CF6",   // violet — distinct from amber pinned + sky memories
   recent:   "#94A3B8",   // slate-soft — recent is read-only, muted on purpose
   newChat:  "#10B981",   // emerald
+  log:      "#0A84FF",   // accent blue — the glow surface
   gooni:    "#A855F7",   // violet
   memories: "#0EA5E9",  // sky
   chatAudit: "#0891B2",  // cyan
@@ -1018,6 +1019,15 @@ export function Sidebar({ isDashboard, isNotes, isChat, isLists, isEval, activeL
             iconColor={ICON_TINT.newChat}
             active={isChat}
             onClick={onNewChat}
+          />
+          <FlatNavRow
+            label="Log"
+            Icon={Radio}
+            iconColor={ICON_TINT.log}
+            onClick={() => navigate({
+              to: "/",
+              search: { note: undefined, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: "log" },
+            })}
           />
           <FlatNavRow
             label="Memories"

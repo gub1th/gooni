@@ -32,3 +32,6 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
+      # FE seam tests (vitest + RTL, precedent set by the Slice 3 log
+      # view). Thin by design — one flow per surface.
+      - run: npm test

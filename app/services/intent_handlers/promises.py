@@ -1,48 +1,24 @@
-"""Unified promise routing — ambient-loop v2 Slice 1.
+"""Unified promise routing — ambient-loop v2 (Slices 1 + 3).
 
-Handles the single `promises` emit from extract_signals (which replaced
-the old soft_promises / todos / done_signals trio). Three kinds:
+Handles the single `promises` emit from extract_signals. Three kinds:
 
-  create   → promise_service.create with cadence + due + importance +
-             optional parent resolution
-  complete → find_active_match → transition kept
+  create   → GLOW, not a row (Slice 3 log-first capture): the parsed
+             draft lands on the source Message as has_actionable_signal +
+             signal_preview; Daniel promotes or dismisses from the log's
+             gutter dot. No auto-created Promise, no dispatch fork.
+  complete → find_active_match → transition kept   (acts on an EXISTING
+             row — closure friction should stay zero, so these remain
+             automatic)
   break    → find_active_match → transition broken
 
 Note-save path doesn't have a source_message_id, so promises are skipped
-there (per PRD: notes rest as notes — no dispatch at capture time). Only
-chat surfaces emit promise routing.
+there (per PRD: notes rest as notes). Only chat surfaces emit promise
+routing.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, time as _time, timezone as _tz
-
-
-def _due_from_signal(sp: dict, utterance: str, db):
-    """Resolve the due datetime for a create. Extractor's absolute
-    `due_date` (YYYY-MM-DD, already future-clamped by the normalizer)
-    wins — anchored to EOD in Daniel's LOCAL day, stored naive UTC.
-    The `due_hint` phrase runs through the shared tz-aware parser
-    (common.parse_due_hint — regex map + dateparser fallback)."""
-    from ...common import local_now, parse_due_hint
-
-    due_date = sp.get("due_date")
-    if due_date:
-        try:
-            d = datetime.strptime(due_date, "%Y-%m-%d").date()
-            try:
-                tzinfo = local_now(db).tzinfo
-                local_eod = datetime.combine(d, _time(23, 59), tzinfo=tzinfo)
-                return local_eod.astimezone(_tz.utc).replace(tzinfo=None)
-            except Exception:
-                return datetime.combine(d, _time(23, 59))
-        except ValueError:
-            pass
-
-    try:
-        return parse_due_hint(sp.get("due_hint"), db=db)
-    except Exception:
-        return None
+import json
 
 
 def handle(items: list[dict], ctx, result) -> None:
@@ -53,57 +29,58 @@ def handle(items: list[dict], ctx, result) -> None:
 
     from .. import promise_service
 
+    glow_signals: list[dict] = []
     for sp in items:
         kind = sp.get("kind") or "create"
         try:
             if kind == "create":
-                _handle_create(sp, ctx, result, promise_service)
+                if (sp.get("utterance") or "").strip():
+                    glow_signals.append(sp)
             elif kind in ("complete", "break"):
                 _handle_transition(sp, kind, ctx, result, promise_service)
         except Exception as e:
             print(f"[promises handler] {kind} error: {e}")
 
-
-def _handle_create(sp: dict, ctx, result, promise_service) -> None:
-    utterance = (sp.get("utterance") or "").strip()
-    if not utterance:
-        return
-
-    inferred = _due_from_signal(sp, utterance, ctx.db)
-
-    parent_id = None
-    parent_hint = (sp.get("parent_hint") or "").strip()
-    if parent_hint:
+    if glow_signals:
         try:
-            parent_id = promise_service.resolve_parent_hint(ctx.db, parent_hint)
+            _stamp_glow(ctx, result, glow_signals)
         except Exception as e:
-            print(f"[promises handler] parent resolve error: {e}")
+            print(f"[promises handler] glow stamp error: {e}")
 
-    p = promise_service.create(
-        ctx.db,
-        utterance=utterance,
-        summary=sp.get("summary"),
-        source_message_id=ctx.source_message_id,
-        inferred_due=inferred,
-        cadence=sp.get("cadence") or "once",
-        cadence_target=sp.get("cadence_target"),
-        is_important=bool(sp.get("is_important")),
-        parent_promise_id=parent_id,
+
+def _stamp_glow(ctx, result, signals: list[dict]) -> None:
+    """Annotate the source Message with the parsed drafts. The log view
+    renders the dot; POST /messages/{id}/promote runs the real create."""
+    from ...db.models import Message
+
+    msg = (
+        ctx.db.query(Message)
+        .filter(Message.id == ctx.source_message_id)
+        .first()
     )
+    if msg is None:
+        return
+    msg.has_actionable_signal = True
+    msg.signal_preview = json.dumps({
+        "signals": signals,
+        "status": "pending",
+        "promise_ids": [],
+    })
+    ctx.db.commit()
 
-    result.captured_promises.append(promise_service.serialize(p))
-    result.tools_used.append("router:promise")
+    result.noticed_promises.extend(signals)
+    result.tools_used.append("router:promise_glow")
     if ctx.on_tool_call:
         try:
             ctx.on_tool_call(
-                "router:promise",
-                label="Captured promise",
+                "router:promise_glow",
+                label="Commitment noticed (glow)",
                 args={
-                    "utterance": utterance,
-                    "cadence": p.cadence,
-                    "cadence_target": p.cadence_target,
-                    "inferred_due": p.inferred_due.isoformat() if p.inferred_due else None,
-                    "slip_count": p.slip_count,
+                    "count": len(signals),
+                    "summaries": [
+                        (s.get("summary") or s.get("utterance") or "")[:80]
+                        for s in signals[:3]
+                    ],
                 },
             )
         except Exception as e:

@@ -1788,6 +1788,26 @@ export interface MessageTraceStep {
   meta?: Record<string, unknown> | null;
 }
 
+// Slice 3 glow: parsed promise-create drafts annotated onto a user
+// message by the extractor. status drives the log view's dot lifecycle.
+export interface SignalPreviewSignal {
+  kind: string;
+  utterance: string | null;
+  summary: string | null;
+  cadence: PromiseCadence;
+  cadence_target: number | null;
+  due_date: string | null;
+  due_hint: string | null;
+  is_important: boolean;
+  parent_hint: string | null;
+}
+
+export interface SignalPreview {
+  signals: SignalPreviewSignal[];
+  status: "pending" | "promoted" | "dismissed";
+  promise_ids: number[];
+}
+
 export interface ApiMessage {
   id: number;
   conversation_id: number;
@@ -1797,6 +1817,41 @@ export interface ApiMessage {
   is_feedback?: boolean;
   feedback_for_message_id?: number | null;
   trace?: MessageTraceStep[] | null;
+  has_actionable_signal?: boolean;
+  signal_preview?: SignalPreview | null;
+}
+
+// Flat log row — ApiMessage + the conversation's source badge.
+export interface LogMessage extends ApiMessage {
+  source: string;
+}
+
+export async function fetchMessageLog(opts: { limit?: number; beforeId?: number } = {}): Promise<LogMessage[]> {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.beforeId) params.set("before_id", String(opts.beforeId));
+  const qs = params.toString();
+  const res = await apiFetch(`${BASE}/messages/log${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch message log");
+  return res.json();
+}
+
+export async function promoteMessage(messageId: number): Promise<{ message: LogMessage; promises: ApiPromise[] }> {
+  const res = await apiFetch(`${BASE}/messages/${messageId}/promote`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to promote message");
+  return res.json();
+}
+
+export async function undoPromoteMessage(messageId: number): Promise<{ message: LogMessage }> {
+  const res = await apiFetch(`${BASE}/messages/${messageId}/undo-promote`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to undo promote");
+  return res.json();
+}
+
+export async function dismissMessageGlow(messageId: number): Promise<{ message: LogMessage }> {
+  const res = await apiFetch(`${BASE}/messages/${messageId}/dismiss-glow`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to dismiss glow");
+  return res.json();
 }
 
 export async function fetchConversations(): Promise<ApiConversation[]> {
