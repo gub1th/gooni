@@ -5,13 +5,11 @@ from sqlalchemy.orm import Session
 from ..db.database import get_db
 from ..db.models import (
     Note,
-    NoteComment,
     PublicProfile,
-    Space,
 )
 
 from ..serializers import (
-    _notes_order, _serialize_comment
+    _notes_order, _parse_tags
 )
 from ..common import (
     _unique_viewers_for_note
@@ -109,22 +107,24 @@ def _read_time_min(html: str) -> int:
 
 @router.get("/public/notes")
 def get_public_notes(db: Session = Depends(get_db)):
-    """Return all public notes with their space name. Public-pinned first,
-    then newest. No auth."""
+    """Return all public notes. Public-pinned first, then newest. No
+    auth. Slice 6: Spaces died — tags carry the grouping signal; the FE
+    renders the first tag where it used to show a space name."""
     rows = (
-        db.query(Note, Space)
-        .outerjoin(Space, Note.space_id == Space.id)
+        db.query(Note)
         .filter(Note.is_public == True)  # noqa: E712
         .order_by(Note.is_public_pinned.desc(), _notes_order())
         .all()
     )
     result = []
-    for n, space in rows:
+    for n in rows:
         excerpt = _strip_html(n.content or "")[:150]
+        tags = _parse_tags(n.tags)
         result.append({
             "id": n.id,
             "title": n.title,
-            "space_name": space.name if space else None,
+            "space_name": tags[0] if tags else None,
+            "tags": tags,
             "excerpt": excerpt,
             "updated_at": n.updated_at,
             "read_time_minutes": _read_time_min(n.content or ""),
@@ -139,12 +139,13 @@ def get_public_note(note_id: int, db: Session = Depends(get_db)):
     note = db.query(Note).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
     if not note:
         raise HTTPException(status_code=404, detail="Not found")
-    space = db.query(Space).filter(Space.id == note.space_id).first() if note.space_id else None
+    tags = _parse_tags(note.tags)
     return {
         "id": note.id,
         "title": note.title,
         "content": note.content,
-        "space_name": space.name if space else None,
+        "space_name": tags[0] if tags else None,
+        "tags": tags,
         "created_at": note.created_at,
         "updated_at": note.updated_at,
         "unique_viewers": _unique_viewers_for_note(db, note.id),
@@ -153,20 +154,12 @@ def get_public_note(note_id: int, db: Session = Depends(get_db)):
 
 @router.get("/public/notes/{note_id}/comments")
 def get_public_note_comments(note_id: int, db: Session = Depends(get_db)):
-    """Read-only comment thread for a public note. 404 if the note isn't
-    public; thread itself has no per-comment visibility flag — if the note
-    is public, all its comments are visible. Auth-bypassed by middleware
-    (path matches /public/* GET)."""
+    """NoteComment died in the Slice 6 nuke. Kept as an empty-list stub so
+    the public page's comment fetch degrades silently instead of 404ing."""
     note = db.query(Note).filter(Note.id == note_id, Note.is_public == True).first()  # noqa: E712
     if not note:
         raise HTTPException(status_code=404, detail="Not found")
-    rows = (
-        db.query(NoteComment)
-        .filter(NoteComment.note_id == note_id)
-        .order_by(NoteComment.created_at.asc(), NoteComment.id.asc())
-        .all()
-    )
-    return [_serialize_comment(c) for c in rows]
+    return []
 
 
 @router.get("/public/profile")

@@ -4,7 +4,6 @@ import {
   createNote as apiCreateNote,
   deleteNote as apiDeleteNote,
   fetchNote as apiFetchNote,
-  moveNote as apiMoveNote,
   type ApiNote,
   updateNote as apiUpdateNote,
   fetchSpaceNotes,
@@ -65,10 +64,8 @@ interface NotesContentState {
   updateNote: (id: number, title: string, content: string) => Promise<void>;
   refetchNote: (id: number) => Promise<void>;
   deleteNote: (id: number, spaceId: string) => Promise<void>;
-  removeSpace: (spaceId: string) => void;
   selectNote: (id: number | null) => void;
   markDirty: () => void;
-  moveNote: (noteId: number, fromSpaceId: string, toSpaceId: string) => Promise<void>;
 }
 
 export const useNotesContentStore = create<NotesContentState>()(
@@ -213,16 +210,6 @@ export const useNotesContentStore = create<NotesContentState>()(
         void spaceId; // kept on signature for callers; cache scrub is global now
       },
 
-      removeSpace: (spaceId: string) => {
-        set((s) => {
-          const newNotes = { ...s.notes };
-          delete newNotes[spaceId];
-          const selectedSpaceId = s.selectedSpaceId === spaceId ? "general" : s.selectedSpaceId;
-          const activeNoteId = s.selectedSpaceId === spaceId ? null : s.activeNoteId;
-          return { notes: newNotes, selectedSpaceId, activeNoteId };
-        });
-      },
-
       selectNote: (id: number | null) => {
         const prevId = get().activeNoteId;
         // When leaving a real (server-persisted) note that the user never
@@ -249,43 +236,6 @@ export const useNotesContentStore = create<NotesContentState>()(
       },
 
       markDirty: () => set({ isDirty: true }),
-
-      moveNote: async (noteId: number, fromSpaceId: string, toSpaceId: string) => {
-        if (fromSpaceId === toSpaceId) return;
-        const note = (get().notes[fromSpaceId] ?? []).find((n) => n.id === noteId);
-        if (!note) return;
-
-        const movedNote = { ...note, space_id: toSpaceId === "general" ? null : Number(toSpaceId) };
-
-        // Optimistic: move note, switch to target space
-        set((s) => ({
-          notes: {
-            ...s.notes,
-            [fromSpaceId]: (s.notes[fromSpaceId] ?? []).filter((n) => n.id !== noteId),
-            [toSpaceId]: [movedNote, ...(s.notes[toSpaceId] ?? [])],
-          },
-          selectedSpaceId: toSpaceId,
-          activeNoteId: noteId,
-        }));
-
-        try {
-          await apiMoveNote(noteId, toSpaceId);
-          // Refresh target space to pick up any notes not yet loaded
-          get().loadNotes(toSpaceId);
-        } catch (e) {
-          // Rollback
-          set((s) => ({
-            notes: {
-              ...s.notes,
-              [fromSpaceId]: [note, ...(s.notes[fromSpaceId] ?? []).filter((n) => n.id !== noteId)],
-              [toSpaceId]: (s.notes[toSpaceId] ?? []).filter((n) => n.id !== noteId),
-            },
-            selectedSpaceId: fromSpaceId,
-            activeNoteId: noteId,
-          }));
-          console.error("moveNote error:", e);
-        }
-      },
     }),
     {
       // v2 → v3: stop persisting `notes` — TipTap inlines images as base64

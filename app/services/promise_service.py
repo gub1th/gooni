@@ -10,10 +10,9 @@ Lifecycle: active → kept | broken. State transitions fire from chat
 time-anchored auto-broken (when inferred_due passes unconfirmed).
 
 Cross-entity links live in `edges` (see edge_service). At create
-time we wire:
-  - utters       Message → Promise   (source message)
-  - supports    Promise → Focus      (if cosine-match to active focus
-                                       above SUPPORTS_THRESHOLD)
+time we wire an `utters` edge from the source Message. (The old
+`supports` Promise→Focus edge died with Focus in the Slice 6 nuke —
+nesting now uses parent_promise_id.)
 """
 
 from __future__ import annotations
@@ -26,12 +25,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ..db.models import Focus, Promise
+from ..db.models import Promise
 from . import edge_service
-from .list_service import _cosine, list_service
+from .embedding_utils import cosine as _cosine, embed_text
 
 
-SUPPORTS_THRESHOLD = 0.75  # promise → focus auto-link cutoff
 SLIP_THRESHOLD = 0.80      # match against past broken promises
 DEDUP_THRESHOLD = 0.85     # match against active pending promises (higher
                            # bar: must be near-paraphrase, not just related)
@@ -76,11 +74,9 @@ def _infer_due_from_text(text: str, anchor: datetime | None = None) -> datetime 
 
 
 def _embed(text: str) -> list[float] | None:
-    """Reuse list_service's embedder so promises + items share the
-    same embedding space (lets us cosine-match across types later)."""
-    if not text or not text.strip():
-        return None
-    return list_service._embed_item_text(text.strip())
+    """Shared embedder (embedding_utils) so promises + memories share
+    one embedding space (lets us cosine-match across types)."""
+    return embed_text(text)
 
 
 VALID_CADENCES = ("once", "daily", "n_per_week", "permanent_do", "permanent_never")
@@ -99,9 +95,8 @@ def create(
     parent_promise_id: int | None = None,
 ) -> Promise:
     """Insert a new ACTIVE promise (ambient-loop v2 shape).
-    Wires `utters` edge from source Message, best-effort `supports` edge
-    to closest active Focus, sets slip_count from cosine match against
-    past broken promises.
+    Wires `utters` edge from source Message, sets slip_count from
+    cosine match against past broken promises.
 
     Active dedup: if the utterance cosine-matches an existing ACTIVE
     promise above DEDUP_THRESHOLD, returns the existing row instead of
@@ -204,19 +199,6 @@ def create(
             kind="utters",
         )
 
-    if vec is not None:
-        focus_id, score = _closest_focus(db, vec)
-        if focus_id is not None and score >= SUPPORTS_THRESHOLD:
-            edge_service.link(
-                db,
-                src_kind="promise",
-                src_id=p.id,
-                dst_kind="focus",
-                dst_id=focus_id,
-                kind="supports",
-                weight=score,
-            )
-
     # Voice-of-reason evaluation — deterministic checks (coupled reward,
     # conflicts active, too vague, track-record doubt). Returns None when
     # the promise passes all checks. Tagged onto the in-memory Promise as
@@ -291,38 +273,6 @@ def _count_prior_slips(db: Session, vec: list[float]) -> int:
             n += 1
     return n
 
-
-def _closest_focus(db: Session, vec: list[float]) -> tuple[int | None, float]:
-    """Best-matching active Focus by cosine over its text+endgoal
-    embedding. Returns (focus_id, score). Embedding lazy-built here if
-    Focus doesn't have one yet — first call pays the cost.
-    """
-    rows = (
-        db.query(Focus.id, Focus.text, Focus.endgoal, Focus.current_signature)
-        .filter(Focus.status.in_(("committed", "someday")))
-        .all()
-    )
-    best_id: int | None = None
-    best_score = 0.0
-    for fid, text, endgoal, sig_raw in rows:
-        if sig_raw:
-            try:
-                emb = json.loads(sig_raw)
-            except (TypeError, ValueError):
-                emb = None
-        else:
-            emb = None
-        if not emb:
-            # Lazy embed of text+endgoal — cheap and cached by upstream
-            # focus logic; here we just compute one-shot for matching.
-            emb = _embed(f"{text or ''}\n{endgoal or ''}")
-        if not emb:
-            continue
-        score = _cosine(vec, emb)
-        if score > best_score:
-            best_score = score
-            best_id = fid
-    return best_id, best_score
 
 
 def create_from_signal(
@@ -594,7 +544,7 @@ def find_active_match(
 
 def resolve_parent_hint(db: Session, hint: str) -> int | None:
     """Resolve a `parent_hint` phrase to an active Promise id — substring
-    first, cosine ≥ SUPPORTS_THRESHOLD fallback. None when nothing lands."""
+    first, cosine fallback. None when nothing lands."""
     p, ambiguous = find_active_match(db, hint)
     if p is not None:
         return p.id

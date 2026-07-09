@@ -9,63 +9,12 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .db.models import (
-    CapabilityFacet,
     Conversation,
-    ListItem,
-    List as ListModel,
     Message,
     Note,
-    NoteComment,
     Reflection,
     Settings,
-    Space,
 )
-
-
-def _serialize_list(lst: ListModel) -> dict:
-    return {
-        "id": lst.id,
-        "name": lst.name,
-        "type": lst.type,
-        "kind": lst.kind or "tasks",
-        "emoji": lst.emoji,
-        "sort_order": lst.sort_order,
-        "created_at": lst.created_at.isoformat() if lst.created_at else None,
-    }
-
-
-def _serialize_list_item(it: ListItem) -> dict:
-    """Generic list item shape — focus / todo / backlog fields all moved
-    to dedicated tables. See serialize_focus / serialize_todo /
-    serialize_ticket in their respective services for those payloads.
-    """
-    return {
-        "id": it.id,
-        "list_id": it.list_id,
-        "text": it.text,
-        "subtitle": it.subtitle,
-        "done": bool(it.done),
-        "actionable": bool(it.actionable),
-        "completed_at": it.completed_at.isoformat() if it.completed_at else None,
-        "sort_order": it.sort_order,
-        "source_note_id": it.source_note_id,
-        "created_at": it.created_at.isoformat() if it.created_at else None,
-    }
-
-
-def _serialize_item(it) -> dict:
-    """Polymorphic serializer used by the legacy /items routes that still
-    accept "item id can be focus OR todo." Routes through the dedicated
-    serializers in focus_service / todo_service.
-    """
-    from .services.focus_service import serialize_focus
-    from .services.todo_service import serialize_todo
-    from .db.models import Focus, Todo
-    if isinstance(it, Focus):
-        return serialize_focus(it)
-    if isinstance(it, Todo):
-        return serialize_todo(it)
-    raise TypeError(f"_serialize_item: unexpected type {type(it).__name__}")
 
 
 def _serialize_settings(s: Settings) -> dict:
@@ -92,17 +41,6 @@ def _safe_json_list(raw) -> list:
         return v if isinstance(v, list) else []
     except (TypeError, ValueError):
         return []
-
-
-def _serialize_space(s: Space) -> dict:
-    return {
-        "id": s.id,
-        "name": s.name,
-        "emoji": s.emoji,
-        "is_pinned": bool(s.is_pinned),
-        "description": s.description,
-        "cover_image_url": s.cover_image_url,
-    }
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -315,46 +253,10 @@ def _serialize_promise(p) -> dict:
     }
 
 
-def _serialize_comment(c: NoteComment) -> dict:
-    return {
-        "id": c.id,
-        "note_id": c.note_id,
-        "author": c.author,
-        "content": c.content,
-        "created_at": c.created_at.isoformat() if c.created_at else None,
-    }
 
 
-_REACTION_TARGETS = ("note", "comment")
 
 
-_REACTION_MAX_EMOJI_LEN = 32
-
-
-_REACTION_MAX_REACTOR_LEN = 80
-
-
-def _validate_reaction_target(target_type: str, target_id: int, db: Session) -> None:
-    if target_type not in _REACTION_TARGETS:
-        raise HTTPException(status_code=400, detail=f"target_type must be one of {_REACTION_TARGETS}")
-    if target_type == "note":
-        exists = db.query(Note.id).filter(Note.id == target_id).first()
-    else:
-        exists = db.query(NoteComment.id).filter(NoteComment.id == target_id).first()
-    if not exists:
-        raise HTTPException(status_code=404, detail=f"{target_type} {target_id} not found")
-
-
-def _serialize_reactions(rows, viewer_reactor_id: str | None) -> list[dict]:
-    """Group raw rows into per-emoji buckets with count + reacted_by_me.
-    Sorted by count desc so the most-reacted emoji floats left."""
-    buckets: dict[str, dict] = {}
-    for r in rows:
-        b = buckets.setdefault(r.emoji, {"emoji": r.emoji, "count": 0, "reacted_by_me": False})
-        b["count"] += 1
-        if viewer_reactor_id and r.reactor_id == viewer_reactor_id:
-            b["reacted_by_me"] = True
-    return sorted(buckets.values(), key=lambda b: (-b["count"], b["emoji"]))
 
 
 def _serialize_conversation(c: Conversation) -> dict:
@@ -391,22 +293,6 @@ def _serialize_message(m: Message) -> dict:
         "trace": parsed_trace,
         "has_actionable_signal": bool(m.has_actionable_signal),
         "signal_preview": preview,
-    }
-
-
-def _serialize_capability_facet(f: CapabilityFacet) -> dict:
-    return {
-        "id": f.id,
-        "layer": f.layer,
-        "facet_key": f.facet_key,
-        "facet_text": f.facet_text,
-        "polarity": f.polarity,
-        "status": f.status,
-        "source": f.source,
-        "evidence_json": f.evidence_json,
-        "last_verified_at": f.last_verified_at.isoformat() if f.last_verified_at else None,
-        "created_at": f.created_at.isoformat() if f.created_at else None,
-        "updated_at": f.updated_at.isoformat() if f.updated_at else None,
     }
 
 

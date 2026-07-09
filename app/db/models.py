@@ -19,45 +19,12 @@ from sqlalchemy.sql import func
 from .database import Base
 
 
-class Space(Base):
-    """A container for organizing notes and conversations.
-
-    Distinct from `Focus`: a space is an evergreen container ("Journal",
-    "Dev", "Claude Code") — no endgoal, no drift detection. Focus is
-    time-bound commitment. Notes live in a space; they can also link to
-    a focus. See discussion note "Discussion: converge spaces + focuses?"
-    for why we kept them separate.
-    """
-
-    __tablename__ = "spaces"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(Text, nullable=False)
-    emoji = Column(String, nullable=True)
-    # Pinned spaces sort to the top of the sidebar — same UX shape as the
-    # per-note pin. Default false so existing rows continue to sort by
-    # whatever the list endpoint orders by.
-    is_pinned = Column(Boolean, default=False, nullable=False, server_default="0")
-    # User-written prose about what this space is for. Renders in the
-    # space-view header so Daniel can give Journal / Dev / Claude Code
-    # actual identity beyond a name + emoji. Markdown/HTML allowed —
-    # sanitized at render time same as note content.
-    description = Column(Text, nullable=True)
-    # R2 URL for an optional cover image. Used as a banner / page-header
-    # background tint in the space view. Nullable — most spaces will
-    # never set one. Same R2 path as note attachments / public profile
-    # avatars.
-    cover_image_url = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
 class Conversation(Base):
     """A session container for a back-and-forth with Claude."""
 
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, index=True)
-    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     title = Column(Text, nullable=True)  # auto-generated short title
     summary = Column(Text, nullable=True)  # auto-generated after session ends
     source = Column(String, nullable=False, default="web")  # 'web' | 'telegram'
@@ -161,7 +128,6 @@ class Note(Base):
     # ship a row without re-running the regex on every request and without
     # exposing inline base64 image bodies. Backfilled lazily at startup.
     excerpt = Column(Text, nullable=True)
-    space_id = Column(Integer, ForeignKey("spaces.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
     last_opened_at = Column(DateTime, nullable=True)
@@ -271,21 +237,6 @@ class Visit(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
-class McpCall(Base):
-    """Append-only log of HTTP requests originating from the Gooni MCP server.
-    The MCP client tags itself with `X-Gooni-Source: mcp`; the auth middleware
-    inserts a row per matched request. Surfaced as a dashboard "claude
-    activity" stat — gives Daniel a glance at how active Claude has been
-    against Gooni without depending on Claude Code internals.
-    """
-
-    __tablename__ = "mcp_calls"
-
-    id = Column(Integer, primary_key=True, index=True)
-    path = Column(Text, nullable=False)
-    called_at = Column(DateTime, default=datetime.utcnow, index=True)
-
-
 class Memory(Base):
     """Daniel's persistent knowledge of himself. Replaces the Mem0 hosted
     service with a local SQL store + LLM extraction + LLM reconciliation.
@@ -323,10 +274,6 @@ class Memory(Base):
     # for retrieval, so the ORM doesn't hydrate ~31KB per row on every
     # Memory load (e.g. dashboard.recent_memories, /memories list).
     embedding = deferred(Column(Text, nullable=True))
-    # Optional link to a Focus when the memory is goal/aspiration-shaped.
-    # Re-pointed from list_items.id back to focuses.id after the focus /
-    # todo / backlog extraction.
-    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=True)
     # Origin tracking — set when this memory was extracted from a note's
     # classify_note run. Lets the editor surface "this note created N
     # memories" disclosure. NULL for memories from chat or other paths.
@@ -339,341 +286,6 @@ class Memory(Base):
     # "which memories actually earn their slot" without mining traces.
     retrieval_count = Column(Integer, nullable=False, default=0)
     last_retrieved_at = Column(DateTime, nullable=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-    )
-
-
-class List(Base):
-    """User-facing structured list. `type` drives small UI variations
-    (todo / backlog / generic) but storage is uniform.
-
-    Conceptually replaces:
-      - TodoItem (the hardcoded "Todo list" — becomes a List(type=todo) row)
-      - Lists feature (Notes with <ul><li> in space "Lists" — items move to ListItem rows)
-      - Gooni Backlog Space (auto-logged feature requests become ListItem rows
-        in List(type=backlog))
-    """
-
-    __tablename__ = "lists"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(Text, nullable=False)
-    # 'todo' | 'backlog' | 'generic'
-    type = Column(String, nullable=False, default="generic", index=True)
-    emoji = Column(String, nullable=True)
-    sort_order = Column(Integer, default=0, nullable=False)
-    # 'tasks' | 'ideas' — list-level kind. tasks = items render with a checkbox
-    # and a done state; ideas = items render as bullets with no checkbox.
-    # ListItem.actionable lingers in storage for back-compat but the UI now
-    # derives this from the list's kind.
-    kind = Column(String, nullable=False, default="tasks")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
-class ListItem(Base):
-    """Generic list row — text + done + sort_order, nothing more.
-
-    After the focus / todo / backlog extraction, `list_items` is back to
-    its original purpose: arbitrary user-defined lists (shopping, notes
-    bullets, etc.). Focus-shaped fields live in `focuses`, todo-shaped
-    fields in `todos`, backlog-shaped fields in `backlog_tickets`.
-    """
-
-    __tablename__ = "list_items"
-
-    id = Column(Integer, primary_key=True, index=True)
-    list_id = Column(Integer, ForeignKey("lists.id"), nullable=False, index=True)
-    parent_id = Column(Integer, ForeignKey("list_items.id"), nullable=True, index=True)
-    text = Column(Text, nullable=False)
-    subtitle = Column(Text, nullable=True)
-    # actionable=True → renders with checkbox (a thing to do).
-    # actionable=False → renders as a bullet/idea (no toggle, no completion state).
-    actionable = Column(Boolean, default=True, nullable=False)
-    done = Column(Boolean, default=False, nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-    sort_order = Column(Integer, default=0, nullable=False)
-    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
-    # JSON-serialised float list. Generated on insert/edit from `text +
-    # subtitle` so add_item can cosine-search existing items in the same
-    # list for conflicts. Deferred — ~31KB per row, never read by tree
-    # or list-render paths.
-    embedding = deferred(Column(Text, nullable=True))
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-    )
-
-
-class Focus(Base):
-    """Long-running commitment. Theme-shaped (e.g. "Ship the dashboard
-    revamp", "Get fit") with optional health/confidence telemetry. After
-    the dashboard-revamp PR, primary moved to Todo — focuses no longer
-    carry is_primary. Each focus has a `color` for the dot system that
-    visually links it to its child todos on the dashboard.
-
-    A focus has many todos via the `todos.focus_id` FK (a todo links to
-    at most one focus — the legacy `focus_todo_links` M2M was dropped
-    when the dashboard revamp landed).
-    """
-
-    __tablename__ = "focuses"
-
-    id = Column(Integer, primary_key=True, index=True)
-    text = Column(Text, nullable=False)
-    subtitle = Column(Text, nullable=True)
-    endgoal = Column(Text, nullable=True)
-    committed = Column(Boolean, default=False, nullable=False)
-    # Color hex (e.g. "#22C55E") for the dot rendered on this focus's
-    # card and on every linked todo. Auto-assigned from a 10-color
-    # palette in focus_service.create when the caller doesn't supply
-    # one. Wraps after 10 focuses.
-    color = Column(String, nullable=True)
-    # Engagement state: 'committed' | 'someday'. Mirrors `committed` —
-    # kept for richer UI labelling.
-    status = Column(String, nullable=True)
-    # Pace bucket: 'quick' | 'slow' (legacy data may have NULL).
-    scale = Column(String, nullable=True)
-    # Health 0..100 + reporter confidence 0..100, both nullable. UI shows
-    # neutral dot when either is null OR confidence < 35.
-    health = Column(Integer, nullable=True)
-    confidence = Column(Integer, nullable=True)
-    # Wall-clock window. Quick focuses default to (now, midnight tonight).
-    start_at = Column(DateTime, nullable=True)
-    end_at = Column(DateTime, nullable=True)
-    done = Column(Boolean, default=False, nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-    sort_order = Column(Integer, default=0, nullable=False)
-    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
-    # JSON-serialised embedding for cosine similarity (conflict detection
-    # when adding focuses). Deferred — ~31KB per row.
-    embedding = deferred(Column(Text, nullable=True))
-
-    # --- Drift / hybrid-binding columns (added by the focus-drift PR) ---
-    # initial_signature: centroid of the cluster's evidence at promotion
-    # time, frozen forever. current_signature: weighted-mean updated on
-    # every successful bind during a synth run. Drift = the cosine
-    # distance between these two — when it crosses 0.65, the focus is
-    # flagged for rename/fork. Same deferred pattern as `embedding` to
-    # keep list endpoints from hydrating the vectors.
-    initial_signature = deferred(Column(Text, nullable=True))
-    current_signature = deferred(Column(Text, nullable=True))
-    # JSON snapshot of the cluster bound to this focus on the last synth
-    # run (list of {kind, id, snippet}). Refreshed every successful bind.
-    current_evidence_json = Column(Text, nullable=True)
-    last_seen_in_synth = Column(DateTime, nullable=True)
-    # Consecutive synth runs where no cluster bound to this focus. After
-    # MISSED_RUN_DORMANCY_THRESHOLD (default 3), the binding pass flips
-    # status='dormant' — not deleted, just demoted.
-    missed_run_count = Column(Integer, default=0, nullable=False)
-    # When the drift score (1 - cos(initial, current)) first crossed the
-    # warning threshold. Cleared on rename. Surfaces in UI as a "rename
-    # or fork?" prompt.
-    drift_flagged_at = Column(DateTime, nullable=True)
-    # Forward link back to the FocusCandidate row this focus was promoted
-    # from. Lets us walk the audit trail without joining backward.
-    promoted_from_candidate_id = Column(
-        Integer, ForeignKey("focus_candidates.id"), nullable=True
-    )
-    # Set when this focus was forked from a prior one — lineage chain.
-    # The old focus carries status='evolved' + the new focus carries this
-    # pointer back. Walks the chain so the UI can render breadcrumbs.
-    evolved_from_focus_id = Column(
-        Integer, ForeignKey("focuses.id"), nullable=True
-    )
-
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-    )
-
-
-class FocusCandidate(Base):
-    """Proposed focus surfaced by the synthesizer. Lives in 'proposed'
-    state until Daniel promotes (→ creates Focus row) or dismisses it.
-
-    Why a separate table from Focus: candidates are pre-curation noise +
-    signal mixed. Most surface a few times then never again; some grow
-    seen_count as the synthesizer keeps re-emitting them; a small
-    fraction get promoted. Persisting them lets the synthesizer dedup
-    on re-emission and lets Daniel review without losing context, but
-    we never want them mixed into the real Focus list.
-
-    cluster_signature is sha256 of sorted "{kind}#{id}" item pairs —
-    deterministic per cluster shape, so repeat synth runs that produce
-    the same cluster upsert the same row (bump seen_count) instead of
-    spawning duplicates. If items shift, the sig changes and a new
-    candidate spawns.
-    """
-
-    __tablename__ = "focus_candidates"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(Text, nullable=False)
-    endgoal = Column(Text, nullable=True)
-    # 'focus' for v1 — only focus-shaped clusters get persisted.
-    # State + noise stay ephemeral in the synth output.
-    category = Column(String, nullable=False, default="focus")
-    confidence = Column(Float, nullable=False, default=0.0)
-    reasoning = Column(Text, nullable=True)
-    # sha256 hex of sorted "{kind}#{id}" items. Indexed unique — same
-    # cluster shape across runs upserts the same row.
-    cluster_signature = Column(String, nullable=False, unique=True, index=True)
-    # JSON list of {kind, id, snippet}. Snapshot of the cluster's items
-    # at the time of last sighting. Refreshed every time we re-sight.
-    evidence_json = Column(Text, nullable=False)
-    # JSON-encoded centroid vector. Deferred — same pattern as
-    # Note.embedding. Needed for future binding-to-existing-Focus pass.
-    centroid_embedding = deferred(Column(Text, nullable=True))
-    # If this candidate came from a sub-cluster under a parent
-    # candidate, link back. Top-level candidates leave this null.
-    parent_candidate_id = Column(
-        Integer, ForeignKey("focus_candidates.id"), nullable=True, index=True
-    )
-    # Lifecycle: 'proposed' | 'promoted' | 'dismissed'.
-    status = Column(String, nullable=False, default="proposed", index=True)
-    promoted_focus_id = Column(
-        Integer, ForeignKey("focuses.id"), nullable=True, index=True
-    )
-    promoted_at = Column(DateTime, nullable=True)
-    dismissed_at = Column(DateTime, nullable=True)
-    first_seen_in_synth = Column(DateTime, default=datetime.utcnow, nullable=False)
-    last_seen_in_synth = Column(DateTime, default=datetime.utcnow, nullable=False)
-    seen_count = Column(Integer, default=1, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-    )
-
-
-class Todo(Base):
-    """Actionable item Daniel is doing or about to do. After the
-    dashboard-revamp PR, todos carry a 3-state enum (`not_yet` | `doing`
-    | `done`), an optional `focus_id` FK (legacy M2M `focus_todo_links`
-    dropped — one todo links to at most one focus), and an `is_primary`
-    singleton flag (only one Todo across the table can have
-    is_primary=True; primary moved here from Focus).
-    """
-
-    __tablename__ = "todos"
-
-    id = Column(Integer, primary_key=True, index=True)
-    text = Column(Text, nullable=False)
-    subtitle = Column(Text, nullable=True)
-    # 3-state enum. Default 'not_yet' on creation. UI cycles via two
-    # checkbox clicks: not_yet → doing → done. The `done` boolean is
-    # kept in sync (state == 'done' ↔ done == True) so legacy callers
-    # that read `done` keep working without porting.
-    state = Column(String, nullable=False, default="not_yet", index=True)
-    # Optional FK back to a focus — visualised as a color dot on the
-    # todo. NULL means "free-floating todo" (groceries, calls, etc).
-    focus_id = Column(Integer, ForeignKey("focuses.id"), nullable=True, index=True)
-    # Singleton across the whole table. Service enforces the invariant.
-    is_primary = Column(Boolean, default=False, nullable=False)
-    due_date = Column(DateTime, nullable=True, index=True)
-    done = Column(Boolean, default=False, nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-    sort_order = Column(Integer, default=0, nullable=False)
-    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
-    embedding = deferred(Column(Text, nullable=True))
-    # Soft-delete tombstone. NULL = live row. NOT NULL = deleted at that
-    # time; lifespan sweeper hard-purges anything past 24h. All read
-    # paths in todo_service filter `deleted_at IS NULL` so soft-deleted
-    # rows are invisible to UI + chat. The undo window is the gap between
-    # soft-delete and sweep.
-    deleted_at = Column(DateTime, nullable=True, index=True)
-    # G3.5 Todo Continuity: short inline outcome text captured when this
-    # todo closes. Optional — most closes have nothing to say. For longer
-    # outcomes, callers write a Note + wire an `outcome_of` edge instead.
-    # Sits next to the lineage edges (kind='spawned_from') that link this
-    # todo to its parents/children in the `edges` table.
-    closure_note = Column(Text, nullable=True)
-    # G3 recurrence counter. On create, todo_service cosine-matches the
-    # new text against open todos at ≥0.85; on match it bumps the
-    # existing row's mention_count + last_mentioned_at + appends the
-    # timestamp to mention_history INSTEAD of inserting a duplicate.
-    # Drives accountability tone: at mention_count ≥3 the ack composer
-    # switches from neutral ("noted") to confrontational Alfred voice
-    # ("third mention. tonight or kill it.") — silence isn't helping.
-    mention_count = Column(Integer, nullable=False, default=1)
-    last_mentioned_at = Column(DateTime, nullable=True, index=True)
-    # JSON array of ISO timestamps — full audit of every utterance that
-    # re-mentioned this todo. Kept so Gooni can cite specifics ("you
-    # talked about this Tue, Thu, and Sun"). Nullable: legacy rows
-    # don't get backfilled to keep the migration cheap.
-    mention_history = Column(Text, nullable=True)
-    # Procrastination nudge (PR-6). doing_started_at is stamped when the
-    # todo flips INTO state='doing' (cleared when it leaves). The proactive
-    # loop pings if a todo sits in 'doing' past the stale threshold;
-    # last_nudge_sent_at debounces so it doesn't nag more than once per
-    # window.
-    doing_started_at = Column(DateTime, nullable=True)
-    last_nudge_sent_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-    )
-
-
-class BacklogTicket(Base):
-    """Engineering backlog ticket — Jira-style board state + PR pointer.
-
-    Was a polymorphic ListItem in a `type='backlog'` list; now its own
-    table with the two fields that actually matter for backlog
-    (board_status + pr_url) instead of dragging through unused focus /
-    todo fields.
-    """
-
-    __tablename__ = "backlog_tickets"
-
-    id = Column(Integer, primary_key=True, index=True)
-    text = Column(Text, nullable=False)
-    subtitle = Column(Text, nullable=True)
-    # 'not_yet' | 'doing' | 'done' (aligned with Todo.state in the
-    # dashboard revamp; was 'todo' | 'in_progress' | 'done' pre-revamp,
-    # remapped in migration). Truth table for board column:
-    #   done=True → Done column (regardless of board_status)
-    #   done=False + board_status='doing' → In Progress
-    #   otherwise → Todo column
-    board_status = Column(String, nullable=True)
-    pr_url = Column(Text, nullable=True)
-    # Free-form ticket body — context, design notes, follow-up scratch.
-    # subtitle stays as the one-line tagline; notes is the multi-line story.
-    notes = Column(Text, nullable=True)
-    # Singleton across the whole table — only one ticket can be the
-    # "north star" pinned to the dashboard banner. Mirrors Todo.is_primary
-    # singleton pattern; service layer enforces the invariant. Auto-clears
-    # when the ticket is marked done.
-    is_primary = Column(Boolean, default=False, nullable=False)
-    # G2 self-PM: workflow blast-radius score (1=one-off annoyance, 5=blocks
-    # daily-driver claim). LLM scores at create time via feature_request_tool;
-    # surfaces in urgency calculation + severity-aware acks. Nullable for
-    # legacy tickets that predate scoring.
-    blast_radius = Column(Integer, nullable=True)
-    # Computed urgency_score = friction_count_30d × blast_radius × recency
-    # weight. Recomputed nightly by lifespan rollup; can also be bumped
-    # synchronously when a fresh friction_event fires. Nullable so unscored
-    # tickets sort naturally to the bottom of urgency lists.
-    urgency_score = Column(Float, nullable=True, index=True)
-    # Timestamp of the most-recent friction_event tied to this ticket.
-    # Drives recency weighting + the "currently hitting workflow" surface.
-    last_friction_at = Column(DateTime, nullable=True, index=True)
-    # Free-text agent attribution. Set when an autonomous worker (e.g.
-    # Claude Code) picks up the ticket so the board surfaces a "🤖 claude
-    # picked up" pill while it's actively being driven. Auto-cleared when
-    # the ticket flips to done — the pill is for live work only.
-    claimed_by = Column(String, nullable=True)
-    # Set when this ticket has been promoted into Daniel's todo list.
-    # Promote = create a Todo with focus_id null, link it here. Demote =
-    # delete the linked Todo, clear this column. When the linked todo's
-    # state flips to 'done', the ticket auto-marks done too.
-    todo_id = Column(Integer, ForeignKey("todos.id"), nullable=True, index=True)
-    done = Column(Boolean, default=False, nullable=False)
-    completed_at = Column(DateTime, nullable=True)
-    sort_order = Column(Integer, default=0, nullable=False)
-    source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
-    embedding = deferred(Column(Text, nullable=True))
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
@@ -702,24 +314,6 @@ class OAuthToken(Base):
     # Display label: Google = email, GitHub = "@username".
     account_email = Column(Text, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class GooniSnapshot(Base):
-    """Daily reflection on Gooni + Daniel — one row per day. The raw_data JSON
-    captures the inputs (commit list, DB counts, deltas vs prior snapshot) and
-    `digest` holds the LLM-generated prose. Lazy-built on first read of the day
-    so we don't need a cron.
-    """
-
-    __tablename__ = "gooni_snapshots"
-
-    id = Column(Integer, primary_key=True)
-    # Day key in YYYY-MM-DD form so we can dedupe/lookup without dealing with
-    # tz-shifted DateTime comparisons.
-    day = Column(String, unique=True, nullable=False, index=True)
-    taken_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    raw_data = Column(Text, nullable=True)  # JSON string
-    digest = Column(Text, nullable=True)
 
 
 class Settings(Base):
@@ -802,24 +396,6 @@ class Settings(Base):
 
 
 
-class TrackedRepo(Base):
-    """A repo the user wants surfaced on the Dev Activity dashboard. The
-    `provider` field is here so we can layer GitLab / Bitbucket on later
-    without a schema change.
-    """
-
-    __tablename__ = "tracked_repos"
-    __table_args__ = (
-        UniqueConstraint("provider", "owner", "name", name="uq_tracked_repo"),
-    )
-
-    id = Column(Integer, primary_key=True)
-    provider = Column(String, nullable=False, default="github")
-    owner = Column(String, nullable=False)
-    name = Column(String, nullable=False)
-    added_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
 class EvalSegment(Base):
     """An evaluable slice of a Conversation. Web sources have one segment per
     conversation (gap-bounded upstream by find_or_create_session); bot sources
@@ -854,34 +430,6 @@ class EvalSegment(Base):
     # When the segmenter last rebuilt this row. Used to invalidate when the
     # underlying conversation grows past the cached message_count.
     computed_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-class ClaudeUsageTurn(Base):
-    """One assistant turn from a Claude Code session.
-
-    Pushed by the local uploader script (scripts/upload_claude_usage.py)
-    walking ~/.claude/projects/**/*.jsonl on Daniel's laptop and POSTing
-    to /dashboard/claude-usage/ingest. Lets prod show stats without
-    needing the JSONL files mounted on Fly.
-
-    Idempotent on (session_id, ts) — re-uploading the same window is
-    safe; UNIQUE constraint drops dupes server-side.
-    """
-
-    __tablename__ = "claude_usage_turns"
-    __table_args__ = (
-        UniqueConstraint("session_id", "ts", name="uq_claude_usage_turn_session_ts"),
-    )
-
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(String, nullable=False, index=True)
-    ts = Column(DateTime(timezone=True), nullable=False, index=True)
-    model = Column(String, nullable=False)
-    input_tokens = Column(Integer, nullable=False, default=0)
-    output_tokens = Column(Integer, nullable=False, default=0)
-    cache_read_tokens = Column(Integer, nullable=False, default=0)
-    cache_creation_tokens = Column(Integer, nullable=False, default=0)
-    ingested_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class EvalStepFeedback(Base):
@@ -933,256 +481,6 @@ class EvalMessageRating(Base):
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), default=func.now(), onupdate=func.now())
-
-
-class FocusSession(Base):
-    """One row per focus-cam tracked work session. Aggregate metrics are
-    populated when the session ends (STOP click, Ctrl+C, or process exit).
-    Written by the standalone focus_cam.py process via raw sqlite3 — these
-    SQLAlchemy declarations exist so Gooni's create_all() recognises the
-    tables and so backend code can read sessions through the ORM.
-    Sister tables: FocusSessionBucket (1Hz telemetry), FocusSessionEvent
-    (discrete h2m/phone/stand/away events).
-    """
-
-    __tablename__ = "focus_sessions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    started_at = Column(DateTime, nullable=False, index=True)
-    ended_at = Column(DateTime, nullable=True)
-    duration_sec = Column(Integer, nullable=True)
-    # Per-sample aggregates (sample interval ~2s):
-    presence_pct = Column(Float, nullable=True)
-    eyes_on_pct = Column(Float, nullable=True)
-    # Bucket-derived (1Hz):
-    active_pct = Column(Float, nullable=True)
-    engaged_pct = Column(Float, nullable=True)
-    # Only populated when the user passed --focused-apps:
-    app_focus_pct = Column(Float, nullable=True)
-    focused_apps_input = Column(Text, nullable=True)  # raw CSV
-    samples_total = Column(Integer, nullable=True)
-    samples_focused = Column(Integer, nullable=True)
-    hand_to_mouth_count = Column(Integer, nullable=True)
-    phone_in_hand_count = Column(Integer, nullable=True)
-    stand_count = Column(Integer, nullable=True)
-    away_count = Column(Integer, nullable=True)
-    note = Column(Text, nullable=True)  # optional freeform user note
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
-class FocusSessionBucket(Base):
-    """1Hz telemetry buckets for a FocusSession. One row per session-second.
-    Captures the frontmost app at that second + raw keyboard / mouse event
-    counts. Granular enough to reconstruct the session timeline; coarse
-    enough that 24/7 use stays under ~7MB/day."""
-
-    __tablename__ = "focus_session_buckets"
-
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(
-        Integer,
-        ForeignKey("focus_sessions.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    ts = Column(DateTime, nullable=False)
-    app = Column(Text, nullable=True)        # macOS frontmost app name
-    keys = Column(Integer, nullable=False, default=0)
-    mouse = Column(Integer, nullable=False, default=0)
-
-
-class FocusSessionEvent(Base):
-    """Discrete events fired during a session. `kind` is a small enum:
-    'hand_to_mouth' | 'phone_in_hand' | 'stand' | 'away'. Inserted at the
-    moment the event completes — stand/away are emitted on face-back-in-frame,
-    h2m/phone are emitted when the hold ends and exceeded the min duration."""
-
-    __tablename__ = "focus_session_events"
-
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(
-        Integer,
-        ForeignKey("focus_sessions.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    kind = Column(String, nullable=False, index=True)
-    started_at = Column(DateTime, nullable=False)
-    ended_at = Column(DateTime, nullable=True)
-    duration_sec = Column(Integer, nullable=True)
-
-
-class GooniTake(Base):
-    """Daily LLM-generated takes on Daniel's state — one row per (day, kind).
-
-    Two flavors today:
-      - kind="focus" — one tight sentence on what Daniel is focused on RIGHT
-        NOW. Inputs: recent notes + active focuses. Powers the dashboard pill.
-      - kind="dev"   — one short paragraph on what Daniel shipped on Gooni
-        today, derived from commits + PR titles across tracked repos. Powers
-        the StatsView Dev-activity card.
-
-    Idempotent on (day, kind): the daily endpoint upserts in place rather
-    than appending so history stays one-row-per-day. Force-refresh
-    regenerates and overwrites the same row. `created_at` records first
-    generation; `updated_at` records last regeneration.
-
-    `sources` is a free-form JSON blob holding whichever input ids the
-    generator used (note ids, focus ids, commit shas, PR urls). Keeping it
-    schemaless lets future kinds add new source types without a migration.
-
-    `prompt_version` bumps when the prompt template or input set changes
-    so future history UIs can filter rows from different prompt eras.
-    """
-
-    __tablename__ = "gooni_takes"
-    __table_args__ = (
-        UniqueConstraint("day", "kind", name="uq_gooni_takes_day_kind"),
-    )
-
-    id = Column(Integer, primary_key=True, index=True)
-    day = Column(Date, nullable=False, index=True)
-    kind = Column(String, nullable=False, index=True)
-    take_text = Column(Text, nullable=False)
-    model = Column(String, nullable=False)
-    prompt_version = Column(String, nullable=False, default="v1")
-    sources = Column(Text, nullable=False, default="{}")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
-
-class NoteComment(Base):
-    """Confluence-style comment thread under a note. One row per comment;
-    no nesting/replies for now (kept flat to keep the UI a simple list).
-    `author` is a free-text label ("daniel", "gooni", "claude") rather than
-    a FK because Gooni is a single-user app — adding a User table just for
-    this would be ceremony without payoff.
-    """
-
-    __tablename__ = "note_comments"
-
-    id = Column(Integer, primary_key=True, index=True)
-    note_id = Column(
-        Integer,
-        ForeignKey("notes.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    author = Column(String, nullable=False, default="daniel")
-    content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
-class Habit(Base):
-    """Daily binary tracking. Each habit is a recurring yes/no question
-    Daniel checks against per day ("went to gym", "stayed clean from
-    vaping", "went to office"). Phrasing is ALWAYS positive — value=True
-    means "I did the thing I said I would." `polarity` carries the
-    underlying connotation so downstream surfaces can colour negative-
-    framed habits differently or roll up "consecutive clean days"
-    separately, without polluting the data model.
-
-    Streak = consecutive value=True days from today (or yesterday if
-    today is unlogged) walking backward. Missing entry breaks the streak;
-    explicit value=False breaks the streak.
-    """
-
-    __tablename__ = "habits"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(Text, nullable=False)
-    # Hex color for the dot/cell rendering. Defaults set by service.
-    color = Column(String, nullable=True)
-    # 'positive' = "do the thing" (gym, church, office, write).
-    # 'negative' = the underlying action is bad but phrasing is still
-    # positive ("stayed clean from vaping" — value=True still means
-    # the GOOD outcome). UI uses polarity to colour or label, never
-    # to invert value semantics.
-    polarity = Column(String, nullable=False, default="positive")
-    # Soft-delete. Archived habits stay in DB for entry history but
-    # don't render in the dashboard widget.
-    archived_at = Column(DateTime, nullable=True)
-    sort_order = Column(Integer, default=0, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-    )
-
-
-class HabitEntry(Base):
-    """One row per (habit, date). Absence of a row = unknown / unlogged.
-    Explicit False = "I did NOT do it." Explicit True = "I did it."
-    Three visual states in the UI: empty cell, ✓, ✗.
-
-    UNIQUE(habit_id, date) — date is a calendar Date, not DateTime,
-    so timezones don't shift logging. The service writes today using
-    the server's local-date interpretation.
-    """
-
-    __tablename__ = "habit_entries"
-
-    id = Column(Integer, primary_key=True, index=True)
-    habit_id = Column(
-        Integer,
-        ForeignKey("habits.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    date = Column(Date, nullable=False, index=True)
-    value = Column(Boolean, nullable=False)
-    note = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
-    )
-
-    __table_args__ = (
-        UniqueConstraint("habit_id", "date", name="uq_habit_entry_per_day"),
-    )
-
-
-class DailyMetric(Base):
-    """Numeric daily fitness/body tracking — the substrate for the cut table.
-
-    Deliberately standalone, NOT folded into Habit/HabitEntry: habits are
-    boolean ("went to gym" → True/False), metrics are numeric (calories,
-    protein, weight). Keeping them apart keeps the habit data model clean
-    and means no migration risk on existing habit rows.
-
-    Row semantics by metric_type:
-      - calories / protein  — ADDITIVE within a day. Each meal Daniel logs
-        = one row; the day's value is SUM(value). No UNIQUE constraint —
-        multiple rows per (type, date) is the intended shape.
-      - weight              — last-write-wins per day. Service reads the
-        most-recent row's value (by created_at); we don't dedupe in the DB.
-      - exercise            — presence sentinel. value=1.0; the real signal
-        is `notes` (the workout label) + the paired `gym` HabitEntry that
-        the fitness handler upserts alongside.
-
-    Corrections ("actually that chicken was ~900 cal") overwrite the
-    most-recent row for (type, today) in place — see
-    daily_metric_service.update_most_recent.
-    """
-
-    __tablename__ = "daily_metrics"
-
-    id = Column(Integer, primary_key=True, index=True)
-    # 'calories' | 'protein' | 'weight' | 'exercise'
-    metric_type = Column(String, nullable=False, index=True)
-    value = Column(Float, nullable=False)
-    # 'kcal' | 'g' | 'lb' | 'kg' | None (exercise carries no unit)
-    unit = Column(String, nullable=True)
-    date = Column(Date, nullable=False, index=True)
-    # Raw input breadcrumb: the food string Daniel typed, the workout
-    # label, or a correction trail. Never load-bearing for aggregation.
-    notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    __table_args__ = (
-        # Every read path (running total, cut table) filters on both
-        # columns — composite index keeps the grouped SUMs cheap.
-        Index("ix_daily_metrics_type_date", "metric_type", "date"),
-    )
 
 
 class Trackable(Base):
@@ -1290,60 +588,6 @@ class WaProcessedId(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
-class FrictionEvent(Base):
-    """G2 self-PM: a logged moment where Gooni hit a capability gap that
-    interrupted Daniel's workflow. Each event ties to a BacklogTicket
-    (creating one if no match found) so the same gap aggregates across
-    sessions instead of stacking duplicate feature requests.
-
-    Sources:
-      - 'user_utterance'  — Daniel said "you can't X" / "isn't there a way
-                            to Y" → extractor signal → log + maybe-create.
-      - 'gooni_response'  — Gooni's own reply emitted "I can't" / "not yet
-                            supported" → orchestrator post-hook regex →
-                            log against nearest cosine-matched ticket.
-      - 'tool_failure'    — a tool call returned a capability-gap error.
-                            (reserved; not wired in v1.)
-      - 'manual'          — Daniel manually flagged a friction via the
-                            feature_request_tool with high blast_radius.
-
-    blast_radius is a 1-5 score of workflow impact:
-      1 = one-off annoyance (e.g., minor formatting)
-      2 = blocks list/UI ergonomics
-      3 = blocks a specific surface (e.g., voice capture)
-      4 = blocks daily flow (multiple sessions affected)
-      5 = blocks the daily-driver claim itself (e.g., todo grooming)
-
-    Urgency aggregation: backlog_ticket.urgency_score = sum of recent
-    friction_events × blast_radius × recency_decay. Surfaced in state_block
-    so Gooni sees its own top blocker every turn.
-    """
-
-    __tablename__ = "friction_events"
-
-    id = Column(Integer, primary_key=True, index=True)
-    backlog_ticket_id = Column(
-        Integer,
-        ForeignKey("backlog_tickets.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    # Optional FK back to the message that triggered the friction. Null
-    # for boot-time seeds or manual flags. Indexed because state_block
-    # queries "what fired in this conv" use it.
-    message_id = Column(
-        Integer,
-        ForeignKey("messages.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    blast_radius = Column(Integer, nullable=False)
-    reason = Column(Text, nullable=True)
-    source = Column(String, nullable=False, default="user_utterance")
-    # 'user_utterance' | 'gooni_response' | 'tool_failure' | 'manual'
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-
-
 class Reflection(Base):
     """Per-turn self-evaluation row. Written asynchronously after every
     assistant Message lands. The Reflexion pattern (Shinn et al.) — Gooni
@@ -1408,65 +652,6 @@ class Reflection(Base):
     score = Column(Float, nullable=True)
     created_at = Column(
         DateTime, default=datetime.utcnow, nullable=False, index=True
-    )
-
-
-class CapabilityFacet(Base):
-    """One row per discrete capability claim Gooni makes about itself.
-
-    Layers:
-      - mechanical    — tool / route / channel primitives derived from the
-                        codebase. Auto-populated via boot-time introspection.
-      - functional    — composed "what I can do for you" facets.
-                        Human / PR-audit curated.
-      - behavioral    — emergent patterns from reflection clustering
-                        ("I keep defaulting to logging instead of acting").
-      - architectural — model, runtime, memory window, ambient-sensing
-                        status. Rarely changes; manual_seed source.
-
-    Status transitions (idempotent, never destructive):
-      claimed     — initial state from any source.
-      verified    — ToolCall telemetry confirms recent successful invocations.
-      unverified  — no successful invocations in 30d.
-      broken      — >=3 failed invocations in 7d (evidence_json snapshots).
-      removed     — boot scan no longer sees this tool/route in the registry.
-
-    facet_key is a stable slug (e.g. "tool.add_note", "route.POST./focuses").
-    UNIQUE on facet_key so all sources upsert against the same row.
-    """
-
-    __tablename__ = "capability_facets"
-
-    id = Column(Integer, primary_key=True, index=True)
-    layer = Column(String, nullable=False, index=True)
-    # 'mechanical' | 'functional' | 'behavioral' | 'architectural'
-    facet_key = Column(String, nullable=False, index=True)
-    facet_text = Column(Text, nullable=False)
-    status = Column(String, nullable=False, default="claimed")
-    # 'claimed' | 'verified' | 'unverified' | 'broken' | 'removed'
-    source = Column(String, nullable=False)
-    # 'code_introspection' | 'pr_audit' | 'reflection_cluster' |
-    # 'manual_seed' | 'chat_tool_update'
-    # Polarity flips facet rendering. 'positive' facets render under
-    # "I can:" / "I tend to:" / "I am:" prefixes per layer. 'negative'
-    # facets render under "I cannot:" — the load-bearing piece for
-    # capability honesty (LLM knows its own gaps so it doesn't claim
-    # capabilities it lacks). Default positive for backward compat.
-    polarity = Column(
-        String, nullable=False, default="positive", server_default="positive"
-    )
-    evidence_json = Column(Text, nullable=True)
-    last_verified_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-        nullable=False,
-    )
-
-    __table_args__ = (
-        UniqueConstraint("facet_key", name="uq_capability_facet_key"),
     )
 
 
@@ -1618,7 +803,6 @@ class Attachment(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
-    todo_id = Column(Integer, ForeignKey("todos.id"), nullable=True, index=True)
     filename = Column(Text, nullable=False)
     mime_type = Column(String, nullable=False)
     size_bytes = Column(Integer, nullable=False, default=0)
@@ -1628,40 +812,4 @@ class Attachment(Base):
     # Public R2 URL — what the frontend renders / downloads from.
     public_url = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
-class Reaction(Base):
-    """Confluence-style emoji reaction on a note or comment.
-
-    Polymorphic on (target_type, target_id) — same row shape covers
-    notes + comments + future surfaces (lists, etc) without a per-target
-    join table explosion. UNIQUE constraint on
-    (target_type, target_id, emoji, reactor_id) so a reactor can't
-    double-react with the same emoji on the same target.
-
-    reactor_id is a stable opaque string from the frontend (localStorage
-    UUID for anonymous public viewers, or a real user id once auth lands).
-    Not an FK — the backend doesn't know who the reactor is, just that
-    they were consistent across requests. No PII.
-    """
-
-    __tablename__ = "reactions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    # "note" | "comment". Kept flexible so we can add more targets without
-    # migrating; validation happens at the route layer.
-    target_type = Column(String, nullable=False)
-    target_id = Column(Integer, nullable=False)
-    emoji = Column(String, nullable=False)
-    reactor_id = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    __table_args__ = (
-        UniqueConstraint(
-            "target_type", "target_id", "emoji", "reactor_id",
-            name="uq_reaction_target_emoji_reactor",
-        ),
-        Index("ix_reactions_target", "target_type", "target_id"),
-    )
-
 

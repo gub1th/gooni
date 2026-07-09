@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchDashboardStats, type DashboardStats } from "../services/api";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { InputBar } from "./chat/InputBar";
 import { MessageBubble } from "./chat/MessageBubble";
-import { StatChip } from "./chat/StatChip";
 import { ThinkingIndicator } from "./chat/ThinkingIndicator";
 import { color as ctok, FONT } from "../ui";
 
@@ -93,14 +91,9 @@ function StreamingProgress({
 export function ChatView() {
   const { activeId, messages, sending, streamingStage, streamingTools, send } = useConversationsStore();
   const [input, setInput] = useState("");
-  const [stats, setStats] = useState<DashboardStats | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const chatStarted = activeId !== null || messages.length > 0;
-
-  useEffect(() => {
-    fetchDashboardStats().then(setStats).catch(console.error);
-  }, []);
 
   useEffect(() => {
     if (chatStarted) {
@@ -139,10 +132,6 @@ export function ChatView() {
           {getGreeting()}, Daniel
         </div>
         <div style={{ fontSize: 13, color: "var(--gooni-muted, #8E8E93)", marginTop: 4 }}>{getDateStr()}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
-          <StatChip value={stats?.notes_this_week ?? "—"} label="notes this week" />
-          <StatChip value={stats && stats.streak > 0 ? `${stats.streak} 🔥` : (stats?.streak ?? "—")} label="streak" />
-        </div>
       </div>
 
       {/* Messages */}

@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Search, Home, FileSearch, BarChart3, Brain, Globe, Plug } from "lucide-react";
-import { useListsStore } from "../stores/useListsStore";
-import { ListIcon } from "./notes/ListIcon";
+import { Search, Radio, FileText, FileSearch, BarChart3, Brain, MessageSquare, Globe, Plug } from "lucide-react";
 import { FONT } from "../ui";
 
 
@@ -16,21 +14,14 @@ interface NavTarget {
 
 // Cmd+K palette mounted in __root so every page (including /public/*) has a
 // way to jump anywhere. Specifically scratches Daniel's #134 itch — getting
-// from /memories, /chat-audit, /public back to lists used to mean clicking
+// from /memories, /chat-audit, /public back home used to mean clicking
 // the logo, then back into the sidebar. Now Cmd+K → type → Enter, anywhere.
-//
-// Lists are pulled from the shared zustand store; if it's empty (e.g. the
-// user landed on a page that didn't fetch them) we fire `fetchAll` on first
-// open. Static pages are baked in.
 export function QuickNav() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const lists = useListsStore((s) => s.lists);
-  const fetchAllLists = useListsStore((s) => s.fetchAll);
 
   // Cmd+K (or Ctrl+K) toggles. Ignored when typing in an input/textarea so
   // we don't hijack note editor / chat input shortcuts.
@@ -52,66 +43,67 @@ export function QuickNav() {
     if (!open) return;
     setQuery("");
     setActiveIndex(0);
-    if (lists.length === 0) fetchAllLists().catch(() => {});
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [open]);
 
-  const targets: NavTarget[] = useMemo(() => {
-    const base: NavTarget[] = [
-      {
-        key: "home",
-        label: "Home",
-        hint: "dashboard",
-        icon: <Home size={14} strokeWidth={1.7} />,
-        onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } }),
-      },
-      {
-        key: "memories",
-        label: "Memories",
-        hint: "/memories",
-        icon: <Brain size={14} strokeWidth={1.7} />,
-        onSelect: () => navigate({ to: "/memories", search: { focus: undefined } }),
-      },
-      {
-        key: "audit",
-        label: "Eval / Audit",
-        hint: "review chat segments",
-        icon: <FileSearch size={14} strokeWidth={1.7} />,
-        onSelect: () => navigate({ to: "/", search: { audit: true, note: undefined, conv: undefined, list: undefined, segment: undefined, view: undefined } }),
-      },
-      {
-        key: "stats",
-        label: "Stats",
-        hint: "OpenAI usage + activity",
-        icon: <BarChart3 size={14} strokeWidth={1.7} />,
-        // No deep-link URL for stats today — go home first; the sidebar
-        // handler picks it up. Acceptable trade-off vs adding new search params.
-        onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } }),
-      },
-      {
-        key: "public",
-        label: "Public profile",
-        hint: "/public",
-        icon: <Globe size={14} strokeWidth={1.7} />,
-        onSelect: () => navigate({ to: "/public" }),
-      },
-      {
-        key: "mcp",
-        label: "MCP",
-        hint: "/public/mcp",
-        icon: <Plug size={14} strokeWidth={1.7} />,
-        onSelect: () => navigate({ to: "/public/mcp" }),
-      },
-    ];
-    const listTargets: NavTarget[] = lists.map((l) => ({
-      key: `list-${l.id}`,
-      label: l.name,
-      hint: `list · ${l.type}`,
-      icon: <ListIcon emoji={l.emoji ?? null} type={l.type as "todo" | "backlog" | "focus" | "generic"} size={14} />,
-      onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, list: l.id, audit: undefined, segment: undefined, view: undefined } }),
-    }));
-    return [...base, ...listTargets];
-  }, [navigate, lists]);
+  const targets: NavTarget[] = useMemo(() => [
+    {
+      key: "log",
+      label: "Log",
+      hint: "the ambient feed",
+      icon: <Radio size={14} strokeWidth={1.7} />,
+      onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "log" } }),
+    },
+    {
+      key: "notes",
+      label: "All Notes",
+      hint: "?view=notes",
+      icon: <FileText size={14} strokeWidth={1.7} />,
+      onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "notes" } }),
+    },
+    {
+      key: "chat",
+      label: "Chat",
+      hint: "?view=chat",
+      icon: <MessageSquare size={14} strokeWidth={1.7} />,
+      onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "chat" } }),
+    },
+    {
+      key: "stats",
+      label: "Stats",
+      hint: "whoop · cut · leetcode",
+      icon: <BarChart3 size={14} strokeWidth={1.7} />,
+      onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "stats" } }),
+    },
+    {
+      key: "memories",
+      label: "Memories",
+      hint: "/memories",
+      icon: <Brain size={14} strokeWidth={1.7} />,
+      onSelect: () => navigate({ to: "/memories", search: { focus: undefined } }),
+    },
+    {
+      key: "audit",
+      label: "Eval / Audit",
+      hint: "review chat segments",
+      icon: <FileSearch size={14} strokeWidth={1.7} />,
+      onSelect: () => navigate({ to: "/", search: { audit: true, note: undefined, conv: undefined, segment: undefined, view: undefined } }),
+    },
+    {
+      key: "public",
+      label: "Public profile",
+      hint: "/public",
+      icon: <Globe size={14} strokeWidth={1.7} />,
+      onSelect: () => navigate({ to: "/public" }),
+    },
+    {
+      key: "mcp",
+      label: "MCP",
+      hint: "/public/mcp",
+      icon: <Plug size={14} strokeWidth={1.7} />,
+      onSelect: () => navigate({ to: "/public/mcp" }),
+    },
+  ], [navigate]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

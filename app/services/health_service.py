@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from ..db.models import (
     Memory, ToolCall, EvalSegment, EvalMessageRating, Message,
-    Note, Todo, HabitEntry, ClaudeUsageTurn, OAuthToken, TrackedRepo,
+    Note, Promise, TrackableEntry, OAuthToken,
 )
 
 
@@ -270,7 +270,7 @@ ENGAGEMENT_TARGET = 10
 
 def _engagement_health(db: Session) -> dict[str, Any]:
     """Today's interaction events vs target. Counts:
-    user messages + notes created + todos created/done + habit entries.
+    user messages + notes created + promises resolved + trackable entries.
 
     Score = today / target * 100, capped at 100.
     """
@@ -290,20 +290,20 @@ def _engagement_health(db: Session) -> dict[str, Any]:
         db.query(func.count(Note.id))
         .filter(Note.created_at >= today_start)
     )
-    todos_today = _count_today(
-        db.query(func.count(Todo.id))
-        .filter(Todo.created_at >= today_start, Todo.deleted_at.is_(None))
+    promises_today = _count_today(
+        db.query(func.count(Promise.id))
+        .filter(Promise.created_at >= today_start)
     )
-    todos_done_today = _count_today(
-        db.query(func.count(Todo.id))
-        .filter(Todo.completed_at >= today_start, Todo.deleted_at.is_(None))
+    promises_resolved_today = _count_today(
+        db.query(func.count(Promise.id))
+        .filter(Promise.resolved_at >= today_start)
     )
-    habits_today = _count_today(
-        db.query(func.count(HabitEntry.id))
-        .filter(HabitEntry.created_at >= today_start)
+    entries_today = _count_today(
+        db.query(func.count(TrackableEntry.id))
+        .filter(TrackableEntry.created_at >= today_start)
     )
 
-    total_today = msgs_today + notes_today + todos_today + todos_done_today + habits_today
+    total_today = msgs_today + notes_today + promises_today + promises_resolved_today + entries_today
     score = _clamp(total_today / ENGAGEMENT_TARGET * 100)
 
     # 7-day rolling for context
@@ -318,9 +318,9 @@ def _engagement_health(db: Session) -> dict[str, Any]:
         db.query(func.count(Note.id))
         .filter(Note.created_at >= week_start)
     )
-    todos_week = _count_week(
-        db.query(func.count(Todo.id))
-        .filter(Todo.created_at >= week_start, Todo.deleted_at.is_(None))
+    promises_week = _count_week(
+        db.query(func.count(Promise.id))
+        .filter(Promise.created_at >= week_start)
     )
 
     components = [
@@ -328,16 +328,16 @@ def _engagement_health(db: Session) -> dict[str, Any]:
          "detail": f"{msgs_today} today · {msgs_week} this week"},
         {"name": "notes", "score": _clamp(notes_today / 2 * 100), "weight": 0.20,
          "detail": f"{notes_today} today · {notes_week} this week"},
-        {"name": "todos", "score": _clamp((todos_today + todos_done_today) / 3 * 100), "weight": 0.30,
-         "detail": f"{todos_today} created · {todos_done_today} done today"},
-        {"name": "habits", "score": _clamp(habits_today / 2 * 100), "weight": 0.20,
-         "detail": f"{habits_today} entries today"},
+        {"name": "promises", "score": _clamp((promises_today + promises_resolved_today) / 3 * 100), "weight": 0.30,
+         "detail": f"{promises_today} made · {promises_resolved_today} resolved today"},
+        {"name": "trackables", "score": _clamp(entries_today / 2 * 100), "weight": 0.20,
+         "detail": f"{entries_today} entries today"},
     ]
 
     return {
         "axis": "engagement",
         "score": round(score, 1),
-        "headline": f"{total_today}/{ENGAGEMENT_TARGET} events today · {msgs_week + notes_week + todos_week} this week",
+        "headline": f"{total_today}/{ENGAGEMENT_TARGET} events today · {msgs_week + notes_week + promises_week} this week",
         "components": components,
     }
 
@@ -395,25 +395,27 @@ def _fmt_uptime(seconds: float) -> str:
 
 
 def _cost_health(db: Session) -> dict[str, Any]:
-    """Today's claude-usage turns vs 7d trailing avg. Spike inverse.
+    """Today's chat tool-calls vs 7d trailing avg. Spike inverse.
 
-    Cheap proxy for actual spend — every turn is one API call. No
-    per-turn $ multiplier yet. If spend ever spikes 3x vs trailing,
-    score drops to surface the anomaly.
+    ClaudeUsageTurn died in the Slice 6 nuke — ToolCall rows are the
+    remaining per-turn activity proxy. If activity spikes 3x vs
+    trailing, score drops to surface the anomaly.
     """
+    from ..db.models import ToolCall
+
     now = datetime.utcnow()
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=7)
 
     today_turns = (
-        db.query(func.count(ClaudeUsageTurn.id))
-        .filter(ClaudeUsageTurn.ts >= today_start)
+        db.query(func.count(ToolCall.id))
+        .filter(ToolCall.started_at >= today_start)
         .scalar() or 0
     )
     week_turns = (
-        db.query(func.count(ClaudeUsageTurn.id))
-        .filter(ClaudeUsageTurn.ts >= week_start)
-        .filter(ClaudeUsageTurn.ts < today_start)
+        db.query(func.count(ToolCall.id))
+        .filter(ToolCall.started_at >= week_start)
+        .filter(ToolCall.started_at < today_start)
         .scalar() or 0
     )
     week_avg = week_turns / 7 if week_turns else 0
@@ -447,7 +449,7 @@ def _connectors_health(db: Session) -> dict[str, Any]:
 
     Probes:
       Whoop:    OAuth token exists AND last WhoopSnapshot < 48h
-      GitHub:   OAuth token exists AND >0 TrackedRepo rows
+      GitHub:   OAuth token exists
       Google:   OAuth token exists for 'google' provider
     """
     components: list[dict[str, Any]] = []
@@ -489,9 +491,9 @@ def _connectors_health(db: Session) -> dict[str, Any]:
         gh_score = 50.0
         gh_detail = "not connected"
     else:
-        n_repos = db.query(func.count(TrackedRepo.id)).scalar() or 0
-        gh_score = 100.0 if n_repos > 0 else 60.0
-        gh_detail = f"{n_repos} tracked repos" if n_repos else "no tracked repos"
+        # TrackedRepo died in the Slice 6 nuke — connected token = healthy.
+        gh_score = 100.0
+        gh_detail = "connected"
     components.append({"name": "GitHub", "score": gh_score, "weight": 1/3, "detail": gh_detail})
 
     # Google Calendar. NOTE: the OAuth flow stores this token under

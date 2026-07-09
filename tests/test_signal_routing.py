@@ -102,12 +102,7 @@ def main() -> int:
         fails.append("substance: routed.captured_metrics missing substance")
     if not (ct and ct[0].get("weed") == 1.0):
         fails.append(f"substance: expected weed=1.0 in cut table, got {ct}")
-    # No Habit row should have been created for the substance.
-    from app.db.models import Habit as _Habit
-    if db.query(_Habit).filter(_Habit.name == "weed").count() != 0:
-        fails.append("substance: a Habit row was created (should be DailyMetric-only)")
-    print(f"[substance] weed_cell={ct[0].get('weed') if ct else None} "
-          f"habit_rows={db.query(_Habit).filter(_Habit.name == 'weed').count()}")
+    print(f"[substance] weed_cell={ct[0].get('weed') if ct else None}")
 
     # ── backdating: log_date routes to that day, not today ──
     from datetime import timedelta as _td

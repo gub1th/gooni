@@ -191,81 +191,36 @@ def forget_memory(memory_id: str) -> str:
     return f"Forgotten: {memory_id}"
 
 
-def _resolve_space_id(space_name: str, emoji: str | None = None) -> int | str:
-    """Map a human space name to its current ID. Creates the space if missing.
-
-    Returns the space.id (int) for named spaces, or the literal "general"
-    when space_name == "General" (since the backend keeps General as a
-    pseudo-space outside the spaces table).
-
-    Robust by name — survives DB rebuilds where IDs shift. Caller passes
-    the name; this function does the lookup.
-    """
-    if space_name.strip().lower() == "general":
-        return "general"
-
-    resp = _session.get(f"{BASE_URL}/spaces", timeout=10)
-    resp.raise_for_status()
-    spaces = resp.json()
-    for s in spaces:
-        if (s.get("name") or "").strip().lower() == space_name.strip().lower():
-            return int(s["id"])
-
-    # Not found — create it
-    payload: dict = {"name": space_name}
-    if emoji:
-        payload["emoji"] = emoji
-    create = _session.post(f"{BASE_URL}/spaces", json=payload, timeout=10)
-    create.raise_for_status()
-    return int(create.json()["id"])
-
 
 @mcp.tool()
 def add_note(
     title: str,
     content: str,
-    space_name: str = "Claude Code",
     is_draft: bool = False,
     is_pinned: bool = False,
     tags: list[str] | None = None,
 ) -> str:
     """Create a new note in Gooni.
 
-    Defaults to the "Claude Code" space — anything Claude Code logs about
-    a coding session belongs there, not in General. Pass `space_name` to
-    override (e.g. "General" for free-floating notes, or any other space).
-
-    The space is resolved by name and auto-created if missing, so this
-    tool stays correct even after DB rebuilds where IDs shift.
-
-    Every Claude-authored note is auto-tagged `from-claude` (merged with
-    any caller-supplied tags) so Daniel can filter the corpus by author.
-    Override by passing `tags=["from-claude", "foo", "bar"]` etc.
+    Slice 6: Spaces are gone — tags own organization. Every Claude-
+    authored note is auto-tagged `from-claude` + `claude-code` (merged
+    with any caller-supplied tags) so Daniel can filter the corpus.
 
     Args:
         title: short note title
         content: note body (plain text or HTML)
-        space_name: target space (defaults to "Claude Code")
         is_draft: surface in the Drafts sidebar (default False). Use when
             you're seeding a half-written note Daniel should finish.
         is_pinned: pin the note (default False).
-        tags: free-form labels (lowercase, ≤60 chars each, deduped). Always
-            merged with `from-claude` so the author tag is never lost.
+        tags: free-form labels (lowercase, ≤60 chars each, deduped).
     """
-    space_id = _resolve_space_id(space_name, emoji="🤖" if space_name == "Claude Code" else None)
-    # Merge caller tags with the author-stamp. Lowercase + dedup happens
-    # server-side; we just prepend the marker.
-    merged_tags = ["from-claude", *(tags or [])]
+    merged_tags = ["from-claude", "claude-code", *(tags or [])]
     payload: dict = {"title": title, "content": content, "tags": merged_tags}
     if is_draft:
         payload["is_draft"] = True
     if is_pinned:
         payload["is_pinned"] = True
-    resp = _session.post(
-        f"{BASE_URL}/spaces/{space_id}/notes",
-        json=payload,
-        timeout=10,
-    )
+    resp = _session.post(f"{BASE_URL}/notes", json=payload, timeout=10)
     resp.raise_for_status()
     n = resp.json()
     flags = []
@@ -274,9 +229,8 @@ def add_note(
     if is_pinned:
         flags.append("pinned")
     suffix = f" [{', '.join(flags)}]" if flags else ""
-    tag_part = f" tags={merged_tags}" if merged_tags else ""
     url = f"{FRONTEND_URL}/?note={n['id']}"
-    return f"Created note #{n['id']} in {space_name}: {n['title']}{suffix}{tag_part} ({url})"
+    return f"Created note #{n['id']}: {n['title']}{suffix} tags={merged_tags} ({url})"
 
 
 # Mirror of AttachmentExtension.ts:iconLabelForMime/shortMime/formatBytes.
@@ -536,22 +490,11 @@ def _read_note_formatted(note_id: int) -> str:
     return f"# {title}\n\n{body}" if body else f"# {title}\n\n(empty)"
 
 
-def _find_space_by_name(name: str) -> dict | None:
-    """Case-insensitive exact-then-partial match. Returns the space dict or None."""
-    spaces = _session.get(f"{BASE_URL}/spaces", timeout=10).json()
-    name_l = name.lower()
-    return (
-        next((s for s in spaces if (s.get("name") or "").lower() == name_l), None)
-        or next((s for s in spaces if name_l in (s.get("name") or "").lower()), None)
-    )
-
 
 def _find_command_center_note() -> dict | None:
-    """Convention: the note titled with 'todo' in the 'dev' space."""
-    dev = _find_space_by_name("dev")
-    if not dev:
-        return None
-    notes = _session.get(f"{BASE_URL}/spaces/{dev['id']}/notes", timeout=10).json()
+    """Convention: the most recent note titled with 'todo' (spaces are
+    gone — title match over the flat list)."""
+    notes = _session.get(f"{BASE_URL}/notes", timeout=10).json()
     return next((n for n in notes if "todo" in (n.get("title") or "").lower()), None)
 
 
@@ -846,47 +789,29 @@ def edit_note(
     return f"Updated note #{n['id']}: {n['title']}{suffix}"
 
 
-@mcp.tool()
-def list_spaces() -> str:
-    """List all spaces in Gooni.
-
-    Use this to know where notes are organized before creating or searching.
-    """
-    resp = _session.get(f"{BASE_URL}/spaces", timeout=10)
-    resp.raise_for_status()
-    spaces = resp.json()
-    if not spaces:
-        return "(no spaces yet)"
-    return "\n".join(f"#{s['id']} {s.get('emoji') or ''} {s['name']}".strip() for s in spaces)
-
 
 @mcp.tool()
-def list_notes(space: str = "general", limit: int = 20) -> str:
-    """List notes in a space. Accepts 'general', a numeric space ID, or a space name.
+def list_notes(tag: str = "", limit: int = 20) -> str:
+    """List notes, newest first. Optional tag filter (spaces are gone —
+    tags own organization).
 
     Args:
-        space: 'general' for all notes, a numeric space ID, or a space name (e.g. 'dev')
-        limit: max notes to return (default 20)
+        tag: filter to notes carrying this tag (empty = all)
+        limit: max notes (default 20)
     """
-    # Resolve a name like "dev" → its numeric ID. Numeric strings and "general" pass through.
-    if space.lower() == "general" or space.isdigit():
-        space_key = space
-    else:
-        match = _find_space_by_name(space)
-        if not match:
-            return f"(no space matching '{space}')"
-        space_key = str(match["id"])
-
-    resp = _session.get(f"{BASE_URL}/spaces/{space_key}/notes", timeout=10)
+    params: dict = {}
+    if (tag or "").strip():
+        params["tag"] = tag.strip().lower()
+    resp = _session.get(f"{BASE_URL}/notes", params=params, timeout=10)
     resp.raise_for_status()
-    notes = resp.json()[:limit]
+    notes = resp.json()[: max(1, min(limit, 100))]
     if not notes:
         return "(no notes)"
     lines = []
     for n in notes:
-        snippet = (n.get("content") or "")[:80].replace("\n", " ")
-        tag_part = f" {n['tags']}" if n.get("tags") else ""
-        lines.append(f"#{n['id']} {n['title'] or '(untitled)'}{tag_part} — {snippet}")
+        tags = n.get("tags") or []
+        tag_part = f" [{', '.join(tags)}]" if tags else ""
+        lines.append(f"#{n['id']} {n.get('title') or '(untitled)'}{tag_part}")
     return "\n".join(lines)
 
 
@@ -901,19 +826,6 @@ def _flatten_items(tree_node: list[dict]) -> list[dict]:
             out.extend(_flatten_items(kids))
     return out
 
-
-def _fetch_todos() -> list[dict]:
-    """Pull every actionable item — focuses + their nested children + inbox
-    todos — as a flat list. Backend renamed `/todos` → `/items` (PR #54);
-    the new endpoint returns a tree, so we flatten here so the rest of the
-    MCP tools stay intact."""
-    resp = _session.get(f"{BASE_URL}/items", timeout=10)
-    resp.raise_for_status()
-    payload = resp.json()
-    items: list[dict] = []
-    items.extend(_flatten_items(payload.get("focuses") or []))
-    items.extend(_flatten_items(payload.get("inbox") or []))
-    return items
 
 
 def _find_todo(match: str, only_open: bool = False) -> tuple[dict | None, str | None]:
@@ -932,62 +844,6 @@ def _find_todo(match: str, only_open: bool = False) -> tuple[dict | None, str | 
     return candidates[0], None
 
 
-@mcp.tool()
-def add_todo(text: str) -> str:
-    """Add a new todo to Daniel's dashboard todo list.
-
-    The todo appears in the dashboard's Todo card, goes to the bottom of the
-    list, and tracks its own created_at so the UI can show an age pill.
-
-    Args:
-        text: the todo text (e.g. "review PR #42", "fix the mascot walk cycle")
-    """
-    text = (text or "").strip()
-    if not text:
-        return "(text required)"
-    resp = _session.post(f"{BASE_URL}/items", json={"text": text}, timeout=10)
-    resp.raise_for_status()
-    t = resp.json()
-    return f"added #{t['id']}: {t['text']}"
-
-
-@mcp.tool()
-def list_todos(include_done: bool = False, limit: int = 50) -> str:
-    """List Daniel's dashboard todos.
-
-    Args:
-        include_done: include completed items (default False — open items only)
-        limit: max items to return (default 50)
-    """
-    todos = _fetch_todos()
-    if not include_done:
-        todos = [t for t in todos if not t["done"]]
-    todos = todos[:limit]
-    if not todos:
-        return "(no todos)"
-    lines = []
-    for t in todos:
-        mark = "[x]" if t["done"] else "[ ]"
-        age = ""
-        if t.get("created_at"):
-            try:
-                dt = datetime.fromisoformat(t["created_at"].replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                secs = (datetime.now(timezone.utc) - dt).total_seconds()
-                if secs < 60:
-                    age = "just now"
-                elif secs < 3600:
-                    age = f"{int(secs / 60)}m"
-                elif secs < 86400:
-                    age = f"{int(secs / 3600)}h"
-                else:
-                    age = f"{int(secs / 86400)}d"
-            except (ValueError, AttributeError):
-                age = ""
-        suffix = f" ({age})" if age else ""
-        lines.append(f"#{t['id']} {mark} {t['text']}{suffix}")
-    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -1219,338 +1075,8 @@ def read_trackable(name: str = "", days: int = 14) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
-def complete_todo(match: str) -> str:
-    """Mark a todo as done by text match.
-
-    Args:
-        match: text contained in the todo (case-insensitive substring; shortest match wins)
-    """
-    t, err = _find_todo(match, only_open=True)
-    if err:
-        return err
-    resp = _session.patch(f"{BASE_URL}/items/{t['id']}", json={"done": True}, timeout=10)
-    resp.raise_for_status()
-    return f"[x] {t['text']}"
 
 
-@mcp.tool()
-def uncheck_todo(match: str) -> str:
-    """Un-check a completed todo by text match.
-
-    Args:
-        match: text contained in the todo (case-insensitive substring; shortest match wins)
-    """
-    t, err = _find_todo(match)
-    if err:
-        return err
-    resp = _session.patch(f"{BASE_URL}/items/{t['id']}", json={"done": False}, timeout=10)
-    resp.raise_for_status()
-    return f"[ ] {t['text']}"
-
-
-@mcp.tool()
-def delete_todo(match: str) -> str:
-    """Delete a todo by text match.
-
-    Args:
-        match: text contained in the todo (case-insensitive substring; shortest match wins)
-    """
-    t, err = _find_todo(match)
-    if err:
-        return err
-    resp = _session.delete(f"{BASE_URL}/items/{t['id']}", timeout=10)
-    resp.raise_for_status()
-    return f"deleted: {t['text']}"
-
-
-def _find_backlog_item(match: str, only_open: bool = True) -> tuple[dict | None, str | None]:
-    """Locate a backlog ticket by substring match. Backlog tickets now
-    live in their own `backlog_tickets` table (extracted out of
-    list_items); the MCP tool hits the dedicated /backlog/tickets routes.
-    Substring match on text or subtitle — auto-routed tickets often have
-    a `from note #N` blurb in `subtitle`.
-    """
-    match_l = match.lower().strip()
-    if not match_l:
-        return None, "(empty match string)"
-
-    resp = _session.get(f"{BASE_URL}/backlog/tickets", timeout=10)
-    resp.raise_for_status()
-    tickets = resp.json() or []
-    candidates: list[dict] = []
-    for t in tickets:
-        if only_open and t.get("done"):
-            continue
-        text = (t.get("text") or "").lower()
-        sub = (t.get("subtitle") or "").lower()
-        if match_l in text or match_l in sub:
-            candidates.append(t)
-
-    if not candidates:
-        return None, f"(no backlog item matching '{match}')"
-    candidates.sort(key=lambda t: len(t.get("text") or ""))
-    return candidates[0], None
-
-
-@mcp.tool()
-def complete_backlog_item(
-    match: str,
-    pr_url: str = None,
-    notes: str = None,
-) -> str:
-    """Mark a backlog ticket as done by text match.
-
-    Backlog tickets now live in their own `backlog_tickets` table — they
-    were extracted out of list_items in the focus/todo/backlog refactor.
-    Auto-routed via feature_request_tool, with `subtitle` like
-    "from note #157".
-
-    Args:
-        match: text contained in the backlog item (matches text OR subtitle)
-        pr_url: optional GitHub PR URL to stamp on close (closes the lifecycle loop)
-        notes: optional body update — append context / decision log on close
-    """
-    item, err = _find_backlog_item(match)
-    if err:
-        return err
-    body: dict = {"done": True, "board_status": "done"}
-    if pr_url:
-        body["pr_url"] = pr_url
-    if notes is not None:
-        body["notes"] = notes
-    resp = _session.patch(
-        f"{BASE_URL}/backlog/tickets/{item['id']}",
-        json=body,
-        timeout=10,
-    )
-    resp.raise_for_status()
-    out = f"[x] {item['text']}"
-    if pr_url:
-        out += f"\nPR: {pr_url}"
-    return out
-
-
-# ── Backlog-tickets MCP surface ──────────────────────────────────────────
-#
-# Mirrors read_list / add_list_item / find_similar_items / delete_list_item
-# but routes through /backlog/tickets/* directly. The legacy list-shaped
-# tools refuse list_ref="backlog" (the underlying list_items rows were
-# extracted into the dedicated `backlog_tickets` table — they now sit
-# empty).
-
-
-@mcp.tool()
-def read_backlog(limit: int = 50, include_done: bool = False) -> str:
-    """Read tickets from the engineering backlog board.
-
-    Backlog tickets carry a board_status enum ('not_yet' | 'doing' |
-    'done') and an optional pr_url. They live in `backlog_tickets`,
-    NOT `list_items` — for arbitrary user lists, use read_list.
-
-    Args:
-        limit: max tickets to return (default 50)
-        include_done: include shipped tickets (default False)
-    """
-    resp = _session.get(
-        f"{BASE_URL}/backlog/tickets?include_done={'true' if include_done else 'false'}",
-        timeout=10,
-    )
-    resp.raise_for_status()
-    rows = resp.json() or []
-    rows = rows[:limit]
-    if not rows:
-        return "(backlog is empty)"
-    lines = ["# backlog"]
-    for t in rows:
-        mark = "[x]" if t.get("done") else "[ ]"
-        status = t.get("board_status") or "-"
-        sub = f" — {t['subtitle']}" if t.get("subtitle") else ""
-        pr = f" ({t['pr_url']})" if t.get("pr_url") else ""
-        note_ref = f" [note #{t['source_note_id']}]" if t.get("source_note_id") else ""
-        lines.append(f"#{t['id']} {mark} [{status}] {t['text']}{sub}{pr}{note_ref}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def add_backlog_item(
-    text: str,
-    subtitle: str = None,
-    notes: str = None,
-    skip_conflict_check: bool = False,
-) -> str:
-    """Add a ticket to the engineering backlog.
-
-    Conflict detection is on by default: the backend cosine-searches
-    existing tickets and surfaces near-duplicates. The ticket is still
-    inserted — but the response flags any matches so the caller can
-    decide whether to merge or delete the new one. Pass
-    `skip_conflict_check=True` for bulk imports / migrations.
-
-    Args:
-        text: ticket text
-        subtitle: optional one-line tagline
-        notes: optional multi-line body — context, design notes, follow-up
-        skip_conflict_check: bypass embed + dedup scan (default False)
-    """
-    text = (text or "").strip()
-    if not text:
-        return "(text required)"
-    body: dict = {"text": text}
-    if subtitle:
-        body["subtitle"] = subtitle
-    if notes:
-        body["notes"] = notes
-    if skip_conflict_check:
-        body["skip_conflict_check"] = True
-    resp = _session.post(f"{BASE_URL}/backlog/tickets", json=body, timeout=20)
-    resp.raise_for_status()
-    t = resp.json()
-    msg = f"added backlog #{t['id']}: {t['text']}"
-    conflicts = t.get("conflicts") or []
-    if conflicts:
-        msg += "\n\n⚠ near-duplicate(s) already on the board:"
-        for c in conflicts:
-            sev = c.get("severity", "medium")
-            sim = c.get("similarity", 0)
-            msg += f"\n  [{sev} {sim:.2f}] #{c['id']} {c['text']}"
-        msg += "\n(call delete_backlog_item or PATCH if this should be merged.)"
-    return msg
-
-
-@mcp.tool()
-def find_similar_backlog(
-    text: str,
-    threshold: float = 0.78,
-    limit: int = 5,
-    include_done: bool = False,
-) -> str:
-    """Cosine-search the backlog for tickets similar to `text` without
-    inserting anything. Use before add_backlog_item to confirm an idea
-    isn't already on the board, or to find merge candidates.
-
-    Args:
-        text: query string
-        threshold: minimum cosine similarity (0..1, default 0.78)
-        limit: max matches to return (default 5)
-        include_done: include shipped tickets (default False)
-    """
-    text = (text or "").strip()
-    if not text:
-        return "(text required)"
-    resp = _session.post(
-        f"{BASE_URL}/backlog/tickets/similar",
-        json={
-            "text": text,
-            "threshold": float(threshold),
-            "limit": int(limit),
-            "include_done": bool(include_done),
-        },
-        timeout=20,
-    )
-    resp.raise_for_status()
-    matches = resp.json().get("matches") or []
-    if not matches:
-        return f"(no backlog tickets above similarity {threshold:.2f})"
-    lines = [f"# similar to '{text}' on backlog:"]
-    for m in matches:
-        status = m.get("board_status") or "-"
-        lines.append(f"[{m['similarity']:.2f}] #{m['id']} [{status}] {m['text']}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def set_backlog_state(match: str, state: str) -> str:
-    """Flip a backlog ticket's board_status by text match.
-
-    State vocab matches the rest of the system: 'not_yet' | 'doing' |
-    'done'. Setting state='done' also flips the `done` boolean so the
-    Done column on the Jira board picks it up; setting 'not_yet' or
-    'doing' clears `done`. Mirrors `check_task` for todos.
-
-    Args:
-        match: substring of ticket text or subtitle (case-insensitive)
-        state: 'not_yet' | 'doing' | 'done'
-    """
-    state = (state or "").strip().lower()
-    if state not in {"not_yet", "doing", "done"}:
-        return "(state must be 'not_yet', 'doing', or 'done')"
-    item, err = _find_backlog_item(match)
-    if err:
-        return err
-    body: dict = {"board_status": state, "done": state == "done"}
-    resp = _session.patch(
-        f"{BASE_URL}/backlog/tickets/{item['id']}",
-        json=body,
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return f"#{item['id']} [{state}] {item['text']}"
-
-
-@mcp.tool()
-def promote_backlog_to_primary(match: str) -> str:
-    """Pin a backlog ticket as the singleton "primary" (dashboard north-
-    star banner). Clears any previously-primary ticket atomically.
-    Idempotent — re-promoting the same ticket is a no-op. Only one
-    ticket can be primary at a time across the whole backlog.
-
-    Args:
-        match: substring of ticket text or subtitle (case-insensitive)
-    """
-    item, err = _find_backlog_item(match)
-    if err:
-        return err
-    resp = _session.post(
-        f"{BASE_URL}/backlog/tickets/{item['id']}/promote-to-primary",
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return f"★ primary now #{item['id']}: {item['text']}"
-
-
-@mcp.tool()
-def clear_primary_backlog() -> str:
-    """Unpin whichever backlog ticket is currently primary. Returns the
-    demoted ticket's text or a "(no primary set)" sentinel. The ticket
-    row itself stays — only the is_primary flag flips."""
-    resp = _session.post(f"{BASE_URL}/backlog/tickets/primary/clear", timeout=10)
-    resp.raise_for_status()
-    out = resp.json()
-    if out is None:
-        return "(no primary set)"
-    return f"unpinned #{out['id']}: {out['text']}"
-
-
-@mcp.tool()
-def delete_backlog_item(match: str) -> str:
-    """Delete a backlog ticket by text match. Refuses if the match is
-    ambiguous — narrow it to exactly one ticket. To merge instead of
-    delete, PATCH the surviving ticket and DELETE the dupe.
-
-    Args:
-        match: substring of the ticket text or subtitle (case-insensitive)
-    """
-    match_l = (match or "").strip().lower()
-    if not match_l:
-        return "(empty match string)"
-    resp = _session.get(f"{BASE_URL}/backlog/tickets", timeout=10)
-    resp.raise_for_status()
-    rows = resp.json() or []
-    candidates = [
-        t for t in rows
-        if match_l in (t.get("text") or "").lower()
-        or match_l in (t.get("subtitle") or "").lower()
-    ]
-    if not candidates:
-        return f"(no backlog tickets matching '{match}')"
-    if len(candidates) > 1:
-        preview = "; ".join(f"#{t['id']} {t['text'][:40]}" for t in candidates[:5])
-        return f"(ambiguous: {len(candidates)} matches — {preview}). Narrow the substring."
-    t = candidates[0]
-    del_resp = _session.delete(f"{BASE_URL}/backlog/tickets/{t['id']}", timeout=10)
-    del_resp.raise_for_status()
-    return f"deleted backlog #{t['id']}: {t['text']}"
 
 
 def _fetch_focuses(include_done: bool = False, include_someday: bool = True) -> list[dict]:
@@ -1595,117 +1121,8 @@ def _find_focus(match: str) -> tuple[dict | None, str | None]:
     return candidates[0], None
 
 
-@mcp.tool()
-def list_focuses(include_done: bool = False, include_someday: bool = True, limit: int = 20) -> str:
-    """List Daniel's focuses — long-running things he's committed to or considering.
-
-    Args:
-        include_done: include completed focuses (default False)
-        include_someday: include 'someday/maybe' focuses (default True)
-        limit: max to return (default 20)
-    """
-    focuses = _fetch_focuses(include_done=include_done, include_someday=include_someday)
-    focuses = focuses[:limit]
-    if not focuses:
-        return "(no focuses)"
-    lines = []
-    for f in focuses:
-        name = f.get("text") or f.get("name") or "(untitled)"
-        due = f" (due {f['due_date'][:10]})" if f.get("due_date") else ""
-        endgoal = f.get("endgoal")
-        endgoal_line = f"\n    → {endgoal}" if endgoal else ""
-        lines.append(f"#{f['id']} [{f['status']}] {name}{due}{endgoal_line}")
-    return "\n".join(lines)
 
 
-@mcp.tool()
-def add_focus(
-    name: str,
-    endgoal: str,
-    due_date: str = None,
-    status: str = "committed",
-) -> str:
-    """Create a new focus on Daniel's dashboard.
-
-    A focus is a top-level item with an endgoal. The unified-item refactor
-    (PR #54) routes anything with `committed=True` OR an endgoal into the
-    focus list automatically — both are set here.
-
-    Args:
-        name: short label (e.g. "Ship Gooni v2")
-        endgoal: what 'done' looks like — long enough that Gooni knows when Daniel's there
-        due_date: optional ISO date (YYYY-MM-DD) or full datetime
-        status: 'committed' | 'pending' | 'someday' (default 'committed')
-    """
-    name = (name or "").strip()
-    endgoal = (endgoal or "").strip()
-    if not name or not endgoal:
-        return "(name and endgoal required)"
-    if status not in ("committed", "pending", "someday"):
-        return f"(invalid status '{status}'; use committed/pending/someday)"
-    body: dict = {
-        "text": name,
-        "endgoal": endgoal,
-        "committed": status == "committed",
-        "status": status,
-    }
-    if due_date:
-        body["due_date"] = due_date
-    resp = _session.post(f"{BASE_URL}/items", json=body, timeout=10)
-    resp.raise_for_status()
-    f = resp.json()
-    return f"added focus #{f['id']}: {f['text']} ({status})"
-
-
-@mcp.tool()
-def update_focus_status(match: str, status: str) -> str:
-    """Change a focus's status (committed/pending/someday/done) by name match.
-
-    `done` is a separate boolean on items; the other three map to the `status`
-    field. Setting `committed`/`pending` flips the `committed` flag too — same
-    rule the backend uses to keep status + flag consistent.
-
-    Args:
-        match: text contained in the focus name (case-insensitive substring)
-        status: 'committed' | 'pending' | 'someday' | 'done'
-    """
-    if status not in ("committed", "pending", "someday", "done"):
-        return f"(invalid status '{status}')"
-    f, err = _find_focus(match)
-    if err:
-        return err
-    body: dict = {}
-    if status == "done":
-        body["done"] = True
-    else:
-        body["status"] = status
-        body["done"] = False
-    resp = _session.patch(f"{BASE_URL}/items/{f['id']}", json=body, timeout=10)
-    resp.raise_for_status()
-    return f"[{status}] {f.get('text') or f.get('name')}"
-
-
-@mcp.tool()
-def read_focus(match: str) -> str:
-    """Read a focus's full details — name, endgoal, status, due date.
-
-    Args:
-        match: text contained in the focus name
-    """
-    f, err = _find_focus(match)
-    if err:
-        return err
-    name = f.get("text") or f.get("name")
-    lines = [
-        f"#{f['id']} {name} ({f['status']})",
-    ]
-    if f.get("endgoal"):
-        lines.append(f"  Endgoal: {f['endgoal']}")
-    if f.get("due_date"):
-        lines.append(f"  Due: {f['due_date'][:10]}")
-    if f.get("scale"):
-        lines.append(f"  Scale: {f['scale']}")
-    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -1838,198 +1255,9 @@ def _find_list_item(
     return candidates[0], None
 
 
-@mcp.tool()
-def read_list(list_ref: str = "todo", limit: int = 50, include_done: bool = False) -> str:
-    """Read items from a Gooni list — todo, focus, or any user-created list.
-
-    For BACKLOG tickets, use `read_backlog` — backlog rows were
-    extracted out of `list_items` into a dedicated table.
-
-    Lists are looked up by type ('todo'/'focus') first, then by name,
-    then by numeric id. Type-based lookup is the stable path: it survives DB
-    rebuilds where ids shift.
-
-    Args:
-        list_ref: 'todo' (default), 'focus', a list name, or a numeric id.
-            'backlog' is rejected — use read_backlog instead.
-        limit: max items to return (default 50)
-        include_done: include checked-off items (default False)
-    """
-    lst, err = _resolve_list(list_ref)
-    if err:
-        return err
-    items = _fetch_list_items(lst["id"])
-    if not include_done:
-        items = [it for it in items if not it.get("done")]
-    items = items[:limit]
-    if not items:
-        return f"(list #{lst['id']} '{lst['name']}' has no {'items' if include_done else 'open items'})"
-    lines = [f"# {lst['name']} (list #{lst['id']}, type={lst['type']})"]
-    for it in items:
-        mark = "[x]" if it.get("done") else "[ ]"
-        primary = " ★" if it.get("is_primary") else ""
-        due = f" (due {it['due_date'][:10]})" if it.get("due_date") else ""
-        sub = f" — {it['subtitle']}" if it.get("subtitle") else ""
-        # Surface the linked source note so the caller can pull full context
-        # via read_note() without an extra round trip — backlog items often
-        # originate from a note discussion and that note is the richest
-        # available context for "what does this item really mean."
-        note_ref = f" [note #{it['source_note_id']}]" if it.get("source_note_id") else ""
-        lines.append(f"#{it['id']} {mark}{primary} {it['text']}{sub}{due}{note_ref}")
-    return "\n".join(lines)
 
 
-@mcp.tool()
-def add_list_item(
-    text: str,
-    list_ref: str = "todo",
-    subtitle: str = None,
-    skip_conflict_check: bool = False,
-) -> str:
-    """Add an item to a Gooni list.
 
-    For BACKLOG tickets use `add_backlog_item` — backlog lives in its
-    own table now. This tool only handles `list_items` rows (todo /
-    focus singletons + user-created generic lists).
-
-    Conflict detection is on by default: the backend cosine-searches existing
-    items in the same list and surfaces near-duplicates. The item is still
-    inserted — but the response flags any matches so you (or the user) can
-    decide whether to merge or delete the new one. Pass
-    `skip_conflict_check=True` for bulk imports / migrations.
-
-    Args:
-        text: item text (e.g. "spike WhatsApp business onboarding")
-        list_ref: 'todo' (default), 'focus', name, or numeric id.
-            'backlog' is rejected — use add_backlog_item instead.
-        subtitle: optional secondary line shown under the item
-        skip_conflict_check: bypass embed + dedup scan (default False)
-    """
-    text = (text or "").strip()
-    if not text:
-        return "(text required)"
-    lst, err = _resolve_list(list_ref)
-    if err:
-        return err
-    body: dict = {"text": text}
-    if subtitle:
-        body["subtitle"] = subtitle
-    if skip_conflict_check:
-        body["skip_conflict_check"] = True
-    resp = _session.post(f"{BASE_URL}/lists/{lst['id']}/items", json=body, timeout=20)
-    resp.raise_for_status()
-    it = resp.json()
-    msg = f"added #{it['id']} to {lst['name']}: {it['text']}"
-    conflicts = it.get("conflicts") or []
-    if conflicts:
-        msg += "\n\n⚠ near-duplicate(s) already in list:"
-        for c in conflicts:
-            sev = c.get("severity", "medium")
-            sim = c.get("similarity", 0)
-            msg += f"\n  [{sev} {sim:.2f}] #{c['id']} {c['text']}"
-        msg += "\n(call delete_list_item or edit_list_item if this should be merged.)"
-    return msg
-
-
-@mcp.tool()
-def find_similar_items(
-    text: str,
-    list_ref: str = "todo",
-    threshold: float = 0.78,
-    limit: int = 5,
-    include_done: bool = False,
-) -> str:
-    """Cosine-search a Gooni list for items similar to `text` without
-    inserting anything. Useful before adding to check if an idea already
-    exists, or to find merge candidates among existing items.
-
-    For BACKLOG search use `find_similar_backlog` — backlog rows live
-    in a separate table.
-
-    Args:
-        text: query string
-        list_ref: which list to search (default 'todo'). 'backlog' is
-            rejected — use find_similar_backlog instead.
-        threshold: minimum cosine similarity (0..1, default 0.78)
-        limit: max matches to return (default 5)
-        include_done: include checked-off items (default False)
-    """
-    text = (text or "").strip()
-    if not text:
-        return "(text required)"
-    lst, err = _resolve_list(list_ref)
-    if err:
-        return err
-    resp = _session.post(
-        f"{BASE_URL}/lists/{lst['id']}/similar",
-        json={
-            "text": text,
-            "threshold": float(threshold),
-            "limit": int(limit),
-            "include_done": bool(include_done),
-        },
-        timeout=20,
-    )
-    resp.raise_for_status()
-    matches = resp.json().get("matches") or []
-    if not matches:
-        return f"(no items in {lst['name']} above similarity {threshold:.2f})"
-    lines = [f"# similar to '{text}' in {lst['name']}:"]
-    for m in matches:
-        lines.append(f"[{m['similarity']:.2f}] #{m['id']} {m['text']}")
-    return "\n".join(lines)
-
-
-@mcp.tool()
-def check_list_item(match: str, list_ref: str = "todo", done: bool = True) -> str:
-    """Toggle a list item's done flag by text match (first-hit-wins, like claim_task).
-
-    For BACKLOG tickets use `complete_backlog_item`.
-
-    Args:
-        match: substring of the item's text (case-insensitive)
-        list_ref: which list to look in (default 'todo'). 'backlog' is
-            rejected — use complete_backlog_item instead.
-        done: True to check, False to uncheck
-    """
-    lst, err = _resolve_list(list_ref)
-    if err:
-        return err
-    item, err = _find_list_item(lst["id"], match, unique=False, only_open=done)
-    if err:
-        return err
-    resp = _session.patch(
-        f"{BASE_URL}/list-items/{item['id']}", json={"done": bool(done)}, timeout=10
-    )
-    resp.raise_for_status()
-    mark = "[x]" if done else "[ ]"
-    return f"{mark} {item['text']} (in {lst['name']})"
-
-
-@mcp.tool()
-def delete_list_item(match: str, list_ref: str = "todo") -> str:
-    """Delete a list item by text match. Refuses if the match is ambiguous —
-    you must narrow it to exactly one item.
-
-    For BACKLOG tickets use `delete_backlog_item`.
-
-    Args:
-        match: substring of the item's text (case-insensitive). Must hit exactly one item.
-        list_ref: which list to look in (default 'todo'). 'backlog' is
-            rejected — use delete_backlog_item instead.
-    """
-    lst, err = _resolve_list(list_ref)
-    if err:
-        return err
-    item, err = _find_list_item(lst["id"], match, unique=True)
-    if err:
-        return err
-    resp = _session.delete(f"{BASE_URL}/list-items/{item['id']}", timeout=10)
-    resp.raise_for_status()
-    return f"deleted #{item['id']} from {lst['name']}: {item['text']}"
-
-
-# ── Notes: find + delete ─────────────────────────────────────────────────────
 
 
 @mcp.tool()
@@ -2093,61 +1321,6 @@ def delete_note(note_id: int) -> str:
     return f"deleted note #{note_id}: {title}"
 
 
-@mcp.tool()
-def add_comment(note_id: int, content: str, author: str = "claude") -> str:
-    """Add a Confluence-style comment to a note's thread.
-
-    Use when reviewing or reacting to a note Daniel wrote — feedback,
-    questions, follow-up thoughts that should hang off the note rather
-    than spawn a new note. The bubble shows up under the editor body.
-
-    Args:
-        note_id: numeric id of the target note (get from find_note,
-            list_recent_notes, search_notes, etc.)
-        content: comment body (plain text or short HTML)
-        author: label shown on the bubble (default "claude" — set to
-            "gooni" if calling from the chat orchestrator instead)
-    """
-    if not isinstance(note_id, int) or note_id <= 0:
-        return "(note_id must be a positive integer)"
-    body = (content or "").strip()
-    if not body:
-        return "(content required)"
-    resp = _session.post(
-        f"{BASE_URL}/notes/{note_id}/comments",
-        json={"content": body, "author": author},
-        timeout=10,
-    )
-    if resp.status_code == 404:
-        return f"(note #{note_id} not found)"
-    resp.raise_for_status()
-    c = resp.json()
-    url = f"{FRONTEND_URL}/?note={note_id}"
-    return f"posted comment #{c['id']} on note #{note_id} ({url})"
-
-
-@mcp.tool()
-def list_comments(note_id: int) -> str:
-    """List comments on a note, oldest first.
-
-    Args:
-        note_id: numeric id of the note to read comments from
-    """
-    if not isinstance(note_id, int) or note_id <= 0:
-        return "(note_id must be a positive integer)"
-    resp = _session.get(f"{BASE_URL}/notes/{note_id}/comments", timeout=10)
-    if resp.status_code == 404:
-        return f"(note #{note_id} not found)"
-    resp.raise_for_status()
-    rows = resp.json()
-    if not rows:
-        return f"(no comments on note #{note_id})"
-    lines = []
-    for c in rows:
-        ts = (c.get("created_at") or "")[:16].replace("T", " ")
-        snippet = (c.get("content") or "")[:200].replace("\n", " ")
-        lines.append(f"#{c['id']} [{c['author']} {ts}] {snippet}")
-    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -2182,114 +1355,4 @@ def get_leetcode_activity() -> str:
     return "\n".join(parts)
 
 
-@mcp.tool()
-def read_capability_facets(layer: str = "") -> str:
-    """Read Gooni's capability inventory — what it can/can't do, grouped by
-    layer (mechanical = tools+routes+channels; functional = composed
-    capabilities; behavioral = patterns from reflection clustering;
-    architectural = model/runtime/memory shape).
 
-    Used by the /capability-audit slash command to inspect what's currently
-    on record before proposing PR-time facet edits.
-
-    Args:
-        layer: optional layer filter ('mechanical' | 'functional' | 'behavioral' | 'architectural').
-               Empty string returns all user-visible layers.
-    """
-    try:
-        resp = _session.get(f"{BASE_URL}/capabilities", timeout=15)
-        resp.raise_for_status()
-    except httpx.HTTPError as exc:
-        return f"(capabilities fetch failed: {exc})"
-    by_layer = (resp.json() or {}).get("by_layer", {})
-    target_layers = [layer] if layer else list(by_layer.keys())
-    out = []
-    for L in target_layers:
-        rows = by_layer.get(L) or []
-        out.append(f"## {L} ({len(rows)})")
-        for r in rows:
-            badge = f"[{r['status']}]"
-            out.append(f"- {badge} {r['facet_key']} — {r['facet_text'][:160]}")
-    return "\n".join(out) if out else "(no facets)"
-
-
-@mcp.tool()
-def update_capability_facet(
-    facet_key: str,
-    facet_text: str = "",
-    status: str = "",
-    layer: str = "",
-) -> str:
-    """Create or update one of Gooni's capability facets.
-
-    Used by the /capability-audit skill to apply PR-derived edits, and by
-    Claude Code when reviewing changes to tools/services. Idempotent on
-    facet_key.
-
-    Args:
-        facet_key: stable slug (e.g. 'tool.add_note', 'functional.web_search').
-        facet_text: new short description (required when creating).
-        status: 'claimed' | 'verified' | 'unverified' | 'broken'.
-        layer: 'mechanical' | 'functional' | 'behavioral' | 'architectural' (required when creating).
-    """
-    facet_key = (facet_key or "").strip()
-    if not facet_key:
-        return "facet_key required"
-
-    # Look up existing first.
-    try:
-        resp = _session.get(f"{BASE_URL}/capabilities", timeout=15)
-        resp.raise_for_status()
-    except httpx.HTTPError as exc:
-        return f"(capabilities fetch failed: {exc})"
-    by_layer = (resp.json() or {}).get("by_layer", {})
-    existing: dict | None = None
-    for rows in by_layer.values():
-        for r in rows:
-            if r["facet_key"] == facet_key:
-                existing = r
-                break
-        if existing:
-            break
-
-    if existing is None:
-        if not facet_text or not layer:
-            return (
-                f"facet '{facet_key}' not found; provide both facet_text and "
-                "layer to create it."
-            )
-        body = {
-            "facet_key": facet_key,
-            "facet_text": facet_text,
-            "layer": layer,
-        }
-        if status:
-            body["status"] = status
-        try:
-            r2 = _session.post(f"{BASE_URL}/capabilities", json=body, timeout=15)
-            r2.raise_for_status()
-        except httpx.HTTPError as exc:
-            return f"(create failed: {exc})"
-        return f"created facet '{facet_key}'"
-
-    body = {}
-    if facet_text:
-        body["facet_text"] = facet_text
-    if status:
-        body["status"] = status
-    if layer:
-        body["layer"] = layer
-    if not body:
-        return f"no changes specified for '{facet_key}'"
-    try:
-        r3 = _session.patch(
-            f"{BASE_URL}/capabilities/{existing['id']}", json=body, timeout=15
-        )
-        r3.raise_for_status()
-    except httpx.HTTPError as exc:
-        return f"(update failed: {exc})"
-    return f"updated facet '{facet_key}': {', '.join(body.keys())}"
-
-
-if __name__ == "__main__":
-    mcp.run(transport="stdio")

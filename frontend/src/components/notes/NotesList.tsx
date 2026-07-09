@@ -1,38 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import { Pin as PinIcon } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
-import { useSpacesStore } from "../../stores/useSpacesStore";
 import {
   cleanupEmptyNotes,
-  fetchSpaceStats,
   patchNote,
-  uploadImage,
   type ApiNote,
-  type ApiSpaceStats,
 } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
-import { SpaceIcon } from "./SpaceIcon";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
 import { color as ctok, z } from "../../ui";
 import { parseServerDate } from "../../utils/date";
 
-// Module-level drag state so Sidebar can read it without prop drilling
-export let draggingNotePayload: { noteId: number; fromSpaceId: string } | null = null;
-
-// Compact "Xd ago" / "Xh ago" stamp for the space header. Falls back to
-// the localized date when the gap is older than ~30 days.
-function formatRelative(iso: string | null): string {
-  const d = parseServerDate(iso);
-  if (!d) return "—";
-  const diffMs = Date.now() - d.getTime();
-  if (diffMs < 60_000) return "just now";
-  const min = Math.floor(diffMs / 60_000);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 30) return `${day}d ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+// Tag-filter channel from the Sidebar. The event can fire BEFORE this
+// component mounts (tag click on the log view navigates to ?view=notes,
+// which mounts NotesList a tick later), so a module-scope listener stashes
+// the last tag and the component reads it on mount. The module is imported
+// eagerly by routes/index.tsx, so the listener is always attached first.
+let pendingTagFilter: string | null = null;
+if (typeof window !== "undefined") {
+  window.addEventListener("gooni:filter-tag", (e: Event) => {
+    const tag = (e as CustomEvent<{ tag?: string }>).detail?.tag;
+    pendingTagFilter = typeof tag === "string" && tag ? tag : null;
+  });
 }
 
 function formatTime(iso: string | null): string {
@@ -92,11 +81,7 @@ interface ContextMenu {
 interface NoteRowProps {
   note: ApiNote;
   active: boolean;
-  spaceId: string;
-  dragging: boolean;
   onSelect: () => void;
-  onDragStart: (id: number) => void;
-  onDragEnd: () => void;
   onContextMenu: (e: React.MouseEvent, noteId: number) => void;
   onTogglePin: (note: ApiNote) => void;
 }
@@ -152,50 +137,7 @@ function FilterPill({
   );
 }
 
-// Single row in the space-filter dropdown menu. Tight, hover-tinted,
-// shows an inline check mark on the active row.
-function SpaceMenuItem({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        width: "100%",
-        padding: "6px 10px",
-        border: "none",
-        background: active ? "rgba(10,132,255,0.10)" : "transparent",
-        cursor: "pointer",
-        borderRadius: 6,
-        fontSize: 12.5,
-        color: active ? ctok.accent : "var(--gooni-text, #1C1C1E)",
-        fontWeight: active ? 600 : 400,
-        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-        textAlign: "left",
-      }}
-      onMouseEnter={(e) => {
-        if (!active) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)";
-      }}
-      onMouseLeave={(e) => {
-        if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-      }}
-    >
-      <span>{label}</span>
-      {active && <span style={{ fontSize: 11 }}>✓</span>}
-    </button>
-  );
-}
-
-function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDragEnd, onContextMenu, onTogglePin }: NoteRowProps) {
+function NoteRow({ note, active, onSelect, onContextMenu, onTogglePin }: NoteRowProps) {
   // Derive title from content when the note has no real title — so the list
   // never shows a row of repeated "New Note" placeholders. Prefer the
   // server-supplied `excerpt`/`thumb_src` (list endpoints don't ship full
@@ -224,28 +166,16 @@ function NoteRow({ note, active, spaceId, dragging, onSelect, onDragStart, onDra
 
   return (
     <div
-      draggable={note.id > 0}
-      onDragStart={(e) => {
-        e.dataTransfer.setData("text/plain", JSON.stringify({ noteId: note.id, fromSpaceId: spaceId }));
-        e.dataTransfer.effectAllowed = "move";
-        draggingNotePayload = { noteId: note.id, fromSpaceId: spaceId };
-        onDragStart(note.id);
-      }}
-      onDragEnd={() => {
-        draggingNotePayload = null;
-        onDragEnd();
-      }}
       onClick={onSelect}
       onContextMenu={(e) => onContextMenu(e, note.id)}
       style={{
         position: "relative",
         padding: "15px 14px",
         borderBottom: "1px solid rgba(0,0,0,0.06)",
-        cursor: note.id > 0 ? "grab" : "pointer",
+        cursor: "pointer",
         background: active ? "rgba(0,0,0,0.07)" : "transparent",
-        transition: "background 0.1s, opacity 0.15s",
+        transition: "background 0.1s",
         userSelect: "none",
-        opacity: dragging ? 0.4 : 1,
       }}
       onMouseEnter={(e) => {
         if (!active) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.04)";
@@ -378,88 +308,49 @@ function SectionHeader({ label }: { label: string }) {
 
 export function NotesList() {
   const { selectedSpaceId, notes, activeNoteId, createNote, selectNote, deleteNote, loadNotes } = useNotesContentStore();
-  const spaces = useSpacesStore((s) => s.spaces);
-  const updateSpaceStore = useSpacesStore((s) => s.updateSpace);
-  const [descEditing, setDescEditing] = useState(false);
-  const [descDraft, setDescDraft] = useState("");
-  const [spaceStats, setSpaceStats] = useState<ApiSpaceStats | null>(null);
-  const [coverUploading, setCoverUploading] = useState(false);
-  const coverInputRef = useRef<HTMLInputElement | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
-  const [draggingId, setDraggingId] = useState<number | null>(null);
   const [cleanConfirm, setCleanConfirm] = useState(false);
   const [search, setSearch] = useState("");
-  // Status filters for All Notes — public / draft / pinned + optional
-  // space narrowing. Stack as AND: enabling multiple means rows must
-  // match all of them. Reset when leaving All Notes since they're
-  // meaningless inside a single space.
+  // Status filters — public / draft / pinned. Stack as AND: enabling
+  // multiple means rows must match all of them.
   const [publicOnly, setPublicOnly] = useState(false);
   const [draftOnly, setDraftOnly] = useState(false);
   const [pinnedOnly, setPinnedOnly] = useState(false);
-  const [spaceFilter, setSpaceFilter] = useState<number | null>(null);
-  const [spaceMenuOpen, setSpaceMenuOpen] = useState(false);
-  const spaceMenuRef = useRef<HTMLDivElement>(null);
+  // Tag filter — set by the Sidebar's Tags section via gooni:filter-tag.
+  // Seeded from the module-level stash so a tag click that mounted this
+  // component still applies (see pendingTagFilter above).
+  const [tagFilter, setTagFilter] = useState<string | null>(() => pendingTagFilter);
   const searchRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // All notes live in the one "general" bucket since Spaces died.
   const spaceId = selectedSpaceId ?? "general";
-  const isAllNotes = spaceId === "general";
   const allNotes = notes[spaceId] ?? [];
 
-  // Clear search whenever the user switches spaces — a query only makes sense
-  // in the space it was typed in. Same for the public-only toggle: it only
-  // applies on All Notes, so reset when leaving.
-  useEffect(() => { setSearch(""); }, [spaceId]);
+  // Follow subsequent tag clicks while mounted.
   useEffect(() => {
-    if (!isAllNotes) {
-      setPublicOnly(false);
-      setDraftOnly(false);
-      setPinnedOnly(false);
-      setSpaceFilter(null);
-      setSpaceMenuOpen(false);
+    function onFilterTag(e: Event) {
+      const tag = (e as CustomEvent<{ tag?: string }>).detail?.tag;
+      setTagFilter(typeof tag === "string" && tag ? tag : null);
     }
-  }, [isAllNotes]);
+    window.addEventListener("gooni:filter-tag", onFilterTag);
+    return () => window.removeEventListener("gooni:filter-tag", onFilterTag);
+  }, []);
 
-  // Fetch space stats for the header (note count, last touched, top tags).
-  // Re-runs when notes mutate so a freshly-created note bumps the count
-  // without requiring a manual refresh.
-  const allNotesForCount = notes[spaceId] ?? [];
-  const allNotesLen = allNotesForCount.length;
-  useEffect(() => {
-    if (isAllNotes || spaceId === "general") {
-      setSpaceStats(null);
-      return;
-    }
-    const idNum = Number(spaceId);
-    if (!Number.isFinite(idNum)) return;
-    let cancelled = false;
-    fetchSpaceStats(idNum)
-      .then((s) => { if (!cancelled) setSpaceStats(s); })
-      .catch((e) => console.warn("space stats fetch failed", e));
-    return () => { cancelled = true; };
-  }, [spaceId, isAllNotes, allNotesLen]);
-
-  // Dismiss space-filter dropdown on outside click.
-  useEffect(() => {
-    if (!spaceMenuOpen) return;
-    function onDown(e: MouseEvent) {
-      if (spaceMenuRef.current && !spaceMenuRef.current.contains(e.target as Node)) {
-        setSpaceMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [spaceMenuOpen]);
+  function clearTagFilter() {
+    pendingTagFilter = null;
+    setTagFilter(null);
+  }
 
   // Client-side title+excerpt search. Case-insensitive substring match.
   // List rows only carry `excerpt` (no full body) — full-content search
   // lives behind the semantic `/mcp/notes/search` route used by AllNotes.
   const searchTrimmed = search.trim().toLowerCase();
-  const statusFiltered = !isAllNotes ? allNotes : allNotes.filter((n) => {
+  const statusFiltered = allNotes.filter((n) => {
     if (publicOnly && !n.is_public) return false;
     if (draftOnly && !n.is_draft) return false;
     if (pinnedOnly && !n.is_pinned) return false;
-    if (spaceFilter !== null && n.space_id !== spaceFilter) return false;
+    if (tagFilter !== null && !(n.tags ?? []).includes(tagFilter)) return false;
     return true;
   });
   const noteList = !searchTrimmed ? statusFiltered : statusFiltered.filter((n) => {
@@ -468,13 +359,9 @@ export function NotesList() {
     const plain = (n.excerpt ?? (n.content ? stripHtml(n.content) : "")).toLowerCase();
     return plain.includes(searchTrimmed);
   });
-  const anyFilterActive = publicOnly || draftOnly || pinnedOnly || spaceFilter !== null;
-  const filterSpaceName = spaceFilter !== null
-    ? (spaces.find((s) => typeof s.id === "number" && s.id === spaceFilter)?.name ?? "Space")
-    : null;
+  const anyFilterActive = publicOnly || draftOnly || pinnedOnly || tagFilter !== null;
 
-  const currentSpace = isAllNotes ? null : spaces.find((s) => String(s.id) === spaceId);
-  const headerName = isAllNotes ? "All Notes" : (currentSpace?.name ?? "Notes");
+  const headerName = "All Notes";
 
   // Cmd/Ctrl-F stays as native browser find. Daniel asked for the
   // standard shortcut back — hijacking it for the notes-rail search
@@ -531,7 +418,7 @@ export function NotesList() {
   }
 
   // Skip date grouping while searching — a flat, recency-ordered list reads better.
-  const groups = isAllNotes && !searchTrimmed ? groupNotes(noteList) : null;
+  const groups = !searchTrimmed ? groupNotes(noteList) : null;
 
   return (
     <div
@@ -540,28 +427,23 @@ export function NotesList() {
       {/* Header */}
       <div style={{ height: 52, padding: "0 10px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, borderBottom: "1px solid rgba(0,0,0,0.06)", gap: 6 }}>
         <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 7, fontSize: 14, fontWeight: 600, color: "var(--gooni-text, #1C1C1E)", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", overflow: "hidden", whiteSpace: "nowrap" }}>
-          {!isAllNotes && currentSpace && (
-            <SpaceIcon emoji={currentSpace.emoji} size={14} />
-          )}
           <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{headerName}</span>
         </span>
-        {isAllNotes && (
-          <button
-            onClick={handleCleanInbox}
-            onMouseLeave={() => setCleanConfirm(false)}
-            title={cleanConfirm ? "Click again to confirm" : "Delete empty untitled notes"}
-            style={{
-              height: 26, padding: "0 8px", borderRadius: 6,
-              background: cleanConfirm ? ctok.danger : "transparent", border: "none",
-              cursor: "pointer", color: cleanConfirm ? "#fff" : ctok.muted, fontSize: 11.5,
-              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-              fontWeight: 500, flexShrink: 0, transition: "background 0.1s, color 0.1s",
-            }}
-            onMouseEnter={(e) => { if (!cleanConfirm) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
-          >
-            {cleanConfirm ? "sure?" : "🧹"}
-          </button>
-        )}
+        <button
+          onClick={handleCleanInbox}
+          onMouseLeave={() => setCleanConfirm(false)}
+          title={cleanConfirm ? "Click again to confirm" : "Delete empty untitled notes"}
+          style={{
+            height: 26, padding: "0 8px", borderRadius: 6,
+            background: cleanConfirm ? ctok.danger : "transparent", border: "none",
+            cursor: "pointer", color: cleanConfirm ? "#fff" : ctok.muted, fontSize: 11.5,
+            fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+            fontWeight: 500, flexShrink: 0, transition: "background 0.1s, color 0.1s",
+          }}
+          onMouseEnter={(e) => { if (!cleanConfirm) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)"; }}
+        >
+          {cleanConfirm ? "sure?" : "🧹"}
+        </button>
         <button
           onClick={() => createNote(spaceId)}
           title="New note"
@@ -575,231 +457,6 @@ export function NotesList() {
           </svg>
         </button>
       </div>
-
-      {/* Space header — description + cover + stats. Hidden for All
-          Notes since there's no underlying space row to attach metadata
-          to. */}
-      {!isAllNotes && currentSpace && (
-        <div
-          style={{
-            position: "relative",
-            padding: "10px 12px 8px",
-            flexShrink: 0,
-            background: currentSpace.cover_image_url
-              ? `linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.95)), url(${JSON.stringify(currentSpace.cover_image_url).slice(1, -1)}) center/cover`
-              : "transparent",
-          }}
-          onDragOver={(e) => {
-            if (Array.from(e.dataTransfer?.items ?? []).some((i) => i.type.startsWith("image/"))) {
-              e.preventDefault();
-            }
-          }}
-          onDrop={async (e) => {
-            const file = Array.from(e.dataTransfer?.files ?? []).find((f) =>
-              f.type.startsWith("image/"),
-            );
-            if (!file || typeof currentSpace.id !== "number") return;
-            e.preventDefault();
-            setCoverUploading(true);
-            try {
-              const result = await uploadImage(file);
-              if (result.kind === "url") {
-                await updateSpaceStore(currentSpace.id as number, {
-                  cover_image_url: result.url,
-                });
-              } else if (result.kind === "fallback") {
-                console.warn("cover upload: R2 unconfigured, skipping");
-              } else {
-                console.warn("cover upload failed:", result.message);
-              }
-            } finally {
-              setCoverUploading(false);
-            }
-          }}
-        >
-          {descEditing ? (
-            <textarea
-              autoFocus
-              value={descDraft}
-              onChange={(e) => setDescDraft(e.target.value)}
-              onBlur={async () => {
-                const next = descDraft.trim();
-                const current = (currentSpace.description ?? "").trim();
-                if (next !== current && typeof currentSpace.id === "number") {
-                  try {
-                    await updateSpaceStore(currentSpace.id, { description: next || null });
-                  } catch (e) {
-                    console.error("updateSpace description failed", e);
-                  }
-                }
-                setDescEditing(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setDescDraft(currentSpace.description ?? "");
-                  setDescEditing(false);
-                }
-              }}
-              placeholder="What's this space for?"
-              rows={3}
-              style={{
-                width: "100%",
-                fontSize: 12,
-                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                color: "var(--gooni-text, #1C1C1E)",
-                background: "rgba(255,255,255,0.7)",
-                border: "1px solid rgba(0,0,0,0.10)",
-                borderRadius: 6,
-                padding: "6px 8px",
-                resize: "vertical",
-                outline: "none",
-                boxSizing: "border-box",
-              }}
-            />
-          ) : (
-            <div
-              onClick={() => {
-                setDescDraft(currentSpace.description ?? "");
-                setDescEditing(true);
-              }}
-              title="Click to edit description"
-              style={{
-                fontSize: 12,
-                color: currentSpace.description ? "var(--gooni-muted, #475569)" : "rgba(142,142,147,0.85)",
-                lineHeight: 1.4,
-                cursor: "pointer",
-                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                fontStyle: currentSpace.description ? "normal" : "italic",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-              }}
-            >
-              {currentSpace.description || "+ add description"}
-            </div>
-          )}
-
-          {/* Hidden file input that the cover-upload button trips. Click
-              the camera icon → native file picker → R2 upload → PATCH
-              cover_image_url. Drag-drop on the whole header also works
-              (see the wrapping div's onDrop). */}
-          <input
-            ref={coverInputRef}
-            type="file"
-            accept="image/*"
-            style={{ display: "none" }}
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              if (!file || typeof currentSpace.id !== "number") return;
-              setCoverUploading(true);
-              try {
-                const result = await uploadImage(file);
-                if (result.kind === "url") {
-                  await updateSpaceStore(currentSpace.id as number, {
-                    cover_image_url: result.url,
-                  });
-                }
-              } finally {
-                setCoverUploading(false);
-                if (coverInputRef.current) coverInputRef.current.value = "";
-              }
-            }}
-          />
-
-          {/* Footer — stats stack into two lines (notes + touched on
-              line 1, top tags on line 2) so the 210px column doesn't
-              pulverize them into a vertical drip of fragments. The
-              "+ cover" affordance moves out of the row entirely into the
-              card's top-right corner — keeps the stats line uncluttered. */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-              marginTop: 6,
-              fontSize: 11,
-              color: "rgba(71,85,105,0.85)",
-              fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-            }}
-          >
-            {spaceStats && (
-              <>
-                <span>
-                  {spaceStats.note_count} note{spaceStats.note_count === 1 ? "" : "s"}
-                  {spaceStats.last_touched && (
-                    <span style={{ color: "rgba(142,142,147,0.85)" }}>
-                      {" · "}{formatRelative(spaceStats.last_touched)}
-                    </span>
-                  )}
-                </span>
-                {spaceStats.top_tags.length > 0 && (
-                  <span style={{ color: "rgba(142,142,147,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {spaceStats.top_tags.map((t) => `#${t.tag}`).join(" ")}
-                  </span>
-                )}
-              </>
-            )}
-          </div>
-          <div
-            style={{
-              position: "absolute",
-              top: 6,
-              right: 8,
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            <button
-              onClick={() => coverInputRef.current?.click()}
-              disabled={coverUploading}
-              title={
-                coverUploading
-                  ? "Uploading cover…"
-                  : currentSpace.cover_image_url
-                    ? "Change cover image"
-                    : "Add cover image (or drag/drop here)"
-              }
-              style={{
-                background: "transparent",
-                border: "none",
-                cursor: coverUploading ? "wait" : "pointer",
-                padding: "0 2px",
-                color: "rgba(71,85,105,0.65)",
-                fontSize: 11,
-                lineHeight: 1,
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#0F172A")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "rgba(71,85,105,0.65)")}
-            >
-              {coverUploading ? "uploading…" : currentSpace.cover_image_url ? "change cover" : "+ cover"}
-            </button>
-            {currentSpace.cover_image_url && !coverUploading && (
-              <button
-                onClick={() => {
-                  if (typeof currentSpace.id === "number") {
-                    void updateSpaceStore(currentSpace.id as number, { cover_image_url: null });
-                  }
-                }}
-                title="Remove cover image"
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: "0 2px",
-                  color: "rgba(239,68,68,0.55)",
-                  fontSize: 11,
-                  lineHeight: 1,
-                }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#EF4444")}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "rgba(239,68,68,0.55)")}
-              >
-                ×
-              </button>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Search row — compact, always visible */}
       <div style={{ padding: "8px 10px", borderBottom: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
@@ -841,83 +498,55 @@ export function NotesList() {
             >×</button>
           )}
         </div>
-        {/* Status pill filters — only on All Notes. Active vs inactive
-            states are visually distinct: active = filled accent bg +
-            saturated text, inactive = outlined chip + muted text. */}
-        {isAllNotes && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+        {/* Status pill filters. Active vs inactive states are visually
+            distinct: active = filled accent bg + saturated text,
+            inactive = outlined chip + muted text. */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+          <FilterPill
+            label="Public"
+            icon="🌐"
+            active={publicOnly}
+            onClick={() => setPublicOnly((v) => !v)}
+          />
+          <FilterPill
+            label="Draft"
+            icon="✏️"
+            active={draftOnly}
+            onClick={() => setDraftOnly((v) => !v)}
+          />
+          <FilterPill
+            label="Pinned"
+            icon="📌"
+            active={pinnedOnly}
+            onClick={() => setPinnedOnly((v) => !v)}
+          />
+          {/* Tag filter chip — set by the Sidebar's Tags section. Click ✕
+              (or the chip) to clear. */}
+          {tagFilter !== null && (
             <FilterPill
-              label="Public"
-              icon="🌐"
-              active={publicOnly}
-              onClick={() => setPublicOnly((v) => !v)}
+              label={`filtered by #${tagFilter} ✕`}
+              active
+              onClick={clearTagFilter}
             />
-            <FilterPill
-              label="Draft"
-              icon="✏️"
-              active={draftOnly}
-              onClick={() => setDraftOnly((v) => !v)}
-            />
-            <FilterPill
-              label="Pinned"
-              icon="📌"
-              active={pinnedOnly}
-              onClick={() => setPinnedOnly((v) => !v)}
-            />
-            <div ref={spaceMenuRef} style={{ position: "relative" }}>
-              <FilterPill
-                label={filterSpaceName ?? "Space"}
-                icon="▾"
-                iconRight
-                active={spaceFilter !== null}
-                onClick={() => setSpaceMenuOpen((v) => !v)}
-              />
-              {spaceMenuOpen && (
-                <div style={{
-                  position: "absolute", top: "100%", left: 0, marginTop: 4,
-                  background: "var(--gooni-card, #FFFFFF)",
-                  border: "1px solid var(--gooni-border, rgba(0,0,0,0.08))",
-                  borderRadius: 8, boxShadow: "0 6px 24px rgba(0,0,0,0.10)",
-                  zIndex: 50, minWidth: 140, padding: 4, maxHeight: 260,
-                  overflowY: "auto",
-                }}>
-                  <SpaceMenuItem
-                    label="All spaces"
-                    active={spaceFilter === null}
-                    onClick={() => { setSpaceFilter(null); setSpaceMenuOpen(false); }}
-                  />
-                  {spaces
-                    .filter((s): s is typeof s & { id: number } => typeof s.id === "number")
-                    .map((s) => (
-                      <SpaceMenuItem
-                        key={s.id}
-                        label={`${s.emoji ?? "📁"} ${s.name}`}
-                        active={spaceFilter === s.id}
-                        onClick={() => { setSpaceFilter(s.id); setSpaceMenuOpen(false); }}
-                      />
-                    ))}
-                </div>
-              )}
-            </div>
-            {anyFilterActive && (
-              <button
-                onClick={() => {
-                  setPublicOnly(false);
-                  setDraftOnly(false);
-                  setPinnedOnly(false);
-                  setSpaceFilter(null);
-                }}
-                title="Clear all filters"
-                style={{
-                  height: 22, padding: "0 8px", borderRadius: 11,
-                  background: "transparent", border: "none", cursor: "pointer",
-                  color: "var(--gooni-muted, #8E8E93)", fontSize: 11,
-                  fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                }}
-              >clear</button>
-            )}
-          </div>
-        )}
+          )}
+          {anyFilterActive && (
+            <button
+              onClick={() => {
+                setPublicOnly(false);
+                setDraftOnly(false);
+                setPinnedOnly(false);
+                clearTagFilter();
+              }}
+              title="Clear all filters"
+              style={{
+                height: 22, padding: "0 8px", borderRadius: 11,
+                background: "transparent", border: "none", cursor: "pointer",
+                color: "var(--gooni-muted, #8E8E93)", fontSize: 11,
+                fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+              }}
+            >clear</button>
+          )}
+        </div>
       </div>
 
       {/* Note list */}
@@ -926,7 +555,7 @@ export function NotesList() {
           <div style={{ padding: "32px 14px", textAlign: "center", color: ctok.faint, fontSize: 13, fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
             {searchTrimmed
               ? `No notes match “${search.trim()}”`
-              : (isAllNotes && anyFilterActive)
+              : anyFilterActive
                 ? "No notes match the active filters. Click 'clear' to reset."
                 : "No notes yet. Press + to create one."}
           </div>
@@ -941,11 +570,7 @@ export function NotesList() {
                     key={note.id}
                     note={note}
                     active={activeNoteId === note.id}
-                    spaceId={spaceId}
-                    dragging={draggingId === note.id}
                     onSelect={() => selectNote(note.id)}
-                    onDragStart={(id) => setDraggingId(id)}
-                    onDragEnd={() => setDraggingId(null)}
                     onContextMenu={handleContextMenu}
                     onTogglePin={handleTogglePin}
                   />
@@ -957,11 +582,7 @@ export function NotesList() {
                 key={note.id}
                 note={note}
                 active={activeNoteId === note.id}
-                spaceId={spaceId}
-                dragging={draggingId === note.id}
                 onSelect={() => selectNote(note.id)}
-                onDragStart={(id) => setDraggingId(id)}
-                onDragEnd={() => setDraggingId(null)}
                 onContextMenu={handleContextMenu}
                 onTogglePin={handleTogglePin}
               />

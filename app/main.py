@@ -10,12 +10,9 @@ load_dotenv()  # must run before any service imports that read env vars
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import bindparam, text
 
-from .db.database import engine
-from .db.database import SessionLocal
+from .db.database import SessionLocal, engine
 from .db.models import (
-    McpCall,
     Visit,
 )
 
@@ -82,52 +79,6 @@ def _alembic_upgrade(engine):
 
 _alembic_upgrade(engine)
 
-def _dedupe_singleton_lists(engine):
-    """Older code paths could spawn duplicate canonical lists (focus, todo,
-    backlog) under race conditions. Squash to one row per type — keep the
-    lowest id, repoint items, delete the rest. Idempotent.
-    """
-    with engine.connect() as conn:
-        existing = {
-            r[0]
-            for r in conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table'")
-            )
-        }
-        if "lists" not in existing or "list_items" not in existing:
-            return
-        for type_ in ("focus", "todo", "backlog"):
-            rows = list(
-                conn.execute(
-                    text("SELECT id FROM lists WHERE type = :t ORDER BY id ASC"),
-                    {"t": type_},
-                )
-            )
-            if len(rows) <= 1:
-                continue
-            keep = rows[0][0]
-            drop = [r[0] for r in rows[1:]]
-            conn.execute(
-                text(
-                    "UPDATE list_items SET list_id = :keep "
-                    "WHERE list_id IN :drop"
-                ).bindparams(
-                    bindparam("drop", expanding=True),
-                ),
-                {"keep": keep, "drop": drop},
-            )
-            conn.execute(
-                text("DELETE FROM lists WHERE id IN :drop").bindparams(
-                    bindparam("drop", expanding=True)
-                ),
-                {"drop": drop},
-            )
-            print(
-                f"Migration: deduped {len(drop)} extra '{type_}' list(s) → kept id={keep}"
-            )
-        conn.commit()
-
-_dedupe_singleton_lists(engine)
 
 # Background loops (daily nudge scheduler, backfills, watchdog, rollups,
 # sweeper) live in app/background.py; the lifespan below just starts them.
@@ -142,31 +93,6 @@ from . import background
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    # Boot-time mechanical capability scan — populates the facet table
-    # from the live tool registry + FastAPI routes + messaging channels.
-    # Idempotent + source-hash short-circuited so it's cheap to re-run on
-    # every uvicorn restart. Negative-polarity facet seed runs alongside
-    # so the "I cannot:" block in the prompt is populated from boot.
-    try:
-        from .services.capability_service import capability_service
-        db = SessionLocal()
-        try:
-            result = capability_service.refresh_mechanical_layer(db)
-            print(f"[capability] boot scan: {result}", flush=True)
-            try:
-                seeded = capability_service.seed_negative_facets(db)
-                if seeded:
-                    print(f"[capability] seeded {seeded} negative facets", flush=True)
-            except Exception as e:
-                # Pre-G1 dev DBs may not have the polarity column yet (the
-                # migration is inspector-guarded against missing columns
-                # both ways). Don't crash boot — just log.
-                print(f"[capability] negative seed skipped: {e}", flush=True)
-        finally:
-            db.close()
-    except Exception as e:
-        print(f"[capability] boot scan failed: {e}", flush=True)
-
     # One-shot backfill: flip any segment currently `not_yet` that has at
     # least one rating or step-feedback row to `pending`. Necessary because
     # `upsert_message_rating` only started bumping pending after PR #214;
@@ -199,19 +125,14 @@ async def _lifespan(app: FastAPI):
         print(f"[fly-revive] boot scan failed: {e}", flush=True)
 
     nudge_task = asyncio.create_task(background._nudge_loop())
-    backfill_task = asyncio.create_task(background._backfill_list_item_embeddings_loop())
     excerpt_task = asyncio.create_task(background._backfill_note_excerpts_loop())
     mem_task = asyncio.create_task(background._memory_watchdog_loop())
-    capability_task = asyncio.create_task(background._capability_telemetry_loop())
-    todo_sweeper_task = asyncio.create_task(background._todo_soft_delete_sweeper_loop())
-    urgency_task = asyncio.create_task(background._urgency_rollup_loop())
-    sleep_nudge_task = asyncio.create_task(background._proactive_nudge_loop())
+    proactive_task = asyncio.create_task(background._proactive_nudge_loop())
     try:
         yield
     finally:
         for t in (
-            nudge_task, backfill_task, excerpt_task, mem_task, capability_task,
-            todo_sweeper_task, urgency_task, sleep_nudge_task,
+            nudge_task, excerpt_task, mem_task, proactive_task,
         ):
             t.cancel()
             try:
@@ -429,29 +350,6 @@ def _hash_ip(ip: str) -> str:
     return hashlib.sha256(_VISIT_SALT + ip.encode()).hexdigest()[:16]
 
 
-@app.middleware("http")
-async def mcp_logger(request: Request, call_next):
-    """Log calls originating from the Gooni MCP server (mcp/server.py tags
-    every outbound request with `X-Gooni-Source: mcp`). Surfaces as a
-    "claude activity" stat on the dashboard. Logs after the route so we
-    only count successful calls — failed auth / 4xx / 5xx don't pad the
-    count.
-    """
-    response = await call_next(request)
-    if (
-        request.headers.get("x-gooni-source", "").lower() == "mcp"
-        and response.status_code < 400
-    ):
-        db = SessionLocal()
-        try:
-            db.add(McpCall(path=request.url.path[:500]))
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            print(f"[mcp_logger] failed to log call {request.url.path}: {e}", flush=True)
-        finally:
-            db.close()
-    return response
 
 
 @app.middleware("http")

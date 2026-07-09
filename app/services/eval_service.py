@@ -31,7 +31,6 @@ from ..db.models import (
     Reflection,
     ToolCall,
 )
-from .list_service import list_service
 
 
 EVAL_GAP_HOURS = float(os.getenv("EVAL_GAP_HOURS", "4"))
@@ -680,7 +679,7 @@ def update_summary(
 
 def dispatch_to_cc(db: Session, segment_id: int) -> dict:
     """Bundle the eval (transcript + traces + flags + summary) into a note in
-    the 'Claude Code' space + a backlog item linking back. Marks the segment
+    a `claude-code`-tagged note + a review Promise linking back. Marks the segment
     dispatched. Idempotent on re-dispatch — overwrites the previous note's
     content rather than spawning duplicates.
     """
@@ -693,7 +692,6 @@ def dispatch_to_cc(db: Session, segment_id: int) -> dict:
 
     body = _format_dispatch_body(full)
     title = _format_dispatch_title(full)
-    space = _get_or_create_claude_code_space(db)
     # Excerpt stamped alongside content so the dispatched note shows a
     # preview in the notes-list endpoint immediately. Without this the
     # row rendered blank until the lazy backfill job ran (PR #134) and
@@ -710,7 +708,7 @@ def dispatch_to_cc(db: Session, segment_id: int) -> dict:
             title=title,
             content=body,
             excerpt=excerpt,
-            space_id=space.id,
+            tags=__import__("json").dumps(["claude-code", "eval-dispatch"]),
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
@@ -722,17 +720,17 @@ def dispatch_to_cc(db: Session, segment_id: int) -> dict:
         note.excerpt = excerpt
         note.updated_at = datetime.utcnow()
 
-    from .backlog_service import backlog_service
+    # Slice 6: BacklogTicket died — the dispatch's actionable half is a
+    # Promise (dev work uses the same primitive as life work, per PRD).
+    from . import promise_service
     one_liner = (
-        f"Eval segment #{seg.id} ({full['segment'].get('source')}): "
+        f"review eval segment #{seg.id} ({full['segment'].get('source')}): "
         f"{full['segment'].get('overall_comment') or full['segment'].get('preview') or 'review needed'}"
     )[:240]
-    backlog_service.create(
-        db,
-        text=one_liner,
-        subtitle=f"See note #{note.id}",
-        source_note_id=note.id,
-    )
+    try:
+        promise_service.create(db, utterance=one_liner, summary=one_liner[:120])
+    except Exception as e:
+        print(f"[eval dispatch] promise create failed (note still dispatched): {e}")
 
     seg.dispatched_to_cc_at = datetime.now(timezone.utc)
     seg.dispatched_note_id = note.id
@@ -860,92 +858,3 @@ def _escape(text: str) -> str:
         .replace(">", "&gt;")
     )
 
-
-def _get_or_create_claude_code_space(db: Session):
-    """Mirror of the MCP server's _resolve_space_id. Lookup by name; create if
-    missing so dispatch never silently fails on a fresh DB."""
-    from ..db.models import Space
-
-    space = (
-        db.query(Space)
-        .filter(func.lower(Space.name) == "claude code")
-        .first()
-    )
-    if space:
-        return space
-    space = Space(name="Claude Code", emoji="🤖")
-    db.add(space)
-    db.commit()
-    db.refresh(space)
-    return space
-
-
-# ── Tool legend (static) ─────────────────────────────────────────────────────
-
-
-TOOL_LEGEND: list[dict] = [
-    {
-        "key": "router:tone",
-        "name": "Tone correction capture",
-        "description": (
-            "Triggered when extract_signals classifies the user's message as a tone "
-            "correction (e.g. 'less teacher-y'). Stores a preference-type memory so "
-            "the rule applies to every future reply across all surfaces."
-        ),
-    },
-    {
-        "key": "router:feature_request",
-        "name": "Feature request log",
-        "description": (
-            "Triggered when extract_signals classifies the user's message as a "
-            "feature request. Calls feature_request_tool to log a structured "
-            "request for later triage."
-        ),
-    },
-    {
-        "key": "memory_recall",
-        "name": "Memory retrieval",
-        "description": (
-            "Cosine-similarity search over fact / goal / routine / constraint / "
-            "episode memories using the user's query. Always-include preferences "
-            "are added separately. Per-type top-K + floor configured in "
-            "RETRIEVAL_PER_TYPE (memory_service.py)."
-        ),
-    },
-    {
-        "key": "extracted_signals",
-        "name": "Unified signal extraction",
-        "description": (
-            "Single LLM call returning {tone_corrections, feature_requests, "
-            "memory_candidates}. Replaces three separate prompts the previous "
-            "pipeline used."
-        ),
-    },
-    {
-        "key": "memories_applied",
-        "name": "Memory reconcile outcome",
-        "description": (
-            "Result of running extracted memory candidates through the reconcile "
-            "LLM (ADD/UPDATE/DELETE/NONE). Runs off-thread so the reply isn't "
-            "blocked — may be empty if the trace was captured before reconcile "
-            "finished."
-        ),
-    },
-    {
-        "key": "master_prompt",
-        "name": "Assembled system prompt",
-        "description": (
-            "Full system-prompt string handed to the reply LLM, plus a preview "
-            "of the recent-history window. Use this to spot prompt-bloat or "
-            "missing context blocks."
-        ),
-    },
-    {
-        "key": "reply",
-        "name": "Reply generation",
-        "description": (
-            "The response LLM call. Captures the assistant text plus token "
-            "usage and total turn latency."
-        ),
-    },
-]

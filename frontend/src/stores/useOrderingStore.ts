@@ -2,24 +2,20 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 /**
- * Per-device ordering for sidebar sections.
+ * Per-device ordering for the sidebar's pinned-notes rows.
  * Stored in localStorage — the backend has no notion of user-chosen order.
  * Items not in the saved array fall back to their natural backend order
  * (new items appear at the end of whatever ordering already exists).
  */
 interface OrderingStore {
-  spaceOrder: number[];
   pinnedOrder: number[];
-  setSpaceOrder: (ids: number[]) => void;
   setPinnedOrder: (ids: number[]) => void;
 }
 
 export const useOrderingStore = create<OrderingStore>()(
   persist(
     (set) => ({
-      spaceOrder: [],
       pinnedOrder: [],
-      setSpaceOrder: (ids) => set({ spaceOrder: ids }),
       setPinnedOrder: (ids) => set({ pinnedOrder: ids }),
     }),
     { name: "gooni-ordering-v1" }

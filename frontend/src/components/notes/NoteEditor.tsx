@@ -13,7 +13,7 @@ import StarterKit from "@tiptap/starter-kit";
 import {
   Bold as BoldIcon, Italic as ItalicIcon, Strikethrough, Code as CodeIcon,
   Heading1, Heading2,
-  Trash2, FolderInput, Pin as PinIcon, ListPlus, Check, Pencil as PencilIcon,
+  Trash2, Pin as PinIcon, Pencil as PencilIcon,
   StickyNote, CheckCircle2, Droplet,
   ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, ArrowDownToLine,
   Columns3, Rows3, Heading as HeadingIcon, Trash,
@@ -32,16 +32,14 @@ import { NoteMention } from "./note-mention";
 import { TextColor, TEXT_COLOR_PALETTE } from "./TextColorExtension";
 import { useNoteCardStyles } from "./noteCardStyles";
 import { SendButton } from "../chat/SendButton";
-import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals, type SpaceSuggestion } from "../../services/api";
+import { createNote as apiCreateNote, updateNote as apiUpdateNote, memorizeNote as apiMemorizeNote, touchNote as apiTouchNote, embedNote as apiEmbedNote, fetchNote as apiFetchNote, fetchNoteMemories, patchNote as apiPatchNote, extractToChildNote as apiExtractToChildNote, autoTitleNote as apiAutoTitleNote, uploadImage as apiUploadImage, uploadAttachment as apiUploadAttachment, fetchOgMetadata, saveLocalNoteDraft, readLocalNoteDraft, clearLocalNoteDraft, type ApiNote, type ApiMemory, type NoteClassifySignals } from "../../services/api";
 import { NoteMemoriesPanel } from "./NoteMemoriesPanel";
 import { DOMSerializer } from "@tiptap/pm/model";
 import { CornerUpRight } from "lucide-react";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
-import { useSpacesStore } from "../../stores/useSpacesStore";
 import { Tooltip } from "../Tooltip";
-import { SpaceIcon } from "./SpaceIcon";
 import { color as ctok } from "../../ui";
 
 type Variant = "full" | "embedded";
@@ -539,8 +537,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
   useNoteCardStyles();
   const embedded = variant === "embedded";
 
-  const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, moveNote, selectNote, deleteNote } = useNotesContentStore();
-  const { spaces } = useSpacesStore();
+  const { selectedSpaceId, notes, activeNoteId, updateNote, refetchNote, selectNote, deleteNote } = useNotesContentStore();
   const navigate = useNavigate();
   const [signalsExpanded, setSignalsExpanded] = useState(false);
   // Surface for the embedded composer — the last submitted note's classify
@@ -561,16 +558,9 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
   const [localTitle, setLocalTitle] = useState(activeNote?.title ?? "");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [editorEmpty, setEditorEmpty] = useState(true);
-  const [movePicker, setMovePicker] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [noteMemories, setNoteMemories] = useState<ApiMemory[]>([]);
-  const [spaceSuggestion, setSpaceSuggestion] = useState<SpaceSuggestion | null>(null);
   const [localIsPublic, setLocalIsPublic] = useState<boolean>(activeNote?.is_public ?? false);
-  // Brief "tagged" pulse on the backlog button so the user sees confirmation
-  // without a full toast. Resets after ~1.6s. Keyed by note id so switching
-  // notes doesn't carry the green-checked state across.
-  const [taggedNoteId, setTaggedNoteId] = useState<number | null>(null);
-  const [taggingInFlight, setTaggingInFlight] = useState(false);
   // Local working copy of the note's tag set — patched through to the
   // backend on each add/remove. Decoupled from activeNote.tags so we can
   // show optimistic updates without waiting for the server round-trip.
@@ -588,7 +578,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
   // of "↑ from #42". Keyed by parent id so switching notes doesn't show
   // stale title flicker. `null` when no parent or fetch is in flight.
   const [parentLink, setParentLink] = useState<{ id: number; title: string } | null>(null);
-  const movePickerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<string>(activeNote?.content ?? "");
   const titleRef = useRef<string>(activeNote?.title ?? "");
@@ -653,7 +642,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     if (savedTimer.current) clearTimeout(savedTimer.current);
     setSaveStatus("idle");
-    setSpaceSuggestion(null);
     setNoteMemories([]);
     setDeleteConfirm(false);
     setLocalIsPublic(activeNote?.is_public ?? false);
@@ -748,18 +736,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       setTimeout(() => titleInputRef.current?.focus(), 0);
     }
   }, [activeNoteId]);
-
-  // Close move picker on outside click
-  useEffect(() => {
-    if (!movePicker) return;
-    function handle(e: MouseEvent) {
-      if (movePickerRef.current && !movePickerRef.current.contains(e.target as Node)) {
-        setMovePicker(false);
-      }
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [movePicker]);
 
   // Flush pending save on tab close (keepalive: true in api.ts ensures the request survives).
   // Same hasChanges/bodyRef race as save-on-leave — read from editor directly and don't gate
@@ -926,7 +902,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           // that ever changes.
         }
         selectNote(id);
-        navigate({ to: "/", search: { note: id, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } });
+        navigate({ to: "/", search: { note: id, conv: undefined, audit: undefined, segment: undefined, view: undefined } });
       })();
     };
     dom.addEventListener("click", onClick);
@@ -1019,7 +995,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
     // reaches for it (otherwise the editor briefly renders an empty note).
     await refetchNote(child.id).catch(() => {});
     selectNote(child.id);
-    navigate({ to: "/", search: { note: child.id, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } });
+    navigate({ to: "/", search: { note: child.id, conv: undefined, audit: undefined, segment: undefined, view: undefined } });
     setExtractInFlight(false);
   }
 
@@ -1272,10 +1248,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
   async function embedAndCheck(noteId: number | null) {
     if (!noteId || noteId < 0) return;
     try {
-      const result = await apiEmbedNote(noteId);
-      if (result.suggested_space_id) {
-        setSpaceSuggestion(result);
-      }
+      await apiEmbedNote(noteId);
     } catch {
       // note may have been deleted — ignore
     }
@@ -1300,17 +1273,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
       editor?.commands.focus();
     }
   }
-
-  // Spaces the note can be moved to (all except the current one).
-  // `emoji` is the raw stored value (may be `lucide:Folder`, a legacy emoji, or null).
-  // `isInbox` flags the General space so the row can render an Inbox icon instead.
-  const currentSpaceId = selectedSpaceId ?? "general";
-  const moveTargets = spaces
-    .map((s) => ({
-      id: String(s.id), name: s.name,
-      emoji: s.id === "general" ? "lucide:Inbox" : s.emoji,
-    }))
-    .filter((s) => s.id !== currentSpaceId);
 
   // Commit the local tag set to the server. Same optimistic pattern as
   // pin/draft toggles — patch the cached note in every space list so the
@@ -1573,92 +1535,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
         )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* Space suggestion */}
-          {spaceSuggestion?.suggested_space_id && activeNote?.space_id === null && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 14, background: "rgba(0,122,255,0.08)", fontSize: 12, color: "#007AFF", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-              <SpaceIcon emoji={spaceSuggestion.suggested_space_emoji} size={13} color="#007AFF" />
-              <span>{spaceSuggestion.suggested_space_name}?</span>
-              <button
-                onClick={() => { if (activeNoteId) moveNote(activeNoteId, currentSpaceId, String(spaceSuggestion.suggested_space_id)); setSpaceSuggestion(null); }}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "#007AFF", fontWeight: 600, fontSize: 12, padding: 0 }}
-              >Move</button>
-              <button
-                onClick={() => setSpaceSuggestion(null)}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--gooni-muted, #8E8E93)", fontSize: 13, padding: 0, lineHeight: 1 }}
-              >×</button>
-            </div>
-          )}
-          {/* Move to... button */}
-          {activeNote && moveTargets.length > 0 && (
-            <div ref={movePickerRef} style={{ position: "relative" }}>
-              <Tooltip label="Move to space">
-                <button
-                  onClick={() => setMovePicker((p) => !p)}
-                  style={{
-                    width: 30, height: 30, borderRadius: 8,
-                    border: "none",
-                    background: movePicker ? ctok.hover : "transparent",
-                    cursor: "pointer",
-                    fontSize: 13,
-                    color: "var(--gooni-muted, #636366)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    padding: 0, flexShrink: 0,
-                    transition: "background 0.12s",
-                  }}
-                  onMouseEnter={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
-                  onMouseLeave={(e) => { if (!movePicker) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-                >
-                  <FolderInput size={15} strokeWidth={1.7} />
-                </button>
-              </Tooltip>
-              {movePicker && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 6px)",
-                    right: 0,
-                    background: "var(--gooni-card, #FFFFFF)",
-                    borderRadius: 10,
-                    boxShadow: "0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06)",
-                    padding: 6,
-                    minWidth: 160,
-                    zIndex: 100,
-                    fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-                  }}
-                >
-                  {moveTargets.map((space) => (
-                    <button
-                      key={space.id}
-                      onClick={() => {
-                        if (activeNoteId) moveNote(activeNoteId, currentSpaceId, space.id);
-                        setMovePicker(false);
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        width: "100%",
-                        padding: "7px 10px",
-                        border: "none",
-                        background: "transparent",
-                        cursor: "pointer",
-                        borderRadius: 6,
-                        fontSize: 13.5,
-                        color: "var(--gooni-text, #1C1C1E)",
-                        textAlign: "left",
-                      }}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = ctok.hover)}
-                      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
-                    >
-                      <SpaceIcon emoji={space.emoji} size={14} />
-                      {space.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Delete button */}
           {activeNote && activeNote.id > 0 && (
             <div style={{ position: "relative" }}>
@@ -1715,7 +1591,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       setDeleteConfirm(false);
                       if (neighbor) {
                         selectNote(neighbor.id);
-                        navigate({ to: "/", search: { note: neighbor.id, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } });
+                        navigate({ to: "/", search: { note: neighbor.id, conv: undefined, audit: undefined, segment: undefined, view: undefined } });
                       }
                     }}
                     style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 10px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, fontSize: 13.5, color: ctok.danger, textAlign: "left" }}
@@ -1760,68 +1636,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                 color={activeNote.is_pinned ? "#F59E0B" : ctok.muted}
                 fill={activeNote.is_pinned ? "#F59E0B" : "none"}
               />
-            </button>
-          </Tooltip>
-        )}
-
-        {/* Tag-to-backlog — sends the note (title or first line) into the
-            Gooni Backlog list as a list_item, with source_note_id pointing
-            back here. Same 30×30 visual family as Pin/Public. Pulses green
-            briefly after a successful tag so the user gets confirmation
-            without a full toast modal. Conflict-check on the backend
-            handles dedupe — repeated clicks just surface as duplicates,
-            won't stack rows. */}
-        {activeNote && activeNoteId && activeNoteId > 0 && (
-          <Tooltip label={taggedNoteId === activeNoteId ? "Tagged to backlog" : "Tag to Gooni backlog"}>
-            <button
-              onClick={async () => {
-                if (!activeNoteId || activeNoteId < 0 || taggingInFlight) return;
-                const titleClean = (localTitle ?? activeNote?.title ?? "").trim();
-                const bodyText = bodyRef.current
-                  .replace(/<[^>]+>/g, " ")
-                  .replace(/\s+/g, " ")
-                  .trim();
-                const firstLine = bodyText.slice(0, 120);
-                const text = titleClean || firstLine;
-                if (!text) return; // nothing to tag yet
-                setTaggingInFlight(true);
-                try {
-                  // Backlog tickets live in `backlog_tickets` (post the focus/
-                  // todo/backlog extraction) — not list_items. Hitting
-                  // /lists/{id}/items is a no-op for the board, which was the
-                  // bug. Backend dedupes idempotently on source_note_id so
-                  // repeat clicks return the existing ticket.
-                  const { createBacklogTicket } = await import("../../services/api");
-                  await createBacklogTicket(text, {
-                    source_note_id: activeNoteId,
-                    subtitle: titleClean && firstLine !== titleClean ? firstLine : null,
-                  });
-                  setTaggedNoteId(activeNoteId);
-                  setTimeout(() => {
-                    setTaggedNoteId((curr) => (curr === activeNoteId ? null : curr));
-                  }, 1600);
-                } catch (e) {
-                  console.error("tag-to-backlog failed", e);
-                } finally {
-                  setTaggingInFlight(false);
-                }
-              }}
-              disabled={taggingInFlight}
-              style={{
-                width: 30, height: 30, borderRadius: 8,
-                border: "none",
-                background: taggedNoteId === activeNoteId ? "rgba(52,199,89,0.16)" : "transparent",
-                cursor: taggingInFlight ? "wait" : "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                padding: 0, flexShrink: 0,
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (taggedNoteId !== activeNoteId) (e.currentTarget as HTMLButtonElement).style.background = ctok.hover; }}
-              onMouseLeave={(e) => { if (taggedNoteId !== activeNoteId) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-            >
-              {taggedNoteId === activeNoteId
-                ? <Check size={15} strokeWidth={2} color="#16A34A" />
-                : <ListPlus size={15} strokeWidth={1.7} color={ctok.muted} />}
             </button>
           </Tooltip>
         )}
@@ -2023,18 +1837,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           if (fr.length) parts.push(`backlog (${fr.length})`);
           if (memCount) parts.push(`memory (${memCount})`);
           const summary = parts.join(" · ");
-          const openBacklog = async () => {
-            try {
-              const { useListsStore } = await import("../../stores/useListsStore");
-              const lists = useListsStore.getState().lists;
-              const backlog = lists.find((l) => l.type === "backlog");
-              if (backlog) {
-                navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined, segment: undefined, view: undefined} });
-              }
-            } catch (e) { console.error(e); }
-          };
           const openNote = () => {
-            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, list: undefined , audit: undefined, segment: undefined, view: undefined} });
+            navigate({ to: "/", search: { note: embeddedToast.noteId, conv: undefined, audit: undefined, segment: undefined, view: undefined } });
           };
           return (
             <div
@@ -2051,7 +1855,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
               }}
             >
               <button
-                onClick={fr.length ? openBacklog : openNote}
+                onClick={openNote}
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 7,
                   padding: "4px 11px", borderRadius: 999,
@@ -2125,7 +1929,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                     onClick={async () => {
                       await save();
                       selectNote(parentLink.id);
-                      navigate({ to: "/", search: { note: parentLink.id, conv: undefined, list: undefined, audit: undefined, segment: undefined, view: undefined } });
+                      navigate({ to: "/", search: { note: parentLink.id, conv: undefined, audit: undefined, segment: undefined, view: undefined } });
                     }}
                     title={`Back to "${parentLink.title}"`}
                     style={{
@@ -2300,21 +2104,6 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                   if (memCount) parts.push(`memory (${memCount})`);
                   const summary = parts.join(" · ");
 
-                  // Find the backlog list id for the deep-link. We import lazily
-                  // via the store at click time; no need to subscribe here.
-                  const openBacklog = async () => {
-                    try {
-                      const { useListsStore } = await import("../../stores/useListsStore");
-                      const lists = useListsStore.getState().lists;
-                      const backlog = lists.find((l) => l.type === "backlog");
-                      if (backlog) {
-                        navigate({ to: "/", search: { note: undefined, conv: undefined, list: backlog.id , audit: undefined, segment: undefined, view: undefined} });
-                      }
-                    } catch (e) {
-                      console.error("openBacklog failed", e);
-                    }
-                  };
-
                   return (
                     <div style={{ marginBottom: 14, maxWidth: 720 }}>
                       <button
@@ -2358,19 +2147,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                                 Feature requests — Gooni Backlog
                               </div>
                               {fr.map((f) => (
-                                <div key={f.list_item_id}>
-                                  ·{" "}
-                                  <button
-                                    onClick={openBacklog}
-                                    style={{
-                                      background: "none", border: "none", padding: 0,
-                                      color: "#0EA5E9", cursor: "pointer", fontSize: "inherit",
-                                      fontFamily: "inherit",
-                                    }}
-                                  >
-                                    {f.title} ↗
-                                  </button>
-                                </div>
+                                <div key={f.list_item_id}>· {f.title}</div>
                               ))}
                             </div>
                           )}

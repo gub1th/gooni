@@ -39,7 +39,7 @@ def handle(items: list[dict], ctx, result) -> None:
     if not items:
         return
 
-    from .. import daily_metric_service, habit_service
+    from .. import daily_metric_service
 
     logged_any = False
 
@@ -51,7 +51,7 @@ def handle(items: list[dict], ctx, result) -> None:
             elif log_type == "weight":
                 logged_any = _handle_weight(ctx, result, entry, daily_metric_service) or logged_any
             elif log_type == "exercise":
-                logged_any = _handle_exercise(ctx, result, entry, daily_metric_service, habit_service) or logged_any
+                logged_any = _handle_exercise(ctx, result, entry, daily_metric_service) or logged_any
             elif log_type == "substance":
                 logged_any = _handle_substance(ctx, result, entry, daily_metric_service) or logged_any
         except Exception as e:
@@ -195,41 +195,21 @@ def _handle_weight(ctx, result, entry, dms) -> bool:
     return True
 
 
-def _handle_exercise(ctx, result, entry, dms, habit_service) -> bool:
+def _handle_exercise(ctx, result, entry, dms) -> bool:
     label = entry.get("exercise_label") or (entry.get("raw_text") or None)
     day = _entry_day(entry, ctx.db)
     # value=1.0 is a presence sentinel — the cut table treats exercise as a
-    # boolean (did/didn't train); `notes` carries the human label (the
+    # boolean (did/didn't train); the label carries the human detail (the
     # activity + any sub-detail: "gym — chest and tris", "tennis", "5k run").
+    # Habit died in the Slice 6 nuke — the exercise Trackable IS the streak
+    # substrate now (a "trained N days" read derives from entry history).
     dms.log(ctx.db, "exercise", 1.0, unit=None, day=day, notes=label)
-
-    # Dual-write a single generic `exercise` boolean habit so "how often did
-    # I train" is one streak across ALL modalities (gym/tennis/run) — what
-    # Daniel actually wants to see. The specific activity lives in the label,
-    # not in separate per-activity habits (those would fragment the count).
-    # Isolated try/except — a habit failure must never roll back the metric
-    # row (metric is the cut-table source of truth).
-    try:
-        _upsert_exercise_habit(ctx.db, habit_service, label, day)
-    except Exception as e:
-        print(f"[fitness handler] exercise habit upsert failed: {e}")
 
     result.captured_metrics.append({
         "log_type": "exercise",
         "exercise_label": label,
     })
     return True
-
-
-def _upsert_exercise_habit(db, habit_service, label: str | None, day: _date) -> None:
-    hits = habit_service.find_by_name_fuzzy(db, "exercise")
-    if not hits:
-        habit = habit_service.create(db, name="exercise", polarity="positive")
-    elif len(hits) == 1:
-        habit = hits[0]
-    else:
-        habit = habit_service.find_by_name(db, "exercise") or hits[0]
-    habit_service.upsert_entry(db, habit.id, day, True, note=label)
 
 
 def _estimate_macros(food: str) -> list[dict] | None:

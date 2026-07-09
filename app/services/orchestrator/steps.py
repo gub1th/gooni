@@ -55,10 +55,8 @@ _UNBACKED_CLAIM_RE = WRITE_CLAIM_RE
 # the previous set was copied from the MCP surface (~15 nonexistent names,
 # 7 real read tools missing), which let read-only turns pass as writes.
 _READ_ONLY_TOOLS = {
-    "list_todos", "list_focuses", "list_recent_notes",
-    "show_my_plate", "show_chain", "show_due_window", "show_list",
-    "read_note", "find_note", "search_notes",
-    "read_recent_commits", "read_recent_backlog",
+    "list_recent_notes", "read_note", "find_note", "search_notes",
+    "list_promises", "read_trackable",
     "web_search", "fetch_url",
     "check_calendar_busy", "list_upcoming_events",
 }

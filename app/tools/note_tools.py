@@ -57,8 +57,8 @@ class AddNoteTool(BaseTool):
     description = (
         "Create a new note in Gooni. Use when Daniel says 'jot this down', "
         "'save a note about X', dictates a longer thought, or you need to "
-        "capture something too long for a memory or todo. Notes live in "
-        "spaces — General by default; pass space_name to override. "
+        "capture something too long for a memory. Pass tags to organize "
+        "(spaces are gone — tags own organization). "
         "Returns the created note id + title."
     )
     parameters = {
@@ -72,9 +72,10 @@ class AddNoteTool(BaseTool):
                 "type": "string",
                 "description": "Note body (plain text or HTML).",
             },
-            "space_name": {
-                "type": "string",
-                "description": "Target space name (default 'General'). Auto-created if missing.",
+            "tags": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Free-form lowercase labels (e.g. ['ideas', 'gooni']).",
             },
         },
         "required": ["title", "content"],
@@ -85,10 +86,12 @@ class AddNoteTool(BaseTool):
         db=None,
         title: str = "",
         content: str = "",
-        space_name: str = "General",
+        tags: list | None = None,
         **kwargs,
     ) -> str:
-        from ..db.models import Note, Space
+        import json as _json
+
+        from ..db.models import Note
         from ..serializers import _excerpt_from_html
 
         if db is None:
@@ -97,20 +100,15 @@ class AddNoteTool(BaseTool):
         content = (content or "").strip()
         if not title and not content:
             return "(title or content required)"
-        space_id: int | None = None
-        if space_name and space_name.lower() != "general":
-            sp = db.query(Space).filter(Space.name == space_name).first()
-            if sp is None:
-                sp = Space(name=space_name)
-                db.add(sp)
-                db.commit()
-                db.refresh(sp)
-            space_id = sp.id
+        clean_tags = sorted({
+            t.strip().lower()[:60] for t in (tags or [])
+            if isinstance(t, str) and t.strip()
+        } | {"from-chat"})
         note = Note(
             title=title,
             content=content,
             excerpt=_excerpt_from_html(content),
-            space_id=space_id,
+            tags=_json.dumps(clean_tags),
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
@@ -125,7 +123,7 @@ class AddNoteTool(BaseTool):
         # and swallows failures.
         from ..services.note_service import note_service
         note_service.update_embedding(note.id)
-        return f"Created note #{note.id}: {note.title or '(untitled)'} in {space_name or 'General'}."
+        return f"Created note #{note.id}: {note.title or '(untitled)'} (tags: {', '.join(clean_tags)})."
 
 
 class FindNoteTool(BaseTool):

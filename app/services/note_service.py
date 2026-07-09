@@ -5,7 +5,7 @@ import re
 from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
-from ..db.models import Note, Space
+from ..db.models import Note
 from ..llm.client import llm_client
 
 
@@ -56,46 +56,8 @@ class NoteService:
             db.close()
 
     def suggest_space(self, note_id: int, db: Session) -> dict:
-        """Return best-matching space for a note based on embedding similarity.
-        Only suggests when the note is in General (space_id is None).
-        """
-        # Tuple query — skips ORM hydration of all the other columns we
-        # don't need (content, title, classify_signals, etc) and only the
-        # deferred embedding actually loads. Saves ~MB per call when the
-        # note body is fat or there are many candidates.
-        row = (
-            db.query(Note.embedding, Note.space_id)
-            .filter(Note.id == note_id)
-            .first()
-        )
-        if not row or not row[0] or row[1] is not None:
-            return {"suggested_space_id": None, "suggested_space_name": None, "suggested_space_emoji": None}
-        note_vec = json.loads(row[0])
-        spaces = db.query(Space).all()
-        best_space = None
-        best_sim = 0.60  # minimum threshold to suggest
-
-        for space in spaces:
-            space_notes = (
-                db.query(Note.embedding)
-                .filter(Note.space_id == space.id, Note.id != note_id, Note.embedding.isnot(None))
-                .all()
-            )
-            if not space_notes:
-                continue
-            vecs = [json.loads(emb) for (emb,) in space_notes]
-            centroid = [sum(v[i] for v in vecs) / len(vecs) for i in range(len(vecs[0]))]
-            sim = _cosine_similarity(note_vec, centroid)
-            if sim > best_sim:
-                best_sim = sim
-                best_space = space
-
-        if best_space:
-            return {
-                "suggested_space_id": best_space.id,
-                "suggested_space_name": best_space.name,
-                "suggested_space_emoji": best_space.emoji,
-            }
+        """Spaces died in the Slice 6 nuke — tags own organization. Kept
+        as a no-op so any straggler caller gets the empty shape."""
         return {"suggested_space_id": None, "suggested_space_name": None, "suggested_space_emoji": None}
 
     def _search_fts(self, query: str, limit: int, db: Session) -> list[int]:

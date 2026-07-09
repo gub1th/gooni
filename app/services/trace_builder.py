@@ -48,7 +48,12 @@ from typing import Any
 # they annotate the source Message (has_actionable_signal + signal_preview)
 # for 1-click promote from the log. complete/break stay automatic. Uniform
 # ack for capture turns; just_extracted gains the NOTICED-not-tracked line.
-PROMPT_VERSION = "v12"
+# v13 (2026-07-09 Slices 6+7 nuke): Todo/Focus/Habit/Backlog/List/Space/
+# CapabilityFacet primitives dropped. Chat tool registry shrank to 16
+# (notes/memory/web/calendar + read-only promise/trackable); state_block
+# is promise-first; persona todo language removed; capability block gone
+# from memory context. Segregate ratings hard.
+PROMPT_VERSION = "v13"
 
 
 class TraceBuilder:

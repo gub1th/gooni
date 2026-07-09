@@ -28,12 +28,8 @@ ENTRY_SUMMARIZE_THRESHOLD = 2000
 # so stale entries don't bloat the prompt.
 _CREATE_TOOL_KINDS: dict[str, str] = {
     "save_memory": "Memory",
-    "add_to_list": "ListItem",
     "add_note": "Note",
-    "add_todo": "Todo",
-    "add_focus": "Focus",
-    "log_habit": "HabitEntry",
-    "request_feature": "BacklogTicket",
+    "request_feature": "Note",
     "create_calendar_event": "CalendarEvent",
 }
 _ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise", "TrackableEntry")
@@ -111,7 +107,7 @@ def _build_ack(routed: "RouterResult") -> str | None:
         DB id. The id is the INTERNAL grounding contract (so the ack helper
         can't be called for a write that didn't land) — it is NOT rendered
         to the user. Daniel called the prior "ticket #281 logged" /
-        "backlog: X" formats clinical; Alfred speaks plainly, not in jira-
+        "logged: X" formats clinical; Alfred speaks plainly, not in jira-
         bot syntax. The id flows into just_extracted_block so the next-
         turn LLM has a verifiable anchor for "did this land?" reasoning,
         but the user-facing bubble stays warm.
@@ -150,12 +146,12 @@ def _build_ack(routed: "RouterResult") -> str | None:
         ]
         n = len(captured_features)
         if n == 1:
-            parts.append(f"on the backlog, sir: {titles[0]}")
+            parts.append(f"gap noted, sir: {titles[0]}")
         elif n == 2:
-            parts.append(f"on the backlog, sir: {titles[0]}, {titles[1]}")
+            parts.append(f"gap noted, sir: {titles[0]}, {titles[1]}")
         else:
             parts.append(
-                f"on the backlog, sir ({n}): {', '.join(titles)}"
+                f"gaps noted, sir ({n}): {', '.join(titles)}"
             )
     if captured_promises:
         # G3.1: all promises are `active` on create — no proposed/pending
@@ -336,154 +332,54 @@ def _build_state_block(db) -> str:
     block the chat reply.
     """
     from ..promise_service import list_pending as _list_pending_promises
-    from ..todo_service import todo_service
 
     lines: list[str] = []
+    # Slice 6: Todo/Backlog/Friction died — active Promises ARE the
+    # actionable state. Named lines for the soonest-due + important so
+    # the LLM can cross-reference "imma X" utterances before claiming a
+    # new capture; count line for the rest.
     try:
-        primary = todo_service.get_primary(db)
-    except Exception:
-        primary = None
-    if primary is not None:
-        lines.append(
-            f"- primary todo: \"{primary.text}\" (state: {primary.state or 'not_yet'})"
-        )
-
-    try:
-        open_todos = todo_service.list_open(db)
-    except Exception:
-        open_todos = []
-    open_count = sum(1 for t in open_todos if not t.is_primary)
-    if open_count:
-        lines.append(f"- {open_count} other open todo(s)")
-
-    # G3 priority ranking surface — revised to hoist active todos.
-    #
-    # Anti-hallucination motivation (conv #1136): Daniel said "imma do a
-    # little leetcode" and Gooni claimed "tracked" without checking that
-    # an active "do a little leetcode" todo already existed. The todo was
-    # unranked, so state_block rendered it as part of an opaque count
-    # line, and the LLM was effectively blind to it. The fix surfaces
-    # ALL state='doing' todos by name regardless of rank, because doing
-    # todos are the most likely match for any "imma X" / "gonna X"
-    # utterance — they need to be name-level visible so the LLM can
-    # cross-reference before claiming a new write.
-    #
-    # Render order:
-    #   1. primary (if any)
-    #   2. ALL state='doing' non-primary, flagged [doing]
-    #   3. state='not_yet' ranked (sort_order asc), filling remaining slots
-    #   4. count line for whatever was clipped
-    # Cap total named lines at 8 to keep the block scannable.
-    try:
-        non_primary = [t for t in open_todos if not t.is_primary]
-        doing = [t for t in non_primary if (t.state or "") == "doing"]
-        not_yet = [t for t in non_primary if (t.state or "") != "doing"]
-        not_yet_ranked = sorted(
-            [t for t in not_yet if (t.sort_order or 0) > 0],
-            key=lambda t: t.sort_order or 0,
-        )
-        not_yet_unranked = [t for t in not_yet if (t.sort_order or 0) == 0]
-        total_open = open_count + (1 if primary is not None else 0)
-
-        MAX_NAMED = 8
-        primary_slot = 1 if primary is not None else 0
-        doing_to_show = doing[:max(0, MAX_NAMED - primary_slot)]
-        remaining = max(0, MAX_NAMED - primary_slot - len(doing_to_show))
-        not_yet_to_show = not_yet_ranked[:remaining]
-        clipped_count = (
-            (len(doing) - len(doing_to_show))
-            + (len(not_yet_ranked) - len(not_yet_to_show))
-            + len(not_yet_unranked)
-        )
-
-        # G3.9 atom #8: chain context inline. Build bulk_chain_summary for
-        # all visible todos so each line can carry "↗N · M done" + "← from:
-        # X" without an N+1 traversal. Orphans get no chain line — pay
-        # the ~25 token cost only when there's info.
-        try:
-            chain_ids = []
-            if primary is not None:
-                chain_ids.append(primary.id)
-            chain_ids.extend(t.id for t in doing_to_show)
-            chain_ids.extend(t.id for t in not_yet_to_show)
-            chain_summary = (
-                todo_service.bulk_chain_summary(db, chain_ids)
-                if chain_ids else {}
-            )
-        except Exception:
-            chain_summary = {}
-
-        def _chain_inline(t) -> str:
-            meta = chain_summary.get(t.id)
-            if not meta:
-                return ""
-            bits = []
-            ct = meta.get("children_total") or 0
-            cd = meta.get("children_done") or 0
-            if ct:
-                bits.append(f"↗{ct}" + (f" ✓{cd}" if cd else ""))
-            ptext = meta.get("parent_text")
-            if ptext:
-                bits.append(f"← from: \"{(ptext or '')[:40]}\"")
-            return f" [{' · '.join(bits)}]" if bits else ""
-
-        if primary or doing_to_show or not_yet_to_show or clipped_count:
-            lines.append(
-                f"- priority order (Daniel-set via drag; {total_open} total open):"
-            )
-            slot = 1
-            if primary is not None:
-                tail = _chain_inline(primary)
-                lines.append(f"  · #{slot} (primary): \"{primary.text}\"{tail}")
-                slot += 1
-            for t in doing_to_show:
-                text = (t.text or "")[:60]
-                mc = t.mention_count or 1
-                mention_tag = f" [×{mc} mentions]" if mc > 1 else ""
-                chain_tail = _chain_inline(t)
-                lines.append(
-                    f"  · #{slot} [doing]: \"{text}\"{mention_tag}{chain_tail}"
-                )
-                slot += 1
-            for t in not_yet_to_show:
-                text = (t.text or "")[:60]
-                mc = t.mention_count or 1
-                mention_tag = f" [×{mc} mentions]" if mc > 1 else ""
-                chain_tail = _chain_inline(t)
-                lines.append(f"  · #{slot}: \"{text}\"{mention_tag}{chain_tail}")
-                slot += 1
-            if clipped_count:
-                lines.append(
-                    f"  · {clipped_count} more open todo(s) not shown"
-                )
-    except Exception as e:
-        print(f"[state_block] priority surface failed: {e}")
-
-    try:
-        done_today = todo_service.list_done_today(db)
-    except Exception:
-        done_today = []
-    if done_today:
-        lines.append(f"- {len(done_today)} todo(s) done today")
-
-    try:
-        promises = _list_pending_promises(db, limit=10)
+        promises = _list_pending_promises(db, limit=25)
     except Exception:
         promises = []
     if promises:
         from datetime import datetime as _dt, timedelta as _td
         cutoff = _dt.utcnow() + _td(hours=24)
+
+        def _cad_tag(p) -> str:
+            cad = p.cadence or "once"
+            if cad == "n_per_week":
+                return f" [{p.cadence_target or '?'}x/wk]"
+            if cad != "once":
+                return f" [{cad}]"
+            return ""
+
         due_soon = [p for p in promises if p.inferred_due and p.inferred_due <= cutoff]
+        named_ids = set()
         if due_soon:
-            lines.append(f"- {len(due_soon)} promise(s) due ≤24h:")
-            for p in due_soon[:3]:
+            lines.append(f"- {len(due_soon)} promise(s) due <=24h:")
+            for p in due_soon[:4]:
+                named_ids.add(p.id)
                 summary = p.summary or p.utterance or ""
                 if len(summary) > 60:
                     summary = summary[:60].rstrip() + "…"
                 slip = f", slipped {p.slip_count}x" if p.slip_count else ""
-                lines.append(f"  · \"{summary}\"{slip}")
-        elif promises:
-            lines.append(f"- {len(promises)} pending promise(s)")
+                lines.append(f'  · "{summary}"{_cad_tag(p)}{slip}')
+        starred = [p for p in promises if p.is_important and p.id not in named_ids]
+        if starred:
+            lines.append(f"- {len(starred)} important promise(s):")
+            for p in starred[:4]:
+                named_ids.add(p.id)
+                summary = p.summary or p.utterance or ""
+                if len(summary) > 60:
+                    summary = summary[:60].rstrip() + "…"
+                lines.append(f'  · "{summary}"{_cad_tag(p)}')
+        rest = [p for p in promises if p.id not in named_ids]
+        if rest:
+            named = ", ".join(
+                f'"{(p.summary or p.utterance or " ")[:40]}"' for p in rest[:5]
+            )
+            lines.append(f"- {len(rest)} other active promise(s): {named}")
 
     # G3.1: lock-in is gone. Vague promises (needs_clarification=True)
     # are still active — Gooni already pushed back in the ack at create
@@ -513,42 +409,6 @@ def _build_state_block(db) -> str:
             if len(summary) > 60:
                 summary = summary[:60].rstrip() + "…"
             lines.append(f"  · \"{summary}\"")
-
-    # G2 self-PM: surface Gooni's own top workflow blocker so the LLM
-    # can reference it when context warrants. Capped at 1 line — the
-    # whole state_block stays scannable. Only fires when urgency_score
-    # is above a floor (otherwise every backlog ticket would parade
-    # through here on slow days).
-    try:
-        from ..backlog_service import backlog_service as _backlog
-        top_blockers = _backlog.list_by_urgency(db, limit=1, min_score=2.0)
-    except Exception:
-        top_blockers = []
-    if top_blockers:
-        t = top_blockers[0]
-        # Count friction events in last 7d to surface the "hit Nx" signal —
-        # repeated pain compounds; the LLM should know this is a session-
-        # killer not a one-off annoyance.
-        try:
-            from ...db.models import FrictionEvent as _FE
-            from datetime import datetime as _dt2, timedelta as _td2
-            cutoff_7d = _dt2.utcnow() - _td2(days=7)
-            recent_hits = (
-                db.query(_FE)
-                .filter(
-                    _FE.backlog_ticket_id == t.id,
-                    _FE.created_at >= cutoff_7d,
-                )
-                .count()
-            )
-        except Exception:
-            recent_hits = 0
-        text = (t.text or "")[:60]
-        hits_phrase = f"hit {recent_hits}x in 7d" if recent_hits >= 2 else "active blocker"
-        lines.append(
-            f"- top workflow blocker: \"{text}\" ({hits_phrase}, "
-            f"blast {t.blast_radius or '?'}/5)"
-        )
 
     # Cal snapshot — today + next ~24h. Proactive Gooni phase 0: bot turns
     # become schedule-aware so "what's my afternoon" answers from cal, not

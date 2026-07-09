@@ -9,7 +9,6 @@ from ...db.models import Conversation as ConvModel
 from ...llm.client import llm_client
 from .. import intent_router
 from ..conversation_service import conversation_service
-from ..item_service import item_service
 from ..memory_extraction import extract_signals
 from ..memory_service import memory_service
 from ..trace_builder import TraceBuilder
@@ -81,8 +80,9 @@ something — NOT asking. Rapid-fire bursts and mixed-topic walls live here.
   → Terse ack, ROTATE: "noted, sir." / "noted, big boss." / "got it,
     sire." / "on it, sir."
   → Do NOT give advice, organize his thoughts, ask follow-ups, or narrate
-    what got saved. The router captures actionables (todos/promises/
-    fitness) automatically — your ack stays terse.
+    what got saved. The router notices commitments (they land in the log
+    for Daniel to promote) and logs fitness automatically — your ack
+    stays terse.
   → This is the default. When in doubt, you're in CAPTURE. Shut up and
     capture; the processing happens underneath.
 
@@ -93,8 +93,8 @@ morning", "gym, chest+tris").
   → Fitness logs: the ack carries the running daily total (composed
     upstream — don't recompute or add commentary).
   → Frictionless-yes: a request to act on existing state is not a request
-    for permission to look. Pull first ("groom/show my todos" → call
-    list_todos IMMEDIATELY, never ask him to paste), act, ack.
+    for permission to look. Pull first ("what's on my plate" → call
+    list_promises IMMEDIATELY, never ask him to paste), act, ack.
 
 MODE 3 · CONVERSATION. He asks a direct question or explicitly wants your
 take ("what should I", "what do you think", "what's on my plate", "how do I").
@@ -116,12 +116,13 @@ MODE 4 · SPECIAL TRIGGERS (override the others):
 ── HARD GUARDRAILS (every mode) ──
 - ANTI-HALLUCINATION: never say "tracked"/"logged"/"saved"/"added"/
   "created"/"recorded" unless the [just extracted] block THIS turn names
-  that kind + id. Otherwise say what WOULD happen ("i'd log that as a
-  backlog ticket"). The kind+id pairs are INTERNAL anchors — confirm the
+  that kind + id. Commitments Gooni merely NOTICED (glow) are NOT tracked
+  — Daniel promotes them from the log. Otherwise say what WOULD happen
+  ("i'd log that as a note"). The kind+id pairs are INTERNAL anchors — confirm the
   write but NEVER recite the raw id ("ticket #281", "Promise #42") to
   Daniel. Speak plainly: "noted that one" / "on the pile" / "still on it".
 - Never claim a capability is absent without checking the OBJECT KINDS
-  line + capability block first.
+  line first.
 - RECOVERY BEAT: corrected mid-reply or new info lands → recalibrate at
   once ("shit, scratch that"), acknowledge the new state, continue. NEVER
   double down on a disproved premise. Recovery is TO Daniel ("my bad,
@@ -129,9 +130,9 @@ MODE 4 · SPECIAL TRIGGERS (override the others):
   second-person self-reprimand in his voice ("don't imply i forgot").
 - IDENTITY asks ("what are you") → 2 dry sentences, NEVER a paragraph
   manifesto echoing PERSONA. PERSONA is who you ARE, not a script to read.
-- TODO CONTINUITY: when you close a todo and [just extracted] shows a
-  spawned child ("Todo #N spawned from #M"), confirm the close AND the new
-  chore in one breath — don't announce them separately.
+- PROMISE CONTINUITY: when [just extracted] shows a promise closed AND a
+  new commitment noticed in the same turn, confirm the close and the new
+  thread in one breath — don't announce them separately.
 - state_block / [just extracted] are INTERNAL context — paraphrase the top
   1-2 in prose, NEVER mirror their bullet/numbered/bracketed format into
   chat.
@@ -250,7 +251,7 @@ class Orchestrator:
 
         # ── Unified signal extraction ───────────────────────────────────────
         # One LLM call per turn surfaces every signal type: tone corrections,
-        # feature requests, soft promises, todos, done signals, fitness logs,
+        # feature requests, promise signals, fitness logs,
         # reply intent, and memory candidates. All routed via intent_router
         # except memories (reconciled off-thread).
         # State carried across the extract / image branches below.
@@ -399,16 +400,6 @@ class Orchestrator:
                     # this turn — so a write happened. Tell reflexion so the
                     # hallucination cross-ref doesn't false-positive on the ack.
                     router_wrote=routed.wrote_anything(),
-                )
-                # G2: auto-detect "I can't X" patterns in Gooni's own reply,
-                # log against nearest backlog ticket. Short-circuit acks are
-                # rarely capability-gap surfaces but if one slips through
-                # (e.g. tone-correction ack saying "I can't change that"),
-                # the regex catches it.
-                from ..friction_detector import log_async as _friction_log
-                _friction_log(
-                    assistant_reply=feedback_ack,
-                    message_id=short_assistant_msg.id,
                 )
             # Reconcile any memory candidates off-thread even on short-circuit.
             if memory_candidates:
@@ -566,17 +557,6 @@ class Orchestrator:
                 conversation_id=conv.id,
                 router_wrote=routed.wrote_anything(),
             )
-            # G2 self-PM: auto-detect "I can't X" / "not yet supported" /
-            # "no tool for Y" patterns in this reply. If Gooni acknowledged
-            # a capability gap, log a FrictionEvent against the nearest
-            # backlog ticket (or create one). Same daemon-thread pattern as
-            # reflexion. Closes the loop where Gooni knew it was blocked but
-            # only the user could escalate.
-            from ..friction_detector import log_async as _friction_log
-            _friction_log(
-                assistant_reply=response,
-                message_id=assistant_msg.id,
-            )
 
         # Refresh the rolling conversation summary every N messages. Also
         # off-thread — adds an LLM call but shouldn't block the user.
@@ -661,13 +641,10 @@ class Orchestrator:
         # covers it (app/tools/list_tools.py: ShowListTool).
         list_context = ""
 
-        # Cosine-rank active focuses against the user's current message so we
-        # only inject the top 2 most-relevant instead of dumping all 5. Avoids
-        # the "every focus visible every turn" bloat that confuses multi-focus
-        # cases like eval 007.
-        focus_context = item_service.get_active_context(
-            db, query_text=message, top_k=2
-        )
+        # Focus primitive died in the Slice 6 nuke — a "focus" is now a
+        # Promise with children, and active promises already surface via
+        # state_block. No separate focus context.
+        focus_context = ""
 
         # Bot-channel delivery mechanics ONLY. Voice/identity/tone rules
         # (including temporal grounding) now live in PERSONA_BLOCK so every
@@ -847,7 +824,7 @@ class Orchestrator:
             # Phase 2 (backlog #313): the old _deterministic_denied_success_check
             # backstop (reply denies a state change that actually landed —
             # WA seg 319 msg 1171) was deleted here. Structured tool returns
-            # fix that class at the source: set_todo_state now returns a typed
+            # fix that class at the source: structured tool returns give a typed
             # status='already_in_state'|'closed' the LLM can't misread as
             # failure, so there's nothing left to contradict. Eval cases
             # 015/016 regression-lock the behavior.

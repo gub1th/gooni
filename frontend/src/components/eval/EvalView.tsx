@@ -129,7 +129,6 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
       search: {
         note: undefined,
         conv: undefined,
-        list: undefined,
         audit: true,
         segment: id ?? undefined,
         view: undefined,

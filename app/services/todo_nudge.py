@@ -9,9 +9,8 @@ New flow:
   1. Sweep pending promises whose inferred_due is past → auto-mark broken.
   2. Pick ONE live promise to ask about (closest due-within-24h, then any
      pending promise w/ no due, then most-recent slip-counted one).
-  3. If no promises at all → fall back to ONE overdue / primary todo
-     (kept conversational, never a list).
-  4. LLM composes ONE chat-shaped message asking about that one thing.
+  3. LLM composes ONE chat-shaped message asking about that one thing.
+     (No promises at all → skip the send; Todo died in the Slice 6 nuke.)
 
 Voice rules in the LLM prompt: text like a sharp friend, not a manager.
 No bullets. No "Good morning!". Reference the verbatim utterance when
@@ -27,14 +26,9 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Promise, Settings, Todo
+from app.db.models import Promise, Settings
 from app.llm.client import llm_client
 from . import promise_service
-
-
-# Cap on how many open-no-due-date todos we surface. The LLM picks 1-2 to
-# name-drop; more than 5 is wasted prompt context.
-_OPEN_TODO_CAP = 5
 
 
 # Default prompt — used when Settings.nudge_prompt is empty. Surfaced to the
@@ -49,9 +43,8 @@ DEFAULT_PROMPT = (
     "howd it land?'). If he's slipped on this same thing before, name "
     "that fact directly but without judgment ('this is the 3rd time you "
     "said this — wanna retire it or take another swing?'). Max 2 short "
-    "sentences. If the picked item is a todo (not a promise), nudge "
-    "lightly without listing other todos. End-state vibe: a friend who "
-    "kept track and is genuinely curious how it went."
+    "sentences. End-state vibe: a friend who kept track and is "
+    "genuinely curious how it went."
 )
 
 
@@ -76,8 +69,7 @@ def _pick_focus_item(db: Session) -> dict[str, Any] | None:
          so anything in 'pending' is still alive).
       2. Any pending promise — even with no inferred_due, the act of
          saying it out loud earns a check-in.
-      3. The primary todo, if set.
-      4. The single most-overdue todo, if any.
+      3. (Todo tiers removed — Slice 6 nuke.)
 
     Returns a dict shaped {kind, ...item fields} or None when nothing
     qualifies (truly quiet day → skip the send).
@@ -107,7 +99,10 @@ def _pick_focus_item(db: Session) -> dict[str, Any] | None:
                 "due_iso": p.inferred_due.isoformat(),
             }
     if pending:
-        p = pending[0]
+        # Important-flagged actives outrank the merely-oldest — the star
+        # is Daniel's own signal for what deserves the check-in.
+        starred = [p for p in pending if p.is_important]
+        p = starred[0] if starred else pending[0]
         return {
             "kind": "promise",
             "utterance": p.utterance,
@@ -116,45 +111,8 @@ def _pick_focus_item(db: Session) -> dict[str, Any] | None:
             "due_iso": p.inferred_due.isoformat() if p.inferred_due else None,
         }
 
-    # Todo tier — primary first, then most-overdue.
-    primary = (
-        db.query(Todo)
-        .filter(
-            Todo.is_primary.is_(True),
-            Todo.done.is_(False),
-            Todo.deleted_at.is_(None),
-        )
-        .first()
-    )
-    if primary:
-        return {
-            "kind": "todo",
-            "subkind": "primary",
-            "text": primary.text,
-        }
-
-    overdue_top = (
-        db.query(Todo)
-        .filter(
-            Todo.done.is_(False),
-            Todo.due_date.is_not(None),
-            Todo.due_date < today,
-            Todo.deleted_at.is_(None),
-        )
-        .order_by(Todo.due_date.asc())
-        .first()
-    )
-    if overdue_top:
-        days_late = (
-            today - overdue_top.due_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        ).days
-        return {
-            "kind": "todo",
-            "subkind": "overdue",
-            "text": overdue_top.text,
-            "days_late": days_late,
-        }
-
+    # Todo primitive died in the Slice 6 nuke — promises are the only
+    # nudge substrate. Quiet day → no send.
     return None
 
 
@@ -172,15 +130,7 @@ def _format_focus_block(focus: dict[str, Any]) -> str:
         if focus.get("slip_count"):
             lines.append(f"  slip_count: {focus['slip_count']} (he's said variations of this and not followed through this many times)")
         return "\n".join(lines)
-    # todo
-    sub = focus.get("subkind")
-    lines = ["PICKED ITEM: todo (manual list item, not uttered)"]
-    lines.append(f"  text: {focus['text']}")
-    if sub == "primary":
-        lines.append("  note: this is his pinned primary todo")
-    elif sub == "overdue":
-        lines.append(f"  note: {focus.get('days_late', 0)} days overdue")
-    return "\n".join(lines)
+    return f"PICKED ITEM: {focus}"
 
 
 def compose_message(db: Session) -> str | None:
@@ -231,8 +181,4 @@ def _fallback(focus: dict[str, Any]) -> str:
                 "still on, or want to retire it?"
             )
         return f"you said \"{utter}\" — still on?"
-    sub = focus.get("subkind")
-    text = focus["text"]
-    if sub == "overdue":
-        return f"\"{text}\" has been sitting — alive or kill it?"
-    return f"quiet day on the docket — still chewing on \"{text}\"?"
+    return "quiet day on the docket, sir."
