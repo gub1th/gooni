@@ -1251,6 +1251,90 @@ class DailyMetric(Base):
     )
 
 
+class Trackable(Base):
+    """Generic measurement definition — ambient-loop v2's Notion-tables
+    primitive (Slice 2). One row per thing-Daniel-tracks: calories,
+    protein, weight, weed, sleep score, leetcode streak, anything.
+    Absorbs DailyMetric's hardcoded metric_type vocabulary and (Slice 5)
+    the Whoop/Leetcode snapshot tables.
+
+    `kind` fixes which TrackableEntry value column is live:
+      boolean → value_boolean   (did/didn't: substances, exercise)
+      numeric → value_numeric   (calories, weight)
+      json    → value_json      (arbitrary payloads; schema_hint describes)
+    `agg` fixes the per-day fold for pivots:
+      sum  → additive within a day (calories, protein)
+      last → newest entry wins (weight, substances, notes)
+    Adding a new tracked thing = one INSERT. No migration.
+    """
+
+    __tablename__ = "trackables"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Lowercase-normalized, unique — service resolves by name so chat +
+    # MCP + feeds converge on the same definition.
+    name = Column(String, nullable=False, unique=True, index=True)
+    # 'boolean' | 'numeric' | 'json'
+    kind = Column(String, nullable=False, default="numeric")
+    unit = Column(String, nullable=True)
+    # Recurrence expectation, mirrors Promise cadence vocabulary. Purely
+    # informational for the overlay's met/missed/pending render.
+    cadence = Column(String, nullable=True)
+    # Numeric goal (calorie limit, protein floor). Direction is semantic
+    # (limit vs floor) — the consumer decides; deterministic either way.
+    target = Column(Float, nullable=True)
+    is_important = Column(Boolean, nullable=False, default=False)
+    # 'sum' | 'last' — per-day fold rule for pivots.
+    agg = Column(String, nullable=False, default="last")
+    # JSON-text description of the value_json payload shape. A hint for
+    # LLM/tool callers, NOT a validation constraint (runtime stays loose).
+    schema_hint = Column(Text, nullable=True)
+    # 'manual' | 'chat' | 'whoop' | 'leetcode' | 'github' | 'derived'
+    source = Column(String, nullable=False, default="manual")
+    # A commitment can carry its measurement instrument ("The Cut" owns
+    # the weight Trackable).
+    parent_promise_id = Column(
+        Integer, ForeignKey("promises.id"), nullable=True, index=True
+    )
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class TrackableEntry(Base):
+    """One value row for a Trackable on a calendar day. Sparse value
+    columns by kind + a JSON overflow for arbitrary shapes. Multiple
+    rows per (trackable, date) are legal — the pivot folds per the
+    definition's `agg` rule (sum vs last), which is how additive
+    calorie logging and last-wins weigh-ins share one table.
+    """
+
+    __tablename__ = "trackable_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trackable_id = Column(
+        Integer, ForeignKey("trackables.id"), nullable=False, index=True
+    )
+    date = Column(Date, nullable=False, index=True)
+    value_boolean = Column(Boolean, nullable=True)
+    value_numeric = Column(Float, nullable=True)
+    # JSON-text payload: labels ("gym — legs"), per-entry units, freeform
+    # notes, or the whole value for kind=json trackables.
+    value_json = Column(Text, nullable=True)
+    # 'chat' | 'manual' | 'whoop' | 'leetcode' | 'migration' | ...
+    source = Column(String, nullable=False, default="manual")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        # Every read path (pivot, running total) filters on both.
+        Index("ix_trackable_entries_tid_date", "trackable_id", "date"),
+    )
+
+
 class WaProcessedId(Base):
     """Idempotency log for inbound WhatsApp messages.
 

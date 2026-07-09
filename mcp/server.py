@@ -1073,6 +1073,153 @@ def read_promises(state: str = "active", limit: int = 30) -> str:
 
 
 @mcp.tool()
+def add_trackable(
+    name: str,
+    kind: str = "numeric",
+    unit: str | None = None,
+    cadence: str | None = None,
+    target: float | None = None,
+    is_important: bool = False,
+    agg: str | None = None,
+    schema_hint: str | None = None,
+) -> str:
+    """Create a Trackable — Gooni's generic measurement definition
+    (ambient-loop v2). Adding a new tracked thing is one call, no schema
+    migration. Name-idempotent: an existing name returns that definition.
+
+    Args:
+        name: what's tracked ("sleep score", "leetcode solved", "weight")
+        kind: boolean (did/didn't) | numeric | json (arbitrary payload)
+        unit: display unit ("kcal", "kg", "hrs")
+        cadence: expected rhythm (once|daily|n_per_week|...) — informational
+        target: numeric goal (limit or floor; consumer decides direction)
+        is_important: surfaces in the overlay's trackables zone
+        agg: per-day fold — "sum" (additive, like calories) or "last"
+             (newest wins, like weight). Default last.
+        schema_hint: JSON string describing the value_json payload shape
+    """
+    name = (name or "").strip()
+    if not name:
+        return "(name required)"
+    payload: dict = {
+        "name": name, "kind": kind, "is_important": is_important,
+    }
+    for k, v in (("unit", unit), ("cadence", cadence), ("target", target),
+                 ("agg", agg), ("schema_hint", schema_hint)):
+        if v is not None:
+            payload[k] = v
+    resp = _session.post(f"{BASE_URL}/trackables", json=payload, timeout=10)
+    resp.raise_for_status()
+    t = resp.json()
+    return f"trackable #{t['id']} ready: {t['name']} ({t['kind']}, agg={t['agg']})"
+
+
+@mcp.tool()
+def log_trackable_entry(
+    name: str,
+    value: str,
+    date: str | None = None,
+    replace: bool = False,
+) -> str:
+    """Log one entry on a Trackable (resolved by name).
+
+    `value` parsing by the trackable's kind:
+      boolean → "true"/"false"/"1"/"0"
+      numeric → a number ("2100", "70.8")
+      json    → a JSON object string ('{"score": 87, "strain": 12.1}')
+
+    Args:
+        name: trackable name (see read_trackable / add_trackable)
+        value: the value, encoded as above
+        date: YYYY-MM-DD (defaults to today in Daniel's TZ)
+        replace: collapse the day to this single entry (cell-edit
+                 semantics) instead of appending
+    """
+    import json as _json
+
+    resp = _session.get(f"{BASE_URL}/trackables", timeout=10)
+    resp.raise_for_status()
+    match = next(
+        (t for t in resp.json() if t["name"] == (name or "").strip().lower()), None
+    )
+    if match is None:
+        return f"(no trackable named {name!r} — create it with add_trackable)"
+    body: dict = {"source": "manual", "replace": replace}
+    if date:
+        body["date"] = date
+    kind = match["kind"]
+    v = (value or "").strip()
+    if kind == "boolean":
+        body["value_boolean"] = v.lower() in ("true", "1", "yes")
+    elif kind == "numeric":
+        try:
+            body["value_numeric"] = float(v)
+        except ValueError:
+            return f"(numeric trackable — {v!r} is not a number)"
+    else:
+        try:
+            body["value_json"] = _json.loads(v)
+        except ValueError:
+            body["value_json"] = {"text": v}
+    resp = _session.post(
+        f"{BASE_URL}/trackables/{match['id']}/entries", json=body, timeout=10
+    )
+    resp.raise_for_status()
+    out = resp.json()
+    if out.get("cleared"):
+        return f"cleared {match['name']} for {date or 'today'}"
+    e = out["entry"]
+    val = e.get("value_numeric") if e.get("value_numeric") is not None else (
+        e.get("value_boolean") if e.get("value_boolean") is not None else e.get("value_json")
+    )
+    return f"logged {match['name']} = {val} on {e['date']}"
+
+
+@mcp.tool()
+def read_trackable(name: str = "", days: int = 14) -> str:
+    """Read Trackables. Empty name lists all definitions; a name returns
+    that trackable's per-day pivot for the last `days` days.
+
+    Args:
+        name: trackable name (empty = list all)
+        days: pivot window when a name is given (default 14)
+    """
+    resp = _session.get(f"{BASE_URL}/trackables", timeout=10)
+    resp.raise_for_status()
+    rows = resp.json()
+    if not (name or "").strip():
+        if not rows:
+            return "(no trackables)"
+        lines = []
+        for t in rows:
+            bits = [t["kind"], f"agg={t['agg']}"]
+            if t.get("unit"):
+                bits.append(t["unit"])
+            if t.get("target") is not None:
+                bits.append(f"target {t['target']:g}")
+            if t.get("is_important"):
+                bits.append("★")
+            lines.append(f"#{t['id']} {t['name']} ({', '.join(bits)})")
+        return "\n".join(lines)
+    match = next((t for t in rows if t["name"] == name.strip().lower()), None)
+    if match is None:
+        return f"(no trackable named {name!r})"
+    resp = _session.get(
+        f"{BASE_URL}/trackables/{match['id']}/entries",
+        params={"days": days},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    pivot = resp.json()["days"]
+    if not pivot:
+        return f"{match['name']}: no entries in last {days}d"
+    lines = [f"{match['name']} ({match['kind']}, last {days}d):"]
+    for d in pivot:
+        lines.append(f"  {d['date']}: {d['value']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def complete_todo(match: str) -> str:
     """Mark a todo as done by text match.
 

@@ -82,18 +82,12 @@ def metric_set_cell(body: dict, db: Session = Depends(get_db)):
 
 @router.get("/metrics")
 def metrics_list(start: str | None = None, end: str | None = None, db: Session = Depends(get_db)):
-    """Raw rows in [start, end] (defaults to last 30 days). Debug/detail."""
+    """Raw rows in [start, end] (defaults to last 30 days). Debug/detail.
+    Slice 2: served from trackable_entries, rendered in the legacy shape."""
     from ..services import daily_metric_service
-    from ..db.models import DailyMetric
     end_d = _parse_iso_date(end) or local_today(db)
     start_d = _parse_iso_date(start) or (end_d - timedelta(days=29))
-    rows = (
-        db.query(DailyMetric)
-        .filter(DailyMetric.date >= start_d, DailyMetric.date <= end_d)
-        .order_by(DailyMetric.date.desc(), DailyMetric.created_at.desc())
-        .all()
-    )
-    return [daily_metric_service.serialize(r) for r in rows]
+    return daily_metric_service.list_entries(db, start_d, end_d)
 
 
 @router.get("/metrics/cut-config")

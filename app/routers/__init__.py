@@ -8,6 +8,7 @@ ROUTER_MODULES = [
     "backlog",
     "habits",
     "metrics",
+    "trackables",
     "focuses",
     "focus_candidates",
     "todos",

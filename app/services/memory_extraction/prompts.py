@@ -336,7 +336,7 @@ Emit them ALL:
 
 fitness_logs:
 - Daniel logging diet / body / training data so Gooni can keep his cut
-  table. These create numeric DailyMetric rows in real time — distinct
+  table. These create TrackableEntry rows in real time — distinct
   from promises (commitments).
 
   *** HARD GATE — APPLY FIRST ***
