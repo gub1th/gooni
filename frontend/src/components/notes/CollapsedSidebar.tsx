@@ -25,7 +25,6 @@ import { FONT } from "../../ui";
 
 
 interface CollapsedSidebarProps {
-  isDashboard: boolean;
   isNotes: boolean;
   isChat: boolean;
   isEval: boolean;
@@ -89,7 +88,6 @@ function RailButton({
 }
 
 export function CollapsedSidebar({
-  isDashboard,
   isNotes,
   isChat,
   isEval,
@@ -138,7 +136,7 @@ export function CollapsedSidebar({
       {/* Gooni logo button — small affordance for branding + Dashboard nav */}
       <button
         onClick={onLogoClick}
-        title={isDashboard ? "Back to notes" : "Dashboard"}
+        title="Home"
         style={{
           width: 36,
           height: 36,
@@ -197,7 +195,6 @@ export function CollapsedSidebar({
               search: {
                 note: undefined,
                 conv: undefined,
-                list: undefined,
                 audit: true,
                 segment: undefined,
                 view: undefined,

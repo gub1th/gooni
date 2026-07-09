@@ -101,9 +101,9 @@ function AppShell() {
   }
 
   // URL-derive every Sidebar active flag. `/` is the multi-view route
-  // (dashboard / notes / chat / lists / eval / stats); we pick the
-  // current view from the same search-param signals routes/index.tsx
-  // reads when it chooses what to render.
+  // (log / notes / chat / eval / stats); we pick the current view from
+  // the same search-param signals routes/index.tsx reads when it
+  // chooses what to render.
   const onIndex = location.pathname === "/";
   // TanStack Router types Search at the route level; at __root we don't
   // know it. Read the raw search blob and probe known keys defensively.
@@ -111,7 +111,6 @@ function AppShell() {
     (routerState.location.search as Record<string, unknown>) ?? {};
   const hasNote = rawSearch.note != null && rawSearch.note !== "";
   const hasConv = rawSearch.conv != null && rawSearch.conv !== "";
-  const hasList = rawSearch.list != null && rawSearch.list !== "";
   const auditFlag =
     rawSearch.audit === true || rawSearch.audit === "true" || rawSearch.audit === "1";
   const viewParam = typeof rawSearch.view === "string" ? rawSearch.view : null;
@@ -123,16 +122,10 @@ function AppShell() {
   // you clicked it. isChat similarly handles ?view=chat for parity.
   const isNotes = onIndex && (hasNote || viewParam === "notes");
   const isChat = onIndex && (hasConv || viewParam === "chat");
-  const isLists = onIndex && hasList;
   const isEval = onIndex && auditFlag;
-  const isDashboard =
-    onIndex && !isNotes && !isChat && !isLists && !isEval;
-  const activeListId =
-    isLists && typeof rawSearch.list === "number"
-      ? (rawSearch.list as number)
-      : isLists && typeof rawSearch.list === "string"
-        ? Number(rawSearch.list) || null
-        : null;
+  const isStats = onIndex && viewParam === "stats";
+  // Log is the index default — active when nothing else claims the URL.
+  const isLog = onIndex && !isNotes && !isChat && !isEval && !isStats;
 
   // Compose / new-chat callbacks. The store actions live in Zustand
   // already; we just call them then navigate. routes/index.tsx's
@@ -151,7 +144,6 @@ function AppShell() {
       search: {
         note: real?.id,
         conv: undefined,
-        list: undefined,
         audit: undefined,
         segment: undefined,
         view: undefined,
@@ -170,7 +162,6 @@ function AppShell() {
       search: {
         note: undefined,
         conv: undefined,
-        list: undefined,
         audit: undefined,
         segment: undefined,
         view: "chat",
@@ -185,7 +176,6 @@ function AppShell() {
       search: {
         note: undefined,
         conv: undefined,
-        list: undefined,
         audit: undefined,
         segment: undefined,
         view: undefined,
@@ -202,7 +192,6 @@ function AppShell() {
       search: {
         note: undefined,
         conv: undefined,
-        list: undefined,
         audit: undefined,
         segment: undefined,
         view: "notes",
@@ -217,7 +206,6 @@ function AppShell() {
       search: {
         note: id,
         conv: undefined,
-        list: undefined,
         audit: undefined,
         segment: undefined,
         view: undefined,
@@ -292,40 +280,24 @@ function AppShell() {
       >
         {sidebarOpen && (
           <Sidebar
-            isDashboard={isDashboard}
             isNotes={isNotes}
             isChat={isChat}
-            isLists={isLists}
+            isLog={isLog}
+            isStats={isStats}
             isEval={isEval}
-            activeListId={activeListId}
             showCompose={!isNotes}
             onLogoClick={gotoBlank}
-            onSpaceSelect={gotoNotesView}
             onAllNotes={gotoNotesView}
             onSelectNote={handleSelectNote}
             onCompose={handleCompose}
             onNewChat={handleNewChat}
             onClose={() => setSidebarOpen(false)}
-            onSelectList={(id) =>
-              navigate({
-                to: "/",
-                search: {
-                  note: undefined,
-                  conv: undefined,
-                  list: id,
-                  audit: undefined,
-                  segment: undefined,
-                  view: undefined,
-                },
-              })
-            }
             onOpenEval={() =>
               navigate({
                 to: "/",
                 search: {
                   note: undefined,
                   conv: undefined,
-                  list: undefined,
                   audit: true,
                   segment: undefined,
                   view: undefined,
@@ -341,7 +313,6 @@ function AppShell() {
             affordance. */}
         {!sidebarOpen && (
           <CollapsedSidebar
-            isDashboard={isDashboard}
             isNotes={isNotes}
             isChat={isChat}
             isEval={isEval}
@@ -355,7 +326,6 @@ function AppShell() {
                 search: {
                   note: undefined,
                   conv: undefined,
-                  list: undefined,
                   audit: true,
                   segment: undefined,
                   view: undefined,

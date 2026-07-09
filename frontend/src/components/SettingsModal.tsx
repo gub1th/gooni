@@ -7,7 +7,6 @@ import { uploadAvatarImage, updatePublicAvatar } from "../services/api";
 import { GooniFacePreview } from "./GooniMascot";
 import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
-import { RepoPicker } from "./RepoPicker";
 import { CommentAvatar } from "./notes/CommentAvatar";
 import { color as ctok, FONT } from "../ui";
 
@@ -402,7 +401,6 @@ function IntegrationsTab() {
           icon={<GithubLogo />}
           blurbConfigured="Connect to surface today's commits, streak, and a weekly summary on the dashboard."
           blurbNotConfigured="Set GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET / GITHUB_REDIRECT_URI on the backend to enable."
-          extras={<RepoPicker />}
         />
         <IntegrationSection
           provider="whoop"

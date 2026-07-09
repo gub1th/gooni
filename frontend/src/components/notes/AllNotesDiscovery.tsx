@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, Plus, FileText, Image as ImageIcon } from "lucide-react";
 import {
   cleanupEmptyNotes,
@@ -7,9 +7,7 @@ import {
   type ApiNote,
 } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
-import { useSpacesStore } from "../../stores/useSpacesStore";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
-import { SpaceIcon } from "./SpaceIcon";
 import { color as ctok, FONT } from "../../ui";
 
 
@@ -36,16 +34,7 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
   const [cleanConfirm, setCleanConfirm] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const spaces = useSpacesStore((s) => s.spaces);
   const loadNotes = useNotesContentStore((s) => s.loadNotes);
-
-  const spaceById = useMemo(() => {
-    const m = new Map<number, { name: string; emoji: string | null }>();
-    for (const s of spaces) {
-      if (typeof s.id === "number") m.set(s.id, { name: s.name, emoji: s.emoji });
-    }
-    return m;
-  }, [spaces]);
 
   async function refreshRecent() {
     try {
@@ -270,7 +259,6 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
               <NoteRow
                 key={note.id}
                 note={note}
-                space={note.space_id != null ? spaceById.get(note.space_id) ?? null : null}
                 onClick={() => onSelectNote(note.id)}
               />
             ))}
@@ -283,11 +271,9 @@ export function AllNotesDiscovery({ onSelectNote, onCompose }: AllNotesDiscovery
 
 function NoteRow({
   note,
-  space,
   onClick,
 }: {
   note: ApiNote;
-  space: { name: string; emoji: string | null } | null;
   onClick: () => void;
 }) {
   const title = displayTitle(note);
@@ -391,15 +377,12 @@ function NoteRow({
             marginTop: 2,
           }}
         >
-          {space ? (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <SpaceIcon emoji={space.emoji} size={10} color={ctok.muted} />
-              {space.name}
-            </span>
-          ) : (
-            <span>General</span>
+          {(note.tags ?? []).length > 0 && (
+            <>
+              <span>{note.tags.slice(0, 3).map((t) => `#${t}`).join(" ")}</span>
+              <span>·</span>
+            </>
           )}
-          <span>·</span>
           <span>{updated}</span>
           {thumb && (
             <>

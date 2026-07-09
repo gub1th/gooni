@@ -5,10 +5,8 @@ import { sanitizeHtml } from "../utils/sanitize";
 import { displayTitle } from "../utils/notePreview";
 import { NoteLoadingState } from "../components/NoteLoadingState";
 import { publicNoteQueryOptions } from "../utils/publicQueries";
-import { fetchPublicNoteComments, type ApiNoteComment } from "../services/api";
 import { AttachmentModal } from "../components/notes/AttachmentModal";
 import { useNoteCardStyles } from "../components/notes/noteCardStyles";
-import { ReactionBar } from "../components/ReactionBar";
 import { color as ctok } from "../ui";
 import { formatLongDate as formatPublicDate, parseServerDate } from "../utils/date";
 
@@ -298,13 +296,6 @@ function PublicNotePage() {
               data-public-view="true"
               dangerouslySetInnerHTML={{ __html: sanitizeHtml(note.content || "") }}
             />
-            {/* Page-level reactions — same shape Daniel sees in the editor.
-                Anonymous reactor_id (localStorage UUID) so public viewers
-                can react without auth. */}
-            <div style={{ marginTop: 18, marginBottom: 18 }}>
-              <ReactionBar targetType="note" targetId={id} />
-            </div>
-            <PublicNoteCommentsThread noteId={id} />
           </>
         )}
       </div>
@@ -318,112 +309,5 @@ function PublicNotePage() {
         />
       )}
     </div>
-  );
-}
-
-function authorAccent(author: string): string {
-  const a = author.toLowerCase();
-  if (a === "claude") return "#A855F7";
-  if (a === "gooni") return "#10B981";
-  return "#475569";
-}
-
-function formatPublicCommentTime(iso: string | null): string {
-  const d = parseServerDate(iso);
-  if (!d) return "";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-// Read-only comment thread for the public note page. Reuses the same
-// sanitizeHtml the note body goes through so MCP-authored HTML
-// (h3/ul/strong/code) renders correctly. No composer — public viewers
-// can't post.
-function PublicNoteCommentsThread({ noteId }: { noteId: number }) {
-  const { data: comments } = useQuery<ApiNoteComment[]>({
-    queryKey: ["public-note-comments", noteId],
-    queryFn: () => fetchPublicNoteComments(noteId),
-    staleTime: 60_000,
-  });
-
-  if (!comments || comments.length === 0) return null;
-  return (
-    <section
-      style={{
-        marginTop: 56,
-        paddingTop: 28,
-        borderTop: "1px solid rgba(0,0,0,0.08)",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          letterSpacing: 0.4,
-          color: "#64748B",
-          textTransform: "uppercase",
-          marginBottom: 16,
-        }}
-      >
-        Comments ({comments.length})
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {comments.map((c) => (
-          <div
-            key={c.id}
-            style={{
-              display: "flex",
-              gap: 12,
-              padding: "12px 14px",
-              borderRadius: 10,
-              background: "rgba(241,245,249,0.55)",
-              border: "1px solid rgba(0,0,0,0.05)",
-            }}
-          >
-            <div
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: "50%",
-                flex: "none",
-                background: authorAccent(c.author),
-                color: "white",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
-                fontWeight: 600,
-                textTransform: "uppercase",
-              }}
-              title={c.author}
-            >
-              {c.author.slice(0, 1)}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  gap: 8,
-                  marginBottom: 4,
-                  fontSize: 12,
-                }}
-              >
-                <span style={{ fontWeight: 600, color: "var(--gooni-text, #0F172A)" }}>{c.author}</span>
-                <span style={{ color: "var(--gooni-faint, #94A3B8)" }}>{formatPublicCommentTime(c.created_at)}</span>
-              </div>
-              <div
-                className="public-prose"
-                style={{ fontSize: 13.5, lineHeight: 1.55, color: "var(--gooni-text, #1E293B)" }}
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(c.content) }}
-              />
-              <div style={{ marginTop: 6 }}>
-                <ReactionBar targetType="comment" targetId={c.id} compact />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
   );
 }

@@ -7,7 +7,6 @@ from ..db.database import get_db
 from ..db.models import (
     Attachment,
     Note,
-    Todo,
 )
 
 
@@ -76,7 +75,6 @@ async def upload_image_route(file: UploadFile = File(...)):
 async def upload_file_route(
     file: UploadFile = File(...),
     note_id: Optional[int] = Form(None),
-    todo_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
 ):
     """Upload an arbitrary file (PDF, doc, archive, etc.) to R2 and return
@@ -84,10 +82,10 @@ async def upload_file_route(
     carrying the URL/mime/filename so the note body itself is the source
     of truth for what's attached.
 
-    When `note_id` OR `todo_id` is supplied we also persist an `attachments`
-    row so the backend has a directory for later cleanup / listing (a row
-    sets exactly one owner). Returns 503 when R2 isn't configured (frontend
-    can decide whether to fall back)."""
+    When `note_id` is supplied we also persist an `attachments` row so
+    the backend has a directory for later cleanup / listing. (Todo owner
+    died in the Slice 6 nuke.) Returns 503 when R2 isn't configured
+    (frontend can decide whether to fall back)."""
     from ..services import image_storage
 
     content_type = (file.content_type or "application/octet-stream").lower()
@@ -123,23 +121,17 @@ async def upload_file_route(
         "size_bytes": len(data),
     }
 
-    # Persist an attachments row when an owner is supplied. Exactly one of
-    # note_id / todo_id is expected; todo_id wins if both are passed. A
-    # missing/unknown owner doesn't fail the upload — the bytes are already
-    # in R2, so we just skip the DB row and let the caller proceed.
+    # Persist an attachments row when an owner is supplied. A missing/
+    # unknown owner doesn't fail the upload — the bytes are already in
+    # R2, so we just skip the DB row and let the caller proceed.
     owner_note_id: Optional[int] = None
-    owner_todo_id: Optional[int] = None
-    if todo_id is not None:
-        if db.query(Todo).filter(Todo.id == todo_id).first() is not None:
-            owner_todo_id = todo_id
-    elif note_id is not None:
+    if note_id is not None:
         if db.query(Note).filter(Note.id == note_id).first() is not None:
             owner_note_id = note_id
 
-    if owner_note_id is not None or owner_todo_id is not None:
+    if owner_note_id is not None:
         row = Attachment(
             note_id=owner_note_id,
-            todo_id=owner_todo_id,
             filename=filename,
             mime_type=content_type,
             size_bytes=len(data),
@@ -249,28 +241,6 @@ def list_note_attachments(note_id: int, db: Session = Depends(get_db)):
         for a in rows
     ]
 
-
-@router.get("/todos/{todo_id}/attachments")
-def list_todo_attachments(todo_id: int, db: Session = Depends(get_db)):
-    if not db.query(Todo).filter(Todo.id == todo_id).first():
-        raise HTTPException(status_code=404, detail="Todo not found")
-    rows = (
-        db.query(Attachment)
-        .filter(Attachment.todo_id == todo_id)
-        .order_by(Attachment.created_at.asc(), Attachment.id.asc())
-        .all()
-    )
-    return [
-        {
-            "id": a.id,
-            "filename": a.filename,
-            "mime_type": a.mime_type,
-            "size_bytes": a.size_bytes,
-            "url": a.public_url,
-            "created_at": a.created_at,
-        }
-        for a in rows
-    ]
 
 
 @router.delete("/attachments/{attachment_id}")

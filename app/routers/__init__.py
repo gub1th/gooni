@@ -1,39 +1,31 @@
-"""Router modules, ordered by original main.py route appearance."""
+"""Router modules, ordered by original main.py route appearance.
+
+Slice 6 nuke removed: visits stays, lists/list_items/backlog/habits/
+focuses/focus_candidates/todos/items/spaces/comments/reactions/dashboard/
+capabilities are gone with their primitives.
+"""
 
 ROUTER_MODULES = [
     "visits",
     "public",
-    "lists",
-    "list_items",
-    "backlog",
-    "habits",
     "metrics",
     "trackables",
     "overlay",
-    "focuses",
-    "focus_candidates",
-    "todos",
-    "items",
     "auth",
     "misc",
     "chat",
     "webhooks",
     "settings",
-    "spaces",
     "notes",
     "promises",
-    "comments",
-    "reactions",
     "uploads",
     "conversations",
     "health",
-    "dashboard",
     "tool_calls",
     "mcp",
     "memories",
     "eval",
     "whoop",
     "integrations",
-    "capabilities",
     "reflections",
 ]

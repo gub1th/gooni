@@ -184,9 +184,8 @@ feature_requests:
   *** HARD ANTI-PATTERN — LIST-ADD ASKS ***
   Phrases of the form "add X to my <noun> list" / "add X to <list_name>"
   / "throw X on my <noun> list" / "remind me to add X to <list_name>"
-  / "put X on my <noun> list" are USER CONTENT going onto an existing
-  list, NOT a capability gap. Gooni already has `add_to_list` —
-  these route through that tool, not the engineering backlog. Emit []
+  / "put X on my <noun> list" are USER CONTENT, NOT a capability gap.
+  Capture-shaped content lands as a Note (tags replace lists). Emit []
   for feature_requests on these. The classifier loses calibration when
   it confuses user content with platform asks (see Cluster A bug:
   "Add to date spots list" wrongly created a BacklogTicket).
@@ -449,8 +448,8 @@ memories:
   here, let tone_corrections catch it), (b) a feature request (skip here,
   feature_requests catches it), or (c) a stable taste/interest about Daniel
   → emit as "fact".
-- DO NOT emit "goal" — action-shaped aspirations belong in focuses list
-  (list_items), not memory. Skip extraction; focus pipeline handles them.
+- DO NOT emit "goal" — action-shaped aspirations are promise-shaped
+  (the `promises` emit catches them), not memory. Skip extraction.
 - key is snake_case for typed memories; null for episodes.
 - scope: "global" = always applies; "contextual" = situation-specific.
 - confidence: 0.85+ for explicit; 0.6-0.7 for inferences.

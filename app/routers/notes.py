@@ -23,6 +23,42 @@ from ..common import (
 router = APIRouter()
 
 
+@router.get("/notes")
+def list_notes(tag: str | None = None, db: Session = Depends(get_db)):
+    """All notes, newest first (Slice 6: Spaces died — this replaces
+    GET /spaces/{id}/notes; optional ?tag= filters server-side)."""
+    q = db.query(Note)
+    if tag:
+        q = q.filter(Note.tags.is_not(None), Note.tags.like(f'%"{tag.strip().lower()}"%'))
+    notes = q.order_by(_notes_order()).all()
+    return [_serialize_note_lite(n) for n in notes]
+
+
+@router.post("/notes")
+def create_note(body: dict, db: Session = Depends(get_db)):
+    """Create a note (Slice 6: replaces POST /spaces/{id}/notes — no
+    space bucket; tags own organization). New notes enter as drafts
+    unless is_draft=False (publish ceremony unchanged)."""
+    from datetime import datetime
+
+    initial_content = body.get("content") or ""
+    initial_tags = _normalize_tags(body.get("tags") or [])
+    note = Note(
+        title=body.get("title") or "",
+        content=initial_content,
+        excerpt=_excerpt_from_html(initial_content),
+        is_draft=bool(body.get("is_draft", True)),
+        is_pinned=bool(body.get("is_pinned", False)),
+        tags=json.dumps(initial_tags) if initial_tags else None,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(note)
+    db.commit()
+    db.refresh(note)
+    return _serialize_note(note)
+
+
 @router.get("/notes/recent")
 def get_recent_notes(limit: int = 5, db: Session = Depends(get_db)):
     notes = (
@@ -135,9 +171,6 @@ def update_note(
         note.excerpt = _excerpt_from_html(new_content)
     if title_changed or content_changed:
         note.updated_at = datetime.utcnow()
-    if "space_id" in body:
-        sid = body["space_id"]
-        note.space_id = None if (sid is None or sid == "general") else int(sid)
     if "is_public" in body:
         new_public = bool(body["is_public"])
         note.is_public = new_public
@@ -228,7 +261,6 @@ def extract_to_child_note(note_id: int, body: dict, db: Session = Depends(get_db
         title=title,
         content=selected_html,
         excerpt=_excerpt_from_html(selected_html),
-        space_id=parent.space_id,
         parent_note_id=parent.id,
         excerpt_anchor=anchor,
         created_at=datetime.utcnow(),
@@ -315,7 +347,7 @@ def notes_graph(db: Session = Depends(get_db)):
     # (and we still get content for word_count). 6MB notes (cf. PR-#134
     # postmortem) make this materially cheaper than .query(Note).all().
     notes = (
-        db.query(Note.id, Note.title, Note.content, Note.embedding, Note.space_id)
+        db.query(Note.id, Note.title, Note.content, Note.embedding)
         .filter(Note.embedding.isnot(None))
         .all()
     )
@@ -323,7 +355,7 @@ def notes_graph(db: Session = Depends(get_db)):
     # Parse embeddings + build node metadata.
     vectors: list[list[float]] = []
     nodes: list[dict] = []
-    for nid, ntitle, ncontent, nemb, nspace in notes:
+    for nid, ntitle, ncontent, nemb in notes:
         try:
             v = json.loads(nemb)
             if not isinstance(v, list) or not v:
@@ -340,7 +372,6 @@ def notes_graph(db: Session = Depends(get_db)):
             "id": nid,
             "title": (ntitle or "").strip() or "(untitled)",
             "size": round(math.log2(word_count + 2), 3),
-            "space_id": nspace,
         })
 
     if len(vectors) < 2:

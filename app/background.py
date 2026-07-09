@@ -37,7 +37,6 @@ async def _proactive_nudge_loop():
     # hoisted out of the per-tick while-loop so it's resolved once, not every
     # 60s.
     from .services.proactive_nudge import (
-        maybe_fire_procrastination_nudge,
         maybe_fire_sleep_nudge,
         process_pending_whoop_nudge,
     )
@@ -49,7 +48,6 @@ async def _proactive_nudge_loop():
             try:
                 process_pending_whoop_nudge(db)
                 maybe_fire_sleep_nudge(db)
-                maybe_fire_procrastination_nudge(db)
             finally:
                 db.close()
         except asyncio.CancelledError:
@@ -95,30 +93,6 @@ async def _nudge_loop():
         except Exception as e:
             print(f"[nudge] loop error: {e}")
             await asyncio.sleep(60)
-
-
-async def _backfill_list_item_embeddings_loop():
-    """One-shot lazy backfill: list_items rows that predate the embedding
-    column have NULL embeddings, so similarity search ignores them. Walk
-    the table in small batches at startup until none remain. Sleeps between
-    batches so we don't block the event loop or burn the OpenAI quota in
-    one shot."""
-    from .services.list_service import list_service
-
-    await asyncio.sleep(5)  # let HTTP server bind first
-    while True:
-        db = SessionLocal()
-        try:
-            wrote = list_service.backfill_missing_embeddings(db, limit=25)
-        except Exception as e:
-            print(f"List embedding backfill error: {e}")
-            wrote = 0
-        finally:
-            db.close()
-        if wrote == 0:
-            return
-        print(f"List embedding backfill: embedded {wrote} item(s)")
-        await asyncio.sleep(2)
 
 
 async def _backfill_note_excerpts_loop():
@@ -248,113 +222,3 @@ async def _memory_watchdog_loop():
         except Exception as e:
             print(f"[mem] watchdog error: {e}", flush=True)
 
-
-async def _capability_telemetry_loop():
-    """Daily rollup of ToolCall audit → CapabilityFacet.status transitions.
-
-    Sleep to the next 03:00 in nudge_tz, then run capability_service
-    telemetry. Idempotency via Settings.capability_telemetry_last_run_day
-    (YYYY-MM-DD in nudge_tz) so a Fly horizontal-scale race can't double-run.
-    Loop survives errors by sleeping a minute and retrying.
-    """
-    from .services.capability_service import capability_service
-    while True:
-        try:
-            db = SessionLocal()
-            try:
-                s = _settings_row(db)
-                tz_name = s.nudge_tz or "America/Los_Angeles"
-            finally:
-                db.close()
-            now = _dt.now(ZoneInfo(tz_name) if ZoneInfo else None)
-            target = _next_fire(now, hour=3, minute=0, tz_name=tz_name)
-            wait = max(1.0, (target - now).total_seconds())
-            await asyncio.sleep(wait)
-            # Idempotency check after wakeup: re-read in case another machine
-            # already wrote today's token.
-            db = SessionLocal()
-            try:
-                s = _settings_row(db)
-                today_str = _dt.now(
-                    ZoneInfo(tz_name) if ZoneInfo else None
-                ).strftime("%Y-%m-%d")
-                if s.capability_telemetry_last_run_day == today_str:
-                    await asyncio.sleep(70)
-                    continue
-                s.capability_telemetry_last_run_day = today_str
-                db.commit()
-                result = capability_service.run_telemetry_rollup(db)
-                print(f"[capability] telemetry: {result}", flush=True)
-            finally:
-                db.close()
-            await asyncio.sleep(70)
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            print(f"[capability] loop error: {e}", flush=True)
-            await asyncio.sleep(60)
-
-
-async def _urgency_rollup_loop():
-    """Nightly recompute of backlog ticket urgency_score from
-    friction_events. Fires at 03:30 local — staggered 30min after the
-    capability_telemetry_loop's 03:00 to avoid double-writing the same
-    rows in adjacent passes.
-
-    G2 self-PM: keeps urgency_score honest even when no fresh friction
-    fires (synchronous bump in log_friction handles real-time, but
-    decay-based ranking shifts daily without new events).
-    """
-    from .services.backlog_service import backlog_service
-    while True:
-        try:
-            db = SessionLocal()
-            try:
-                s = _settings_row(db)
-                tz_name = s.nudge_tz or "America/Los_Angeles"
-            finally:
-                db.close()
-            now = _dt.now(ZoneInfo(tz_name) if ZoneInfo else None)
-            target = _next_fire(now, hour=3, minute=30, tz_name=tz_name)
-            wait = max(1.0, (target - now).total_seconds())
-            await asyncio.sleep(wait)
-            db = SessionLocal()
-            try:
-                result = backlog_service.recompute_all_urgency(db)
-                print(f"[urgency-rollup] {result}", flush=True)
-            finally:
-                db.close()
-            await asyncio.sleep(70)
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            print(f"[urgency-rollup] loop error: {e}", flush=True)
-            await asyncio.sleep(60)
-
-
-
-async def _todo_soft_delete_sweeper_loop():
-    """Hourly hard-purge of soft-deleted todos past the 24h undo window.
-
-    G1 groom-mutation: chat-side delete/merge/rename soft-deletes via
-    `Todo.deleted_at`. This sweeper hard-removes anything past the TTL
-    so the table doesn't grow tombstones forever. Hourly cadence keeps
-    the window tight enough that the undo runway stays honest (matches
-    `SOFT_DELETE_TTL_HOURS` semantics).
-    """
-    from .services.todo_service import todo_service
-    while True:
-        try:
-            await asyncio.sleep(3600)  # 1 hour
-            db = SessionLocal()
-            try:
-                purged = todo_service.purge_old_deleted(db)
-                if purged:
-                    print(f"[todo-sweeper] purged {purged} stale tombstones", flush=True)
-            finally:
-                db.close()
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            print(f"[todo-sweeper] loop error: {e}", flush=True)
-            await asyncio.sleep(60)

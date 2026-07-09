@@ -263,18 +263,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   );
 }
 
-// G3.9 frontend follow-up (atom #7) — inline todo cards in chat replies.
-// Scans the message trace for router:todo* events and renders compact
-// action chips below the reply bubble. Closes the visible-action loop:
-// Daniel sees the ack text AND a structured confirmation that the right
-// todo was touched. Click-target intentionally minimal in v1 — text +
-// icon. Wiring click→open-edit-modal cross-cuts dashboard + chat state
-// and is left for the next polish pass.
+// Inline action chips below the reply bubble — structured confirmation
+// of what the router actually captured this turn. Todos died in the
+// Slice 6 nuke; promises are the surviving router capture worth chipping.
 function ActionCards({ trace }: { trace: MessageTraceStep[] }) {
-  const cards: { kind: string; icon: string; text: string; todoId?: number }[] = [];
+  const cards: { icon: string; text: string }[] = [];
   for (const step of trace) {
     // TraceBuilder canonical: tool calls land with `type: "tool_call"`
-    // and `key` carrying the router event name (router:todo etc.).
+    // and `key` carrying the router event name (router:promise etc.).
     // Fall back to label for older trace shapes.
     if (step.type !== "tool_call") continue;
     const name = (step.key || step.label || "").toString();
@@ -283,79 +279,34 @@ function ActionCards({ trace }: { trace: MessageTraceStep[] }) {
       typeof args.text === "string" ? args.text :
       typeof args.match === "string" ? args.match :
       "";
-    // G3.9 loop-close: chip carries todo_id for click-navigation.
-    const todoId = (typeof args.todo_id === "number" ? args.todo_id : typeof args.id === "number" ? args.id : undefined);
-    if (!name.startsWith("router:") || !text) continue;
-    if (name === "router:todo" || name === "router:todo_bumped") {
-      cards.push({ kind: "create", icon: "＋", text: trim(text), todoId });
-    } else if (name === "router:todo_killed") {
-      cards.push({ kind: "kill", icon: "✗", text: trim(text), todoId });
-    } else if (name === "router:todo_completed" || name === "router:todo_implicit_done") {
-      cards.push({ kind: "done", icon: "✓", text: trim(text), todoId });
-    } else if (name === "router:todo_merged") {
-      cards.push({ kind: "merge", icon: "⇆", text: trim(text), todoId });
-    } else if (name === "router:todo_edited") {
-      const changes = Array.isArray(args.changes) ? (args.changes as string[]).join(", ") : "";
-      cards.push({ kind: "edit", icon: "✎", text: `${trim(text)}${changes ? ` — ${changes}` : ""}`, todoId });
-    } else if (name === "router:todo_spawned") {
-      cards.push({ kind: "spawn", icon: "↗", text: trim(text), todoId });
-    } else if (name === "router:promise") {
-      const utt = typeof args.utterance === "string" ? args.utterance : text;
-      cards.push({ kind: "promise", icon: "🤝", text: trim(utt) });
-    }
+    if (name !== "router:promise" || !text) continue;
+    const utt = typeof args.utterance === "string" ? args.utterance : text;
+    cards.push({ icon: "🤝", text: trim(utt) });
   }
   if (cards.length === 0) return null;
-  // Color palette per kind — desaturated, claude-minimal. Status verbs
-  // (done/kill) keep their existing dashboard tints so cross-surface
-  // identity stays consistent.
-  const tint = {
-    create: { bg: "rgba(15,23,42,0.06)", fg: "#0F172A" },
-    edit:   { bg: "rgba(15,23,42,0.06)", fg: "#0F172A" },
-    spawn:  { bg: "rgba(15,23,42,0.06)", fg: "#0F172A" },
-    promise:{ bg: "rgba(15,23,42,0.06)", fg: "#0F172A" },
-    done:   { bg: "#E1F5EE", fg: "#085041" },
-    kill:   { bg: "#FCEBEB", fg: "#791F1F" },
-    merge:  { bg: "rgba(15,23,42,0.06)", fg: "#0F172A" },
-  } as const;
   return (
     <div style={{
       display: "flex", flexWrap: "wrap", gap: 6,
       marginTop: 8, maxWidth: "80%",
     }}>
-      {cards.slice(0, 6).map((c, i) => {
-        const t = tint[c.kind as keyof typeof tint] ?? tint.create;
-        // G3.9 loop-close: clickable chips when a todo_id is present.
-        // Dispatches gooni:focus-todo → routes/index.tsx flips view to
-        // dashboard if needed; TodoList then scrolls + flash-highlights.
-        const clickable = typeof c.todoId === "number";
-        return (
-          <span
-            key={i}
-            onClick={clickable ? () => {
-              window.dispatchEvent(new CustomEvent("gooni:focus-todo", {
-                detail: { todoId: c.todoId },
-              }));
-            } : undefined}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
-              padding: "3px 8px", borderRadius: 99,
-              background: t.bg, color: t.fg,
-              fontSize: 11.5, fontFamily: FONT, fontWeight: 500,
-              border: "0.5px solid rgba(15,23,42,0.08)",
-              maxWidth: 280,
-              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              cursor: clickable ? "pointer" : "default",
-              transition: "transform 0.12s",
-            }}
-            onMouseEnter={clickable ? (e) => { (e.currentTarget as HTMLSpanElement).style.transform = "translateY(-1px)"; } : undefined}
-            onMouseLeave={clickable ? (e) => { (e.currentTarget as HTMLSpanElement).style.transform = "translateY(0)"; } : undefined}
-            title={clickable ? `${c.text} (click to view)` : c.text}
-          >
-            <span style={{ opacity: 0.7 }}>{c.icon}</span>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{c.text}</span>
-          </span>
-        );
-      })}
+      {cards.slice(0, 6).map((c, i) => (
+        <span
+          key={i}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "3px 8px", borderRadius: 99,
+            background: "rgba(15,23,42,0.06)", color: "#0F172A",
+            fontSize: 11.5, fontFamily: FONT, fontWeight: 500,
+            border: "0.5px solid rgba(15,23,42,0.08)",
+            maxWidth: 280,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}
+          title={c.text}
+        >
+          <span style={{ opacity: 0.7 }}>{c.icon}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{c.text}</span>
+        </span>
+      ))}
       {cards.length > 6 && (
         <span style={{
           padding: "3px 8px", borderRadius: 99,

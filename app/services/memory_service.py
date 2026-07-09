@@ -650,20 +650,10 @@ class MemoryService:
                 except Exception as e:
                     print(f"memory retrieval bump error: {e}")
                     sess.rollback()
-            # Prepend the capability profile so Gooni grounds "I can / I can't"
-            # answers in verified facts instead of hallucinating. The block is
-            # capped at ~30 lines inside capability_service so the prompt
-            # doesn't bloat over time. Imported lazily to avoid a circular
-            # import at module load (capability_service → main → memory).
-            try:
-                from .capability_service import capability_service
-
-                cap_block = capability_service.build_prompt_block(sess)
-            except Exception as e:
-                print(f"capability prompt block error: {e}")
-                cap_block = ""
-            full_block = "\n\n".join([b for b in (cap_block, base_block) if b])
-            return full_block, debug
+            # CapabilityFacet died in the Slice 6 nuke — OBJECT_KINDS_BLOCK
+            # (auto-derived from the live tool registry) is the remaining
+            # anti-hallucination anchor for "I can / I can't" answers.
+            return base_block, debug
         finally:
             if owns:
                 sess.close()
