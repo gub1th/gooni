@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.185.0 — 2026-07-09 (minor)
+
+- feat(overlay): ambient-loop v2 Slice 4 — hover overlay w/ 4 frosted zones (#402)
+
 ## 0.184.0 — 2026-07-09 (minor)
 
 - feat(log): ambient-loop v2 Slice 3 — log view + glow + 1-click promote (#401)
