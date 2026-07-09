@@ -21,19 +21,13 @@ router = APIRouter()
 
 def _build_feed(
     db: Session,
-    space_id: int | None = None,
     general: bool = False,
     limit: int = 100,
 ) -> list[dict]:
-    """Conversations sorted newest first.
-
-    - general=True: return everything (no filter)
-    - space_id set: filter by space
-    """
+    """Conversations sorted newest first (Spaces died in the v2 nuke, so
+    `general` is now always effectively True — the param is kept for the
+    one caller's call-site shape)."""
     q = db.query(Conversation).filter(Conversation.source != "telegram")
-
-    if not general and space_id is not None:
-        q = q.filter(Conversation.space_id == space_id)
 
     items = [_serialize_conversation(c) for c in q.all()]
     items.sort(key=lambda x: x["created_at"] or "", reverse=True)
