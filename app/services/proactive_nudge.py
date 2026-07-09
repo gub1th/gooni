@@ -30,7 +30,6 @@ from ..db.models import (
     Message,
     Note,
     Settings as SettingsModel,
-    WhoopSnapshot,
 )
 from .messaging.whatsapp import whatsapp_channel
 
@@ -114,12 +113,31 @@ def _detect_active_signal(db: Session, minutes: int) -> str | None:
 # ── Whoop nudge ─────────────────────────────────────────────────────
 
 
-def _compose_whoop_message(row: WhoopSnapshot) -> str:
-    """Alfred-voice ping summarizing today's whoop snapshot. Tone tilts
-    sharper when stats are bad. Always lowercase, terse."""
-    sleep_h = (row.sleep_minutes / 60.0) if row.sleep_minutes else None
-    recovery = row.recovery_score
-    strain = row.strain
+def _parse_iso_dt(v):
+    """ISO string (or datetime) → naive-UTC datetime, else None. Whoop
+    payloads round-trip through TrackableEntry.value_json as strings."""
+    if isinstance(v, datetime):
+        return v
+    if not isinstance(v, str) or not v:
+        return None
+    try:
+        ts = datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if ts.tzinfo is not None:
+        from datetime import timezone as _tz
+        ts = ts.astimezone(_tz.utc).replace(tzinfo=None)
+    return ts
+
+
+def _compose_whoop_message(doc: dict) -> str:
+    """Alfred-voice ping summarizing today's whoop payload (the json
+    master Trackable entry — Slice 5). Tone tilts sharper when stats are
+    bad. Always lowercase, terse."""
+    sleep_minutes = doc.get("sleep_minutes")
+    sleep_h = (sleep_minutes / 60.0) if sleep_minutes else None
+    recovery = doc.get("recovery_score")
+    strain = doc.get("strain")
 
     bits: list[str] = []
     if sleep_h is not None:
@@ -129,8 +147,8 @@ def _compose_whoop_message(row: WhoopSnapshot) -> str:
         # when start/end are missing.
         from zoneinfo import ZoneInfo
         tz = ZoneInfo("America/Los_Angeles")
-        start = getattr(row, "sleep_start_at", None)
-        end = getattr(row, "sleep_end_at", None)
+        start = _parse_iso_dt(doc.get("sleep_start_at"))
+        end = _parse_iso_dt(doc.get("sleep_end_at"))
         if start is not None and end is not None:
             try:
                 # Stored naive UTC — interpret as UTC then convert.
@@ -178,7 +196,7 @@ def _compose_whoop_message(row: WhoopSnapshot) -> str:
 _WHOOP_DEBOUNCE_SECONDS = 180  # 3 min stability window
 
 
-def maybe_fire_whoop_nudge(row: WhoopSnapshot, db: Session) -> bool:
+def maybe_fire_whoop_nudge(doc: dict, db: Session) -> bool:
     """Queue a whoop-stats ping for the debouncer instead of firing
     inline. Returns True when something was queued (or short-circuited
     because nothing new).
@@ -195,13 +213,13 @@ def maybe_fire_whoop_nudge(row: WhoopSnapshot, db: Session) -> bool:
 
     Fail-open as before.
     """
-    if row is None:
+    if not doc:
         return False
     try:
         s = _settings(db)
         if s is None:
             return False
-        compare_ts = row.source_updated_at or row.updated_at
+        compare_ts = _parse_iso_dt(doc.get("source_updated_at")) or _parse_iso_dt(doc.get("updated_at"))
         if compare_ts is None:
             return False
         # Already pinged this exact source_ts — nothing new to debounce.
@@ -240,15 +258,10 @@ def process_pending_whoop_nudge(db: Session) -> bool:
             return False
         if (datetime.utcnow() - pending_set).total_seconds() < _WHOOP_DEBOUNCE_SECONDS:
             return False
-        # Pull the snapshot the pending ts came from — but use whatever
-        # is freshest in `whoop_snapshots` since the burst may have
-        # written more recent data while we waited. The day key is
-        # `date` (one row per day) so latest = newest non-null updated_at.
-        latest = (
-            db.query(WhoopSnapshot)
-            .order_by(WhoopSnapshot.updated_at.desc())
-            .first()
-        )
+        # Pull whatever is freshest from the whoop master Trackable —
+        # the burst may have written more recent data while we waited.
+        from . import whoop as _whoop
+        latest = _whoop.latest_snapshot(db)
         if latest is None:
             # Clean up the stale pending — no snapshot to send anyway.
             s.whoop_nudge_pending_source_ts = None
@@ -263,7 +276,9 @@ def process_pending_whoop_nudge(db: Session) -> bool:
             # is broken we'd rather retry than lose the ping silently.
             return False
         s.last_whoop_nudge_source_ts = (
-            latest.source_updated_at or latest.updated_at or pending_ts
+            _parse_iso_dt(latest.get("source_updated_at"))
+            or _parse_iso_dt(latest.get("updated_at"))
+            or pending_ts
         )
         s.whoop_nudge_pending_source_ts = None
         s.whoop_nudge_pending_set_at = None

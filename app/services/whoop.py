@@ -21,6 +21,7 @@ Scopes requested:
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import time
@@ -30,7 +31,7 @@ from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
-from ..db.models import OAuthToken, WhoopSnapshot
+from ..db.models import OAuthToken
 
 
 def _local_today(db: Session) -> date_cls:
@@ -351,40 +352,111 @@ def fetch_today_snapshot(db: Session) -> dict[str, Any] | None:
     }
 
 
-def upsert_today_snapshot(db: Session, payload: dict[str, Any]) -> WhoopSnapshot | None:
-    """Save a snapshot row for today. Idempotent on (date), re-running
-    overwrites the same day's row rather than stacking duplicates.
-    `today` uses Daniel's local TZ so the row keys on his lived day,
-    not on UTC.
-    """
+# ── Trackable feed (Slice 5 — WhoopSnapshot table is gone) ─────────────
+#
+# One json master trackable ("whoop") carries the whole day payload —
+# the nudge composer, /whoop/today, and health connector read it. A few
+# numeric child trackables mirror the headline metrics so the overlay's
+# whoop-select zone (and any future pivot) can chart them individually.
+# All replace-mode per day: webhook bursts overwrite, never stack.
+
+MASTER_KEY = "whoop"
+_NUMERIC_KEYS: tuple[tuple[str, str, str | None], ...] = (
+    # (trackable name, payload key, unit)
+    ("whoop recovery", "recovery_score", "%"),
+    ("whoop strain", "strain", None),
+    ("whoop hrv", "hrv_rmssd_ms", "ms"),
+    ("whoop rhr", "resting_hr", "bpm"),
+    ("whoop sleep hours", "sleep_hours", "h"),
+)
+
+
+def _payload_to_json(payload: dict[str, Any]) -> dict[str, Any]:
+    """Datetime fields → ISO strings so the payload round-trips through
+    the TrackableEntry value_json column."""
+    out = dict(payload)
+    for k in ("sleep_start_at", "sleep_end_at", "source_updated_at"):
+        v = out.get(k)
+        if isinstance(v, datetime):
+            out[k] = v.isoformat()
+    if payload.get("sleep_minutes"):
+        out["sleep_hours"] = round(payload["sleep_minutes"] / 60.0, 2)
+    out["updated_at"] = datetime.utcnow().isoformat()
+    return out
+
+
+def upsert_today_snapshot(db: Session, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Persist today's whoop data as Trackable entries (idempotent per
+    day — replace-mode). `today` uses Daniel's local TZ so the entries
+    key on his lived day, not UTC. Returns the JSON-safe payload dict
+    (the shape latest_snapshot()/get_today() hand back)."""
+    from . import trackable_service
+
     today = _local_today(db)
-    row = db.query(WhoopSnapshot).filter(WhoopSnapshot.date == today).first()
-    if row is None:
-        row = WhoopSnapshot(date=today)
-        db.add(row)
-    row.recovery_score = payload.get("recovery_score")
-    row.hrv_rmssd_ms = payload.get("hrv_rmssd_ms")
-    row.resting_hr = payload.get("resting_hr")
-    row.strain = payload.get("strain")
-    row.sleep_minutes = payload.get("sleep_minutes")
-    row.sleep_performance_pct = payload.get("sleep_performance_pct")
-    row.sleep_start_at = payload.get("sleep_start_at")
-    row.sleep_end_at = payload.get("sleep_end_at")
-    row.sleep_efficiency_pct = payload.get("sleep_efficiency_pct")
-    row.sleep_disturbance_count = payload.get("sleep_disturbance_count")
-    src_ts = payload.get("source_updated_at")
-    if src_ts is not None:
-        row.source_updated_at = src_ts
-    row.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(row)
-    # Proactive nudge — phase 0. Fires once per fresh source_updated_at
-    # via WhatsApp. Lazy import to avoid an import cycle (proactive_nudge
-    # imports from whoop.models indirectly). Fail-open: any error here
-    # must not break whoop ingest.
+    doc = _payload_to_json(payload)
+
+    master = trackable_service.create(
+        db, name=MASTER_KEY, kind="json", agg="last", source="whoop",
+        schema_hint={"description": "daily whoop rollup: recovery/strain/sleep"},
+    )
+    trackable_service.log_entry(
+        db, master, day=today, value_json=doc, source="whoop", replace=True,
+    )
+
+    for name, key, unit in _NUMERIC_KEYS:
+        val = doc.get(key)
+        if val is None:
+            continue
+        t = trackable_service.create(
+            db, name=name, kind="numeric", unit=unit, agg="last", source="whoop",
+        )
+        trackable_service.log_entry(
+            db, t, day=today, value_numeric=float(val), source="whoop", replace=True,
+        )
+
+    # Proactive nudge — phase 0. Queues once per fresh source_updated_at
+    # via the Settings debouncer. Fail-open: any error here must not
+    # break whoop ingest.
     try:
         from .proactive_nudge import maybe_fire_whoop_nudge
-        maybe_fire_whoop_nudge(row, db)
+        maybe_fire_whoop_nudge(doc, db)
     except Exception as e:
         print(f"[whoop] proactive nudge hook errored (ignored): {e}")
-    return row
+    return doc
+
+
+def get_today(db: Session) -> dict[str, Any] | None:
+    """Today's cached payload from the master trackable, or None."""
+    from . import trackable_service
+
+    t = trackable_service.get_by_name(db, MASTER_KEY)
+    if t is None:
+        return None
+    today = _local_today(db)
+    entries = trackable_service.entries_for(db, t, start=today, end=today)
+    val = trackable_service.day_value(entries, t)
+    return val if isinstance(val, dict) else None
+
+
+def latest_snapshot(db: Session) -> dict[str, Any] | None:
+    """Newest whoop payload regardless of day — the nudge debouncer's
+    read (the burst may span local midnight)."""
+    from ..db.models import TrackableEntry
+    from . import trackable_service
+
+    t = trackable_service.get_by_name(db, MASTER_KEY)
+    if t is None:
+        return None
+    row = (
+        db.query(TrackableEntry)
+        .filter(TrackableEntry.trackable_id == t.id)
+        .order_by(TrackableEntry.date.desc(), TrackableEntry.created_at.desc())
+        .first()
+    )
+    if row is None or not row.value_json:
+        return None
+    try:
+        val = json.loads(row.value_json)
+    except (TypeError, ValueError):
+        return None
+    return val if isinstance(val, dict) else None

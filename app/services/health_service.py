@@ -34,7 +34,6 @@ from sqlalchemy.orm import Session
 from ..db.models import (
     Memory, ToolCall, EvalSegment, EvalMessageRating, Message,
     Note, Todo, HabitEntry, ClaudeUsageTurn, OAuthToken, TrackedRepo,
-    WhoopSnapshot,
 )
 
 
@@ -461,14 +460,22 @@ def _connectors_health(db: Session) -> dict[str, Any]:
         whoop_score = 50.0  # not configured = neutral, not penalized
         whoop_detail = "not connected"
     else:
-        last_snap = (
-            db.query(WhoopSnapshot)
-            .order_by(WhoopSnapshot.date.desc())
-            .first()
-        )
-        if last_snap and (datetime.utcnow().date() - last_snap.date).days <= 2:
+        # Slice 5: whoop data lives on the `whoop` master Trackable now.
+        from ..db.models import TrackableEntry
+        from . import trackable_service
+        last_date = None
+        wt = trackable_service.get_by_name(db, "whoop")
+        if wt is not None:
+            last_entry = (
+                db.query(TrackableEntry.date)
+                .filter(TrackableEntry.trackable_id == wt.id)
+                .order_by(TrackableEntry.date.desc())
+                .first()
+            )
+            last_date = last_entry[0] if last_entry else None
+        if last_date and (datetime.utcnow().date() - last_date).days <= 2:
             whoop_score = 100.0
-            whoop_detail = f"last pull {last_snap.date.isoformat()}"
+            whoop_detail = f"last pull {last_date.isoformat()}"
         else:
             whoop_score = 40.0
             whoop_detail = "stale (>2d since last pull)"

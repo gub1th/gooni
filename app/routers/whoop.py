@@ -14,20 +14,24 @@ router = APIRouter()
 def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
     """Return today's recovery + strain + sleep snapshot.
 
-    Cached daily in `whoop_snapshots` (one row per date). Pass `?refresh=1`
-    to force a live API hit; otherwise we serve the cached row if it was
-    updated within the last 2 hours, else refetch.
+    Slice 5: cached as the `whoop` json master Trackable entry (one per
+    local day). Pass `?refresh=1` to force a live API hit; otherwise we
+    serve the cached payload if it was written within the last 2 hours,
+    else refetch. Response shape unchanged from the WhoopSnapshot era.
     """
     from datetime import datetime as _dt, timedelta as _td
-    from ..db.models import WhoopSnapshot
-    # `today` keyed on Daniel's local TZ so the snapshot maps to his lived
-    # day, not UTC. Whoop service mirrors this in `_local_today`.
-    today = whoop._local_today(db)
-    row = db.query(WhoopSnapshot).filter(WhoopSnapshot.date == today).first()
+
+    doc = whoop.get_today(db)
+    updated_at = None
+    if doc:
+        try:
+            updated_at = _dt.fromisoformat(doc.get("updated_at") or "")
+        except (ValueError, TypeError):
+            updated_at = None
     stale = (
-        row is None
-        or row.updated_at is None
-        or (_dt.utcnow() - row.updated_at) > _td(hours=2)
+        doc is None
+        or updated_at is None
+        or (_dt.utcnow() - updated_at) > _td(hours=2)
     )
     if refresh or stale:
         try:
@@ -36,30 +40,23 @@ def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
             raise HTTPException(status_code=502, detail=f"Whoop fetch failed: {e}")
         if payload is None:
             raise HTTPException(status_code=401, detail="Whoop not connected")
-        row = whoop.upsert_today_snapshot(db, payload)
+        doc = whoop.upsert_today_snapshot(db, payload)
+
+    doc = doc or {}
     return {
-        "date": row.date.isoformat() if row and row.date else None,
-        "recovery_score": row.recovery_score if row else None,
-        "hrv_rmssd_ms": row.hrv_rmssd_ms if row else None,
-        "resting_hr": row.resting_hr if row else None,
-        "strain": row.strain if row else None,
-        "sleep_minutes": row.sleep_minutes if row else None,
-        "sleep_performance_pct": row.sleep_performance_pct if row else None,
-        "sleep_start_at": (
-            row.sleep_start_at.isoformat()
-            if row and row.sleep_start_at else None
-        ),
-        "sleep_end_at": (
-            row.sleep_end_at.isoformat()
-            if row and row.sleep_end_at else None
-        ),
-        "sleep_efficiency_pct": row.sleep_efficiency_pct if row else None,
-        "sleep_disturbance_count": row.sleep_disturbance_count if row else None,
-        "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
-        "source_updated_at": (
-            row.source_updated_at.isoformat()
-            if row and row.source_updated_at else None
-        ),
+        "date": whoop._local_today(db).isoformat(),
+        "recovery_score": doc.get("recovery_score"),
+        "hrv_rmssd_ms": doc.get("hrv_rmssd_ms"),
+        "resting_hr": doc.get("resting_hr"),
+        "strain": doc.get("strain"),
+        "sleep_minutes": doc.get("sleep_minutes"),
+        "sleep_performance_pct": doc.get("sleep_performance_pct"),
+        "sleep_start_at": doc.get("sleep_start_at"),
+        "sleep_end_at": doc.get("sleep_end_at"),
+        "sleep_efficiency_pct": doc.get("sleep_efficiency_pct"),
+        "sleep_disturbance_count": doc.get("sleep_disturbance_count"),
+        "updated_at": doc.get("updated_at"),
+        "source_updated_at": doc.get("source_updated_at"),
     }
 
 
