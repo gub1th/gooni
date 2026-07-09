@@ -13,13 +13,11 @@ from ...llm.client import llm_client
 from .prompts import _RECONCILE_PROMPT, _SIGNALS_PROMPT
 from .parsers import _parse_json_object
 from .normalizers import (
-    _normalize_done_signals,
     _normalize_features,
     _normalize_fitness,
     _normalize_memories,
-    _normalize_promises,
+    _normalize_promise_signals,
     _normalize_reply_intent,
-    _normalize_todos,
     _normalize_tone,
 )
 
@@ -86,7 +84,7 @@ def extract_signals(
       {
         "tone_corrections": [{"rule": str}],
         "feature_requests": [{"title": str, "why": str}],
-        "soft_promises":    [{"utterance": str, ...}],
+        "promises":         [{"kind", "utterance", "cadence", ...}],
         "memories":         [memory candidate dicts],
       }
 
@@ -109,9 +107,7 @@ def extract_signals(
     empty = {
         "tone_corrections": [],
         "feature_requests": [],
-        "soft_promises": [],
-        "todos": [],
-        "done_signals": [],
+        "promises": [],
         "fitness_logs": [],
         "reply_intent": "answer",
         "memories": [],
@@ -166,9 +162,7 @@ def extract_signals(
     return {
         "tone_corrections": _normalize_tone(parsed.get("tone_corrections")),
         "feature_requests": _normalize_features(parsed.get("feature_requests")),
-        "soft_promises":    _normalize_promises(parsed.get("soft_promises")),
-        "todos":            _normalize_todos(parsed.get("todos")),
-        "done_signals":     _normalize_done_signals(parsed.get("done_signals")),
+        "promises":         _normalize_promise_signals(parsed.get("promises"), today_d),
         "fitness_logs":     fitness,
         "reply_intent":     _normalize_reply_intent(parsed.get("reply_intent")),
         "memories":         _normalize_memories(parsed.get("memories")),

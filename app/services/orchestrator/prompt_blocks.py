@@ -86,13 +86,17 @@ def _summarize_signals(signals: dict, memory_candidates: list) -> dict:
             {"title": f["title"], "why": f.get("why", "")}
             for f in signals.get("feature_requests", [])
         ],
-        "soft_promises": [
-            {"utterance": p["utterance"], "time_hint": p.get("time_hint")}
-            for p in signals.get("soft_promises", [])
-        ],
-        "todos": [
-            {"text": t["text"], "due_hint": t.get("due_hint")}
-            for t in signals.get("todos", [])
+        "promises": [
+            {
+                "kind": p.get("kind", "create"),
+                "utterance": p.get("utterance"),
+                "match": p.get("match"),
+                "cadence": p.get("cadence"),
+                "cadence_target": p.get("cadence_target"),
+                "due_date": p.get("due_date"),
+                "due_hint": p.get("due_hint"),
+            }
+            for p in signals.get("promises", [])
         ],
         "reply_intent": signals.get("reply_intent", "answer"),
         "memory_count": len(memory_candidates),
@@ -124,14 +128,9 @@ def _build_ack(routed: "RouterResult") -> str | None:
     tone_rules = routed.tone_rules
     captured_features = routed.captured_features
     captured_promises = routed.captured_promises
-    captured_todos = routed.captured_todos
-    killed_todos = routed.killed_todos
-    completed_todos = routed.completed_todos
-    merged_todos = routed.merged_todos
-    failed_todo_actions = routed.failed_todo_actions
-    edited_todos = routed.edited_todos
-    implicit_done_todos = routed.implicit_done_todos
-    disambiguation_needed = routed.disambiguation_needed
+    completed_promises = routed.completed_promises
+    broken_promises = routed.broken_promises
+    failed_promise_actions = routed.failed_promise_actions
     captured_metrics = routed.captured_metrics
 
     def _trim(s: str, n: int = 60) -> str:
@@ -184,11 +183,27 @@ def _build_ack(routed: "RouterResult") -> str | None:
                 return ""
             return " — how often counts? say it specific or this stays mush."
 
+        def _cadence_tail(prom: dict) -> str:
+            """Recurring shapes read back their cadence so a wrong parse
+            is visible in the ack ("gym 6x/wk" misread as daily should
+            jump out)."""
+            cad = prom.get("cadence") or "once"
+            if cad == "daily":
+                return " — daily"
+            if cad == "n_per_week":
+                n = prom.get("cadence_target")
+                return f" — {n}x/wk" if n else " — weekly target"
+            if cad == "permanent_do":
+                return " — standing rule"
+            if cad == "permanent_never":
+                return " — standing no"
+            return ""
+
         if len(captured_promises) == 1:
             p = captured_promises[0]
             slip = p.get("slip_count", 0) or 0
             summary = _trim(p.get("summary") or p.get("utterance") or "")
-            tail = _clarifier_tail(p) + _voice_tail(p)
+            tail = _cadence_tail(p) + _clarifier_tail(p) + _voice_tail(p)
             if slip > 0:
                 parts.append(f"tracked, sir — slip #{slip + 1} on \"{summary}\"{tail}")
             else:
@@ -200,191 +215,52 @@ def _build_ack(routed: "RouterResult") -> str | None:
             if vague:
                 phrase += f" ({vague} vague — sharpen or stay mush)"
             parts.append(phrase)
-    # G3.5: filter out spawned children — they'll be rendered alongside
-    # their parent's close phrase below. Bare creates still show here.
-    bare_creates = [t for t in (captured_todos or []) if not t.get("spawned_from_id")]
-    if bare_creates:
-        # G3 accountability tone: if Daniel re-mentioned a todo that already
-        # exists, todo_service.create returned the bumped existing row
-        # instead of inserting a dupe. captured_todos carries mention_count;
-        # at ≥3 we drop the "noted" register and call out the laziness.
-        # This is the whole reason we collect the counter — silence on a
-        # 4th mention is enabling, not helpful.
-        bumped = [t for t in bare_creates if t.get("bumped") and (t.get("mention_count") or 1) >= 3]
-        fresh = [t for t in bare_creates if not (t.get("bumped") and (t.get("mention_count") or 1) >= 3)]
 
-        for t in bumped[:2]:
-            text_q = f"\"{_trim(t.get('text'))}\""
-            count = t.get("mention_count") or 1
-            if count >= 5:
-                parts.append(
-                    f"{text_q} again. that's {count} mentions and it's still open. you're stalling — do it tonight or kill it."
-                )
-            elif count == 4:
-                parts.append(
-                    f"{text_q} — fourth mention. you keep saying this. tonight, or kill the todo."
-                )
-            else:  # count == 3
-                parts.append(
-                    f"{text_q} — third mention. either move on it tonight or kill it. talking about it isn't the work."
-                )
-        if len(bumped) > 2:
-            parts.append(f"+{len(bumped) - 2} more stale repeats")
+    # Ambient-loop v2: chat-side promise lifecycle acks. Verb-led,
+    # text-quoted — Daniel needs to spot wrong cosine matches in the ack;
+    # that's the safety net behind the auto-act pattern.
+    completed_promises = completed_promises or []
+    broken_promises = broken_promises or []
+    failed_promise_actions = failed_promise_actions or []
 
-        if fresh:
-            # Light "second mention" surface for count==2 — neutral, just a
-            # nudge that Gooni's seen this before. Count==1 is the default
-            # fresh-create voice.
-            two_count_idx = next(
-                (i for i, t in enumerate(fresh) if t.get("bumped") and (t.get("mention_count") or 1) == 2),
-                None,
-            )
-            texts = [
-                f"\"{_trim(t.get('text'))}\""
-                + (" (second mention)" if (t.get("bumped") and (t.get("mention_count") or 1) == 2) else "")
-                for t in fresh[:3]
-            ]
-            n = len(fresh)
-            if n == 1:
-                parts.append(f"noted {texts[0]}, sir.")
-            elif n == 2:
-                parts.append(f"noted {texts[0]} and {texts[1]}, sir.")
-            else:
-                parts.append(f"noted all {n}: {', '.join(texts)}, sir.")
-            _ = two_count_idx  # signal kept for traceability; rendering inline above
-
-    # G1.1 destructive-action acks. Verb-led, text-quoted, no opaque
-    # "(+N)" suffix. Daniel needs to spot wrong cosine matches in the
-    # ack — that's the safety net behind the auto-act pattern.
-    killed_todos = killed_todos or []
-    completed_todos = completed_todos or []
-    merged_todos = merged_todos or []
-    failed_todo_actions = failed_todo_actions or []
-    edited_todos = edited_todos or []
-    implicit_done_todos = implicit_done_todos or []
-    disambiguation_needed = disambiguation_needed or []
-
-    if killed_todos:
-        texts = [f"\"{_trim(t.get('text'))}\"" for t in killed_todos[:3]]
-        n = len(killed_todos)
-        if n == 1:
-            parts.append(f"killed {texts[0]}, sir.")
-        elif n == 2:
-            parts.append(f"killed {texts[0]} and {texts[1]}, sir.")
-        else:
-            parts.append(f"killed {n}, sir: {', '.join(texts)}")
-    if completed_todos:
-        # G3.5: rendering varies by whether closure_note + spawned[] present.
-        # Per Surface F spec: "closed X, sir. outcome logged. spawned: A, B."
-        # Multiple closes condense, but a SINGLE close with outcome/spawn
-        # gets the richer per-line phrasing.
-        if len(completed_todos) == 1:
-            ct = completed_todos[0]
-            text = _trim(ct.get("text"))
-            outcome_present = bool((ct.get("closure_note") or "").strip())
-            # Find any spawned_todos in captured_todos that point at this close
-            close_id = ct.get("todo_id")
-            spawned_for_this = [
-                t for t in (captured_todos or [])
-                if t.get("spawned_from_id") == close_id
-            ]
-            # Slice 5: warmer close voice + Todo #id grounding on each
-            # spawn. The id stays internal (PERSONA prompt forbids reciting
-            # raw ids in user replies), but the ack composer surfaces it so
-            # frontend chat-chip rendering + downstream LLM reasoning have
-            # a verifiable anchor. ", sir" honorific anchors the line to
-            # Alfred voice. Comma-joined intentionally — newlines would
-            # split into separate segments under _MAX_SEGMENTS=2 on bots.
-            phrase = f"closed \"{text}\", sir"
-            if outcome_present:
-                phrase += ". outcome logged"
-            if spawned_for_this:
-                # id stays internal — surfaces via just_extracted_block for
-                # LLM grounding, NEVER in user-facing ack. Daniel called the
-                # "(Todo #N)" leak jira-bot syntax 2026-05-22.
-                spawn_texts = ", ".join(
-                    f"\"{_trim(t.get('text'))}\"" for t in spawned_for_this[:3]
-                )
-                phrase += f". spawned {spawn_texts}"
-            parts.append(phrase)
-        else:
-            texts = [f"\"{_trim(t.get('text'))}\"" for t in completed_todos[:3]]
-            n = len(completed_todos)
-            if n == 2:
-                parts.append(f"closed {texts[0]} and {texts[1]}, sir.")
-            else:
-                parts.append(f"closed {n}, sir: {', '.join(texts)}")
-    if merged_todos:
-        # Render each merge as `"from" → "into"` so the direction is clear
-        # (which text was kept vs absorbed).
-        pieces = [
-            f"\"{_trim(m.get('from_text'))}\" → \"{_trim(m.get('into_text'))}\""
-            for m in merged_todos[:3]
+    if completed_promises:
+        texts = [
+            f"\"{_trim(p.get('summary') or p.get('utterance'))}\""
+            for p in completed_promises[:3]
         ]
-        n = len(merged_todos)
+        n = len(completed_promises)
         if n == 1:
-            parts.append(f"merged {pieces[0]}")
+            parts.append(f"closed {texts[0]}, sir.")
+        elif n == 2:
+            parts.append(f"closed {texts[0]} and {texts[1]}, sir.")
         else:
-            parts.append(f"merged {n}: {', '.join(pieces)}")
-    if failed_todo_actions:
-        # Surface no-match failures so wrong-shape extractions don't go
-        # silent. Don't claim Gooni "tried" — be honest about the miss.
-        misses = []
-        for f in failed_todo_actions[:3]:
-            kind = f.get("kind", "")
-            match = _trim(f.get("match", ""))
-            verb = {"delete": "kill", "complete": "close", "merge": "merge", "edit": "edit"}.get(kind, kind)
-            misses.append(f"couldn't {verb} \"{match}\" — no match")
-        parts.append("; ".join(misses))
-
-    # G3.9 edit-action ack. Each edit carries a `changes` list of
-    # human-readable diffs — render verb-led + comma-joined.
-    for ed in edited_todos[:3]:
-        text = _trim(ed.get("text"))
-        changes = ed.get("changes") or []
-        if not changes:
-            continue
-        # First change leads the phrase; rest comma-join in parens.
-        head = changes[0]
-        if len(changes) > 1:
-            extra = ", ".join(changes[1:])
-            parts.append(f"\"{text}\": {head} ({extra})")
+            parts.append(f"closed {n}, sir: {', '.join(texts)}")
+    if broken_promises:
+        texts = [
+            f"\"{_trim(p.get('summary') or p.get('utterance'))}\""
+            for p in broken_promises[:3]
+        ]
+        n = len(broken_promises)
+        if n == 1:
+            parts.append(f"scratched {texts[0]}, sir.")
         else:
-            parts.append(f"\"{text}\": {head}")
-    if len(edited_todos) > 3:
-        parts.append(f"+{len(edited_todos) - 3} more edits")
-
-    # G3.9 implicit-done ack. Daniel said "just called papi" → Gooni
-    # closed the matching open todo. Surface what + why + undo hint.
-    if implicit_done_todos:
-        if len(implicit_done_todos) == 1:
-            done = implicit_done_todos[0]
-            text = _trim(done.get("text"))
-            phrase = _trim(done.get("phrase", ""), 80)
-            parts.append(f"closed \"{text}\". you said \"{phrase}\". undo if wrong.")
-        else:
-            n = len(implicit_done_todos)
-            texts = [f"\"{_trim(d.get('text'))}\"" for d in implicit_done_todos[:3]]
-            parts.append(f"closed {n} from what you said: {', '.join(texts)}. undo if wrong.")
-
-    # G3.9 disambiguation ack. Cosine returned 2+ candidates within
-    # 0.05 of each other — refuse to execute, ask Daniel to clarify.
-    # One wrong auto-action erodes trust faster than ten correct ones.
-    for amb in disambiguation_needed[:2]:
-        action = amb.get("action", "")
-        match = _trim(amb.get("match", ""))
-        cands = amb.get("candidates") or []
-        verb = {
-            "delete": "kill", "complete": "close", "edit": "edit",
-            "done_signal": "close (you said done)",
-            "edit_parent_link": "link as parent",
-        }.get(action, action)
+            parts.append(f"scratched {n}, sir: {', '.join(texts)}")
+    for f in failed_promise_actions[:3]:
+        kind = f.get("kind", "")
+        match = _trim(f.get("match", ""))
+        cands = f.get("candidates") or []
+        verb = {"complete": "close", "break": "scratch"}.get(kind, kind)
         if len(cands) >= 2:
-            cand_texts = " or ".join(f"\"{_trim(c.get('text'))}\"" for c in cands[:2])
-            scores = " / ".join(f"{c.get('score'):.2f}" for c in cands[:2])
-            parts.append(
-                f"which one to {verb} for \"{match}\"? {cand_texts} (both ~{scores})"
+            # Ambiguous — refuse to execute, ask. One wrong auto-action
+            # erodes trust faster than ten correct ones.
+            cand_texts = " or ".join(
+                f"\"{_trim(c.get('text'))}\"" for c in cands[:2]
             )
+            parts.append(f"which one to {verb} for \"{match}\"? {cand_texts}")
+        else:
+            # Surface no-match misses so wrong-shape extractions don't go
+            # silent. Don't claim Gooni "tried" — be honest about the miss.
+            parts.append(f"couldn't {verb} \"{match}\" — no match")
 
     # PR-1 fitness ack. Diet logs render the running daily total (Daniel
     # wants to know where he stands — the ONE place a number belongs in the
@@ -861,14 +737,9 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
     tone_rules = routed.tone_rules
     captured_features = routed.captured_features
     captured_promises = routed.captured_promises
-    captured_todos = routed.captured_todos
-    killed_todos = routed.killed_todos
-    completed_todos = routed.completed_todos
-    merged_todos = routed.merged_todos
-    failed_todo_actions = routed.failed_todo_actions
-    edited_todos = routed.edited_todos
-    implicit_done_todos = routed.implicit_done_todos
-    disambiguation_needed = routed.disambiguation_needed
+    completed_promises = routed.completed_promises
+    broken_promises = routed.broken_promises
+    failed_promise_actions = routed.failed_promise_actions
     captured_metrics = routed.captured_metrics
 
     lines: list[str] = []
@@ -905,108 +776,52 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
             sug = (voice.get("suggestion") or "").strip()
             if sug:
                 voice_tail = f" — voice-of-reason flag '{flag}': {sug}"
+        # Ambient-loop v2: cadence is part of the parse — surface it so
+        # the LLM can reference the recurrence shape without guessing.
+        cad = p.get("cadence") or "once"
+        cad_tail = ""
+        if cad == "n_per_week":
+            cad_tail = f" [cadence: {p.get('cadence_target') or '?'}x/week]"
+        elif cad != "once":
+            cad_tail = f" [cadence: {cad}]"
         if pid is not None:
             lines.append(
-                f"- Promise #{pid} {verb}: \"{summary}\"{slip_tail}{voice_tail}"
+                f"- Promise #{pid} {verb}: \"{summary}\"{cad_tail}{slip_tail}{voice_tail}"
             )
         else:
-            lines.append(f"- Promise {verb}: \"{summary}\"{slip_tail}{voice_tail}")
-    for t in captured_todos[:3]:
-        text = (t.get("text") or "").strip()
-        if len(text) > 60:
-            text = text[:60].rstrip() + "…"
-        tid = t.get("todo_id")
-        spawn_parent = t.get("spawned_from_id")
-        if spawn_parent is not None:
-            # G3.5: a child todo spawned from a close. Surface the lineage
-            # so the LLM understands it's a follow-up, not a fresh chore.
-            parent_text = (t.get("spawned_from_text") or "").strip()
-            if len(parent_text) > 40:
-                parent_text = parent_text[:40].rstrip() + "…"
-            anchor = f"#{tid}" if tid is not None else "?"
-            parent_anchor = f"#{spawn_parent}"
-            lines.append(
-                f"- Todo {anchor} spawned: \"{text}\" "
-                f"(from Todo {parent_anchor} \"{parent_text}\")"
-            )
-        elif tid is not None:
-            lines.append(f"- Todo #{tid} added: \"{text}\"")
-        else:
-            lines.append(f"- Todo added (id unknown): \"{text}\"")
-    # G1.1 destructive todo actions. Each line names the kind+id so the
-    # PERSONA "never claim without id this turn" rule has the anchor to
-    # cite. Reply must NOT recite the id number — speak plainly.
-    for t in (killed_todos or [])[:3]:
-        text = (t.get("text") or "").strip()
-        if len(text) > 60:
-            text = text[:60].rstrip() + "…"
-        tid = t.get("todo_id")
-        if tid is not None:
-            lines.append(f"- Todo #{tid} killed: \"{text}\" (24h undo window)")
-        else:
-            lines.append(f"- Todo killed: \"{text}\"")
-    for t in (completed_todos or [])[:3]:
-        text = (t.get("text") or "").strip()
-        if len(text) > 60:
-            text = text[:60].rstrip() + "…"
-        tid = t.get("todo_id")
-        # G3.5: closure_note on the completed todo. Surface verbatim so the
-        # LLM has the outcome context the user just shared — useful for any
-        # follow-up question or summary they ask later in the turn.
-        outcome = (t.get("closure_note") or "").strip()
-        outcome_tail = f" · outcome: \"{outcome[:80]}\"" if outcome else ""
-        if tid is not None:
-            lines.append(f"- Todo #{tid} completed: \"{text}\"{outcome_tail}")
-        else:
-            lines.append(f"- Todo completed: \"{text}\"{outcome_tail}")
-    for m in (merged_todos or [])[:3]:
-        into_text = (m.get("into_text") or "").strip()
-        from_text = (m.get("from_text") or "").strip()
-        into_id = m.get("into_id")
-        if into_id is not None:
-            lines.append(
-                f"- Todos merged into #{into_id}: \"{from_text}\" → \"{into_text}\""
-            )
-        else:
-            lines.append(f"- Todos merged: \"{from_text}\" → \"{into_text}\"")
-    for f in (failed_todo_actions or [])[:3]:
+            lines.append(f"- Promise {verb}: \"{summary}\"{cad_tail}{slip_tail}{voice_tail}")
+    # Ambient-loop v2 lifecycle lines. Each names kind+id so the PERSONA
+    # "never claim without id this turn" rule has the anchor to cite.
+    # Reply must NOT recite the id number — speak plainly.
+    for p in (completed_promises or [])[:3]:
+        summary = (p.get("summary") or p.get("utterance") or "").strip()
+        if len(summary) > 60:
+            summary = summary[:60].rstrip() + "…"
+        lines.append(f"- Promise #{p.get('id')} KEPT (closed): \"{summary}\"")
+    for p in (broken_promises or [])[:3]:
+        summary = (p.get("summary") or p.get("utterance") or "").strip()
+        if len(summary) > 60:
+            summary = summary[:60].rstrip() + "…"
+        lines.append(f"- Promise #{p.get('id')} BROKEN (scratched): \"{summary}\"")
+    for f in (failed_promise_actions or [])[:3]:
         kind = f.get("kind", "")
         match = (f.get("match") or "").strip()
-        verb = {"delete": "kill", "complete": "close", "merge": "merge", "edit": "edit"}.get(
-            kind, kind
-        )
-        lines.append(
-            f"- Todo {verb} ATTEMPTED but NO MATCH for: \"{match}\". Acknowledge the miss honestly."
-        )
-    # G3.9 edit-action surfacing.
-    for ed in (edited_todos or [])[:3]:
-        text = (ed.get("text") or "").strip()
-        tid = ed.get("todo_id")
-        changes = ", ".join(ed.get("changes") or [])
-        lines.append(
-            f"- Todo #{tid} edited: \"{text}\" — {changes}"
-        )
-    # G3.9 implicit-done surfacing.
-    for d in (implicit_done_todos or [])[:3]:
-        text = (d.get("text") or "").strip()
-        tid = d.get("todo_id")
-        phrase = (d.get("phrase") or "").strip()
-        lines.append(
-            f"- Todo #{tid} CLOSED implicitly (\"{phrase}\"): \"{text}\". Surface that you closed it + offer undo."
-        )
-    # G3.9 disambiguation surfacing — tell LLM to surface the candidate
-    # list as a clarifying question, NOT to pick one.
-    for amb in (disambiguation_needed or [])[:2]:
-        match = (amb.get("match") or "").strip()
-        action = amb.get("action", "")
-        cands = amb.get("candidates") or []
-        cand_str = " | ".join(
-            f"\"{c.get('text')}\" (#{c.get('id')}, {c.get('score'):.2f})"
-            for c in cands[:3]
-        )
-        lines.append(
-            f"- AMBIGUOUS {action} for \"{match}\" — candidates within 0.05: {cand_str}. ASK Daniel which one before doing anything."
-        )
+        cands = f.get("candidates") or []
+        verb = {"complete": "close", "break": "scratch"}.get(kind, kind)
+        if len(cands) >= 2:
+            cand_str = " | ".join(
+                f"\"{c.get('text')}\" (#{c.get('id')}, {c.get('score'):.2f})"
+                for c in cands[:3]
+            )
+            lines.append(
+                f"- AMBIGUOUS promise {verb} for \"{match}\" — candidates: "
+                f"{cand_str}. ASK Daniel which one before doing anything."
+            )
+        else:
+            lines.append(
+                f"- Promise {verb} ATTEMPTED but NO MATCH for: \"{match}\". "
+                "Acknowledge the miss honestly."
+            )
     # PR-1 fitness metric surfacing. The ack stub already told Daniel the
     # running total — these lines just license the LLM to reference it
     # without re-announcing the log.

@@ -41,7 +41,10 @@ from typing import Any
 # tightened to shared WRITE_CLAIM_RE, G4 gate respects reply_intent=answer,
 # master-rule #6 names real tools, add_to_list todo-misroute line fixed,
 # extract max_tokens 500→1500, MIN_QUERY_LEN read gate.
-PROMPT_VERSION = "v10"
+# v11 (2026-07-08 ambient-loop v2 Slice 1): unified `promises` emit replaces
+# soft_promises/todos/done_signals; Promise gains cadence/importance/parent;
+# todos intent handler deleted; chat-side promise complete/break added.
+PROMPT_VERSION = "v11"
 
 
 class TraceBuilder:
@@ -158,19 +161,15 @@ class TraceBuilder:
         tone = signals.get("tone_corrections") or []
         features = signals.get("feature_requests") or []
         memories = signals.get("memories") or []
-        promises = signals.get("soft_promises") or []
-        todos = signals.get("todos") or []
+        promises = signals.get("promises") or []
         fitness = signals.get("fitness_logs") or []
-        done = signals.get("done_signals") or []
         reply_intent = signals.get("reply_intent")
         counts = {
             "tone": len(tone),
             "feature": len(features),
             "memory": len(memories),
             "promise": len(promises),
-            "todo": len(todos),
             "fitness": len(fitness),
-            "done": len(done),
         }
         parts = [f"{n} {name}" for name, n in counts.items() if n]
         label = "Extracted signals: " + (", ".join(parts) if parts else "none")
@@ -182,10 +181,8 @@ class TraceBuilder:
                 "tone_corrections": tone,
                 "feature_requests": features,
                 "memory_candidates": memories,
-                "soft_promises": promises,
-                "todos": todos,
+                "promises": promises,
                 "fitness_logs": fitness,
-                "done_signals": done,
                 "reply_intent": reply_intent,
             },
             meta={f"{name}_count": n for name, n in counts.items()},

@@ -541,8 +541,8 @@ class TodoService:
                 continue
             due_at = spec.get("due_date")
             if due_at is None:
-                from ..services.intent_handlers.todos import _parse_due
-                due_at = _parse_due(spec.get("due_hint"), db=db)
+                from ..common import parse_due_hint
+                due_at = parse_due_hint(spec.get("due_hint"), db=db)
             child = self.create(
                 db,
                 text=text,

@@ -54,38 +54,17 @@ class RouterResult:
     # hallucination layer for the "tracked without id" failure mode.
     captured_features: list[dict] = field(default_factory=list)
     tone_rules: list[str] = field(default_factory=list)
+    # Serialized Promise rows created this turn (kind=create).
     captured_promises: list[dict] = field(default_factory=list)
-    # Each entry: {"text": str, "todo_id": int}. Mirrors captured_features
-    # so the ack helper can render with real Todo ids.
-    captured_todos: list[dict] = field(default_factory=list)
-    # G1.1 destructive todo action results — populated by router-level
-    # dispatch when the extractor emits kind=delete | complete | merge.
-    # Each entry mirrors captured_todos {"text", "todo_id"} except merge
-    # which carries both ids. Ack composer renders these separately.
-    killed_todos: list[dict] = field(default_factory=list)
-    completed_todos: list[dict] = field(default_factory=list)
-    # Merge entries: {"into_text", "into_id", "from_text", "from_id"}.
-    merged_todos: list[dict] = field(default_factory=list)
-    # Observability: destructive actions where the extractor emitted a
-    # match but the router couldn't find a matching open todo. Logged to
-    # the trace + surfaced in ack so Daniel can spot extraction errors.
-    failed_todo_actions: list[dict] = field(default_factory=list)
-    # G3.9 edit-action results — populated by router-level dispatch when
-    # the extractor emits kind=edit. Each entry:
-    #   {"text": str, "todo_id": int, "changes": [str], "from": dict}
-    # changes = human-readable list of what changed ("due → friday",
-    # "primary", "linked-parent: X"). from = pre-edit snapshot for ack.
-    edited_todos: list[dict] = field(default_factory=list)
-    # G3.9 implicit-done results from `done_signals` extraction. Each:
-    #   {"text": str, "todo_id": int, "phrase": str}
-    implicit_done_todos: list[dict] = field(default_factory=list)
-    # G3.9 disambiguation queue — when cosine match returns ≥2 candidates
-    # within 0.05 score gap, the handler doesn't execute. Ack composer
-    # surfaces a "which one — A or B?" question; Daniel's next turn
-    # picks the right one with more specific text.
-    # Each entry: {"action": "delete"|"complete"|"edit"|"done_signal",
-    #              "match": str, "candidates": [{"id", "text", "score"}]}
-    disambiguation_needed: list[dict] = field(default_factory=list)
+    # Ambient-loop v2: chat-side promise lifecycle results. Serialized
+    # Promise rows flipped kept (kind=complete) / broken (kind=break).
+    completed_promises: list[dict] = field(default_factory=list)
+    broken_promises: list[dict] = field(default_factory=list)
+    # complete/break emits whose match found nothing (candidates empty)
+    # or was ambiguous (top-2 within 0.05 — candidates carries both so
+    # the ack can ask "which one?"). Each:
+    #   {"kind": "complete"|"break", "match": str, "candidates": [...]}
+    failed_promise_actions: list[dict] = field(default_factory=list)
     # PR-1 fitness pipeline — DailyMetric rows logged this turn. Each entry:
     #   {"log_type": str, "metric_type": str | None, "value": float | None,
     #    "unit": str | None, "running_calories": float, "running_protein": float,
@@ -111,13 +90,9 @@ class RouterResult:
             self.captured_features
             or self.tone_rules
             or self.captured_promises
-            or self.captured_todos
+            or self.completed_promises
+            or self.broken_promises
             or self.captured_metrics
-            or self.completed_todos
-            or self.killed_todos
-            or self.merged_todos
-            or self.edited_todos
-            or self.implicit_done_todos
         )
 
 
@@ -125,7 +100,7 @@ def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
     """Fan out signals to per-type handlers. Each handler is wrapped so
     a single handler failure doesn't kill the rest of the routing.
     """
-    from .intent_handlers import features, fitness, memories, promises, todos, tones
+    from .intent_handlers import features, fitness, memories, promises, tones
 
     result = RouterResult()
     # Pass through reply_intent (phase 5) — extractor classifies, caller
@@ -149,25 +124,12 @@ def dispatch(signals: dict, ctx: RouterContext) -> RouterResult:
     except Exception as e:
         print(f"[intent_router] feature handler error: {e}")
 
+    # Ambient-loop v2: ONE actionable emit. create/complete/break all
+    # live on the unified `promises` signal list.
     try:
-        promises.handle(signals.get("soft_promises") or [], ctx, result)
+        promises.handle(signals.get("promises") or [], ctx, result)
     except Exception as e:
         print(f"[intent_router] promise handler error: {e}")
-
-    try:
-        todos.handle(signals.get("todos") or [], ctx, result)
-    except Exception as e:
-        print(f"[intent_router] todo handler error: {e}")
-
-    # G3.9 implicit-done: "just called papi" auto-closes the matching todo
-    # at ≥0.85 cosine. Lives on its own signal list (done_signals) so the
-    # extractor can emit it independently of the explicit todos[] actions.
-    try:
-        todos.handle_done_signals(
-            signals.get("done_signals") or [], ctx, result
-        )
-    except Exception as e:
-        print(f"[intent_router] done_signals handler error: {e}")
 
     # PR-1: fitness logs → DailyMetric rows + running-total stamp. Real-time
     # (not batched) — Daniel wants the "1,165 cal so far" ack instantly.

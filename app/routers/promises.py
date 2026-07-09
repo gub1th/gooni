@@ -55,15 +55,29 @@ def create_promise(body: dict, db: Session = Depends(get_db)):
     """Manually add a promise from the dashboard drawer. Promises usually
     land via chat utterances; this is the direct-entry path. Runs the same
     `promise_service.create` pipeline (complexity classify, embed, closest-
-    focus `supports` edge, recurring-shape habit auto-spawn) minus the
-    source-message `utters` edge. Lands `active` per G3.1.
+    focus `supports` edge) minus the source-message `utters` edge.
+    Optional v2 fields: cadence, cadence_target, is_important,
+    parent_promise_id.
     """
     from ..services import promise_service
 
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text required")
-    p = promise_service.create(db, utterance=text)
+    cadence = body.get("cadence") or "once"
+    if cadence not in promise_service.VALID_CADENCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"cadence must be one of {promise_service.VALID_CADENCES}",
+        )
+    p = promise_service.create(
+        db,
+        utterance=text,
+        cadence=cadence,
+        cadence_target=body.get("cadence_target"),
+        is_important=bool(body.get("is_important")),
+        parent_promise_id=body.get("parent_promise_id"),
+    )
     return _serialize_promise(p)
 
 
@@ -155,31 +169,47 @@ def promise_integrity_score(db: Session = Depends(get_db)):
 
 @router.patch("/promises/{promise_id}")
 def patch_promise(promise_id: int, body: dict, db: Session = Depends(get_db)):
-    """Edit a promise. Three independent, optional fields:
+    """Edit a promise. Independent, optional fields:
 
       - `state`: active | kept | broken (G3.1 transition — same
         idempotency + resolved_at bookkeeping as `promise_service.transition`).
       - `text`: rewrites the display `summary` (utterance kept for provenance).
       - `due`: ISO datetime, or `""`/`null` to clear the deadline.
+      - `is_important`: bool — overlay importance star.
+      - `cadence` (+ optional `cadence_target`): recurrence shape.
 
-    Send any subset. text/due are applied first, then the state
+    Send any subset. Non-state edits are applied first, then the state
     transition, so the returned row reflects all edits in one round-trip.
-    Lock-in is gone — habit auto-spawn fires at promise create.
     """
     from ..services import promise_service
 
     has_text = "text" in body
     has_due = "due" in body
     has_state = "state" in body
-    if not (has_text or has_due or has_state):
+    has_important = "is_important" in body
+    has_cadence = "cadence" in body
+    has_target = "cadence_target" in body
+    if not (has_text or has_due or has_state or has_important or has_cadence or has_target):
         raise HTTPException(status_code=400, detail="nothing to update")
 
-    if has_text or has_due:
+    if has_cadence and body.get("cadence") not in promise_service.VALID_CADENCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"cadence must be one of {promise_service.VALID_CADENCES}",
+        )
+
+    if has_text or has_due or has_important or has_cadence or has_target:
         kwargs: dict = {}
         if has_text:
             kwargs["text"] = body.get("text") or ""
         if has_due:
             kwargs["inferred_due"] = _parse_optional_due(body.get("due"))
+        if has_important:
+            kwargs["is_important"] = bool(body.get("is_important"))
+        if has_cadence:
+            kwargs["cadence"] = body.get("cadence")
+        if has_target:
+            kwargs["cadence_target"] = body.get("cadence_target")
         p = promise_service.update(db, promise_id, **kwargs)
         if p is None:
             raise HTTPException(status_code=404, detail="Promise not found")

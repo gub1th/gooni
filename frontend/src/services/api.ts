@@ -2403,11 +2403,24 @@ export async function uploadImage(file: File): Promise<ImageUploadResult> {
 // three. Keep this in sync with promise_service.transition.
 export type PromiseState = "active" | "kept" | "broken";
 
+// Ambient-loop v2: one primitive expresses one-shot todos AND recurring
+// habits AND standing rules. Keep in sync with promise_service.VALID_CADENCES.
+export type PromiseCadence =
+  | "once"
+  | "daily"
+  | "n_per_week"
+  | "permanent_do"
+  | "permanent_never";
+
 export interface ApiPromise {
   id: number;
   utterance: string;
   summary: string | null;
   state: PromiseState;
+  cadence: PromiseCadence;
+  cadence_target: number | null;
+  is_important: boolean;
+  parent_promise_id: number | null;
   inferred_due: string | null;
   slip_count: number;
   resolved_at: string | null;
@@ -2430,12 +2443,20 @@ export async function patchPromiseState(id: number, state: PromiseState): Promis
   return patchPromise(id, { state });
 }
 
-// Full promise edit — any subset of {text, due, state}. `due` is an ISO
-// datetime string (UTC, "…Z") or null to clear. Backend applies text/due
-// then the state transition in one round-trip (see promises router).
+// Full promise edit — any subset of {text, due, state, is_important,
+// cadence, cadence_target}. `due` is an ISO datetime string (UTC, "…Z")
+// or null to clear. Backend applies non-state edits then the state
+// transition in one round-trip (see promises router).
 export async function patchPromise(
   id: number,
-  patch: { text?: string; due?: string | null; state?: PromiseState },
+  patch: {
+    text?: string;
+    due?: string | null;
+    state?: PromiseState;
+    is_important?: boolean;
+    cadence?: PromiseCadence;
+    cadence_target?: number | null;
+  },
 ): Promise<ApiPromise> {
   const res = await apiFetch(`${BASE}/promises/${id}`, {
     method: "PATCH",

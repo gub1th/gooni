@@ -68,7 +68,7 @@ def _deterministic_unbacked_check(
     draft: str,
     captured_features: list[dict],
     captured_promises: list[dict],
-    captured_todos: list[dict],
+    resolved_promises: list[dict] | None = None,
     captured_metrics: list[dict] | None = None,
     tool_call_ids: list[int],
     db,
@@ -83,11 +83,12 @@ def _deterministic_unbacked_check(
     if not draft:
         return None
     # Router-layer writes back any "tracked"/"logged" claim — Promise /
-    # Feature / Todo / DailyMetric rows landed even when no chat tool
-    # fired. ok regardless of verb. (DailyMetric matters here because the
-    # fitness ack legitimately says "logged" — without this, a fitness
-    # turn on the full-reply path would falsely trip the regen.)
-    if captured_features or captured_promises or captured_todos or captured_metrics:
+    # Feature / DailyMetric rows landed (or a promise resolved kept/broken)
+    # even when no chat tool fired. ok regardless of verb. (DailyMetric
+    # matters here because the fitness ack legitimately says "logged" —
+    # without this, a fitness turn on the full-reply path would falsely
+    # trip the regen.)
+    if captured_features or captured_promises or resolved_promises or captured_metrics:
         return None
     m = _UNBACKED_CLAIM_RE.search(draft)
     if not m:

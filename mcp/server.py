@@ -991,6 +991,88 @@ def list_todos(include_done: bool = False, limit: int = 50) -> str:
 
 
 @mcp.tool()
+def add_promise(
+    text: str,
+    cadence: str = "once",
+    cadence_target: int | None = None,
+    is_important: bool = False,
+    due: str | None = None,
+) -> str:
+    """Add a Promise — Gooni's unified commitment primitive (ambient-loop
+    v2). A Promise expresses one-shot chores (cadence=once), recurring
+    habits (daily / n_per_week), and standing rules (permanent_do /
+    permanent_never) in one shape.
+
+    Args:
+        text: the commitment ("ship the eval", "gym 6x a week", "no weed")
+        cadence: once | daily | n_per_week | permanent_do | permanent_never
+        cadence_target: N for n_per_week (e.g. 6 for six times a week)
+        is_important: flag for the overlay's action-horizon zone
+        due: optional ISO datetime deadline (once-cadence only)
+    """
+    text = (text or "").strip()
+    if not text:
+        return "(text required)"
+    payload: dict = {
+        "text": text,
+        "cadence": cadence,
+        "is_important": is_important,
+    }
+    if cadence_target is not None:
+        payload["cadence_target"] = cadence_target
+    resp = _session.post(f"{BASE_URL}/promises", json=payload, timeout=10)
+    resp.raise_for_status()
+    p = resp.json()
+    if due:
+        patch = _session.patch(
+            f"{BASE_URL}/promises/{p['id']}", json={"due": due}, timeout=10
+        )
+        patch.raise_for_status()
+        p = patch.json()
+    cad = p.get("cadence", "once")
+    if cad == "n_per_week":
+        cad_str = f" [{p.get('cadence_target') or '?'}x/wk]"
+    elif cad != "once":
+        cad_str = f" [{cad}]"
+    else:
+        cad_str = ""
+    return f"promise #{p['id']} tracked: {p.get('summary') or text}{cad_str}"
+
+
+@mcp.tool()
+def read_promises(state: str = "active", limit: int = 30) -> str:
+    """List Daniel's promises (the unified commitment primitive).
+
+    Args:
+        state: active | kept | broken | all (default active)
+        limit: max rows (default 30)
+    """
+    params: dict = {"limit": limit}
+    if state and state != "all":
+        params["state"] = state
+    resp = _session.get(f"{BASE_URL}/promises", params=params, timeout=10)
+    resp.raise_for_status()
+    rows = resp.json()
+    if not rows:
+        return "(no promises)"
+    lines = []
+    for p in rows:
+        cad = p.get("cadence") or "once"
+        cad_tag = ""
+        if cad == "n_per_week":
+            cad_tag = f" [{p.get('cadence_target') or '?'}x/wk]"
+        elif cad != "once":
+            cad_tag = f" [{cad}]"
+        imp = " ★" if p.get("is_important") else ""
+        due = f" (due {p['inferred_due'][:10]})" if p.get("inferred_due") else ""
+        lines.append(
+            f"#{p['id']} [{p.get('state')}] {p.get('summary') or p.get('utterance')}"
+            f"{cad_tag}{imp}{due}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def complete_todo(match: str) -> str:
     """Mark a todo as done by text match.
 
