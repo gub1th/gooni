@@ -36,7 +36,7 @@ _CREATE_TOOL_KINDS: dict[str, str] = {
     "request_feature": "BacklogTicket",
     "create_calendar_event": "CalendarEvent",
 }
-_ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise", "DailyMetric")
+_ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise", "TrackableEntry")
 
 
 def _build_object_kinds_block() -> str:
@@ -835,16 +835,16 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
             ic = m.get("item_calories")
             item_tag = f" [{label}{f' +{ic:g} cal' if ic else ''}]" if label else ""
             lines.append(
-                f"- DailyMetric {verb} (diet){item_tag} — running today: "
+                f"- TrackableEntry {verb} (diet){item_tag} — running today: "
                 f"{cal} cal, {prot}g"
             )
         elif lt == "weight":
-            lines.append(f"- DailyMetric logged: weight {m.get('value')}{m.get('unit') or ''}")
+            lines.append(f"- TrackableEntry logged: weight {m.get('value')}{m.get('unit') or ''}")
         elif lt == "exercise":
             label = m.get("exercise_label") or ""
-            lines.append(f"- DailyMetric logged: exercise \"{label}\" (+ exercise HabitEntry)")
+            lines.append(f"- TrackableEntry logged: exercise \"{label}\" (+ exercise HabitEntry)")
         elif lt == "substance":
-            lines.append(f"- DailyMetric logged: {m.get('substance')} = true today (cut-table boolean)")
+            lines.append(f"- TrackableEntry logged: {m.get('substance')} = true today (cut-table boolean)")
     if not lines:
         return ""
     return (

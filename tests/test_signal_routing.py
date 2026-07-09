@@ -33,7 +33,7 @@ _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 
 from app.db.database import SessionLocal, engine  # noqa: E402
-from app.db.models import Base, DailyMetric, Promise  # noqa: E402
+from app.db.models import Base, Promise, TrackableEntry  # noqa: E402
 from app.services import intent_router  # noqa: E402
 
 Base.metadata.create_all(bind=engine)
@@ -69,13 +69,24 @@ def main() -> int:
     ]
     routed = intent_router.dispatch({**sig, "memories": []},
                                     intent_router.RouterContext(db=db))
-    n_metrics = db.query(DailyMetric).count()
+    n_metrics = db.query(TrackableEntry).count()
     if not routed.captured_metrics:
         fails.append("fitness: routed.captured_metrics empty")
     if n_metrics < 3:  # exercise(1) + calories(1) + protein(1)
-        fails.append(f"fitness: expected >=3 DailyMetric rows, got {n_metrics}")
+        fails.append(f"fitness: expected >=3 TrackableEntry rows, got {n_metrics}")
+    # Slice 2 AC: the calorie log lands as a TrackableEntry ON the calorie
+    # Trackable definition, not a free-floating row.
+    from app.services import trackable_service as _ts
+    cal_t = _ts.get_by_name(db, "calories")
+    cal_entries = (
+        db.query(TrackableEntry)
+        .filter(TrackableEntry.trackable_id == (cal_t.id if cal_t else -1))
+        .count()
+    )
+    if not cal_t or cal_entries < 1:
+        fails.append("fitness: no TrackableEntry on the calories Trackable")
     print(f"[fitness] captured_metrics={len(routed.captured_metrics)} "
-          f"DailyMetric_rows={n_metrics}")
+          f"TrackableEntry_rows={n_metrics} cal_entries={cal_entries}")
 
     # ── substance log → boolean cut-table cell (DailyMetric, no Habit) ──
     sig = _empty_signals()
@@ -190,6 +201,31 @@ def main() -> int:
     if not routed.completed_promises:
         fails.append("promise complete: routed.completed_promises empty")
     print(f"[promise d] state={gym and gym.state}")
+
+    # ── trackables: generic primitive (slice 2) ──
+    # JSON-payload trackable accepts an arbitrary schema — no migration,
+    # no validation gate; pivot folds per the definition's agg rule.
+    from datetime import date as _date2
+    from app.services import trackable_service as _ts2
+    sleep = _ts2.create(
+        db, name="sleep quality", kind="json",
+        schema_hint={"score": "int 0-100", "strain": "float"}, source="manual",
+    )
+    _ts2.log_entry(db, sleep, day=_date2.today(),
+                   value_json={"score": 87, "strain": 12.1, "extra": ["loose", "ok"]})
+    piv = _ts2.pivot(db, "sleep quality", days=3)
+    got = piv[0]["value"] if piv else None
+    if not (isinstance(got, dict) and got.get("score") == 87):
+        fails.append(f"trackable json: pivot value wrong: {got}")
+    # additive numeric fold
+    cals = _ts2.get_by_name(db, "calories")
+    _ts2.log_entry(db, cals, day=_date2.today(), value_numeric=300, source="manual")
+    _ts2.log_entry(db, cals, day=_date2.today(), value_numeric=200, source="manual")
+    piv2 = _ts2.pivot(db, cals, days=1)
+    total_today = piv2[0]["value"] if piv2 else None
+    if total_today is None or total_today < 500:
+        fails.append(f"trackable sum-agg: expected >=500, got {total_today}")
+    print(f"[trackable] json_pivot={got} cal_today={total_today}")
 
     db.close()
     os.unlink(_tmp.name)
