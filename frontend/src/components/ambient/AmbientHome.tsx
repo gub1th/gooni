@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FONT } from "../../ui";
-import { WaveMark } from "./WaveMark";
-import { TracedOutline } from "./TracedOutline";
+import { MorphLine, type MorphRect } from "./MorphLine";
 import { LimboCards } from "./LimboCards";
 import { SummonedNav } from "./SummonedNav";
-import { GREEN } from "./wavePath";
 import {
   createConversation,
   dismissMessageGlow,
@@ -14,13 +12,13 @@ import {
   type LogMessage,
 } from "../../services/api";
 
-// Line-art "presence" home. One breathing SVG stroke (WaveMark) is the only
-// resident thing. Everything else is the line reshaping: summoned surfaces
-// trace a rounded-rect outline on (TracedOutline) then fade content in.
-//   • hover center (or "/") → the capture input traces itself out, taller
+// Line-art "presence" home. ONE stroke (MorphLine) is the only resident thing:
+// a tall breathing waveform at rest that BENDS into the capture input's outline
+// when summoned (the line becomes the box), then back. Pending glow-items and
+// the nav are their own summoned strokes over the black.
+//   • hover center (or "/") → the wave morphs into the input box; text fades in
 //   • submit → thought logged (glow runs; reply discarded), green pulse
-//   • pending glow-items surface as traced green cards; count → wave energy
-// Deterministic surfacing; the LLM only parses on capture.
+//   • pending glow-items → traced green cards; count → wave energy (white→green)
 
 const POLL_MS = 15_000;
 
@@ -32,19 +30,35 @@ function energyFor(count: number): number {
   return Math.min(1, 0.14 + count * 0.28);
 }
 
+// px geometry of the morph target (the input box). Centered, a touch above
+// the middle. The wave lives here too, so it collapses into the box in place.
+function computeRect(vw: number, vh: number): MorphRect {
+  const w = Math.min(560, vw * 0.86);
+  return { cx: vw / 2, cy: vh * 0.44, w, h: 96, r: 18 };
+}
+
 export function AmbientHome() {
   const energyRef = useRef(0);
   const activeRef = useRef(0);
 
+  const [vp, setVp] = useState({ w: 1200, h: 800 });
   const [limbo, setLimbo] = useState<LogMessage[]>([]);
-  const [inputShown, setInputShown] = useState(false);
-  const [focused, setFocused] = useState(false);
+  const [boxMode, setBoxMode] = useState(false);
   const [value, setValue] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [flash, setFlash] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const hideTimer = useRef<number | null>(null);
   const flashTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    function onResize() { setVp({ w: window.innerWidth, h: window.innerHeight }); }
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const rect = computeRect(vp.w, vp.h);
 
   const reload = useCallback(async () => {
     try {
@@ -69,7 +83,7 @@ export function AmbientHome() {
       const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
       if (e.key === "/" && !typing) {
         e.preventDefault();
-        revealInput();
+        openBox();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -84,25 +98,25 @@ export function AmbientHome() {
     }
   }
 
-  function revealInput() {
+  function openBox() {
     clearHideTimer();
-    setInputShown(true);
+    setBoxMode(true);
     activeRef.current = 1;
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
   function onHeroEnter() {
     clearHideTimer();
-    setInputShown(true);
+    setBoxMode(true);
     activeRef.current = 1;
   }
 
   function onHeroLeave() {
     if (document.activeElement === inputRef.current) return;
+    if (value.trim()) return; // keep a drafted-but-unfocused thought
     activeRef.current = 0;
-    if (value.trim()) return;
     clearHideTimer();
-    hideTimer.current = window.setTimeout(() => setInputShown(false), 600);
+    hideTimer.current = window.setTimeout(() => setBoxMode(false), 500);
   }
 
   async function capture() {
@@ -111,9 +125,7 @@ export function AmbientHome() {
     setCapturing(true);
     try {
       const conv = await createConversation();
-      // fire the turn; the reply is intentionally discarded — the thought is
-      // logged and the extractor has annotated any glow.
-      await sendConversationMessage(conv.id, text);
+      await sendConversationMessage(conv.id, text); // reply discarded; glow runs
       setValue("");
       setFlash(true);
       energyRef.current = 0.95;
@@ -140,7 +152,7 @@ export function AmbientHome() {
     if (e.key === "Escape") {
       (e.target as HTMLTextAreaElement).blur();
       activeRef.current = 0;
-      if (!value.trim()) setInputShown(false);
+      if (!value.trim()) setBoxMode(false);
     }
   }
 
@@ -155,56 +167,52 @@ export function AmbientHome() {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000", overflow: "hidden", fontFamily: FONT }}>
-      {/* the mark — slightly above center so summoned surfaces have room below */}
-      <div style={{ position: "absolute", left: "50%", top: "43%", transform: "translate(-50%, -50%)", zIndex: 1 }}>
-        <WaveMark energyRef={energyRef} activeRef={activeRef} />
-      </div>
+      {/* the one line — waveform ⇄ input box */}
+      <MorphLine boxMode={boxMode} rect={rect} energyRef={energyRef} activeRef={activeRef} />
 
       <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
       <SummonedNav />
 
-      {/* hero zone under the mark — hover wakes the capture input */}
+      {/* hero zone around the mark — hover wakes the box; generous target */}
       <div
         onMouseEnter={onHeroEnter}
         onMouseLeave={onHeroLeave}
         style={{
-          position: "absolute", left: "50%", top: "58%", transform: "translateX(-50%)",
-          width: "min(560px, 88vw)", zIndex: 3,
-          display: "flex", justifyContent: "center",
+          position: "absolute",
+          left: rect.cx - Math.max(rect.w, 620) / 2,
+          top: rect.cy - 120,
+          width: Math.max(rect.w, 620),
+          height: 240,
+          zIndex: 2,
         }}
       >
-        <TracedOutline
-          show={inputShown}
-          radius={16}
-          color={flash ? GREEN : "rgba(244,245,244,0.5)"}
-          strokeWidth={1.5}
-          glow={flash ? 0.5 : 0.18}
-          style={{ width: "100%", pointerEvents: inputShown ? "auto" : "none" }}
-        >
-          <textarea
-            ref={inputRef}
-            value={value}
-            rows={1}
-            disabled={capturing}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={onKeyDown}
-            onFocus={() => { setFocused(true); activeRef.current = 1; }}
-            onBlur={() => { setFocused(false); onHeroLeave(); }}
-            placeholder={flash ? "captured." : "what's on your mind?"}
-            spellCheck={false}
-            style={{
-              width: "100%", resize: "none", outline: "none", border: "none",
-              fontFamily: FONT, fontSize: 16, lineHeight: 1.5,
-              padding: "14px 18px",
-              // taller when focused (his ask) — the box grows once you commit
-              minHeight: focused ? 92 : 50,
-              transition: "min-height 220ms cubic-bezier(0.4,0,0.1,1)",
-              borderRadius: 16, color: "#F4F5F4", caretColor: GREEN,
-              background: "color-mix(in srgb, #0b0f0d 55%, transparent)",
-              backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
-            }}
-          />
-        </TracedOutline>
+        {/* textarea overlaid exactly on the morph target; it IS the box the
+            line becomes. Border is transparent — the morphed stroke draws it. */}
+        <textarea
+          ref={inputRef}
+          value={value}
+          disabled={capturing}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={onKeyDown}
+          onFocus={() => { activeRef.current = 1; }}
+          onBlur={onHeroLeave}
+          placeholder={flash ? "captured." : "what's on your mind?"}
+          spellCheck={false}
+          style={{
+            position: "absolute",
+            left: "50%", top: 120, transform: "translate(-50%, -50%)",
+            width: rect.w, height: rect.h, boxSizing: "border-box",
+            resize: "none", outline: "none", border: "none",
+            fontFamily: FONT, fontSize: 16, lineHeight: 1.5, padding: "16px 20px",
+            borderRadius: rect.r, color: "#F4F5F4", caretColor: "#4ADE80",
+            background: boxMode ? "color-mix(in srgb, #0b0f0d 55%, transparent)" : "transparent",
+            backdropFilter: boxMode ? "blur(14px)" : "none",
+            WebkitBackdropFilter: boxMode ? "blur(14px)" : "none",
+            opacity: boxMode ? 1 : 0,
+            pointerEvents: boxMode ? "auto" : "none",
+            transition: "opacity 260ms ease 120ms, background 260ms ease",
+          }}
+        />
       </div>
 
       {/* faint affordance so the empty screen tells you how to start */}
@@ -213,7 +221,7 @@ export function AmbientHome() {
           position: "fixed", bottom: 22, left: 0, right: 0, textAlign: "center",
           zIndex: 1, pointerEvents: "none", fontSize: 11.5, letterSpacing: 0.4,
           color: "rgba(244,245,244,0.28)",
-          opacity: inputShown ? 0 : 1, transition: "opacity 300ms ease",
+          opacity: boxMode ? 0 : 1, transition: "opacity 300ms ease",
         }}
       >
         press <kbd style={{
