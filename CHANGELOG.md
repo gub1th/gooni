@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.188.0 — 2026-07-10 (minor)
+
+- feat(home): ambient waveform "presence" home — gorgeous 3D wave + summoned chrome (#406)
+
 ## 0.187.1 — 2026-07-09 (patch)
 
 - fix(serializers): guard vestigial FK attrs nuked in ambient-loop v2 (#405)
