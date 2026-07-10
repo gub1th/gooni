@@ -38,6 +38,50 @@ export function roundedRectPath(x: number, y: number, w: number, h: number, r: n
   );
 }
 
+// A single point on a rounded-rect perimeter at arc-length `d` (0 → perimeter),
+// clockwise from the top edge. Sequential early-returns (not an else-if chain)
+// so the mutated-`d` guards don't read as duplicate conditions.
+function pointOnRoundedRect(
+  x: number, y: number, w: number, h: number, rr: number, sw: number, sh: number, arc: number, d: number,
+): [number, number] {
+  const HALF = Math.PI / 2;
+  let s = d;
+  if (s <= sw) return [x + rr + s, y];                                        // top edge
+  s -= sw;
+  if (s <= arc) { const a = -HALF + (s / arc) * HALF; return [x + w - rr + Math.cos(a) * rr, y + rr + Math.sin(a) * rr]; } // TR
+  s -= arc;
+  if (s <= sh) return [x + w, y + rr + s];                                    // right edge
+  s -= sh;
+  if (s <= arc) { const a = (s / arc) * HALF; return [x + w - rr + Math.cos(a) * rr, y + h - rr + Math.sin(a) * rr]; }     // BR
+  s -= arc;
+  if (s <= sw) return [x + w - rr - s, y + h];                                // bottom edge
+  s -= sw;
+  if (s <= arc) { const a = HALF + (s / arc) * HALF; return [x + rr + Math.cos(a) * rr, y + h - rr + Math.sin(a) * rr]; }  // BL
+  s -= arc;
+  if (s <= sh) return [x, y + h - rr - s];                                    // left edge
+  s -= sh;
+  const a = Math.PI + (s / arc) * HALF;                                       // TL
+  return [x + rr + Math.cos(a) * rr, y + rr + Math.sin(a) * rr];
+}
+
+// Analytic rounded-rect perimeter sampler → N+1 ordered points, evenly spaced
+// by arc length. Beats getPointAtLength: clean corners, no DOM, and the height
+// can vary smoothly per-frame (grow-on-focus / grow-with-content box).
+export function roundedRectPoints(
+  x: number, y: number, w: number, h: number, r: number, n: number,
+): [number, number][] {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+  const sw = w - 2 * rr;
+  const sh = h - 2 * rr;
+  const arc = (Math.PI / 2) * rr;
+  const P = 2 * sw + 2 * sh + 4 * arc;
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= n; i++) {
+    pts.push(pointOnRoundedRect(x, y, w, h, rr, sw, sh, arc, (i / n) * P));
+  }
+  return pts;
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace("#", "");
   return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];

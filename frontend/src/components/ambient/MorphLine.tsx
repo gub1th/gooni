@@ -1,14 +1,15 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
-import { GREEN, WHITE, mixColor, roundedRectPath } from "./wavePath";
+import { GREEN, WHITE, mixColor, roundedRectPoints } from "./wavePath";
 import { useReducedMotion } from "../creative/useReducedMotion";
 
 // THE line. One continuous stroke that IS the waveform at rest and BENDS into
 // the input's rounded-rect outline when you capture — in place, so it reads as
-// "the wave became the box." Both shapes are sampled into N ordered points;
-// each frame we lerp point-by-point by an eased morph value. Breathing damps
-// to zero as it becomes the box. Fully ref-driven — no React re-render.
+// "the wave became the box." Rest wave and rect are both N ordered points; each
+// frame we lerp point-by-point by an eased morph value. The box height eases
+// too (grow-on-focus / grow-with-content). A soft blurred underlay feathers the
+// stroke so it's not razor-hard on black. Fully ref-driven, no React re-render.
 
-const N = 120;
+const N = 140;
 const HUMPS = 1.5;
 
 function smoothstep(x: number): number {
@@ -17,8 +18,8 @@ function smoothstep(x: number): number {
 }
 
 export interface MorphRect {
-  cx: number; // center x, px
-  cy: number; // center y, px
+  cx: number;
+  cy: number;
   w: number;
   h: number;
   r: number;
@@ -37,36 +38,16 @@ export function MorphLine({
   energyRef: MutableRefObject<number>;
   activeRef: MutableRefObject<number>;
 }) {
-  const pathRef = useRef<SVGPathElement>(null);
-  const samplerRef = useRef<SVGPathElement>(null);
-  const rectPtsRef = useRef<[number, number][]>([]);
+  const crispRef = useRef<SVGPathElement>(null);
+  const glowRef = useRef<SVGPathElement>(null);
   const morphRef = useRef(0);
+  const hRef = useRef(rect.h);
   const reduce = useReducedMotion();
 
-  // keep latest inputs in refs so the rAF loop never needs restarting
   const boxRef = useRef(boxMode);
   boxRef.current = boxMode;
   const rectRef = useRef(rect);
   rectRef.current = rect;
-
-  // resample the rect perimeter into N ordered points whenever it changes
-  useEffect(() => {
-    const el = samplerRef.current;
-    if (!el) return;
-    el.setAttribute("d", roundedRectPath(rect.cx - rect.w / 2, rect.cy - rect.h / 2, rect.w, rect.h, rect.r));
-    try {
-      const L = el.getTotalLength();
-      if (!L) return;
-      const pts: [number, number][] = [];
-      for (let i = 0; i <= N; i++) {
-        const p = el.getPointAtLength((i / N) * L);
-        pts.push([p.x, p.y]);
-      }
-      rectPtsRef.current = pts;
-    } catch {
-      /* jsdom / no layout — skip; the wave still renders */
-    }
-  }, [rect.cx, rect.cy, rect.w, rect.h, rect.r]);
 
   useEffect(() => {
     let raf = 0;
@@ -81,16 +62,23 @@ export function MorphLine({
       if (!reduce) t += dt;
       e.cur += (energyRef.current - e.cur) * Math.min(1, dt * 3);
       a.cur += (activeRef.current - a.cur) * Math.min(1, dt * 5);
-      morphRef.current += ((boxRef.current ? 1 : 0) - morphRef.current) * Math.min(1, dt * 6);
+
+      // morph eases toward target; snap the last sliver so the box is a clean
+      // rect (no residual wave wiggle in the corners)
+      const target = boxRef.current ? 1 : 0;
+      morphRef.current += (target - morphRef.current) * Math.min(1, dt * 6);
+      if (target === 1 && morphRef.current > 0.995) morphRef.current = 1;
+      if (target === 0 && morphRef.current < 0.004) morphRef.current = 0;
       const m = smoothstep(morphRef.current);
 
       const r = rectRef.current;
+      hRef.current += (r.h - hRef.current) * Math.min(1, dt * 8); // box height eases
+      const h = hRef.current;
+
       const breathe = 0.5 + 0.5 * Math.sin(t * 0.7);
-      // taller, Spectre-like amplitude; collapses to 0 as it becomes the box
       const amp = (26 + 12 * breathe) * (0.8 + e.cur * 0.6) * (1 + a.cur * 0.4) * (1 - m);
       const W = Math.min(waveWidth, r.w * 1.05);
-      const rectPts = rectPtsRef.current;
-      const hasRect = rectPts.length === N + 1;
+      const rectPts = m > 0.001 ? roundedRectPoints(r.cx - r.w / 2, r.cy - h / 2, r.w, h, r.r, N) : null;
 
       let d = "";
       for (let i = 0; i <= N; i++) {
@@ -100,18 +88,23 @@ export function MorphLine({
         const y0 = r.cy - Math.sin(tt * Math.PI * 2 * HUMPS + t * 0.8) * amp * env;
         let x = x0;
         let y = y0;
-        if (hasRect && m > 0.001) {
+        if (rectPts) {
           const rp = rectPts[i];
           x = x0 + (rp[0] - x0) * m;
           y = y0 + (rp[1] - y0) * m;
         }
         d += `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)} `;
       }
+      d = d.trim();
 
-      const p = pathRef.current;
-      if (p) {
-        p.setAttribute("d", d.trim());
-        p.setAttribute("stroke", e.cur > 0.02 ? mixColor(WHITE, GREEN, Math.min(1, e.cur)) : WHITE);
+      const stroke = e.cur > 0.02 ? mixColor(WHITE, GREEN, Math.min(1, e.cur)) : WHITE;
+      if (crispRef.current) {
+        crispRef.current.setAttribute("d", d);
+        crispRef.current.setAttribute("stroke", stroke);
+      }
+      if (glowRef.current) {
+        glowRef.current.setAttribute("d", d);
+        glowRef.current.setAttribute("stroke", stroke);
       }
       raf = requestAnimationFrame(frame);
     }
@@ -126,15 +119,27 @@ export function MorphLine({
       aria-hidden
       style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "visible", zIndex: 1 }}
     >
-      <path ref={samplerRef} d="" fill="none" stroke="none" />
+      {/* soft blurred underlay — feathers the stroke so it isn't razor-hard */}
       <path
-        ref={pathRef}
+        ref={glowRef}
         fill="none"
         stroke={WHITE}
-        strokeWidth={2}
+        strokeWidth={5}
         strokeLinecap="round"
         strokeLinejoin="round"
-        style={{ filter: "drop-shadow(0 0 5px rgba(74,222,128,0.22))" }}
+        opacity={0.4}
+        style={{ filter: "blur(5px)" }}
+      />
+      {/* crisp core */}
+      <path
+        ref={crispRef}
+        fill="none"
+        stroke={WHITE}
+        strokeWidth={1.75}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.92}
+        style={{ filter: "blur(0.4px)" }}
       />
     </svg>
   );
