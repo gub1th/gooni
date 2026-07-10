@@ -124,8 +124,11 @@ function AppShell() {
   const isChat = onIndex && (hasConv || viewParam === "chat");
   const isEval = onIndex && auditFlag;
   const isStats = onIndex && viewParam === "stats";
-  // Log is the index default — active when nothing else claims the URL.
-  const isLog = onIndex && !isNotes && !isChat && !isEval && !isStats;
+  const isLog = onIndex && viewParam === "log";
+  // Ambient waveform home is the index default — active when nothing else
+  // claims the URL. It renders its OWN summoned chrome (frosted nav, capture
+  // input), so the docked sidebar + chat orb stand down here.
+  const isHome = onIndex && !isNotes && !isChat && !isEval && !isStats && !isLog;
 
   // Compose / new-chat callbacks. The store actions live in Zustand
   // already; we just call them then navigate. routes/index.tsx's
@@ -274,11 +277,11 @@ function AppShell() {
           display: "flex",
           height: "100vh",
           overflow: "hidden",
-          background: "var(--gooni-bg, #FFFFFF)",
+          background: isHome ? "#000000" : "var(--gooni-bg, #FFFFFF)",
           position: "relative",
         }}
       >
-        {sidebarOpen && (
+        {!isHome && sidebarOpen && (
           <Sidebar
             isNotes={isNotes}
             isChat={isChat}
@@ -311,7 +314,7 @@ function AppShell() {
             New chat / Search / All Notes / Memories / Audit / Settings
             without expanding. Replaces the prior floating panel-open
             affordance. */}
-        {!sidebarOpen && (
+        {!isHome && !sidebarOpen && (
           <CollapsedSidebar
             isNotes={isNotes}
             isChat={isChat}
@@ -345,7 +348,7 @@ function AppShell() {
         >
           <Outlet />
         </div>
-        {!suppressGooniLayer(location.pathname) && <GooniLayer />}
+        {!isHome && !suppressGooniLayer(location.pathname) && <GooniLayer />}
       </div>
     </PasswordGate>
   );
