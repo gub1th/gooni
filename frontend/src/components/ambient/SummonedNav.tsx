@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  Radio, FileText, MessageSquare, BarChart3, Brain, ClipboardList,
+  Radio, FileText, MessageSquare, Brain, ClipboardList,
   Settings as SettingsIcon, type LucideIcon,
 } from "lucide-react";
 import { FONT, z } from "../../ui";
@@ -49,7 +49,6 @@ export function SummonedNav() {
     { label: "Log", Icon: ClipboardList, go: () => nav({ view: "log" }) },
     { label: "Notes", Icon: FileText, go: () => nav({ view: "notes" }) },
     { label: "Chat", Icon: MessageSquare, go: () => nav({ view: "chat" }) },
-    { label: "Stats", Icon: BarChart3, go: () => nav({ view: "stats" }) },
     { label: "Memories", Icon: Brain, go: () => navigate({ to: "/memories", search: { focus: undefined } }) },
     { label: "Settings", Icon: SettingsIcon, go: () => setSettingsOpen(true) },
   ];

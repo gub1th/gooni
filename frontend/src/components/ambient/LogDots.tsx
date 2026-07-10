@@ -1,0 +1,479 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Maximize2, Minimize2 } from "lucide-react";
+import { FONT } from "../../ui";
+import { GREEN } from "./wavePath";
+import { LogTable } from "./LogTable";
+import {
+  createTrackable,
+  fetchLeetcodeToday,
+  fetchTrackableDays,
+  fetchTrackables,
+  fetchWhoopToday,
+  logTrackable,
+  startWhoopOAuth,
+  type LeetcodeToday,
+  type Trackable,
+  type TrackableDay,
+  type WhoopToday,
+} from "../../services/api";
+
+// Slice B+ — the log surface. The wave gives way to a frosted glass panel of
+// trackable columns: each column is today's interactive control (a green dot
+// for booleans, a value pill for numbers) with a fading history trail of past
+// days stacked above. Tap a boolean to toggle; tap a number to type. "+" adds a
+// trackable. Below sit read-only frosted tiles for the passive feeds (whoop,
+// leetcode) — which is why this surface can retire the old stats dashboard.
+// Only the current day is actionable; the trail is ambient context.
+
+const TRAIL_DAYS = 6;
+
+// shared dark frosted-glass recipe (home is black, so NOT the light overlay card)
+const GLASS: React.CSSProperties = {
+  background: "color-mix(in srgb, #0b0f0d 55%, transparent)",
+  backdropFilter: "blur(20px)",
+  WebkitBackdropFilter: "blur(20px)",
+  border: "1px solid rgba(244,245,244,0.10)",
+  boxShadow: "0 18px 60px rgba(0,0,0,0.55)",
+};
+
+// Which trackables belong on the daily dots: skip json feeds (whoop/leetcode)
+// and the freeform "note", keep the boolean habits + key numbers.
+function isDaily(t: Trackable): boolean {
+  if (t.kind === "json") return false;
+  if (t.source === "whoop" || t.source === "leetcode") return false;
+  if (t.name === "note") return false;
+  return true;
+}
+
+interface Row {
+  t: Trackable;
+  days: TrackableDay[]; // newest-first, gap-filled; today = days[0]
+}
+
+export function LogDots({ onClose }: { onClose: () => void }) {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addKind, setAddKind] = useState<"boolean" | "numeric">("boolean");
+  const [shown, setShown] = useState(false); // drives the Y expand/contract
+  const [expanded, setExpanded] = useState(false); // full editable matrix
+  const editRef = useRef<HTMLInputElement | null>(null);
+
+  // expand in on mount; contract out before the parent unmounts us
+  useEffect(() => {
+    const r = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(r);
+  }, []);
+  const requestClose = useCallback(() => {
+    setShown(false);
+    window.setTimeout(onClose, 230);
+  }, [onClose]);
+
+  const load = useCallback(async () => {
+    try {
+      const all = (await fetchTrackables()).filter(isDaily);
+      const withDays = await Promise.all(
+        all.map(async (t) => ({ t, days: (await fetchTrackableDays(t.id, 1 + TRAIL_DAYS)).days })),
+      );
+      // booleans first, then numbers; important first within each
+      withDays.sort((a, b) => {
+        if (a.t.kind !== b.t.kind) return a.t.kind === "boolean" ? -1 : 1;
+        if (a.t.is_important !== b.t.is_important) return a.t.is_important ? -1 : 1;
+        return a.t.name.localeCompare(b.t.name);
+      });
+      setRows(withDays);
+    } catch {
+      /* surface stays quiet on error */
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    // Escape closes the log surface — but not while the table is expanded
+    // (there, Escape belongs to cell-editing / the toggle button owns collapse)
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape" && !expanded) requestClose(); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [requestClose, expanded]);
+
+  async function refreshRow(id: number) {
+    try {
+      const d = (await fetchTrackableDays(id, 1 + TRAIL_DAYS)).days;
+      setRows((prev) => prev.map((r) => (r.t.id === id ? { ...r, days: d } : r)));
+    } catch { /* ignore */ }
+  }
+
+  async function toggleBool(row: Row) {
+    const cur = row.days[0]?.value === true;
+    // optimistic
+    setRows((prev) => prev.map((r) => (
+      r.t.id === row.t.id
+        ? { ...r, days: r.days.map((d, i) => (i === 0 ? { ...d, value: !cur } : d)) }
+        : r
+    )));
+    try { await logTrackable(row.t.id, { value_boolean: !cur, replace: true }); } finally { void refreshRow(row.t.id); }
+  }
+
+  function openNumber(row: Row) {
+    const v = row.days[0]?.value;
+    setEditId(row.t.id);
+    setDraft(typeof v === "number" ? String(v) : "");
+    requestAnimationFrame(() => editRef.current?.focus());
+  }
+
+  async function commitNumber(row: Row) {
+    const n = parseFloat(draft);
+    setEditId(null);
+    if (Number.isNaN(n)) return;
+    setRows((prev) => prev.map((r) => (
+      r.t.id === row.t.id
+        ? { ...r, days: r.days.map((d, i) => (i === 0 ? { ...d, value: n } : d)) }
+        : r
+    )));
+    try { await logTrackable(row.t.id, { value_numeric: n, replace: true }); } finally { void refreshRow(row.t.id); }
+  }
+
+  async function addTrackable() {
+    const name = addName.trim().toLowerCase();
+    if (!name) { setAdding(false); return; }
+    setAdding(false);
+    setAddName("");
+    try {
+      await createTrackable({ name, kind: addKind });
+      await load();
+    } catch { /* ignore */ }
+  }
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 6, fontFamily: FONT,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}
+    >
+      {/* animated block — expands/contracts along Y on open/close */}
+      <div
+        style={{
+          display: "flex", flexDirection: "column", alignItems: "center",
+          transformOrigin: "center", transform: shown ? "scaleY(1)" : "scaleY(0.55)",
+          opacity: shown ? 1 : 0,
+          transition: "opacity 230ms ease, transform 230ms cubic-bezier(0.22,1,0.36,1)",
+        }}
+      >
+        <div style={{
+          fontSize: 10, letterSpacing: 2, textTransform: "uppercase",
+          color: "rgba(244,245,244,0.3)", marginBottom: 16, height: 12,
+          opacity: expanded ? 0 : 1, transition: "opacity 200ms ease",
+        }}>
+          today
+        </div>
+
+        {/* the morphing card — dots ⇄ table live inside one frosted surface that
+            grows/shrinks in place; the corner toggle swaps which body shows */}
+        <div
+          style={{
+            ...GLASS, borderRadius: 24, position: "relative", overflow: "hidden",
+            width: expanded ? "min(760px, 94vw)" : "min(720px, 92vw)",
+            height: expanded ? "min(80vh, 640px)" : 200,
+            transition: "width 300ms cubic-bezier(0.22,1,0.36,1), height 300ms cubic-bezier(0.22,1,0.36,1)",
+          }}
+        >
+          {/* one control: expand (arrows-out) ⇄ collapse (arrows-in) */}
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            aria-label={expanded ? "Collapse" : "Expand to full table"}
+            style={{
+              position: "absolute", top: 12, right: 14, zIndex: 3,
+              width: 26, height: 26, borderRadius: 8, cursor: "pointer", padding: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              border: "1px solid rgba(244,245,244,0.12)", background: "rgba(11,15,13,0.5)",
+              color: "rgba(244,245,244,0.5)",
+            }}
+          >
+            {expanded ? <Minimize2 size={13} strokeWidth={1.8} /> : <Maximize2 size={13} strokeWidth={1.8} />}
+          </button>
+
+          {/* dots layer (today's quick driver) */}
+          <div
+            style={{
+              position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+              padding: "0 30px", opacity: expanded ? 0 : 1, pointerEvents: expanded ? "none" : "auto",
+              transition: "opacity 180ms ease",
+            }}
+          >
+            {loading ? (
+              <div style={{ color: "rgba(244,245,244,0.35)", fontSize: 13 }}>loading…</div>
+            ) : (
+              <div style={{ display: "flex", gap: 34, alignItems: "flex-end" }}>
+                {rows.map((row) => (
+                  <Column
+                    key={row.t.id}
+                    row={row}
+                    editing={editId === row.t.id}
+                    draft={draft}
+                    editRef={editRef}
+                    onToggle={() => void toggleBool(row)}
+                    onOpenNumber={() => openNumber(row)}
+                    onDraft={setDraft}
+                    onCommit={() => void commitNumber(row)}
+                    onCancel={() => setEditId(null)}
+                  />
+                ))}
+
+                {/* add trackable */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <div style={{ height: 66 }} />
+                  {adding ? (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                      <input
+                        autoFocus
+                        value={addName}
+                        onChange={(e) => setAddName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") void addTrackable(); if (e.key === "Escape") setAdding(false); }}
+                        placeholder="name"
+                        style={{
+                          width: 84, fontSize: 12, padding: "5px 8px", borderRadius: 8, textAlign: "center",
+                          border: "1px solid rgba(244,245,244,0.25)", background: "rgba(11,15,13,0.6)",
+                          color: "#F4F5F4", outline: "none", fontFamily: FONT,
+                        }}
+                      />
+                      <button
+                        onClick={() => setAddKind((k) => (k === "boolean" ? "numeric" : "boolean"))}
+                        style={{
+                          fontSize: 10, padding: "2px 8px", borderRadius: 999, cursor: "pointer",
+                          border: "1px solid rgba(244,245,244,0.2)", background: "transparent",
+                          color: "rgba(244,245,244,0.6)", fontFamily: FONT,
+                        }}
+                      >
+                        {addKind === "boolean" ? "yes/no" : "number"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setAdding(true)}
+                      aria-label="Add trackable"
+                      style={{
+                        width: 18, height: 18, borderRadius: 999, cursor: "pointer",
+                        border: "1.5px dashed rgba(244,245,244,0.3)", background: "transparent",
+                        color: "rgba(244,245,244,0.4)", display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 13, lineHeight: 1, padding: 0,
+                      }}
+                    >
+                      +
+                    </button>
+                  )}
+                  <div style={{ fontSize: 11, color: "rgba(244,245,244,0.45)", marginTop: 12 }}>add</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* table layer — mounted only when expanded */}
+          <div
+            style={{
+              position: "absolute", inset: 0, opacity: expanded ? 1 : 0,
+              pointerEvents: expanded ? "auto" : "none", transition: "opacity 200ms ease 80ms",
+            }}
+          >
+            {expanded && <LogTable />}
+          </div>
+        </div>
+
+        {/* passive feed tiles — collapse + fade away when expanded */}
+        <div style={{
+          overflow: "hidden", maxHeight: expanded ? 0 : 160, opacity: expanded ? 0 : 1,
+          transition: "max-height 280ms cubic-bezier(0.22,1,0.36,1), opacity 180ms ease",
+        }}>
+          {!loading && <FeedTiles />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Column({
+  row, editing, draft, editRef, onToggle, onOpenNumber, onDraft, onCommit, onCancel,
+}: {
+  row: Row;
+  editing: boolean;
+  draft: string;
+  editRef: React.RefObject<HTMLInputElement>;
+  onToggle: () => void;
+  onOpenNumber: () => void;
+  onDraft: (v: string) => void;
+  onCommit: () => void;
+  onCancel: () => void;
+}) {
+  const { t, days } = row;
+  const today = days[0]?.value;
+  // trail: past days (skip today), oldest at top
+  const trail = days.slice(1, 1 + TRAIL_DAYS).slice().reverse();
+  const n = trail.length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+      {/* history trail */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 7, marginBottom: 6 }}>
+        {trail.map((d, i) => {
+          const recency = n <= 1 ? 1 : i / (n - 1); // 0 oldest → 1 newest
+          const size = 4 + recency * 4;
+          const op = 0.12 + recency * 0.32;
+          const did = t.kind === "boolean" ? d.value === true : d.value != null;
+          return (
+            <span
+              key={d.date}
+              title={`${d.date}: ${d.value ?? "—"}`}
+              style={{
+                width: size, height: size, borderRadius: 999, boxSizing: "border-box",
+                background: did ? `rgba(74,222,128,${op})` : "transparent",
+                border: did ? "none" : `1px solid rgba(244,245,244,${op * 0.7})`,
+              }}
+            />
+          );
+        })}
+      </div>
+
+      {/* today control */}
+      {t.kind === "boolean" ? (
+        <button
+          onClick={onToggle}
+          aria-label={`Toggle ${t.name}`}
+          style={{
+            width: 18, height: 18, borderRadius: 999, cursor: "pointer", padding: 0, boxSizing: "border-box",
+            background: today === true ? GREEN : "transparent",
+            border: today === true ? "none" : "1.5px solid rgba(244,245,244,0.45)",
+            boxShadow: today === true ? `0 0 10px 1px rgba(74,222,128,0.6)` : "none",
+          }}
+        />
+      ) : editing ? (
+        <input
+          ref={editRef}
+          value={draft}
+          onChange={(e) => onDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") onCommit(); if (e.key === "Escape") onCancel(); }}
+          onBlur={onCommit}
+          inputMode="decimal"
+          style={{
+            width: 60, fontSize: 13, fontWeight: 600, padding: "4px 8px", borderRadius: 999, textAlign: "center",
+            border: `1px solid ${GREEN}`, background: "rgba(11,15,13,0.7)", color: "#F4F5F4",
+            outline: "none", fontFamily: FONT,
+          }}
+        />
+      ) : (
+        <button
+          onClick={onOpenNumber}
+          style={{
+            minWidth: 40, padding: "4px 12px", borderRadius: 999, cursor: "pointer",
+            border: "1px solid rgba(244,245,244,0.35)", background: "transparent",
+            color: "#F4F5F4", fontSize: 13, fontWeight: 600, fontFamily: FONT,
+          }}
+        >
+          {typeof today === "number" ? today : "–"}
+        </button>
+      )}
+
+      <div style={{ fontSize: 11, color: "rgba(244,245,244,0.45)", marginTop: 12, letterSpacing: 0.3 }}>
+        {t.name}
+      </div>
+    </div>
+  );
+}
+
+// ── passive feed tiles ──────────────────────────────────────────────────────
+// Read-only glass tiles for the whoop/leetcode feeds. Their data is feed-owned
+// (not hand-editable), so these are display-only — the reason the log can
+// absorb the old stats dashboard.
+
+function FeedTiles() {
+  const [whoop, setWhoop] = useState<WhoopToday | null | "err">(null);
+  const [lc, setLc] = useState<LeetcodeToday | null | "err">(null);
+
+  useEffect(() => {
+    void fetchWhoopToday().then(setWhoop).catch(() => setWhoop("err"));
+    void fetchLeetcodeToday().then(setLc).catch(() => setLc("err"));
+  }, []);
+
+  return (
+    <div style={{ display: "flex", gap: 14, marginTop: 16 }}>
+      <FeedTile title="whoop">
+        {whoop === null ? (
+          <Dim>…</Dim>
+        ) : whoop === "err" || !whoop.date ? (
+          <button
+            onClick={() => void startWhoopOAuth().then((r) => { window.location.href = r.authorize_url; }).catch(() => {})}
+            style={connectBtn}
+          >
+            connect
+          </button>
+        ) : (
+          <>
+            <Metric label="recovery" value={fmtPct(whoop.recovery_score)} accent />
+            <Metric label="strain" value={fmt(whoop.strain)} />
+            <Metric label="sleep" value={whoop.sleep_minutes != null ? `${Math.round(whoop.sleep_minutes / 60 * 10) / 10}h` : "–"} />
+          </>
+        )}
+      </FeedTile>
+
+      <FeedTile title="leetcode">
+        {lc === null ? (
+          <Dim>…</Dim>
+        ) : lc === "err" || !lc.available ? (
+          <Dim>—</Dim>
+        ) : (
+          <>
+            <Metric label="today" value={fmt(lc.today_count)} accent />
+            <Metric label="streak" value={fmt(lc.streak)} />
+            <Metric label="solved" value={fmt(lc.total_solved)} />
+          </>
+        )}
+      </FeedTile>
+    </div>
+  );
+}
+
+function FeedTile({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ ...GLASS, borderRadius: 18, padding: "14px 18px", minWidth: 150 }}>
+      <div style={{
+        fontSize: 9, letterSpacing: 1.6, textTransform: "uppercase",
+        color: "rgba(244,245,244,0.35)", marginBottom: 10,
+      }}>
+        {title}
+      </div>
+      <div style={{ display: "flex", gap: 16 }}>{children}</div>
+    </div>
+  );
+}
+
+function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: accent ? GREEN : "#F4F5F4", lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 9.5, color: "rgba(244,245,244,0.4)", letterSpacing: 0.3 }}>{label}</div>
+    </div>
+  );
+}
+
+function Dim({ children }: { children: React.ReactNode }) {
+  return <div style={{ fontSize: 13, color: "rgba(244,245,244,0.35)" }}>{children}</div>;
+}
+
+const connectBtn: React.CSSProperties = {
+  fontSize: 11, padding: "4px 12px", borderRadius: 999, cursor: "pointer",
+  border: "1px solid rgba(244,245,244,0.25)", background: "transparent",
+  color: "rgba(244,245,244,0.6)", fontFamily: FONT,
+};
+
+function fmt(v: number | null | undefined): string {
+  return v == null ? "–" : String(v);
+}
+function fmtPct(v: number | null | undefined): string {
+  return v == null ? "–" : `${Math.round(v)}`;
+}

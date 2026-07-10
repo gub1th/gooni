@@ -28,12 +28,16 @@ export interface MorphRect {
 export function MorphLine({
   boxMode,
   rect,
+  thinking = false,
+  dimmed = false,
   waveWidth = 380,
   energyRef,
   activeRef,
 }: {
   boxMode: boolean;
   rect: MorphRect;
+  thinking?: boolean;
+  dimmed?: boolean;
   waveWidth?: number;
   energyRef: MutableRefObject<number>;
   activeRef: MutableRefObject<number>;
@@ -46,6 +50,8 @@ export function MorphLine({
 
   const boxRef = useRef(boxMode);
   boxRef.current = boxMode;
+  const thinkRef = useRef(thinking);
+  thinkRef.current = thinking;
   const rectRef = useRef(rect);
   rectRef.current = rect;
 
@@ -76,16 +82,27 @@ export function MorphLine({
       const h = hRef.current;
 
       const breathe = 0.5 + 0.5 * Math.sin(t * 0.7);
-      const amp = (26 + 12 * breathe) * (0.8 + e.cur * 0.6) * (1 + a.cur * 0.4) * (1 - m);
+      // rest peak ≈ (40+12)*0.8 ≈ 42 half-height, so the wave sits inside the
+      // PEEK_H (104) box with margin — the box IS the wave's bounding rect.
+      const amp = (40 + 12 * breathe) * (0.8 + e.cur * 0.6) * (1 + a.cur * 0.4) * (1 - m);
       const W = Math.min(waveWidth, r.w * 1.05);
       const rectPts = m > 0.001 ? roundedRectPoints(r.cx - r.w / 2, r.cy - h / 2, r.w, h, r.r, N) : null;
+
+      // a bright bump that travels along the wave = the "thinking" indicator,
+      // embedded in the line itself instead of separate dots
+      const think = thinkRef.current ? 1 : 0;
+      const head = (t * 0.85) % 1;
 
       let d = "";
       for (let i = 0; i <= N; i++) {
         const tt = i / N;
-        const env = Math.sin(Math.PI * tt);
+        // fuller envelope (pow < 1) so amplitude stays high across the span and
+        // the ends don't read as faint tails — closer to the Spectre mark
+        const env = Math.pow(Math.sin(Math.PI * tt), 0.6);
         const x0 = r.cx - W / 2 + tt * W;
-        const y0 = r.cy - Math.sin(tt * Math.PI * 2 * HUMPS + t * 0.8) * amp * env;
+        const dx = tt - head;
+        const pulse = think * Math.exp(-(dx * dx) / 0.004) * 20;
+        const y0 = r.cy - (Math.sin(tt * Math.PI * 2 * HUMPS + t * 0.8) * amp + pulse) * env;
         let x = x0;
         let y = y0;
         if (rectPts) {
@@ -117,29 +134,33 @@ export function MorphLine({
       width="100%"
       height="100%"
       aria-hidden
-      style={{ position: "fixed", inset: 0, pointerEvents: "none", overflow: "visible", zIndex: 1 }}
+      style={{
+        position: "fixed", inset: 0, pointerEvents: "none", overflow: "visible", zIndex: 4,
+        opacity: dimmed ? 0 : 1, transition: "opacity 260ms ease",
+      }}
     >
-      {/* soft blurred underlay — feathers the stroke so it isn't razor-hard */}
+      {/* faint even underlay — a low, uniform halo (doesn't pool at the humps
+          like a heavy blur did, so brightness stays constant along the line) */}
       <path
         ref={glowRef}
         fill="none"
         stroke={WHITE}
-        strokeWidth={5}
+        strokeWidth={3}
         strokeLinecap="round"
         strokeLinejoin="round"
-        opacity={0.4}
-        style={{ filter: "blur(5px)" }}
+        opacity={0.18}
+        style={{ filter: "blur(3px)" }}
       />
-      {/* crisp core */}
+      {/* the line — one solid, uniform stroke */}
       <path
         ref={crispRef}
         fill="none"
         stroke={WHITE}
-        strokeWidth={1.75}
+        strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
-        opacity={0.92}
-        style={{ filter: "blur(0.4px)" }}
+        opacity={1}
+        style={{ filter: "drop-shadow(0 0 2.5px rgba(255,255,255,0.28))" }}
       />
     </svg>
   );
