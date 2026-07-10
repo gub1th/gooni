@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import { ChatView } from "../components/ChatView";
 import { ChatLogView } from "../components/ChatLogView";
 import { EvalView } from "../components/eval/EvalView";
-import { StatsLite } from "../components/StatsLite";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
@@ -15,9 +14,10 @@ import { fetchNote } from "../services/api";
 // Ambient-loop v2 "presence" pass: the WAVEFORM is the app's home. Default =
 // home — a near-empty black surface with the reactive waveform; everything
 // else (log, notes, chat, stats, nav) is hover-summoned frosted glass on top.
-// The log demoted from default to ?view=log.
+// The log demoted from default to ?view=log. Stats retired — the log surface
+// absorbed the trackables + whoop/leetcode feed tiles.
 
-type View = "home" | "notes" | "chat" | "log" | "eval" | "stats";
+type View = "home" | "notes" | "chat" | "log" | "eval";
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -27,10 +27,10 @@ export const Route = createFileRoute("/")({
     audit: search.audit === true || search.audit === "true" || search.audit === "1" || undefined,
     // ?segment=<id> → auto-open that segment's drilldown in the audit view.
     segment: typeof search.segment === "number" ? search.segment : typeof search.segment === "string" ? Number(search.segment) : undefined,
-    // ?view=notes|chat|log|stats → force a view that has no other URL signal.
+    // ?view=notes|chat|log → force a view that has no other URL signal.
     view:
-      search.view === "notes" || search.view === "chat" || search.view === "log" || search.view === "stats"
-        ? (search.view as "notes" | "chat" | "log" | "stats")
+      search.view === "notes" || search.view === "chat" || search.view === "log"
+        ? (search.view as "notes" | "chat" | "log")
         : undefined,
   }),
   component: LogPage,
@@ -52,7 +52,6 @@ function LogPage() {
     search.conv ? "chat" :
     search.view === "notes" ? "notes" :
     search.view === "chat" ? "chat" :
-    search.view === "stats" ? "stats" :
     search.view === "log" ? "log" :
     "home";
 
@@ -152,8 +151,6 @@ function LogPage() {
         <ChatLogView />
       ) : view === "chat" ? (
         <ChatView />
-      ) : view === "stats" ? (
-        <StatsLite />
       ) : view === "eval" ? (
         <EvalView
           onOpenNote={(noteId: number) =>

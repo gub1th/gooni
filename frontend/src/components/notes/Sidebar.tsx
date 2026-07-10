@@ -9,7 +9,7 @@ import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeSt
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText, Brain, ClipboardList, Settings as SettingsIcon,
-  Globe, Plug, PanelLeftClose, Radio, BarChart3, MessageSquare,
+  Globe, Plug, PanelLeftClose, Radio, MessageSquare,
   Pin as PinIcon, Tag as TagIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
@@ -21,7 +21,6 @@ const ICON_TINT = {
   draft:    "#8B5CF6",   // violet — distinct from amber pinned + sky memories
   newChat:  "#10B981",   // emerald
   log:      "#0A84FF",   // accent blue — the glow surface
-  stats:    "#D97706",   // amber-deep — numbers surface
   tags:     "#94A3B8",   // slate-soft — tags are navigation, muted on purpose
   memories: "#0EA5E9",  // sky
   chatAudit: "#0891B2",  // cyan
@@ -52,7 +51,6 @@ interface SidebarProps {
   isNotes: boolean;
   isChat: boolean;
   isLog: boolean;
-  isStats: boolean;
   isEval?: boolean;
   showCompose: boolean;
   onLogoClick: () => void;
@@ -217,7 +215,7 @@ function SidebarChildRow({
   );
 }
 
-export function Sidebar({ isNotes, isChat, isLog, isStats, isEval, showCompose, onLogoClick, onAllNotes, onSelectNote, onCompose, onNewChat, onOpenEval, onClose }: SidebarProps) {
+export function Sidebar({ isNotes, isChat, isLog, isEval, showCompose, onLogoClick, onAllNotes, onSelectNote, onCompose, onNewChat, onOpenEval, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const { selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
 
@@ -516,16 +514,6 @@ export function Sidebar({ isNotes, isChat, isLog, isStats, isEval, showCompose, 
             iconColor={ICON_TINT.newChat}
             active={isChat}
             onClick={onNewChat}
-          />
-          <FlatNavRow
-            label="Stats"
-            Icon={BarChart3}
-            iconColor={ICON_TINT.stats}
-            active={isStats}
-            onClick={() => navigate({
-              to: "/",
-              search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "stats" },
-            })}
           />
           <FlatNavRow
             label="Memories"

@@ -79,12 +79,13 @@ Route shapes are grep-able — one `app/routers/<domain>.py` module per domain (
 ### Frontend (`frontend/src/`)
 
 - **`ui/`** — tokens (`FONT`, `color`, `z` ladder incl. `overlay: 950`, `ambient` = overlay-blur + glow-dot), Button/Card/Modal. `--gooni-overlay-blur` + `--gooni-glow-dot` pushed per-theme in `__root` ThemeVarSync.
-- **`routes/index.tsx`** — THE app shell: view union `notes|chat|log|eval|stats`, **default = log**. No dashboard, no lists.
-- **`components/ChatLogView.tsx`** — the append-only Thought log (default surface): glow dots, peek panel (cadence pill/due/importance), Promote/Dismiss, 10s undo, source badges, 15s poll. Mounts AmbientOverlay. Seam test `ChatLogView.test.tsx` (vitest + RTL; `npm test`, in CI).
+- **`routes/index.tsx`** — THE app shell: view union `home|notes|chat|log|eval`, **default = home** (the ambient waveform). `?view=log` = ChatLogView; **stats retired** (absorbed by the log surface). No dashboard, no lists.
+- **`components/ambient/`** — the presence home (`AmbientHome`). ONE morphing line (`MorphLine`) is the breathing waveform at rest and bends into the capture input's outline (wave bbox = hover zone = box, one rect). Omnibox recall on the box (title-substring instant + semantic on pause → note suggestions; ↑/↓+Enter opens `NotePeek` inline reader; plain Enter commits). `LogDots`+`LogTable` = the log surface: a frosted dots card (today's trackables + whoop/leetcode read-only feed tiles) that morphs into a full editable matrix (dates × trackables, historical cells via `logTrackable` date+replace). `SummonedNav` (frosted edge nav), `LimboCards` (pending-glow), `TracedOutline`.
+- **`components/ChatLogView.tsx`** — the append-only Thought log (`?view=log`): glow dots, peek panel (cadence pill/due/importance), Promote/Dismiss, 10s undo, source badges, 15s poll. Mounts AmbientOverlay. Seam test `ChatLogView.test.tsx` (vitest + RTL; `npm test`, in CI).
 - **`components/AmbientOverlay.tsx`** — corner toggle → frosted edge panels (200ms fade), 4 zones, anchor note picker (persists via Settings PATCH).
-- **`components/StatsLite.tsx`** — surviving numbers: editable CutTableSection + WhoopSection + LeetcodeSection (`?view=stats`). `StatsView.tsx` hosts those section exports.
+- **Stats retired** — `StatsLite`/`StatsView` deleted; the log surface (`LogDots`/`LogTable`) owns trackables + whoop/leetcode feed tiles now. `?view=stats` dead, pulled from all nav.
 - **`components/ChatView.tsx`** — full chat w/ SSE (secondary surface).
-- **`components/notes/Sidebar.tsx`** — Notes (All/Pinned/Drafts/Recent) + tag filter + flat nav (Log/Chat/Stats/Memories/Audit/Settings) + Public/MCP footer. Spaces/Lists sections dead.
+- **`components/notes/Sidebar.tsx`** — Notes (All/Pinned/Drafts/Recent) + tag filter + flat nav (Log/Chat/Memories/Audit/Settings) + Public/MCP footer. Spaces/Lists sections dead. **Docked sidebar only shows off-home; the ambient home uses `SummonedNav` instead** (nav parity not yet unified — two navs today).
 - **`components/eval/EvalView.tsx`** — kept on `?audit=1` (Daniel's override).
 - **`components/dashboard/PromiseDrawer.tsx`** + `PromiseDetailModal` — promise list UI (cadence pill + importance star), kept for reuse.
 - **`stores/`** — `useNotesContentStore` (all notes live in the single "general" bucket), `useConversationsStore`, theme store. Spaces/Lists/Ordering stores dead.

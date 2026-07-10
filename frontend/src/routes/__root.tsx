@@ -123,12 +123,11 @@ function AppShell() {
   const isNotes = onIndex && (hasNote || viewParam === "notes");
   const isChat = onIndex && (hasConv || viewParam === "chat");
   const isEval = onIndex && auditFlag;
-  const isStats = onIndex && viewParam === "stats";
   const isLog = onIndex && viewParam === "log";
   // Ambient waveform home is the index default — active when nothing else
   // claims the URL. It renders its OWN summoned chrome (frosted nav, capture
   // input), so the docked sidebar + chat orb stand down here.
-  const isHome = onIndex && !isNotes && !isChat && !isEval && !isStats && !isLog;
+  const isHome = onIndex && !isNotes && !isChat && !isEval && !isLog;
 
   // Compose / new-chat callbacks. The store actions live in Zustand
   // already; we just call them then navigate. routes/index.tsx's
@@ -286,7 +285,6 @@ function AppShell() {
             isNotes={isNotes}
             isChat={isChat}
             isLog={isLog}
-            isStats={isStats}
             isEval={isEval}
             showCompose={!isNotes}
             onLogoClick={gotoBlank}

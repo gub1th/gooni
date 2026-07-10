@@ -812,6 +812,75 @@ export async function fetchConversations(): Promise<ApiConversation[]> {
   return res.json();
 }
 
+// ── Trackables (ambient log surface) ─────────────────────────────────────────
+export type TrackableKind = "boolean" | "numeric" | "json";
+
+export interface Trackable {
+  id: number;
+  name: string;
+  kind: TrackableKind;
+  unit: string | null;
+  cadence: string | null;
+  target: number | null;
+  is_important: boolean;
+  agg: string | null;
+  schema_hint: unknown;
+  source: string;
+  parent_promise_id: number | null;
+}
+
+export interface TrackableDay {
+  date: string;
+  value: boolean | number | Record<string, unknown> | null;
+  entry_count: number;
+}
+
+export async function fetchTrackables(): Promise<Trackable[]> {
+  const res = await apiFetch(`${BASE}/trackables`);
+  if (!res.ok) throw new Error("Failed to fetch trackables");
+  return res.json();
+}
+
+// Per-day pivot, newest-first, gap-filled — today is days[0].
+export async function fetchTrackableDays(
+  id: number,
+  days = 7,
+): Promise<{ trackable: Trackable; days: TrackableDay[] }> {
+  const res = await apiFetch(`${BASE}/trackables/${id}/entries?days=${days}&fill=true`);
+  if (!res.ok) throw new Error("Failed to fetch trackable days");
+  return res.json();
+}
+
+// Log one entry. replace=true = cell-edit (collapse the day to this value).
+export async function logTrackable(
+  id: number,
+  // date (YYYY-MM-DD) optional → omit for today; pass to edit a historical cell
+  body: { value_boolean?: boolean; value_numeric?: number; replace?: boolean; date?: string },
+): Promise<{ cleared: boolean }> {
+  const res = await apiFetch(`${BASE}/trackables/${id}/entries`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, source: "manual" }),
+  });
+  if (!res.ok) throw new Error("Failed to log trackable");
+  return res.json();
+}
+
+export async function createTrackable(body: {
+  name: string;
+  kind?: TrackableKind;
+  unit?: string;
+  target?: number;
+}): Promise<Trackable> {
+  const res = await apiFetch(`${BASE}/trackables`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to create trackable");
+  return res.json();
+}
+
 export async function createConversation(content?: string): Promise<ApiConversation> {
   const res = await apiFetch(`${BASE}/conversations`, {
     method: "POST",
