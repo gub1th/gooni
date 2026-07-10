@@ -7,16 +7,17 @@ import { StatsLite } from "../components/StatsLite";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
+import { AmbientHome } from "../components/ambient/AmbientHome";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { useConversationsStore } from "../stores/useConversationsStore";
 import { fetchNote } from "../services/api";
 
-// Ambient-loop v2 (Slice 7): the chat log IS the app. View union shrank
-// from notes|dashboard|chat|lists|eval|stats to notes|chat|log|eval|stats,
-// default = log (capture + consumption share one attention surface; the
-// AmbientOverlay hover-summons "what matters now" on top of it).
+// Ambient-loop v2 "presence" pass: the WAVEFORM is the app's home. Default =
+// home — a near-empty black surface with the reactive waveform; everything
+// else (log, notes, chat, stats, nav) is hover-summoned frosted glass on top.
+// The log demoted from default to ?view=log.
 
-type View = "notes" | "chat" | "log" | "eval" | "stats";
+type View = "home" | "notes" | "chat" | "log" | "eval" | "stats";
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -52,7 +53,8 @@ function LogPage() {
     search.view === "notes" ? "notes" :
     search.view === "chat" ? "chat" :
     search.view === "stats" ? "stats" :
-    "log";
+    search.view === "log" ? "log" :
+    "home";
 
   useEffect(() => {
     fetchConversations();
@@ -144,7 +146,9 @@ function LogPage() {
   // content into AppShell's <Outlet />.
   return (
     <>
-      {view === "log" ? (
+      {view === "home" ? (
+        <AmbientHome />
+      ) : view === "log" ? (
         <ChatLogView />
       ) : view === "chat" ? (
         <ChatView />
