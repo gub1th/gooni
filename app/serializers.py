@@ -186,6 +186,8 @@ def _serialize_note(n: Note) -> dict:
         "excerpt_anchor": n.excerpt_anchor,
         "tags": _parse_tags(n.tags),
         "icon": getattr(n, "icon", None),
+        "log_date": n.log_date.isoformat() if getattr(n, "log_date", None) else None,
+        "home_pos": _parse_home_pos(getattr(n, "home_pos", None)),
     }
 
 
@@ -212,7 +214,31 @@ def _serialize_note_lite(n: Note) -> dict:
         "parent_note_id": n.parent_note_id,
         "excerpt_anchor": n.excerpt_anchor,
         "tags": _parse_tags(n.tags),
+        "log_date": n.log_date.isoformat() if getattr(n, "log_date", None) else None,
+        "home_pos": _parse_home_pos(getattr(n, "home_pos", None)),
     }
+
+
+def _parse_home_pos(raw):
+    """Decode the JSON-as-text sticky placement into {"x","y"} (viewport
+    fractions) + optional {"w","h"} (px size). Returns None for non-stickies
+    or garbage."""
+    if not raw:
+        return None
+    try:
+        v = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(v, dict) or "x" not in v or "y" not in v:
+        return None
+    try:
+        out = {"x": float(v["x"]), "y": float(v["y"])}
+        for k in ("w", "h"):
+            if v.get(k) is not None:
+                out[k] = float(v[k])
+        return out
+    except (TypeError, ValueError):
+        return None
 
 
 def _notes_order():

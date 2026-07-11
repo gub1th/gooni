@@ -16,11 +16,29 @@ from ..serializers import (
     _excerpt_from_html, _strip_html_to_visible_text, _normalize_tags, _serialize_note, _serialize_note_lite, _notes_order, _memory_to_dashboard
 )
 from ..common import (
-    _unique_viewers_for_note
+    _unique_viewers_for_note,
+    _parse_iso_date,
 )
 
 
 router = APIRouter()
+
+
+def _encode_home_pos(raw) -> str | None:
+    """Validate + JSON-encode a sticky placement for storage. Accepts
+    {"x","y"} (viewport fractions) + optional {"w","h"} (px size); returns
+    None for anything else so a bad payload clears the placement rather than
+    corrupting it."""
+    if not isinstance(raw, dict) or "x" not in raw or "y" not in raw:
+        return None
+    try:
+        out = {"x": float(raw["x"]), "y": float(raw["y"])}
+        for k in ("w", "h"):
+            if raw.get(k) is not None:
+                out[k] = float(raw[k])
+        return json.dumps(out)
+    except (TypeError, ValueError):
+        return None
 
 
 @router.get("/notes")
@@ -50,6 +68,10 @@ def create_note(body: dict, db: Session = Depends(get_db)):
         is_draft=bool(body.get("is_draft", True)),
         is_pinned=bool(body.get("is_pinned", False)),
         tags=json.dumps(initial_tags) if initial_tags else None,
+        # Sticky notes come in with a home_pos; log-day notes with a log_date.
+        # Both null on ordinary captures.
+        home_pos=_encode_home_pos(body.get("home_pos")),
+        log_date=_parse_iso_date(body["log_date"]) if body.get("log_date") else None,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -68,6 +90,89 @@ def get_recent_notes(limit: int = 5, db: Session = Depends(get_db)):
         .all()
     )
     return [_serialize_note_lite(n) for n in notes]
+
+
+@router.get("/notes/daily")
+def list_daily_notes(days: int = 30, end: str | None = None, db: Session = Depends(get_db)):
+    """Daily-log notes (the log-matrix note column) whose log_date lands in
+    the [end-(days-1), end] window, newest first. Sparse — only dates that
+    actually have a note. Frontend keys them by log_date. `end` (YYYY-MM-DD)
+    defaults to today; page backwards to match the matrix's infinite scroll."""
+    from datetime import timedelta
+
+    from ..common import local_today
+
+    days = max(1, min(days, 366))
+    end_d = _parse_iso_date(end) if end else local_today(db)
+    start_d = end_d - timedelta(days=days - 1)
+    notes = (
+        db.query(Note)
+        .filter(
+            Note.log_date.is_not(None),
+            Note.log_date >= start_d,
+            Note.log_date <= end_d,
+        )
+        .order_by(Note.log_date.desc())
+        .all()
+    )
+    return [_serialize_note(n) for n in notes]
+
+
+@router.get("/notes/sticky")
+def list_sticky_notes(db: Session = Depends(get_db)):
+    """Sticky notes parked on the ambient home canvas — the `sticky`-tagged
+    notes that carry a home_pos. Full serialization (content included) so the
+    home can render + edit them; the flat /notes list only ships lite rows."""
+    notes = (
+        db.query(Note)
+        .filter(Note.home_pos.is_not(None))
+        .order_by(Note.created_at.asc())
+        .all()
+    )
+    return [_serialize_note(n) for n in notes]
+
+
+@router.put("/notes/daily/{date}")
+def upsert_daily_note(date: str, body: dict, db: Session = Depends(get_db)):
+    """Upsert the daily-log note for `date` (YYYY-MM-DD). Body {content}.
+    Empty content deletes the note (cell-clear semantics, mirrors trackables).
+    One note per date via the log_date key, carried by the `daily` tag;
+    is_draft=False so daily logs don't crowd the Drafts sidebar."""
+    from datetime import datetime
+
+    d = _parse_iso_date(date)
+    content = body.get("content") or ""
+    visible = _strip_html_to_visible_text(content).strip()
+    existing = (
+        db.query(Note)
+        .filter(Note.log_date == d)
+        .order_by(Note.id.asc())
+        .first()
+    )
+    if not visible:
+        if existing is not None:
+            db.delete(existing)
+            db.commit()
+        return {"cleared": True}
+    if existing is None:
+        existing = Note(
+            title=d.isoformat(),
+            content=content,
+            excerpt=_excerpt_from_html(content),
+            log_date=d,
+            tags=json.dumps(["daily"]),
+            is_draft=False,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(existing)
+    else:
+        existing.content = content
+        existing.excerpt = _excerpt_from_html(content)
+        existing.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(existing)
+    return _serialize_note(existing)
 
 
 @router.post("/notes/{note_id}/publish")
@@ -188,6 +293,12 @@ def update_note(
     if "tags" in body:
         normalized = _normalize_tags(body["tags"])
         note.tags = json.dumps(normalized) if normalized else None
+    if "home_pos" in body:
+        # Sticky drag-reposition. Null clears the placement (note stops being
+        # a sticky on the canvas). Doesn't bump updated_at — moving a note
+        # isn't an edit, and we don't want it jumping the sidebar's recency
+        # sort every drag.
+        note.home_pos = _encode_home_pos(body.get("home_pos"))
     if "icon" in body:
         raw_icon = body.get("icon")
         if raw_icon is None or raw_icon == "":
