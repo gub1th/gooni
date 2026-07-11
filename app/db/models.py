@@ -26,7 +26,6 @@ class Conversation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(Text, nullable=True)  # auto-generated short title
-    summary = Column(Text, nullable=True)  # auto-generated after session ends
     source = Column(String, nullable=False, default="web")  # 'web' | 'telegram'
     last_message_at = Column(
         DateTime(timezone=True), nullable=True

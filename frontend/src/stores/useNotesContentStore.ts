@@ -113,7 +113,6 @@ export const useNotesContentStore = create<NotesContentState>()(
           id: tempId,
           title: null,
           content: null,
-          space_id: spaceId === "general" ? null : parseInt(spaceId),
           created_at: now,
           updated_at: now,
           last_opened_at: null,

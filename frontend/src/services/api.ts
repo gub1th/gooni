@@ -57,7 +57,6 @@ export interface ApiNote {
   // First external <img src="https://..."/> from the note body. Inline
   // base64 images are excluded — list endpoints never ship those.
   thumb_src?: string | null;
-  space_id: number | null;
   created_at: string;
   updated_at: string;
   last_opened_at: string | null;
@@ -186,19 +185,11 @@ export async function extractToChildNote(
 }
 
 
-export interface SpaceSuggestion {
-  suggested_space_id: number | null;
-  suggested_space_name: string | null;
-  suggested_space_emoji: string | null;
-}
-
-export async function embedNote(id: number): Promise<SpaceSuggestion> {
+export async function embedNote(id: number): Promise<void> {
   try {
-    const res = await apiFetch(`${BASE}/notes/${id}/embed`, { method: "POST" });
-    if (!res.ok) return { suggested_space_id: null, suggested_space_name: null, suggested_space_emoji: null };
-    return res.json();
+    await apiFetch(`${BASE}/notes/${id}/embed`, { method: "POST" });
   } catch {
-    return { suggested_space_id: null, suggested_space_name: null, suggested_space_emoji: null };
+    // embed is a fire-and-forget side effect; failures are non-fatal
   }
 }
 

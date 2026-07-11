@@ -170,7 +170,6 @@ def _serialize_note(n: Note) -> dict:
         "title": n.title,
         "content": n.content,
         "excerpt": _note_excerpt(n),
-        "space_id": getattr(n, "space_id", None),  # vestigial post-nuke; attr unmapped
         "created_at": n.created_at,
         "updated_at": n.updated_at,
         "last_opened_at": n.last_opened_at,
@@ -203,7 +202,6 @@ def _serialize_note_lite(n: Note) -> dict:
         "content": None,
         "excerpt": _note_excerpt(n),
         "thumb_src": _external_thumb_from_html(n.content),
-        "space_id": getattr(n, "space_id", None),  # vestigial post-nuke; attr unmapped
         "created_at": n.created_at,
         "updated_at": n.updated_at,
         "last_opened_at": n.last_opened_at,
@@ -256,7 +254,6 @@ def _serialize_conversation(c: Conversation) -> dict:
         "type": "conversation",
         "title": c.title,
         "summary": c.summary,
-        "space_id": getattr(c, "space_id", None),  # vestigial post-nuke; attr unmapped
         "source": c.source,
         "created_at": c.created_at,
     }
@@ -317,7 +314,6 @@ def _memory_to_dashboard(m) -> dict:
         "confidence": m.confidence,
         "is_active": bool(m.is_active),
         "superseded_by": m.superseded_by,
-        "focus_id": getattr(m, "focus_id", None),  # vestigial post-nuke; attr unmapped
         "retrieval_count": m.retrieval_count,
         "last_retrieved_at": m.last_retrieved_at.isoformat() if m.last_retrieved_at else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,

@@ -55,11 +55,6 @@ class NoteService:
         finally:
             db.close()
 
-    def suggest_space(self, note_id: int, db: Session) -> dict:
-        """Spaces died in the Slice 6 nuke — tags own organization. Kept
-        as a no-op so any straggler caller gets the empty shape."""
-        return {"suggested_space_id": None, "suggested_space_name": None, "suggested_space_emoji": None}
-
     def _search_fts(self, query: str, limit: int, db: Session) -> list[int]:
         """SQLite FTS5 MATCH against notes_fts (virtual table populated by
         migration c7e3d9b8a1f2 + insert/update/delete triggers on notes).
