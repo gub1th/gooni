@@ -3,8 +3,8 @@
 #
 # Why: the in-process eval harness (evals/run_orchestrator.py) normally points
 # at a scratch DB so synthetic cases run clean. That gives us "ideal-state"
-# scores. But real prod has 660+ memories, dozens of focuses, hundreds of
-# capability facets — all of which actually shape the master prompt at chat
+# scores. But real prod has hundreds of memories, live promises, and
+# trackable history — all of which actually shape the master prompt at chat
 # time. Score against prod state = the number that actually matters.
 #
 # Snapshot is git-ignored (db/gooni-prod-snapshot.db) and contains all user
