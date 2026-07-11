@@ -414,14 +414,6 @@ def upsert_today_snapshot(db: Session, payload: dict[str, Any]) -> dict[str, Any
             db, t, day=today, value_numeric=float(val), source="whoop", replace=True,
         )
 
-    # Proactive nudge — phase 0. Queues once per fresh source_updated_at
-    # via the Settings debouncer. Fail-open: any error here must not
-    # break whoop ingest.
-    try:
-        from .proactive_nudge import maybe_fire_whoop_nudge
-        maybe_fire_whoop_nudge(doc, db)
-    except Exception as e:
-        print(f"[whoop] proactive nudge hook errored (ignored): {e}")
     return doc
 
 

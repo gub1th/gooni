@@ -1138,25 +1138,11 @@ export async function fetchChatAudit(opts: {
   return res.json();
 }
 
-// ── Settings (daily nudge) ────────────────────────────────────────────────────
-
-export type NudgeChannel = "telegram" | "whatsapp";
+// ── Settings ─────────────────────────────────────────────────────────────────
 
 export interface AppSettings {
-  nudge_enabled: boolean;
-  nudge_hour: number;        // 0-23
-  nudge_minute: number;      // 0-59
-  nudge_tz: string;          // IANA, e.g. "America/Los_Angeles"
-  nudge_channels: NudgeChannel[];
-  nudge_last_sent_day: string | null;
-  nudge_prompt: string;      // user-editable instruction for the daily digest LLM
-}
-
-export async function fetchNudgePromptDefault(): Promise<string> {
-  const res = await apiFetch(`${BASE}/settings/nudge-prompt-default`);
-  if (!res.ok) throw new Error("Failed to fetch default prompt");
-  const j = await res.json();
-  return j.prompt || "";
+  // Legacy field name — the app-wide canonical timezone (IANA).
+  nudge_tz: string;
 }
 
 export async function fetchSettings(): Promise<AppSettings> {
@@ -1175,19 +1161,6 @@ export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSe
     const detail = await res.text();
     throw new Error(detail || "Failed to update settings");
   }
-  return res.json();
-}
-
-export interface NudgeTestResult {
-  sent: boolean;
-  to?: string[];
-  skipped?: string[];
-  reason?: string;
-}
-
-export async function testNudge(): Promise<NudgeTestResult> {
-  const res = await apiFetch(`${BASE}/settings/test-nudge`, { method: "POST" });
-  if (!res.ok) throw new Error("test nudge failed");
   return res.json();
 }
 

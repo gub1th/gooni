@@ -1,10 +1,11 @@
 """Background loop coroutines for the FastAPI process.
 
 Extracted from main.py — these are the long-running workers the app starts in
-its lifespan: the daily nudge scheduler, one-shot startup backfills, the memory
-watchdog, daily capability-telemetry + urgency rollups, and the soft-delete
-sweeper. main.py's lifespan owns STARTING them (asyncio.create_task); the loop
-bodies live here so main stays pure app wiring.
+its lifespan: one-shot startup backfills and the memory watchdog. (The daily
+nudge scheduler and proactive-nudge tick died in the 2026-07 proactiveness
+reset — Gooni sends zero unprompted messages until the next proactive system
+is designed.) main.py's lifespan owns STARTING them (asyncio.create_task);
+the loop bodies live here so main stays pure app wiring.
 
 All decision logic still lives in the respective services — these loops just
 tick, call the service, and fail open. Service imports are kept lazy (inside
@@ -13,86 +14,10 @@ and an unused loop never drags its service in.
 """
 
 import asyncio
-from datetime import datetime as _dt
-
-try:
-    from zoneinfo import ZoneInfo  # py3.9+
-except ImportError:  # pragma: no cover — Fly runs 3.11
-    ZoneInfo = None  # type: ignore
 
 from .db.database import SessionLocal
 from .db.models import Note
-from .deps import _fire_nudge_once, _next_fire, _settings_row
 from .serializers import _excerpt_from_html
-
-
-async def _proactive_nudge_loop():
-    """Single tick driving every proactive surface: sleep callout +
-    debounced whoop ping. Runs every 60s so the whoop debouncer has
-    minute-level resolution while the sleep callout stays cheap. All
-    decision logic lives in proactive_nudge; this loop just calls the
-    checks and fails open. Renamed from `_sleep_nudge_loop` once the
-    whoop debouncer landed."""
-    # Import deferred to first run (drags in messaging + orchestrator), but
-    # hoisted out of the per-tick while-loop so it's resolved once, not every
-    # 60s.
-    from .services.proactive_nudge import (
-        maybe_fire_sleep_nudge,
-        process_pending_whoop_nudge,
-    )
-    # Stagger past boot so we don't race the alembic upgrade.
-    await asyncio.sleep(30)
-    while True:
-        try:
-            db = SessionLocal()
-            try:
-                process_pending_whoop_nudge(db)
-                maybe_fire_sleep_nudge(db)
-            finally:
-                db.close()
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            print(f"[proactive_nudge] tick error (ignored): {e}")
-        try:
-            await asyncio.sleep(60)
-        except asyncio.CancelledError:
-            return
-
-
-async def _nudge_loop():
-    """Sleep until the next configured fire time, then fire. Re-reads Settings
-    every iteration so a UI change to nudge_hour/minute/tz takes effect on the
-    next loop without restarting the process."""
-    while True:
-        try:
-            db = SessionLocal()
-            try:
-                s = _settings_row(db)
-                enabled = s.nudge_enabled
-                hour = s.nudge_hour
-                minute = s.nudge_minute
-                tz_name = s.nudge_tz or "America/Los_Angeles"
-            finally:
-                db.close()
-            if not enabled:
-                # Re-check every 5 min so toggling on in the UI doesn't take
-                # 24h to take effect.
-                await asyncio.sleep(300)
-                continue
-            now = _dt.now(ZoneInfo(tz_name) if ZoneInfo else None)
-            target = _next_fire(now, hour, minute, tz_name)
-            wait = max(1.0, (target - now).total_seconds())
-            await asyncio.sleep(wait)
-            await _fire_nudge_once()
-            # Buffer past the firing minute so we don't immediately recompute
-            # "next 9:00" as today again on a clock still at 09:00:00.
-            await asyncio.sleep(70)
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            print(f"[nudge] loop error: {e}")
-            await asyncio.sleep(60)
 
 
 async def _backfill_note_excerpts_loop():

@@ -18,18 +18,9 @@ from .db.models import (
 
 
 def _serialize_settings(s: Settings) -> dict:
-    try:
-        channels = json.loads(s.nudge_channels or '["telegram"]')
-    except json.JSONDecodeError:
-        channels = ["telegram"]
     return {
-        "nudge_enabled": bool(s.nudge_enabled),
-        "nudge_hour": int(s.nudge_hour),
-        "nudge_minute": int(s.nudge_minute),
+        # Legacy name; the app-wide canonical timezone (local_today reads it).
         "nudge_tz": s.nudge_tz or "America/Los_Angeles",
-        "nudge_channels": channels,
-        "nudge_last_sent_day": s.nudge_last_sent_day,
-        "nudge_prompt": s.nudge_prompt or "",
         "overlay_anchor_note_id": s.overlay_anchor_note_id,
         "overlay_whoop_keys": _safe_json_list(s.overlay_whoop_keys),
     }
