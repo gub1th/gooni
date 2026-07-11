@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useConversationsStore } from "../stores/useConversationsStore";
+import { speakText } from "../services/speech";
 import { InputBar } from "./chat/InputBar";
 import { MessageBubble } from "./chat/MessageBubble";
 import { ThinkingIndicator } from "./chat/ThinkingIndicator";
@@ -92,6 +93,8 @@ export function ChatView() {
   const { activeId, messages, sending, streamingStage, streamingTools, send } = useConversationsStore();
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // true when the pending send was spoken (see InputBar) → voice the reply back
+  const voiceRef = useRef(false);
 
   const chatStarted = activeId !== null || messages.length > 0;
 
@@ -105,8 +108,17 @@ export function ChatView() {
     const text = input.trim();
     if (!text && !imageUrl) return;
     if (sending) return;
+    // snapshot + reset the modality before the async turn; only voice the reply
+    // back if THIS send was spoken (a keystroke since would have cleared it).
+    const wasVoice = voiceRef.current;
+    voiceRef.current = false;
     setInput("");
     await send(text, undefined, imageUrl);
+    if (wasVoice) {
+      const latest = useConversationsStore.getState().messages;
+      const reply = [...latest].reverse().find((m) => m.role === "assistant");
+      if (reply?.content) void speakText(reply.content);
+    }
   }
 
   return (
@@ -166,7 +178,7 @@ export function ChatView() {
         boxSizing: "border-box",
         flexShrink: 0,
       }}>
-        <InputBar input={input} setInput={setInput} onSend={handleSend} sending={sending} />
+        <InputBar input={input} setInput={setInput} onSend={handleSend} sending={sending} voiceRef={voiceRef} />
         <div style={{
           display: "flex",
           gap: 8,

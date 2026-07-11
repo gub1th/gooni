@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Mic, MicOff } from "lucide-react";
 import { FONT } from "../../ui";
+import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "../../services/speech";
 import { MorphLine, type MorphRect } from "./MorphLine";
 import { LimboCards } from "./LimboCards";
 import { SummonedNav } from "./SummonedNav";
@@ -19,21 +21,22 @@ import {
 
 // Line-art "presence" home. ONE stroke (MorphLine) is the only resident thing:
 // a tall breathing waveform at rest that BENDS into the capture input's outline
-// when summoned (the line becomes the box), then back. Hover → short peek box;
-// focus → it grows tall and expands with your lines; Enter → captured instantly
-// (optimistic — the LLM turn runs in the background) and the box melts back to
-// the wave with a green "got it" pulse. Pending glow-items + nav are their own
-// summoned strokes over the black.
+// when summoned (the line becomes the box), then back.
+//
+// VOICE-FIRST (default): the wave is always listening. Tap once to wake (a
+// browser gesture is unavoidable — it unlocks the mic + audio autoplay), then
+// it's hands-free: you talk → it auto-sends on your pause → Gooni speaks the
+// reply back, then resumes listening. No button, no textbox, no Enter. The mic
+// pauses while Gooni talks (no echo) and while you type. Toggle voice off (pill,
+// persisted) to fall back to the typed capture box.
 
 const POLL_MS = 15_000;
-// The wave's bounding box, the hover trigger zone, and the input box the wave
-// morphs into are ONE rectangle: X = wave start→end (WAVE_WIDTH), Y = ±max
-// amplitude (PEEK_H). So hovering anywhere on the wave is inside the box that
-// forms, and leaving that rect melts it back — no edge flicker.
 const WAVE_WIDTH = 440;
 const PEEK_H = 104; // rest box height ≈ the wave's full amplitude span (+margin)
 const FOCUS_MIN_H = 104; // never shrink below the resting bounds when focused
 const MAX_H = 340;
+const IDLE_LISTEN_AMP = 0.4; // gentle live wave while listening at rest
+const MIN_UTTERANCE = 2; // ignore stray one-char finals / noise
 
 function isGlowing(m: LogMessage): boolean {
   return Boolean(m.has_actionable_signal) && (m.signal_preview?.status ?? "pending") === "pending";
@@ -82,6 +85,22 @@ export function AmbientHome() {
   const replyTimer = useRef<number | null>(null);
   const replyHideTimer = useRef<number | null>(null);
 
+  // ── Voice engine ──────────────────────────────────────────────────────────
+  // voiceMode = master switch (persisted, default on). armed = user has tapped
+  // to wake this session (mic running + audio unlocked). listening = mic hot.
+  // Refs mirror the flags for use inside SpeechRecognition callbacks (which see
+  // stale closures otherwise). busyRef gates overlaps while a turn runs/speaks.
+  const [voiceMode, setVoiceModeState] = useState(isVoiceMode);
+  const [armed, setArmed] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState("");
+  const recognitionRef = useRef<any>(null); // SpeechRecognition — not in lib.dom
+  const shouldListenRef = useRef(false); // do we WANT the mic hot right now
+  const busyRef = useRef(false); // a turn is thinking/speaking → don't listen/overlap
+  const convIdRef = useRef<number | null>(null); // one conversation for the session
+  const voiceModeRef = useRef(voiceMode);
+  const armedRef = useRef(false);
+
   useEffect(() => {
     function onResize() { setVp({ w: window.innerWidth, h: window.innerHeight }); }
     onResize();
@@ -98,8 +117,6 @@ export function AmbientHome() {
       const rows = await fetchMessageLog({ limit: 40 });
       const glowing = rows.filter(isGlowing);
       setLimbo(glowing);
-      // energy (green) tracks pending count; amplitude/"speaking" is activeRef,
-      // kept independent so a reply landing doesn't fight the pending signal.
       energyRef.current = energyFor(glowing.length);
     } catch {
       /* ambient surface — never throw at the user */
@@ -112,14 +129,178 @@ export function AmbientHome() {
     return () => window.clearInterval(t);
   }, [reload]);
 
-  // grow the box to fit the content (min depends on focus). Owns textarea
-  // height imperatively so scrollHeight reads true, and mirrors it to the
-  // morph target via boxH.
+  // resting wave energy: a gentle live shimmer while listening, flat otherwise.
+  const idleActive = useCallback(() => {
+    activeRef.current = voiceModeRef.current && armedRef.current ? IDLE_LISTEN_AMP : 0;
+  }, []);
+
+  // ── SpeechRecognition lifecycle ─────────────────────────────────────────────
+  const startListening = useCallback(() => {
+    if (!voiceModeRef.current || !armedRef.current || busyRef.current) return;
+    const w = window as any;
+    const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!Ctor) return;
+    let rec = recognitionRef.current;
+    if (!rec) {
+      rec = new Ctor();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = "en-US";
+      rec.onresult = onRecResult;
+      rec.onend = onRecEnd;
+      rec.onerror = onRecError;
+      recognitionRef.current = rec;
+    }
+    shouldListenRef.current = true;
+    try {
+      rec.start();
+      setListening(true);
+      activeRef.current = IDLE_LISTEN_AMP;
+    } catch {
+      /* already started — fine */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const stopListening = useCallback(() => {
+    shouldListenRef.current = false;
+    setListening(false);
+    setLiveTranscript("");
+    const rec = recognitionRef.current;
+    if (rec) { try { rec.stop(); } catch { /* not running */ } }
+  }, []);
+
+  function onRecResult(e: any) {
+    let interim = "";
+    let finalText = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      const txt = r[0]?.transcript ?? "";
+      if (r.isFinal) finalText += txt;
+      else interim += txt;
+    }
+    if (interim) {
+      setLiveTranscript(interim);
+      activeRef.current = 1; // hearing you → wave leaps
+    }
+    const utt = finalText.trim();
+    if (utt.length >= MIN_UTTERANCE) {
+      setLiveTranscript("");
+      void runTurn(utt, true);
+    }
+  }
+
+  function onRecEnd() {
+    setListening(false);
+    // Chrome ends recognition after a silence window — restart if we still want
+    // to be listening (and aren't mid-turn).
+    if (shouldListenRef.current && voiceModeRef.current && armedRef.current && !busyRef.current) {
+      try { recognitionRef.current?.start(); setListening(true); } catch { /* race — ignore */ }
+    }
+  }
+
+  function onRecError(e: any) {
+    // Mic permission denied / blocked → drop to typing rather than loop errors.
+    if (e?.error === "not-allowed" || e?.error === "service-not-allowed") {
+      disableVoice();
+    }
+    // no-speech / aborted / network → onend fires next and handles restart.
+  }
+
+  // ── Turn pipeline (shared by voice + typed) ─────────────────────────────────
+  async function sendTurn(text: string): Promise<string> {
+    let cid = convIdRef.current;
+    if (cid == null) {
+      const conv = await createConversation();
+      cid = conv.id;
+      convIdRef.current = cid;
+    }
+    const out = await sendConversationMessage(cid, text);
+    const assistant = [...out.messages].reverse().find((m) => m.role === "assistant");
+    return (assistant?.content || "").trim();
+  }
+
+  // One turn: pause the mic, think, show + (if spoken) SPEAK the reply, then
+  // resume listening. `spoken` = came by voice → Gooni voices it back; typed
+  // turns stay silent-subtitle only.
+  async function runTurn(text: string, spoken: boolean) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    stopListening(); // no echo: don't hear Gooni / ourselves mid-turn
+    clearReplyTimers();
+    setReplyText(null);
+    setThinking(true);
+    activeRef.current = 1;
+    let reply = "";
+    try {
+      reply = await sendTurn(text);
+    } catch {
+      /* dropped — stay quiet */
+    }
+    setThinking(false);
+    void reload(); // surface any glow card the turn produced
+    if (reply && spoken) {
+      // hold the subtitle for the WHOLE utterance — the audio, not a timer,
+      // decides when it fades.
+      showSubtitle(reply, true);
+      activeRef.current = 1;
+      await speakText(reply); // resolves exactly when playback ends (or is cut)
+      hideSubtitle();
+    } else if (reply) {
+      showSubtitle(reply); // typed → silent, length-timed subtitle
+    } else {
+      idleActive();
+    }
+    busyRef.current = false;
+    if (voiceModeRef.current && armedRef.current) startListening();
+  }
+
+  // ── Wake / toggle ───────────────────────────────────────────────────────────
+  // Tap-to-wake: the one required gesture. Unlocks audio autoplay + starts the
+  // mic. After this it's hands-free for the session.
+  const arm = useCallback(() => {
+    if (armedRef.current) return;
+    primeAudio(); // unlock autoplay inside the gesture
+    armedRef.current = true;
+    setArmed(true);
+    startListening();
+  }, [startListening]);
+
+  function toggleVoiceMode() {
+    const next = !voiceMode;
+    setVoiceMode(next); // persist
+    setVoiceModeState(next);
+    voiceModeRef.current = next;
+    if (next) {
+      arm(); // this click is a gesture → wake immediately, no separate tap
+    } else {
+      stopListening();
+      stopSpeaking();
+      setArmed(false);
+      armedRef.current = false;
+      idleActive();
+    }
+  }
+
+  function disableVoice() {
+    setVoiceMode(false);
+    setVoiceModeState(false);
+    voiceModeRef.current = false;
+    stopListening();
+    stopSpeaking();
+    setArmed(false);
+    armedRef.current = false;
+    idleActive();
+  }
+
+  // cleanup on unmount
+  useEffect(() => {
+    return () => { stopListening(); stopSpeaking(); };
+  }, [stopListening]);
+
   const syncHeight = useCallback(() => {
     const el = inputRef.current;
     if (!el) return;
-    // unfocused → clear the explicit height so the box falls back to the
-    // resting bounds (height:100% of the PEEK_H-tall hero)
     if (!focusedRef.current) { el.style.height = ""; setBoxH(PEEK_H); return; }
     el.style.height = "auto";
     const h = Math.max(FOCUS_MIN_H, Math.min(MAX_H, el.scrollHeight));
@@ -127,17 +308,13 @@ export function AmbientHome() {
     setBoxH(h);
   }, []);
 
-  // Omnibox recall: as you type, note suggestions surface live (like a browser
-  // address bar). Cheap title-substring is instant on every keystroke; semantic
-  // (embedding-cosine) search fires on a short pause to also catch meaning-
-  // matches. Empty box → recent notes (history). Enter never "searches harder" —
-  // it commits your thought unless a suggestion is highlighted (↑/↓), which opens.
+  // Omnibox recall — unchanged. Instant title-substring per keystroke + semantic
+  // on a short pause; Enter commits unless a suggestion is highlighted.
   const runRecall = useCallback((raw: string) => {
     const seq = ++searchSeq.current;
     if (searchTimer.current) { window.clearTimeout(searchTimer.current); searchTimer.current = null; }
     const q = raw.trim();
     setActiveIdx(-1);
-    // nothing typed yet → no dropdown (don't greet an empty box with a list)
     if (!q) { setSuggestions([]); return; }
     void searchNoteTitles(q, 6)
       .then((r) => { if (seq === searchSeq.current) setSuggestions((prev) => mergeNotes(r, prev)); })
@@ -167,6 +344,10 @@ export function AmbientHome() {
       const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
       if (e.key === "/" && !typing) {
         e.preventDefault();
+        // "/" = intent to type. If voice is armed but idle, that's fine — just
+        // open the box (mic pauses on focus). If voice hasn't been woken yet,
+        // pressing "/" means "I'd rather type" → drop out of voice mode.
+        if (voiceModeRef.current && !armedRef.current) disableVoice();
         openBox();
       }
     }
@@ -182,7 +363,6 @@ export function AmbientHome() {
     if (enterTimer.current) { window.clearTimeout(enterTimer.current); enterTimer.current = null; }
   }
 
-  // "/" → open + focus straight into the tall box
   function openBox() {
     clearHideTimer();
     clearEnterTimer();
@@ -191,9 +371,6 @@ export function AmbientHome() {
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
-  // hover → short peek box, but only if you DWELL on the wave. A hover-intent
-  // delay means a quick downward flick (heading for the log pill below) passes
-  // through without summoning the box.
   function onHeroEnter() {
     clearHideTimer();
     clearEnterTimer();
@@ -204,10 +381,10 @@ export function AmbientHome() {
   }
 
   function onHeroLeave() {
-    clearEnterTimer(); // cancel a pending open — the flick left before it fired
+    clearEnterTimer();
     if (focusedRef.current) return;
-    if (value.trim()) return; // keep a drafted-but-unfocused thought
-    activeRef.current = 0;
+    if (value.trim()) return;
+    idleActive();
     clearHideTimer();
     hideTimer.current = window.setTimeout(() => setBoxMode(false), 110);
   }
@@ -217,50 +394,37 @@ export function AmbientHome() {
     if (replyHideTimer.current) { window.clearTimeout(replyHideTimer.current); replyHideTimer.current = null; }
   }
 
-  // Gooni speaks: the reply fades in as a subtitle under the wave, holds for a
-  // read-time proportional to its length, then fades out → calm.
-  function speak(text: string) {
+  // Gooni's reply as a subtitle under the wave. `hold` = keep it up until the
+  // caller hides it (spoken path syncs the hide to when the AUDIO ends, so the
+  // text never fades mid-sentence). Silent (typed) path uses a length-based
+  // timer since there's no audio to track.
+  function showSubtitle(text: string, hold = false) {
     clearReplyTimers();
     setReplyText(text);
     requestAnimationFrame(() => setReplyShown(true));
-    activeRef.current = 1; // wave stays lively while speaking
+    activeRef.current = 1;
+    if (hold) return;
     const dur = Math.min(9000, Math.max(2600, text.length * 45));
-    replyTimer.current = window.setTimeout(() => {
-      setReplyShown(false);
-      activeRef.current = 0;
-      replyHideTimer.current = window.setTimeout(() => setReplyText(null), 420);
-    }, dur);
+    replyTimer.current = window.setTimeout(() => hideSubtitle(), dur);
   }
 
+  function hideSubtitle() {
+    clearReplyTimers();
+    setReplyShown(false);
+    idleActive();
+    replyHideTimer.current = window.setTimeout(() => setReplyText(null), 420);
+  }
+
+  // Typed capture (voice off, or optional typing while voice on) — silent reply.
   function capture() {
     const text = value.trim();
     if (!text) return;
-    // optimistic: clear + melt back to the wave immediately; then the wave
-    // goes into "thinking", and Gooni's ack/answer speaks as a subtitle.
     setValue("");
     focusedRef.current = false;
     setBoxMode(false);
     setBoxH(PEEK_H);
     inputRef.current?.blur();
-    clearReplyTimers();
-    setReplyText(null);
-    setThinking(true);
-    activeRef.current = 1; // listening/thinking → livelier wave
-    void (async () => {
-      let reply = "";
-      try {
-        const conv = await createConversation();
-        const out = await sendConversationMessage(conv.id, text);
-        const assistant = [...out.messages].reverse().find((m) => m.role === "assistant");
-        reply = (assistant?.content || "").trim();
-      } catch {
-        /* dropped — stay quiet, don't throw at the user */
-      }
-      setThinking(false);
-      void reload(); // surface any glow card the turn produced
-      if (reply) speak(reply);
-      else activeRef.current = 0;
-    })();
+    void runTurn(text, false);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -276,7 +440,6 @@ export function AmbientHome() {
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      // a highlighted suggestion opens; otherwise Enter commits the thought
       if (activeIdx >= 0 && suggestions[activeIdx]) { openNote(suggestions[activeIdx]); return; }
       capture();
       return;
@@ -284,7 +447,7 @@ export function AmbientHome() {
     if (e.key === "Escape") {
       if (activeIdx >= 0) { setActiveIdx(-1); return; }
       (e.target as HTMLTextAreaElement).blur();
-      activeRef.current = 0;
+      idleActive();
       if (!value.trim()) setBoxMode(false);
     }
   }
@@ -298,6 +461,8 @@ export function AmbientHome() {
     try { await dismissMessageGlow(m.id); } finally { void reload(); }
   }
 
+  const needsWake = voiceMode && !armed; // show the tap-to-wake veil
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000", overflow: "hidden", fontFamily: FONT }}>
       <MorphLine boxMode={boxMode} rect={rect} thinking={thinking} dimmed={logMode} waveWidth={waveW} energyRef={energyRef} activeRef={activeRef} />
@@ -305,10 +470,9 @@ export function AmbientHome() {
       <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
       <SummonedNav />
 
-      {/* hero zone = the wave's bounding rectangle (X spans the wave, Y spans
-          its max amplitude). This IS the box the wave morphs into AND the hover
-          target, so hovering any part of the wave is inside the forming box and
-          leaving the rect melts it back — no edge flicker. */}
+      {/* hero zone = the wave's bounding rectangle. Box the wave morphs into +
+          the hover target. Focusing it PAUSES the mic (so voice doesn't hear you
+          type); blurring resumes listening. */}
       <div
         onMouseEnter={onHeroEnter}
         onMouseLeave={onHeroLeave}
@@ -321,16 +485,18 @@ export function AmbientHome() {
           zIndex: 2,
         }}
       >
-        {/* textarea fills the box exactly; the morphed stroke IS its border
-            (transparent fill here). Clicking anywhere in the rect focuses.
-            Height (boxH) owned by syncHeight. */}
         <textarea
           ref={inputRef}
           value={value}
           onChange={(e) => { setValue(e.target.value); syncHeight(); }}
           onKeyDown={onKeyDown}
-          onFocus={() => { focusedRef.current = true; activeRef.current = 1; syncHeight(); }}
-          onBlur={() => { focusedRef.current = false; syncHeight(); onHeroLeave(); }}
+          onFocus={() => { focusedRef.current = true; activeRef.current = 1; stopListening(); syncHeight(); }}
+          onBlur={() => {
+            focusedRef.current = false;
+            syncHeight();
+            onHeroLeave();
+            if (voiceModeRef.current && armedRef.current && !busyRef.current) startListening();
+          }}
           placeholder="what's on your mind?"
           spellCheck={false}
           style={{
@@ -348,8 +514,7 @@ export function AmbientHome() {
         />
       </div>
 
-      {/* omnibox recall — live note suggestions under the box. ↑/↓ highlights,
-          Enter on a highlight opens it inline; plain Enter still commits. */}
+      {/* omnibox recall — live note suggestions under the box */}
       {boxMode && suggestions.length > 0 && (
         <div
           style={{
@@ -394,8 +559,7 @@ export function AmbientHome() {
         </div>
       )}
 
-      {/* log trigger — a pill row the width of the wave box, hover-revealed just
-          below it. One pill now (log); the row leaves room for more later. */}
+      {/* log + voice pills — hover-revealed row below the wave */}
       {!boxMode && !logMode && (
         <div
           onMouseEnter={() => setLogPillHot(true)}
@@ -417,6 +581,22 @@ export function AmbientHome() {
           >
             log ▾
           </button>
+          {/* voice mode switch — default on, persisted. Off = typed-only home. */}
+          <button
+            onClick={toggleVoiceMode}
+            aria-label={voiceMode ? "Turn voice off" : "Turn voice on"}
+            title={voiceMode ? "Voice on — Gooni listens + speaks. Click to go silent." : "Voice off — click to talk to Gooni."}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "5px 14px", borderRadius: 999, cursor: "pointer", fontFamily: FONT, fontSize: 12,
+              border: "1px solid rgba(244,245,244,0.2)",
+              background: voiceMode ? "rgba(74,222,128,0.12)" : "rgba(11,15,13,0.5)",
+              color: voiceMode ? "rgba(74,222,128,0.9)" : "rgba(244,245,244,0.5)",
+            }}
+          >
+            {voiceMode ? <Mic size={13} /> : <MicOff size={13} />}
+            {voiceMode ? "voice" : "silent"}
+          </button>
         </div>
       )}
 
@@ -424,9 +604,23 @@ export function AmbientHome() {
 
       {peekNote && <NotePeek note={peekNote} onClose={() => setPeekNote(null)} />}
 
-      {/* Gooni's voice — thinking shows IN the wave (traveling pulse); when the
-          reply lands it fades in here as a subtitle under the wave */}
-      {replyText && (
+      {/* live transcript — what the mic is hearing right now (ephemeral) */}
+      {liveTranscript && (
+        <div
+          style={{
+            position: "absolute",
+            left: "50%", top: rect.cy + PEEK_H / 2 + 44, transform: "translateX(-50%)",
+            width: "min(600px, 86vw)", textAlign: "center", zIndex: 5, pointerEvents: "none",
+            fontFamily: FONT, fontSize: 15.5, lineHeight: 1.55, fontStyle: "italic",
+            color: "rgba(244,245,244,0.5)", textShadow: "0 1px 14px rgba(0,0,0,0.7)",
+          }}
+        >
+          {liveTranscript}
+        </div>
+      )}
+
+      {/* Gooni's reply subtitle (hidden while a fresh transcript is showing) */}
+      {replyText && !liveTranscript && (
         <div
           style={{
             position: "absolute",
@@ -441,20 +635,65 @@ export function AmbientHome() {
         </div>
       )}
 
-      {/* faint affordance so the empty screen tells you how to start */}
+      {/* bottom affordance — reflects the current mode */}
       <div
         style={{
           position: "fixed", bottom: 22, left: 0, right: 0, textAlign: "center",
           zIndex: 1, pointerEvents: "none", fontSize: 11.5, letterSpacing: 0.4,
           color: "rgba(244,245,244,0.28)",
-          opacity: boxMode || logMode || thinking || replyText ? 0 : 1, transition: "opacity 300ms ease",
+          opacity: needsWake || boxMode || logMode || thinking || replyText || liveTranscript ? 0 : 1,
+          transition: "opacity 300ms ease",
         }}
       >
-        press <kbd style={{
-          fontFamily: FONT, fontWeight: 700, color: "rgba(244,245,244,0.5)",
-          padding: "1px 6px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.12)",
-        }}>/</kbd> or hover to capture a thought
+        {voiceMode && armed
+          ? (listening ? "listening — just talk" : "…")
+          : (
+            <>
+              press <kbd style={{
+                fontFamily: FONT, fontWeight: 700, color: "rgba(244,245,244,0.5)",
+                padding: "1px 6px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.12)",
+              }}>/</kbd> or hover to capture a thought
+            </>
+          )}
       </div>
+
+      {/* tap-to-wake veil — the one required gesture (unlocks mic + audio). One
+          tap, then hands-free. "type instead" bails to the silent typed home. */}
+      {needsWake && (
+        <div
+          onClick={arm}
+          style={{
+            position: "fixed", inset: 0, zIndex: 30, cursor: "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            gap: 14, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(2px)",
+          }}
+        >
+          <div style={{
+            width: 64, height: 64, borderRadius: "50%",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            border: "1px solid rgba(74,222,128,0.4)", background: "rgba(74,222,128,0.08)",
+            color: "rgba(74,222,128,0.9)", boxShadow: "0 0 40px rgba(74,222,128,0.18)",
+          }}>
+            <Mic size={26} />
+          </div>
+          <div style={{ fontFamily: FONT, fontSize: 16, color: "#F4F5F4", letterSpacing: 0.3 }}>
+            tap to wake
+          </div>
+          <div style={{ fontFamily: FONT, fontSize: 12.5, color: "rgba(244,245,244,0.45)" }}>
+            then just talk — Gooni listens + speaks back
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); disableVoice(); }}
+            style={{
+              marginTop: 6, padding: "4px 12px", borderRadius: 999, cursor: "pointer",
+              fontFamily: FONT, fontSize: 11.5, color: "rgba(244,245,244,0.4)",
+              background: "transparent", border: "1px solid rgba(244,245,244,0.14)",
+            }}
+          >
+            type instead
+          </button>
+        </div>
+      )}
     </div>
   );
 }

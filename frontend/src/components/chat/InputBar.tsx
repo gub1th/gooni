@@ -10,9 +10,12 @@ interface InputBarProps {
   setInput: (v: string) => void;
   onSend: (imageUrl?: string) => void;
   sending: boolean;
+  // Flips true when input arrived by speech, false on any keystroke. ChatView
+  // reads it on send to decide whether to voice the reply back.
+  voiceRef?: React.MutableRefObject<boolean>;
 }
 
-export function InputBar({ input, setInput, onSend, sending }: InputBarProps) {
+export function InputBar({ input, setInput, onSend, sending, voiceRef }: InputBarProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const plusBtnRef = useRef<HTMLButtonElement>(null);
@@ -103,6 +106,7 @@ export function InputBar({ input, setInput, onSend, sending }: InputBarProps) {
     rec.onresult = (e: any) => {
       const transcript = Array.from(e.results as ArrayLike<any>)
         .map((r: any) => r[0].transcript).join(" ");
+      if (voiceRef) voiceRef.current = true; // spoken → reply gets voiced back
       setInput(input ? `${input} ${transcript}` : transcript);
     };
     rec.onend = () => setRecording(false);
@@ -156,7 +160,7 @@ export function InputBar({ input, setInput, onSend, sending }: InputBarProps) {
         <textarea
           ref={textareaRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => { if (voiceRef) voiceRef.current = false; setInput(e.target.value); }}
           onKeyDown={handleKeyDown}
           placeholder="Ask Gooni"
           rows={1}
