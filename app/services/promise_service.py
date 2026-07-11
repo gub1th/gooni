@@ -91,8 +91,8 @@ def create(
     inserting a duplicate (touches the `utters` edge for re-statement
     provenance).
 
-    Complexity classifier: runs `promise_complexity.needs_game_plan` and
-    stores it as `needs_clarification` metadata. Doesn't gate the
+    Vague flag: `needs_clarification` = once-cadence with no resolvable
+    deadline (structural — no text classifier). Doesn't gate the
     lifecycle — promise is `active` either way. The flag drives ack
     pushback (Gooni asks one sharp clarifier in the same turn) and
     seeds future weekly-digest stats.
@@ -105,24 +105,6 @@ def create(
     if not cleaned:
         raise ValueError("utterance required")
 
-    # G3.1 complexity classification — pure-regex, no LLM. The bool
-    # determines `needs_clarification` metadata, NOT the state. Both
-    # vague and concrete utterances land as `active` immediately.
-    # v2: an explicit recurring cadence answers the "how often counts?"
-    # clarifier by construction — don't flag those as vague.
-    try:
-        from . import promise_complexity
-        needs_clarification = promise_complexity.needs_game_plan(cleaned)
-        if cadence in ("daily", "n_per_week"):
-            needs_clarification = False
-    except Exception as e:
-        print(f"[promise complexity] classifier error: {e}")
-        needs_clarification = False
-    print(
-        f"[promise complexity] needs_clarification={needs_clarification} "
-        f"for: {cleaned[:80]}"
-    )
-
     if cadence not in VALID_CADENCES:
         cadence = "once"
     if cadence != "n_per_week":
@@ -134,6 +116,16 @@ def create(
         inferred = inferred_due or _infer_due_from_text(cleaned, db=db)
     else:
         inferred = None
+
+    # Vague-promise flag — STRUCTURAL, no regex (the old promise_complexity
+    # module re-detected recurrence shape from raw text; the extractor now
+    # emits `cadence` directly, so the only genuinely vague shape left is a
+    # one-shot commitment with no resolvable deadline: "imma get better at
+    # cooking". Recurring cadences answer "how often counts?" by
+    # construction; a due answers "when?"). Metadata only — the promise
+    # lands `active` either way; the flag drives the clarifier ack + the
+    # overlay's vague list.
+    needs_clarification = cadence == "once" and inferred is None
     vec = _embed(cleaned)
 
     # Active dedup BEFORE insert. Skip when no embedding — cosine match

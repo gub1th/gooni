@@ -6,6 +6,7 @@ import {
   dismissMessageGlow,
   fetchMessageLog,
   promoteMessage,
+  reextractMessage,
   undoPromoteMessage,
   type LogMessage,
   type SignalPreviewSignal,
@@ -126,6 +127,15 @@ export function ChatLogView() {
     setOpenPeekId(null);
   }
 
+  async function onRetry(m: LogMessage) {
+    try {
+      const out = await reextractMessage(m.id);
+      patchMessage({ ...m, ...out.message });
+    } catch (e) {
+      console.error("reextract failed", e);
+    }
+  }
+
   return (
     <div
       data-testid="chat-log-view"
@@ -167,6 +177,7 @@ export function ChatLogView() {
                 onPromote={() => void onPromote(m)}
                 onUndo={() => void onUndo(m)}
                 onDismiss={() => void onDismiss(m)}
+                onRetry={() => void onRetry(m)}
               />
             ))}
           </div>
@@ -185,6 +196,7 @@ function LogRow({
   onPromote,
   onUndo,
   onDismiss,
+  onRetry,
 }: {
   message: LogMessage;
   peekOpen: boolean;
@@ -193,10 +205,12 @@ function LogRow({
   onPromote: () => void;
   onUndo: () => void;
   onDismiss: () => void;
+  onRetry: () => void;
 }) {
   const preview = m.signal_preview ?? null;
   const status = preview?.status ?? "pending";
   const glowing = Boolean(m.has_actionable_signal) && status === "pending";
+  const extractFailed = status === "extract_failed";
   const justPromoted = status === "promoted" && undoSecondsLeft !== undefined;
   const isUser = m.role === "user";
   const badge = SOURCE_BADGE[m.source];
@@ -227,6 +241,19 @@ function LogRow({
             />
           ) : status === "promoted" ? (
             <Check size={11} strokeWidth={2.6} color="#15803D" style={{ marginTop: 1 }} />
+          ) : extractFailed ? (
+            <button
+              data-testid={`retry-dot-${m.id}`}
+              onClick={onRetry}
+              title="Gooni couldn't process this one — tap to retry"
+              aria-label="Extraction failed — retry"
+              style={{
+                width: 12, height: 12, padding: 0, borderRadius: 999,
+                border: "none", cursor: "pointer",
+                background: "#D97706",
+                boxShadow: "0 0 6px 1px rgba(217,119,6,0.45)",
+              }}
+            />
           ) : null}
         </div>
 

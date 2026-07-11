@@ -290,6 +290,21 @@ class Orchestrator:
             signals_summary = _summarize_signals(signals, memory_candidates)
             tb.extracted_signals(saved_message, signals)
 
+            # Extractor died (LLM error / truncated JSON) → every capture
+            # for this turn is lost. Stamp the Message row so the log view
+            # can render a retry affordance instead of silence — dropped
+            # captures are trust-fatal for an ambient assistant (this
+            # exact class already bit us: audit 2026-06-10).
+            if signals.get("extract_failed") and user_msg is not None:
+                try:
+                    user_msg.signal_preview = json.dumps({
+                        "signals": [], "status": "extract_failed",
+                        "promise_ids": [],
+                    })
+                    db.commit()
+                except Exception as e:
+                    print(f"[extract-failed mark] {e}")
+
             # Unified routing: one dispatch point fans signals out to
             # the per-type handlers in app/services/intent_handlers/.
             # Replaces three copy-pasted if-blocks (tone, feature,
@@ -344,40 +359,25 @@ class Orchestrator:
                 skip_normal_reply = routed.reply_intent in ("task_only", "no_reply")
 
                 # G4: capture-only short-circuit. When the ack stub
-                # already says "tracked X, sir" / "closed X, sir" and
-                # the user message is a short statement (no question,
-                # ≤12 words), an LLM continuation just adds filler
-                # ("on it, sir. 450 now."). Daniel called this double-
-                # narration 2026-05-22 on the "do 450" turn. The fix:
-                # the ack stub IS the reply. Only fires when the
-                # extractor didn't already pick task_only — and NEVER
-                # when it explicitly classified the turn as "answer"
-                # (the word-count heuristic alone ate real questions
-                # like "wait why'd you close that": 5 words, starts
-                # "wait", no question mark — audit 2026-06-10).
-                if not skip_normal_reply and routed.reply_intent != "answer":
-                    msg_text = (message or "").strip()
-                    word_count = len(msg_text.split())
-                    has_question = "?" in msg_text
-                    first_word = (msg_text.split() or [""])[0].lower().strip(",.!?;:")
-                    _QUESTION_WORDS = {
-                        "what", "when", "where", "how", "why", "who",
-                        "which", "can", "will", "should", "is", "are",
-                        "do", "does", "did", "could", "would", "wdym",
-                    }
-                    looks_like_question = first_word in _QUESTION_WORDS
+                # already says "tracked X, sir" / "closed X, sir", an LLM
+                # continuation just adds filler ("on it, sir. 450 now.") —
+                # Daniel called this double-narration out 2026-05-22. The
+                # ack stub IS the reply. Gate is now purely the extractor's
+                # reply_intent — "acknowledge" + a real capture. The old
+                # word-count/question-word heuristic re-implemented intent
+                # detection the extractor already does, and its comment
+                # history shows it repeatedly ate real questions ("wait
+                # why'd you close that" — audit 2026-06-10). reply_intent
+                # defaults to "answer" on extract failure, so a dead
+                # extractor can never silence a real reply.
+                if not skip_normal_reply and routed.reply_intent == "acknowledge":
                     capture_happened = bool(
                         routed.captured_promises
                         or routed.completed_promises
                         or routed.broken_promises
                         or routed.captured_metrics
                     )
-                    if (
-                        capture_happened
-                        and not has_question
-                        and not looks_like_question
-                        and word_count <= 12
-                    ):
+                    if capture_happened:
                         skip_normal_reply = True
 
         if skip_normal_reply and feedback_ack is not None:
@@ -737,11 +737,11 @@ class Orchestrator:
         # dynamic_context = everything per-turn (bot mechanics, state,
         #   memory, note, focus). Never cacheable — kept in the tail.
         #
-        # B4 NOTE: PERSONA + MASTER RULES (prompts._STATIC_SYSTEM_BLOCK) now
-        # sit adjacent in the cached prefix — one identity region. Content
-        # dedup of their overlapping rules (no-lists / verify-before-claim /
-        # no-bot-register) is a follow-up; co-locating without deleting guard
-        # lines keeps this behavior-preserving.
+        # B4 NOTE: PERSONA + MASTER RULES (prompts._STATIC_SYSTEM_BLOCK) sit
+        # adjacent in the cached prefix — one identity region. Deduped in the
+        # post-sweep fixes (2026-07-10): PERSONA owns identity/voice/register/
+        # length; _STATIC_SYSTEM_BLOCK owns machinery (hard rules, capabilities,
+        # tool protocols, memory citation). Don't restate one in the other.
         static_context = "\n\n".join(filter(None, [
             PERSONA_BLOCK,
             OBJECT_KINDS_BLOCK,

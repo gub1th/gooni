@@ -53,7 +53,7 @@ from typing import Any
 # (notes/memory/web/calendar + read-only promise/trackable); state_block
 # is promise-first; persona todo language removed; capability block gone
 # from memory context. Segregate ratings hard.
-PROMPT_VERSION = "v13"
+PROMPT_VERSION = "v14"  # v14: PERSONA/MASTER-RULES dedup + G4 reply_intent gate + structural needs_clarification
 
 
 class TraceBuilder:
