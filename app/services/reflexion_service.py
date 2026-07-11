@@ -147,14 +147,6 @@ def _detect_doubled_down_after_correction(reply: str) -> str | None:
     return m.group(0).strip() if m else None
 
 
-# Behavioral promotion: when this many recent reflections cluster on the same
-# gap_exposed (cosine > floor), promote the centroid into a behavioral
-# CapabilityFacet.
-_CLUSTER_MIN_HITS = 3
-_CLUSTER_SIM_FLOOR = 0.8
-_CLUSTER_LOOKBACK_DAYS = 30
-
-
 # Score lookup: composite of gap-dimension weight + severity. Conservative —
 # better to under-score than inflate. Aggregated per-conv on dashboards.
 _GAP_DIMENSION_PENALTY = {

@@ -271,7 +271,6 @@ _RATE_RULES: list[tuple[re.Pattern[str], str, int, int]] = [
     (re.compile(r"^/auth$"), "auth", 10, 60),
     (re.compile(r"^/chat(/|$)"), "chat", 30, 60),
     (re.compile(r"^/notes/\d+/(embed|memorize)$"), "embed", 30, 60),
-    (re.compile(r"^/dashboard/take$"), "take", 30, 60),
 ]
 _DEFAULT_BUCKET = ("default", 300, 60)
 
