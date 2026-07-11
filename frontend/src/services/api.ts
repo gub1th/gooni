@@ -518,7 +518,9 @@ export interface SignalPreviewSignal {
 
 export interface SignalPreview {
   signals: SignalPreviewSignal[];
-  status: "pending" | "promoted" | "dismissed";
+  // extract_failed = the extractor died on this turn (LLM error/truncated
+  // JSON) — captures were lost; the log renders a retry affordance.
+  status: "pending" | "promoted" | "dismissed" | "extract_failed";
   promise_ids: number[];
 }
 
@@ -565,6 +567,14 @@ export async function undoPromoteMessage(messageId: number): Promise<{ message: 
 export async function dismissMessageGlow(messageId: number): Promise<{ message: LogMessage }> {
   const res = await apiFetch(`${BASE}/messages/${messageId}/dismiss-glow`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to dismiss glow");
+  return res.json();
+}
+
+export async function reextractMessage(messageId: number): Promise<{ message: LogMessage }> {
+  // Retry extraction on an extract_failed message — re-runs the signal
+  // pipeline server-side; glow re-lands if commitments are found.
+  const res = await apiFetch(`${BASE}/messages/${messageId}/reextract`, { method: "POST" });
+  if (!res.ok) throw new Error("retry failed — extractor may still be down");
   return res.json();
 }
 

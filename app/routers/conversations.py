@@ -305,6 +305,69 @@ def undo_promote(message_id: int, db: Session = Depends(get_db)):
     return {"message": _serialize_message(msg)}
 
 
+@router.post("/messages/{message_id}/reextract")
+def reextract_message(message_id: int, db: Session = Depends(get_db)):
+    """Retry signal extraction on a message whose original extract died
+    (status == "extract_failed" — LLM error / truncated JSON at capture
+    time). Re-runs extract_signals + the full intent-router dispatch, so
+    promises re-glow and fitness/tone signals land exactly as they would
+    have on the original turn. Only failed messages are retryable — a
+    clean no-signal message has nothing to recover."""
+    from ..common import local_today
+    from ..db.models import Message
+    from ..services import intent_router
+    from ..services.memory_extraction import extract_signals
+
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if msg is None:
+        raise HTTPException(404, "Message not found")
+    try:
+        preview = json.loads(msg.signal_preview or "null")
+    except (TypeError, ValueError):
+        preview = None
+    if not isinstance(preview, dict) or preview.get("status") != "extract_failed":
+        raise HTTPException(409, "message is not in extract_failed state")
+
+    prev_assistant = (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == msg.conversation_id,
+            Message.role == "assistant",
+            Message.id < msg.id,
+        )
+        .order_by(Message.id.desc())
+        .first()
+    )
+
+    signals = extract_signals(
+        msg.content,
+        prev_assistant=prev_assistant.content if prev_assistant else None,
+        today=local_today(db),
+    )
+    if signals.get("extract_failed"):
+        # Still failing — keep the retry affordance, tell the client.
+        raise HTTPException(502, "extraction failed again — try later")
+
+    # Clear the failed mark BEFORE dispatch: the promises handler overwrites
+    # signal_preview with a fresh glow when it finds commitment shapes.
+    msg.signal_preview = None
+    msg.has_actionable_signal = False
+    db.commit()
+
+    ctx = intent_router.RouterContext(
+        db=db,
+        source_message_id=msg.id,
+        prev_assistant_text=prev_assistant.content if prev_assistant else None,
+        prev_assistant_id=prev_assistant.id if prev_assistant else None,
+    )
+    # Same contract as the orchestrator: forward the FULL signals dict,
+    # blank `memories` (reconcile is the chat path's off-thread job — a
+    # retry shouldn't write memories without that pipeline).
+    intent_router.dispatch({**signals, "memories": []}, ctx)
+    db.refresh(msg)
+    return {"message": _serialize_message(msg)}
+
+
 @router.post("/messages/{message_id}/dismiss-glow")
 def dismiss_glow(message_id: int, db: Session = Depends(get_db)):
     """Dismiss without acting — the glow dot clears, the parse is kept
