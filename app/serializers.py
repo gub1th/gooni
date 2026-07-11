@@ -185,7 +185,6 @@ def _serialize_note(n: Note) -> dict:
         "parent_note_id": n.parent_note_id,
         "excerpt_anchor": n.excerpt_anchor,
         "tags": _parse_tags(n.tags),
-        "status": getattr(n, "status", "unprocessed") or "unprocessed",
         "icon": getattr(n, "icon", None),
     }
 
@@ -213,7 +212,6 @@ def _serialize_note_lite(n: Note) -> dict:
         "parent_note_id": n.parent_note_id,
         "excerpt_anchor": n.excerpt_anchor,
         "tags": _parse_tags(n.tags),
-        "status": getattr(n, "status", "unprocessed") or "unprocessed",
     }
 
 

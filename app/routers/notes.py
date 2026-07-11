@@ -185,14 +185,6 @@ def update_note(
         note.is_public_pinned = bool(body["is_public_pinned"])
     if "is_draft" in body:
         note.is_draft = bool(body["is_draft"])
-    if "status" in body:
-        new_status = body.get("status")
-        if new_status not in ("unprocessed", "graduated", "archived"):
-            raise HTTPException(
-                status_code=400,
-                detail="status must be unprocessed|graduated|archived",
-            )
-        note.status = new_status
     if "tags" in body:
         normalized = _normalize_tags(body["tags"])
         note.tags = json.dumps(normalized) if normalized else None
@@ -301,24 +293,6 @@ def get_draft_notes(db: Session = Depends(get_db)):
     notes = (
         db.query(Note)
         .filter(Note.is_draft == True)  # noqa: E712
-        .order_by(_notes_order())
-        .all()
-    )
-    return [_serialize_note_lite(n) for n in notes]
-
-
-@router.get("/notes/unprocessed")
-def get_unprocessed_notes(db: Session = Depends(get_db)):
-    """Notes captured but not yet graduated into Promise/Todo/Habit/Focus.
-
-    Drives the "Unprocessed" sidebar view — Daniel's triage queue for
-    captured thought that hasn't taken shape yet. The synthesizer reads
-    the same filter to surface focus candidates from cluster patterns
-    in this set (see focus_synthesizer note-graduation path).
-    """
-    notes = (
-        db.query(Note)
-        .filter(Note.status == "unprocessed")
         .order_by(_notes_order())
         .all()
     )

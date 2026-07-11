@@ -160,10 +160,6 @@ class Note(Base):
     # snapshot, the meaning hasn't shifted enough to warrant another pass.
     # Deferred — only ever read inside `classify_note`'s dedup check.
     classified_embedding = deferred(Column(Text, nullable=True))
-    # FK back to a Note in the "Gooni Backlog" space when this note's
-    # content triggered a feature_request. Drives the editor chip so
-    # Daniel sees that the note actually fed the self-improvement loop.
-    backlog_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
     # JSON snapshot of what classify_note routed for this note's most recent
     # save. Mirrors the chat-side `signals` payload so the editor can render
     # the same "Routed:" disclosure as MessageBubble. Shape:
@@ -175,14 +171,6 @@ class Note(Base):
     #   }
     # Empty / null when no signals fired or note hasn't been classified yet.
     last_classify_signals = Column(Text, nullable=True)
-    # Session-summary notes (PR-4): the 5am batch writes one Note per
-    # processed session with note_type='session_summary'. Null for normal
-    # notes. session_start/end bound the source window; message_count is the
-    # raw count. The desktop review (PR-5) queries by note_type.
-    note_type = Column(String, nullable=True, index=True)  # None | 'session_summary'
-    session_start = Column(DateTime, nullable=True)
-    session_end = Column(DateTime, nullable=True)
-    message_count = Column(Integer, nullable=True)
     # Set when this note was extracted out of a parent note via the
     # "↗ Extract to new note" BubbleMenu action. The parent's content keeps
     # a clickable chip (TipTap noteLink node) where the selection used to
@@ -198,18 +186,6 @@ class Note(Base):
     # M2M `note_tags` table is needed (cross-cutting analytics across
     # the whole corpus) we can derive it from this column.
     tags = Column(Text, nullable=True)
-    # Graduation lifecycle for the primitive-model redraw. Every Note
-    # starts as `unprocessed` — captured but uncommitted intent. Becomes
-    # `graduated` once it spawns a Promise / Todo / Habit / Focus (or is
-    # otherwise turned into structured action; tracked via derives_from
-    # edges back to the source note). `archived` is a manual tombstone
-    # for notes that never need to graduate. The synthesizer reads only
-    # `unprocessed` rows for focus-candidate clustering so a graduated
-    # note doesn't get re-surfaced as a stale prompt.
-    status = Column(
-        String, nullable=False, default="unprocessed",
-        server_default="unprocessed", index=True,
-    )
 
 
 class PublicProfile(Base):
