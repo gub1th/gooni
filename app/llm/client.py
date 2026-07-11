@@ -159,6 +159,23 @@ class LLMClient:
             )
         return result.text
 
+    def synthesize_speech(self, text: str, voice: str = "fable") -> bytes:
+        """Text → MP3 audio bytes via OpenAI TTS. Used when the user triggered
+        a reply by VOICE — Gooni speaks it back (see routers/speech.py).
+
+        voice="fable" is OpenAI's British-storyteller timbre — the closest fit
+        to the Alfred persona; swap the default to re-cast the voice. tts-1 is
+        the low-latency model (tts-1-hd trades latency for fidelity). The API
+        caps input at 4096 chars; caller pre-trims but we clamp again for
+        safety. Returns raw MP3 bytes."""
+        resp = self.client.audio.speech.create(
+            model="tts-1",
+            voice=voice,
+            input=text[:4000],
+            response_format="mp3",
+        )
+        return resp.content
+
     def generate_embedding(self, text: str) -> tuple[List[float], dict]:
         """Generate embedding for text."""
         try:

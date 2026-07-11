@@ -14,6 +14,7 @@ ROUTER_MODULES = [
     "auth",
     "misc",
     "chat",
+    "speech",
     "webhooks",
     "settings",
     "notes",

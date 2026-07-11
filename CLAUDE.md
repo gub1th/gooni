@@ -45,7 +45,7 @@ See `docs/TODO.md` (gitignored — local only).
 
 ## API surface
 
-Route shapes are grep-able — one `app/routers/<domain>.py` module per domain (`visits, public, metrics, trackables, overlay, auth, misc, chat, webhooks, settings, notes, promises, uploads, conversations, health, tool_calls, mcp, memories, eval, whoop, integrations, reflections`). Serialization in `app/serializers.py`.
+Route shapes are grep-able — one `app/routers/<domain>.py` module per domain (`visits, public, metrics, trackables, overlay, auth, misc, chat, speech, webhooks, settings, notes, promises, uploads, conversations, health, tool_calls, mcp, memories, eval, whoop, integrations, reflections`). Serialization in `app/serializers.py`. `speech` = `POST /tts` (text → MP3 bytes via OpenAI `tts-1`, voice `fable`; best-effort, 502→client stays silent).
 
 ## Architecture
 
@@ -74,13 +74,13 @@ Route shapes are grep-able — one `app/routers/<domain>.py` module per domain (
 - **`app/services/health_service.py`** — 6 axes; engagement counts promises/trackable entries; cost proxies on ToolCall rows; whoop connector reads the master Trackable; github connector = token-only.
 - **`app/tools/`** — 16-tool chat registry: memory (save), web (fetch/search), notes (search/add w/ tags/find/read/recent), `list_promises` + `read_trackable` (read-only — router owns actionable writes), `request_feature` (→ tagged Note), calendar (5).
 - **Greeting fast-path** + **tool-history in recent_history** — unchanged.
-- **`app/llm/client.py`** — unchanged (gpt-5.4 chat, gpt-5.4-mini extract, gpt-4o-mini cheap paths).
+- **`app/llm/client.py`** — gpt-5.4 chat, gpt-5.4-mini extract, gpt-4o-mini cheap paths. `transcribe` (Whisper, unused by web) + `synthesize_speech(text, voice="fable")` (TTS → MP3 bytes, powers `/tts`).
 
 ### Frontend (`frontend/src/`)
 
 - **`ui/`** — tokens (`FONT`, `color`, `z` ladder incl. `overlay: 950`, `ambient` = overlay-blur + glow-dot), Button/Card/Modal. `--gooni-overlay-blur` + `--gooni-glow-dot` pushed per-theme in `__root` ThemeVarSync.
 - **`routes/index.tsx`** — THE app shell: view union `home|notes|chat|log|eval`, **default = home** (the ambient waveform). `?view=log` = ChatLogView; **stats retired** (absorbed by the log surface). No dashboard, no lists.
-- **`components/ambient/`** — the presence home (`AmbientHome`). ONE morphing line (`MorphLine`) is the breathing waveform at rest and bends into the capture input's outline (wave bbox = hover zone = box, one rect). Omnibox recall on the box (title-substring instant + semantic on pause → note suggestions; ↑/↓+Enter opens `NotePeek` inline reader; plain Enter commits). `LogDots`+`LogTable` = the log surface: a frosted dots card (today's trackables + whoop/leetcode read-only feed tiles) that morphs into a full editable matrix (dates × trackables, historical cells via `logTrackable` date+replace). `SummonedNav` (frosted edge nav), `LimboCards` (pending-glow), `TracedOutline`.
+- **`components/ambient/`** — the presence home (`AmbientHome`). **Voice-first (default on, persisted `gooni_voice_mode`):** tap-to-wake (one required browser gesture — unlocks mic + audio autoplay) → continuous Web Speech STT → auto-send on speech pause → Gooni speaks the reply (TTS via `services/speech.ts::speakText`, subtitle held until audio ends) → resumes listening. Mic pauses during Gooni's reply (no echo) + on textarea focus. `voice`/`silent` pill toggles it; off = typed-only. Recognizer callbacks read `voiceMode`/`armed`/`busy` via REFS (the SpeechRecognition object binds once — state would freeze at first render). ONE morphing line (`MorphLine`) is the breathing waveform at rest and bends into the capture input's outline (wave bbox = hover zone = box, one rect). Omnibox recall on the box (title-substring instant + semantic on pause → note suggestions; ↑/↓+Enter opens `NotePeek` inline reader; plain Enter commits). `LogDots`+`LogTable` = the log surface: a frosted dots card (today's trackables + whoop/leetcode read-only feed tiles) that morphs into a full editable matrix (dates × trackables, historical cells via `logTrackable` date+replace). `SummonedNav` (frosted edge nav), `LimboCards` (pending-glow), `TracedOutline`.
 - **`components/ChatLogView.tsx`** — the append-only Thought log (`?view=log`): glow dots, peek panel (cadence pill/due/importance), Promote/Dismiss, 10s undo, source badges, 15s poll. Mounts AmbientOverlay. Seam test `ChatLogView.test.tsx` (vitest + RTL; `npm test`, in CI).
 - **`components/AmbientOverlay.tsx`** — corner toggle → frosted edge panels (200ms fade), 4 zones, anchor note picker (persists via Settings PATCH).
 - **Stats retired** — `StatsLite`/`StatsView` deleted; the log surface (`LogDots`/`LogTable`) owns trackables + whoop/leetcode feed tiles now. `?view=stats` dead, pulled from all nav.
