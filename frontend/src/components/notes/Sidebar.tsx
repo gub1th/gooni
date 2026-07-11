@@ -8,12 +8,11 @@ import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
-  PenLine, FileText, Brain, ClipboardList, Settings as SettingsIcon,
-  Globe, Plug, PanelLeftClose, Radio, MessageSquare,
+  PenLine, FileText,
+  Globe, Plug, PanelLeftClose,
   Pin as PinIcon, Tag as TagIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
-import { SettingsModal } from "../SettingsModal";
 
 const ICON_TINT = {
   allNotes: "#6366F1",   // indigo
@@ -47,11 +46,10 @@ const sidebarFooterBtn: React.CSSProperties = {
   outline: "none",
 };
 
+// Sidebar = the NOTES BROWSER (pinned/drafts/recents/tags). App-level nav
+// lives in SummonedNav (one rail, every surface) since the unification pass.
 interface SidebarProps {
   isNotes: boolean;
-  isChat: boolean;
-  isLog: boolean;
-  isEval?: boolean;
   showCompose: boolean;
   onLogoClick: () => void;
   // All-Notes row click. Sidebar mutates the store (selectSpace "general"),
@@ -61,8 +59,6 @@ interface SidebarProps {
   // so the index route's search.note effect picks it up.
   onSelectNote: (id: number) => void;
   onCompose: () => void;
-  onNewChat: () => void;
-  onOpenEval?: () => void;
   // Collapse the sidebar — Claude-style top-right panel-close icon.
   // AppShell owns sidebarOpen state; Sidebar just calls this.
   onClose?: () => void;
@@ -215,7 +211,7 @@ function SidebarChildRow({
   );
 }
 
-export function Sidebar({ isNotes, isChat, isLog, isEval, showCompose, onLogoClick, onAllNotes, onSelectNote, onCompose, onNewChat, onOpenEval, onClose }: SidebarProps) {
+export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelectNote, onCompose, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const { selectSpace, loadNotes, selectNote, activeNoteId } = useNotesContentStore();
 
@@ -225,7 +221,6 @@ export function Sidebar({ isNotes, isChat, isLog, isEval, showCompose, onLogoCli
   // Distinct tag set across the whole corpus — derived from the flat
   // GET /notes list (notes carry `tags: string[]`).
   const [allTags, setAllTags] = useState<string[]>([]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const theme = useGooniThemeStore((s) => s.theme);
   const palette = THEME_PALETTES[theme];
 
@@ -494,52 +489,6 @@ export function Sidebar({ isNotes, isChat, isLog, isEval, showCompose, onLogoCli
 
           <div style={{ flex: 1, minHeight: 20 }} />
 
-          {/* Divider into the bottom flat-nav cluster. Log / Chat / Stats /
-              Memories / Audit / Settings all read as flat navigation items
-              at the same scale as section headers. */}
-          <div style={{ height: 1, margin: "8px 14px", background: "rgba(0,0,0,0.07)" }} />
-          <FlatNavRow
-            label="Log"
-            Icon={Radio}
-            iconColor={ICON_TINT.log}
-            active={isLog}
-            onClick={() => navigate({
-              to: "/",
-              search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "log" },
-            })}
-          />
-          <FlatNavRow
-            label="Chat"
-            Icon={MessageSquare}
-            iconColor={ICON_TINT.newChat}
-            active={isChat}
-            onClick={onNewChat}
-          />
-          <FlatNavRow
-            label="Memories"
-            Icon={Brain}
-            iconColor={ICON_TINT.memories}
-            onClick={() => navigate({ to: "/memories", search: { focus: undefined } })}
-          />
-          <FlatNavRow
-            label="Audit"
-            Icon={ClipboardList}
-            iconColor={ICON_TINT.chatAudit}
-            active={!!isEval}
-            onClick={() => {
-              if (onOpenEval) { onOpenEval(); return; }
-              navigate({
-                to: "/",
-                search: { audit: true, note: undefined, conv: undefined, segment: undefined, view: undefined },
-              });
-            }}
-          />
-          <FlatNavRow
-            label="Settings"
-            Icon={SettingsIcon}
-            iconColor={ICON_TINT.settings}
-            onClick={() => setSettingsOpen(true)}
-          />
         </div>
 
         {/* Footer — Public profile + MCP connector. Side-by-side pills. Lives
@@ -574,43 +523,7 @@ export function Sidebar({ isNotes, isChat, isLog, isEval, showCompose, onLogoCli
         </div>
       </div>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
   );
 }
 
-// FlatNavRow — destination rows in the bottom cluster (Log / Chat / Stats /
-// Memories / Audit / Settings). Same scale as SidebarSection headers so
-// they read as peers, not as muted afterthoughts. No trailing affordance —
-// clicking the row navigates.
-function FlatNavRow({ label, Icon, iconColor, active, onClick }: {
-  label: string;
-  Icon: typeof FileText;
-  iconColor?: string;
-  active?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={label}
-      style={{
-        display: "flex", alignItems: "center", gap: 8,
-        width: "100%", padding: "7px 14px",
-        border: "none",
-        background: active ? "rgba(10,132,255,0.08)" : "transparent",
-        cursor: "pointer", textAlign: "left",
-        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-        fontSize: 13,
-        fontWeight: active ? 600 : 500,
-        color: active ? "#0A66D6" : "var(--gooni-text, #1C1C1E)",
-        transition: "background 0.12s, color 0.12s",
-      }}
-      onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.03)"; }}
-      onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-    >
-      <Icon size={15} strokeWidth={1.8} color={active ? "#0A66D6" : (iconColor ?? "#475569")} style={{ flexShrink: 0 }} />
-      {label}
-    </button>
-  );
-}

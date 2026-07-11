@@ -4,7 +4,6 @@ import { FONT } from "../../ui";
 import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "../../services/speech";
 import { MorphLine, type MorphRect } from "./MorphLine";
 import { LimboCards } from "./LimboCards";
-import { SummonedNav } from "./SummonedNav";
 import { LogDots } from "./LogDots";
 import { NotePeek } from "./NotePeek";
 import {
@@ -468,7 +467,6 @@ export function AmbientHome() {
       <MorphLine boxMode={boxMode} rect={rect} thinking={thinking} dimmed={logMode} waveWidth={waveW} energyRef={energyRef} activeRef={activeRef} />
 
       <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
-      <SummonedNav />
 
       {/* hero zone = the wave's bounding rectangle. Box the wave morphs into +
           the hover target. Focusing it PAUSES the mic (so voice doesn't hear you

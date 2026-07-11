@@ -2,17 +2,16 @@ import { useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Radio, FileText, MessageSquare, Brain, ClipboardList,
-  Settings as SettingsIcon, type LucideIcon,
+  SearchCheck, Settings as SettingsIcon, type LucideIcon,
 } from "lucide-react";
-import { FONT, z } from "../../ui";
+import { FONT, frost, z } from "../../ui";
 import { SettingsModal } from "../SettingsModal";
 import { TracedOutline } from "./TracedOutline";
 
-// Slice 3 — the nav is summoned too, but (unlike v1) it has a VISIBLE handle
-// so you can actually find your way off the home. A faint 3-dot grip sits at
-// the left-center edge; hover it (or the panel) and the frosted rail traces
-// itself in. Leave → it retreats. Home is the only surface that swaps the
-// docked sidebar for this.
+// THE app nav — one rail, every surface (hoisted to AppShell in the
+// unification pass; the docked sidebar is just the notes browser now).
+// A faint 3-dot grip sits at the left-center edge; hover it (or the panel)
+// and the frosted rail traces itself in. Leave → it retreats.
 
 const FADE_MS = 220;
 const GRACE_MS = 280;
@@ -50,6 +49,7 @@ export function SummonedNav() {
     { label: "Notes", Icon: FileText, go: () => nav({ view: "notes" }) },
     { label: "Chat", Icon: MessageSquare, go: () => nav({ view: "chat" }) },
     { label: "Memories", Icon: Brain, go: () => navigate({ to: "/memories", search: { focus: undefined } }) },
+    { label: "Audit", Icon: SearchCheck, go: () => nav({ audit: true }) },
     { label: "Settings", Icon: SettingsIcon, go: () => setSettingsOpen(true) },
   ];
 
@@ -102,8 +102,7 @@ export function SummonedNav() {
             style={{
               padding: "14px 12px", borderRadius: 16,
               display: "flex", flexDirection: "column", gap: 3,
-              background: "color-mix(in srgb, #0a0d0c 62%, transparent)",
-              backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)",
+              ...frost.chrome,
             }}
           >
             <div style={{

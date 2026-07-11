@@ -12,6 +12,8 @@ import { QuickComposer } from "../components/QuickComposer";
 import { ErrorView, NotFoundView } from "../components/ErrorView";
 import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
+import { SummonedNav } from "../components/ambient/SummonedNav";
+import { sheetFrame } from "../ui";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { GooniLayer } from "../components/GooniLayer";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -95,10 +97,6 @@ function AppShell() {
   const selectSpace = useNotesContentStore((s) => s.selectSpace);
   const createNote = useNotesContentStore((s) => s.createNote);
   const newChat = useConversationsStore((s) => s.newChat);
-
-  if (isChromelessPath(location.pathname)) {
-    return <Outlet />;
-  }
 
   // URL-derive every Sidebar active flag. `/` is the multi-view route
   // (log / notes / chat / eval / stats); we pick the current view from
@@ -215,6 +213,41 @@ function AppShell() {
     });
   }
 
+  // /creative is its own immersive world — exempt from the sheet frame.
+  const isImmersive = suppressGooniLayer(location.pathname);
+  // Every non-home authed surface renders as a summoned layer over the void.
+  const isSheet = !isHome && !isImmersive && !isChromelessPath(location.pathname);
+
+  // Esc = drop the summoned layer, back to presence. Skips text inputs and
+  // open dialogs (the canonical Modal stopPropagation()s Escape at the
+  // document level before this window listener fires).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+         t.tagName === "SELECT" || t.isContentEditable)
+      ) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      if (!isSheet || isChromelessPath(location.pathname)) return;
+      navigate({
+        to: "/",
+        search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined },
+      });
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSheet]);
+
+  // Chromeless paths (public portfolio) render bare — checked AFTER all
+  // hooks so the hook order is stable across paths (rules-of-hooks).
+  if (isChromelessPath(location.pathname)) {
+    return <Outlet />;
+  }
+
   return (
     <PasswordGate>
       {/* Global thin/translucent scrollbar — applies to everything except
@@ -276,35 +309,35 @@ function AppShell() {
           display: "flex",
           height: "100vh",
           overflow: "hidden",
-          background: isHome ? "#000000" : "var(--gooni-bg, #FFFFFF)",
+          // The void is the app's ground; views float on it as sheets.
+          background: isImmersive ? "var(--gooni-bg, #FFFFFF)" : "#000000",
           position: "relative",
         }}
       >
-        {!isHome && sidebarOpen && (
+        <div
+          style={
+            isSheet
+              ? {
+                  flex: 1, display: "flex", minWidth: 0, minHeight: 0,
+                  margin: sheetFrame.margin,
+                  borderRadius: sheetFrame.borderRadius,
+                  border: sheetFrame.border,
+                  boxShadow: sheetFrame.boxShadow,
+                  overflow: "hidden",
+                  background: "var(--gooni-bg, #FFFFFF)",
+                }
+              : { flex: 1, display: "flex", minWidth: 0, minHeight: 0 }
+          }
+        >
+        {isNotes && sidebarOpen && (
           <Sidebar
             isNotes={isNotes}
-            isChat={isChat}
-            isLog={isLog}
-            isEval={isEval}
             showCompose={!isNotes}
             onLogoClick={gotoBlank}
             onAllNotes={gotoNotesView}
             onSelectNote={handleSelectNote}
             onCompose={handleCompose}
-            onNewChat={handleNewChat}
             onClose={() => setSidebarOpen(false)}
-            onOpenEval={() =>
-              navigate({
-                to: "/",
-                search: {
-                  note: undefined,
-                  conv: undefined,
-                  audit: true,
-                  segment: undefined,
-                  view: undefined,
-                },
-              })
-            }
           />
         )}
         {/* Claude-style icon rail. Renders when sidebarOpen=false instead
@@ -312,7 +345,7 @@ function AppShell() {
             New chat / Search / All Notes / Memories / Audit / Settings
             without expanding. Replaces the prior floating panel-open
             affordance. */}
-        {!isHome && !sidebarOpen && (
+        {isNotes && !sidebarOpen && (
           <CollapsedSidebar
             isNotes={isNotes}
             isChat={isChat}
@@ -346,7 +379,9 @@ function AppShell() {
         >
           <Outlet />
         </div>
-        {!isHome && !suppressGooniLayer(location.pathname) && <GooniLayer />}
+        </div>
+        {!isImmersive && <SummonedNav />}
+        {!isHome && !isImmersive && <GooniLayer />}
       </div>
     </PasswordGate>
   );
