@@ -678,11 +678,10 @@ class Promise(Base):
 class Edge(Base):
     """Graph layer for semantic many-to-many links across entities.
 
-    Existing FKs (Comment.note_id, Memory.source_note_id, Todo.focus_id,
-    BacklogTicket.todo_id, etc) stay — those model OWNERSHIP. This table
-    models semantic links where adding an FK column per relation would
-    M²-explode the schema as new entities land. Promise is the first
-    citizen; new entity types plug in for free.
+    Ownership FKs (Memory.source_note_id, Note.parent_note_id, etc) stay —
+    those model OWNERSHIP. This table models semantic links where adding an
+    FK column per relation would M²-explode the schema as new entities land.
+    Promise is the first citizen; new entity types plug in for free.
 
     Edge kinds (v1):
       'utters'        — Message → Promise   (source utterance)
@@ -722,14 +721,11 @@ class Edge(Base):
 
 
 class Attachment(Base):
-    """File attached to a Note OR a Todo (PDF, doc, archive, etc.). Stored on
-    R2; the DB row carries metadata + the public URL. Distinct from inline
-    <img> figures, which live in note HTML.
-
-    Owner is exactly one of note_id / todo_id (both nullable; each row sets
-    one). A nullable FK per owner-kind keeps read paths trivial; if focuses /
-    promises ever need attachments too, revisit a polymorphic owner then —
-    one extra owner doesn't justify that rework yet."""
+    """File attached to a Note (PDF, doc, archive, etc.). Stored on R2; the
+    DB row carries metadata + the public URL. Distinct from inline <img>
+    figures, which live in note HTML. (Todo ownership died with Todo in the
+    v2 nuke — note_id is the only owner now; if promises ever need
+    attachments, add a nullable FK then.)"""
 
     __tablename__ = "attachments"
 

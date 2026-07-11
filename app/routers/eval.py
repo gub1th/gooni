@@ -254,9 +254,9 @@ def eval_patch_summary(segment_id: int, body: dict, db: Session = Depends(get_db
 
 @router.post("/eval/segments/{segment_id}/dispatch-to-cc")
 def eval_dispatch_to_cc(segment_id: int, db: Session = Depends(get_db)):
-    """Bundle the eval into a Claude Code space note + a backlog item.
+    """Bundle the eval into a `claude-code`-tagged Note + a review Promise.
     Idempotent: re-dispatching overwrites the prior note rather than spawning
-    duplicates. Returns the note id and backlog list id."""
+    duplicates. Returns the note id."""
     from ..services import eval_service
 
     try:
