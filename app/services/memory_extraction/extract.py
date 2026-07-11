@@ -135,7 +135,10 @@ def extract_signals(
         raw = llm_client.generate_simple_completion(prompt, max_tokens=1500, temperature=0.0, model="gpt-5.4-mini")
     except Exception as e:
         print(f"extract_signals LLM error: {e}")
-        return empty
+        # extract_failed distinguishes "extractor died" from "no signals" —
+        # the orchestrator marks the Message row so the log can offer retry
+        # instead of silently losing the turn's captures.
+        return {**empty, "extract_failed": True}
     cleaned = (raw or "").strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.split("```", 2)[1].strip()
@@ -146,9 +149,9 @@ def extract_signals(
         parsed = json.loads(cleaned)
     except json.JSONDecodeError as e:
         print(f"extract_signals JSON parse error: {e} | raw: {cleaned[:240]}")
-        return empty
+        return {**empty, "extract_failed": True}
     if not isinstance(parsed, dict):
-        return empty
+        return {**empty, "extract_failed": True}
     fitness = _normalize_fitness(parsed.get("fitness_logs"), today_d)
     # Hybrid override: a clear whole-day restatement in the raw text force-flags
     # the calorie/protein-bearing entries as day-scope corrections, so the

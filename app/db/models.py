@@ -640,9 +640,10 @@ class Promise(Base):
     # in `43a0649e9e06`). Per Daniel: "you don't want to stall on a
     # promise. it's active, then kept or broken." Lock-in is gone.
     state = Column(String, nullable=False, default="active", index=True)
-    # G3.1: vague-promise flag. Set by `promise_complexity.needs_game_plan`
-    # at create time. Doesn't gate the lifecycle (the promise is `active`
-    # either way) — drives ack composition (Alfred sharp clarifier) and
+    # Vague-promise flag: once-cadence + no resolvable deadline, set
+    # structurally at create time (the old promise_complexity regex died in
+    # the post-sweep fixes). Doesn't gate the lifecycle (the promise is
+    # `active` either way) — drives ack composition (sharp clarifier) and
     # future weekly digest stats ("X of N promises this week were vague,
     # you sharpened Y of them"). Sharpening happens when a follow-up
     # extract_signals turn refines the utterance and supersedes the
