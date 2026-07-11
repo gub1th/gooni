@@ -14,7 +14,10 @@ class TTSRequest(BaseModel):
 
 
 @router.post("/tts")
-async def tts_route(req: TTSRequest):
+def tts_route(req: TTSRequest):
+    # Plain `def` on purpose: synthesize_speech is a sync 1-3s OpenAI call.
+    # As `async def` it ran ON the event loop and froze every request for
+    # the duration — Starlette threadpools sync handlers automatically.
     """Synthesize speech for a reply the user triggered by VOICE — the web
     client plays the returned MP3 through an <audio> blob (see
     frontend/services/speech.ts). TTS is never load-bearing: on any synthesis
