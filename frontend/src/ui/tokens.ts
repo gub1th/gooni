@@ -55,6 +55,41 @@ export const color = {
   white: "#FFFFFF",
 } as const;
 
+// Frosted-surface language of the ambient shell. THE three sanctioned frost
+// levels — any summoned chrome (nav rails, edge panels, floating sheets)
+// picks one instead of hand-rolling rgba+blur. Dark-glass over the void by
+// design: frost reads against the black home surface in both themes.
+export const frost = {
+  /** nav rails + small summoned chrome (SummonedNav) */
+  chrome: {
+    background: "color-mix(in srgb, #0a0d0c 62%, transparent)",
+    backdropFilter: "blur(16px)",
+    WebkitBackdropFilter: "blur(16px)",
+  },
+  /** edge panels + cards floating over the waveform (AmbientOverlay zones) */
+  panel: {
+    background: "color-mix(in srgb, #0a0d0c 55%, transparent)",
+    backdropFilter: "blur(20px)",
+    WebkitBackdropFilter: "blur(20px)",
+  },
+  /** full-height view sheets summoned over the home void */
+  sheet: {
+    background: "color-mix(in srgb, #0a0d0c 38%, transparent)",
+    backdropFilter: "blur(24px)",
+    WebkitBackdropFilter: "blur(24px)",
+  },
+} as const;
+
+// The frame every non-home view renders inside — a window floating on the
+// void. Content keeps its own themed background; the frame supplies the
+// inset, radius, and hairline that make it read as a summoned layer.
+export const sheetFrame = {
+  margin: 14,
+  borderRadius: 18,
+  border: "1px solid rgba(255,255,255,0.13)",
+  boxShadow: "0 24px 80px rgba(0,0,0,0.55)",
+} as const;
+
 // Translucent overlays (modal backdrops, hover scrims). Kept separate because
 // they're alpha layers, not solid tokens.
 export const scrim = {
