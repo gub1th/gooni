@@ -737,11 +737,11 @@ class Orchestrator:
         # dynamic_context = everything per-turn (bot mechanics, state,
         #   memory, note, focus). Never cacheable — kept in the tail.
         #
-        # B4 NOTE: PERSONA + MASTER RULES (prompts._STATIC_SYSTEM_BLOCK) now
-        # sit adjacent in the cached prefix — one identity region. Content
-        # dedup of their overlapping rules (no-lists / verify-before-claim /
-        # no-bot-register) is a follow-up; co-locating without deleting guard
-        # lines keeps this behavior-preserving.
+        # B4 NOTE: PERSONA + MASTER RULES (prompts._STATIC_SYSTEM_BLOCK) sit
+        # adjacent in the cached prefix — one identity region. Deduped in the
+        # post-sweep fixes (2026-07-10): PERSONA owns identity/voice/register/
+        # length; _STATIC_SYSTEM_BLOCK owns machinery (hard rules, capabilities,
+        # tool protocols, memory citation). Don't restate one in the other.
         static_context = "\n\n".join(filter(None, [
             PERSONA_BLOCK,
             OBJECT_KINDS_BLOCK,
