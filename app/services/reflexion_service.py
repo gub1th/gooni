@@ -13,13 +13,14 @@ need NO model judgment.
     "logged", "saved") but the audit trail (ToolCall rows + the turn's router
     captures) is empty → the claim is a lie. Ground truth lives in the DB; we
     only string-match the claim side.
-  - voice-spec violations: bot-register / character-attack / doubled-down-
-    after-correction regex.
 
-A row is written ONLY when one of these trips. Most turns trip nothing →
-return None → no row → no self-take spam. Rows that DO write still embed +
-feed behavioral-facet clustering, so a recurring real failure still promotes
-a CapabilityFacet. (Facet promotion died in the Slice 6 nuke; rows still embed for history.)
+(The voice-spec regexes — bot-register / character-attack / doubled-down —
+died in the 2026-07 lean sweep: verbatim-phrase lists could only catch the
+exact phrasings enumerated, had zero test coverage, and nothing consumed the
+sev2 rows once facet promotion died. Tone is the eval loop's job now.)
+
+A row is written ONLY when the guard trips. Most turns trip nothing →
+return None → no row → no self-take spam.
 
 Runs in a daemon thread with its own SessionLocal so the chat path never
 waits. Failures are logged + swallowed; the audit must NEVER break chat.
@@ -28,10 +29,7 @@ waits. Failures are logged + swallowed; the audit must NEVER break chat.
 from __future__ import annotations
 
 import json
-import math
-import re
 import threading
-from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -56,97 +54,6 @@ def _detect_write_claim(reply: str) -> str | None:
     return m.group(0).strip() if m else None
 
 
-# Bot-register phrases that scream "AI assistant" not "Alfred." Catches voice
-# drift; repeated drift clusters → promotes "I tend to drift into bot register"
-# as a behavioral facet. Case-insensitive, anchored where needed.
-_BOT_REGISTER_PATTERNS = [
-    r"\bi'?d be happy to\b",
-    r"\bi'?d love to (help|hear)\b",
-    r"\bhappy to help\b",
-    r"\blet me know if (you|there)\b",
-    r"\bdon'?t hesitate to\b",
-    r"\bfeel free to\b",
-    r"\bhope (this|that) helps\b",
-    r"\bgreat question\b",
-    r"\bjust (a )?friendly reminder\b",
-    r"\bjust checking in\b",
-    r"\bi'?ve gone ahead and\b",
-    r"\bi have gone ahead and\b",
-    r"^\s*sure!",
-    r"^\s*absolutely!",
-    r"^\s*certainly!",
-    r"^\s*of course!",
-]
-
-_BOT_REGISTER_RE = re.compile(
-    "|".join(_BOT_REGISTER_PATTERNS), re.IGNORECASE | re.MULTILINE
-)
-
-
-def _detect_voice_drift(reply: str) -> str | None:
-    """Return the first bot-register phrase matched, or None."""
-    if not reply:
-        return None
-    m = _BOT_REGISTER_RE.search(reply)
-    return m.group(0).strip() if m else None
-
-
-# Character attacks — names aimed AT Daniel. Banned by the voice spec (G0.1).
-# Targets the SHAPE "second-person accusation" ("you X" / "your X-cognition"),
-# not the standalone slur (Daniel uses "dumbass" at himself; mirroring his
-# register is fine — aiming a name AT him is the violation).
-_CHARACTER_ATTACK_PATTERNS = [
-    r"\byou (?:dumbass|idiot|moron|stupid|imbecile|retard)\b",
-    r"\byour (?:dumbass|stupid|idiotic|dumb|little)\s+\w*\s*(?:narrative|brain|mind|reasoning|logic|fog|loop|spiral|generator)\b",
-    r"\b(?:dumbass|stupid|idiotic)\s+(?:narrative generator|reasoning|brain|loop|story|fog)\b",
-    r"\byour (?:little|own|dumb|whole)\s+(?:bullshit|nonsense|drama)\s+(?:fog|loop|spiral|generator|story)\b",
-    r"\bstop freelancing\b",
-]
-
-_CHARACTER_ATTACK_RE = re.compile(
-    "|".join(_CHARACTER_ATTACK_PATTERNS), re.IGNORECASE | re.MULTILINE
-)
-
-
-def _detect_character_attack(reply: str) -> str | None:
-    """Return the first character-attack phrase matched, or None."""
-    if not reply:
-        return None
-    m = _CHARACTER_ATTACK_RE.search(reply)
-    return m.group(0).strip() if m else None
-
-
-# Reply admitted being wrong (recovery marker) AND kept attacking on the
-# now-disproved premise (continued harshness) — caring-core violation.
-_RECOVERY_MARKER_RE = re.compile(
-    r"\b(?:my read was wrong|scratch that|my mistake|i was wrong|"
-    r"i'?m wrong|correction[—:]|disregard that|never mind that)\b",
-    re.IGNORECASE,
-)
-
-_CONTINUED_HARSHNESS_RE = re.compile(
-    r"\b(?:now hold the line|before (?:your|you) (?:dumbass|brain|"
-    r"narrative|mind|story) (?:starts|begins) \w+|don'?t do that "
-    r"(?:again|with me)|stop (?:freelancing|spiraling|spinning|"
-    r"making up))\b",
-    re.IGNORECASE,
-)
-
-
-def _detect_doubled_down_after_correction(reply: str) -> str | None:
-    """Reply contains a recovery shape AND a continued-harshness phrase —
-    Gooni admitted being wrong then kept attacking. Returns the offending
-    phrase, or None. Both gates required: standalone "now hold the line" can
-    be a legit correction OF Daniel; the violation is specifically recovering
-    then attacking on the disproved premise."""
-    if not reply:
-        return None
-    if not _RECOVERY_MARKER_RE.search(reply):
-        return None
-    m = _CONTINUED_HARSHNESS_RE.search(reply)
-    return m.group(0).strip() if m else None
-
-
 # Score lookup: composite of gap-dimension weight + severity. Conservative —
 # better to under-score than inflate. Aggregated per-conv on dashboards.
 _GAP_DIMENSION_PENALTY = {
@@ -166,17 +73,6 @@ def _derive_score(gap_dimension: str, severity: int) -> float:
     dim_penalty = _GAP_DIMENSION_PENALTY.get((gap_dimension or "none").lower(), 2)
     sev_penalty = _SEVERITY_PENALTY.get(severity, 2)
     return max(1.0, min(10.0, 10.0 - dim_penalty - sev_penalty))
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
 
 
 class ReflexionService:
@@ -233,12 +129,9 @@ class ReflexionService:
     ) -> Reflection | None:
         """Deterministic self-take. NO LLM judgment.
 
-        Writes a Reflection row ONLY when a hard guard trips:
-          - hallucination: a write-claim phrase with no ToolCall row AND no
-            router capture backing it.
-          - voice-spec: bot-register / character-attack / doubled-down regex.
-        Nothing trips → return None (no row, no UI take). Rows that write still
-        embed + feed behavioral-facet clustering.
+        Writes a Reflection row ONLY when the hallucination guard trips:
+        a write-claim phrase with no ToolCall row AND no router capture
+        backing it. Nothing trips → return None (no row, no UI take).
         """
         tools = (
             db.query(ToolCall)
@@ -256,18 +149,6 @@ class ReflexionService:
                 "hallucination", 3,
                 f'claimed a write with no tool/router backing: "{claim}"',
             ))
-
-        vd = _detect_voice_drift(assistant_reply)
-        if vd:
-            flags.append(("tone", 2, f'voice drift to bot register: "{vd}"'))
-
-        ca = _detect_character_attack(assistant_reply)
-        if ca:
-            flags.append(("tone", 2, f'character attack on Daniel: "{ca}"'))
-
-        dd = _detect_doubled_down_after_correction(assistant_reply)
-        if dd:
-            flags.append(("tone", 2, f'doubled down after correction: "{dd}"'))
 
         if not flags:
             return None
