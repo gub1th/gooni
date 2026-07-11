@@ -15,13 +15,13 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-type Tab = "profile" | "appearance" | "notifications" | "integrations" | "deployments";
+type Tab = "profile" | "appearance" | "general" | "integrations" | "deployments";
 
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "appearance", label: "Appearance" },
-  { id: "notifications", label: "Notifications" },
+  { id: "general", label: "General" },
   { id: "integrations", label: "Integrations" },
   { id: "deployments", label: "Deployments" },
 ];
@@ -148,7 +148,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
           {tab === "profile" && <ProfileTab />}
           {tab === "appearance" && <AppearanceTab />}
-          {tab === "notifications" && <SettingsPanel />}
+          {tab === "general" && <SettingsPanel />}
           {tab === "integrations" && <IntegrationsTab />}
           {tab === "deployments" && <DeploymentsTab />}
         </div>
@@ -406,7 +406,7 @@ function IntegrationsTab() {
           provider="whoop"
           label="Whoop"
           icon={<WhoopLogo />}
-          blurbConfigured="Connect to surface recovery, HRV, and sleep on the Stats view. Future: tune daily nudge based on recovery."
+          blurbConfigured="Connect to surface recovery, HRV, and sleep as trackables."
           blurbNotConfigured="Set WHOOP_CLIENT_ID / WHOOP_CLIENT_SECRET / WHOOP_REDIRECT_URI on the backend to enable."
         />
       </div>

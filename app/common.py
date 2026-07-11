@@ -95,7 +95,10 @@ _DUE_HINTS = {
     "tonight": ("today_eod", None),
     "today": ("today_eod", None),
     "tomorrow": ("plus_days", 1),
+    "tmrw": ("plus_days", 1),          # slang dateparser can't read
     "this week": ("plus_days", 7),
+    "next week": ("plus_days", 14),    # EOD-anchored (raw dateparser isn't)
+    "this weekend": ("next_weekend", None),
 }
 
 
@@ -145,6 +148,14 @@ def parse_due_hint(hint, db=None):
         if kind == "plus_days" and isinstance(arg, int):
             return _to_storage(
                 (now + _td(days=arg)).replace(
+                    hour=23, minute=59, second=0, microsecond=0
+                )
+            )
+        if kind == "next_weekend":
+            # weekday() Mon=0 … Sun=6; Saturday=5. Same-day Saturday → next.
+            days_to_sat = (5 - now.weekday()) % 7 or 7
+            return _to_storage(
+                (now + _td(days=days_to_sat)).replace(
                     hour=23, minute=59, second=0, microsecond=0
                 )
             )

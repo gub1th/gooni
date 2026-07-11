@@ -124,15 +124,13 @@ async def _lifespan(app: FastAPI):
     except Exception as e:
         print(f"[fly-revive] boot scan failed: {e}", flush=True)
 
-    nudge_task = asyncio.create_task(background._nudge_loop())
     excerpt_task = asyncio.create_task(background._backfill_note_excerpts_loop())
     mem_task = asyncio.create_task(background._memory_watchdog_loop())
-    proactive_task = asyncio.create_task(background._proactive_nudge_loop())
     try:
         yield
     finally:
         for t in (
-            nudge_task, excerpt_task, mem_task, proactive_task,
+            excerpt_task, mem_task,
         ):
             t.cancel()
             try:
@@ -271,7 +269,6 @@ _RATE_RULES: list[tuple[re.Pattern[str], str, int, int]] = [
     (re.compile(r"^/auth$"), "auth", 10, 60),
     (re.compile(r"^/chat(/|$)"), "chat", 30, 60),
     (re.compile(r"^/notes/\d+/(embed|memorize)$"), "embed", 30, 60),
-    (re.compile(r"^/dashboard/take$"), "take", 30, 60),
 ]
 _DEFAULT_BUCKET = ("default", 300, 60)
 

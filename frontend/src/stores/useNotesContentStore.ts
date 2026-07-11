@@ -113,7 +113,6 @@ export const useNotesContentStore = create<NotesContentState>()(
           id: tempId,
           title: null,
           content: null,
-          space_id: spaceId === "general" ? null : parseInt(spaceId),
           created_at: now,
           updated_at: now,
           last_opened_at: null,
@@ -121,7 +120,6 @@ export const useNotesContentStore = create<NotesContentState>()(
           is_pinned: false,
           is_draft: false,
           tags: [],
-          status: "unprocessed",
         };
         // Go through selectNote so the prev note gets memorized if dirty
         get().selectNote(tempId);

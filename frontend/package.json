@@ -11,7 +11,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@chakra-ui/react": "^3.2.0",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
     "@react-three/postprocessing": "^2.19.1",
@@ -39,7 +38,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@tanstack/router-devtools": "^1.48.0",
     "@tanstack/router-vite-plugin": "^1.48.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

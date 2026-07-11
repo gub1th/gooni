@@ -715,7 +715,7 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
             lines.append(f"- TrackableEntry logged: weight {m.get('value')}{m.get('unit') or ''}")
         elif lt == "exercise":
             label = m.get("exercise_label") or ""
-            lines.append(f"- TrackableEntry logged: exercise \"{label}\" (+ exercise HabitEntry)")
+            lines.append(f"- TrackableEntry logged: exercise \"{label}\"")
         elif lt == "substance":
             lines.append(f"- TrackableEntry logged: {m.get('substance')} = true today (cut-table boolean)")
     if not lines:

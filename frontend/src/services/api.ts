@@ -8,13 +8,10 @@ export function getStoredToken(): string | null {
   return localStorage.getItem("gooni_token");
 }
 
-export function setStoredToken(token: string) {
+function setStoredToken(token: string) {
   localStorage.setItem("gooni_token", token);
 }
 
-export function clearStoredToken() {
-  localStorage.removeItem("gooni_token");
-}
 
 export async function login(password: string): Promise<void> {
   const res = await fetch(`${BASE}/auth`, {
@@ -60,7 +57,6 @@ export interface ApiNote {
   // First external <img src="https://..."/> from the note body. Inline
   // base64 images are excluded — list endpoints never ship those.
   thumb_src?: string | null;
-  space_id: number | null;
   created_at: string;
   updated_at: string;
   last_opened_at: string | null;
@@ -80,11 +76,6 @@ export interface ApiNote {
   // Free-form labels (lowercase, ≤60 chars each, deduped server-side).
   // Always present in responses — empty array when no tags.
   tags: string[];
-  // Graduation lifecycle. `unprocessed` = captured but uncommitted;
-  // `graduated` = spawned a Promise / Todo / Habit / Focus (tracked via
-  // derives_from edges); `archived` = manual tombstone. Drives the
-  // Unprocessed sidebar view + the synthesizer's source filter.
-  status: "unprocessed" | "graduated" | "archived";
   // Notion-style optional note icon. Either a single emoji (e.g. "📝")
   // OR a lucide reference of shape "lucide:<name>" matching SpaceIcon
   // encoding. Null = no icon (default).
@@ -188,25 +179,12 @@ export async function extractToChildNote(
   return res.json();
 }
 
-export async function fetchNoteChildren(parentId: number): Promise<ApiNote[]> {
-  const res = await apiFetch(`${BASE}/notes/${parentId}/children`);
-  if (!res.ok) throw new Error("Failed to fetch note children");
-  return res.json();
-}
 
-export interface SpaceSuggestion {
-  suggested_space_id: number | null;
-  suggested_space_name: string | null;
-  suggested_space_emoji: string | null;
-}
-
-export async function embedNote(id: number): Promise<SpaceSuggestion> {
+export async function embedNote(id: number): Promise<void> {
   try {
-    const res = await apiFetch(`${BASE}/notes/${id}/embed`, { method: "POST" });
-    if (!res.ok) return { suggested_space_id: null, suggested_space_name: null, suggested_space_emoji: null };
-    return res.json();
+    await apiFetch(`${BASE}/notes/${id}/embed`, { method: "POST" });
   } catch {
-    return { suggested_space_id: null, suggested_space_name: null, suggested_space_emoji: null };
+    // embed is a fire-and-forget side effect; failures are non-fatal
   }
 }
 
@@ -239,28 +217,6 @@ export async function fetchDraftNotes(): Promise<ApiNote[]> {
   return res.json();
 }
 
-export async function fetchUnprocessedNotes(): Promise<ApiNote[]> {
-  const res = await apiFetch(`${BASE}/notes/unprocessed`);
-  if (!res.ok) throw new Error("Failed to fetch unprocessed notes");
-  return res.json();
-}
-
-export interface GraphNode {
-  id: number;
-  title: string;
-  size: number;
-  space_id: number | null;
-}
-export interface GraphEdge {
-  from: number;
-  to: number;
-  weight: number;
-}
-export async function fetchNotesGraph(): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
-  const res = await apiFetch(`${BASE}/notes/graph`);
-  if (!res.ok) throw new Error("Failed to fetch notes graph");
-  return res.json();
-}
 
 // ── Google Calendar integration ─────────────────────────────────────────────────
 
@@ -284,31 +240,6 @@ export async function disconnectCalendar(): Promise<void> {
   if (!res.ok) throw new Error("Failed to disconnect calendar");
 }
 
-export interface CalendarEvent {
-  id: string;
-  html_link: string;
-  summary: string;
-  start: { dateTime?: string; date?: string };
-  end: { dateTime?: string; date?: string };
-}
-export async function createCalendarEvent(body: {
-  summary: string;
-  start_iso: string;
-  end_iso: string;
-  description?: string;
-  time_zone?: string;
-}): Promise<CalendarEvent> {
-  const res = await apiFetch(`${BASE}/calendar/events`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(`Failed to create event: ${msg || res.status}`);
-  }
-  return res.json();
-}
 
 // ── GitHub integration ──────────────────────────────────────────────────────
 
@@ -410,7 +341,7 @@ export async function cleanupEmptyNotes(): Promise<{ deleted: number; ids: numbe
 
 export async function patchNote(
   id: number,
-  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string; tags?: string[]; status?: "unprocessed" | "graduated" | "archived"; icon?: string | null },
+  patch: { is_public?: boolean; is_pinned?: boolean; is_public_pinned?: boolean; is_draft?: boolean; title?: string; content?: string; tags?: string[]; icon?: string | null },
 ): Promise<ApiNote> {
   const res = await apiFetch(`${BASE}/notes/${id}`, {
     method: "PATCH",
@@ -506,24 +437,7 @@ export async function fetchPublicMcpConfig(): Promise<PublicMcpConfig> {
   if (!res.ok) throw new Error("Failed to fetch MCP config");
   return res.json();
 }
-export interface ChatGraphNode {
-  id: number;
-  label: string;
-  role: "user" | "assistant";
-}
 
-export interface ChatGraphEdge {
-  from: number;
-  to: number;
-}
-
-export async function fetchConversationGraph(
-  id: number,
-): Promise<{ nodes: ChatGraphNode[]; edges: ChatGraphEdge[] }> {
-  const res = await apiFetch(`${BASE}/conversations/${id}/graph`);
-  if (!res.ok) throw new Error("Failed to fetch conversation graph");
-  return res.json();
-}
 
 export async function updatePublicProfile(bio: string): Promise<void> {
   const res = await apiFetch(`${BASE}/public/profile`, {
@@ -555,118 +469,6 @@ export async function uploadAvatarImage(file: File): Promise<{ url: string; key:
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 
-export interface CutTableRow {
-  date: string;             // YYYY-MM-DD
-  calories: number;
-  protein: number;
-  weight: number | null;    // last weigh-in that day, null if none
-  exercise: boolean;
-  exercise_label: string | null;
-  alcohol: number | null;   // per-day count, null if none
-  weed: number | null;
-  vape: number | null;
-  note: string | null;      // freeform per-day annotation
-}
-export interface CutTable {
-  rows: CutTableRow[];      // newest day first
-  today: { calories: number; protein: number };
-  updated_at?: string;
-}
-// `fill=true` returns an empty row for every day in the window (continuous
-// grid for the editable dashboard view); false keeps only days with data.
-export async function fetchCutTable(days = 30, fill = false): Promise<CutTable> {
-  const res = await apiFetch(`${BASE}/metrics/cut-table?days=${days}&fill=${fill}`);
-  if (!res.ok) throw new Error("Failed to fetch cut table");
-  return res.json() as Promise<CutTable>;
-}
-
-// Numeric cut-table cells (cal/protein/weight/alcohol/weed/vape) send
-// `value`; text cells (exercise label, note) send `text`. Passing both
-// null clears the cell. Collapses the (date, metric_type) to one row
-// server-side, so it's idempotent.
-export type CutMetricType =
-  | "calories" | "protein" | "weight"
-  | "alcohol" | "weed" | "vape" | "exercise" | "note";
-export async function setCutCell(
-  date: string,
-  metricType: CutMetricType,
-  payload: { value?: number | null; text?: string | null },
-): Promise<{ cleared: boolean; row: unknown }> {
-  const res = await apiFetch(`${BASE}/metrics/cell`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ date, metric_type: metricType, ...payload }),
-  });
-  if (!res.ok) throw new Error("Failed to set cut cell");
-  return res.json();
-}
-
-// Cut-table config: limits drive the cell red/green (cal green ≤ limit,
-// protein green ≥ limit); start_date anchors the "Day N" counter.
-export interface CutConfig {
-  calorie_limit: number;
-  protein_limit: number;
-  start_date: string | null; // YYYY-MM-DD
-}
-export async function fetchCutConfig(): Promise<CutConfig> {
-  const res = await apiFetch(`${BASE}/metrics/cut-config`);
-  if (!res.ok) throw new Error("Failed to fetch cut config");
-  return res.json() as Promise<CutConfig>;
-}
-export async function setCutConfig(patch: Partial<CutConfig>): Promise<CutConfig> {
-  const res = await apiFetch(`${BASE}/metrics/cut-config`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error("Failed to set cut config");
-  return res.json() as Promise<CutConfig>;
-}
-
-
-// Time spent on the gooni repo today + this week, estimated by clustering
-// commit timestamps from GitHub (server hits the GitHub API). All-zero
-// payload when GitHub OAuth isn't connected.
-export interface OpenAIUsageModel {
-  model: string;
-  kind: "chat" | "embedding";
-  requests: number;
-  input_tokens: number;
-  output_tokens: number;
-  total_tokens: number;
-}
-
-export interface DayBucket {
-  date: string;       // YYYY-MM-DD UTC
-  input: number;
-  output: number;
-  cache_read?: number;
-  cache_creation?: number;
-}
-
-export interface OpenAIUsage {
-  configured: boolean;
-  error?: string;
-  month_start_unix?: number;
-  spend_usd?: number;
-  spend_today_usd?: number;
-  requests?: number;
-  input_tokens?: number;
-  output_tokens?: number;
-  total_tokens?: number;
-  by_model?: OpenAIUsageModel[];
-  by_day?: DayBucket[];
-  fetched_at?: number;
-}
-
-export async function fetchOpenAIUsage(refresh = false): Promise<OpenAIUsage> {
-  const url = refresh
-    ? `${BASE}/dashboard/openai-usage?refresh=true`
-    : `${BASE}/dashboard/openai-usage`;
-  const res = await apiFetch(url);
-  if (!res.ok) throw new Error("Failed to fetch OpenAI usage");
-  return res.json() as Promise<OpenAIUsage>;
-}
 
 export interface ApiConversation {
   id: number;
@@ -1138,25 +940,11 @@ export async function fetchChatAudit(opts: {
   return res.json();
 }
 
-// ── Settings (daily nudge) ────────────────────────────────────────────────────
-
-export type NudgeChannel = "telegram" | "whatsapp";
+// ── Settings ─────────────────────────────────────────────────────────────────
 
 export interface AppSettings {
-  nudge_enabled: boolean;
-  nudge_hour: number;        // 0-23
-  nudge_minute: number;      // 0-59
-  nudge_tz: string;          // IANA, e.g. "America/Los_Angeles"
-  nudge_channels: NudgeChannel[];
-  nudge_last_sent_day: string | null;
-  nudge_prompt: string;      // user-editable instruction for the daily digest LLM
-}
-
-export async function fetchNudgePromptDefault(): Promise<string> {
-  const res = await apiFetch(`${BASE}/settings/nudge-prompt-default`);
-  if (!res.ok) throw new Error("Failed to fetch default prompt");
-  const j = await res.json();
-  return j.prompt || "";
+  // Legacy field name — the app-wide canonical timezone (IANA).
+  nudge_tz: string;
 }
 
 export async function fetchSettings(): Promise<AppSettings> {
@@ -1175,19 +963,6 @@ export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSe
     const detail = await res.text();
     throw new Error(detail || "Failed to update settings");
   }
-  return res.json();
-}
-
-export interface NudgeTestResult {
-  sent: boolean;
-  to?: string[];
-  skipped?: string[];
-  reason?: string;
-}
-
-export async function testNudge(): Promise<NudgeTestResult> {
-  const res = await apiFetch(`${BASE}/settings/test-nudge`, { method: "POST" });
-  if (!res.ok) throw new Error("test nudge failed");
   return res.json();
 }
 
@@ -1337,10 +1112,6 @@ export async function postEvalFeedback(payload: {
   return res.json();
 }
 
-export async function deleteEvalFeedback(id: number): Promise<void> {
-  const res = await apiFetch(`${BASE}/eval/feedback/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete eval feedback");
-}
 
 export async function putMessageRating(
   segmentId: number,
@@ -1626,123 +1397,12 @@ export async function uploadAttachment(
   return { kind: "error", status: res.status, message };
 }
 
-// Persisted attachment row (note- or todo-owned). Shape matches the
-// GET /{owner}/attachments list response.
-export interface AttachmentMeta {
-  id: number;
-  filename: string;
-  mime_type: string;
-  size_bytes: number;
-  url: string;
-  created_at: string;
-}
-
-export async function deleteAttachment(attachmentId: number): Promise<void> {
-  const res = await apiFetch(`${BASE}/attachments/${attachmentId}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete attachment");
-}
 
 // ── Habits (daily binary trackers) ─────────────────────────────────────
 
-export interface ToolCallFailure {
-  id: number;
-  tool_name: string;
-  error: string;
-  conversation_id: number | null;
-  message_id: number | null;
-  started_at: string | null;
-}
-
-export async function fetchToolCallFailures(
-  days = 7, limit = 20,
-): Promise<ToolCallFailure[]> {
-  const res = await apiFetch(`${BASE}/tool-calls/failures?days=${days}&limit=${limit}`);
-  if (!res.ok) throw new Error("Failed to fetch tool failures");
-  return res.json();
-}
-
-export interface ApiEvalSegment {
-  id: number;
-  conversation_id: number;
-  source: string;
-  last_message_at: string | null;
-  message_count: number;
-  eval_status: "not_yet" | "pending" | "done";
-  overall_rating: number | null;
-  overall_comment: string | null;
-  preview?: string;
-  title?: string | null;
-  is_active?: boolean;
-}
-
-export async function fetchEvalSegments(
-  opts: {
-    statuses?: string;
-    sources?: string;
-    limit?: number;
-    offset?: number;
-  } = {},
-): Promise<ApiEvalSegment[]> {
-  const params = new URLSearchParams();
-  if (opts.statuses) params.set("statuses", opts.statuses);
-  if (opts.sources) params.set("sources", opts.sources);
-  if (opts.limit != null) params.set("limit", String(opts.limit));
-  if (opts.offset != null) params.set("offset", String(opts.offset));
-  const res = await apiFetch(`${BASE}/eval/segments?${params.toString()}`);
-  if (!res.ok) throw new Error("Failed to fetch eval segments");
-  // Endpoint returns `{segments, total}` — unwrap to keep the
-  // ApiEvalSegment[] contract callers expect. Without this OpsMode's
-  // `n.map` blew up because `data` was the wrapper object.
-  const body = await res.json();
-  return Array.isArray(body) ? body : (body?.segments ?? []);
-}
-
-export async function patchEvalSegment(
-  id: number,
-  body: {
-    eval_status?: string;
-    overall_rating?: number;
-    overall_comment?: string;
-  },
-): Promise<void> {
-  const res = await apiFetch(`${BASE}/eval/segments/${id}/summary`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error("Failed to patch eval segment");
-}
 
 // ── Gooni health (Build mode) ──────────────────────────────────────────
 
-export type HealthAxisName =
-  | "memory" | "chat" | "engagement"
-  | "availability" | "cost" | "connectors";
-
-export interface HealthComponent {
-  name: string;
-  score: number; // 0-100
-  weight: number; // 0-1
-  detail: string;
-}
-
-export interface HealthAxis {
-  axis: HealthAxisName;
-  score: number; // composite 0-100
-  headline: string;
-  components: HealthComponent[];
-  error?: string;
-}
-
-export interface HealthScores {
-  axes: HealthAxis[];
-}
-
-export async function fetchHealthScores(): Promise<HealthScores> {
-  const res = await apiFetch(`${BASE}/health/scores`);
-  if (!res.ok) throw new Error("Failed to fetch health scores");
-  return res.json();
-}
 
 export type ReflectionAction = "acted" | "described" | "mixed" | "na";
 

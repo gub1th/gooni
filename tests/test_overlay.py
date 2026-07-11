@@ -20,6 +20,12 @@ sys.path.insert(0, _ROOT)
 _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 
+# llm client builds its OpenAI singleton at import; load .env first so the
+# test runs outside an activated shell (same pattern as test_signal_routing).
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(os.path.join(_ROOT, ".env"))
+
 from app.db.database import SessionLocal, engine  # noqa: E402
 from app.db.models import Base, Note, Promise, Settings  # noqa: E402
 

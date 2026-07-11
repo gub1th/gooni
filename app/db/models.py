@@ -26,7 +26,6 @@ class Conversation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(Text, nullable=True)  # auto-generated short title
-    summary = Column(Text, nullable=True)  # auto-generated after session ends
     source = Column(String, nullable=False, default="web")  # 'web' | 'telegram'
     last_message_at = Column(
         DateTime(timezone=True), nullable=True
@@ -161,10 +160,6 @@ class Note(Base):
     # snapshot, the meaning hasn't shifted enough to warrant another pass.
     # Deferred — only ever read inside `classify_note`'s dedup check.
     classified_embedding = deferred(Column(Text, nullable=True))
-    # FK back to a Note in the "Gooni Backlog" space when this note's
-    # content triggered a feature_request. Drives the editor chip so
-    # Daniel sees that the note actually fed the self-improvement loop.
-    backlog_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True)
     # JSON snapshot of what classify_note routed for this note's most recent
     # save. Mirrors the chat-side `signals` payload so the editor can render
     # the same "Routed:" disclosure as MessageBubble. Shape:
@@ -176,14 +171,6 @@ class Note(Base):
     #   }
     # Empty / null when no signals fired or note hasn't been classified yet.
     last_classify_signals = Column(Text, nullable=True)
-    # Session-summary notes (PR-4): the 5am batch writes one Note per
-    # processed session with note_type='session_summary'. Null for normal
-    # notes. session_start/end bound the source window; message_count is the
-    # raw count. The desktop review (PR-5) queries by note_type.
-    note_type = Column(String, nullable=True, index=True)  # None | 'session_summary'
-    session_start = Column(DateTime, nullable=True)
-    session_end = Column(DateTime, nullable=True)
-    message_count = Column(Integer, nullable=True)
     # Set when this note was extracted out of a parent note via the
     # "↗ Extract to new note" BubbleMenu action. The parent's content keeps
     # a clickable chip (TipTap noteLink node) where the selection used to
@@ -199,18 +186,6 @@ class Note(Base):
     # M2M `note_tags` table is needed (cross-cutting analytics across
     # the whole corpus) we can derive it from this column.
     tags = Column(Text, nullable=True)
-    # Graduation lifecycle for the primitive-model redraw. Every Note
-    # starts as `unprocessed` — captured but uncommitted intent. Becomes
-    # `graduated` once it spawns a Promise / Todo / Habit / Focus (or is
-    # otherwise turned into structured action; tracked via derives_from
-    # edges back to the source note). `archived` is a manual tombstone
-    # for notes that never need to graduate. The synthesizer reads only
-    # `unprocessed` rows for focus-candidate clustering so a graduated
-    # note doesn't get re-surfaced as a stale prompt.
-    status = Column(
-        String, nullable=False, default="unprocessed",
-        server_default="unprocessed", index=True,
-    )
 
 
 class PublicProfile(Base):
@@ -319,62 +294,19 @@ class OAuthToken(Base):
 class Settings(Base):
     """Singleton row (id=1) holding user-level config that used to live in env.
 
-    Daily nudge is the only consumer for now — but anything that needs runtime
-    toggling without a redeploy belongs here. Schedule + channel list are the
-    settable knobs; nudge_last_sent_day is the idempotency token (YYYY-MM-DD)
-    that prevents two-process double-fire.
+    Anything that needs runtime toggling without a redeploy belongs here.
+    (The daily-digest + proactive-nudge knobs died in the 2026-07
+    proactiveness reset; `nudge_tz` survives because it became the app-wide
+    canonical timezone.)
     """
 
     __tablename__ = "settings"
 
     id = Column(Integer, primary_key=True)  # always 1
-    nudge_enabled = Column(Boolean, nullable=False, default=True)
-    nudge_hour = Column(Integer, nullable=False, default=9)
-    nudge_minute = Column(Integer, nullable=False, default=0)
-    # IANA name, e.g. "America/Los_Angeles". Resolved via zoneinfo so the
-    # schedule is wall-clock correct regardless of host timezone.
+    # IANA name, e.g. "America/Los_Angeles". Legacy column name — this is the
+    # app-wide canonical timezone: local_today()/local_now() in common.py
+    # resolve every user-facing calendar day against it.
     nudge_tz = Column(String, nullable=False, default="America/Los_Angeles")
-    # JSON list[str], e.g. ["telegram", "whatsapp"]. Empty list = no fanout.
-    nudge_channels = Column(Text, nullable=False, default='["telegram"]')
-    # YYYY-MM-DD in nudge_tz. Refuse to send a second time on the same date.
-    nudge_last_sent_day = Column(String, nullable=True)
-    # JSON dict {channel: {recipient: [ordered_todo_ids]}}. Persisted instead
-    # of in-memory because FastAPI (sender) and the bot polling script
-    # (reply-handler) run as separate processes.
-    nudge_last_digests = Column(Text, nullable=False, default="{}")
-    # User-editable instruction Daniel writes for the daily digest. The LLM
-    # gets this verbatim plus today's todos/focuses data and produces the
-    # outgoing chat message. Empty string = use the bundled default.
-    nudge_prompt = Column(Text, nullable=False, default="")
-    # YYYY-MM-DD idempotency token for the daily capability-telemetry rollup
-    # (same shape as nudge_last_sent_day). Prevents double-fire when Fly
-    # scales horizontally — the loop checks this before doing work.
-    capability_telemetry_last_run_day = Column(String, nullable=True)
-    # Proactive nudges (phase 0). Each column is the idempotency token
-    # for one trigger; the proactive_nudge_service refuses to re-fire on
-    # the same value.
-    #   last_whoop_nudge_source_ts: WhoopSnapshot.source_updated_at the
-    #     last time we pinged about whoop. Fresh source_updated_at → new
-    #     ping; same → skip.
-    #   last_sleep_nudge_day: YYYY-MM-DD in sleep_cutoff_tz. One sleep
-    #     ping per night max.
-    #   sleep_cutoff_hour: local hour at which "you're up too late"
-    #     triggers fire. 1 = past 1am. NULL → defaults to 1 in code.
-    last_whoop_nudge_source_ts = Column(DateTime, nullable=True)
-    last_sleep_nudge_day = Column(String, nullable=True)
-    sleep_cutoff_hour = Column(Integer, nullable=True)
-    # Whoop debounce — fixes the dup-ping race where recovery + cycle +
-    # sleep webhooks fire within seconds, each passing the idempotency
-    # check BEFORE any of them commits. Instead of firing on the spot,
-    # `maybe_fire_whoop_nudge` writes the candidate snapshot's source_ts
-    # here and stamps `pending_set_at`. A lifespan tick fires the pending
-    # ping only after `pending_set_at` has been stable for ≥3 min, so
-    # bursts collapse to one ping carrying the LATEST snapshot's data.
-    whoop_nudge_pending_source_ts = Column(DateTime, nullable=True)
-    whoop_nudge_pending_set_at = Column(DateTime, nullable=True)
-    # 5am batch processor idempotency stamp (YYYY-MM-DD in nudge_tz). Mirrors
-    # capability_telemetry_last_run_day — kills a double-run if Fly scales out.
-    batch_last_run_day = Column(String, nullable=True)
     # Cut-table config (the fitness/cut dashboard). Limits drive the cell
     # red/green (cal green when ≤ limit, protein green when ≥ limit) and are
     # set via the Cal/Pro header popup. cut_start_date anchors the "Day N"
@@ -746,11 +678,10 @@ class Promise(Base):
 class Edge(Base):
     """Graph layer for semantic many-to-many links across entities.
 
-    Existing FKs (Comment.note_id, Memory.source_note_id, Todo.focus_id,
-    BacklogTicket.todo_id, etc) stay — those model OWNERSHIP. This table
-    models semantic links where adding an FK column per relation would
-    M²-explode the schema as new entities land. Promise is the first
-    citizen; new entity types plug in for free.
+    Ownership FKs (Memory.source_note_id, Note.parent_note_id, etc) stay —
+    those model OWNERSHIP. This table models semantic links where adding an
+    FK column per relation would M²-explode the schema as new entities land.
+    Promise is the first citizen; new entity types plug in for free.
 
     Edge kinds (v1):
       'utters'        — Message → Promise   (source utterance)
@@ -790,14 +721,11 @@ class Edge(Base):
 
 
 class Attachment(Base):
-    """File attached to a Note OR a Todo (PDF, doc, archive, etc.). Stored on
-    R2; the DB row carries metadata + the public URL. Distinct from inline
-    <img> figures, which live in note HTML.
-
-    Owner is exactly one of note_id / todo_id (both nullable; each row sets
-    one). A nullable FK per owner-kind keeps read paths trivial; if focuses /
-    promises ever need attachments too, revisit a polymorphic owner then —
-    one extra owner doesn't justify that rework yet."""
+    """File attached to a Note (PDF, doc, archive, etc.). Stored on R2; the
+    DB row carries metadata + the public URL. Distinct from inline <img>
+    figures, which live in note HTML. (Todo ownership died with Todo in the
+    v2 nuke — note_id is the only owner now; if promises ever need
+    attachments, add a nullable FK then.)"""
 
     __tablename__ = "attachments"
 

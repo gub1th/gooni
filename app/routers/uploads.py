@@ -142,7 +142,7 @@ async def upload_file_route(
         db.commit()
         db.refresh(row)
         payload["attachment_id"] = row.id
-    elif note_id is not None or todo_id is not None:
+    elif note_id is not None:
         # Owner was supplied but not found — keep the bytes, skip the row.
         payload["attachment_id"] = None
 

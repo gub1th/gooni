@@ -81,11 +81,8 @@ os.environ["DATABASE_URL"] = _EVAL_DB_URL
 
 from app.db.database import SessionLocal, engine
 from app.db.models import Conversation as ConvModel
-from app.db.models import Focus as FocusModel
-from app.db.models import ListItem as ListItemModel
 from app.db.models import Memory as MemoryModel
 from app.db.models import Message as MessageModel
-from app.db.models import Todo as TodoModel
 from app.llm.client import llm_client
 from app.main import _alembic_upgrade
 from app.services.orchestrator import Orchestrator as orchestrator  # singleton instance
@@ -239,7 +236,7 @@ def _cache_save(key: str, result: dict) -> None:
 
 
 def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
-    """Insert seed_memories, seed_prefs, seed_focuses, history for one case.
+    """Insert seed_memories, seed_prefs, history for one case.
 
     Returns a teardown callable that removes the seeded rows. Caller MUST
     invoke teardown before closing the session, otherwise rows leak.
@@ -264,8 +261,6 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
     """
     seeded_memory_ids: list[int] = []
     seeded_message_ids: list[int] = []
-    seeded_focus_ids: list[int] = []
-    seeded_todo_ids: list[int] = []
 
     for entry in case.get("seed_prefs") or []:
         rule = (entry.get("rule") or entry.get("content") or "").strip()
@@ -301,43 +296,9 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
         db.flush()
         seeded_memory_ids.append(m.id)
 
-    for entry in case.get("seed_focuses") or []:
-        text = (entry.get("text") or "").strip()
-        if not text:
-            continue
-        # Focus moved out of list_items into its own table (PR d4e1f2a3b5c8).
-        # is_primary moved further to Todo (dashboard revamp e6c2a9b1f4d3).
-        focus = FocusModel(
-            text=text,
-            endgoal=entry.get("endgoal"),
-            committed=True,
-            status=entry.get("status", "committed"),
-            scale=entry.get("scale"),
-        )
-        db.add(focus)
-        db.flush()
-        seeded_focus_ids.append(focus.id)
-
-    # Seed todos. Required for G1.1 destructive-action dispatch tests
-    # (router cosine-matches the extractor's `match` field against open
-    # todos at extract time; with no seeded todos, every delete/complete
-    # action no-matches and the test can't verify the dispatch happened).
-    # Embeddings generated on insert so the cosine match works.
-    for entry in case.get("seed_todos") or []:
-        text = (entry.get("text") or "").strip()
-        if not text:
-            continue
-        emb, _ = llm_client.generate_embedding(text)
-        todo = TodoModel(
-            text=text,
-            subtitle=entry.get("subtitle"),
-            done=bool(entry.get("done", False)),
-            state=entry.get("state", "not_yet"),
-            embedding=json.dumps(emb) if emb else None,
-        )
-        db.add(todo)
-        db.flush()
-        seeded_todo_ids.append(todo.id)
+    # seed_focuses / seed_todos: Focus and Todo died in the v2 nuke, so those
+    # fixture keys are IGNORED (kept in old fixtures for history). Seeding the
+    # Promise-based equivalents is future harness work.
 
     for turn in case.get("history") or []:
         msg = MessageModel(
@@ -359,14 +320,6 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
         if seeded_message_ids:
             db.query(MessageModel).filter(
                 MessageModel.id.in_(seeded_message_ids)
-            ).delete(synchronize_session=False)
-        if seeded_focus_ids:
-            db.query(FocusModel).filter(
-                FocusModel.id.in_(seeded_focus_ids)
-            ).delete(synchronize_session=False)
-        if seeded_todo_ids:
-            db.query(TodoModel).filter(
-                TodoModel.id.in_(seeded_todo_ids)
             ).delete(synchronize_session=False)
         db.commit()
 

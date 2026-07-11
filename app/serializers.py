@@ -18,18 +18,9 @@ from .db.models import (
 
 
 def _serialize_settings(s: Settings) -> dict:
-    try:
-        channels = json.loads(s.nudge_channels or '["telegram"]')
-    except json.JSONDecodeError:
-        channels = ["telegram"]
     return {
-        "nudge_enabled": bool(s.nudge_enabled),
-        "nudge_hour": int(s.nudge_hour),
-        "nudge_minute": int(s.nudge_minute),
+        # Legacy name; the app-wide canonical timezone (local_today reads it).
         "nudge_tz": s.nudge_tz or "America/Los_Angeles",
-        "nudge_channels": channels,
-        "nudge_last_sent_day": s.nudge_last_sent_day,
-        "nudge_prompt": s.nudge_prompt or "",
         "overlay_anchor_note_id": s.overlay_anchor_note_id,
         "overlay_whoop_keys": _safe_json_list(s.overlay_whoop_keys),
     }
@@ -179,7 +170,6 @@ def _serialize_note(n: Note) -> dict:
         "title": n.title,
         "content": n.content,
         "excerpt": _note_excerpt(n),
-        "space_id": getattr(n, "space_id", None),  # vestigial post-nuke; attr unmapped
         "created_at": n.created_at,
         "updated_at": n.updated_at,
         "last_opened_at": n.last_opened_at,
@@ -195,7 +185,6 @@ def _serialize_note(n: Note) -> dict:
         "parent_note_id": n.parent_note_id,
         "excerpt_anchor": n.excerpt_anchor,
         "tags": _parse_tags(n.tags),
-        "status": getattr(n, "status", "unprocessed") or "unprocessed",
         "icon": getattr(n, "icon", None),
     }
 
@@ -212,7 +201,6 @@ def _serialize_note_lite(n: Note) -> dict:
         "content": None,
         "excerpt": _note_excerpt(n),
         "thumb_src": _external_thumb_from_html(n.content),
-        "space_id": getattr(n, "space_id", None),  # vestigial post-nuke; attr unmapped
         "created_at": n.created_at,
         "updated_at": n.updated_at,
         "last_opened_at": n.last_opened_at,
@@ -224,7 +212,6 @@ def _serialize_note_lite(n: Note) -> dict:
         "parent_note_id": n.parent_note_id,
         "excerpt_anchor": n.excerpt_anchor,
         "tags": _parse_tags(n.tags),
-        "status": getattr(n, "status", "unprocessed") or "unprocessed",
     }
 
 
@@ -265,7 +252,6 @@ def _serialize_conversation(c: Conversation) -> dict:
         "type": "conversation",
         "title": c.title,
         "summary": c.summary,
-        "space_id": getattr(c, "space_id", None),  # vestigial post-nuke; attr unmapped
         "source": c.source,
         "created_at": c.created_at,
     }
@@ -326,7 +312,6 @@ def _memory_to_dashboard(m) -> dict:
         "confidence": m.confidence,
         "is_active": bool(m.is_active),
         "superseded_by": m.superseded_by,
-        "focus_id": getattr(m, "focus_id", None),  # vestigial post-nuke; attr unmapped
         "retrieval_count": m.retrieval_count,
         "last_retrieved_at": m.last_retrieved_at.isoformat() if m.last_retrieved_at else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,

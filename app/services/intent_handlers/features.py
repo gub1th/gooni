@@ -1,5 +1,5 @@
 """Feature-request routing — wraps `feature_request_tool.execute` which
-creates a BacklogTicket row.
+creates a `feature-request`-tagged Note (BacklogTicket died in the v2 nuke).
 """
 
 from __future__ import annotations

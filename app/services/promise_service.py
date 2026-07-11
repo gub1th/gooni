@@ -35,41 +35,29 @@ DEDUP_THRESHOLD = 0.85     # match against active pending promises (higher
                            # bar: must be near-paraphrase, not just related)
 
 
-_TIME_HINTS = {
-    "tonight": ("today_eod", None),
-    "today": ("today_eod", None),
-    "tmrw": ("plus_days", 1),
-    "tomorrow": ("plus_days", 1),
-    "this week": ("plus_days", 7),
-    "this weekend": ("next_weekend", None),
-    "next week": ("plus_days", 14),
-}
+# Canonical time phrases scanned out of an utterance. Resolution is
+# delegated to common.parse_due_hint — ONE deadline parser (regex map +
+# dateparser fallback, local-tz EOD anchored). This used to be a second,
+# divergent parser with utcnow() anchoring ("tonight" at 6pm PT resolved
+# to 4:59pm PT the NEXT day).
+_TIME_PHRASES = (
+    "tonight", "today", "tmrw", "tomorrow",
+    "this weekend", "this week", "next week",
+)
 
 
-def _infer_due_from_text(text: str, anchor: datetime | None = None) -> datetime | None:
-    """Cheap regex pass over the utterance to pull a deadline. LLM
-    parsing would be more accurate but costs a turn — start cheap, fall
-    back to None if no hint matches. Caller can run the LLM path later
-    when slip_count > 0 makes accuracy more valuable.
+def _infer_due_from_text(text: str, db: Session | None = None) -> datetime | None:
+    """Scan the utterance for a canonical time phrase and resolve it via
+    common.parse_due_hint. Cheap (no LLM); returns None when nothing matches.
     """
     if not text:
         return None
-    now = anchor or datetime.utcnow()
+    from ..common import parse_due_hint
+
     lowered = text.lower()
-    for phrase, (rule, arg) in _TIME_HINTS.items():
+    for phrase in _TIME_PHRASES:
         if re.search(rf"\b{re.escape(phrase)}\b", lowered):
-            if rule == "today_eod":
-                return now.replace(hour=23, minute=59, second=0, microsecond=0)
-            if rule == "plus_days" and isinstance(arg, int):
-                return (now + timedelta(days=arg)).replace(
-                    hour=23, minute=59, second=0, microsecond=0
-                )
-            if rule == "next_weekend":
-                # weekday() Mon=0 ... Sun=6. Saturday=5.
-                days_to_sat = (5 - now.weekday()) % 7 or 7
-                return (now + timedelta(days=days_to_sat)).replace(
-                    hour=23, minute=59, second=0, microsecond=0
-                )
+            return parse_due_hint(phrase, db=db)
     return None
 
 
@@ -143,7 +131,7 @@ def create(
     # Recurring commitments carry no single deadline (see normalizer note:
     # a due on a daily/weekly promise is a parse artifact).
     if cadence == "once":
-        inferred = inferred_due or _infer_due_from_text(cleaned)
+        inferred = inferred_due or _infer_due_from_text(cleaned, db=db)
     else:
         inferred = None
     vec = _embed(cleaned)

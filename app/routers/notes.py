@@ -185,14 +185,6 @@ def update_note(
         note.is_public_pinned = bool(body["is_public_pinned"])
     if "is_draft" in body:
         note.is_draft = bool(body["is_draft"])
-    if "status" in body:
-        new_status = body.get("status")
-        if new_status not in ("unprocessed", "graduated", "archived"):
-            raise HTTPException(
-                status_code=400,
-                detail="status must be unprocessed|graduated|archived",
-            )
-        note.status = new_status
     if "tags" in body:
         normalized = _normalize_tags(body["tags"])
         note.tags = json.dumps(normalized) if normalized else None
@@ -301,24 +293,6 @@ def get_draft_notes(db: Session = Depends(get_db)):
     notes = (
         db.query(Note)
         .filter(Note.is_draft == True)  # noqa: E712
-        .order_by(_notes_order())
-        .all()
-    )
-    return [_serialize_note_lite(n) for n in notes]
-
-
-@router.get("/notes/unprocessed")
-def get_unprocessed_notes(db: Session = Depends(get_db)):
-    """Notes captured but not yet graduated into Promise/Todo/Habit/Focus.
-
-    Drives the "Unprocessed" sidebar view — Daniel's triage queue for
-    captured thought that hasn't taken shape yet. The synthesizer reads
-    the same filter to surface focus candidates from cluster patterns
-    in this set (see focus_synthesizer note-graduation path).
-    """
-    notes = (
-        db.query(Note)
-        .filter(Note.status == "unprocessed")
         .order_by(_notes_order())
         .all()
     )
@@ -464,12 +438,9 @@ def cleanup_empty_notes(dry_run: bool = False, db: Session = Depends(get_db)):
 
 @router.post("/notes/{note_id}/embed")
 def embed_note(note_id: int, db: Session = Depends(get_db)):
-    """Generate embedding for a note and check for space suggestion.
-    Called on blur (not on every save) to avoid wasteful API calls.
-    Also runs the focus-activity matcher so focuses get heartbeats from
-    note writing without an explicit FK linkage. Kicks the unified
-    classifier off-thread so notes about Gooni gaps land in the Backlog
-    space without blocking the response.
+    """Generate embedding for a note. Called on blur (not on every save)
+    to avoid wasteful API calls. Kicks the unified classifier off-thread
+    so signal extraction doesn't block the response.
     """
     import threading
 
@@ -477,12 +448,10 @@ def embed_note(note_id: int, db: Session = Depends(get_db)):
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     note_service.update_embedding(note_id)  # opens/closes its own session
-    db.expire_all()  # invalidate cache so suggest_space sees fresh embedding
-    suggestion = note_service.suggest_space(note_id, db)
 
     # Unified extractor: runs in a daemon thread so the embed endpoint
     # returns fast. Internally dedup-gates via `Note.classified_embedding`
-    # so trivial edits don't make duplicate Backlog rows.
+    # so trivial edits don't re-extract.
     from ..services.note_service import classify_note
     threading.Thread(
         target=classify_note,
@@ -490,7 +459,7 @@ def embed_note(note_id: int, db: Session = Depends(get_db)):
         daemon=True,
     ).start()
 
-    return {"ok": True, **suggestion}
+    return {"ok": True}
 
 
 @router.post("/notes/{note_id}/touch")

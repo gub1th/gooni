@@ -191,7 +191,6 @@ def forget_memory(memory_id: str) -> str:
     return f"Forgotten: {memory_id}"
 
 
-
 @mcp.tool()
 def add_note(
     title: str,
@@ -488,7 +487,6 @@ def _read_note_formatted(note_id: int) -> str:
     title = n.get("title") or "(untitled)"
     body = _html_to_text(n.get("content") or "")
     return f"# {title}\n\n{body}" if body else f"# {title}\n\n(empty)"
-
 
 
 def _find_command_center_note() -> dict | None:
@@ -789,7 +787,6 @@ def edit_note(
     return f"Updated note #{n['id']}: {n['title']}{suffix}"
 
 
-
 @mcp.tool()
 def list_notes(tag: str = "", limit: int = 20) -> str:
     """List notes, newest first. Optional tag filter (spaces are gone —
@@ -813,37 +810,6 @@ def list_notes(tag: str = "", limit: int = 20) -> str:
         tag_part = f" [{', '.join(tags)}]" if tags else ""
         lines.append(f"#{n['id']} {n.get('title') or '(untitled)'}{tag_part}")
     return "\n".join(lines)
-
-
-def _flatten_items(tree_node: list[dict]) -> list[dict]:
-    """Walk an /items tree (list of nodes with .children) and return a flat
-    list. Children are included recursively; the original ordering is kept."""
-    out: list[dict] = []
-    for n in tree_node:
-        out.append(n)
-        kids = n.get("children") or []
-        if kids:
-            out.extend(_flatten_items(kids))
-    return out
-
-
-
-def _find_todo(match: str, only_open: bool = False) -> tuple[dict | None, str | None]:
-    """Case-insensitive substring match on todo text. Returns (todo, error_or_None)."""
-    match_l = match.lower().strip()
-    if not match_l:
-        return None, "(empty match string)"
-    todos = _fetch_todos()
-    candidates = [t for t in todos if match_l in (t.get("text") or "").lower()]
-    if only_open:
-        candidates = [t for t in candidates if not t.get("done")]
-    if not candidates:
-        return None, f"(no todo matching '{match}')"
-    # Prefer shortest text (most specific match)
-    candidates.sort(key=lambda t: len(t.get("text") or ""))
-    return candidates[0], None
-
-
 
 
 @mcp.tool()
@@ -1075,56 +1041,6 @@ def read_trackable(name: str = "", days: int = 14) -> str:
     return "\n".join(lines)
 
 
-
-
-
-
-def _fetch_focuses(include_done: bool = False, include_someday: bool = True) -> list[dict]:
-    """Top-level focus items (committed roots in the new /items tree).
-
-    Backend renamed `/focuses` → focuses-as-root-items in PR #54. A focus is
-    now a top-level ListItem in the focus list, surfaced under the
-    `focuses` key of /items. We normalize to the legacy shape so existing
-    tools' string formatting still works: `name` aliases `text`, `status`
-    is derived from done/committed flags.
-
-    `include_someday` is no longer meaningful — committed flag is binary.
-    Kept as a no-op so existing tool signatures don't break.
-    """
-    del include_someday  # binary committed flag replaced the trinary status
-    resp = _session.get(f"{BASE_URL}/items", timeout=10)
-    resp.raise_for_status()
-    raw = resp.json().get("focuses") or []
-    out: list[dict] = []
-    for f in raw:
-        if not include_done and f.get("done"):
-            continue
-        out.append({
-            **f,
-            "name": f.get("text"),  # legacy alias
-            "status": "done" if f.get("done") else ("committed" if f.get("committed") else "pending"),
-        })
-    return out
-
-
-def _find_focus(match: str) -> tuple[dict | None, str | None]:
-    """Case-insensitive substring match on focus text. Returns (focus, error_or_None)."""
-    match_l = match.lower().strip()
-    if not match_l:
-        return None, "(empty match string)"
-    focuses = _fetch_focuses(include_done=True)
-    candidates = [f for f in focuses if match_l in ((f.get("text") or f.get("name") or "")).lower()]
-    if not candidates:
-        return None, f"(no focus matching '{match}')"
-    # Prefer shortest text (most specific match)
-    candidates.sort(key=lambda f: len(f.get("text") or f.get("name") or ""))
-    return candidates[0], None
-
-
-
-
-
-
 @mcp.tool()
 def list_recent_notes(limit: int = 10) -> str:
     """List the most recently updated notes across all spaces.
@@ -1144,120 +1060,6 @@ def list_recent_notes(limit: int = 10) -> str:
         snippet = (n.get("content") or "")[:80].replace("\n", " ")
         lines.append(f"#{n['id']} {n['title'] or '(untitled)'} — {snippet}")
     return "\n".join(lines)
-
-
-# ── Generic lists (backlog / todo / focus singletons + user-created lists) ───
-#
-# Singletons live in the `lists` table with unique types — `backlog`, `todo`,
-# `focus`. Resolving by type avoids hard-coding numeric IDs that shift across
-# DB rebuilds. Generic lists fall back to name match.
-
-
-def _fetch_lists() -> list[dict]:
-    resp = _session.get(f"{BASE_URL}/lists", timeout=10)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _resolve_list(list_ref: str) -> tuple[dict | None, str | None]:
-    """Resolve a list by type ('todo'/'focus'), name, or numeric id.
-
-    `list_ref="backlog"` is REJECTED — backlog tickets were extracted
-    out of `list_items` into a dedicated `backlog_tickets` table, so
-    the legacy "Backlog" list_items row is empty. Callers must use the
-    backlog-tickets surface instead: read_backlog, add_backlog_item,
-    find_similar_backlog, complete_backlog_item, delete_backlog_item.
-    """
-    ref = (list_ref or "").strip()
-    if not ref:
-        return None, "(empty list reference)"
-    if ref.lower() == "backlog":
-        return None, (
-            "(list_ref='backlog' is deprecated — backlog tickets live in "
-            "their own table now. Use read_backlog / add_backlog_item / "
-            "find_similar_backlog / complete_backlog_item / "
-            "delete_backlog_item instead.)"
-        )
-    lists = _fetch_lists()
-    # numeric id wins
-    if ref.isdigit():
-        target_id = int(ref)
-        for lst in lists:
-            if lst["id"] == target_id:
-                return lst, None
-        return None, f"(no list with id {target_id})"
-    ref_l = ref.lower()
-    # singleton type match (backlog/todo/focus)
-    by_type = [lst for lst in lists if (lst.get("type") or "").lower() == ref_l]
-    if len(by_type) == 1:
-        return by_type[0], None
-    if len(by_type) > 1:
-        names = ", ".join(f"#{lst['id']} {lst['name']}" for lst in by_type)
-        return None, f"(multiple lists with type '{ref}': {names})"
-    # fall back to case-insensitive name match
-    by_name = [lst for lst in lists if (lst.get("name") or "").lower() == ref_l]
-    if len(by_name) == 1:
-        return by_name[0], None
-    if len(by_name) > 1:
-        names = ", ".join(f"#{lst['id']} {lst['name']}" for lst in by_name)
-        return None, f"(multiple lists named '{ref}': {names})"
-    # last-resort substring on name
-    sub = [lst for lst in lists if ref_l in (lst.get("name") or "").lower()]
-    if len(sub) == 1:
-        return sub[0], None
-    if not sub:
-        return None, f"(no list matching '{ref}')"
-    names = ", ".join(f"#{lst['id']} {lst['name']}" for lst in sub)
-    return None, f"(ambiguous list '{ref}'; candidates: {names})"
-
-
-def _fetch_list_items(list_id: int) -> list[dict]:
-    resp = _session.get(f"{BASE_URL}/lists/{list_id}", timeout=10)
-    resp.raise_for_status()
-    return resp.json().get("items", [])
-
-
-def _find_list_item(
-    list_id: int, match: str, unique: bool = False, only_open: bool = False
-) -> tuple[dict | None, str | None]:
-    """Substring match on item text within a list.
-
-    `unique=True` refuses if 0 or >1 candidates (use for destructive ops).
-    `unique=False` returns shortest-text match (most specific) — safe for
-    non-destructive toggles like check_list_item.
-    """
-    match_l = (match or "").lower().strip()
-    if not match_l:
-        return None, "(empty match string)"
-    items = _fetch_list_items(list_id)
-    if only_open:
-        items = [it for it in items if not it.get("done")]
-    # Match text OR subtitle — backlog rows often store a short title in text
-    # and an auto-generated "from note #N" or descriptor in subtitle, so
-    # text-only match misses obvious references.
-    candidates = [
-        it for it in items
-        if match_l in (it.get("text") or "").lower()
-        or match_l in (it.get("subtitle") or "").lower()
-    ]
-    if not candidates:
-        return None, f"(no item matching '{match}' in list #{list_id})"
-    if unique and len(candidates) > 1:
-        previews = "\n".join(
-            f"  #{it['id']} {'[x]' if it['done'] else '[ ]'} {it['text']}"
-            for it in candidates[:6]
-        )
-        return None, (
-            f"(ambiguous: {len(candidates)} items match '{match}'. "
-            f"Refine match string or call again with the exact text.\n{previews})"
-        )
-    candidates.sort(key=lambda it: len(it.get("text") or ""))
-    return candidates[0], None
-
-
-
-
-
 
 
 @mcp.tool()
@@ -1321,8 +1123,6 @@ def delete_note(note_id: int) -> str:
     return f"deleted note #{note_id}: {title}"
 
 
-
-
 @mcp.tool()
 def get_leetcode_activity() -> str:
     """Get Daniel's recent LeetCode activity — current streak, today's
@@ -1353,6 +1153,5 @@ def get_leetcode_activity() -> str:
     if snapshot_date:
         parts.append(f"snapshot date: {snapshot_date}")
     return "\n".join(parts)
-
 
 

@@ -14,7 +14,7 @@ Mobile capture via bots: Telegram (live), WhatsApp (live), iMessage (code shippe
 
 ## North Star
 
-Ambient physical assistant — device that knows you passively, surfaces context proactively. Gooni = brain. See `docs/VISION.md`.
+Ambient physical assistant — device that knows you passively, surfaces context proactively. Gooni = brain. (`docs/VISION.md` is local-only/gitignored — don't expect it in a fresh clone.)
 
 ## Project Rules
 
@@ -32,7 +32,7 @@ See `docs/TODO.md` (gitignored — local only).
 ## Core data model (post-v2)
 
 **5 primitives + Memory:**
-- `Note` — universal capture atom. Tags (JSON list, lowercase, deduped) replace Spaces for ALL organization. `excerpt` cached preview; `is_draft`/`is_pinned`/`is_public(_pinned)`; `status` graduation col is vestigial post-nuke. `GET /notes` (flat list, `?tag=` filter), `POST /notes`.
+- `Note` — universal capture atom. Tags (JSON list, lowercase, deduped) replace Spaces for ALL organization. `excerpt` cached preview; `is_draft`/`is_pinned`/`is_public(_pinned)`. `GET /notes` (flat list, `?tag=` filter), `POST /notes`. (The `status` graduation lifecycle + 5am-batch session cols were dropped in the lean sweep `4d9c44f8f546`.)
 - `Promise` — THE actionable primitive (absorbs Todo/Habit/Focus). `cadence` (`once|daily|n_per_week|permanent_do|permanent_never`), `cadence_target` (N for n_per_week), `is_important` (user-set; overlay input), `parent_promise_id` (self-FK nesting — a "Focus" is a Promise with children), `inferred_due` (local-EOD anchored, naive UTC), `needs_clarification`, `slip_count` (cosine vs past broken), `source_message_id`, deferred `embedding`. Lifecycle `active → kept|broken`; `auto_mark_overdue` sweeps once-cadence only (recurring never auto-breaks on a date). Chat-side closure via `find_active_match` (substring → unique-word-overlap → cosine ≥0.60; top-2-within-0.05 → ambiguity refusal → "which one?" ack). CREATES from chat do NOT auto-insert — see glow below. `DELETE /promises/{id}` hard-deletes (undo path).
 - `Trackable` + `TrackableEntry` — generic measurement (Notion-tables model). Definition: `name` (lowercase-unique), `kind` (`boolean|numeric|json`), `agg` (`sum|last` per-day fold), `unit`, `cadence`, `target`, `is_important`, `schema_hint` (JSON hint incl. optional `direction: limit|floor`), `source` (`manual|chat|whoop|leetcode|derived`), `parent_promise_id`. Entry: sparse `value_boolean|value_numeric|value_json` + `(trackable_id, date)` index; multiple rows/day legal. New tracked thing = one INSERT. 8 system trackables (calories/protein sum-agg; weight/exercise/alcohol/weed/vape/note last-agg) + feed masters (`whoop`, `leetcode` json) + numeric mirrors.
 - `Message` — the log substrate. Slice 3 glow cols: `has_actionable_signal` (sticky extractor verdict) + `signal_preview` (JSON `{signals, status: pending|promoted|dismissed, promise_ids}`). `GET /messages/log` = flat newest-first stream across all conversations w/ source badge. `POST /messages/{id}/promote` (runs `promise_service.create_from_signal` per draft), `/undo-promote` (hard-deletes exactly those promises, restores pending), `/dismiss-glow`.
@@ -41,7 +41,7 @@ See `docs/TODO.md` (gitignored — local only).
 
 **Infra kept:** `Conversation`, `ToolCall` (audit), `WaProcessedId`, `Attachment` (note-owned only now), `Reflection` (deterministic guards; facet promotion removed), `PublicProfile`, `Visit`, `OAuthToken`, `Settings`, `EvalSegment`/`EvalStepFeedback`/`EvalMessageRating`, `Trackable(Entry)`.
 
-**Nuked (migration `e8b3c6d9f2a7`, 2026-07-09):** Space, List, ListItem, Todo, Focus, FocusCandidate, Habit, HabitEntry, BacklogTicket, FocusSession×3, FrictionEvent, GooniTake, McpCall, ClaudeUsageTurn, CapabilityFacet, NoteComment, Reaction, DailyMetric (rows pre-migrated to TrackableEntry in `f3b8d1c6a9e2`), GooniSnapshot, TrackedRepo (+ WhoopSnapshot/LeetcodeSnapshot in `d2f5a8c1e9b3`). Nuclear — git is the rollback. Dead FK columns left behind by SQLite DROP-COLUMN limits (e.g. `memories.focus_id`) are unmapped and harmless.
+**Nuked (migration `e8b3c6d9f2a7`, 2026-07-09):** Space, List, ListItem, Todo, Focus, FocusCandidate, Habit, HabitEntry, BacklogTicket, FocusSession×3, FrictionEvent, GooniTake, McpCall, ClaudeUsageTurn, CapabilityFacet, NoteComment, Reaction, DailyMetric (rows pre-migrated to TrackableEntry in `f3b8d1c6a9e2`), GooniSnapshot, TrackedRepo (+ WhoopSnapshot/LeetcodeSnapshot in `d2f5a8c1e9b3`). Nuclear — git is the rollback. The lean sweep (`4d9c44f8f546`, 2026-07-10) finished the job: dropped the 25 orphan columns the nuke stranded (Settings nudge/idle cols, Note graduation/session cluster, unmapped FK leftovers).
 
 ## API surface
 
@@ -51,9 +51,9 @@ Route shapes are grep-able — one `app/routers/<domain>.py` module per domain (
 
 ### Backend (`app/`)
 
-- **`app/main.py`** — SLIM wiring: middlewares (auth Bearer, CORS, req-trace, visit-log), `_lifespan` (eval pending backfill, fly-revive, then background loops), `_alembic_upgrade`. **Background loops in `app/background.py`**: daily nudge scheduler, note-excerpt backfill, memory watchdog, proactive-nudge tick. Routers never import from `main`.
+- **`app/main.py`** — SLIM wiring: middlewares (auth Bearer, CORS, req-trace, visit-log), `_lifespan` (eval pending backfill, fly-revive, then background loops), `_alembic_upgrade`. **Background loops in `app/background.py`**: note-excerpt backfill + memory watchdog ONLY — the nudge scheduler + proactive tick died in the 2026-07 proactiveness reset. Routers never import from `main`.
 - **`app/db/models.py`** — see Core data model above.
-- **`app/common.py`** — date parsers + auth-token + `local_now(db)`/`local_today(db)` (canonical tz-aware "today" in `Settings.nudge_tz`; NEVER `date.today()` — server runs UTC) + `parse_due_hint(hint, db)` (shared due-phrase resolver: regex map + dateparser fallback, local-EOD anchored).
+- **`app/common.py`** — date parsers + auth-token + `local_now(db)`/`local_today(db)` (canonical tz-aware "today" in `Settings.nudge_tz` — legacy column name, the tz survived the nudge nuke; NEVER `date.today()` — server runs UTC) + `parse_due_hint(hint, db)` — THE one deadline parser (regex map + dateparser fallback, local-EOD anchored). `promise_service._infer_due_from_text` scans utterances and delegates here; never grow a second resolver.
 - **`app/services/embedding_utils.py`** — `embed_text` + `cosine`, THE shared embedding surface (extracted from dead list_service). All cosine matchers (promises, memory, feature dedup) go through it.
 - **`app/services/memory_service.py`** — unchanged reconcile/retrieval core. Retrieval = always-included prefs + top-5 cosine (no capability block anymore). `MIN_QUERY_LEN` read gate stays tiny.
 - **`app/services/memory_extraction/`** — single LLM call per turn (`extract_signals`, gpt-5.4-mini, max_tokens=1500) emits `tone_corrections`, `feature_requests`, **`promises`** (unified emit: kind=`create|complete|break`; create carries utterance/summary/cadence/cadence_target/due_date (absolute, clamped today..+366d)/due_hint/is_important/parent_hint; recurring cadences are stripped of due dates — a due on a daily promise is a parse artifact), `fitness_logs` (unchanged shape → Trackable entries), `reply_intent`, memory candidates. Prefilter gates note-saves only.
@@ -66,10 +66,9 @@ Route shapes are grep-able — one `app/routers/<domain>.py` module per domain (
 - **`app/services/whoop.py`** — OAuth + client unchanged; storage = `whoop` json master Trackable + numeric mirrors, replace-mode per local day. `get_today`/`latest_snapshot` read back dicts. `/whoop/today` shape unchanged.
 - **`app/services/leetcode_service.py`** — same pattern (`leetcode` master + mirrors, per UTC day).
 - **`app/services/orchestrator/`** — `core.py` (persona v9: promise-first language, glow NOTICED-not-tracked guardrail), `prompt_blocks.py` (`OBJECT_KINDS_BLOCK` auto-derived from the 16-tool registry × `_CREATE_TOOL_KINDS` + `("Promise","TrackableEntry")`; `_build_ack` promise/fitness/feature acks; `_build_just_extracted_block` w/ NOTICED lines; `_build_state_block` = promise-first: due ≤24h named, important named, rest counted + vague list + calendar + recent activity + food ledger), `steps.py` (verify rail; `_READ_ONLY_TOOLS` tracks the new registry).
-- **`app/services/reflexion_service.py`** — deterministic guards only (hallucination cross-ref + voice-spec regex). Facet promotion removed; rows still embed for history.
+- **`app/services/reflexion_service.py`** — ONE deterministic guard: hallucination cross-ref (write-claim regex × ToolCall audit + router captures). Voice-spec regexes deleted in the lean sweep (verbatim-phrase lists, zero recall on novel phrasing, nothing consumed the rows). Rows still embed for history.
 - **`app/services/recent_activity.py`** — promises + notes lines (todo/focus/habit tiers dead).
-- **`app/services/todo_nudge.py`** — daily digest, PROMISE-ONLY picker (due ≤24h → important → oldest active; nothing → skip send). Name is legacy; owns `DEFAULT_PROMPT` + `compose_message`.
-- **`app/services/proactive_nudge.py`** — whoop nudge (takes payload DICT from the master Trackable; debounced via Settings) + sleep nudge. Procrastination nudge died with Todo.
+- **PROACTIVENESS: none, by design (2026-07 reset).** `todo_nudge.py` (daily digest) + `proactive_nudge.py` (whoop/sleep pings) are DELETED — Gooni sends zero unprompted messages. The next proactive system starts from scratch around asymmetric value (surface what Gooni knows that Daniel doesn't; event-driven > schedule-driven; per-day cap). `fly_revive` boot apology is crash-recovery UX, not proactiveness — it stays.
 - **`app/services/eval_service.py`** — segments/ratings unchanged; dispatch writes a `claude-code`+`eval-dispatch`-tagged Note + a review Promise (Space + backlog targets died).
 - **`app/services/health_service.py`** — 6 axes; engagement counts promises/trackable entries; cost proxies on ToolCall rows; whoop connector reads the master Trackable; github connector = token-only.
 - **`app/tools/`** — 16-tool chat registry: memory (save), web (fetch/search), notes (search/add w/ tags/find/read/recent), `list_promises` + `read_trackable` (read-only — router owns actionable writes), `request_feature` (→ tagged Note), calendar (5).
@@ -87,7 +86,7 @@ Route shapes are grep-able — one `app/routers/<domain>.py` module per domain (
 - **`components/ChatView.tsx`** — full chat w/ SSE (secondary surface).
 - **`components/notes/Sidebar.tsx`** — Notes (All/Pinned/Drafts/Recent) + tag filter + flat nav (Log/Chat/Memories/Audit/Settings) + Public/MCP footer. Spaces/Lists sections dead. **Docked sidebar only shows off-home; the ambient home uses `SummonedNav` instead** (nav parity not yet unified — two navs today).
 - **`components/eval/EvalView.tsx`** — kept on `?audit=1` (Daniel's override).
-- **`components/dashboard/PromiseDrawer.tsx`** + `PromiseDetailModal` — promise list UI (cadence pill + importance star), kept for reuse.
+- **`components/SettingsPanel.tsx`** — General tab: timezone only (the one surviving Settings knob). `components/dashboard/` deleted in the lean sweep (zero importers).
 - **`stores/`** — `useNotesContentStore` (all notes live in the single "general" bucket), `useConversationsStore`, theme store. Spaces/Lists/Ordering stores dead.
 - **`services/api.ts`** — surviving fetchers only; `fetchSpaceNotes`/`createNote` are flat `/notes` calls (legacy signatures).
 
@@ -119,6 +118,7 @@ cd frontend && npx tsc --noEmit          # zero errors required
 cd frontend && npm run lint              # eslint — react-hooks/rules-of-hooks is error (gates CI); rest are warn
 cd frontend && npm test                  # vitest + RTL seam tests (gates CI via frontend-lint.yml)
 source venv/bin/activate && python -c "from app.main import app; print('OK')"
+python tests/test_imports.py             # import smoke: EVERY module under app/+evals/+scripts/ — catches lazy-import breakage table nukes leave behind
 python tests/test_signal_routing.py      # extract→dispatch→DB net (no LLM)
 python tests/test_overlay.py             # deterministic ranker net
 ```
@@ -135,11 +135,7 @@ alembic upgrade head
 # Commit the new revision alongside the model change.
 ```
 
-`alembic upgrade head` runs on uvicorn boot via `_alembic_upgrade()`. Fresh DBs walk from baseline to head. **Half-applied-state recovery:** boot catches "already exists" OperationalErrors and stamps to head. **Migration-author conventions:** inspector guards (`has_table` / column checks) so re-runs are no-ops; `if_not_exists=True` on create_index; raw best-effort `ALTER TABLE … DROP COLUMN` instead of batch_alter when FK targets may already be dropped.
-
-## Daily digest
-
-`app/services/todo_nudge.py::compose_message(db)` — promise-only picker (due ≤24h → important → oldest active; quiet day → skip). Prompt in `Settings.nudge_prompt` (empty → DEFAULT_PROMPT). Scheduler in FastAPI lifespan; `Settings.nudge_last_sent_day` idempotency; WA respects Meta's 24h window.
+`alembic upgrade head` runs on uvicorn boot via `_alembic_upgrade()`. Fresh DBs walk from baseline to head. **Half-applied-state recovery:** boot catches "already exists" OperationalErrors and stamps to head. **Migration-author conventions:** inspector guards (`has_table` / column checks) so re-runs are no-ops; `if_not_exists=True` on create_index. **Dropping columns whose FK targets are already-dropped tables:** batch_alter reflects the table and follows FKs → `NoSuchTableError`; stand up empty phantom parents for the rebuild, drop indexes touching the doomed columns first, drop phantoms after — see `4d9c44f8f546` for the working pattern.
 
 ## Code Patterns
 
