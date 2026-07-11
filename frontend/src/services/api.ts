@@ -85,7 +85,15 @@ export interface ApiNote {
   // count requires a per-note Visit query that isn't worth running for
   // every list row.
   unique_viewers?: number;
+  // The day a "daily log" note is about (YYYY-MM-DD) — set only for the
+  // log-matrix note column. Null for ordinary notes.
+  log_date?: string | null;
+  // Sticky placement on the ambient home canvas: {x,y} as viewport fractions
+  // (0..1) + optional {w,h} px size. Set only for stickies; null otherwise.
+  home_pos?: { x: number; y: number; w?: number; h?: number } | null;
 }
+
+export type StickyPos = { x: number; y: number; w?: number; h?: number };
 
 // Slice 6: Spaces died — the flat GET /notes list IS the corpus. The
 // spaceId param survives for call-site compatibility ("general" = all)
@@ -653,13 +661,81 @@ export async function fetchTrackables(): Promise<Trackable[]> {
   return res.json();
 }
 
-// Per-day pivot, newest-first, gap-filled — today is days[0].
+// Per-day pivot, newest-first, gap-filled — days[0] is `end` (today by
+// default). Pass `end` (YYYY-MM-DD) to fetch an older window — the log
+// matrix pages backwards for infinite scroll.
 export async function fetchTrackableDays(
   id: number,
   days = 7,
+  end?: string,
 ): Promise<{ trackable: Trackable; days: TrackableDay[] }> {
-  const res = await apiFetch(`${BASE}/trackables/${id}/entries?days=${days}&fill=true`);
+  const q = new URLSearchParams({ days: String(days), fill: "true" });
+  if (end) q.set("end", end);
+  const res = await apiFetch(`${BASE}/trackables/${id}/entries?${q.toString()}`);
   if (!res.ok) throw new Error("Failed to fetch trackable days");
+  return res.json();
+}
+
+// ── Daily-log notes (the log-matrix note column) ─────────────────────────────
+// Per-day freeform "what happened" notes, backed by the Note primitive
+// (log_date + `daily` tag) so they're searchable + feed memory like any note.
+
+// Notes whose log_date lands in the [end-(days-1), end] window (sparse).
+export async function fetchDailyNotes(days: number, end?: string): Promise<ApiNote[]> {
+  const q = new URLSearchParams({ days: String(days) });
+  if (end) q.set("end", end);
+  const res = await apiFetch(`${BASE}/notes/daily?${q.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch daily notes");
+  return res.json();
+}
+
+// Upsert the daily note for a date. Empty content deletes it (cell-clear).
+export async function upsertDailyNote(
+  date: string,
+  content: string,
+): Promise<ApiNote | { cleared: boolean }> {
+  const res = await apiFetch(`${BASE}/notes/daily/${date}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error("Failed to save daily note");
+  return res.json();
+}
+
+// ── Sticky notes (ambient home canvas) ───────────────────────────────────────
+// Free-floating notes parked on the home void, backed by the Note primitive
+// (home_pos + `sticky` tag).
+
+export async function fetchStickyNotes(): Promise<ApiNote[]> {
+  const res = await apiFetch(`${BASE}/notes/sticky`);
+  if (!res.ok) throw new Error("Failed to fetch sticky notes");
+  return res.json();
+}
+
+export async function createStickyNote(
+  content: string,
+  pos: StickyPos,
+): Promise<ApiNote> {
+  const res = await apiFetch(`${BASE}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, tags: ["sticky"], home_pos: pos, is_draft: false }),
+  });
+  if (!res.ok) throw new Error("Failed to create sticky note");
+  return res.json();
+}
+
+export async function updateStickyNote(
+  id: number,
+  patch: { content?: string; home_pos?: StickyPos | null },
+): Promise<ApiNote> {
+  const res = await apiFetch(`${BASE}/notes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update sticky note");
   return res.json();
 }
 

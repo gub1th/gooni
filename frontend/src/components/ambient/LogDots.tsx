@@ -5,12 +5,14 @@ import { GREEN } from "./wavePath";
 import { LogTable } from "./LogTable";
 import {
   createTrackable,
+  fetchDailyNotes,
   fetchLeetcodeToday,
   fetchTrackableDays,
   fetchTrackables,
   fetchWhoopToday,
   logTrackable,
   startWhoopOAuth,
+  upsertDailyNote,
   type LeetcodeToday,
   type Trackable,
   type TrackableDay,
@@ -60,6 +62,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   const [addKind, setAddKind] = useState<"boolean" | "numeric">("boolean");
   const [shown, setShown] = useState(false); // drives the Y expand/contract
   const [expanded, setExpanded] = useState(false); // full editable matrix
+  const [noteDraft, setNoteDraft] = useState(""); // today's daily-log note
   const editRef = useRef<HTMLInputElement | null>(null);
 
   // expand in on mount; contract out before the parent unmounts us
@@ -85,12 +88,26 @@ export function LogDots({ onClose }: { onClose: () => void }) {
         return a.t.name.localeCompare(b.t.name);
       });
       setRows(withDays);
+      // today's daily-log note (window of 1 → just today)
+      try {
+        const daily = await fetchDailyNotes(1);
+        setNoteDraft((daily[0]?.content || "").replace(/<[^>]+>/g, "").trim() || daily[0]?.excerpt || "");
+      } catch { /* ignore */ }
     } catch {
       /* surface stays quiet on error */
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Today's date = the newest cell of any trackable row (local-day anchored,
+  // gap-filled so it's always present).
+  const today = rows[0]?.days[0]?.date;
+
+  function commitTodayNote() {
+    if (!today) return;
+    void upsertDailyNote(today, noteDraft.trim()).catch(() => {});
+  }
 
   useEffect(() => { void load(); }, [load]);
 
@@ -128,8 +145,19 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   }
 
   async function commitNumber(row: Row) {
-    const n = parseFloat(draft);
+    const raw = draft.trim();
     setEditId(null);
+    // Empty field clears today's cell (valueless replace deletes the row).
+    if (raw === "") {
+      setRows((prev) => prev.map((r) => (
+        r.t.id === row.t.id
+          ? { ...r, days: r.days.map((d, i) => (i === 0 ? { ...d, value: null } : d)) }
+          : r
+      )));
+      try { await logTrackable(row.t.id, { replace: true }); } finally { void refreshRow(row.t.id); }
+      return;
+    }
+    const n = parseFloat(raw);
     if (Number.isNaN(n)) return;
     setRows((prev) => prev.map((r) => (
       r.t.id === row.t.id
@@ -180,8 +208,8 @@ export function LogDots({ onClose }: { onClose: () => void }) {
         <div
           style={{
             ...GLASS, borderRadius: 24, position: "relative", overflow: "hidden",
-            width: expanded ? "min(760px, 94vw)" : "min(720px, 92vw)",
-            height: expanded ? "min(80vh, 640px)" : 200,
+            width: expanded ? "min(1120px, 94vw)" : "min(720px, 92vw)",
+            height: expanded ? "min(80vh, 640px)" : 248,
             transition: "width 300ms cubic-bezier(0.22,1,0.36,1), height 300ms cubic-bezier(0.22,1,0.36,1)",
           }}
         >
@@ -203,7 +231,8 @@ export function LogDots({ onClose }: { onClose: () => void }) {
           {/* dots layer (today's quick driver) */}
           <div
             style={{
-              position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", gap: 20,
               padding: "0 30px", opacity: expanded ? 0 : 1, pointerEvents: expanded ? "none" : "auto",
               transition: "opacity 180ms ease",
             }}
@@ -211,6 +240,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
             {loading ? (
               <div style={{ color: "rgba(244,245,244,0.35)", fontSize: 13 }}>loading…</div>
             ) : (
+              <>
               <div style={{ display: "flex", gap: 34, alignItems: "flex-end" }}>
                 {rows.map((row) => (
                   <Column
@@ -272,6 +302,25 @@ export function LogDots({ onClose }: { onClose: () => void }) {
                   <div style={{ fontSize: 11, color: "rgba(244,245,244,0.45)", marginTop: 12 }}>add</div>
                 </div>
               </div>
+
+              {/* today's note — a freeform "what happened" line under the metrics */}
+              {today && (
+                <div style={{ width: "min(560px, 88%)", borderTop: "1px solid rgba(244,245,244,0.08)", paddingTop: 13 }}>
+                  <input
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    onBlur={commitTodayNote}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitTodayNote(); (e.currentTarget as HTMLInputElement).blur(); } }}
+                    placeholder="what happened today?"
+                    spellCheck={false}
+                    style={{
+                      width: "100%", background: "transparent", border: "none", outline: "none",
+                      color: "#F4F5F4", fontFamily: FONT, fontSize: 13.5, textAlign: "center", caretColor: GREEN,
+                    }}
+                  />
+                </div>
+              )}
+              </>
             )}
           </div>
 

@@ -106,10 +106,13 @@ def trackable_entries(
     days: int = 30,
     fill: bool = False,
     raw: bool = False,
+    end: str | None = None,
     db: Session = Depends(get_db),
 ):
-    """Per-day pivot for the last `days` days (newest first) — the
-    cut-table-style read. `raw=true` returns individual entries instead."""
+    """Per-day pivot for `days` days ending at `end` (newest first) — the
+    cut-table-style read. `end` (YYYY-MM-DD) defaults to today; pass an older
+    date to page backwards for the log matrix's infinite scroll. `raw=true`
+    returns individual entries instead."""
     from datetime import timedelta
 
     from ..common import local_today
@@ -119,8 +122,8 @@ def trackable_entries(
     if t is None:
         raise HTTPException(404, "Trackable not found")
     days = max(1, min(days, 365))
+    end_d = _parse_iso_date(end) if end else local_today(db)
     if raw:
-        end_d = local_today(db)
         start_d = end_d - timedelta(days=days - 1)
         rows = trackable_service.entries_for(db, t, start=start_d, end=end_d)
         return {
@@ -129,5 +132,5 @@ def trackable_entries(
         }
     return {
         "trackable": trackable_service.serialize(t),
-        "days": trackable_service.pivot(db, t, days=days, fill_gaps=fill),
+        "days": trackable_service.pivot(db, t, days=days, end=end_d, fill_gaps=fill),
     }

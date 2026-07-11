@@ -186,6 +186,19 @@ class Note(Base):
     # M2M `note_tags` table is needed (cross-cutting analytics across
     # the whole corpus) we can derive it from this column.
     tags = Column(Text, nullable=True)
+    # The day this note is "about" — set ONLY for per-day "daily log" notes
+    # (the log-matrix note column: "what happened on date X"). One daily note
+    # per date, carried by the `daily` tag. Distinct from created_at because
+    # you can edit or backfill a past day's note today. Null = an ordinary
+    # note. Indexed so the matrix can pull a date-range of daily notes cheaply.
+    log_date = Column(Date, nullable=True, index=True)
+    # Placement of a "sticky note" on the ambient home canvas. JSON-as-text
+    # of shape {"x": float, "y": float} where x/y are FRACTIONS of the
+    # viewport (0..1) so a note parked on a big monitor lands in-frame on a
+    # laptop too. Set only for stickies (carried by the `sticky` tag); null
+    # for every other note. Text (not a JSON column) so the placement shape
+    # can grow (pinned?, color?) without a migration.
+    home_pos = Column(Text, nullable=True)
 
 
 class PublicProfile(Base):

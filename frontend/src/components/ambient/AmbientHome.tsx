@@ -6,6 +6,7 @@ import { MorphLine, type MorphRect } from "./MorphLine";
 import { LimboCards } from "./LimboCards";
 import { LogDots } from "./LogDots";
 import { NotePeek } from "./NotePeek";
+import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import {
   createConversation,
   dismissMessageGlow,
@@ -76,6 +77,7 @@ export function AmbientHome() {
   const [activeIdx, setActiveIdx] = useState(-1);
   const [peekNote, setPeekNote] = useState<ApiNote | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const stickyRef = useRef<StickyHandle>(null);
   const focusedRef = useRef(false);
   const hideTimer = useRef<number | null>(null);
   const enterTimer = useRef<number | null>(null);
@@ -462,9 +464,23 @@ export function AmbientHome() {
 
   const needsWake = voiceMode && !armed; // show the tap-to-wake veil
 
+  // Double-click an empty patch of the void → spawn a sticky there. Skip while
+  // another surface owns the screen, and skip clicks on interactive chrome
+  // (pills, glow cards, the capture box, existing stickies) — StickyLayer's
+  // createAt also refuses the forbidden centre/nav zones.
+  function onRootDoubleClick(e: React.MouseEvent) {
+    if (boxMode || logMode || needsWake || peekNote) return;
+    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky]")) return;
+    stickyRef.current?.createAt(e.clientX, e.clientY);
+  }
+
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000000", overflow: "hidden", fontFamily: FONT }}>
+    <div
+      onDoubleClick={onRootDoubleClick}
+      style={{ position: "fixed", inset: 0, background: "#000000", overflow: "hidden", fontFamily: FONT }}
+    >
       <MorphLine boxMode={boxMode} rect={rect} thinking={thinking} dimmed={logMode} waveWidth={waveW} energyRef={energyRef} activeRef={activeRef} />
+      <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={logMode || !!peekNote || needsWake} />
 
       <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
 
