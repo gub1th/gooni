@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.190.0 — 2026-07-11 (minor)
+
+- feat(home): voice-first ambient home — tap-to-wake, hands-free voice loop (#408)
+
 ## 0.189.0 — 2026-07-10 (minor)
 
 - feat(home): ambient waveform home — log surface, omnibox recall, retire stats (#407)
