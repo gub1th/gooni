@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { X } from "lucide-react";
 import { FONT, frost } from "../../ui";
 import {
   createStickyNote,
@@ -15,8 +15,8 @@ import {
 // memory; leave it empty and click away → it evaporates (never hits the
 // backend). Drag anywhere (the note follows the cursor 1:1); on drop it settles
 // to the nearest legal spot — off the centre capture box + the left nav rail.
-// Resize from any edge or corner (invisible handles). Drag onto the trash zone
-// (revealed while dragging) to delete. Enter commits (Shift+Enter = newline).
+// Resize from any edge or corner (invisible handles). Hover a note to reveal a
+// corner X that deletes it. Enter commits (Shift+Enter = newline).
 //
 // Positions are VIEWPORT FRACTIONS (0..1) so a note keeps its relative spot
 // across screen sizes; size (w/h) is px.
@@ -60,7 +60,7 @@ export const StickyLayer = forwardRef<
   const [items, setItems] = useState<Sticky[]>([]);
   const [live, setLive] = useState<{ key: string; x: number; y: number } | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
-  const [overTrash, setOverTrash] = useState(false);
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [anim, setAnim] = useState<string[]>([]); // keys currently settling
   const keySeq = useRef(0);
   const drag = useRef<{ key: string; dx: number; dy: number; startX: number; startY: number; moved: boolean } | null>(null);
@@ -105,18 +105,6 @@ export const StickyLayer = forwardRef<
       return [x, y];
     },
     [clampVp, navMinX, centerRect, vp.h],
-  );
-
-  const trashRect = useCallback(
-    () => ({ cx: vp.w / 2, cy: vp.h - 60, hw: 78, hh: 38 }),
-    [vp.w, vp.h],
-  );
-  const inTrash = useCallback(
-    (px: number, py: number) => {
-      const t = trashRect();
-      return Math.abs(px - t.cx) < t.hw && Math.abs(py - t.cy) < t.hh;
-    },
-    [trashRect],
   );
 
   // Resolved px top-left (fractions → px → viewport-clamped). Zone-snap only
@@ -223,14 +211,12 @@ export const StickyLayer = forwardRef<
       d.moved = true;
     }
     setLive({ key: d.key, x: e.clientX - d.dx, y: e.clientY - d.dy }); // raw — free across screen
-    setOverTrash(inTrash(e.clientX, e.clientY));
   }
 
   function onPointerUp(e: React.PointerEvent, s: Sticky) {
     const d = drag.current;
     drag.current = null;
     setDragKey(null);
-    setOverTrash(false);
     if (!d) return;
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     setLive(null);
@@ -238,7 +224,6 @@ export const StickyLayer = forwardRef<
       setItems((prev) => prev.map((x) => (x.key === s.key ? { ...x, editing: true } : x)));
       return;
     }
-    if (inTrash(e.clientX, e.clientY)) { removeSticky(s); return; }
     const [x, y] = resolve(e.clientX - d.dx, e.clientY - d.dy, s.w, s.h);
     const fx = x / vp.w;
     const fy = y / vp.h;
@@ -313,13 +298,16 @@ export const StickyLayer = forwardRef<
             onPointerDown={(e) => onPointerDown(e, s)}
             onPointerMove={onPointerMove}
             onPointerUp={(e) => onPointerUp(e, s)}
+            onMouseEnter={() => setHoverKey(s.key)}
+            onMouseLeave={() => setHoverKey((k) => (k === s.key ? null : k))}
             style={{
               position: "absolute", left: x, top: y, width: s.w, height: s.h,
               pointerEvents: "auto", cursor: s.editing ? "text" : dragging ? "grabbing" : "grab",
               ...frost.panel, borderRadius: 14,
               border: `1px solid rgba(244,245,244,${s.editing ? 0.2 : 0.1})`,
-              boxShadow: dragging ? "0 24px 70px rgba(0,0,0,0.6)" : "0 12px 40px rgba(0,0,0,0.4)",
-              opacity: dragging && overTrash ? 0.55 : 1,
+              boxShadow: dragging
+                ? "0 0 0 1px rgba(74,222,128,0.5), 0 24px 70px rgba(0,0,0,0.6)"
+                : "0 12px 40px rgba(0,0,0,0.4)",
               padding: 13, boxSizing: "border-box", fontFamily: FONT,
               transition: dragging
                 ? "none"
@@ -355,6 +343,32 @@ export const StickyLayer = forwardRef<
               </div>
             )}
 
+            {/* hover-reveal delete — top-right, data-no-drag so it never starts a drag */}
+            {hoverKey === s.key && !dragging && !s.editing && (
+              <button
+                data-no-drag
+                aria-label="Delete note"
+                title="Delete note"
+                onClick={() => removeSticky(s)}
+                style={{
+                  position: "absolute", top: 6, right: 6, width: 22, height: 22,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  borderRadius: 7, border: "none", cursor: "pointer", pointerEvents: "auto",
+                  background: "rgba(0,0,0,0.35)", color: "rgba(244,245,244,0.6)",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(248,113,113,0.25)";
+                  e.currentTarget.style.color = "rgba(248,113,113,0.95)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "rgba(0,0,0,0.35)";
+                  e.currentTarget.style.color = "rgba(244,245,244,0.6)";
+                }}
+              >
+                <X size={13} strokeWidth={2} />
+              </button>
+            )}
+
             {/* resize from any edge/corner — invisible hit-zones, no grip */}
             {HANDLES.map((hd, i) => (
               <div
@@ -369,25 +383,6 @@ export const StickyLayer = forwardRef<
           </div>
         );
       })}
-
-      {/* trash drop-zone — only while dragging */}
-      {dragKey && (
-        <div
-          style={{
-            position: "fixed", left: "50%", bottom: 28,
-            display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: 999,
-            pointerEvents: "none", fontFamily: FONT, fontSize: 12.5, letterSpacing: 0.3,
-            ...frost.panel,
-            border: `1px solid ${overTrash ? "rgba(248,113,113,0.7)" : "rgba(244,245,244,0.12)"}`,
-            color: overTrash ? "rgba(248,113,113,0.95)" : "rgba(244,245,244,0.5)",
-            transform: `translateX(-50%) scale(${overTrash ? 1.08 : 1})`,
-            transition: "transform 140ms ease, border-color 140ms ease, color 140ms ease",
-          }}
-        >
-          <Trash2 size={15} strokeWidth={1.8} />
-          {overTrash ? "release to delete" : "drag here to delete"}
-        </div>
-      )}
     </div>
   );
 });
