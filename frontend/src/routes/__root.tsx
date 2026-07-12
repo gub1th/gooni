@@ -13,6 +13,7 @@ import { ErrorView, NotFoundView } from "../components/ErrorView";
 import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
 import { SummonedNav } from "../components/ambient/SummonedNav";
+import { WidgetOverlays } from "../components/widgets/WidgetOverlays";
 import { sheetFrame } from "../ui";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { GooniLayer } from "../components/GooniLayer";
@@ -381,6 +382,7 @@ function AppShell() {
         </div>
         </div>
         {!isImmersive && <SummonedNav />}
+        {!isImmersive && <WidgetOverlays />}
         {!isHome && !isImmersive && <GooniLayer />}
       </div>
     </PasswordGate>

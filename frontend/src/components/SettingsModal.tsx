@@ -9,19 +9,22 @@ import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
 import { CommentAvatar } from "./notes/CommentAvatar";
 import { color as ctok, FONT } from "../ui";
+import { WIDGETS } from "./widgets/registry";
+import { useWidgetLayoutStore } from "../stores/useWidgetLayoutStore";
 
 interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
 }
 
-type Tab = "profile" | "appearance" | "general" | "integrations" | "deployments";
+type Tab = "profile" | "appearance" | "general" | "widgets" | "integrations" | "deployments";
 
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "appearance", label: "Appearance" },
   { id: "general", label: "General" },
+  { id: "widgets", label: "Widgets" },
   { id: "integrations", label: "Integrations" },
   { id: "deployments", label: "Deployments" },
 ];
@@ -149,6 +152,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           {tab === "profile" && <ProfileTab />}
           {tab === "appearance" && <AppearanceTab />}
           {tab === "general" && <SettingsPanel />}
+          {tab === "widgets" && <WidgetsTab />}
           {tab === "integrations" && <IntegrationsTab />}
           {tab === "deployments" && <DeploymentsTab />}
         </div>
@@ -722,6 +726,69 @@ const btn: React.CSSProperties = {
   cursor: "pointer", color: ctok.text, fontWeight: 500,
   fontFamily: FONT,
 };
+
+// ── Widgets tab ──────────────────────────────────────────────────────────
+// Which home-screen widgets are enabled by default. Registry-driven — every
+// entry in WIDGETS gets a toggle for free.
+function WidgetsTab() {
+  const enabled = useWidgetLayoutStore((s) => s.enabled);
+  const setEnabled = useWidgetLayoutStore((s) => s.setEnabled);
+  return (
+    <div>
+      <SectionLabel>home widgets</SectionLabel>
+      <p style={{
+        fontSize: 12.5, color: "var(--gooni-muted, #8E8E93)",
+        margin: "0 0 18px", lineHeight: 1.5,
+      }}>
+        Draggable cards on the ambient home. Turn one off to hide it; drag it
+        anywhere on the home to reposition.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {WIDGETS.map((w) => {
+          const on = enabled[w.id] ?? w.defaultEnabled;
+          return (
+            <div
+              key={w.id}
+              style={{
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "12px 4px",
+                borderBottom: "0.5px solid rgba(0,0,0,0.06)",
+              }}
+            >
+              <w.Icon size={18} color="var(--gooni-text, #1C1C1E)" />
+              <span style={{ flex: 1, fontSize: 14, color: "var(--gooni-text, #1C1C1E)" }}>
+                {w.title}
+              </span>
+              <Toggle on={on} onChange={(v) => setEnabled(w.id, v)} label={`Toggle ${w.title} widget`} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={() => onChange(!on)}
+      style={{
+        width: 40, height: 24, borderRadius: 999, border: "none", cursor: "pointer",
+        background: on ? "#16A34A" : "rgba(0,0,0,0.2)",
+        position: "relative", transition: "background 0.15s", flexShrink: 0, padding: 0,
+      }}
+    >
+      <span style={{
+        position: "absolute", top: 2, left: on ? 18 : 2,
+        width: 20, height: 20, borderRadius: "50%", background: "#fff",
+        transition: "left 0.15s", boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+      }} />
+    </button>
+  );
+}
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (

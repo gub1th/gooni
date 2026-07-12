@@ -248,6 +248,80 @@ export async function disconnectCalendar(): Promise<void> {
   if (!res.ok) throw new Error("Failed to disconnect calendar");
 }
 
+// ── Calendar events (widget-facing read/write) ───────────────────────────────
+// The backend flattens Google's start.dateTime / start.date union into a single
+// `start` string + `all_day` flag (see integrations.py::_serialize_event).
+
+/** Thrown on 401 = OAuth row missing. Widgets catch this to show a connect CTA
+ *  instead of a hard error. */
+export class CalendarNotConnectedError extends Error {
+  constructor() {
+    super("Calendar not connected");
+    this.name = "CalendarNotConnectedError";
+  }
+}
+
+export interface CalendarEvent {
+  id: string;
+  summary: string;
+  start: string | null;   // ISO dateTime for timed events, YYYY-MM-DD for all-day
+  end: string | null;
+  all_day: boolean;
+  html_link?: string | null;
+  description?: string | null;
+  location?: string | null;
+}
+
+export interface CalendarEventInput {
+  summary: string;
+  start_iso: string;
+  end_iso: string;
+  description?: string;
+  time_zone?: string;
+}
+
+export async function fetchCalendarEvents(startISO: string, endISO: string): Promise<CalendarEvent[]> {
+  const res = await apiFetch(
+    `${BASE}/calendar/events?start=${encodeURIComponent(startISO)}&end=${encodeURIComponent(endISO)}`,
+  );
+  if (res.status === 401) throw new CalendarNotConnectedError();
+  if (!res.ok) throw new Error("Failed to fetch calendar events");
+  return res.json();
+}
+
+export async function createCalendarEvent(input: CalendarEventInput): Promise<CalendarEvent> {
+  const res = await apiFetch(`${BASE}/calendar/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (res.status === 401) throw new CalendarNotConnectedError();
+  if (!res.ok) throw new Error("Failed to create calendar event");
+  return res.json();
+}
+
+export async function updateCalendarEvent(
+  id: string,
+  patch: Partial<CalendarEventInput>,
+): Promise<CalendarEvent> {
+  const res = await apiFetch(`${BASE}/calendar/events/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (res.status === 401) throw new CalendarNotConnectedError();
+  if (!res.ok) throw new Error("Failed to update calendar event");
+  return res.json();
+}
+
+export async function deleteCalendarEvent(id: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/calendar/events/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 401) throw new CalendarNotConnectedError();
+  if (!res.ok) throw new Error("Failed to delete calendar event");
+}
+
 
 // ── GitHub integration ──────────────────────────────────────────────────────
 
