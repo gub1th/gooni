@@ -726,6 +726,9 @@ export interface Trackable {
 export interface TrackableDay {
   date: string;
   value: boolean | number | Record<string, unknown> | null;
+  // Optional freeform tag riding on the day (value_json.label) — e.g. an
+  // exercise day tagged "push"/"legs". Only booleans carry one today.
+  label?: string | null;
   entry_count: number;
 }
 
@@ -817,7 +820,14 @@ export async function updateStickyNote(
 export async function logTrackable(
   id: number,
   // date (YYYY-MM-DD) optional → omit for today; pass to edit a historical cell
-  body: { value_boolean?: boolean; value_numeric?: number; replace?: boolean; date?: string },
+  body: {
+    value_boolean?: boolean;
+    value_numeric?: number;
+    // Freeform sidecar (e.g. {label: "push"}) — tags a boolean entry.
+    value_json?: Record<string, unknown>;
+    replace?: boolean;
+    date?: string;
+  },
 ): Promise<{ cleared: boolean }> {
   const res = await apiFetch(`${BASE}/trackables/${id}/entries`, {
     method: "POST",

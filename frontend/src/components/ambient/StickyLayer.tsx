@@ -15,8 +15,8 @@ import {
 // memory; leave it empty and click away → it evaporates (never hits the
 // backend). Drag anywhere (the note follows the cursor 1:1); on drop it settles
 // to the nearest legal spot — off the centre capture box + the left nav rail.
-// Resize from the corner. Drag onto the trash zone (revealed while dragging) to
-// delete. Enter commits (Shift+Enter = newline).
+// Resize from any edge or corner (invisible handles). Drag onto the trash zone
+// (revealed while dragging) to delete. Enter commits (Shift+Enter = newline).
 //
 // Positions are VIEWPORT FRACTIONS (0..1) so a note keeps its relative spot
 // across screen sizes; size (w/h) is px.
@@ -64,7 +64,10 @@ export const StickyLayer = forwardRef<
   const [anim, setAnim] = useState<string[]>([]); // keys currently settling
   const keySeq = useRef(0);
   const drag = useRef<{ key: string; dx: number; dy: number; startX: number; startY: number; moved: boolean } | null>(null);
-  const resz = useRef<{ key: string; startX: number; startY: number; startW: number; startH: number } | null>(null);
+  const resz = useRef<{
+    key: string; startX: number; startY: number; startW: number; startH: number;
+    startLeft: number; startTop: number; dirX: -1 | 0 | 1; dirY: -1 | 0 | 1;
+  } | null>(null);
 
   // ── geometry ───────────────────────────────────────────────────────────────
   const centerRect = useCallback(() => {
@@ -244,28 +247,58 @@ export const StickyLayer = forwardRef<
     persistPos(s, fx, fy, s.w, s.h);
   }
 
-  // ── resize (corner handle) ───────────────────────────────────────────────────
-  function onResizeDown(e: React.PointerEvent, s: Sticky) {
+  // ── resize (invisible edge + corner handles) ─────────────────────────────────
+  // dir picks which edge you grabbed: +1 grows toward that side (anchor fixed);
+  // -1 pulls the near edge so the note's OPPOSITE edge stays put — i.e. the
+  // top-left anchor slides by however much the size changed (clamped).
+  function onResizeDown(e: React.PointerEvent, s: Sticky, dirX: -1 | 0 | 1, dirY: -1 | 0 | 1) {
     e.stopPropagation();
-    resz.current = { key: s.key, startX: e.clientX, startY: e.clientY, startW: s.w, startH: s.h };
+    const [left, top] = posOf(s);
+    resz.current = {
+      key: s.key, startX: e.clientX, startY: e.clientY, startW: s.w, startH: s.h,
+      startLeft: left, startTop: top, dirX, dirY,
+    };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  // Resolve a resize gesture → new box (w/h px + left/top px), honoring clamps.
+  function resizeBox(r: NonNullable<typeof resz.current>, e: React.PointerEvent) {
+    const dx = e.clientX - r.startX;
+    const dy = e.clientY - r.startY;
+    let w = r.startW, h = r.startH, left = r.startLeft, top = r.startTop;
+    if (r.dirX === 1) w = clamp(r.startW + dx, MIN_W, MAX_W);
+    else if (r.dirX === -1) { w = clamp(r.startW - dx, MIN_W, MAX_W); left = r.startLeft + (r.startW - w); }
+    if (r.dirY === 1) h = clamp(r.startH + dy, MIN_H, MAX_H);
+    else if (r.dirY === -1) { h = clamp(r.startH - dy, MIN_H, MAX_H); top = r.startTop + (r.startH - h); }
+    return { w, h, left, top };
   }
   function onResizeMove(e: React.PointerEvent) {
     const r = resz.current;
     if (!r) return;
-    const w = clamp(r.startW + (e.clientX - r.startX), MIN_W, MAX_W);
-    const h = clamp(r.startH + (e.clientY - r.startY), MIN_H, MAX_H);
-    setItems((prev) => prev.map((x) => (x.key === r.key ? { ...x, w, h } : x)));
+    const { w, h, left, top } = resizeBox(r, e);
+    setItems((prev) => prev.map((x) => (
+      x.key === r.key ? { ...x, w, h, fx: left / vp.w, fy: top / vp.h } : x
+    )));
   }
   function onResizeUp(e: React.PointerEvent, s: Sticky) {
     const r = resz.current;
     resz.current = null;
     if (!r) return;
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    const w = clamp(r.startW + (e.clientX - r.startX), MIN_W, MAX_W);
-    const h = clamp(r.startH + (e.clientY - r.startY), MIN_H, MAX_H);
-    persistPos(s, s.fx, s.fy, w, h);
+    const { w, h, left, top } = resizeBox(r, e);
+    persistPos(s, left / vp.w, top / vp.h, w, h);
   }
+
+  // 4 edges + 4 corners — thin invisible hit-zones straddling the border.
+  const HANDLES: { dirX: -1 | 0 | 1; dirY: -1 | 0 | 1; cursor: string; style: React.CSSProperties }[] = [
+    { dirX: 0, dirY: -1, cursor: "ns-resize", style: { top: -3, left: 10, right: 10, height: 8 } },
+    { dirX: 0, dirY: 1, cursor: "ns-resize", style: { bottom: -3, left: 10, right: 10, height: 8 } },
+    { dirX: -1, dirY: 0, cursor: "ew-resize", style: { left: -3, top: 10, bottom: 10, width: 8 } },
+    { dirX: 1, dirY: 0, cursor: "ew-resize", style: { right: -3, top: 10, bottom: 10, width: 8 } },
+    { dirX: -1, dirY: -1, cursor: "nwse-resize", style: { top: -3, left: -3, width: 13, height: 13 } },
+    { dirX: 1, dirY: 1, cursor: "nwse-resize", style: { bottom: -3, right: -3, width: 13, height: 13 } },
+    { dirX: 1, dirY: -1, cursor: "nesw-resize", style: { top: -3, right: -3, width: 13, height: 13 } },
+    { dirX: -1, dirY: 1, cursor: "nesw-resize", style: { bottom: -3, left: -3, width: 13, height: 13 } },
+  ];
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 5, pointerEvents: "none", display: hidden ? "none" : "block" }}>
@@ -322,21 +355,17 @@ export const StickyLayer = forwardRef<
               </div>
             )}
 
-            {/* resize corner */}
-            <div
-              data-no-drag
-              onPointerDown={(e) => onResizeDown(e, s)}
-              onPointerMove={onResizeMove}
-              onPointerUp={(e) => onResizeUp(e, s)}
-              style={{
-                position: "absolute", right: 0, bottom: 0, width: 18, height: 18,
-                cursor: "nwse-resize", pointerEvents: "auto",
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 18 18" style={{ position: "absolute", right: 2, bottom: 2 }}>
-                <path d="M17 7 L7 17 M17 12 L12 17" stroke="rgba(244,245,244,0.28)" strokeWidth="1.4" fill="none" />
-              </svg>
-            </div>
+            {/* resize from any edge/corner — invisible hit-zones, no grip */}
+            {HANDLES.map((hd, i) => (
+              <div
+                key={i}
+                data-no-drag
+                onPointerDown={(e) => onResizeDown(e, s, hd.dirX, hd.dirY)}
+                onPointerMove={onResizeMove}
+                onPointerUp={(e) => onResizeUp(e, s)}
+                style={{ position: "absolute", cursor: hd.cursor, pointerEvents: "auto", ...hd.style }}
+              />
+            ))}
           </div>
         );
       })}

@@ -63,6 +63,7 @@ export function LogTable() {
   const [cols, setCols] = useState<Trackable[]>([]);
   const [dates, setDates] = useState<string[]>([]);
   const [cells, setCells] = useState<Record<number, Record<string, Cell>>>({});
+  const [labels, setLabels] = useState<Record<number, Record<string, string>>>({});
   const [notes, setNotes] = useState<Record<string, NoteCell>>({});
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -70,9 +71,12 @@ export function LogTable() {
 
   const [edit, setEdit] = useState<{ tid: number; date: string } | null>(null);
   const [draft, setDraft] = useState("");
+  const [labelEdit, setLabelEdit] = useState<{ tid: number; date: string } | null>(null);
+  const [labelDraft, setLabelDraft] = useState("");
   const [noteEdit, setNoteEdit] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const editRef = useRef<HTMLInputElement | null>(null);
+  const labelRef = useRef<HTMLInputElement | null>(null);
   const noteRef = useRef<HTMLTextAreaElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const busyMore = useRef(false); // re-entrancy guard for scroll-triggered paging
@@ -86,16 +90,19 @@ export function LogTable() {
       );
       let spine: string[] = [];
       const grid: Record<number, Record<string, Cell>> = {};
+      const labels: Record<number, Record<string, string>> = {};
       for (const { t, days: ds } of withDays) {
         if (ds.length > spine.length) spine = ds.map((d) => d.date);
         grid[t.id] = {};
+        labels[t.id] = {};
         for (const d of ds) {
           grid[t.id][d.date] =
             typeof d.value === "boolean" || typeof d.value === "number" ? d.value : null;
+          if (d.label) labels[t.id][d.date] = d.label;
         }
       }
       const daily = dailyMapFrom(await fetchDailyNotes(days, end));
-      return { spine, grid, daily };
+      return { spine, grid, labels, daily };
     },
     [],
   );
@@ -108,10 +115,11 @@ export function LogTable() {
         if (a.is_important !== b.is_important) return a.is_important ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
-      const { spine, grid, daily } = await fetchWindow(all, INITIAL_DAYS);
+      const { spine, grid, labels: lbls, daily } = await fetchWindow(all, INITIAL_DAYS);
       setCols(all);
       setDates(spine);
       setCells(grid);
+      setLabels(lbls);
       setNotes(daily);
     } catch {
       /* quiet */
@@ -132,7 +140,7 @@ export function LogTable() {
     setLoadingMore(true);
     try {
       const end = isoPrevDay(dates[dates.length - 1]);
-      const { spine, grid, daily } = await fetchWindow(cols, PAGE_DAYS, end);
+      const { spine, grid, labels: lbls, daily } = await fetchWindow(cols, PAGE_DAYS, end);
       // Nothing but empty cells + no notes in this window → we've paged past
       // all recorded history; stop asking. (fill=true always returns a full
       // window, so day-count can't signal the end — data presence does.)
@@ -144,6 +152,13 @@ export function LogTable() {
         const next = { ...prev };
         for (const tid of Object.keys(grid)) {
           next[Number(tid)] = { ...next[Number(tid)], ...grid[Number(tid)] };
+        }
+        return next;
+      });
+      setLabels((prev) => {
+        const next = { ...prev };
+        for (const tid of Object.keys(lbls)) {
+          next[Number(tid)] = { ...next[Number(tid)], ...lbls[Number(tid)] };
         }
         return next;
       });
@@ -170,7 +185,39 @@ export function LogTable() {
   function toggleBool(tid: number, date: string) {
     const cur = cells[tid]?.[date] === true;
     setCell(tid, date, !cur);
+    // replace=true collapses the day → any existing tag is dropped; mirror that.
+    setLabelCell(tid, date, "");
     void logTrackable(tid, { value_boolean: !cur, replace: true, date }).catch(() => void load());
+  }
+
+  function setLabelCell(tid: number, date: string, v: string) {
+    setLabels((prev) => {
+      const col = { ...(prev[tid] || {}) };
+      if (v) col[date] = v; else delete col[date];
+      return { ...prev, [tid]: col };
+    });
+  }
+
+  function openLabel(tid: number, date: string) {
+    setEdit(null);
+    setNoteEdit(null);
+    setLabelEdit({ tid, date });
+    setLabelDraft(labels[tid]?.[date] ?? "");
+    requestAnimationFrame(() => labelRef.current?.focus());
+  }
+
+  // Tag a boolean cell. Must resend value_boolean:true — replace=true would
+  // otherwise blank the day when only value_json is sent.
+  function commitLabel() {
+    if (!labelEdit) return;
+    const { tid, date } = labelEdit;
+    const text = labelDraft.trim();
+    setLabelEdit(null);
+    setLabelCell(tid, date, text);
+    const body = text
+      ? { value_boolean: true, value_json: { label: text }, replace: true, date }
+      : { value_boolean: true, replace: true, date };
+    void logTrackable(tid, body).catch(() => void load());
   }
 
   function openNum(tid: number, date: string) {
@@ -264,16 +311,50 @@ export function LogTable() {
                   return (
                     <td key={t.id} style={tdBase}>
                       {t.kind === "boolean" ? (
-                        <button
-                          onClick={() => toggleBool(t.id, date)}
-                          aria-label={`${t.name} ${date}`}
-                          style={{
-                            width: 16, height: 16, borderRadius: 999, cursor: "pointer", padding: 0, boxSizing: "border-box",
-                            background: v === true ? GREEN : "transparent",
-                            border: v === true ? "none" : "1.5px solid rgba(244,245,244,0.35)",
-                            boxShadow: v === true ? "0 0 8px 1px rgba(74,222,128,0.5)" : "none",
-                          }}
-                        />
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                          <button
+                            onClick={() => toggleBool(t.id, date)}
+                            aria-label={`${t.name} ${date}`}
+                            style={{
+                              width: 16, height: 16, borderRadius: 999, cursor: "pointer", padding: 0, boxSizing: "border-box",
+                              background: v === true ? GREEN : "transparent",
+                              border: v === true ? "none" : "1.5px solid rgba(244,245,244,0.35)",
+                              boxShadow: v === true ? "0 0 8px 1px rgba(74,222,128,0.5)" : "none",
+                            }}
+                          />
+                          {/* tag sliver — only on a logged (green) day (treatment A) */}
+                          {v === true && (
+                            labelEdit?.tid === t.id && labelEdit?.date === date ? (
+                              <input
+                                ref={labelRef}
+                                value={labelDraft}
+                                onChange={(e) => setLabelDraft(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === "Enter") commitLabel(); if (e.key === "Escape") setLabelEdit(null); }}
+                                onBlur={commitLabel}
+                                placeholder="push"
+                                spellCheck={false}
+                                style={{
+                                  width: 52, fontSize: 9.5, textAlign: "center", fontFamily: FONT,
+                                  padding: "1px 3px", borderRadius: 5, outline: "none",
+                                  border: `1px solid ${GREEN}`, background: "rgba(11,15,13,0.85)", color: "#F4F5F4",
+                                }}
+                              />
+                            ) : (
+                              <button
+                                onClick={() => openLabel(t.id, date)}
+                                title={labels[t.id]?.[date] ? "edit tag" : "add tag"}
+                                style={{
+                                  fontSize: 9, letterSpacing: 0.3, lineHeight: 1, fontFamily: FONT, cursor: "pointer",
+                                  padding: "1px 3px", borderRadius: 4, border: "none", background: "transparent",
+                                  maxWidth: 60, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                                  color: labels[t.id]?.[date] ? "rgba(74,222,128,0.7)" : "rgba(244,245,244,0.22)",
+                                }}
+                              >
+                                {labels[t.id]?.[date] || "+"}
+                              </button>
+                            )
+                          )}
+                        </div>
                       ) : editing ? (
                         <input
                           ref={editRef}
@@ -356,6 +437,8 @@ const thBase: React.CSSProperties = {
   borderBottom: "1px solid rgba(244,245,244,0.1)", whiteSpace: "nowrap",
 };
 const tdBase: React.CSSProperties = {
-  padding: "5px 10px", textAlign: "center", fontSize: 12.5,
+  // top-align so a tagged (taller) cell doesn't re-center its dot — every dot in
+  // a row stays on the same line and the tag hangs below it.
+  padding: "8px 10px", textAlign: "center", fontSize: 12.5, verticalAlign: "top",
   borderBottom: "1px solid rgba(244,245,244,0.05)",
 };

@@ -19,7 +19,6 @@ import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { GooniLayer } from "../components/GooniLayer";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
-import { useConversationsStore } from "../stores/useConversationsStore";
 
 // Pushes the current theme's tokens to CSS custom properties on <html>. Components
 // read them via `var(--gooni-text, ...)` etc., with sensible light fallbacks so
@@ -97,10 +96,9 @@ function AppShell() {
   const selectedSpaceId = useNotesContentStore((s) => s.selectedSpaceId);
   const selectSpace = useNotesContentStore((s) => s.selectSpace);
   const createNote = useNotesContentStore((s) => s.createNote);
-  const newChat = useConversationsStore((s) => s.newChat);
 
   // URL-derive every Sidebar active flag. `/` is the multi-view route
-  // (log / notes / chat / eval / stats); we pick the current view from
+  // (log / notes / eval); we pick the current view from
   // the same search-param signals routes/index.tsx reads when it
   // chooses what to render.
   const onIndex = location.pathname === "/";
@@ -109,7 +107,6 @@ function AppShell() {
   const rawSearch: Record<string, unknown> =
     (routerState.location.search as Record<string, unknown>) ?? {};
   const hasNote = rawSearch.note != null && rawSearch.note !== "";
-  const hasConv = rawSearch.conv != null && rawSearch.conv !== "";
   const auditFlag =
     rawSearch.audit === true || rawSearch.audit === "true" || rawSearch.audit === "1";
   const viewParam = typeof rawSearch.view === "string" ? rawSearch.view : null;
@@ -118,15 +115,14 @@ function AppShell() {
   // open via ?note=N, and the All-Notes discovery view via ?view=notes
   // (no specific id). The All Notes sidebar row keys its active state
   // off this prop, so omitting ?view=notes left the row inactive when
-  // you clicked it. isChat similarly handles ?view=chat for parity.
+  // you clicked it.
   const isNotes = onIndex && (hasNote || viewParam === "notes");
-  const isChat = onIndex && (hasConv || viewParam === "chat");
   const isEval = onIndex && auditFlag;
   const isLog = onIndex && viewParam === "log";
   // Ambient waveform home is the index default — active when nothing else
   // claims the URL. It renders its OWN summoned chrome (frosted nav, capture
   // input), so the docked sidebar + chat orb stand down here.
-  const isHome = onIndex && !isNotes && !isChat && !isEval && !isLog;
+  const isHome = onIndex && !isNotes && !isEval && !isLog;
 
   // Compose / new-chat callbacks. The store actions live in Zustand
   // already; we just call them then navigate. routes/index.tsx's
@@ -148,24 +144,6 @@ function AppShell() {
         audit: undefined,
         segment: undefined,
         view: undefined,
-      },
-      replace: true,
-    });
-  }
-
-  function handleNewChat() {
-    newChat();
-    // No conv id yet (created on first send). ?view=chat forces chat view
-    // in NotesPage; once a real convId lands, the activeConvId effect
-    // rewrites the URL to ?conv=<id>.
-    navigate({
-      to: "/",
-      search: {
-        note: undefined,
-        conv: undefined,
-        audit: undefined,
-        segment: undefined,
-        view: "chat",
       },
       replace: true,
     });
@@ -349,12 +327,10 @@ function AppShell() {
         {isNotes && !sidebarOpen && (
           <CollapsedSidebar
             isNotes={isNotes}
-            isChat={isChat}
             isEval={isEval}
             onOpen={() => setSidebarOpen(true)}
             onLogoClick={gotoBlank}
             onAllNotes={gotoNotesView}
-            onNewChat={handleNewChat}
             onOpenEval={() =>
               navigate({
                 to: "/",
