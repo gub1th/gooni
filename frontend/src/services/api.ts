@@ -634,6 +634,30 @@ export async function fetchMessageLog(opts: { limit?: number; beforeId?: number 
   return res.json();
 }
 
+// Full per-turn processing trace (orchestrator steps + tool-call audit +
+// paired user utterance + post-turn reflexion), keyed to the assistant
+// message. Powers the ambient recent-chat ribbon's audit panel.
+export interface TurnTrace {
+  message: {
+    id: number;
+    conversation_id: number;
+    role: string;
+    content: string;
+    created_at: string;
+    source: string;
+  };
+  user_message: { id: number; content: string; created_at: string } | null;
+  trace: MessageTraceStep[];
+  tool_calls: EvalToolCall[];
+  reflection: EvalReflectionInline | null;
+}
+
+export async function fetchTurnTrace(messageId: number): Promise<TurnTrace> {
+  const res = await apiFetch(`${BASE}/messages/${messageId}/trace`);
+  if (!res.ok) throw new Error("Failed to fetch turn trace");
+  return res.json();
+}
+
 export async function promoteMessage(messageId: number): Promise<{ message: LogMessage; promises: ApiPromise[] }> {
   const res = await apiFetch(`${BASE}/messages/${messageId}/promote`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to promote message");

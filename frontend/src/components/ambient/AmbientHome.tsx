@@ -8,6 +8,7 @@ import { LogDots } from "./LogDots";
 import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import { WidgetHost } from "../widgets/WidgetHost";
+import { RecentChatRibbon } from "./RecentChatRibbon";
 import {
   createConversation,
   dismissMessageGlow,
@@ -471,7 +472,7 @@ export function AmbientHome() {
   // createAt also refuses the forbidden centre/nav zones.
   function onRootDoubleClick(e: React.MouseEvent) {
     if (boxMode || logMode || needsWake || peekNote) return;
-    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-widget]")) return;
+    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-widget], [data-chat-ribbon]")) return;
     stickyRef.current?.createAt(e.clientX, e.clientY);
   }
 
@@ -622,6 +623,12 @@ export function AmbientHome() {
       {logMode && <LogDots onClose={() => setLogMode(false)} />}
 
       {peekNote && <NotePeek note={peekNote} onClose={() => setPeekNote(null)} />}
+
+      {/* recent-chat ribbon — hover the band below the wave → today's last ~3
+          turns (bottom = newest), each with a per-turn audit affordance */}
+      <RecentChatRibbon
+        suppressed={boxMode || logMode || needsWake || !!peekNote || thinking || !!replyText || !!liveTranscript}
+      />
 
       {/* live transcript — what the mic is hearing right now (ephemeral) */}
       {liveTranscript && (
