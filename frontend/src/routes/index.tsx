@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
-import { ChatView } from "../components/ChatView";
 import { ChatLogView } from "../components/ChatLogView";
 import { EvalView } from "../components/eval/EvalView";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
@@ -13,11 +12,11 @@ import { fetchNote } from "../services/api";
 
 // Ambient-loop v2 "presence" pass: the WAVEFORM is the app's home. Default =
 // home — a near-empty black surface with the reactive waveform; everything
-// else (log, notes, chat, stats, nav) is hover-summoned frosted glass on top.
+// else (log, notes, nav) is hover-summoned frosted glass on top.
 // The log demoted from default to ?view=log. Stats retired — the log surface
 // absorbed the trackables + whoop/leetcode feed tiles.
 
-type View = "home" | "notes" | "chat" | "log" | "eval";
+type View = "home" | "notes" | "log" | "eval";
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -27,10 +26,10 @@ export const Route = createFileRoute("/")({
     audit: search.audit === true || search.audit === "true" || search.audit === "1" || undefined,
     // ?segment=<id> → auto-open that segment's drilldown in the audit view.
     segment: typeof search.segment === "number" ? search.segment : typeof search.segment === "string" ? Number(search.segment) : undefined,
-    // ?view=notes|chat|log → force a view that has no other URL signal.
+    // ?view=notes|log → force a view that has no other URL signal.
     view:
-      search.view === "notes" || search.view === "chat" || search.view === "log"
-        ? (search.view as "notes" | "chat" | "log")
+      search.view === "notes" || search.view === "log"
+        ? (search.view as "notes" | "log")
         : undefined,
   }),
   component: LogPage,
@@ -38,7 +37,7 @@ export const Route = createFileRoute("/")({
 
 function LogPage() {
   const { loadNotes, createNote, selectNote } = useNotesContentStore();
-  const { fetchConversations, selectConversation } = useConversationsStore();
+  const { fetchConversations } = useConversationsStore();
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
   const { activeNoteId } = useNotesContentStore();
@@ -49,9 +48,7 @@ function LogPage() {
   const view: View =
     search.audit ? "eval" :
     search.note ? "notes" :
-    search.conv ? "chat" :
     search.view === "notes" ? "notes" :
-    search.view === "chat" ? "chat" :
     search.view === "log" ? "log" :
     "home";
 
@@ -84,13 +81,6 @@ function LogPage() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.note]);
-
-  // ?conv=<id> → select the conversation. View derives to "chat".
-  useEffect(() => {
-    if (!search.conv) return;
-    selectConversation(search.conv);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.conv]);
 
   useEffect(() => {
     if (view === "notes") {
@@ -131,15 +121,6 @@ function LogPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeNoteId, view]);
 
-  // Mirror active conversation id into ?conv=<id> for refresh/back-button.
-  const { activeId: activeConvId } = useConversationsStore();
-  useEffect(() => {
-    if (view === "chat" && activeConvId && search.conv !== activeConvId) {
-      navigate({ search: { note: undefined, conv: activeConvId, audit: undefined, segment: undefined, view: undefined }, replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConvId, view]);
-
   // Sidebar + GooniLayer + PasswordGate live in __root.tsx's AppShell so they
   // persist across route changes. This route just renders the right-column
   // content into AppShell's <Outlet />.
@@ -149,8 +130,6 @@ function LogPage() {
         <AmbientHome />
       ) : view === "log" ? (
         <ChatLogView />
-      ) : view === "chat" ? (
-        <ChatView />
       ) : view === "eval" ? (
         <EvalView
           onOpenNote={(noteId: number) =>

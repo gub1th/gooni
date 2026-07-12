@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Search, Radio, FileText, FileSearch, Brain, MessageSquare, Globe, Plug } from "lucide-react";
+import { Search, Radio, FileText, FileSearch, Brain, Globe, Plug } from "lucide-react";
 import { FONT } from "../ui";
 
 
@@ -60,13 +60,6 @@ export function QuickNav() {
       hint: "?view=notes",
       icon: <FileText size={14} strokeWidth={1.7} />,
       onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "notes" } }),
-    },
-    {
-      key: "chat",
-      label: "Chat",
-      hint: "?view=chat",
-      icon: <MessageSquare size={14} strokeWidth={1.7} />,
-      onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "chat" } }),
     },
     {
       key: "memories",

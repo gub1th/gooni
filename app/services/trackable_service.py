@@ -255,6 +255,24 @@ def day_value(entries: list[TrackableEntry], t: Trackable) -> Any:
     return None
 
 
+def day_label(entries: list[TrackableEntry]) -> str | None:
+    """The freeform label riding on a day's entries (newest wins) — the
+    `value_json.label` sidecar used to tag a boolean day ("exercise → push").
+    Returns None when no entry carries a non-empty string label."""
+    for e in reversed(entries):
+        if not e.value_json:
+            continue
+        try:
+            payload = json.loads(e.value_json)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict):
+            lbl = payload.get("label")
+            if isinstance(lbl, str) and lbl.strip():
+                return lbl.strip()
+    return None
+
+
 def pivot(
     db: Session,
     trackable: Trackable | int | str,
@@ -284,6 +302,7 @@ def pivot(
         out.append({
             "date": d.isoformat(),
             "value": day_value(by_day[d], t),
+            "label": day_label(by_day[d]),
             "entry_count": len(by_day[d]),
         })
     return out

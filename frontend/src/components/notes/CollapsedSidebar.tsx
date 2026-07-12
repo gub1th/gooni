@@ -1,6 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
-  Plus,
   Search,
   FileText,
   Brain,
@@ -26,18 +25,15 @@ import { FONT } from "../../ui";
 
 interface CollapsedSidebarProps {
   isNotes: boolean;
-  isChat: boolean;
   isEval: boolean;
   onOpen: () => void;
   onLogoClick: () => void;
   onAllNotes: () => void;
-  onNewChat: () => void;
   onOpenEval?: () => void;
 }
 
 const ICON_TINT = {
   allNotes: "#6366F1",
-  newChat: "#10B981",
   memories: "#0EA5E9",
   audit: "#0891B2",
   settings: "#64748B",
@@ -89,12 +85,10 @@ function RailButton({
 
 export function CollapsedSidebar({
   isNotes,
-  isChat,
   isEval,
   onOpen,
   onLogoClick,
   onAllNotes,
-  onNewChat,
   onOpenEval,
 }: CollapsedSidebarProps) {
   const navigate = useNavigate();
@@ -157,13 +151,6 @@ export function CollapsedSidebar({
         <GooniLogo size={22} />
       </button>
 
-      <RailButton
-        Icon={Plus}
-        title="New chat"
-        active={isChat}
-        onClick={onNewChat}
-        color={ICON_TINT.newChat}
-      />
       <RailButton
         Icon={Search}
         title="Quick nav (⌘K)"

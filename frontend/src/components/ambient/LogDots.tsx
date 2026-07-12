@@ -63,7 +63,10 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   const [shown, setShown] = useState(false); // drives the Y expand/contract
   const [expanded, setExpanded] = useState(false); // full editable matrix
   const [noteDraft, setNoteDraft] = useState(""); // today's daily-log note
+  const [labelEditId, setLabelEditId] = useState<number | null>(null); // boolean tag editor
+  const [labelDraft, setLabelDraft] = useState("");
   const editRef = useRef<HTMLInputElement | null>(null);
+  const labelRef = useRef<HTMLInputElement | null>(null);
 
   // expand in on mount; contract out before the parent unmounts us
   useEffect(() => {
@@ -167,6 +170,29 @@ export function LogDots({ onClose }: { onClose: () => void }) {
     try { await logTrackable(row.t.id, { value_numeric: n, replace: true }); } finally { void refreshRow(row.t.id); }
   }
 
+  function openLabel(row: Row) {
+    setLabelEditId(row.t.id);
+    setLabelDraft(row.days[0]?.label ?? "");
+    requestAnimationFrame(() => labelRef.current?.focus());
+  }
+
+  // Tag today's boolean day. The label rides value_json.label — but replace=true
+  // collapses the day, so we MUST resend value_boolean:true or the dot goes dark.
+  async function commitLabel(row: Row) {
+    const text = labelDraft.trim();
+    setLabelEditId(null);
+    // optimistic
+    setRows((prev) => prev.map((r) => (
+      r.t.id === row.t.id
+        ? { ...r, days: r.days.map((d, i) => (i === 0 ? { ...d, label: text || null } : d)) }
+        : r
+    )));
+    const body = text
+      ? { value_boolean: true, value_json: { label: text }, replace: true }
+      : { value_boolean: true, replace: true };
+    try { await logTrackable(row.t.id, body); } finally { void refreshRow(row.t.id); }
+  }
+
   async function addTrackable() {
     const name = addName.trim().toLowerCase();
     if (!name) { setAdding(false); return; }
@@ -254,6 +280,13 @@ export function LogDots({ onClose }: { onClose: () => void }) {
                     onDraft={setDraft}
                     onCommit={() => void commitNumber(row)}
                     onCancel={() => setEditId(null)}
+                    labelEditing={labelEditId === row.t.id}
+                    labelDraft={labelDraft}
+                    labelRef={labelRef}
+                    onOpenLabel={() => openLabel(row)}
+                    onLabelDraft={setLabelDraft}
+                    onLabelCommit={() => void commitLabel(row)}
+                    onLabelCancel={() => setLabelEditId(null)}
                   />
                 ))}
 
@@ -300,6 +333,8 @@ export function LogDots({ onClose }: { onClose: () => void }) {
                     </button>
                   )}
                   <div style={{ fontSize: 11, color: "rgba(244,245,244,0.45)", marginTop: 12 }}>add</div>
+                  {/* mirror Column's tag slot so the row stays bottom-aligned */}
+                  <div style={{ height: 13, marginTop: 1 }} />
                 </div>
               </div>
 
@@ -349,6 +384,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
 
 function Column({
   row, editing, draft, editRef, onToggle, onOpenNumber, onDraft, onCommit, onCancel,
+  labelEditing, labelDraft, labelRef, onOpenLabel, onLabelDraft, onLabelCommit, onLabelCancel,
 }: {
   row: Row;
   editing: boolean;
@@ -359,9 +395,17 @@ function Column({
   onDraft: (v: string) => void;
   onCommit: () => void;
   onCancel: () => void;
+  labelEditing: boolean;
+  labelDraft: string;
+  labelRef: React.RefObject<HTMLInputElement>;
+  onOpenLabel: () => void;
+  onLabelDraft: (v: string) => void;
+  onLabelCommit: () => void;
+  onLabelCancel: () => void;
 }) {
   const { t, days } = row;
   const today = days[0]?.value;
+  const todayLabel = days[0]?.label ?? null;
   // trail: past days (skip today), oldest at top
   const trail = days.slice(1, 1 + TRAIL_DAYS).slice().reverse();
   const n = trail.length;
@@ -378,7 +422,7 @@ function Column({
           return (
             <span
               key={d.date}
-              title={`${d.date}: ${d.value ?? "—"}`}
+              title={`${d.date}: ${d.value ?? "—"}${d.label ? ` · ${d.label}` : ""}`}
               style={{
                 width: size, height: size, borderRadius: 999, boxSizing: "border-box",
                 background: did ? `rgba(74,222,128,${op})` : "transparent",
@@ -431,6 +475,42 @@ function Column({
       <div style={{ fontSize: 11, color: "rgba(244,245,244,0.45)", marginTop: 12, letterSpacing: 0.3 }}>
         {t.name}
       </div>
+
+      {/* tag slot (treatment A) — a reserved sliver under every name so the row
+          stays bottom-aligned; only a logged boolean fills it. Invisible until
+          the dot is green, so substances/untagged days show nothing. */}
+      <div style={{ height: 13, marginTop: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {t.kind === "boolean" && today === true && (
+          labelEditing ? (
+            <input
+              ref={labelRef}
+              value={labelDraft}
+              onChange={(e) => onLabelDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") onLabelCommit(); if (e.key === "Escape") onLabelCancel(); }}
+              onBlur={onLabelCommit}
+              placeholder="push"
+              spellCheck={false}
+              style={{
+                width: 58, fontSize: 10, textAlign: "center", fontFamily: FONT,
+                padding: "2px 4px", borderRadius: 6, outline: "none",
+                border: `1px solid ${GREEN}`, background: "rgba(11,15,13,0.8)", color: "#F4F5F4",
+              }}
+            />
+          ) : (
+            <button
+              onClick={onOpenLabel}
+              aria-label={todayLabel ? `Edit ${t.name} tag` : `Tag ${t.name}`}
+              style={{
+                fontSize: 10, letterSpacing: 0.4, fontFamily: FONT, cursor: "pointer",
+                padding: "1px 4px", borderRadius: 5, border: "none", background: "transparent",
+                color: todayLabel ? "rgba(74,222,128,0.72)" : "rgba(244,245,244,0.3)",
+              }}
+            >
+              {todayLabel || "+ tag"}
+            </button>
+          )
+        )}
+      </div>
     </div>
   );
 }
@@ -464,7 +544,7 @@ function FeedTiles() {
         ) : (
           <>
             <Metric label="recovery" value={fmtPct(whoop.recovery_score)} accent />
-            <Metric label="strain" value={fmt(whoop.strain)} />
+            <Metric label="strain" value={fmt1(whoop.strain)} />
             <Metric label="sleep" value={whoop.sleep_minutes != null ? `${Math.round(whoop.sleep_minutes / 60 * 10) / 10}h` : "–"} />
           </>
         )}
@@ -522,6 +602,10 @@ const connectBtn: React.CSSProperties = {
 
 function fmt(v: number | null | undefined): string {
   return v == null ? "–" : String(v);
+}
+// one-decimal for noisy floats (whoop strain comes back like 20.700724)
+function fmt1(v: number | null | undefined): string {
+  return v == null ? "–" : (Math.round(v * 10) / 10).toFixed(1);
 }
 function fmtPct(v: number | null | undefined): string {
   return v == null ? "–" : `${Math.round(v)}`;
