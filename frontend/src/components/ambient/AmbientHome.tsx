@@ -7,6 +7,7 @@ import { LimboCards } from "./LimboCards";
 import { LogDots } from "./LogDots";
 import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
+import { WidgetHost } from "../widgets/WidgetHost";
 import {
   createConversation,
   dismissMessageGlow,
@@ -470,7 +471,7 @@ export function AmbientHome() {
   // createAt also refuses the forbidden centre/nav zones.
   function onRootDoubleClick(e: React.MouseEvent) {
     if (boxMode || logMode || needsWake || peekNote) return;
-    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky]")) return;
+    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-widget]")) return;
     stickyRef.current?.createAt(e.clientX, e.clientY);
   }
 
@@ -483,6 +484,10 @@ export function AmbientHome() {
       <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={logMode || !!peekNote || needsWake} />
 
       <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
+
+      {/* draggable home widgets (calendar, …) — enabled set lives in the
+          widget layout store; toggle in Settings ▸ Widgets */}
+      {!logMode && !needsWake && !peekNote && <WidgetHost />}
 
       {/* hero zone = the wave's bounding rectangle. Box the wave morphs into +
           the hover target. Focusing it PAUSES the mic (so voice doesn't hear you

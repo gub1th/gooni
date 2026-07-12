@@ -7,6 +7,8 @@ import {
 import { FONT, frost, z } from "../../ui";
 import { SettingsModal } from "../SettingsModal";
 import { TracedOutline } from "./TracedOutline";
+import { WIDGETS } from "../widgets/registry";
+import { useWidgetOverlayStore } from "../../stores/useWidgetOverlayStore";
 
 // THE app nav — one rail, every surface (hoisted to AppShell in the
 // unification pass; the docked sidebar is just the notes browser now).
@@ -24,6 +26,7 @@ interface NavItem {
 
 export function SummonedNav() {
   const navigate = useNavigate();
+  const openWidget = useWidgetOverlayStore((s) => s.open);
   const [open, setOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const closeTimer = useRef<number | null>(null);
@@ -43,9 +46,18 @@ export function SummonedNav() {
   const nav = (search: Record<string, unknown>) =>
     navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, ...search } });
 
+  // Every widget with a full panel gets a nav entry (opens its overlay).
+  // Auto-extensible: register a widget → it appears here for free.
+  const widgetItems: NavItem[] = WIDGETS.filter((w) => w.Panel).map((w) => ({
+    label: w.title,
+    Icon: w.Icon,
+    go: () => openWidget(w.id, "week"),
+  }));
+
   const items: NavItem[] = [
     { label: "Home", Icon: Radio, go: () => nav({}) },
     { label: "Log", Icon: ClipboardList, go: () => nav({ view: "log" }) },
+    ...widgetItems,
     { label: "Notes", Icon: FileText, go: () => nav({ view: "notes" }) },
     { label: "Chat", Icon: MessageSquare, go: () => nav({ view: "chat" }) },
     { label: "Memories", Icon: Brain, go: () => navigate({ to: "/memories", search: { focus: undefined } }) },
