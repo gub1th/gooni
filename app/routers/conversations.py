@@ -12,7 +12,7 @@ from ..services.conversation_service import conversation_service
 from ..services.orchestrator import Orchestrator
 
 from ..serializers import (
-    _serialize_conversation, _serialize_message
+    _serialize_conversation, _serialize_message, _serialize_reflection
 )
 
 
@@ -230,6 +230,95 @@ def messages_log(
         d["source"] = source
         out.append(d)
     return out
+
+
+def _serialize_tool_call(t) -> dict:
+    duration_ms = None
+    if t.started_at and t.finished_at:
+        duration_ms = int((t.finished_at - t.started_at).total_seconds() * 1000)
+    return {
+        "id": t.id,
+        "tool_name": t.tool_name,
+        "status": t.status,
+        "args_json": t.args_json,
+        "result_json": t.result_json,
+        "error": t.error,
+        "started_at": t.started_at,
+        "finished_at": t.finished_at,
+        "duration_ms": duration_ms,
+    }
+
+
+@router.get("/messages/{message_id}/trace")
+def message_trace(message_id: int, db: Session = Depends(get_db)):
+    """Full processing trace for ONE assistant turn: the orchestrator step
+    trace (intent → memory → prompt → tool calls → verify → reply), the
+    ToolCall audit rows, the paired user utterance, and the post-turn
+    Reflexion. Powers the ambient recent-chat ribbon's per-turn audit panel.
+    All of this already lives keyed to the assistant message_id — this route
+    just assembles it (no per-turn endpoint existed before)."""
+    from ..db.models import Message, ToolCall, Reflection
+
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if msg is None:
+        raise HTTPException(404, "Message not found")
+    source = (
+        db.query(Conversation.source)
+        .filter(Conversation.id == msg.conversation_id)
+        .scalar()
+    )
+
+    trace = None
+    if msg.trace:
+        try:
+            trace = json.loads(msg.trace)
+        except (TypeError, ValueError):
+            trace = None
+
+    # Paired user utterance = nearest lower-id user row in the same conversation.
+    user_msg = (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == msg.conversation_id,
+            Message.role == "user",
+            Message.id < msg.id,
+        )
+        .order_by(Message.id.desc())
+        .first()
+    )
+
+    tcs = (
+        db.query(ToolCall)
+        .filter(ToolCall.message_id == message_id)
+        .order_by(ToolCall.started_at.asc(), ToolCall.id.asc())
+        .all()
+    )
+
+    refl = (
+        db.query(Reflection)
+        .filter(Reflection.message_id == message_id)
+        .order_by(Reflection.id.desc())
+        .first()
+    )
+
+    return {
+        "message": {
+            "id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "role": msg.role,
+            "content": msg.content,
+            "created_at": msg.created_at,
+            "source": source or "web",
+        },
+        "user_message": (
+            {"id": user_msg.id, "content": user_msg.content, "created_at": user_msg.created_at}
+            if user_msg
+            else None
+        ),
+        "trace": trace or [],
+        "tool_calls": [_serialize_tool_call(t) for t in tcs],
+        "reflection": _serialize_reflection(refl) if refl else None,
+    }
 
 
 def _glow_message(db: Session, message_id: int):
