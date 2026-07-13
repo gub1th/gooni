@@ -1,22 +1,20 @@
 import { type EvalStatus } from "../../services/api";
-import { color as ctok } from "../../ui";
+import { frostInk as ctok } from "../../ui";
 
-// Per-source visual identity. Tone matches Apple-Notes restraint that the
-// rest of Gooni uses: muted accent dot + label, not loud full-fill badges.
-// `accent` colors stay deliberately desaturated so cards read as a quiet
-// grid, not a status board.
-// Distinct per-source palette — Daniel called out that everything was
-// the same green. WhatsApp gets the brand green; Telegram + iMessage get
-// blues from their respective brand families (slightly differentiated so
-// they're not literally identical); Web stays a neutral generic blue.
+// Per-source label. Design-system rule: source tags are NOT color-coded —
+// green is the product's only accent, so four per-channel brand hues (the old
+// iOS-blue / Telegram-blue / WhatsApp-green / iMessage-purple) read as "a
+// different app." Every source is now a neutral text-2 label with a small
+// neutral dot; the channel is legible from the word, not the color.
+const SOURCE_DOT = ctok.muted;
 export const SOURCE_STYLE: Record<
   string,
   { accent: string; label: string }
 > = {
-  web: { accent: "#378ADD", label: "Web" },
-  telegram: { accent: "#229ED9", label: "Telegram" },
-  whatsapp: { accent: "#25D366", label: "WhatsApp" },
-  imessage: { accent: "#534AB7", label: "iMessage" },
+  web: { accent: SOURCE_DOT, label: "Web" },
+  telegram: { accent: SOURCE_DOT, label: "Telegram" },
+  whatsapp: { accent: SOURCE_DOT, label: "WhatsApp" },
+  imessage: { accent: SOURCE_DOT, label: "iMessage" },
 };
 
 // Color-coded status pills — DONE green / PENDING amber / NOT YET neutral.
@@ -24,8 +22,8 @@ export const SOURCE_STYLE: Record<
 // know which is which.
 export const STATUS_STYLE: Record<EvalStatus, { color: string; bg: string; label: string }> = {
   not_yet: { color: ctok.muted, bg: ctok.hover, label: "Not yet" },
-  pending: { color: "#B8860B", bg: "rgba(245,158,11,0.16)", label: "Pending" },
-  done: { color: "#15A06E", bg: "rgba(22,163,74,0.16)", label: "Done" },
+  pending: { color: "#F5C451", bg: "rgba(245,158,11,0.16)", label: "Pending" },
+  done: { color: "#34D399", bg: "rgba(22,163,74,0.16)", label: "Done" },
 };
 
 export const SOURCES = ["web", "telegram", "whatsapp", "imessage"] as const;

@@ -266,6 +266,11 @@ class Memory(Base):
     # classify_note run. Lets the editor surface "this note created N
     # memories" disclosure. NULL for memories from chat or other paths.
     source_note_id = Column(Integer, ForeignKey("notes.id"), nullable=True, index=True)
+    # Chat-provenance twin of source_note_id: the user-utterance Message this
+    # memory was extracted from. Mirrors Promise.source_message_id. NULL for
+    # note-derived or pre-provenance memories. Together they let /memories
+    # answer "where did this come from" for BOTH capture paths.
+    source_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True, index=True)
     is_active = Column(Boolean, nullable=False, default=True)
     superseded_by = Column(Integer, ForeignKey("memories.id"), nullable=True)
     # Retrieval tracking — bumped per turn for memories that survive cosine

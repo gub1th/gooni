@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { X, ArrowUpRight } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
-import { FONT, frost, z } from "../../ui";
+import { FONT, frost, frostInk, z } from "../../ui";
+import { decodeEscapes } from "../../utils/decodeEscapes";
 import {
   fetchTurnTrace,
   fetchSegmentForMessage,
@@ -19,18 +20,21 @@ import {
 // with newlines decoded. "full audit →" hands off to the eval page for the
 // real review. Opened from the recent-chat ribbon's per-turn audit button.
 
-const GREEN = "rgba(74,222,128,0.9)";
+// Panel vocabulary mapped onto the shared dark-frost token (ui/frostInk) — the
+// same palette eval + memories consume, so the audit surfaces stay in lockstep.
+const GREEN = frostInk.good;
+const AMBER = frostInk.warn;
+const RED = frostInk.bad;
+const INK = frostInk.text;
+const MUT_1 = frostInk.strong;
+const MUT_2 = frostInk.muted;
+const MUT_3 = frostInk.faint;
+const MUT_4 = frostInk.dim;
+const HAIR = frostInk.hairline;
+const MONO = frostInk.mono;
+// Green tints local to this panel (split-bar fills) — no shared analog.
 const GREEN_DIM = "rgba(74,222,128,0.55)";
 const GREEN_FAINT = "rgba(74,222,128,0.12)";
-const AMBER = "#F5A623";
-const RED = "#FF6B6B";
-const INK = "#F4F5F4";
-const MUT_1 = "rgba(244,245,244,0.92)";
-const MUT_2 = "rgba(244,245,244,0.55)";
-const MUT_3 = "rgba(244,245,244,0.38)";
-const MUT_4 = "rgba(244,245,244,0.20)";
-const HAIR = "rgba(244,245,244,0.14)";
-const MONO = "'SF Mono', ui-monospace, Menlo, Monaco, monospace";
 
 const SOURCE_LABEL: Record<string, string> = {
   whatsapp: "WhatsApp",
@@ -739,25 +743,6 @@ function replyMs(step: MessageTraceStep | null): number | null {
 // self-check is noise on a glance panel.
 function reflexionWorthShowing(r: EvalReflectionInline): boolean {
   return r.severity >= 2 || Boolean(r.gap_exposed) || r.user_critique_present;
-}
-
-// Decode JSON string escapes (\n \t \" \\ …) into real chars in one pass so
-// each \X is consumed exactly once (chained .replace double-processes
-// backslashes). Ported from the eval page's FormattedModal.
-function decodeEscapes(text: string): string {
-  return text.replace(/\\(["\\/bfnrt])/g, (_, c) => {
-    const map: Record<string, string> = {
-      '"': '"',
-      "\\": "\\",
-      "/": "/",
-      b: "\b",
-      f: "\f",
-      n: "\n",
-      r: "\r",
-      t: "\t",
-    };
-    return map[c];
-  });
 }
 
 function humanize(key: string): string {

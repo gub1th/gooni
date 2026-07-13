@@ -1,11 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchMemories, fetchMemoryStats, deleteMemory, patchMemory,
-  type ApiMemory, type MemoryType,
+  type ApiMemory, type MemoryType, type MemorySource,
 } from "../services/api";
 import { MemoryBrain } from "../components/notes/MemoryBrain";
-import { color as ctok, FONT } from "../ui";
+import { frostInk as ctok, FONT } from "../ui";
 import { relativeTimeShort as relativeTime } from "../utils/date";
 
 export const Route = createFileRoute("/memories")({
@@ -23,15 +23,16 @@ export const Route = createFileRoute("/memories")({
 });
 
 
-// Type → tab color. Mirrors the brand palette so the type column reads at
-// a glance the way Mem0's category dots do.
+// Type → tab color. Bright hues tuned for the dark-frost surface — the chip
+// text (fg) rides a faint tint of the same hue, so both must read light. (The
+// original darker fg/dot were built for a white table.)
 const TYPE_COLORS: Record<MemoryType, { dot: string; bg: string; fg: string }> = {
-  preference: { dot: "#16A34A", bg: "rgba(74,222,128,0.14)", fg: "#16A34A" },
-  goal:       { dot: "#7C3AED", bg: "rgba(124,58,237,0.14)", fg: "#7C3AED" },
-  fact:       { dot: "#2563EB", bg: "rgba(37,99,235,0.13)",  fg: "#2563EB" },
-  routine:    { dot: "#EA580C", bg: "rgba(234,88,12,0.13)",  fg: "#C2410C" },
-  constraint: { dot: "#DC2626", bg: "rgba(220,38,38,0.13)",  fg: "#B91C1C" },
-  episode:    { dot: "#6B7280", bg: "rgba(107,114,128,0.13)", fg: "#4B5563" },
+  preference: { dot: "#4ADE80", bg: "rgba(74,222,128,0.14)",  fg: "#4ADE80" },
+  goal:       { dot: "#A78BFA", bg: "rgba(124,58,237,0.18)",  fg: "#A78BFA" },
+  fact:       { dot: "#60A5FA", bg: "rgba(37,99,235,0.18)",   fg: "#60A5FA" },
+  routine:    { dot: "#FB923C", bg: "rgba(234,88,12,0.16)",   fg: "#FB923C" },
+  constraint: { dot: "#F87171", bg: "rgba(220,38,38,0.16)",   fg: "#F87171" },
+  episode:    { dot: "#9CA3AF", bg: "rgba(107,114,128,0.16)", fg: "#9CA3AF" },
 };
 
 const TYPE_ORDER: MemoryType[] = ["preference", "goal", "fact", "routine", "constraint", "episode"];
@@ -148,9 +149,9 @@ function MemoriesPage() {
     ];
   }, [stats, filter]);
 
-  // Sidebar + GooniLayer + PasswordGate live in __root.tsx's AppShell.
+  // Sidebar + PasswordGate live in __root.tsx's AppShell.
   return (
-        <div style={{ flex: 1, overflowY: "auto", fontFamily: FONT, background: ctok.bg }}>
+        <div style={{ flex: 1, overflowY: "auto", fontFamily: FONT, background: ctok.sheet }}>
           <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 32px 80px" }}>
             {/* Header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18 }}>
@@ -165,7 +166,7 @@ function MemoriesPage() {
 
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <label style={{
-                  fontSize: 12, color: "var(--gooni-muted, #6E6E73)",
+                  fontSize: 12, color: ctok.muted,
                   display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
                   userSelect: "none",
                 }}>
@@ -179,9 +180,9 @@ function MemoriesPage() {
                 <button
                   onClick={() => load()}
                   style={{
-                    padding: "6px 12px", borderRadius: 8,
-                    border: "1px solid rgba(0,0,0,0.1)",
-                    background: "var(--gooni-card, #fff)", cursor: "pointer", fontSize: 12, fontFamily: FONT,
+                    padding: "6px 14px", borderRadius: 999,
+                    border: `1px solid ${ctok.hairline}`,
+                    background: "transparent", color: ctok.muted, cursor: "pointer", fontSize: 12, fontFamily: FONT,
                   }}
                 >
                   Refresh
@@ -202,9 +203,9 @@ function MemoriesPage() {
                       display: "inline-flex", alignItems: "center", gap: 7,
                       padding: "6px 12px",
                       borderRadius: 999,
-                      background: active ? ctok.text : "var(--gooni-card, #fff)",
-                      color: active ? "#fff" : "#3C3C43",
-                      border: active ? "1px solid #1C1C1E" : "1px solid rgba(0,0,0,0.1)",
+                      background: active ? ctok.accentDim : "transparent",
+                      color: active ? ctok.accent : ctok.muted,
+                      border: active ? "1px solid transparent" : `1px solid ${ctok.hairline}`,
                       fontFamily: FONT, fontSize: 12.5, fontWeight: 500,
                       cursor: "pointer",
                       transition: "background 0.12s, color 0.12s",
@@ -248,17 +249,17 @@ function MemoriesPage() {
                 style={{
                   width: "100%", boxSizing: "border-box",
                   padding: "9px 14px", borderRadius: 10,
-                  border: "1px solid rgba(0,0,0,0.1)",
+                  border: `1px solid ${ctok.border}`,
                   fontSize: 13, fontFamily: FONT, outline: "none",
-                  background: "var(--gooni-card, #fff)",
+                  background: ctok.inputBg, color: ctok.text,
                 }}
               />
             </div>
 
             {/* Table */}
             <div style={{
-              background: "var(--gooni-card, #fff)",
-              border: "1px solid rgba(0,0,0,0.08)",
+              background: ctok.card,
+              border: `1px solid ${ctok.border}`,
               borderRadius: 12,
               overflow: "hidden",
             }}>
@@ -269,8 +270,8 @@ function MemoriesPage() {
                 padding: "10px 16px",
                 fontSize: 11, color: ctok.muted, letterSpacing: 0.4,
                 textTransform: "uppercase", fontWeight: 600,
-                background: "var(--gooni-card, #F8F8F9)",
-                borderBottom: "1px solid rgba(0,0,0,0.06)",
+                background: ctok.cardRaised,
+                borderBottom: `1px solid ${ctok.border}`,
               }}>
                 <div>Time</div>
                 <div>Type</div>
@@ -303,12 +304,12 @@ function MemoriesPage() {
                         gap: 0,
                         padding: "12px 16px",
                         fontSize: 13,
-                        borderBottom: "1px solid rgba(0,0,0,0.05)",
+                        borderBottom: `1px solid ${ctok.border}`,
                         alignItems: "center",
                         opacity: isInactive ? 0.55 : 1,
                         background: isFlashing
-                          ? "rgba(255, 230, 100, 0.35)"
-                          : isInactive ? "rgba(0,0,0,0.015)" : "transparent",
+                          ? "rgba(255, 230, 100, 0.28)"
+                          : isInactive ? "rgba(255,255,255,0.03)" : "transparent",
                         boxShadow: isFlashing ? "inset 0 0 0 2px rgba(234,179,8,0.55)" : "none",
                         transition: "background 0.5s ease, box-shadow 0.5s ease",
                       }}
@@ -343,7 +344,8 @@ function MemoriesPage() {
                               width: "100%", boxSizing: "border-box",
                               fontFamily: FONT, fontSize: 13,
                               padding: "6px 8px", borderRadius: 6,
-                              border: "1px solid rgba(0,0,0,0.18)",
+                              border: `1px solid ${ctok.border}`,
+                              background: ctok.inputBg, color: ctok.text,
                               outline: "none", resize: "vertical",
                             }}
                           />
@@ -362,10 +364,11 @@ function MemoriesPage() {
                                 fontStyle: "italic",
                               }}>→ superseded by #{m.superseded_by}</span>
                             )}
+                            <SourceTrace source={m.source} />
                           </>
                         )}
                       </div>
-                      <div style={{ color: "var(--gooni-muted, #6E6E73)", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                      <div style={{ color: ctok.muted, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
                         {(m.confidence * 100).toFixed(0)}%
                       </div>
                       <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
@@ -384,7 +387,7 @@ function MemoriesPage() {
                             >edit</button>
                             <button
                               onClick={() => handleDelete(m)}
-                              style={{ ...iconBtn(), color: "#C76B6B" }}
+                              style={{ ...iconBtn(), color: ctok.bad }}
                               disabled={isInactive}
                               title={isInactive ? "Already inactive" : "Forget"}
                             >×</button>
@@ -401,14 +404,70 @@ function MemoriesPage() {
   );
 }
 
+// Provenance trace — "where did this memory come from". Note-sourced → click
+// opens the note. Chat-sourced → click reveals the source utterance inline
+// (no dedicated single-message view; the utterance text IS the trace). Renders
+// nothing when no origin was recorded (old chat memories / injected prefs).
+function SourceTrace({ source }: { source: MemorySource | null }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  if (!source) return null;
+
+  const isNote = source.kind === "note";
+  const label = isNote
+    ? `from note: ${source.preview}`
+    : `from ${source.channel || "chat"}${source.created_at ? ` · ${relativeTime(source.created_at)}` : ""}`;
+
+  return (
+    <div style={{ marginTop: 7 }}>
+      <button
+        onClick={() => {
+          if (isNote && source.note_id != null) {
+            navigate({
+              to: "/",
+              search: { note: source.note_id, conv: undefined, audit: undefined, segment: undefined, view: undefined },
+            });
+          } else {
+            setOpen((v) => !v);
+          }
+        }}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          padding: "2px 9px", borderRadius: 999,
+          border: `1px solid ${ctok.border}`, background: "transparent",
+          color: ctok.faint, fontSize: 11, fontFamily: FONT, cursor: "pointer",
+          transition: "color 0.12s, border-color 0.12s",
+        }}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = ctok.text; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = ctok.faint; }}
+        title={isNote ? "Open the source note" : "Show the source message"}
+      >
+        <span aria-hidden>{isNote ? "📄" : "💬"}</span>
+        {label}
+        <span aria-hidden style={{ opacity: 0.7 }}>{isNote ? "→" : open ? "▲" : "▼"}</span>
+      </button>
+      {open && !isNote && (
+        <div style={{
+          marginTop: 6, padding: "7px 11px", borderRadius: 8,
+          background: ctok.inputBg, border: `1px solid ${ctok.border}`,
+          fontSize: 12, color: ctok.muted, fontStyle: "italic", lineHeight: 1.5,
+          maxWidth: 640,
+        }}>
+          “{source.preview}”
+        </div>
+      )}
+    </div>
+  );
+}
+
 function iconBtn(variant?: "primary"): React.CSSProperties {
   const primary = variant === "primary";
   return {
-    padding: "4px 10px",
-    fontSize: 11.5, fontFamily: FONT, fontWeight: 500,
-    border: primary ? "none" : "1px solid rgba(0,0,0,0.1)",
-    background: primary ? ctok.text : "transparent",
-    color: primary ? "#fff" : "#6E6E73",
-    borderRadius: 6, cursor: "pointer",
+    padding: "4px 12px",
+    fontSize: 11.5, fontFamily: FONT, fontWeight: primary ? 600 : 500,
+    border: primary ? "none" : `1px solid ${ctok.hairline}`,
+    background: primary ? ctok.accentDim : "transparent",
+    color: primary ? ctok.accent : ctok.muted,
+    borderRadius: 999, cursor: "pointer",
   };
 }

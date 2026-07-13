@@ -28,7 +28,11 @@ def handle(candidates: list[dict], ctx, result) -> None:
     try:
         for c in candidates:
             try:
-                m = _reconcile_one(sess, c, source_note_id=ctx.source_note_id)
+                m = _reconcile_one(
+                    sess, c,
+                    source_note_id=ctx.source_note_id,
+                    source_message_id=ctx.source_message_id,
+                )
             except Exception as e:
                 print(f"[memories handler] reconcile error: {e}")
                 continue
@@ -54,7 +58,12 @@ def handle(candidates: list[dict], ctx, result) -> None:
                 print(f"[memories handler] trace hook error: {e}")
 
 
-def _reconcile_one(sess, candidate: dict, source_note_id: int | None = None):
+def _reconcile_one(
+    sess,
+    candidate: dict,
+    source_note_id: int | None = None,
+    source_message_id: int | None = None,
+):
     """Per-candidate reconcile + apply. Returns the Memory row written
     (ADD/UPDATE), or None when the decision was NONE / DELETE-only / no
     new row was created.
@@ -138,23 +147,27 @@ def _reconcile_one(sess, candidate: dict, source_note_id: int | None = None):
     decision = reconcile_candidate(candidate, existing)
     if not decision:
         return memory_service._apply_add(
-            sess, candidate, embedding or [], source_note_id=source_note_id
+            sess, candidate, embedding or [],
+            source_note_id=source_note_id, source_message_id=source_message_id,
         )
 
     action = decision["action"]
     target = decision.get("target_id")
     if action == "ADD":
         return memory_service._apply_add(
-            sess, candidate, embedding or [], source_note_id=source_note_id
+            sess, candidate, embedding or [],
+            source_note_id=source_note_id, source_message_id=source_message_id,
         )
     if action == "UPDATE" and isinstance(target, int):
         return memory_service._apply_update(
-            sess, candidate, embedding or [], target, source_note_id=source_note_id
+            sess, candidate, embedding or [], target,
+            source_note_id=source_note_id, source_message_id=source_message_id,
         )
     if action == "DELETE" and isinstance(target, int):
         memory_service._apply_delete(sess, target)
         return memory_service._apply_add(
-            sess, candidate, embedding or [], source_note_id=source_note_id
+            sess, candidate, embedding or [],
+            source_note_id=source_note_id, source_message_id=source_message_id,
         )
     if action == "NONE" and isinstance(target, int):
         memory_service._apply_none(sess, target)

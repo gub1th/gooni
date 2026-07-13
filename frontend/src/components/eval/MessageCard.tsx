@@ -10,7 +10,7 @@ import {
   type EvalToolCall,
 } from "../../services/api";
 import { Check, Minus, X } from "lucide-react";
-import { color as ctok, FONT } from "../../ui";
+import { frostInk as ctok, FONT } from "../../ui";
 import { RATING_COLOR_EVAL, RATING_LABEL_EVAL } from "./evalShared";
 import { StepCard } from "./TraceStepCard";
 
@@ -49,27 +49,15 @@ export function MessageCard({
     return map;
   }, [msg.step_feedback]);
 
-  // Subtle role distinction — Apple-Notes restraint, not iMessage bubbles.
-  // User = white card on the left half. Assistant = soft tinted card on the
-  // right half-ish, with a thin accent edge so the eye snaps to who said
-  // what without bright bubbles fighting the trace cards.
-  const cardStyle = isAssistant
-    ? {
-        background: "var(--gooni-card, #F5F8FB)",
-        border: `1px solid ${ctok.border}`,
-        borderLeft: `3px solid ${ctok.border}`,
-      }
-    : {
-        background: "var(--gooni-card, #FFFFFF)",
-        border: `1px solid ${ctok.border}`,
-        borderLeft: `3px solid ${ctok.border}`,
-      };
-
+  // Role distinction comes from the header label color (assistant = accent,
+  // user = muted) + the rating/trace affordances that only render on
+  // assistant turns — not from card outlines. Both rows sit on the same
+  // surface (#0C0C0C card on the black canvas); depth is surface, not stroke.
   return (
     <div
       style={{
-        ...cardStyle,
-        borderRadius: 12,
+        background: ctok.card,
+        borderRadius: 14,
         padding: 16,
       }}
     >
@@ -80,19 +68,20 @@ export function MessageCard({
           gap: 8,
           marginBottom: 8,
           fontSize: 11,
+          fontWeight: 600,
           textTransform: "uppercase",
-          letterSpacing: 0.3,
-          color: isAssistant ? ctok.accent : ctok.muted,
+          letterSpacing: "0.08em",
+          color: isAssistant ? ctok.accent : ctok.faint,
         }}
       >
         <strong>{msg.role}</strong>
-        <span style={{ color: ctok.muted }}>· #{msg.id}</span>
+        <span style={{ color: ctok.faint }}>· #{msg.id}</span>
         {msg.created_at && (
-          <span style={{ color: ctok.muted }}>
+          <span style={{ color: ctok.faint }}>
             · {new Date(msg.created_at).toLocaleString()}
           </span>
         )}
-        {msg.is_feedback && <span style={{ color: "#FF9500" }}>· feedback</span>}
+        {msg.is_feedback && <span style={{ color: ctok.warn }}>· feedback</span>}
       </div>
       <div
         style={{
@@ -207,17 +196,16 @@ function SelfTakePanel({ messageId }: { messageId: number }) {
   // the header (green/amber for sev 2/3) instead of bleeding into the
   // whole card surface.
   const pill = reflection.severity === 3
-    ? { bg: "rgba(220,38,38,0.14)", color: "#FF6B6B", label: "load-bearing" }
-    : { bg: "rgba(245,158,11,0.14)", color: "#F5C451", label: "notable" };
+    ? { bg: ctok.badDim, color: ctok.bad, label: "load-bearing" }
+    : { bg: "rgba(224,168,62,0.14)", color: ctok.warn, label: "notable" };
 
   return (
     <div
       style={{
         marginTop: 12,
         padding: "10px 12px",
-        background: "var(--gooni-card, #FFFFFF)",
-        border: `1px solid ${ctok.border}`,
-        borderRadius: 8,
+        background: ctok.cardRaised,
+        borderRadius: 14,
       }}
     >
       <div
@@ -232,8 +220,8 @@ function SelfTakePanel({ messageId }: { messageId: number }) {
           style={{
             fontSize: 10.5,
             textTransform: "uppercase",
-            letterSpacing: 0.4,
-            color: ctok.muted,
+            letterSpacing: "0.08em",
+            color: ctok.faint,
             fontWeight: 600,
           }}
         >
@@ -323,23 +311,22 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const pillBg =
     tc.status === "done"
-      ? "rgba(22,163,74,0.16)"
+      ? ctok.accentDim
       : tc.status === "failed"
-      ? "rgba(255,59,48,0.16)"
-      : "rgba(245,158,11,0.16)";
+      ? ctok.badDim
+      : "rgba(224,168,62,0.14)";
   const pillColor =
     tc.status === "done"
-      ? "#4ADE80"
+      ? ctok.accent
       : tc.status === "failed"
-      ? "#FF6B6B"
-      : "#F5C451";
+      ? ctok.bad
+      : ctok.warn;
   return (
     <div
       style={{
-        border: `1px solid ${ctok.border}`,
-        borderRadius: 8,
+        borderRadius: 14,
         padding: 8,
-        background: "var(--gooni-card, #FFFFFF)",
+        background: ctok.cardRaised,
         fontFamily: FONT,
         fontSize: 12,
       }}
@@ -353,7 +340,7 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
             background: pillBg,
             color: pillColor,
             padding: "2px 6px",
-            borderRadius: 4,
+            borderRadius: 999,
             fontSize: 10,
             textTransform: "uppercase",
             letterSpacing: 0.3,
@@ -371,7 +358,7 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
         </span>
       </div>
       {tc.error && (
-        <div style={{ marginTop: 6, color: "#FF6B6B", fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap" }}>
+        <div style={{ marginTop: 6, color: ctok.bad, fontFamily: ctok.mono, whiteSpace: "pre-wrap" }}>
           {tc.error}
         </div>
       )}
@@ -384,8 +371,10 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
                 style={{
                   margin: "4px 0 0 0",
                   padding: 8,
-                  background: "var(--gooni-card, #F5F8FB)",
-                  borderRadius: 6,
+                  background: ctok.codeBg,
+                  color: ctok.text,
+                  fontFamily: ctok.mono,
+                  borderRadius: 8,
                   fontSize: 11,
                   overflowX: "auto",
                   whiteSpace: "pre-wrap",
@@ -403,8 +392,10 @@ function ToolCallRow({ tc }: { tc: EvalToolCall }) {
                 style={{
                   margin: "4px 0 0 0",
                   padding: 8,
-                  background: "var(--gooni-card, #F5F8FB)",
-                  borderRadius: 6,
+                  background: ctok.codeBg,
+                  color: ctok.text,
+                  fontFamily: ctok.mono,
+                  borderRadius: 8,
                   fontSize: 11,
                   overflowX: "auto",
                   whiteSpace: "pre-wrap",
@@ -536,14 +527,14 @@ function MessageRatingRow({
       style={{
         marginTop: 10,
         paddingTop: 10,
-        borderTop: `1px dashed ${ctok.border}`,
+        borderTop: `1px solid ${ctok.hairline}`,
         display: "flex",
         flexDirection: "column",
         gap: 8,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ fontSize: 11, color: ctok.muted, marginRight: 4 }}>Reply</span>
+        <span style={{ fontSize: 11, color: ctok.faint, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginRight: 4 }}>Reply</span>
         {[1, 2, 3].map((r) => {
           const active = existing?.rating === r;
           const icon = r === 1
@@ -558,11 +549,11 @@ function MessageRatingRow({
               disabled={pending}
               title={RATING_LABEL_EVAL[r]}
               style={{
-                width: 28, height: 28, borderRadius: 8,
+                width: 28, height: 28, borderRadius: 999,
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
-                background: active ? RATING_COLOR_EVAL[r] : "transparent",
-                border: `1px solid ${active ? RATING_COLOR_EVAL[r] : ctok.border}`,
-                color: active ? "#fff" : RATING_COLOR_EVAL[r],
+                background: active ? `${RATING_COLOR_EVAL[r]}1F` : "transparent",
+                border: active ? "none" : `1px solid ${ctok.hairline}`,
+                color: RATING_COLOR_EVAL[r],
                 cursor: pending ? "wait" : "pointer",
                 padding: 0, fontFamily: "inherit",
                 transition: "background 120ms ease, transform 120ms ease",
@@ -584,15 +575,16 @@ function MessageRatingRow({
         rows={3}
         style={{
           width: "100%",
+          boxSizing: "border-box",
           fontSize: 12.5,
           fontFamily: FONT,
           lineHeight: 1.5,
           padding: "8px 10px",
-          border: `1px solid ${ctok.border}`,
-          borderRadius: 8,
+          border: "none",
+          borderRadius: 14,
           resize: "vertical",
           outline: "none",
-          background: "var(--gooni-card, #fff)",
+          background: ctok.inputBg,
           color: ctok.text,
           overflow: "hidden",
         }}
@@ -603,9 +595,9 @@ function MessageRatingRow({
             onClick={() => setComment(existing?.comment ?? "")}
             disabled={pending}
             style={{
-              padding: "5px 12px", borderRadius: 6,
-              border: `1px solid ${ctok.border}`, background: "transparent",
-              color: "var(--gooni-muted, #6E6E73)", fontSize: 11.5, fontWeight: 500,
+              padding: "5px 14px", borderRadius: 999,
+              border: `1px solid ${ctok.hairline}`, background: "transparent",
+              color: ctok.muted, fontSize: 12, fontWeight: 600,
               cursor: pending ? "wait" : "pointer", fontFamily: FONT,
             }}
           >
@@ -617,11 +609,12 @@ function MessageRatingRow({
           disabled={!canSave}
           title={!dirty ? "no changes" : !hasContent ? "type a note or pick a rating" : "save note"}
           style={{
-            padding: "5px 12px", borderRadius: 6,
+            padding: "5px 14px", borderRadius: 999,
             border: "none",
-            background: canSave ? ctok.accent : ctok.border,
-            color: canSave ? "#fff" : ctok.muted,
-            fontSize: 11.5, fontWeight: 600,
+            background: ctok.accentDim,
+            color: ctok.accent,
+            opacity: canSave ? 1 : 0.4,
+            fontSize: 12, fontWeight: 600,
             cursor: canSave ? "pointer" : "not-allowed",
             fontFamily: FONT,
           }}

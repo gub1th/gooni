@@ -3,7 +3,7 @@ import {
   type EvalStatus,
 } from "../../services/api";
 import { Check, Minus, X } from "lucide-react";
-import { color as ctok, FONT } from "../../ui";
+import { frostInk as ctok, FONT } from "../../ui";
 import { RATING_COLOR_EVAL, RATING_LABEL_EVAL, STATUS_STYLE } from "./evalShared";
 
 // ── Small UI helpers ─────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ export function FilterGroup({ label, children }: { label: string; children: Reac
   // any selected = show only those.
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ fontSize: 11, color: ctok.muted, fontWeight: 500 }}>{label}</span>
+      <span style={{ fontSize: 11, color: ctok.faint, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</span>
       <div style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
         {children}
       </div>
@@ -56,7 +56,7 @@ export function FilterPill({
         gap: 5,
         background: active ? `${accent}1A` : "transparent",
         color: active ? accent : ctok.muted,
-        border: active ? `0.5px solid ${accent}55` : `0.5px solid ${ctok.border}`,
+        border: active ? "none" : `1px solid ${ctok.hairline}`,
         borderRadius: 999,
         padding: "3px 10px",
         cursor: "pointer",
@@ -140,7 +140,7 @@ export function ActiveBadge() {
       title="Active conversation — last message <30 min ago"
       style={{
         display: "inline-flex", alignItems: "center", gap: 4,
-        fontSize: 10, color: "#15A06E", fontWeight: 600,
+        fontSize: 10, color: ctok.accent, fontWeight: 600,
         letterSpacing: 0.4, textTransform: "uppercase",
       }}
     >
@@ -152,7 +152,7 @@ export function ActiveBadge() {
       `}</style>
       <span style={{
         width: 7, height: 7, borderRadius: "50%",
-        background: "#22C55E",
+        background: ctok.accent,
         animation: "gooni-active-pulse 1.6s ease-out infinite",
       }} />
       live
@@ -172,7 +172,7 @@ export function StatusPill({ status, onCycle }: { status: EvalStatus; onCycle?: 
       style={{
         display: "inline-block",
         padding: "2px 8px",
-        borderRadius: 10,
+        borderRadius: 999,
         background: s.bg,
         color: s.color,
         fontSize: 10,
@@ -202,16 +202,15 @@ export function RatedProgressBadge({ data }: { data: EvalSegmentFull }) {
     (m) => m.rating && (m.rating.rating != null || (m.rating.comment ?? "").trim() !== ""),
   ).length;
   const pct = total === 0 ? 0 : Math.round((rated / total) * 100);
-  const done = rated === total;
   return (
     <span
       title={`${rated} of ${total} assistant replies have a rating or note (${pct}%)`}
       style={{
         display: "inline-block",
         padding: "2px 8px",
-        borderRadius: 10,
-        background: done ? "rgba(34,197,94,0.12)" : "rgba(10,132,255,0.10)",
-        color: done ? "#15A06E" : ctok.accent,
+        borderRadius: 999,
+        background: ctok.accentDim,
+        color: ctok.accent,
         fontSize: 10,
         fontWeight: 600,
         letterSpacing: 0.3,
@@ -248,10 +247,10 @@ export function RatingPicker({
           onClick={() => onChange(value === r ? null : r)}
           title={`${r} = ${RATING_LABEL_EVAL[r]}`}
           style={{
-            background: active ? RATING_COLOR_EVAL[r] : "transparent",
-            color: active ? "#FFFFFF" : RATING_COLOR_EVAL[r],
-            border: `1px solid ${active ? RATING_COLOR_EVAL[r] : ctok.border}`,
-            borderRadius: 6,
+            background: active ? `${RATING_COLOR_EVAL[r]}1F` : "transparent",
+            color: RATING_COLOR_EVAL[r],
+            border: active ? "none" : `1px solid ${ctok.hairline}`,
+            borderRadius: 999,
             padding: "4px 10px",
             cursor: "pointer",
             fontSize: 13,
@@ -285,12 +284,12 @@ export function ModalButton({
     <button
       onClick={onClick}
       style={{
-        background: variant === "primary" ? ctok.accent : "transparent",
-        color: variant === "primary" ? "#FFFFFF" : ctok.accent,
-        border: variant === "primary" ? "none" : `1px solid ${ctok.border}`,
-        borderRadius: 6,
-        padding: "6px 14px",
-        fontSize: 13,
+        background: variant === "primary" ? ctok.accentDim : "transparent",
+        color: variant === "primary" ? ctok.accent : ctok.muted,
+        border: variant === "primary" ? "none" : `1px solid ${ctok.hairline}`,
+        borderRadius: 999,
+        padding: "5px 14px",
+        fontSize: 12,
         fontWeight: 600,
         fontFamily: FONT,
         cursor: "pointer",

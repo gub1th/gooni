@@ -292,6 +292,7 @@ class MemoryService:
         candidate: dict,
         embedding: list[float],
         source_note_id: int | None = None,
+        source_message_id: int | None = None,
     ) -> Memory:
         ctx = candidate.get("context")
         key = candidate.get("key")
@@ -303,6 +304,7 @@ class MemoryService:
             confidence=float(candidate.get("confidence", 0.8)),
             embedding=json.dumps(embedding) if embedding else None,
             source_note_id=source_note_id,
+            source_message_id=source_message_id,
             is_active=True,
         )
         db.add(m)
@@ -336,9 +338,13 @@ class MemoryService:
         embedding: list[float],
         target_id: int,
         source_note_id: int | None = None,
+        source_message_id: int | None = None,
     ) -> Memory:
         # Mark the old row inactive, point superseded_by at the new row.
-        new_m = self._apply_add(db, candidate, embedding, source_note_id=source_note_id)
+        new_m = self._apply_add(
+            db, candidate, embedding,
+            source_note_id=source_note_id, source_message_id=source_message_id,
+        )
         old = db.query(Memory).filter(Memory.id == target_id).first()
         if old:
             old.is_active = False
@@ -366,6 +372,7 @@ class MemoryService:
         candidates: list[dict],
         db: Session | None = None,
         source_note_id: int | None = None,
+        source_message_id: int | None = None,
     ) -> list[Memory]:
         """Reconcile + apply pre-extracted memory candidates. Returns the
         list of Memory rows actually written (ADDs + UPDATEs).
@@ -387,7 +394,11 @@ class MemoryService:
         try:
             for c in candidates:
                 try:
-                    m = _reconcile_one(sess, c, source_note_id=source_note_id)
+                    m = _reconcile_one(
+                        sess, c,
+                        source_note_id=source_note_id,
+                        source_message_id=source_message_id,
+                    )
                 except Exception as e:
                     print(f"apply_memory_candidates per-candidate error: {e}")
                     continue

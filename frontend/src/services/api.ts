@@ -1048,6 +1048,20 @@ export async function runProdSnapshotEval(
 
 export type MemoryType = "preference" | "goal" | "fact" | "routine" | "constraint" | "episode";
 
+// Resolved provenance for a memory — where it was captured from. `null` when
+// no origin was recorded (chat memories from before provenance shipped, or the
+// always-injected prefs). Chat carries the source utterance preview; note
+// carries the note title.
+export interface MemorySource {
+  kind: "note" | "chat";
+  preview: string;
+  message_id?: number;
+  note_id?: number;
+  conversation_id?: number | null;
+  channel?: string | null;
+  created_at?: string | null;
+}
+
 export interface ApiMemory {
   id: number;
   type: MemoryType;
@@ -1061,6 +1075,9 @@ export interface ApiMemory {
   last_retrieved_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  source_note_id: number | null;
+  source_message_id: number | null;
+  source: MemorySource | null;
 }
 
 export async function fetchMemories(opts: {

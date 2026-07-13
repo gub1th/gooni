@@ -5,7 +5,7 @@ import {
   runProdSnapshotEval,
   type EvalRunEvent,
 } from "../../services/api";
-import { color as ctok, FONT } from "../../ui";
+import { frostInk as ctok, FONT } from "../../ui";
 import { formatDate } from "./evalShared";
 
 // ── Eval runs panel ──────────────────────────────────────────────────────────
@@ -195,7 +195,7 @@ export function EvalRunsPanel() {
   return (
     <div style={{ flex: 1, display: "flex", overflow: "hidden", background: ctok.bg }}>
       {/* Left rail: run list */}
-      <div style={{ width: 320, borderRight: `1px solid ${ctok.border}`, overflowY: "auto", padding: "12px 0", flexShrink: 0 }}>
+      <div style={{ width: 320, borderRight: `1px solid ${ctok.hairline}`, overflowY: "auto", padding: "12px 0", flexShrink: 0 }}>
         {/* Run-against-live-prod-snapshot button. Triggers a backend subprocess
             that copies the live DB and runs the eval harness against the copy.
             Streams stdout SSE so we render per-case progress in the log box. */}
@@ -207,22 +207,22 @@ export function EvalRunsPanel() {
             style={{
               width: "100%",
               padding: "8px 12px",
-              borderRadius: 8,
-              border: `1px solid ${ctok.border}`,
-              background: evalRunning ? "#f0f0f0" : "#111",
-              color: evalRunning ? "#999" : "#fff",
+              borderRadius: 999,
+              border: "none",
+              background: ctok.accentDim,
+              color: ctok.accent,
+              opacity: evalRunning ? 0.4 : 1,
               fontSize: 12.5,
               fontWeight: 600,
               cursor: evalRunning ? "wait" : "pointer",
               fontFamily: FONT,
               letterSpacing: 0.2,
-              boxShadow: evalRunning ? "none" : "0 1px 2px rgba(0,0,0,0.06)",
             }}
           >
-            {evalRunning ? "running eval…" : "▶ Run eval on prod snapshot"}
+            {evalRunning ? "running eval…" : "Run eval on prod snapshot"}
           </button>
           {evalError && (
-            <div style={{ marginTop: 8, fontSize: 11, color: "#b3261e" }}>
+            <div style={{ marginTop: 8, fontSize: 11, color: ctok.bad }}>
               error: {evalError}
             </div>
           )}
@@ -233,10 +233,10 @@ export function EvalRunsPanel() {
                 maxHeight: 180,
                 overflowY: "auto",
                 padding: "8px 10px",
-                background: "#1a1a1a",
-                color: "#dcdcdc",
-                borderRadius: 6,
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                background: ctok.cardRaised,
+                color: ctok.text,
+                borderRadius: 10,
+                fontFamily: ctok.mono,
                 fontSize: 10.5,
                 lineHeight: 1.45,
                 whiteSpace: "pre-wrap",
@@ -249,7 +249,7 @@ export function EvalRunsPanel() {
             </div>
           )}
         </div>
-        <div style={{ padding: "0 16px 8px", fontSize: 11, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>
+        <div style={{ padding: "0 16px 8px", fontSize: 11, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>
           Latest baselines
         </div>
         {baselineList.length === 0 ? (
@@ -276,7 +276,7 @@ export function EvalRunsPanel() {
                   textAlign: "left",
                   padding: "8px 16px",
                   border: "none",
-                  borderBottom: `1px solid ${ctok.border}`,
+                  borderBottom: `1px solid ${ctok.hairline}`,
                   background: isSelected ? ctok.hover : "transparent",
                   cursor: b.filename ? "pointer" : "default",
                   fontFamily: FONT,
@@ -284,8 +284,8 @@ export function EvalRunsPanel() {
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <span style={{ fontWeight: 600 }}>{b.pipeline_model}</span>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: (b.composite_score ?? 0) >= 75 ? "#0a8a3a" : (b.composite_score ?? 0) >= 60 ? "#9a7a00" : "#b3261e" }}>
+                  <span style={{ fontWeight: 600, color: ctok.text }}>{b.pipeline_model}</span>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: (b.composite_score ?? 0) >= 75 ? ctok.accent : (b.composite_score ?? 0) >= 60 ? ctok.warn : ctok.bad }}>
                     {b.composite_score ?? "?"}
                   </span>
                 </div>
@@ -302,7 +302,7 @@ export function EvalRunsPanel() {
             );
           })
         )}
-        <div style={{ padding: "16px 16px 8px", fontSize: 11, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>
+        <div style={{ padding: "16px 16px 8px", fontSize: 11, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>
           Reports ({runs.length})
         </div>
         {loading ? (
@@ -326,9 +326,9 @@ export function EvalRunsPanel() {
                 width: "100%",
                 textAlign: "left",
                 padding: "8px 16px",
-                background: selected === r.filename ? "var(--gooni-hover, #E8E8ED)" : "transparent",
+                background: selected === r.filename ? ctok.hover : "transparent",
                 border: "none",
-                borderBottom: `1px solid ${ctok.border}`,
+                borderBottom: `1px solid ${ctok.hairline}`,
                 cursor: "pointer",
                 fontFamily: FONT,
                 fontSize: 12,
@@ -345,7 +345,7 @@ export function EvalRunsPanel() {
         )}
       </div>
       {/* Right pane: baseline-detail (priority) OR report iframe (fallback). */}
-      <div style={{ flex: 1, overflow: "auto", background: "var(--gooni-card, #FFFFFF)" }}>
+      <div style={{ flex: 1, overflow: "auto", background: ctok.card }}>
         {selectedBaselineFile ? (
           baselineDetailLoading ? (
             <div style={{ padding: 24, color: ctok.muted, fontSize: 13, fontFamily: FONT }}>
@@ -393,11 +393,11 @@ function BaselineDetailPanel({
   filename: string;
 }) {
   const results = detail.results || [];
-  const passedColor = "#0a8a3a";
-  const failedColor = "#b3261e";
+  const passedColor = ctok.accent;
+  const failedColor = ctok.bad;
   return (
     <div style={{ padding: "20px 24px", fontFamily: FONT, color: ctok.text }}>
-      <div style={{ fontSize: 11, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>
+      <div style={{ fontSize: 11, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>
         Baseline
       </div>
       <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4, wordBreak: "break-all" }}>
@@ -405,18 +405,18 @@ function BaselineDetailPanel({
       </div>
       <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Composite</div>
-          <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2, color: (detail.composite_score ?? 0) >= 75 ? passedColor : (detail.composite_score ?? 0) >= 60 ? "#9a7a00" : failedColor }}>
+          <div style={{ fontSize: 10.5, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>Composite</div>
+          <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2, color: (detail.composite_score ?? 0) >= 75 ? passedColor : (detail.composite_score ?? 0) >= 60 ? ctok.warn : failedColor }}>
             {detail.composite_score ?? "?"}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Pass / total</div>
+          <div style={{ fontSize: 10.5, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>Pass / total</div>
           <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{detail.passed}/{detail.n_cases}</div>
         </div>
         {detail.total_cost_usd != null && (
           <div>
-            <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Total cost</div>
+            <div style={{ fontSize: 10.5, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>Total cost</div>
             <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>${detail.total_cost_usd.toFixed(4)}</div>
             {detail.cost_per_case_usd != null && (
               <div style={{ fontSize: 11, color: ctok.muted, marginTop: 1 }}>
@@ -426,7 +426,7 @@ function BaselineDetailPanel({
           </div>
         )}
         <div>
-          <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>Pipeline</div>
+          <div style={{ fontSize: 10.5, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>Pipeline</div>
           <div style={{ fontSize: 14, marginTop: 2 }}>
             v{detail.pipeline_version} · {detail.pipeline_model}
           </div>
@@ -435,20 +435,20 @@ function BaselineDetailPanel({
       </div>
 
       {detail.means && Object.keys(detail.means).length > 0 && (
-        <div style={{ marginTop: 18, padding: "10px 12px", background: ctok.hover, borderRadius: 8, fontSize: 12.5 }}>
-          <div style={{ fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>
+        <div style={{ marginTop: 18, padding: "10px 12px", background: ctok.cardRaised, borderRadius: 14, fontSize: 12.5 }}>
+          <div style={{ fontSize: 10.5, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: 4 }}>
             Means
           </div>
           {Object.entries(detail.means).map(([k, v]) => (
             <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
-              <span style={{ color: "var(--gooni-muted, #636366)" }}>{k}</span>
+              <span style={{ color: ctok.muted }}>{k}</span>
               <span style={{ fontWeight: 600 }}>{Number(v).toFixed(2)}</span>
             </div>
           ))}
         </div>
       )}
 
-      <div style={{ marginTop: 22, fontSize: 10.5, color: ctok.muted, textTransform: "uppercase", letterSpacing: 0.4 }}>
+      <div style={{ marginTop: 22, fontSize: 10.5, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>
         Per-case results ({results.length})
       </div>
       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -458,9 +458,8 @@ function BaselineDetailPanel({
             <div
               key={r.id}
               style={{
-                border: `1px solid ${ok ? "rgba(10,138,58,0.18)" : "rgba(179,38,30,0.20)"}`,
-                background: ok ? "rgba(10,138,58,0.04)" : "rgba(179,38,30,0.04)",
-                borderRadius: 8,
+                background: ok ? ctok.accentDim : ctok.badDim,
+                borderRadius: 14,
                 padding: "10px 12px",
                 fontSize: 12.5,
               }}
@@ -471,9 +470,9 @@ function BaselineDetailPanel({
                     fontSize: 10.5,
                     fontWeight: 700,
                     padding: "2px 6px",
-                    borderRadius: 4,
-                    background: ok ? passedColor : failedColor,
-                    color: "#fff",
+                    borderRadius: 999,
+                    background: ok ? ctok.accentDim : ctok.badDim,
+                    color: ok ? ctok.accent : ctok.bad,
                   }}>
                     {r.status}
                   </span>
@@ -490,7 +489,7 @@ function BaselineDetailPanel({
               {Object.keys(r.scores || {}).length > 0 && (
                 <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 10 }}>
                   {Object.entries(r.scores).map(([dim, score]) => (
-                    <span key={dim} style={{ fontSize: 11.5, color: "var(--gooni-muted, #636366)" }}>
+                    <span key={dim} style={{ fontSize: 11.5, color: ctok.muted }}>
                       {dim}: <strong>{score}</strong>
                     </span>
                   ))}
@@ -504,7 +503,7 @@ function BaselineDetailPanel({
                 </div>
               )}
               {r.judge_notes && (
-                <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--gooni-muted, #636366)", lineHeight: 1.45 }}>
+                <div style={{ marginTop: 6, fontSize: 11.5, color: ctok.muted, lineHeight: 1.45 }}>
                   {r.judge_notes}
                 </div>
               )}

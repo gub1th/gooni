@@ -36,10 +36,53 @@ def list_memories(
         query = query.filter(Memory.content.ilike(f"%{q}%"))
     total = query.count()
     rows = query.order_by(Memory.created_at.desc()).offset(offset).limit(limit).all()
+    serialized = [_memory_to_dashboard(m) for m in rows]
+    _attach_sources(serialized, rows, db)
     return {
         "total": total,
-        "memories": [_memory_to_dashboard(m) for m in rows],
+        "memories": serialized,
     }
+
+
+def _attach_sources(serialized: list[dict], rows: list, db: Session) -> None:
+    """Resolve each memory's provenance into a displayable `source` object
+    (note title, or chat message preview + channel), in two batch queries so
+    the list stays O(1) round-trips. `source` is None for memories with no
+    recorded origin (chat memories created before provenance shipped, or the
+    always-injected prefs). Mutates `serialized` in place."""
+    from ..db.models import Conversation, Message, Note
+
+    msg_ids = {m.source_message_id for m in rows if m.source_message_id}
+    note_ids = {m.source_note_id for m in rows if m.source_note_id}
+
+    msg_map: dict[int, dict] = {}
+    if msg_ids:
+        msgs = db.query(
+            Message.id, Message.content, Message.conversation_id, Message.created_at,
+        ).filter(Message.id.in_(msg_ids)).all()
+        # Channel (web/whatsapp/telegram/imessage) lives on the Conversation,
+        # not the Message — resolve it in one more batch query.
+        conv_ids = {conv_id for _, _, conv_id, _ in msgs if conv_id}
+        chan_map = dict(
+            db.query(Conversation.id, Conversation.source).filter(Conversation.id.in_(conv_ids))
+        ) if conv_ids else {}
+        for mid, content, conv_id, created in msgs:
+            msg_map[mid] = {
+                "kind": "chat",
+                "message_id": mid,
+                "conversation_id": conv_id,
+                "channel": chan_map.get(conv_id),
+                "preview": (content or "")[:180],
+                "created_at": created.isoformat() if created else None,
+            }
+
+    note_map: dict[int, dict] = {}
+    if note_ids:
+        for nid, title in db.query(Note.id, Note.title).filter(Note.id.in_(note_ids)):
+            note_map[nid] = {"kind": "note", "note_id": nid, "preview": title or "(untitled note)"}
+
+    for row, m in zip(serialized, rows):
+        row["source"] = msg_map.get(m.source_message_id) or note_map.get(m.source_note_id)
 
 
 @router.get("/memories/stats")

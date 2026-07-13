@@ -55,6 +55,76 @@ export const color = {
   white: "#FFFFFF",
 } as const;
 
+// Dark-frost ink palette — the text/surface tokens for chrome that floats on
+// the black void (audit panels, eval, memories). Theme-INDEPENDENT dark glass,
+// same as `frost` below: these read dark-on-void in BOTH themes, unlike
+// `color.*` which follows the theme and goes WHITE in light mode (white cards
+// on a black void — the bug this fixes). Key shape MIRRORS `color` so a legacy
+// light surface migrates by swapping the import (`color as ctok` → `frostInk
+// as ctok`) rather than rewriting every call site. Promoted from the palette
+// that lived locally at the top of ambient/TurnTracePanel.tsx.
+export const frostInk = {
+  // ── text — EXACTLY 3 legible tiers; nothing renders below text-3 ──────────
+  /** text-1 — primary content */
+  text: "rgba(255,255,255,0.92)",
+  /** alias of text-1 (headings) */
+  strong: "rgba(255,255,255,0.92)",
+  /** text-2 — secondary / metadata */
+  muted: "rgba(255,255,255,0.58)",
+  /** text-3 — micro-labels, timestamps, placeholders (the FLOOR — nothing dimmer) */
+  faint: "rgba(255,255,255,0.40)",
+  /** alias of text-3 — never dip below this */
+  dim: "rgba(255,255,255,0.40)",
+
+  // ── surfaces — depth via SURFACE, not outline (neutral, per spec) ────────
+  /** canvas — the pure-black base a full audit surface sits on */
+  sheet: "#000000",
+  /** page base — transparent so the canvas shows through */
+  bg: "transparent",
+  /** surface — cards + panels */
+  card: "#0C0C0C",
+  /** surface-hi — hover / raised / inputs */
+  cardRaised: "#141414",
+  /** code / JSON block fill — one notch below surface, no stroke */
+  codeBg: "#0A0A0A",
+  /** hover background */
+  hover: "#141414",
+  /** input field background (surface-hi, no stroke) */
+  inputBg: "#141414",
+  /** disabled control background */
+  disabled: "#141414",
+
+  // ── hairline — dividers ONLY, sparingly (no card strokes) ─────────────────
+  border: "rgba(255,255,255,0.06)",
+  hairline: "rgba(255,255,255,0.06)",
+
+  /** monospace stack for code / JSON blocks */
+  mono: "'SF Mono', ui-monospace, Menlo, Monaco, monospace",
+
+  // ── accent — GREEN is the ONLY accent in the product ─────────────────────
+  /** accent green — links, active, primary text */
+  accent: "#4ADE80",
+  /** accent @ 12% — primary-button + active-pill fills */
+  accentDim: "rgba(74,222,128,0.12)",
+  good: "#4ADE80",
+  /** muted amber — pending only */
+  warn: "#E0A83E",
+  /** muted red — negative TEXT (never a saturated solid fill) */
+  bad: "#F87171",
+  /** muted red @ 12% — negative fills */
+  badDim: "rgba(248,113,113,0.12)",
+
+  // ── legacy semantic aliases — retuned to green/muted so old call sites that
+  //    read `.danger`/`.success`/`.warning`/`.accent` stop emitting blue ─────
+  danger: "#F87171",
+  dangerText: "#F87171",
+  success: "#4ADE80",
+  successBright: "#4ADE80",
+  warning: "#E0A83E",
+  warningText: "#E0A83E",
+  white: "#FFFFFF",
+} as const;
+
 // Frosted-surface language of the ambient shell. THE three sanctioned frost
 // levels — any summoned chrome (nav rails, edge panels, floating sheets)
 // picks one instead of hand-rolling rgba+blur. Dark-glass over the void by
@@ -86,7 +156,10 @@ export const frost = {
 export const sheetFrame = {
   margin: 14,
   borderRadius: 18,
-  border: "1px solid rgba(255,255,255,0.13)",
+  // NO window border. The app sits on pure black; depth = radius + drop shadow
+  // + surface-vs-void contrast. A hard 1px stroke here was the most out-of-
+  // place thing on screen (nothing in the Whisper surfaces has one).
+  border: "none",
   boxShadow: "0 24px 80px rgba(0,0,0,0.55)",
 } as const;
 
