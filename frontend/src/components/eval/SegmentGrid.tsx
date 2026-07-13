@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { type EvalSegmentSummary } from "../../services/api";
-import { color as ctok, FONT } from "../../ui";
+import { frostInk as ctok, FONT } from "../../ui";
 import { ActiveBadge, Dot, StatusPill } from "./EvalAtoms";
 import {
   formatDate,
@@ -38,27 +38,25 @@ export function SegmentCard({
       style={{
         textAlign: "left",
         padding: "14px 16px",
-        borderRadius: 12,
-        background: focused ? "rgba(10,132,255,0.14)" : ctok.card,
-        border: focused ? `1px solid ${ctok.accent}` : `0.5px solid ${ctok.border}`,
+        borderRadius: 14,
+        background: focused ? ctok.accentDim : ctok.card,
+        border: "none",
         cursor: "pointer",
         fontFamily: FONT,
         display: "flex",
         flexDirection: "column",
         gap: 8,
         minHeight: 130,
-        transition: "background 0.12s, border-color 0.12s",
+        transition: "background 0.12s",
         outline: "none",
       }}
       onMouseEnter={(e) => {
         if (focused) return;
-        e.currentTarget.style.background = ctok.bg;
-        e.currentTarget.style.borderColor = ctok.border;
+        e.currentTarget.style.background = ctok.cardRaised;
       }}
       onMouseLeave={(e) => {
         if (focused) return;
         e.currentTarget.style.background = ctok.card;
-        e.currentTarget.style.borderColor = ctok.border;
       }}
     >
       {/* Top — source + status pill. Source reads as the primary id of
@@ -87,7 +85,7 @@ export function SegmentCard({
       <div
         style={{
           fontSize: 13,
-          color: "var(--gooni-muted, #475569)",
+          color: ctok.muted,
           lineHeight: 1.45,
           flex: 1,
           overflow: "hidden",
@@ -117,7 +115,7 @@ export function SegmentCard({
         </span>
         <span style={{ display: "flex", gap: 8 }}>
           {seg.flag_count > 0 && (
-            <span style={{ color: "#A1742B" }}>{seg.flag_count} flag{seg.flag_count === 1 ? "" : "s"}</span>
+            <span style={{ color: ctok.warn }}>{seg.flag_count} flag{seg.flag_count === 1 ? "" : "s"}</span>
           )}
           {seg.dispatched_to_cc_at && (
             <span style={{ color: ctok.accent }}>→ CC</span>
@@ -156,9 +154,9 @@ export function SegmentRow({
       style={{
         textAlign: "left",
         padding: "10px 14px",
-        background: focused ? "rgba(10,132,255,0.14)" : ctok.card,
+        background: focused ? ctok.accentDim : ctok.card,
         border: "none",
-        borderTop: isFirst ? "none" : `1px solid ${ctok.border}`,
+        borderTop: isFirst ? "none" : `1px solid ${ctok.hairline}`,
         borderLeft: focused ? `3px solid ${ctok.accent}` : "3px solid transparent",
         cursor: "pointer",
         fontFamily: FONT,
@@ -170,7 +168,7 @@ export function SegmentRow({
       }}
       onMouseEnter={(e) => {
         if (focused) return;
-        e.currentTarget.style.background = ctok.bg;
+        e.currentTarget.style.background = ctok.cardRaised;
       }}
       onMouseLeave={(e) => {
         if (focused) return;
@@ -201,7 +199,7 @@ export function SegmentRow({
         </span>
         <span style={{ flex: 1 }} />
         {seg.flag_count > 0 && (
-          <span style={{ fontSize: 11, color: "#A1742B", flexShrink: 0 }}>
+          <span style={{ fontSize: 11, color: ctok.warn, flexShrink: 0 }}>
             {seg.flag_count} flag{seg.flag_count === 1 ? "" : "s"}
           </span>
         )}
@@ -214,7 +212,7 @@ export function SegmentRow({
             color: statusStyle.color,
             background: statusStyle.bg,
             padding: "2px 6px",
-            borderRadius: 4,
+            borderRadius: 999,
             letterSpacing: 0.3,
             fontWeight: 600,
             textTransform: "uppercase",
@@ -231,7 +229,7 @@ export function SegmentRow({
         <div
           style={{
             fontSize: 12.5,
-            color: "var(--gooni-muted, #6E6E73)",
+            color: ctok.muted,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -260,15 +258,14 @@ export function ViewToggle({
     padding: "3px 10px",
     fontSize: 12,
     fontFamily: FONT,
-    background: active ? "var(--gooni-card, #FFFFFF)" : "transparent",
+    background: active ? ctok.cardRaised : "transparent",
     color: active ? ctok.text : ctok.muted,
     border: "none",
-    borderRadius: 5,
+    borderRadius: 999,
     cursor: "pointer",
     lineHeight: 1,
-    boxShadow: active ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
     fontWeight: active ? 600 : 500,
-    transition: "background 0.1s, color 0.1s, box-shadow 0.1s",
+    transition: "background 0.1s, color 0.1s",
     outline: "none",
   });
   return (
@@ -276,8 +273,8 @@ export function ViewToggle({
       style={{
         display: "inline-flex",
         padding: 2,
-        background: ctok.hover,
-        borderRadius: 7,
+        background: ctok.card,
+        borderRadius: 999,
       }}
     >
       <button style={btn(mode === "list")} onClick={() => onChange("list")} title="List view">

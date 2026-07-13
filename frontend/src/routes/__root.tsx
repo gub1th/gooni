@@ -16,7 +16,6 @@ import { SummonedNav } from "../components/ambient/SummonedNav";
 import { WidgetOverlays } from "../components/widgets/WidgetOverlays";
 import { sheetFrame } from "../ui";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
-import { GooniLayer } from "../components/GooniLayer";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 
@@ -67,12 +66,10 @@ function isChromelessPath(pathname: string): boolean {
   return pathname === "/public" || pathname.startsWith("/public/");
 }
 
-// Paths where the Gooni chat orb (ChatLauncher + GooniMascot inside
-// GooniLayer) is intentionally hidden. /creative is an immersive 3D
-// world — the bottom-right FAB pops up over the plaza and breaks the
-// scene. Sidebar still mounts on /creative; only the floating orb +
-// mascot get suppressed.
-function suppressGooniLayer(pathname: string): boolean {
+// Immersive paths hide the ambient chrome (SummonedNav + widget overlays).
+// /creative is an immersive 3D world — the summoned nav + floating widgets
+// pop over the plaza and break the scene. Sidebar still mounts there.
+function isImmersivePath(pathname: string): boolean {
   return pathname === "/creative" || pathname.startsWith("/creative/");
 }
 
@@ -193,7 +190,7 @@ function AppShell() {
   }
 
   // /creative is its own immersive world — exempt from the sheet frame.
-  const isImmersive = suppressGooniLayer(location.pathname);
+  const isImmersive = isImmersivePath(location.pathname);
   // Every non-home authed surface renders as a summoned layer over the void.
   const isSheet = !isHome && !isImmersive && !isChromelessPath(location.pathname);
 
@@ -303,7 +300,11 @@ function AppShell() {
                   border: sheetFrame.border,
                   boxShadow: sheetFrame.boxShadow,
                   overflow: "hidden",
-                  background: "var(--gooni-bg, #FFFFFF)",
+                  // Transparent so the black canvas (not a theme-white) shows
+                  // at the rounded corners — each route paints its own bg
+                  // (dark audit/memories, light notes). White here bled through
+                  // the corners on the dark surfaces.
+                  background: "transparent",
                 }
               : { flex: 1, display: "flex", minWidth: 0, minHeight: 0 }
           }
@@ -359,7 +360,6 @@ function AppShell() {
         </div>
         {!isImmersive && <SummonedNav />}
         {!isImmersive && <WidgetOverlays />}
-        {!isHome && !isImmersive && <GooniLayer />}
       </div>
     </PasswordGate>
   );

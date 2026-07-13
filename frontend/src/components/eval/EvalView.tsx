@@ -7,7 +7,7 @@ import {
   type EvalSegmentSummary,
   type EvalStatus,
 } from "../../services/api";
-import { color as ctok, FONT } from "../../ui";
+import { frostInk as ctok, FONT } from "../../ui";
 import { Dot, FilterDot, FilterGroup, FilterPill, TabButton } from "./EvalAtoms";
 import { EvalRunsPanel } from "./EvalRunsPanel";
 import { SegmentCard, SegmentRow, ViewToggle } from "./SegmentGrid";
@@ -309,21 +309,15 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
         display: "flex",
         flexDirection: "column",
         minWidth: 0,
-        background: "var(--gooni-card, #FFFFFF)",
+        background: ctok.sheet,
         fontFamily: FONT,
         overflow: "hidden",
       }}
     >
       {/* Header — sentence case title + segment count + tabs. Keyboard
           shortcut hints hidden by default; press "?" to surface. */}
-      <div
-        style={{
-          padding: "20px 24px 0",
-          borderBottom: `1px solid ${ctok.border}`,
-          background: "var(--gooni-card, #FFFFFF)",
-          flexShrink: 0,
-        }}
-      >
+      <div style={{ padding: "20px 24px 0", background: ctok.sheet, flexShrink: 0 }}>
+       <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, color: ctok.text }}>Audit</h1>
           {tab === "convos" && (
@@ -340,8 +334,8 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                 width: 22,
                 height: 22,
                 borderRadius: "50%",
-                border: `1px solid ${ctok.border}`,
-                background: showShortcuts ? "rgba(10,132,255,0.10)" : "transparent",
+                border: `1px solid ${ctok.hairline}`,
+                background: showShortcuts ? ctok.accentDim : "transparent",
                 color: showShortcuts ? ctok.accent : ctok.muted,
                 fontSize: 11,
                 fontWeight: 700,
@@ -364,6 +358,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
           <TabButton active={tab === "convos"} onClick={() => setTab("convos")}>Conversations</TabButton>
           <TabButton active={tab === "runs"} onClick={() => setTab("runs")}>Runs</TabButton>
         </div>
+       </div>
       </div>
 
       {tab === "runs" ? (
@@ -379,15 +374,8 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
           />
 
           {/* Filter rail — row 1: search + view toggle. */}
-          <div
-            style={{
-              padding: "12px 24px 8px",
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-              flexShrink: 0,
-            }}
-          >
+          <div style={{ padding: "12px 24px 8px", flexShrink: 0 }}>
+           <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%", display: "flex", gap: 10, alignItems: "center" }}>
             <input
               type="search"
               placeholder="Search transcripts…"
@@ -398,31 +386,23 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
               }}
               style={{
                 flex: 1,
-                padding: "7px 14px",
-                border: `1px solid ${ctok.border}`,
-                borderRadius: 10,
+                padding: "8px 14px",
+                border: "none",
+                borderRadius: 14,
                 fontSize: 13,
                 fontFamily: FONT,
                 outline: "none",
-                background: ctok.bg,
+                background: ctok.inputBg,
+                color: ctok.text,
               }}
             />
             <ViewToggle mode={viewMode} onChange={setViewMode} />
+           </div>
           </div>
 
           {/* Filter rail — row 2: source · status · binary toggles · min. */}
-          <div
-            style={{
-              padding: "0 24px 14px",
-              borderBottom: `1px solid ${ctok.border}`,
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 10,
-              alignItems: "center",
-              rowGap: 8,
-              flexShrink: 0,
-            }}
-          >
+          <div style={{ padding: "0 24px 14px", flexShrink: 0 }}>
+           <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%", display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", rowGap: 8 }}>
             <FilterGroup label="Source:">
               {SOURCES.map((src) => (
                 <FilterPill
@@ -477,7 +457,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                   fontSize: 11,
                   fontWeight: 500,
                   fontFamily: FONT,
-                  border: `0.5px solid ${ctok.border}`,
+                  border: `1px solid ${ctok.hairline}`,
                   background: "transparent",
                   color: ctok.muted,
                   padding: "3px 10px",
@@ -494,11 +474,10 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                     top: "calc(100% + 6px)",
                     left: 0,
                     zIndex: 20,
-                    background: "var(--gooni-card, #FFFFFF)",
-                    border: `1px solid ${ctok.border}`,
-                    borderRadius: 10,
+                    background: ctok.card,
+                    borderRadius: 14,
                     padding: "10px 12px",
-                    boxShadow: "0 4px 18px rgba(15,23,42,0.10)",
+                    boxShadow: "0 4px 18px rgba(0,0,0,0.35)",
                     display: "flex",
                     alignItems: "center",
                     gap: 8,
@@ -514,16 +493,18 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                     onChange={(e) => setMinMessages(Math.max(1, Number(e.target.value) || 1))}
                     style={{ width: 140 }}
                   />
-                  <span style={{ fontSize: 12, fontWeight: 600, width: 24, textAlign: "right" }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, width: 24, textAlign: "right", color: ctok.text }}>
                     {minMessages}
                   </span>
                 </div>
               )}
             </div>
+           </div>
           </div>
 
-          {/* Grid */}
+          {/* Grid — centered column on the black canvas, not full-bleed. */}
           <div style={{ flex: 1, overflow: "auto", padding: 24, background: ctok.bg }}>
+           <div style={{ maxWidth: 1000, margin: "0 auto", width: "100%" }}>
             {error && (
               <div style={{ color: ctok.danger, fontSize: 13, marginBottom: 12 }}>{error}</div>
             )}
@@ -553,11 +534,11 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                 <button
                   onClick={clearAllFilters}
                   style={{
-                    padding: "6px 14px",
-                    borderRadius: 8,
-                    border: `1px solid ${ctok.border}`,
+                    padding: "5px 14px",
+                    borderRadius: 999,
+                    border: `1px solid ${ctok.hairline}`,
                     background: "transparent",
-                    color: ctok.accent,
+                    color: ctok.muted,
                     fontFamily: FONT,
                     fontSize: 12,
                     fontWeight: 600,
@@ -572,9 +553,8 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  background: "var(--gooni-card, #FFFFFF)",
-                  border: `1px solid ${ctok.border}`,
-                  borderRadius: 8,
+                  background: ctok.card,
+                  borderRadius: 14,
                   overflow: "hidden",
                 }}
               >
@@ -612,6 +592,7 @@ export function EvalView({ onOpenNote, initialSegmentId = null }: {
                 ))}
               </div>
             )}
+           </div>
           </div>
         </>
       )}

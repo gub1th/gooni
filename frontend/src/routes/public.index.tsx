@@ -7,8 +7,6 @@ import LinkExtension from "@tiptap/extension-link";
 import { updatePublicProfile, getStoredToken, patchNote, type PublicNote } from "../services/api";
 import { Globe, Pin, PinOff } from "lucide-react";
 import { displayTitle } from "../utils/notePreview";
-import { PublicChatLauncher } from "../components/PublicChatLauncher";
-import { GooniMascot } from "../components/GooniMascot";
 import { Skeleton } from "../components/Skeleton";
 import { color as ctok, FONT, z } from "../ui";
 import { formatLongDate as formatDate, parseServerDate } from "../utils/date";
@@ -379,9 +377,6 @@ function PublicPage() {
 
   // Treat legacy plain-text bios as text; new HTML bios render rich.
   const bioIsHtml = bio !== null && /<[a-z][\s\S]*>/i.test(bio);
-
-  // Invisible viewport bounds for the mascot to walk in (matches GooniLayer).
-  const mascotBoundsRef = useRef<HTMLDivElement>(null);
 
   const displayed = notes;
   const pinned = displayed.filter((n) => n.is_public_pinned);
@@ -894,13 +889,6 @@ function PublicPage() {
           </a>
         </div>
       </div>
-      <div
-        ref={mascotBoundsRef}
-        aria-hidden
-        style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 1 }}
-      />
-      <GooniMascot dashboardRef={mascotBoundsRef} />
-      <PublicChatLauncher />
 
       {/* Undo toast for unpublish — bottom-center, owner-only. Auto-
           dismisses after 6s; the button restores the row + its

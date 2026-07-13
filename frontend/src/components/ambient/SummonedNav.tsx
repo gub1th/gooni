@@ -103,9 +103,9 @@ export function SummonedNav() {
         <TracedOutline
           show={open}
           radius={16}
-          color="rgba(244,245,244,0.55)"
-          strokeWidth={1.25}
-          glow={0.15}
+          color="transparent"
+          strokeWidth={0}
+          glow={0}
           contentDelayMs={140}
           style={{ width: 208 }}
         >

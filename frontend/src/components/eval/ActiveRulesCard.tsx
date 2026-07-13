@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { color as ctok, FONT } from "../../ui";
+import { frostInk as ctok, FONT } from "../../ui";
 import {
   fetchChatAudit, deleteMemory,
   type ChatAuditActiveRule,
@@ -58,11 +58,13 @@ export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: 
 
   return (
     <div style={{
-      background: "var(--gooni-card, #fff)",
-      border: `1px solid ${ctok.border}`,
-      borderRadius: 12,
+      background: ctok.card,
+      borderRadius: 14,
       padding: "12px 16px",
-      margin: "16px 24px 0",
+      margin: "16px auto 0",
+      maxWidth: 1000,
+      width: "calc(100% - 48px)",
+      boxSizing: "border-box",
       fontFamily: FONT,
     }}>
       <button
@@ -109,25 +111,24 @@ export function ActiveRulesCard({ collapsedDefault, open: openProp, onToggle }: 
               key={r.memory_id}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "8px 12px", borderRadius: 8,
-                background: "rgba(74,222,128,0.10)",
-                border: "1px solid rgba(22,163,74,0.18)",
+                padding: "8px 12px", borderRadius: 14,
+                background: ctok.accentDim,
               }}
             >
               <div style={{ fontSize: 13, color: ctok.text, lineHeight: 1.4 }}>
                 {r.rule}
-                <span style={{ marginLeft: 10, fontSize: 11, color: "var(--gooni-muted, #6E6E73)" }}>
+                <span style={{ marginLeft: 10, fontSize: 11, color: ctok.muted }}>
                   · {relativeTime(r.created_at)}
                 </span>
               </div>
               <button
                 onClick={() => handleDismiss(r)}
                 style={{
-                  padding: "4px 10px", fontSize: 11.5,
-                  fontFamily: FONT, fontWeight: 500,
-                  border: `1px solid ${ctok.border}`,
-                  background: "transparent", color: "var(--gooni-muted, #6E6E73)",
-                  borderRadius: 6, cursor: "pointer",
+                  padding: "4px 12px", fontSize: 12,
+                  fontFamily: FONT, fontWeight: 600,
+                  border: `1px solid ${ctok.hairline}`,
+                  background: "transparent", color: ctok.muted,
+                  borderRadius: 999, cursor: "pointer",
                 }}
                 title="Deactivate this rule"
               >

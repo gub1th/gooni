@@ -402,10 +402,13 @@ class Orchestrator:
                     router_wrote=routed.wrote_anything(),
                 )
             # Reconcile any memory candidates off-thread even on short-circuit.
+            # Pass the user-utterance id so each written memory records its
+            # provenance (source_message_id) — mirrors the note path.
             if memory_candidates:
                 threading.Thread(
                     target=memory_service.apply_memory_candidates,
                     args=(memory_candidates,),
+                    kwargs={"source_message_id": user_msg.id},
                     daemon=True,
                 ).start()
             return feedback_ack, {
@@ -474,6 +477,7 @@ class Orchestrator:
             feedback_ack=feedback_ack,
             memory_candidates=memory_candidates,
             saved_message=saved_message,
+            source_message_id=user_msg.id,
             signals_summary=signals_summary,
             feedback_tools=feedback_tools,
             routed=routed,
@@ -490,6 +494,7 @@ class Orchestrator:
         feedback_ack: str | None,
         memory_candidates: list[dict],
         saved_message: str,
+        source_message_id: int | None = None,
         signals_summary: dict,
         feedback_tools: list[str],
         routed,
@@ -541,6 +546,7 @@ class Orchestrator:
             threading.Thread(
                 target=memory_service.apply_memory_candidates,
                 args=(memory_candidates,),
+                kwargs={"source_message_id": source_message_id},
                 daemon=True,
             ).start()
 

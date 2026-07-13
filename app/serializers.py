@@ -342,4 +342,8 @@ def _memory_to_dashboard(m) -> dict:
         "last_retrieved_at": m.last_retrieved_at.isoformat() if m.last_retrieved_at else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+        # Provenance ids (raw). The /memories router resolves these into a
+        # displayable `source` object; kept here so MCP/other callers see them.
+        "source_note_id": m.source_note_id,
+        "source_message_id": m.source_message_id,
     }

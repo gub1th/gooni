@@ -7,7 +7,6 @@ import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { AmbientHome } from "../components/ambient/AmbientHome";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
-import { useConversationsStore } from "../stores/useConversationsStore";
 import { fetchNote } from "../services/api";
 
 // Ambient-loop v2 "presence" pass: the WAVEFORM is the app's home. Default =
@@ -37,7 +36,6 @@ export const Route = createFileRoute("/")({
 
 function LogPage() {
   const { loadNotes, createNote, selectNote } = useNotesContentStore();
-  const { fetchConversations } = useConversationsStore();
   const navigate = useNavigate({ from: "/" });
   const search = Route.useSearch();
   const { activeNoteId } = useNotesContentStore();
@@ -51,11 +49,6 @@ function LogPage() {
     search.view === "notes" ? "notes" :
     search.view === "log" ? "log" :
     "home";
-
-  useEffect(() => {
-    fetchConversations();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // ?note=<id> → fetch + seed the note into the store. View derives to
   // "notes" automatically from the URL param. All notes live in one flat
@@ -121,7 +114,7 @@ function LogPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeNoteId, view]);
 
-  // Sidebar + GooniLayer + PasswordGate live in __root.tsx's AppShell so they
+  // Sidebar + PasswordGate live in __root.tsx's AppShell so they
   // persist across route changes. This route just renders the right-column
   // content into AppShell's <Outlet />.
   return (

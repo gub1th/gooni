@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
-import { GOONI_FACES, GOONI_FACE_LABELS, useGooniFaceStore, type GooniFace } from "../stores/useGooniFaceStore";
 import { GOONI_THEMES, GOONI_THEME_LABELS, THEME_PALETTES, useGooniThemeStore, type GooniTheme } from "../stores/useGooniThemeStore";
 import { useProfileStore } from "../stores/useProfileStore";
 import { uploadAvatarImage, updatePublicAvatar } from "../services/api";
-import { GooniFacePreview } from "./GooniMascot";
 import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
 import { CommentAvatar } from "./notes/CommentAvatar";
@@ -164,8 +162,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 // ── Tabs ─────────────────────────────────────────────────────────────────
 
 function AppearanceTab() {
-  const selectedFace = useGooniFaceStore((s) => s.face);
-  const setFace = useGooniFaceStore((s) => s.setFace);
   const selectedTheme = useGooniThemeStore((s) => s.theme);
   const setTheme = useGooniThemeStore((s) => s.setTheme);
 
@@ -213,43 +209,6 @@ function AppearanceTab() {
                   fontWeight: selected ? 600 : 400,
                 }}>
                   {GOONI_THEME_LABELS[t]}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
-      <section>
-        <SectionLabel>gooni's face</SectionLabel>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
-          {GOONI_FACES.map((f: GooniFace) => {
-            const selected = selectedFace === f;
-            return (
-              <button
-                key={f}
-                onClick={() => setFace(f)}
-                title={GOONI_FACE_LABELS[f]}
-                style={{
-                  padding: 6, borderRadius: 10,
-                  background: selected ? "var(--gooni-card, #fff)" : "transparent",
-                  border: "none",
-                  outline: selected ? "2px solid #4ADE80" : "1px solid rgba(0,0,0,0.08)",
-                  outlineOffset: selected ? "-2px" : "-1px",
-                  cursor: "pointer",
-                  display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-                  transition: "background 0.12s, outline-color 0.12s",
-                }}
-                onMouseEnter={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.03)"; }}
-                onMouseLeave={(e) => { if (!selected) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
-              >
-                <GooniFacePreview face={f} size={36} />
-                <div style={{
-                  fontSize: 9.5, color: selected ? ctok.text : ctok.muted,
-                  textTransform: "lowercase", letterSpacing: 0.2, lineHeight: 1.1,
-                  textAlign: "center", minHeight: 22, fontWeight: selected ? 600 : 400,
-                }}>
-                  {GOONI_FACE_LABELS[f]}
                 </div>
               </button>
             );

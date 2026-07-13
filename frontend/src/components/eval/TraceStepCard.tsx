@@ -4,7 +4,8 @@ import {
   type EvalMessage,
   type MessageTraceStep,
 } from "../../services/api";
-import { color as ctok, FONT, z } from "../../ui";
+import { frostInk as ctok, FONT, z } from "../../ui";
+import { decodeEscapes } from "../../utils/decodeEscapes";
 import { RatingPicker } from "./EvalAtoms";
 
 // ── Step card with flag popover ──────────────────────────────────────────────
@@ -42,19 +43,18 @@ export function StepCard({
   return (
     <div
       style={{
-        background: ctok.bg,
-        border: `1px solid ${ctok.border}`,
-        borderRadius: 8,
+        background: ctok.cardRaised,
+        borderRadius: 14,
         padding: 12,
       }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: ctok.muted, flexShrink: 0, paddingTop: 1 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: ctok.muted, flexShrink: 0, paddingTop: 1, fontFamily: ctok.mono }}>
           {toolName ? `${stepKey}: ${toolName}` : stepKey}
         </span>
         {/* Take the remaining width and wrap — long verify/critique labels
             used to overflow the card and get hard-clipped with no ellipsis. */}
-        <span style={{ fontSize: 13, flex: 1, minWidth: 0, lineHeight: 1.4, overflowWrap: "anywhere" }}>
+        <span style={{ fontSize: 13, flex: 1, minWidth: 0, lineHeight: 1.4, overflowWrap: "anywhere", color: ctok.text }}>
           {headerLabel}
         </span>
         <button
@@ -62,9 +62,10 @@ export function StepCard({
           style={{
             marginLeft: "auto",
             flexShrink: 0,
-            background: existing ? "rgba(255,59,48,0.14)" : "transparent",
-            border: existing ? "1px solid #FF3B30" : `1px solid ${ctok.border}`,
-            borderRadius: 6,
+            background: existing ? ctok.badDim : "transparent",
+            border: existing ? "none" : `1px solid ${ctok.hairline}`,
+            color: existing ? ctok.bad : ctok.muted,
+            borderRadius: 999,
             padding: "2px 8px",
             cursor: "pointer",
             fontSize: 12,
@@ -72,7 +73,7 @@ export function StepCard({
           }}
           title={existing ? `Rated ${existing.rating}/3 — click to edit` : "Flag this step"}
         >
-          🚩 {existing ? `${existing.rating}/3` : "Flag"}
+          {existing ? `${existing.rating}/3` : "Flag"}
         </button>
       </div>
 
@@ -178,16 +179,16 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
           marginBottom: 2,
         }}
       >
-        <span style={{ fontSize: 10, color: ctok.muted }}>{label}</span>
+        <span style={{ fontSize: 10, color: ctok.faint, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>{label}</span>
         {showExpand && (
           <button
             onClick={() => setExpanded(true)}
             title="View formatted (newlines expanded)"
             style={{
               background: "transparent",
-              border: `1px solid ${ctok.border}`,
-              borderRadius: 5,
-              padding: "1px 6px",
+              border: `1px solid ${ctok.hairline}`,
+              borderRadius: 999,
+              padding: "1px 8px",
               fontSize: 10,
               color: ctok.accent,
               cursor: "pointer",
@@ -202,11 +203,12 @@ function CodeBlock({ label, value }: { label: string; value: unknown }) {
         style={{
           margin: 0,
           padding: 8,
-          background: "var(--gooni-card, #FFFFFF)",
-          border: `1px solid ${ctok.border}`,
-          borderRadius: 6,
+          background: ctok.codeBg,
+          color: ctok.text,
+          border: "none",
+          borderRadius: 8,
           fontSize: 11,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+          fontFamily: ctok.mono,
           maxHeight: 200,
           overflow: "auto",
           whiteSpace: "pre-wrap",
@@ -235,21 +237,7 @@ function FormattedModal({
   text: string;
   onClose: () => void;
 }) {
-  // Decode JSON string escapes in one pass so each \X is consumed exactly once
-  // (chaining .replace per type re-scans output and double-processes backslashes).
-  const formatted = text.replace(/\\(["\\/bfnrt])/g, (_, c) => {
-    const map: Record<string, string> = {
-      '"': '"',
-      "\\": "\\",
-      "/": "/",
-      b: "\b",
-      f: "\f",
-      n: "\n",
-      r: "\r",
-      t: "\t",
-    };
-    return map[c];
-  });
+  const formatted = decodeEscapes(text);
   return (
     <div
       onClick={onClose}
@@ -267,8 +255,8 @@ function FormattedModal({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "var(--gooni-card, #FFFFFF)",
-          borderRadius: 12,
+          background: ctok.card,
+          borderRadius: 14,
           padding: "16px 18px",
           width: "80vw",
           maxWidth: 860,
@@ -288,11 +276,11 @@ function FormattedModal({
             style={{
               marginLeft: "auto",
               background: "transparent",
-              border: `1px solid ${ctok.border}`,
-              borderRadius: 6,
-              padding: "4px 12px",
-              fontSize: 13,
-              color: ctok.accent,
+              border: `1px solid ${ctok.hairline}`,
+              borderRadius: 999,
+              padding: "5px 14px",
+              fontSize: 12,
+              color: ctok.muted,
               cursor: "pointer",
               fontFamily: FONT,
             }}
@@ -304,12 +292,13 @@ function FormattedModal({
           style={{
             margin: 0,
             padding: 12,
-            background: ctok.bg,
-            border: `1px solid ${ctok.border}`,
-            borderRadius: 8,
+            background: ctok.codeBg,
+            color: ctok.text,
+            border: "none",
+            borderRadius: 10,
             fontSize: 12,
             lineHeight: 1.5,
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, monospace",
+            fontFamily: ctok.mono,
             overflow: "auto",
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
@@ -372,9 +361,8 @@ function FlagEditor({
     <div
       style={{
         marginTop: 10,
-        background: "var(--gooni-card, #FFFFFF)",
-        border: "1px solid #FF3B30",
-        borderRadius: 8,
+        background: ctok.badDim,
+        borderRadius: 14,
         padding: 10,
       }}
     >
@@ -401,14 +389,16 @@ function FlagEditor({
         rows={2}
         style={{
           width: "100%",
-          padding: 6,
-          border: `1px solid ${ctok.border}`,
-          borderRadius: 6,
+          padding: 8,
+          border: "none",
+          borderRadius: 14,
           fontSize: 12,
           fontFamily: FONT,
           resize: "vertical",
           outline: "none",
           boxSizing: "border-box",
+          background: ctok.inputBg,
+          color: ctok.text,
         }}
       />
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
@@ -416,11 +406,11 @@ function FlagEditor({
           onClick={submit}
           disabled={saving}
           style={{
-            background: ctok.danger,
-            color: "#FFFFFF",
+            background: ctok.badDim,
+            color: ctok.bad,
             border: "none",
-            borderRadius: 6,
-            padding: "4px 12px",
+            borderRadius: 999,
+            padding: "5px 14px",
             cursor: saving ? "wait" : "pointer",
             fontSize: 12,
             fontWeight: 600,
