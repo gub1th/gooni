@@ -138,6 +138,18 @@ def eval_segment_full(segment_id: int, db: Session = Depends(get_db)):
     return full
 
 
+@router.get("/eval/segment-for-message/{message_id}")
+def eval_segment_for_message(message_id: int, db: Session = Depends(get_db)):
+    """Resolve which segment a message belongs to. Powers the ambient
+    turn-audit's "full audit →" deep link. 404 if unresolvable."""
+    from ..services import eval_service
+
+    seg_id = eval_service.segment_id_for_message(db, message_id)
+    if seg_id is None:
+        raise HTTPException(status_code=404, detail="no segment for message")
+    return {"segment_id": seg_id}
+
+
 @router.post("/eval/feedback")
 def eval_post_feedback(body: dict, db: Session = Depends(get_db)):
     """Upsert a step-level feedback. Body:
