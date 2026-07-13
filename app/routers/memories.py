@@ -18,13 +18,18 @@ def list_memories(
     type: str | None = None,
     q: str | None = None,
     include_inactive: bool = False,
-    limit: int = 200,
-    offset: int = 0,
+    limit: int = 50,
+    before_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    """List memories for the dashboard. Filters by type (optional), text
-    substring (optional), and active flag. Paged via limit/offset. Newest
-    first."""
+    """List memories for the dashboard, newest first. Filters by type
+    (optional), text substring (optional), and active flag.
+
+    **Cursor-paginated on id** (monotonic + unique → the ordering key IS the
+    cursor). Pass `before_id=<last id seen>` to fetch the next older page —
+    stable under concurrent inserts, unlike offset (a new row shifts every
+    offset → dup/skip). `total` is the full filtered count (header); use
+    `next_cursor`/`has_more` to drive infinite scroll."""
     from ..db.models import Memory  # local to avoid circular at import time
     query = db.query(Memory)
     if not include_inactive:
@@ -35,12 +40,19 @@ def list_memories(
         # Case-insensitive content substring match — cheap, works without FTS.
         query = query.filter(Memory.content.ilike(f"%{q}%"))
     total = query.count()
-    rows = query.order_by(Memory.created_at.desc()).offset(offset).limit(limit).all()
+    page = query
+    if before_id is not None:
+        page = page.filter(Memory.id < before_id)
+    rows = page.order_by(Memory.id.desc()).limit(limit).all()
     serialized = [_memory_to_dashboard(m) for m in rows]
     _attach_sources(serialized, rows, db)
+    # A full page means there's (probably) more; a short page is the tail.
+    next_cursor = rows[-1].id if len(rows) == limit else None
     return {
         "total": total,
         "memories": serialized,
+        "next_cursor": next_cursor,
+        "has_more": next_cursor is not None,
     }
 
 

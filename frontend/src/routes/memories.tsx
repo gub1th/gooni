@@ -37,6 +37,8 @@ const TYPE_COLORS: Record<MemoryType, { dot: string; bg: string; fg: string }> =
 
 const TYPE_ORDER: MemoryType[] = ["preference", "goal", "fact", "routine", "constraint", "episode"];
 
+const PAGE_SIZE = 50;
+
 function MemoriesPage() {
   const urlSearch = Route.useSearch();
 
@@ -56,24 +58,33 @@ function MemoriesPage() {
   const [editDraft, setEditDraft] = useState("");
   const reqIdRef = useRef(0);
 
+  // Cursor pagination — 50/page, fetched on scroll-near-bottom. Cursor is
+  // the last-seen memory id (see GET /memories docstring for why id, not
+  // offset). Reset whenever the filter set changes (load() below).
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
   // Debounce search input — table refetches on every keystroke otherwise.
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 280);
     return () => clearTimeout(t);
   }, [search]);
 
+  // Build the filter opts shared by the first page + every load-more.
+  function pageOpts(): Parameters<typeof fetchMemories>[0] {
+    const opts: Parameters<typeof fetchMemories>[0] = { limit: PAGE_SIZE, includeInactive };
+    if (filter !== "all") opts.type = filter;
+    if (debouncedSearch) opts.q = debouncedSearch;
+    return opts;
+  }
+
   async function load() {
     const reqId = ++reqIdRef.current;
     setLoading(true);
     try {
-      const opts: Parameters<typeof fetchMemories>[0] = {
-        limit: 500,
-        includeInactive,
-      };
-      if (filter !== "all") opts.type = filter;
-      if (debouncedSearch) opts.q = debouncedSearch;
       const [list, st] = await Promise.all([
-        fetchMemories(opts),
+        fetchMemories(pageOpts()),
         fetchMemoryStats(),
       ]);
       // Drop the response if a newer request has been kicked off — prevents
@@ -81,12 +92,39 @@ function MemoriesPage() {
       if (reqId !== reqIdRef.current) return;
       setMemories(list.memories);
       setTotal(list.total);
+      setCursor(list.next_cursor);
+      setHasMore(list.has_more);
       setStats(st.by_type);
     } catch (e) {
       console.error(e);
     } finally {
       if (reqId === reqIdRef.current) setLoading(false);
     }
+  }
+
+  // Append the next older page. Guards against double-fire (scroll spam) and
+  // stale appends (filter changed mid-fetch → reqId moved). Cursor is a plain
+  // id boundary, so it stays valid even if that exact row was just deleted.
+  async function loadMore() {
+    if (loadingMore || !hasMore || cursor == null) return;
+    const reqId = reqIdRef.current;
+    setLoadingMore(true);
+    try {
+      const list = await fetchMemories({ ...pageOpts(), beforeId: cursor });
+      if (reqId !== reqIdRef.current) return;
+      setMemories((prev) => [...prev, ...list.memories]);
+      setCursor(list.next_cursor);
+      setHasMore(list.has_more);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  function handleScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 400) loadMore();
   }
 
   useEffect(() => {
@@ -151,7 +189,7 @@ function MemoriesPage() {
 
   // Sidebar + PasswordGate live in __root.tsx's AppShell.
   return (
-        <div style={{ flex: 1, overflowY: "auto", fontFamily: FONT, background: ctok.sheet }}>
+        <div onScroll={handleScroll} style={{ flex: 1, overflowY: "auto", fontFamily: FONT, background: ctok.sheet }}>
           <div style={{ maxWidth: 1100, margin: "0 auto", padding: "32px 32px 80px" }}>
             {/* Header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18 }}>
@@ -399,6 +437,17 @@ function MemoriesPage() {
                 })
               )}
             </div>
+
+            {/* Pagination tail — scroll near the bottom pulls the next page. */}
+            {memories.length > 0 && (
+              <div style={{ padding: "16px 4px 4px", textAlign: "center", fontSize: 12, color: ctok.faint }}>
+                {loadingMore
+                  ? "Loading more…"
+                  : hasMore
+                    ? `${memories.length} of ${total} — scroll for more`
+                    : `All ${total} loaded`}
+              </div>
+            )}
           </div>
         </div>
   );
