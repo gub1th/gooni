@@ -658,6 +658,17 @@ export async function fetchTurnTrace(messageId: number): Promise<TurnTrace> {
   return res.json();
 }
 
+// Resolve the eval segment a message lives in → powers the turn-audit's
+// "full audit →" deep link (navigate to ?audit=1&segment=N). 404 → null so
+// the caller can hide the affordance rather than dead-link.
+export async function fetchSegmentForMessage(messageId: number): Promise<number | null> {
+  const res = await apiFetch(`${BASE}/eval/segment-for-message/${messageId}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to resolve segment");
+  const data = (await res.json()) as { segment_id: number };
+  return data.segment_id;
+}
+
 export async function promoteMessage(messageId: number): Promise<{ message: LogMessage; promises: ApiPromise[] }> {
   const res = await apiFetch(`${BASE}/messages/${messageId}/promote`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to promote message");

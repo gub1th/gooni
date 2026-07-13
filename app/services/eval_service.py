@@ -304,6 +304,28 @@ def _flag_counts_by_segment(db: Session, segment_ids: list[int]) -> dict[int, in
 # ── Detail view ──────────────────────────────────────────────────────────────
 
 
+def segment_id_for_message(db: Session, message_id: int) -> int | None:
+    """Resolve the eval segment a message falls inside — powers the ambient
+    turn-audit's "full audit →" deep link (message → ?audit=1&segment=N).
+
+    Segments are computed-on-demand, so we (re)build this conversation's
+    segments first, then range-match. Returns None if the message doesn't
+    exist or somehow lands outside every window (shouldn't happen once
+    segments are fresh, but the caller 404s rather than guessing)."""
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if not msg:
+        return None
+    conv = db.query(Conversation).filter(Conversation.id == msg.conversation_id).first()
+    if not conv:
+        return None
+    segments = _ensure_segments_for_conversation(conv, db)
+    db.commit()  # _ensure_ only stages; persist any freshly-built rows
+    for seg in segments:
+        if seg.start_message_id <= message_id <= seg.end_message_id:
+            return seg.id
+    return None
+
+
 def get_segment_full(db: Session, segment_id: int) -> dict | None:
     seg = db.query(EvalSegment).filter(EvalSegment.id == segment_id).first()
     if not seg:
