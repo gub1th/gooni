@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.199.0 — 2026-07-13 (minor)
+
+- feat(memories): cursor pagination (50/page, infinite scroll) (#419)
+
 ## 0.198.0 — 2026-07-13 (minor)
 
 - feat(audit): dark-frost migration + orb removal + memory provenance (#418)
