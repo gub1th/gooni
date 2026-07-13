@@ -1085,14 +1085,14 @@ export async function fetchMemories(opts: {
   q?: string;
   includeInactive?: boolean;
   limit?: number;
-  offset?: number;
-} = {}): Promise<{ total: number; memories: ApiMemory[] }> {
+  beforeId?: number;
+} = {}): Promise<{ total: number; memories: ApiMemory[]; next_cursor: number | null; has_more: boolean }> {
   const params = new URLSearchParams();
   if (opts.type) params.set("type", opts.type);
   if (opts.q) params.set("q", opts.q);
   if (opts.includeInactive) params.set("include_inactive", "true");
   if (opts.limit != null) params.set("limit", String(opts.limit));
-  if (opts.offset != null) params.set("offset", String(opts.offset));
+  if (opts.beforeId != null) params.set("before_id", String(opts.beforeId));
   const res = await apiFetch(`${BASE}/memories?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to fetch memories");
   return res.json();
