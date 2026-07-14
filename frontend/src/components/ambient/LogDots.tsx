@@ -529,9 +529,28 @@ function FeedTiles() {
     void fetchLeetcodeToday().then(setLc).catch(() => setLc("err"));
   }, []);
 
+  // Footer line for the whoop tile: sleep window + data age. source_updated_at
+  // is WHOOP's OWN record timestamp (not our poll) — if it's >36h old the strap
+  // has stopped syncing and every metric is a ghost, so we flag it loudly.
+  const connected = whoop !== null && whoop !== "err" && !!whoop.date;
+  const w = connected ? (whoop as WhoopToday) : null;
+  const ageMs = w?.source_updated_at ? Date.now() - parseUtc(w.source_updated_at)! : null;
+  const stale = ageMs != null && ageMs > 36 * 3600 * 1000;
+  const sleepWindow = w ? sleepClock(w.sleep_start_at, w.sleep_end_at) : null;
+  const whoopFooter = w ? (
+    <>
+      {sleepWindow && <span>slept {sleepWindow}</span>}
+      {ageMs != null && (
+        <span style={{ color: stale ? "rgba(251,146,60,0.85)" : "rgba(244,245,244,0.4)" }}>
+          {sleepWindow ? "· " : ""}updated {relAge(ageMs)}{stale ? " ⚠ stale" : ""}
+        </span>
+      )}
+    </>
+  ) : undefined;
+
   return (
     <div style={{ display: "flex", gap: 14, marginTop: 16 }}>
-      <FeedTile title="whoop">
+      <FeedTile title="whoop" footer={whoopFooter}>
         {whoop === null ? (
           <Dim>…</Dim>
         ) : whoop === "err" || !whoop.date ? (
@@ -567,7 +586,7 @@ function FeedTiles() {
   );
 }
 
-function FeedTile({ title, children }: { title: string; children: React.ReactNode }) {
+function FeedTile({ title, children, footer }: { title: string; children: React.ReactNode; footer?: React.ReactNode }) {
   return (
     <div style={{ ...GLASS, borderRadius: 18, padding: "14px 18px", minWidth: 150 }}>
       <div style={{
@@ -577,6 +596,15 @@ function FeedTile({ title, children }: { title: string; children: React.ReactNod
         {title}
       </div>
       <div style={{ display: "flex", gap: 16 }}>{children}</div>
+      {footer && (
+        <div style={{
+          marginTop: 11, paddingTop: 8, borderTop: "1px solid rgba(244,245,244,0.07)",
+          fontSize: 10, letterSpacing: 0.2, color: "rgba(244,245,244,0.4)",
+          display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap",
+        }}>
+          {footer}
+        </div>
+      )}
     </div>
   );
 }
@@ -609,4 +637,40 @@ function fmt1(v: number | null | undefined): string {
 }
 function fmtPct(v: number | null | undefined): string {
   return v == null ? "–" : `${Math.round(v)}`;
+}
+
+// WHOOP timestamps come back as naive UTC (no offset). `new Date()` on a
+// suffix-less ISO string parses as LOCAL, shifting the clock — so force a Z
+// unless one is already present, then let the browser render in local tz.
+function parseUtc(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const s = /[Z+]|[-]\d\d:\d\d$/.test(iso.slice(10)) ? iso : `${iso}Z`;
+  const t = new Date(s).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+function clock(iso: string | null | undefined): string | null {
+  const t = parseUtc(iso);
+  if (t == null) return null;
+  const d = new Date(t);
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ap = h < 12 ? "a" : "p";
+  h = h % 12 || 12;
+  return `${h}:${String(m).padStart(2, "0")}${ap}`;
+}
+
+// "11:20p → 7:05a", or null if either end is missing.
+function sleepClock(start: string | null, end: string | null): string | null {
+  const a = clock(start);
+  const b = clock(end);
+  return a && b ? `${a} → ${b}` : null;
+}
+
+function relAge(ms: number): string {
+  const mins = Math.max(0, Math.floor(ms / 60000));
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }

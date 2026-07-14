@@ -375,8 +375,10 @@ export interface WhoopToday {
   strain: number | null;
   sleep_minutes: number | null;
   sleep_performance_pct: number | null;
+  sleep_start_at: string | null; // ISO, naive UTC — bed time
+  sleep_end_at: string | null; // ISO, naive UTC — wake time
   updated_at: string | null;
-  source_updated_at: string | null;
+  source_updated_at: string | null; // ISO — age of WHOOP's own data (staleness signal)
 }
 export async function fetchWhoopToday(refresh = false): Promise<WhoopToday> {
   const url = `${BASE}/whoop/today${refresh ? "?refresh=1" : ""}`;
