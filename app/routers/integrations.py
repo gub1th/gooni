@@ -6,9 +6,31 @@ from ..db.database import get_db
 
 from ..services import github as gh
 from ..services import google_calendar as gcal
+from ..services import event_service
 
 
 router = APIRouter()
+
+
+@router.post("/events")
+def event_ingest(body: dict, db: Session = Depends(get_db)):
+    """Generic iOS Shortcuts event ingest (behind the standard Bearer auth the
+    Shortcut attaches). Body: { subject, event, at? } — e.g.
+    {"subject":"gym","event":"arrive"} or
+    {"subject":"instagram","event":"open","at":"2026-07-16T21:04:00-07:00"}.
+    Logs +1 on the "{subject} {event}" sum-agg Trackable for the event's local
+    day; the clock time is stored in value_json.at. `at` accepts ISO-8601 or
+    epoch seconds and defaults to now.
+    """
+    try:
+        return event_service.log_event(
+            db,
+            subject=body.get("subject", ""),
+            event=body.get("event", ""),
+            at=body.get("at"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def _serialize_event(ev: dict) -> dict:
