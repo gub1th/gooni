@@ -7,24 +7,6 @@ from typing import Any
 from .parsers import _validate_candidate
 
 
-def _coerce_log_date(raw: Any, today: _date | None = None) -> str | None:
-    """Validate an extractor-supplied fitness-log date (YYYY-MM-DD). Must
-    parse, not be in the future, and not >1yr back — clamps LLM date math
-    mistakes. None means "use today" (the handler's default). `today` is the
-    user's local date (passed down from extract_signals); falls back to
-    date.today() which is server-UTC, so prefer passing it."""
-    if not isinstance(raw, str) or not raw.strip():
-        return None
-    try:
-        d = _date.fromisoformat(raw.strip()[:10])
-    except ValueError:
-        return None
-    today = today or _date.today()
-    if d > today or d < today - timedelta(days=366):
-        return None
-    return d.isoformat()
-
-
 def _normalize_tone(items: Any) -> list[dict]:
     out = []
     if not isinstance(items, list):
@@ -175,13 +157,6 @@ def _normalize_promise_signals(items: Any, today: _date | None = None) -> list[d
     return out
 
 
-_VALID_FITNESS_LOG_TYPES = ("food", "weight", "exercise", "macros_explicit", "substance")
-_VALID_METRIC_TYPES = ("calories", "protein")
-# Substance occurrences flip a boolean cut-table column for today (alcohol/
-# weed/vape). DailyMetric only — no Habit; the streak is derived.
-_VALID_SUBSTANCES = ("alcohol", "weed", "vape")
-
-
 def _coerce_bool(v: Any) -> bool:
     """str-or-bool → bool. Mirrors the spawns_todo coercion idiom."""
     if isinstance(v, bool):
@@ -189,118 +164,6 @@ def _coerce_bool(v: Any) -> bool:
     if isinstance(v, str):
         return v.strip().lower() == "true"
     return False
-
-
-def _coerce_float(v: Any) -> float | None:
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
-
-
-def _normalize_fitness(items: Any, today: _date | None = None) -> list[dict]:
-    """Normalize fitness_logs entries from the extractor (PR-1 fitness
-    pipeline). Each entry logs diet/body/training data → DailyMetric rows.
-    Drops malformed entries silently — never crash the extractor.
-
-    Output entry shape:
-      {log_type, raw_text, needs_estimation, metrics:[{metric_type,value,unit}],
-       weight, weight_unit, exercise_label, correction, correction_target,
-       correction_scope}
-    """
-    out = []
-    if not isinstance(items, list):
-        return out
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        lt_raw = it.get("log_type")
-        log_type = lt_raw.strip().lower() if isinstance(lt_raw, str) else ""
-        if log_type not in _VALID_FITNESS_LOG_TYPES:
-            continue
-
-        raw_text_raw = it.get("raw_text")
-        raw_text = raw_text_raw.strip()[:500] if isinstance(raw_text_raw, str) else ""
-
-        # Normalize metrics list (only for explicit/correction logs).
-        metrics: list[dict] = []
-        metrics_raw = it.get("metrics")
-        if isinstance(metrics_raw, list):
-            for m in metrics_raw:
-                if not isinstance(m, dict):
-                    continue
-                mt_raw = m.get("metric_type")
-                mt = mt_raw.strip().lower() if isinstance(mt_raw, str) else ""
-                if mt not in _VALID_METRIC_TYPES:
-                    continue
-                val = _coerce_float(m.get("value"))
-                if val is None:
-                    continue
-                unit_raw = m.get("unit")
-                unit = unit_raw.strip()[:16] if isinstance(unit_raw, str) and unit_raw.strip() else None
-                metrics.append({"metric_type": mt, "value": val, "unit": unit})
-
-        weight = _coerce_float(it.get("weight")) if log_type == "weight" else None
-        wu_raw = it.get("weight_unit")
-        weight_unit = (
-            wu_raw.strip().lower()[:8]
-            if isinstance(wu_raw, str) and wu_raw.strip()
-            else "lb"
-        ) if log_type == "weight" else None
-
-        ex_raw = it.get("exercise_label") if log_type == "exercise" else None
-        exercise_label = ex_raw.strip()[:120] if isinstance(ex_raw, str) and ex_raw.strip() else None
-
-        sub_raw = it.get("substance") if log_type == "substance" else None
-        substance = (
-            sub_raw.strip().lower()
-            if isinstance(sub_raw, str) and sub_raw.strip().lower() in _VALID_SUBSTANCES
-            else None
-        )
-
-        correction = _coerce_bool(it.get("correction"))
-        ct_raw = it.get("correction_target")
-        correction_target = (
-            ct_raw.strip().lower()
-            if isinstance(ct_raw, str)
-            and ct_raw.strip().lower() in (*_VALID_METRIC_TYPES, "weight")
-            else None
-        )
-        # item (default) = fix one earlier food; day = reset the whole day's
-        # total. "day" routes to set_cell (collapse), so anything we can't
-        # confidently read as "day" stays "item" — the safe default.
-        cs_raw = it.get("correction_scope")
-        correction_scope = (
-            cs_raw.strip().lower()
-            if isinstance(cs_raw, str) and cs_raw.strip().lower() == "day"
-            else "item"
-        )
-
-        # Per-type sanity: drop entries that carry no actionable payload.
-        if log_type in ("food", "macros_explicit") and not metrics and not (
-            log_type == "food" and _coerce_bool(it.get("needs_estimation"))
-        ) and not raw_text:
-            continue
-        if log_type == "weight" and weight is None:
-            continue
-        if log_type == "substance" and substance is None:
-            continue
-
-        out.append({
-            "log_type": log_type,
-            "raw_text": raw_text,
-            "needs_estimation": _coerce_bool(it.get("needs_estimation")),
-            "metrics": metrics,
-            "weight": weight,
-            "weight_unit": weight_unit,
-            "exercise_label": exercise_label,
-            "substance": substance,
-            "log_date": _coerce_log_date(it.get("date"), today),
-            "correction": correction,
-            "correction_target": correction_target,
-            "correction_scope": correction_scope,
-        })
-    return out
 
 
 def _normalize_reply_intent(value: Any) -> str:

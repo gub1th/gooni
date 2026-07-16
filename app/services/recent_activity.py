@@ -2,55 +2,63 @@
 
 Daniel called this out 2026-05-22 (WA seg 319 leetcode-finished turn):
 state_block tells Gooni what IS right now, but not what just happened.
-If the user closes a todo via dashboard at 5:08pm and texts "finished
+If the user closes a promise via the UI at 5:08pm and texts "finished
 leetcode" at 5:10pm, Gooni has no idea the closure already landed —
 cosine-matches active promises, misses, fires a "couldn't close it"
-hallucination.
+hallucination. Same hole exists for a run logged in the matrix, a Whoop
+sync, etc. — the model can't pull what it doesn't know happened.
 
-The fix here is read-only: pull recent updated_at across promises /
-promises / focuses / habits / notes, render as natural-language lines
-(no raw ids — Daniel's locked feedback memory), inject into state_block
-as a "[recent — last 1h]" section. The LLM can reconcile the current
-user message against actions it didn't witness.
+The fix is a read-only recency PUSH: the `[recent — last 1h]` block in the
+state block. As of the life-log Phase 3 rewrite this is a thin RENDERER over
+`activity_service.build_activity_feed` — the SAME union that powers the
+always-on activity rail — so the surface Daniel sees and the context Gooni
+reads before it answers are one stream (PRD note #397).
 
-Cheap query, defensive — each kind wrapped in try/except so one model's
-schema drift can't take down the whole block. Cap each kind so the
-section stays scannable (max ~8 lines total).
+Two deliberate narrowings vs the rail:
+  - messages are excluded — they're already in Gooni's conversation history,
+    so re-pushing them here would just be scrollback;
+  - the food trackables (calories/protein) are dropped — the food-ledger
+    section below surfaces them in richer form, and letting them in would
+    double-surface AND eat the ~8-line budget, crowding out promise events;
+  - feed lines (Whoop/LeetCode) are stripped to the EVENT ("whoop synced") —
+    the numbers stay a pull (Gooni fetches them via read tools if asked).
+
+NO raw ids in the output (Daniel's locked `feedback_alfred-voice-acks`
+memory) — verb + quoted text + age is all the LLM needs to reconcile.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 
 _DEFAULT_WINDOW_MIN = 60
-_MAX_PER_KIND = {
-    "promises": 3,
-    "notes": 2,
-}
 _HARD_LINE_CAP = 8
+# Fetched from the union; messages excluded at source so a chatty hour can't
+# starve the state-change lines we actually care about.
+_FETCH_LIMIT = 60
+# Trackables the food-ledger section already renders in richer form.
+_LEDGER_TRACKABLES = {"calories", "protein"}
+# Feed-source trackables: collapse to an event, drop the numbers (pull-on-ask).
+_FEED_SOURCES = {"whoop", "leetcode", "derived"}
 
 
-def _fmt_age(when: datetime, now: datetime) -> str:
+def _fmt_age(when: datetime | None, now: datetime) -> str:
     """Human-readable delta. Treats anything ≤60s as 'just now', then
     minutes up to 60, then 'Xh ago' beyond. Caller passes 'now' so all
     lines in one render share the same anchor — avoids the "0m ago"
     vs "1m ago" flicker across lines built ~10ms apart."""
     if when is None:
         return "recently"
-    delta = now - when
-    secs = int(delta.total_seconds())
-    if secs < 0:
-        return "just now"
+    secs = int((now - when).total_seconds())
     if secs < 60:
         return "just now"
     mins = secs // 60
     if mins < 60:
         return f"{mins}m ago"
-    hrs = mins // 60
-    return f"{hrs}h ago"
+    return f"{mins // 60}h ago"
 
 
 def _trim(text: str | None, n: int = 50) -> str:
@@ -60,89 +68,64 @@ def _trim(text: str | None, n: int = 50) -> str:
     return s[:n].rstrip() + "…"
 
 
+def _render(item: dict, now: datetime) -> str | None:
+    """Map one activity-feed item → a natural-language line, or None to skip."""
+    kind = item.get("kind")
+    age = _fmt_age(item.get("at"), now)
+    text = _trim(item.get("text"))
 
-def _recent_promises(db: Session, cutoff: datetime, now: datetime) -> list[tuple[datetime, str]]:
-    from ..db.models import Promise
+    if kind == "promise":
+        verb = item.get("verb")
+        if verb == "kept":
+            return f'promise kept: "{text}" ({age})'
+        if verb == "broken":
+            return f'promise broken: "{text}" ({age})'
+        return f'new promise: "{text}" ({age})'
 
-    try:
-        rows = (
-            db.query(
-                Promise.summary,
-                Promise.utterance,
-                Promise.state,
-                Promise.created_at,
-                Promise.resolved_at,
-                Promise.updated_at,
-            )
-            .filter(Promise.updated_at >= cutoff)
-            .order_by(Promise.updated_at.desc())
-            .limit(_MAX_PER_KIND["promises"] * 2)
-            .all()
-        )
-    except Exception as e:
-        print(f"[recent_activity] promises query failed: {e}")
-        return []
+    if kind == "note":
+        verb = "note edited" if item.get("verb") == "edited" else "new note"
+        return f'{verb}: "{text}" ({age})'
 
-    out: list[tuple[datetime, str]] = []
-    for summary, utterance, state, created_at, resolved_at, updated_at in rows:
-        text = summary or utterance or ""
-        ts = updated_at or created_at
-        if ts is None:
-            continue
-        if state == "kept":
-            line = f"promise kept: \"{_trim(text)}\" ({_fmt_age(resolved_at or ts, now)})"
-        elif state == "broken":
-            line = f"promise broken: \"{_trim(text)}\" ({_fmt_age(resolved_at or ts, now)})"
-        elif created_at and created_at >= cutoff:
-            line = f"new promise: \"{_trim(text)}\" ({_fmt_age(created_at, now)})"
-        else:
-            line = f"promise updated: \"{_trim(text)}\" ({_fmt_age(ts, now)})"
-        out.append((ts, line))
-    return out[: _MAX_PER_KIND["promises"]]
+    if kind == "trackable":
+        name = (item.get("name") or "").lower()
+        if name in _LEDGER_TRACKABLES:
+            return None  # food ledger owns these
+        src = item.get("source")
+        if src in _FEED_SOURCES:
+            return f"{src} synced ({age})"  # numbers stay a pull
+        return f"logged: {text} ({age})"
 
-
-
-
-def _recent_notes(db: Session, cutoff: datetime, now: datetime) -> list[tuple[datetime, str]]:
-    from ..db.models import Note
-
-    try:
-        rows = (
-            db.query(Note.title, Note.created_at, Note.updated_at)
-            .filter(Note.updated_at >= cutoff)
-            .order_by(Note.updated_at.desc())
-            .limit(_MAX_PER_KIND["notes"] * 2)
-            .all()
-        )
-    except Exception as e:
-        print(f"[recent_activity] notes query failed: {e}")
-        return []
-
-    out: list[tuple[datetime, str]] = []
-    for title, created_at, updated_at in rows:
-        ts = updated_at or created_at
-        if ts is None:
-            continue
-        title_str = title or "untitled"
-        verb = "new note" if (created_at and created_at >= cutoff) else "note edited"
-        out.append((ts, f"{verb}: \"{_trim(title_str)}\" ({_fmt_age(ts, now)})"))
-    return out[: _MAX_PER_KIND["notes"]]
+    return None
 
 
 def build_recent_activity_lines(
     db: Session, window_minutes: int = _DEFAULT_WINDOW_MIN
 ) -> list[str]:
     """Return up to ~8 natural-language activity lines for the past
-    `window_minutes`. Sorted newest-first. Empty list when nothing
-    happened in the window. NO raw ids in output — per Daniel's
-    `feedback_alfred-voice-acks` memory (locked 2026-05-22).
+    `window_minutes`, newest-first. Empty list when nothing happened in the
+    window. Thin renderer over the unified activity feed (messages excluded).
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     cutoff = now - timedelta(minutes=max(1, window_minutes))
 
-    combined: list[tuple[datetime, str]] = []
-    combined += _recent_promises(db, cutoff, now)
-    combined += _recent_notes(db, cutoff, now)
+    try:
+        from . import activity_service
 
-    combined.sort(key=lambda r: r[0], reverse=True)
-    return [line for _, line in combined[:_HARD_LINE_CAP]]
+        feed = activity_service.build_activity_feed(
+            db, before=None, limit=_FETCH_LIMIT, exclude_kinds={"message"}
+        )
+    except Exception as e:  # pragma: no cover — defensive; state block must not die
+        print(f"[recent_activity] activity feed failed: {e}")
+        return []
+
+    lines: list[str] = []
+    for item in feed:  # feed is newest-first
+        at = item.get("at")
+        if at is None or at < cutoff:
+            break
+        line = _render(item, now)
+        if line:
+            lines.append(line)
+        if len(lines) >= _HARD_LINE_CAP:
+            break
+    return lines

@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { FONT, frost } from "../../ui";
+import { RAIL_W } from "./ActivityRail";
 import {
   createStickyNote,
   deleteNote,
@@ -80,9 +81,13 @@ export const StickyLayer = forwardRef<
     [vp.h],
   );
 
+  // Right edge reserves the always-on ActivityRail strip (RAIL_W) — the log is
+  // a persistent reading surface, so stickies stay to its left the same way
+  // they stay off the centre box + left nav. Rail visibility is coupled to
+  // sticky visibility (same hidden gate in AmbientHome), so reserve always.
   const clampVp = useCallback(
     (x: number, y: number, w: number, h: number): [number, number] => [
-      Math.max(M, Math.min(vp.w - w - M, x)),
+      Math.max(M, Math.min(vp.w - RAIL_W - w - M, x)),
       Math.max(TOP, Math.min(vp.h - h - M, y)),
     ],
     [vp.w, vp.h],
@@ -286,7 +291,7 @@ export const StickyLayer = forwardRef<
   ];
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 5, pointerEvents: "none", display: hidden ? "none" : "block" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 7, pointerEvents: "none", display: hidden ? "none" : "block" }}>
       {items.map((s) => {
         const [x, y] = posOf(s);
         const dragging = dragKey === s.key;

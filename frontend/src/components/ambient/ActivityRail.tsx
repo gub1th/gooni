@@ -13,7 +13,7 @@ import { TurnTracePanel } from "./TurnTracePanel";
 // affordance (→ TurnTracePanel) ported from the recent-chat ribbon this rail
 // replaces — one log surface, not three.
 
-const RAIL_W = 300;
+export const RAIL_W = 300;
 const POLL_MS = 20_000;
 const PAGE = 40;
 const OLDER_PAGE = 30;

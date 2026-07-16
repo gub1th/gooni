@@ -4,8 +4,9 @@ Distinct from test_extract_signals.py, which only checks that extraction
 *emits* the right signals. This guards the next hop: that dispatch actually
 routes each signal type to its handler and a row lands. Born from the bug
 where the orchestrator forwarded a hand-picked SUBSET of signals to dispatch
-and silently dropped `fitness_logs` — extraction was fine, routing wasn't, so
-no DailyMetric ever wrote.
+and silently dropped a whole signal type — extraction was fine, routing
+wasn't, so nothing wrote. (Trackable logging is no longer a routed signal —
+it's the explicit LogTrackableEntryTool; covered at the bottom.)
 
 No LLM calls: signals are hand-built so the test is fast + deterministic.
 Uses a throwaway in-file SQLite DB with the full current schema.
@@ -33,7 +34,7 @@ _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
 
 from app.db.database import SessionLocal, engine  # noqa: E402
-from app.db.models import Base, Promise, TrackableEntry  # noqa: E402
+from app.db.models import Base, Promise  # noqa: E402
 from app.services import intent_router  # noqa: E402
 
 Base.metadata.create_all(bind=engine)
@@ -47,7 +48,6 @@ def _empty_signals() -> dict:
         "tone_corrections": [],
         "feature_requests": [],
         "promises": [],
-        "fitness_logs": [],
         "reply_intent": "acknowledge",
         "memories": [],
     }
@@ -56,69 +56,6 @@ def _empty_signals() -> dict:
 def main() -> int:
     db = SessionLocal()
     fails: list[str] = []
-
-    # ── fitness_logs → DailyMetric rows (the regression that started this) ──
-    sig = _empty_signals()
-    sig["fitness_logs"] = [
-        {"log_type": "exercise", "raw_text": "legs day", "needs_estimation": False,
-         "metrics": [], "exercise_label": "gym — legs", "correction": False},
-        {"log_type": "macros_explicit", "raw_text": "2100 cal 140g protein",
-         "needs_estimation": False, "correction": False,
-         "metrics": [{"metric_type": "calories", "value": 2100, "unit": "kcal"},
-                     {"metric_type": "protein", "value": 140, "unit": "g"}]},
-    ]
-    routed = intent_router.dispatch({**sig, "memories": []},
-                                    intent_router.RouterContext(db=db))
-    n_metrics = db.query(TrackableEntry).count()
-    if not routed.captured_metrics:
-        fails.append("fitness: routed.captured_metrics empty")
-    if n_metrics < 3:  # exercise(1) + calories(1) + protein(1)
-        fails.append(f"fitness: expected >=3 TrackableEntry rows, got {n_metrics}")
-    # Slice 2 AC: the calorie log lands as a TrackableEntry ON the calorie
-    # Trackable definition, not a free-floating row.
-    from app.services import trackable_service as _ts
-    cal_t = _ts.get_by_name(db, "calories")
-    cal_entries = (
-        db.query(TrackableEntry)
-        .filter(TrackableEntry.trackable_id == (cal_t.id if cal_t else -1))
-        .count()
-    )
-    if not cal_t or cal_entries < 1:
-        fails.append("fitness: no TrackableEntry on the calories Trackable")
-    print(f"[fitness] captured_metrics={len(routed.captured_metrics)} "
-          f"TrackableEntry_rows={n_metrics} cal_entries={cal_entries}")
-
-    # ── substance log → boolean cut-table cell (DailyMetric, no Habit) ──
-    sig = _empty_signals()
-    sig["fitness_logs"] = [
-        {"log_type": "substance", "substance": "weed", "raw_text": "smoked a bit"},
-    ]
-    routed = intent_router.dispatch({**sig, "memories": []},
-                                    intent_router.RouterContext(db=db))
-    from datetime import date as _date
-    from app.services import daily_metric_service as _dms
-    ct = _dms.cut_table(db, _date.today(), _date.today())
-    if not any(m.get("log_type") == "substance" for m in routed.captured_metrics):
-        fails.append("substance: routed.captured_metrics missing substance")
-    if not (ct and ct[0].get("weed") == 1.0):
-        fails.append(f"substance: expected weed=1.0 in cut table, got {ct}")
-    print(f"[substance] weed_cell={ct[0].get('weed') if ct else None}")
-
-    # ── backdating: log_date routes to that day, not today ──
-    from datetime import timedelta as _td
-    yest = (_date.today() - _td(days=1)).isoformat()
-    sig = _empty_signals()
-    sig["fitness_logs"] = [
-        {"log_type": "weight", "weight": 70.8, "weight_unit": "kg", "log_date": yest},
-    ]
-    intent_router.dispatch({**sig, "memories": []},
-                           intent_router.RouterContext(db=db))
-    ct_by_day = {r["date"]: r for r in _dms.cut_table(db, _date.today() - _td(days=2), _date.today())}
-    if not (ct_by_day.get(yest) and ct_by_day[yest].get("weight") == 70.8):
-        fails.append(f"backdate: expected weight 70.8 on {yest}, got {ct_by_day.get(yest)}")
-    if ct_by_day.get(_date.today().isoformat(), {}).get("weight") is not None:
-        fails.append("backdate: weight leaked onto today")
-    print(f"[backdate] {yest} weight={ct_by_day.get(yest, {}).get('weight')} (today not touched)")
 
     # ── promises: unified emit (slice 1) + glow/promote (slice 3) ──
     # Hand-built signals — no LLM. Embedding calls fail gracefully to None
@@ -254,8 +191,10 @@ def main() -> int:
     got = piv[0]["value"] if piv else None
     if not (isinstance(got, dict) and got.get("score") == 87):
         fails.append(f"trackable json: pivot value wrong: {got}")
-    # additive numeric fold
-    cals = _ts2.get_by_name(db, "calories")
+    # additive numeric fold — create the calories system trackable first
+    # (no fitness router path auto-creates it anymore)
+    from app.services import daily_metric_service as _dms
+    cals = _dms._trackable(db, "calories")
     _ts2.log_entry(db, cals, day=_date2.today(), value_numeric=300, source="manual")
     _ts2.log_entry(db, cals, day=_date2.today(), value_numeric=200, source="manual")
     piv2 = _ts2.pivot(db, cals, days=1)
@@ -263,6 +202,27 @@ def main() -> int:
     if total_today is None or total_today < 500:
         fails.append(f"trackable sum-agg: expected >=500, got {total_today}")
     print(f"[trackable] json_pivot={got} cal_today={total_today}")
+
+    # ── LogTrackableEntryTool: the explicit chat write path that replaced the
+    #    fitness auto-writer. Deterministic — no LLM. ──
+    from app.tools.trackable_tools import LogTrackableEntryTool
+    _tool = LogTrackableEntryTool()
+    # WHOLE-BASIS: the tool SETS the day (replace), it does not add. calories
+    # already has 500 logged above; logging 400 collapses today to 400.
+    res = _tool.execute(db=db, name="calories", value=400)
+    after2 = (_ts2.pivot(db, "calories", days=1) or [{}])[0].get("value")
+    if "set" not in res.lower() or after2 != 400:
+        fails.append(f"log tool whole-basis: expected today=400, got {after2} ({res!r})")
+    # boolean SYSTEM trackable auto-creates + logs true (mobile-capture parity)
+    exres = _tool.execute(db=db, name="exercise", boolean=True, label="legs")
+    expiv = _ts2.pivot(db, "exercise", days=1)
+    if "logged" not in exres.lower() or not (expiv and expiv[0]["value"]):
+        fails.append(f"log tool boolean: exercise not logged ({exres!r}, {expiv})")
+    # unknown NON-system name → honest miss, no crash, no row
+    miss = _tool.execute(db=db, name="totally_made_up_xyz", value=1)
+    if "no trackable" not in miss.lower():
+        fails.append(f"log tool miss: expected 'no trackable', got {miss!r}")
+    print(f"[log tool] numeric={res!r} boolean={exres!r} miss_ok={'no trackable' in miss.lower()}")
 
     db.close()
     os.unlink(_tmp.name)

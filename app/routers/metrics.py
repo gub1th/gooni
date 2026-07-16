@@ -21,8 +21,8 @@ _TEXT_CELL_TYPES = ("exercise", "note")
 @router.post("/metrics")
 def metric_log(body: dict, db: Session = Depends(get_db)):
     """Manual / test log. Body: {metric_type, value, unit?, date?, notes?}.
-    The live logging path is the chat fitness handler — this endpoint is
-    for direct entry + verification."""
+    The live logging paths are the web matrix + the chat log_trackable_entry
+    tool — this endpoint is for direct entry + verification."""
     from ..services import daily_metric_service
     metric_type = (body.get("metric_type") or "").strip().lower()
     if metric_type not in _VALID_METRIC_TYPES:

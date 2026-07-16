@@ -78,22 +78,6 @@ Return JSON shaped exactly like this — no preamble, no markdown fence:
       "match":          "<for complete/break — substring identifying the existing promise Daniel is closing or cancelling>"
     }}
   ],
-  "fitness_logs": [
-    {{
-      "log_type":         "food|weight|exercise|macros_explicit|substance",
-      "raw_text":         "<verbatim slice Daniel logged, e.g. 'chicken rice kimchi, 2 oranges, yogurt w/ blueberries'>",
-      "needs_estimation": "true|false — true ONLY for log_type=food when NO calorie/protein numbers were given",
-      "metrics":          [{{"metric_type": "calories|protein", "value": 2100, "unit": "kcal|g"}}],
-      "weight":           "<number, for log_type=weight only — e.g. 175>",
-      "weight_unit":      "lb|kg",
-      "exercise_label":   "<for log_type=exercise only — e.g. 'chest and tris'>",
-      "substance":        "<for log_type=substance only — alcohol|weed|vape>",
-      "date":             "<YYYY-MM-DD if Daniel names a day; omit/null when he means today>",
-      "correction":       "true|false — true when Daniel is amending an EARLIER log this day",
-      "correction_target":"calories|protein|weight — which metric the correction overwrites",
-      "correction_scope": "item|day — 'item' fixes one earlier food (default); 'day' RESETS the whole day's total to these numbers"
-    }}
-  ],
   "reply_intent": "answer|acknowledge|task_only|no_reply",
   "memories": [
     {{
@@ -333,94 +317,6 @@ Emit them ALL:
 - Empty when nothing commitment-shaped fires. Passive dumps, questions,
   journal entries, groceries lists → [].
 
-fitness_logs:
-- Daniel logging diet / body / training data so Gooni can keep his cut
-  table. These create TrackableEntry rows in real time — distinct
-  from promises (commitments).
-
-  *** HARD GATE — APPLY FIRST ***
-  Questions about food/body ("how many calories in X?", "what's my protein
-  today?", "should I eat more?") → emit [] for fitness_logs. Asking ≠
-  logging. The reply step answers; this field stays empty.
-
-LOG TYPES — pick per entry:
-- food — Daniel names what he ate WITHOUT explicit numbers. Set
-  needs_estimation=true, leave metrics=[]. The handler estimates macros.
-    "chicken rice kimchi, 2 oranges, yogurt w/ blueberries"
-      → {{log_type:"food", raw_text:"chicken rice kimchi, 2 oranges, yogurt w/ blueberries", needs_estimation:true, metrics:[]}}
-    "had a protein shake and a banana" → food, needs_estimation:true
-- macros_explicit — Daniel GIVES the numbers. needs_estimation=false, fill
-  metrics[] directly (no estimation call).
-    "2100 cal, 140g protein"
-      → {{log_type:"macros_explicit", needs_estimation:false,
-          metrics:[{{metric_type:"calories",value:2100,unit:"kcal"}},
-                   {{metric_type:"protein",value:140,unit:"g"}}]}}
-    "just 850 calories so far" → macros_explicit, metrics:[{{calories,850}}]
-- weight — a bodyweight reading. Fill `weight` + `weight_unit` (default lb
-  if Daniel gave a bare number that's plausibly bodyweight).
-    "175 this morning" → {{log_type:"weight", weight:175, weight_unit:"lb"}}
-    "weighed in at 79.4kg" → {{log_type:"weight", weight:79.4, weight_unit:"kg"}}
-- exercise — ANY training happened: gym (push/pull/legs/upper/etc.), a
-  sport (tennis, soccer), or cardio (run, bike, swim). One log_type for all
-  of it. Fill exercise_label with WHAT it was — name the activity, and keep
-  any sub-detail (the gym split / distance). The label is how Daniel later
-  sees "what exercise was it", so make it self-describing.
-    "gym today, chest and tris" → {{log_type:"exercise", exercise_label:"gym — chest and tris"}}
-    "did legs at the gym" → {{log_type:"exercise", exercise_label:"gym — legs"}}
-    "pull day" → {{log_type:"exercise", exercise_label:"gym — pull"}}
-    "played tennis" → {{log_type:"exercise", exercise_label:"tennis"}}
-    "ran 5k this morning" → {{log_type:"exercise", exercise_label:"5k run"}}
-- substance — Daniel used alcohol, weed, or a vape/nicotine. Map to ONE of:
-  alcohol|weed|vape. Read INTENT, not keywords:
-  • alcohol = ALCOHOLIC drinks ONLY (beer/wine/liquor/cocktails/"drinks" out).
-    Water, juice, coffee, soda, energy drinks, protein shakes are NOT alcohol —
-    "drank" alone means nothing; it's WHAT he drank.
-  • weed = cannabis. "smoked salmon"/"smoked brisket" is FOOD, not weed.
-  • vape = nicotine vape/pen/juul. Water "vapor" is not a vape.
-  Slang counts:
-    "smoked last night" / "blazed" / "hit the j" → {{log_type:"substance", substance:"weed"}}
-    "had a few beers" / "got drunk" / "hungover af" → {{log_type:"substance", substance:"alcohol"}}
-    "hit the pen" / "juuled" / "vaped a bunch" → {{log_type:"substance", substance:"vape"}}
-  NOT substance logs (emit nothing for these):
-    "drank a ton of water today", "had a coffee", "smoked salmon for lunch"
-  POSITIVE occurrence only — DON'T log abstinence ("stayed sober", "no weed
-  today"); the absence is the default empty cell. One entry per substance.
-
-DATES — today is {today}. If Daniel names a day for a fitness log, resolve it
-  to an absolute YYYY-MM-DD in `date`. If he says nothing about when, OMIT
-  `date` (defaults to today — the normal case). Never use a future date.
-    "weighed 70.80 yesterday" → {{log_type:"weight", weight:70.80, date:"<today minus 1 day>"}}
-    "smoked on tuesday" → {{log_type:"substance", substance:"weed", date:"<that tuesday>"}}
-    "had 2100 cal" → {{log_type:"macros_explicit", ...}}  (no date → today)
-
-CORRECTIONS — Daniel amends a log from the same day. TWO scopes:
-
-  • correction_scope="item" (DEFAULT) — fixes ONE earlier food. Overwrites the
-    most-recent matching row. Use when he names/refers to a single item.
-    "actually that chicken was more like 900 cal"
-      → {{log_type:"macros_explicit", correction:true, correction_target:"calories",
-          correction_scope:"item", metrics:[{{metric_type:"calories",value:900,unit:"kcal"}}]}}
-
-  • correction_scope="day" — RESETS the WHOLE day's total to the numbers given.
-    Use when he restates the day total, not a single food. Telltale: he gives a
-    cal/protein PAIR as "the total", or references what the running number should
-    be. The handler COLLAPSES the day to exactly these numbers (no compounding).
-    "change to 1,740 / 127g"  (restating the day, not one meal)
-      → {{log_type:"macros_explicit", correction:true, correction_scope:"day",
-          metrics:[{{metric_type:"calories",value:1740,unit:"kcal"}},
-                   {{metric_type:"protein",value:127,unit:"g"}}]}}
-    "the total should be 1900", "you're at 1900 not 2600", "make today 1740"
-      → correction_scope:"day"
-  When unsure between the two, prefer "item" — "day" wipes the day, so reserve it
-  for clear whole-day restatements. (A regex guard also force-flags the obvious
-  "change to N / Mg" phrasings as day, so you don't have to catch every variant.)
-
-- A single message can carry MULTIPLE fitness logs (food + weight + gym) —
-  emit each as its own entry.
-- reply_intent for pure fitness-log messages should be "acknowledge" (a
-  brief "noted, sir" ack is all Daniel wants; he's logging, not asking).
-- Empty when the text carries no diet/body/training data.
-
 reply_intent:
 - One-of: "answer" | "acknowledge" | "task_only" | "no_reply".
 - Tells the orchestrator how much reply the user actually wants/needs.
@@ -494,17 +390,5 @@ memories:
   than emitting a near-duplicate (the reconcile step will dedupe).
 
 If no signals across all fields, return all-empty arrays.
-
-JSON:"""
-
-
-# Tier-2 macro estimation — fired by the fitness handler ONLY when an
-# extracted food log has needs_estimation=true (no numbers given). Kept
-# tiny + temperature 0 so it's a sub-second, deterministic-ish add-on.
-_MACRO_ESTIMATE_PROMPT = """Estimate total calories and grams of protein for what Daniel ate. Use realistic typical portions unless he specified amounts. Return ONLY JSON, no prose, no fence:
-
-{{"calories": <int>, "protein_g": <int>}}
-
-Food: "{food}"
 
 JSON:"""
