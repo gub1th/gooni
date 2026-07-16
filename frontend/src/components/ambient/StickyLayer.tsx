@@ -1,7 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { FONT, frost } from "../../ui";
-import { RAIL_W } from "./ActivityRail";
 import {
   createStickyNote,
   deleteNote,
@@ -81,13 +80,13 @@ export const StickyLayer = forwardRef<
     [vp.h],
   );
 
-  // Right edge reserves the always-on ActivityRail strip (RAIL_W) — the log is
-  // a persistent reading surface, so stickies stay to its left the same way
-  // they stay off the centre box + left nav. Rail visibility is coupled to
-  // sticky visibility (same hidden gate in AmbientHome), so reserve always.
+  // Clamp a card box into the viewport. The activity log moved out of the right
+  // sidebar (it's now a centered block under the wave), so the full right edge is
+  // free for stickies again — only the centre box + left nav stay reserved (via
+  // resolve/navMinX below).
   const clampVp = useCallback(
     (x: number, y: number, w: number, h: number): [number, number] => [
-      Math.max(M, Math.min(vp.w - RAIL_W - w - M, x)),
+      Math.max(M, Math.min(vp.w - w - M, x)),
       Math.max(TOP, Math.min(vp.h - h - M, y)),
     ],
     [vp.w, vp.h],

@@ -4,16 +4,16 @@ import { FONT } from "../../ui";
 import { fetchActivity, type ActivityItem } from "../../services/api";
 import { TurnTracePanel } from "./TurnTracePanel";
 
-// The always-on activity rail — the unified "true log" (PRD note #397) rendered
-// down the right edge: chats (every channel) + notes + promise events +
-// trackables (Whoop/LeetCode ride in as trackables), newest at the top. Scroll
-// down = back in time (infinite, paginated via the `before` cursor); a 20s poll
-// prepends anything new. Bare text on the void (no frost) with a hairline
-// separator + soft top/bottom fade. Assistant turns keep the per-turn audit
-// affordance (→ TurnTracePanel) ported from the recent-chat ribbon this rail
-// replaces — one log surface, not three.
+// The always-on activity log — the unified "true log" (PRD note #397): chats
+// (every channel) + notes + promise events + trackables (Whoop/LeetCode ride in
+// as trackables), newest at the top. Lives as a compact centered block UNDER the
+// wave + trackable pill (not a right sidebar anymore). Shows ~4 rows at rest and
+// sits DIMMED on the void; hover brightens it to full. Scroll down within the
+// window = back in time (infinite, paginated via the `before` cursor); a 20s
+// poll prepends anything new. Bare text on the void (no frost) with a soft
+// top/bottom fade. Assistant turns keep the per-turn audit affordance (→
+// TurnTracePanel) — one log surface, not three.
 
-export const RAIL_W = 300;
 const POLL_MS = 20_000;
 const PAGE = 40;
 const OLDER_PAGE = 30;
@@ -72,7 +72,7 @@ function Row({ item, onAudit }: { item: ActivityItem; onAudit: () => void }) {
       </div>
       <div style={{
         fontSize: 12.5, lineHeight: 1.45, color: "rgba(244,245,244,0.82)",
-        display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden",
+        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
       }}>
         {item.text || "…"}
       </div>
@@ -94,10 +94,16 @@ function Row({ item, onAudit }: { item: ActivityItem; onAudit: () => void }) {
   );
 }
 
-export function ActivityRail({ hidden }: { hidden?: boolean }) {
+// Anchor = where the block hangs: centered on `cx`, starting at `top` (below the
+// pills), `width` matched to the wave box. Owned by AmbientHome so the log tracks
+// the wave geometry on resize.
+export type RailAnchor = { cx: number; top: number; width: number };
+
+export function ActivityRail({ hidden, anchor }: { hidden?: boolean; anchor: RailAnchor }) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [traceId, setTraceId] = useState<number | null>(null);
+  const [hovered, setHovered] = useState(false);
   const loadingOlder = useRef(false);
   const seen = useRef<Set<string>>(new Set());
 
@@ -162,24 +168,30 @@ export function ActivityRail({ hidden }: { hidden?: boolean }) {
       <div
         data-activity-rail
         onScroll={onScroll}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         style={{
-          position: "fixed", top: 0, right: 0, bottom: 0, width: RAIL_W, zIndex: 6,
+          position: "absolute",
+          left: anchor.cx - anchor.width / 2,
+          top: anchor.top,
+          width: anchor.width,
+          maxHeight: `min(280px, calc(100vh - ${anchor.top + 40}px))`,
+          zIndex: 3,
           fontFamily: FONT, overflowY: "auto", overflowX: "hidden",
-          padding: "54px 18px 40px 18px",
-          borderLeft: "1px solid rgba(244,245,244,0.06)",
-          maskImage: "linear-gradient(to bottom, transparent 0, #000 46px, #000 calc(100% - 24px), transparent 100%)",
-          WebkitMaskImage: "linear-gradient(to bottom, transparent 0, #000 46px, #000 calc(100% - 24px), transparent 100%)",
+          padding: "12px 4px 20px 4px",
+          // dim at rest, full on hover (per-row alpha still applies underneath)
+          opacity: hovered ? 1 : 0.4,
+          transition: "opacity 220ms ease",
+          maskImage: "linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 20px), transparent 100%)",
+          WebkitMaskImage: "linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 20px), transparent 100%)",
         }}
       >
-        <div style={{ fontSize: 10, letterSpacing: 1.5, textTransform: "uppercase", color: "rgba(244,245,244,0.28)", marginBottom: 14 }}>
-          log
-        </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {items.map((it) => (
             <Row key={it.key} item={it} onAudit={() => it.message_id && setTraceId(it.message_id)} />
           ))}
           {items.length === 0 && (
-            <div style={{ fontSize: 12, color: "rgba(244,245,244,0.3)" }}>nothing yet</div>
+            <div style={{ fontSize: 12, color: "rgba(244,245,244,0.3)", textAlign: "center" }}>nothing yet</div>
           )}
           {!hasMore && items.length > 0 && (
             <div style={{ fontSize: 10.5, color: "rgba(244,245,244,0.22)", textAlign: "center", paddingTop: 6 }}>
