@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.201.0 — 2026-07-16 (minor)
+
+- feat(trackables): explicit log tool replaces fitness auto-writer (#422)
+
 ## 0.200.0 — 2026-07-16 (minor)
 
 - feat(home): unified activity rail — one log for chats/notes/promises/trackables (#421)
