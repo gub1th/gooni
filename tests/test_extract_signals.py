@@ -88,6 +88,18 @@ CASES = [
         "prev": "understood, sir.",
         "expect": {"promise_max": 0, "feature_max": 0},
     },
+    {
+        # Guards the killed prefilter: first-turn (prev=None) commitment whose
+        # words ("promise", "cut", "till") matched NO trigger phrase — used to
+        # be dropped before the LLM ran. Must now extract a due-bearing create.
+        "label": "PROMISE_FIRSTTURN",
+        "text": "i promise to cut till next month",
+        "prev": None,
+        "expect": {
+            "promise_min": 1, "feature_max": 0,
+            "promise_cadence": "once", "promise_has_due": True,
+        },
+    },
 ]
 
 
