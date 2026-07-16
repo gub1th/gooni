@@ -5,7 +5,6 @@ extract_signals, reconcile_candidate.
 """
 
 import json
-import re
 from datetime import date as _date
 from typing import Any
 
@@ -18,39 +17,6 @@ from .normalizers import (
     _normalize_promise_signals,
     _normalize_reply_intent,
     _normalize_tone,
-)
-
-
-# Regex pre-filter for extract_signals. If the text has NONE of these
-# trigger phrases, we skip the LLM call entirely (returns empty) — most
-# pure-capture notes ("groceries: milk eggs", "kitchen sink") carry no
-# signal but still cost ~$0.0003/note today. Conservative trigger set:
-# only phrases that overwhelmingly correlate with at least one signal
-# type. False negatives (signal missed because phrasing didn't trip the
-# regex) re-fire on the next save once the trigger landed in the text.
-_PREFILTER_TRIGGERS = re.compile(
-    r"\b("
-    r"need to|needs to|want to|wanna|gotta|"
-    r"should(?!\s+have)|must|have to|"
-    r"imma|i'?ll|i am going to|i'?m going to|going to|"
-    r"remind|reminder|"
-    r"prefer|like better|hate|"
-    r"feature|broken|bug|fix this|"
-    r"track|log|"
-    r"feedback|annoying|too\s+\w+|don'?t\s+\w+|"
-    r"todo|to-?do|"
-    r"add (a|to|that)|save (this|a)|"
-    r"call|text|email|message|book|schedule|"
-    # Fitness logging on note-save: chat surfaces bypass the prefilter
-    # entirely (prev_assistant is set), so this only guards notes. Bare
-    # weight ("175 this morning") may still slip through with no trigger
-    # word — acceptable; chat is the primary logging surface.
-    r"cal|cals|calorie|protein|kcal|macro|"
-    r"gym|workout|lifted|ran|run|cardio|"
-    r"ate|eating|breakfast|lunch|dinner|snack|meal|"
-    r"weigh|\d+\s*g\b|\d+\s*lbs?\b|\d+\s*kg\b"
-    r")\b",
-    re.IGNORECASE,
 )
 
 
@@ -78,12 +44,6 @@ def extract_signals(
     ("weighed 70.8 yesterday") in the prompt AND the future-clamp on
     fitness log_dates. Falls back to date.today() when None — but that's
     server-UTC, so DB-backed callers should always pass it.
-
-    Cost optimization (phase 4): regex pre-filter skips the LLM entirely
-    when text contains no signal-trigger phrases. Pure-capture text
-    ("groceries: milk eggs") returns empty without burning an API call.
-    Chat surfaces bypass the prefilter when prev_assistant is set — tone
-    corrections often phrased as "less of that" without trigger words.
     """
     empty = {
         "tone_corrections": [],
@@ -93,12 +53,6 @@ def extract_signals(
         "memories": [],
     }
     if not text or not text.strip():
-        return empty
-
-    # Prefilter on note saves only. Chat turns always run extraction —
-    # tone corrections ("less of that", "be terser") often lack trigger
-    # phrases but are critical to capture.
-    if prev_assistant is None and not _PREFILTER_TRIGGERS.search(text):
         return empty
 
     today_d = today or _date.today()
