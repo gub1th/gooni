@@ -163,22 +163,19 @@ class TraceBuilder:
     def extracted_signals(self, message: str, signals: dict) -> None:
         """All signal types from extract_signals, in one step so the reviewer
         rates the extractor as a unit. Covers tone/feature/memory AND the
-        router-routed signals (promises, todos, fitness, done) — without these
-        a dropped promise/fitness log is invisible in the eval UI (the exact
-        blind spot that hid the prod fitness-capture failures).
+        router-routed promise signals — without these a dropped promise is
+        invisible in the eval UI.
         """
         tone = signals.get("tone_corrections") or []
         features = signals.get("feature_requests") or []
         memories = signals.get("memories") or []
         promises = signals.get("promises") or []
-        fitness = signals.get("fitness_logs") or []
         reply_intent = signals.get("reply_intent")
         counts = {
             "tone": len(tone),
             "feature": len(features),
             "memory": len(memories),
             "promise": len(promises),
-            "fitness": len(fitness),
         }
         parts = [f"{n} {name}" for name, n in counts.items() if n]
         label = "Extracted signals: " + (", ".join(parts) if parts else "none")
@@ -191,7 +188,6 @@ class TraceBuilder:
                 "feature_requests": features,
                 "memory_candidates": memories,
                 "promises": promises,
-                "fitness_logs": fitness,
                 "reply_intent": reply_intent,
             },
             meta={f"{name}_count": n for name, n in counts.items()},

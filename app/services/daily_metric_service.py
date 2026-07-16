@@ -6,8 +6,10 @@ protein, last-wins weight/substances, exercise presence + label, freeform
 day notes, the correction flows, and the cut-table pivot shape.
 
 Public function signatures + return shapes are unchanged from the
-DailyMetric era, so the chat fitness handler, /metrics routes, state_block
-food ledger, and the CutTableSection FE all keep working. Storage mapping:
+DailyMetric era, so the /metrics routes, state_block food ledger, and the
+CutTableSection FE all keep working. (The chat fitness handler that used to
+write through here is gone — chat logging is the log_trackable_entry tool,
+which writes trackable_service directly.) Storage mapping:
 
   metric_type      → Trackable (by name; seeded in the migration)
   value            → value_numeric (calories/protein/weight)

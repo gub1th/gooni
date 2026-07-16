@@ -31,8 +31,9 @@ _CREATE_TOOL_KINDS: dict[str, str] = {
     "add_note": "Note",
     "request_feature": "Note",
     "create_calendar_event": "CalendarEvent",
+    "log_trackable_entry": "TrackableEntry",  # explicit log tool (fitness auto-writer cut)
 }
-_ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise", "TrackableEntry")
+_ROUTER_CREATED_KINDS: tuple[str, ...] = ("Promise",)
 
 
 def _build_object_kinds_block() -> str:
@@ -127,7 +128,6 @@ def _build_ack(routed: "RouterResult") -> str | None:
     completed_promises = routed.completed_promises
     broken_promises = routed.broken_promises
     failed_promise_actions = routed.failed_promise_actions
-    captured_metrics = routed.captured_metrics
 
     def _trim(s: str, n: int = 60) -> str:
         s = (s or "").strip()
@@ -258,63 +258,9 @@ def _build_ack(routed: "RouterResult") -> str | None:
             # silent. Don't claim Gooni "tried" — be honest about the miss.
             parts.append(f"couldn't {verb} \"{match}\" — no match")
 
-    # PR-1 fitness ack. Diet logs render the running daily total (Daniel
-    # wants to know where he stands — the ONE place a number belongs in the
-    # ack). Weight + exercise get their own terse phrasing. A single message
-    # can carry all three (food + weight + gym).
-    captured_metrics = captured_metrics or []
-    if captured_metrics:
-        def _fmt_cal(c) -> str:
-            try:
-                return f"{int(round(float(c))):,}"
-            except (TypeError, ValueError):
-                return "0"
-
-        diet = [m for m in captured_metrics if m.get("log_type") in ("food", "macros_explicit")]
-        weight = next((m for m in captured_metrics if m.get("log_type") == "weight"), None)
-        exercise = next((m for m in captured_metrics if m.get("log_type") == "exercise"), None)
-
-        if diet:
-            last = diet[-1]
-            cal = _fmt_cal(last.get("running_calories", 0))
-            prot = int(round(float(last.get("running_protein", 0) or 0)))
-            corrected = any(m.get("correction") for m in diet)
-            # Name the item(s) just logged so a dropped/misvalued food is
-            # visible in the ack rather than hidden inside the total (conv
-            # #1398 orange silently vanished). Additive logs get a "+cal"
-            # delta; corrections keep the terser "fixed — total" phrasing.
-            item_bits: list[str] = []
-            for m in diet:
-                label = _trim(m.get("item_label") or "", 32)
-                ic = m.get("item_calories")
-                if not label:
-                    continue
-                item_bits.append(f"{label} +{_fmt_cal(ic)} cal" if ic else label)
-            if not corrected and item_bits:
-                shown = ", ".join(item_bits[:3])
-                if len(item_bits) > 3:
-                    shown += f", +{len(item_bits) - 3} more"
-                parts.append(f"noted, sir — {shown}. day so far: {cal} cal, {prot}g.")
-            else:
-                lead = "fixed — " if corrected else "noted, sir. "
-                parts.append(f"{lead}{cal} cal, {prot}g so far today.")
-        if weight is not None:
-            val = weight.get("value")
-            unit = weight.get("unit") or "lb"
-            try:
-                vtxt = f"{float(val):g}"
-            except (TypeError, ValueError):
-                vtxt = str(val)
-            parts.append(f"{vtxt} {unit} logged, sir.")
-        if exercise is not None:
-            label = _trim(exercise.get("exercise_label") or "")
-            parts.append(f"trained, sir — {label}." if label else "trained, sir.")
-        substances = [m.get("substance") for m in captured_metrics if m.get("log_type") == "substance"]
-        substances = [s for s in dict.fromkeys(substances) if s]  # dedupe, keep order
-        if substances:
-            # Terse, named (anti-hallucination: confirm the specific capture).
-            # Persona adds any said-vs-done jab; the ack just marks it down.
-            parts.append(f"marked down — {', '.join(substances)}, sir.")
+    # NB: fitness is no longer a router-captured signal — trackable logging
+    # is an explicit log_trackable_entry tool call, so its "logged X" ack is
+    # produced by the LLM reply path (backed by the tool call), not here.
 
     if not parts:
         return None
@@ -600,7 +546,6 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
     completed_promises = routed.completed_promises
     broken_promises = routed.broken_promises
     failed_promise_actions = routed.failed_promise_actions
-    captured_metrics = routed.captured_metrics
 
     lines: list[str] = []
     if tone_rules:
@@ -695,29 +640,9 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
                 f"- Promise {verb} ATTEMPTED but NO MATCH for: \"{match}\". "
                 "Acknowledge the miss honestly."
             )
-    # PR-1 fitness metric surfacing. The ack stub already told Daniel the
-    # running total — these lines just license the LLM to reference it
-    # without re-announcing the log.
-    for m in (captured_metrics or [])[:4]:
-        lt = m.get("log_type")
-        if lt in ("food", "macros_explicit"):
-            cal = m.get("running_calories")
-            prot = m.get("running_protein")
-            verb = "corrected" if m.get("correction") else "logged"
-            label = (m.get("item_label") or "")[:40]
-            ic = m.get("item_calories")
-            item_tag = f" [{label}{f' +{ic:g} cal' if ic else ''}]" if label else ""
-            lines.append(
-                f"- TrackableEntry {verb} (diet){item_tag} — running today: "
-                f"{cal} cal, {prot}g"
-            )
-        elif lt == "weight":
-            lines.append(f"- TrackableEntry logged: weight {m.get('value')}{m.get('unit') or ''}")
-        elif lt == "exercise":
-            label = m.get("exercise_label") or ""
-            lines.append(f"- TrackableEntry logged: exercise \"{label}\"")
-        elif lt == "substance":
-            lines.append(f"- TrackableEntry logged: {m.get('substance')} = true today (cut-table boolean)")
+    # NB: fitness/trackable logging is a tool call now (log_trackable_entry),
+    # not a router capture — the tool result already tells the LLM what
+    # landed, so there's nothing to surface here.
     if not lines:
         return ""
     return (

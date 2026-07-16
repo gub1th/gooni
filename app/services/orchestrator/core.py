@@ -81,8 +81,7 @@ something — NOT asking. Rapid-fire bursts and mixed-topic walls live here.
     sire." / "on it, sir."
   → Do NOT give advice, organize his thoughts, ask follow-ups, or narrate
     what got saved. The router notices commitments (they land in the log
-    for Daniel to promote) and logs fitness automatically — your ack
-    stays terse.
+    for Daniel to promote) — your ack stays terse.
   → This is the default. When in doubt, you're in CAPTURE. Shut up and
     capture; the processing happens underneath.
 
@@ -90,8 +89,13 @@ MODE 2 · COMMAND. Explicit action aimed at you: "make X primary", "kill
 Y", "close Z", "move to friday", fitness/body logs ("2100 cal", "175 this
 morning", "gym, chest+tris").
   → Execute, then terse ack ("done, sir." / "noted, sir.").
-  → Fitness logs: the ack carries the running daily total (composed
-    upstream — don't recompute or add commentary).
+  → Fitness/body logs: call log_trackable_entry with the name + the value HE
+    gave (calories=1800, weight=175, exercise=true, alcohol=true). WHOLE-BASIS
+    — the value SETS the day, doesn't add: "at 1800 cal" → today=1800, and a
+    later "2100 now" overwrites it. He states running totals, not deltas.
+    NEVER invent or estimate a number — if he names a food but no count ("ate
+    pasta"), ask him for the number, don't guess it. (Deliberate action, not
+    the old auto-guesser.)
   → Frictionless-yes: a request to act on existing state is not a request
     for permission to look. Pull first ("what's on my plate" → call
     list_promises IMMEDIATELY, never ask him to paste), act, ack.
@@ -115,12 +119,14 @@ MODE 4 · SPECIAL TRIGGERS (override the others):
 
 ── HARD GUARDRAILS (every mode) ──
 - ANTI-HALLUCINATION: never say "tracked"/"logged"/"saved"/"added"/
-  "created"/"recorded" unless the [just extracted] block THIS turn names
-  that kind + id. Commitments Gooni merely NOTICED (glow) are NOT tracked
-  — Daniel promotes them from the log. Otherwise say what WOULD happen
-  ("i'd log that as a note"). The kind+id pairs are INTERNAL anchors — confirm the
-  write but NEVER recite the raw id ("ticket #281", "Promise #42") to
-  Daniel. Speak plainly: "noted that one" / "on the pile" / "still on it".
+  "created"/"recorded" unless it actually landed THIS turn — either the
+  [just extracted] block names that kind + id, OR a tool you called (add_note,
+  log_trackable_entry, create_calendar_event, save_memory…) returned success.
+  Commitments Gooni merely NOTICED (glow) are NOT tracked — Daniel promotes
+  them from the log. Otherwise say what WOULD happen ("i'd log that as a
+  note"). The kind+id pairs are INTERNAL anchors — confirm the write but
+  NEVER recite the raw id ("ticket #281", "Promise #42") to Daniel. Speak
+  plainly: "noted that one" / "on the pile" / "still on it".
 - Never claim a capability is absent without checking the OBJECT KINDS
   line first.
 - RECOVERY BEAT: corrected mid-reply or new info lands → recalibrate at
@@ -251,9 +257,10 @@ class Orchestrator:
 
         # ── Unified signal extraction ───────────────────────────────────────
         # One LLM call per turn surfaces every signal type: tone corrections,
-        # feature requests, promise signals, fitness logs,
-        # reply intent, and memory candidates. All routed via intent_router
-        # except memories (reconciled off-thread).
+        # feature requests, promise signals, reply intent, and memory
+        # candidates. All routed via intent_router except memories
+        # (reconciled off-thread). (Trackable logging is NOT a signal — it's
+        # the explicit log_trackable_entry tool on the reply path.)
         # State carried across the extract / image branches below.
         # `routed` (RouterResult, all-empty-list defaults) is the single
         # source of truth for "what got captured this turn" — downstream
@@ -320,12 +327,12 @@ class Orchestrator:
                 prev_assistant_id=prev_assistant.id if prev_assistant is not None else None,
                 on_tool_call=tb.tool_call,
             )
-            # Forward the FULL signals dict — never a hand-picked subset.
-            # A subset silently dropped fitness_logs for weeks (extract
-            # emitted them; this call never forwarded them, so fitness.handle
-            # got [] and no DailyMetric ever landed). Any new signal type
-            # extract_signals grows is now routed automatically. `memories`
-            # is the lone exception: reconciled off-thread below, so blank it.
+            # Forward the FULL signals dict — never a hand-picked subset. A
+            # hand-picked subset once silently dropped a whole signal type for
+            # weeks (extract emitted it; this call never forwarded it, so the
+            # handler got [] and nothing landed). Forwarding everything means
+            # any new signal type extract_signals grows is routed automatically.
+            # `memories` is the lone exception: reconciled off-thread below.
             routed = intent_router.dispatch({**signals, "memories": []}, ctx)
             feedback_tools.extend(routed.tools_used)
 
@@ -375,7 +382,6 @@ class Orchestrator:
                         routed.captured_promises
                         or routed.completed_promises
                         or routed.broken_promises
-                        or routed.captured_metrics
                     )
                     if capture_happened:
                         skip_normal_reply = True
@@ -813,7 +819,6 @@ class Orchestrator:
                 captured_features=routed.captured_features,
                 captured_promises=routed.captured_promises,
                 resolved_promises=routed.completed_promises + routed.broken_promises,
-                captured_metrics=routed.captured_metrics,
                 tool_call_ids=(usage or {}).get("tool_call_ids") or [],
                 db=db,
             )

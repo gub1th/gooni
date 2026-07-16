@@ -9,7 +9,7 @@ from .note_tools import (
     ListRecentNotesTool,
 )
 from .promise_tools import ListPromisesTool
-from .trackable_tools import ReadTrackableTool
+from .trackable_tools import ReadTrackableTool, LogTrackableEntryTool
 from .feature_request_tool import RequestFeatureTool
 from .calendar_tools import (
     CreateCalendarEventTool,
@@ -19,9 +19,10 @@ from .calendar_tools import (
     DeleteCalendarEventTool,
 )
 
-# Slice 6 registry — post primitive-collapse chat surface. Writes for the
-# actionable primitives are router-driven (promise glow/complete, fitness
-# entries), so the tool surface is mostly recall + notes + calendar.
+# Slice 6 registry — post primitive-collapse chat surface. Promise writes are
+# router-driven (glow/complete); trackable logging is an explicit tool
+# (log_trackable_entry) since the fitness-intent auto-writer was cut. Rest is
+# recall + notes + calendar.
 registry = [
     # Memory
     SaveMemoryTool(),
@@ -34,9 +35,10 @@ registry = [
     FindNoteTool(),
     ReadNoteTool(),
     ListRecentNotesTool(),
-    # Promises + trackables (read-only — router owns the writes)
+    # Promises (read-only — router owns the writes) + trackables (read + explicit log)
     ListPromisesTool(),
     ReadTrackableTool(),
+    LogTrackableEntryTool(),
     # Feature requests (tagged Notes since Slice 6)
     RequestFeatureTool(),
     # Calendar

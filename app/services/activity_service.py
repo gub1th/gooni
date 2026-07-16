@@ -7,8 +7,13 @@ store as trackable entries). Query-time union — NO new table — each source
 is over-fetched then k-way merged by timestamp in Python.
 
 The point of the union is that ONE stream powers two consumers: the always-on
-activity rail on the ambient home AND (next) the pre-reply context feed, so
-what Daniel sees and what Gooni reads before it answers are the same thing.
+activity rail on the ambient home AND the pre-reply context feed (the
+`[recent — last 1h]` state-block section — see recent_activity.py, which is a
+thin renderer over this feed), so what Daniel sees and what Gooni reads before
+it answers are the same thing. That second consumer passes `exclude_kinds`
+(messages are already in Gooni's conversation history — re-injecting them would
+just be scrollback), and filtering at the source keeps a chatty hour from
+blowing the item cap on messages and starving the trackable/promise lines.
 
 Timestamp hazard: Message.created_at is tz-AWARE (DateTime(timezone=True)),
 while Note/Promise/TrackableEntry use naive utcnow(). Sorting the two kinds
@@ -239,22 +244,35 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
 
 
 def build_activity_feed(
-    db: Session, before: datetime | None = None, limit: int = 40
+    db: Session,
+    before: datetime | None = None,
+    limit: int = 40,
+    exclude_kinds: set[str] | None = None,
 ) -> list[dict]:
     """Return up to `limit` activity items, newest first, older than `before`.
 
     `before` is a tz-aware UTC cursor (use the prior page's last `at`). The
     client pages by re-sending it. Empty list = nothing older left.
+
+    `exclude_kinds` skips whole sources at query time (e.g. {"message"} for the
+    pre-reply context feed). Filtering here rather than after the merge means an
+    excluded kind can't consume the item cap — the surviving kinds get the full
+    `limit` budget.
     """
     limit = max(1, min(limit, 100))
+    skip = exclude_kinds or set()
     before_aware = before  # Message.created_at is tz-aware
     before_naive = before.replace(tzinfo=None) if before is not None else None
 
     items: list[dict] = []
-    items += _messages(db, before_aware, limit)
-    items += _notes(db, before_naive, limit)
-    items += _promises(db, before_naive, limit)
-    items += _trackables(db, before_naive, limit)
+    if "message" not in skip:
+        items += _messages(db, before_aware, limit)
+    if "note" not in skip:
+        items += _notes(db, before_naive, limit)
+    if "promise" not in skip:
+        items += _promises(db, before_naive, limit)
+    if "trackable" not in skip:
+        items += _trackables(db, before_naive, limit)
 
     # drop anything undated, then k-way merge by the normalized UTC ts
     items = [it for it in items if it.get("at") is not None]
