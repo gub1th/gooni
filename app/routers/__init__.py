@@ -21,6 +21,7 @@ ROUTER_MODULES = [
     "promises",
     "uploads",
     "conversations",
+    "activity",
     "health",
     "tool_calls",
     "mcp",

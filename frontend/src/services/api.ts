@@ -634,6 +634,42 @@ export async function fetchMessageLog(opts: { limit?: number; beforeId?: number 
   return res.json();
 }
 
+// Unified activity stream (GET /activity) — the "true log": one recency-ordered
+// feed merging chats + notes + promise events + trackables (Whoop/LeetCode ride
+// in as trackables). Paginate back in time with `before` = the prior page's last
+// item `at`. Powers the always-on ambient activity rail.
+export interface ActivityItem {
+  key: string;
+  kind: "message" | "note" | "promise" | "trackable";
+  at: string; // ISO (UTC)
+  text: string;
+  // message
+  role?: "user" | "assistant";
+  source?: string;
+  message_id?: number;
+  conversation_id?: number;
+  has_trace?: boolean;
+  // note
+  note_id?: number;
+  verb?: string;
+  // promise
+  state?: string;
+  // trackable
+  name?: string;
+}
+
+export async function fetchActivity(
+  opts: { limit?: number; before?: string } = {},
+): Promise<ActivityItem[]> {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.before) params.set("before", opts.before);
+  const qs = params.toString();
+  const res = await apiFetch(`${BASE}/activity${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch activity");
+  return res.json();
+}
+
 // Full per-turn processing trace (orchestrator steps + tool-call audit +
 // paired user utterance + post-turn reflexion), keyed to the assistant
 // message. Powers the ambient recent-chat ribbon's audit panel.

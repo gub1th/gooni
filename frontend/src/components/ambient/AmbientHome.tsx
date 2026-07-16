@@ -8,7 +8,7 @@ import { LogDots } from "./LogDots";
 import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import { WidgetHost } from "../widgets/WidgetHost";
-import { RecentChatRibbon } from "./RecentChatRibbon";
+import { ActivityRail } from "./ActivityRail";
 import {
   createConversation,
   dismissMessageGlow,
@@ -69,7 +69,6 @@ export function AmbientHome() {
   const [limbo, setLimbo] = useState<LogMessage[]>([]);
   const [boxMode, setBoxMode] = useState(false);
   const [logMode, setLogMode] = useState(false);
-  const [logPillHot, setLogPillHot] = useState(false);
   const [value, setValue] = useState("");
   const [boxH, setBoxH] = useState(PEEK_H);
   const [thinking, setThinking] = useState(false);
@@ -579,16 +578,15 @@ export function AmbientHome() {
         </div>
       )}
 
-      {/* log + voice pills — hover-revealed row below the wave */}
+      {/* trackables + voice pills — always visible row below the wave (Daniel:
+          fewer hidden hover controls). The "log" now lives in the right rail;
+          this pill opens the trackables matrix, hence the rename. */}
       {!boxMode && !logMode && (
         <div
-          onMouseEnter={() => setLogPillHot(true)}
-          onMouseLeave={() => setLogPillHot(false)}
           style={{
             position: "absolute", left: rect.cx - rect.w / 2, top: rect.cy + PEEK_H / 2 + 18,
             width: rect.w, paddingTop: 16, zIndex: 3,
             display: "flex", justifyContent: "center", gap: 8,
-            opacity: logPillHot ? 1 : 0, transition: "opacity 220ms ease",
           }}
         >
           <button
@@ -599,7 +597,7 @@ export function AmbientHome() {
               color: "rgba(244,245,244,0.6)",
             }}
           >
-            log ▾
+            trackables ▾
           </button>
           {/* voice mode switch — default on, persisted. Off = typed-only home. */}
           <button
@@ -624,11 +622,10 @@ export function AmbientHome() {
 
       {peekNote && <NotePeek note={peekNote} onClose={() => setPeekNote(null)} />}
 
-      {/* recent-chat ribbon — hover the band below the wave → today's last ~3
-          turns (bottom = newest), each with a per-turn audit affordance */}
-      <RecentChatRibbon
-        suppressed={boxMode || logMode || needsWake || !!peekNote || thinking || !!replyText || !!liveTranscript}
-      />
+      {/* activity rail — the always-on unified log down the right edge (chats +
+          notes + promise events + trackables). Replaces the recent-chat ribbon
+          AND the sidebar Log view; hidden only under full-screen surfaces. */}
+      <ActivityRail hidden={needsWake || !!peekNote || logMode} />
 
       {/* live transcript — what the mic is hearing right now (ephemeral) */}
       {liveTranscript && (
