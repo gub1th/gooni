@@ -471,7 +471,7 @@ export function AmbientHome() {
   // createAt also refuses the forbidden centre/nav zones.
   function onRootDoubleClick(e: React.MouseEvent) {
     if (boxMode || logMode || needsWake || peekNote) return;
-    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-widget], [data-chat-ribbon]")) return;
+    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-widget], [data-chat-ribbon], [data-activity-rail]")) return;
     stickyRef.current?.createAt(e.clientX, e.clientY);
   }
 
@@ -579,8 +579,8 @@ export function AmbientHome() {
       )}
 
       {/* trackables + voice pills — always visible row below the wave (Daniel:
-          fewer hidden hover controls). The "log" now lives in the right rail;
-          this pill opens the trackables matrix, hence the rename. */}
+          fewer hidden hover controls). The activity log sits below this row (the
+          `ActivityRail` block); this pill opens the trackables matrix. */}
       {!boxMode && !logMode && (
         <div
           style={{
@@ -622,10 +622,14 @@ export function AmbientHome() {
 
       {peekNote && <NotePeek note={peekNote} onClose={() => setPeekNote(null)} />}
 
-      {/* activity rail — the always-on unified log down the right edge (chats +
-          notes + promise events + trackables). Replaces the recent-chat ribbon
-          AND the sidebar Log view; hidden only under full-screen surfaces. */}
-      <ActivityRail hidden={needsWake || !!peekNote || logMode} />
+      {/* activity log — the always-on unified stream (chats + notes + promise
+          events + trackables), a compact DIMMED block under the wave + pills that
+          brightens on hover and scrolls back into history. Hidden only under
+          full-screen surfaces. */}
+      <ActivityRail
+        hidden={needsWake || !!peekNote || logMode}
+        anchor={{ cx: rect.cx, top: rect.cy + PEEK_H / 2 + 96, width: rect.w }}
+      />
 
       {/* live transcript — what the mic is hearing right now (ephemeral) */}
       {liveTranscript && (
