@@ -19,6 +19,11 @@ from .db.database import SessionLocal
 from .db.models import Note
 from .serializers import _excerpt_from_html
 
+# How often the integration-refresh loop pulls whoop/leetcode/24hr. Hourly is
+# plenty for these signals (a gym check-in, daily solve count, recovery); tune
+# this one constant to change cadence.
+INTEGRATION_REFRESH_INTERVAL_S = 3600
+
 
 async def _backfill_note_excerpts_loop():
     """One-shot lazy backfill of the new `notes.excerpt` column. Old rows
@@ -147,3 +152,65 @@ async def _memory_watchdog_loop():
         except Exception as e:
             print(f"[mem] watchdog error: {e}", flush=True)
 
+
+
+# --- integration refresh (whoop + leetcode + 24hr fitness) ------------------
+# The ONE periodic "cron" for external integrations. Same background-loop
+# pattern as the two loops above; runs server-side on Fly so the log stays
+# current + complete even on days the app is never opened. whoop/leetcode also
+# still lazy-pull on read (their tiles) -- this loop just proactively warms the
+# cache and fills the 24hr `exercise` cell, which has no read tile to hang a
+# lazy-fetch on. Each sub-refresh is independently guarded: one failure never
+# blocks the others, and nothing here can crash boot.
+
+
+def _refresh_leetcode() -> None:
+    from .services import leetcode_service
+    db = SessionLocal()
+    try:
+        leetcode_service.get_or_fetch(db, force=True)  # commits internally
+    finally:
+        db.close()
+
+
+def _refresh_whoop() -> None:
+    from .services import whoop
+    db = SessionLocal()
+    try:
+        whoop.fetch_today_snapshot(db)  # raises if not connected -> caller logs
+    finally:
+        db.close()
+
+
+def _refresh_24hr() -> None:
+    from .services import fitness_24hr
+    db = SessionLocal()
+    try:
+        res = fitness_24hr.sync_today(db)  # writes the exercise cell if empty
+        if res.get("wrote"):
+            print(f"[refresh] 24hr: {res}", flush=True)
+    finally:
+        db.close()
+
+
+def _run_integration_refreshes() -> None:
+    """Blocking body (network + sync DB) -- run off the event loop via
+    asyncio.to_thread so external API latency can't stall request handling."""
+    for name, fn in (("leetcode", _refresh_leetcode), ("whoop", _refresh_whoop), ("24hr", _refresh_24hr)):
+        try:
+            fn()
+        except Exception as e:
+            print(f"[refresh] {name} failed: {e}", flush=True)
+
+
+async def _integration_refresh_loop():
+    """Every INTEGRATION_REFRESH_INTERVAL_S, refresh whoop/leetcode/24hr."""
+    await asyncio.sleep(15)  # let boot settle before the first pull
+    while True:
+        try:
+            await asyncio.to_thread(_run_integration_refreshes)
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[refresh] loop error: {e}", flush=True)
+        await asyncio.sleep(INTEGRATION_REFRESH_INTERVAL_S)
