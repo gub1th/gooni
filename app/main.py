@@ -126,11 +126,12 @@ async def _lifespan(app: FastAPI):
 
     excerpt_task = asyncio.create_task(background._backfill_note_excerpts_loop())
     mem_task = asyncio.create_task(background._memory_watchdog_loop())
+    refresh_task = asyncio.create_task(background._integration_refresh_loop())
     try:
         yield
     finally:
         for t in (
-            excerpt_task, mem_task,
+            excerpt_task, mem_task, refresh_task,
         ):
             t.cancel()
             try:
