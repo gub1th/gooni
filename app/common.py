@@ -78,6 +78,23 @@ def local_today(db: Session):
     return local_now(db).date()
 
 
+def stale_day_label(today, subject) -> str:
+    """Human day-label for a reading whose subject-day may lag today.
+    '' when it's today's data (or undeterminable), 'yesterday' at -1 day,
+    else 'Jul 14'. Only labels strictly-past days so a UTC-vs-local skew
+    (feeds stored per UTC day, ahead of PT) can't mislabel a current reading
+    as stale. THE shared vocab for the activity rail, the state-block
+    renderer, and the Whoop tile — one phrasing, three surfaces."""
+    if today is None or subject is None:
+        return ""
+    delta = (today - subject).days
+    if delta == 1:
+        return "yesterday"
+    if delta > 1:
+        return f"{subject:%b} {subject.day}"
+    return ""
+
+
 def _parse_optional_due(raw):
     from datetime import datetime as _dt
     if raw is None or raw == "":

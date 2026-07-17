@@ -92,7 +92,11 @@ def _render(item: dict, now: datetime) -> str | None:
             return None  # food ledger owns these
         src = item.get("source")
         if src in _FEED_SOURCES:
-            return f"{src} synced ({age})"  # numbers stay a pull
+            # name the subject-day when stale so Gooni doesn't read a day-old
+            # Whoop as this morning's (numbers still stay a pull-on-ask)
+            lbl = item.get("day_label")
+            head = f"{src} ({lbl})" if lbl else src
+            return f"{head} synced ({age})"
         return f"logged: {text} ({age})"
 
     return None

@@ -369,6 +369,9 @@ export async function disconnectWhoop(): Promise<void> {
 
 export interface WhoopToday {
   date: string | null;
+  // '' when the reading is today's; else 'yesterday' / 'Jul 14' — the reading's
+  // true subject-day when today's sleep hasn't synced yet (consistency-over-availability)
+  day_label?: string;
   recovery_score: number | null;
   hrv_rmssd_ms: number | null;
   resting_hr: number | null;

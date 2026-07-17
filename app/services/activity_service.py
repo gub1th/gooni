@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from ..common import stale_day_label as _stale_day_label
+
 
 def _utc(dt: datetime | None) -> datetime | None:
     """Normalize to tz-aware UTC. Naive values in this app are all utcnow(),
@@ -177,7 +179,8 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
             db.query(
                 TrackableEntry.id, TrackableEntry.value_boolean,
                 TrackableEntry.value_numeric, TrackableEntry.created_at,
-                TrackableEntry.source, Trackable.name, Trackable.unit, Trackable.kind,
+                TrackableEntry.date, TrackableEntry.source,
+                Trackable.name, Trackable.unit, Trackable.kind,
             )
             .join(Trackable, TrackableEntry.trackable_id == Trackable.id)
         )
@@ -189,9 +192,19 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
         print(f"[activity] trackables query failed: {e}")
         return []
 
+    # "today" in Daniel's tz — feed rows carry a subject-day (the day the data is
+    # FOR), which lags created_at (when the poll wrote it). A Whoop poll re-upserts
+    # the same snapshot every cycle, so created_at reads "1m ago" while the recovery
+    # is still yesterday's. Tag the stale subject-day so the rail never implies today.
+    try:
+        from ..common import local_today
+        today = local_today(db)
+    except Exception:  # pragma: no cover — never let a tz lookup kill the feed
+        today = None
+
     singles: list[dict] = []
     groups: dict[tuple, dict] = {}  # (source, second) → collapsed feed poll
-    for eid, vbool, vnum, created_at, source, name, unit, kind in rows:
+    for eid, vbool, vnum, created_at, edate, source, name, unit, kind in rows:
         src = source or "manual"
         if kind == "boolean":
             frag = name if (vbool or vbool is None) else None
@@ -213,7 +226,7 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
             sec = created_at.replace(microsecond=0)
             g = groups.setdefault(
                 (src, sec.isoformat()),
-                {"at": created_at, "frags": [], "source": src, "id": eid},
+                {"at": created_at, "frags": [], "source": src, "id": eid, "date": edate},
             )
             if created_at > g["at"]:
                 g["at"] = created_at
@@ -231,7 +244,11 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
 
     out = list(singles)
     for (src, sec_iso), g in groups.items():
-        text = f"{src} · " + ", ".join(g["frags"]) if g["frags"] else f"{src} synced"
+        # consistency-over-availability: name the subject-day when it isn't today
+        # ("whoop (yesterday) · …") so a stale feed never reads as a fresh reading.
+        lbl = _stale_day_label(today, g.get("date"))
+        head = f"{src} ({lbl})" if lbl else src
+        text = f"{head} · " + ", ".join(g["frags"]) if g["frags"] else f"{head} synced"
         out.append({
             "key": f"feed-{src}-{sec_iso}",
             "kind": "trackable",
@@ -239,6 +256,7 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
             "text": text,
             "name": src,
             "source": src,
+            "day_label": lbl,  # '' when current — consumed by recent_activity too
         })
     return out
 

@@ -529,9 +529,12 @@ function FeedTiles() {
     void fetchLeetcodeToday().then(setLc).catch(() => setLc("err"));
   }, []);
 
+  // stale-tag: the served reading may be a day-old sleep (today's hasn't synced)
+  const whoopNote = whoop && whoop !== "err" && whoop.day_label ? whoop.day_label : undefined;
+
   return (
     <div style={{ display: "flex", gap: 14, marginTop: 16 }}>
-      <FeedTile title="whoop">
+      <FeedTile title="whoop" note={whoopNote}>
         {whoop === null ? (
           <Dim>…</Dim>
         ) : whoop === "err" || !whoop.date ? (
@@ -567,14 +570,22 @@ function FeedTiles() {
   );
 }
 
-function FeedTile({ title, children }: { title: string; children: React.ReactNode }) {
+function FeedTile({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
   return (
     <div style={{ ...GLASS, borderRadius: 18, padding: "14px 18px", minWidth: 150 }}>
-      <div style={{
-        fontSize: 9, letterSpacing: 1.6, textTransform: "uppercase",
-        color: "rgba(244,245,244,0.35)", marginBottom: 10,
-      }}>
-        {title}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 }}>
+        <span style={{
+          fontSize: 9, letterSpacing: 1.6, textTransform: "uppercase",
+          color: "rgba(244,245,244,0.35)",
+        }}>
+          {title}
+        </span>
+        {note && (
+          // amber = "heads up, this reading isn't today's"
+          <span style={{ fontSize: 9, letterSpacing: 0.3, color: "rgba(230,190,140,0.85)" }}>
+            · {note}
+          </span>
+        )}
       </div>
       <div style={{ display: "flex", gap: 16 }}>{children}</div>
     </div>
