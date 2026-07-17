@@ -50,8 +50,17 @@ function labelFor(it: ActivityItem): { label: string; color: string } {
           : it.state === "broken" ? "rgba(248,150,150,0.75)"
           : "rgba(244,245,244,0.42)",
       };
-    case "trackable":
+    case "trackable": {
+      // external syncs are NOT things Daniel logged — separate "you vs system":
+      // whoop/leetcode/derived feeds → "synced" (dim blue), device events →
+      // "device" (amber), only genuine manual/chat logs keep green "logged".
+      const src = it.source ?? "manual";
+      if (src === "whoop" || src === "leetcode" || src === "derived")
+        return { label: "synced", color: "rgba(150,180,255,0.5)" };
+      if (src === "shortcuts")
+        return { label: "device", color: "rgba(230,190,140,0.6)" };
       return { label: "logged", color: GREEN + "0.5)" };
+    }
     default:
       return { label: "", color: "rgba(244,245,244,0.42)" };
   }
@@ -60,8 +69,22 @@ function labelFor(it: ActivityItem): { label: string; color: string } {
 function Row({ item, onAudit }: { item: ActivityItem; onAudit: () => void }) {
   const meta = labelFor(item);
   const canAudit = item.kind === "message" && item.role === "assistant" && !!item.has_trace;
+  const [rowHover, setRowHover] = useState(false);
   return (
-    <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 3, paddingRight: canAudit ? 20 : 0 }}>
+    <div
+      onMouseEnter={() => setRowHover(true)}
+      onMouseLeave={() => setRowHover(false)}
+      style={{
+        position: "relative", display: "flex", flexDirection: "column", gap: 3,
+        paddingRight: canAudit ? 20 : 0,
+        // per-row wake ON TOP of the block wake: the hovered row lifts above its
+        // neighbours (faint bg + brighter ink) so "you're here" survives even
+        // though the whole block already went full-opacity
+        margin: "0 -6px", padding: `2px ${canAudit ? 20 : 6}px 2px 6px`, borderRadius: 6,
+        background: rowHover ? "rgba(244,245,244,0.05)" : "transparent",
+        transition: "background 140ms ease",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
         <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: meta.color, flexShrink: 0 }}>
           {meta.label}
@@ -71,7 +94,8 @@ function Row({ item, onAudit }: { item: ActivityItem; onAudit: () => void }) {
         </span>
       </div>
       <div style={{
-        fontSize: 12.5, lineHeight: 1.45, color: "rgba(244,245,244,0.82)",
+        fontSize: 12.5, lineHeight: 1.45, color: rowHover ? "rgba(244,245,244,0.98)" : "rgba(244,245,244,0.82)",
+        transition: "color 140ms ease",
         display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
       }}>
         {item.text || "…"}
@@ -82,7 +106,7 @@ function Row({ item, onAudit }: { item: ActivityItem; onAudit: () => void }) {
           title="Inspect the trace for this turn"
           onClick={onAudit}
           style={{
-            position: "absolute", top: 0, right: 0, width: 20, height: 20, padding: 0,
+            position: "absolute", top: 2, right: 2, width: 20, height: 20, padding: 0,
             border: "none", background: "transparent", cursor: "pointer", color: GREEN + "0.7)",
             display: "flex", alignItems: "center", justifyContent: "center",
           }}

@@ -43,8 +43,14 @@ def whoop_today(refresh: bool = False, db: Session = Depends(get_db)):
         doc = whoop.upsert_today_snapshot(db, payload)
 
     doc = doc or {}
+    from ..common import stale_day_label
+    # subject-day honesty: the served reading may be a day-old sleep (today's
+    # sync hasn't landed). day_label is '' when current, else 'yesterday'/'Jul 14'
+    # — same vocab the activity rail uses, so the tile never implies today.
+    day_label = stale_day_label(whoop._local_today(db), whoop.subject_day(doc, db))
     return {
         "date": whoop._local_today(db).isoformat(),
+        "day_label": day_label,
         "recovery_score": doc.get("recovery_score"),
         "hrv_rmssd_ms": doc.get("hrv_rmssd_ms"),
         "resting_hr": doc.get("resting_hr"),

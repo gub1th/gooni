@@ -430,6 +430,31 @@ def get_today(db: Session) -> dict[str, Any] | None:
     return val if isinstance(val, dict) else None
 
 
+def subject_day(doc: dict[str, Any] | None, db: Session) -> date_cls | None:
+    """The local calendar day a whoop reading is actually FOR — recovery is
+    computed for the morning you wake, so the day the last sleep ENDED is the
+    truthful subject-day (not when the poll happened to run). Falls back to the
+    source/sync timestamp, then None. Used to flag a stale tile ("yesterday")
+    when today's sleep hasn't synced yet."""
+    if not doc:
+        return None
+    from ..common import local_now
+
+    tz = local_now(db).tzinfo
+    for key in ("sleep_end_at", "source_updated_at", "updated_at"):
+        raw = doc.get(key)
+        if not raw:
+            continue
+        try:
+            dt = datetime.fromisoformat(raw)
+        except (ValueError, TypeError):
+            continue
+        if dt.tzinfo is None:  # stored naive UTC
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(tz).date()
+    return None
+
+
 def latest_snapshot(db: Session) -> dict[str, Any] | None:
     """Newest whoop payload regardless of day — the nudge debouncer's
     read (the burst may span local midnight)."""
