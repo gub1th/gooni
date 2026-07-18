@@ -38,11 +38,17 @@ const GLASS: React.CSSProperties = {
   boxShadow: "0 18px 60px rgba(0,0,0,0.55)",
 };
 
-// Which trackables belong on the daily dots: skip json feeds (whoop/leetcode)
-// and the freeform "note", keep the boolean habits + key numbers.
+// Which trackables belong on the COMPACT daily-dots glance: skip json feeds
+// (whoop/leetcode) and the freeform "note", keep the boolean habits + key
+// numbers. Also skip `shortcuts` — iOS device events (app-opens, arrivals) are
+// ambient telemetry, not priority; a handful of them crowd the single-row
+// glance and bury the OG trackables (they still live in the expanded matrix +
+// the activity rail's "device" events, so nothing is lost). The matrix's own
+// isDaily (LogTable) deliberately keeps them — the glance is priority-only.
 function isDaily(t: Trackable): boolean {
   if (t.kind === "json") return false;
   if (t.source === "whoop" || t.source === "leetcode") return false;
+  if (t.source === "shortcuts") return false;
   if (t.name === "note") return false;
   return true;
 }
