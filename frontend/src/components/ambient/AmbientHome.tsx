@@ -478,7 +478,7 @@ export function AmbientHome() {
   return (
     <div
       onDoubleClick={onRootDoubleClick}
-      style={{ position: "fixed", inset: 0, background: "#000000", overflow: "hidden", fontFamily: FONT }}
+      style={{ position: "fixed", inset: 0, background: "var(--gooni-void, #000000)", overflow: "hidden", fontFamily: FONT }}
     >
       <MorphLine boxMode={boxMode} rect={rect} thinking={thinking} dimmed={logMode} waveWidth={waveW} energyRef={energyRef} activeRef={activeRef} />
       <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={logMode || !!peekNote || needsWake} />
@@ -522,8 +522,8 @@ export function AmbientHome() {
             position: "absolute", inset: 0, width: "100%", height: "100%", boxSizing: "border-box",
             resize: "none", outline: "none", border: "none", overflow: "hidden",
             fontFamily: FONT, fontSize: 16, lineHeight: 1.5, padding: "16px 22px",
-            borderRadius: rect.r, color: "#F4F5F4", caretColor: "#4ADE80",
-            background: boxMode ? "color-mix(in srgb, #0b0f0d 52%, transparent)" : "transparent",
+            borderRadius: rect.r, color: "rgb(var(--gooni-ink, 244 245 244))", caretColor: "#4ADE80",
+            background: boxMode ? "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 52%, transparent)" : "transparent",
             backdropFilter: boxMode ? "blur(16px)" : "none",
             WebkitBackdropFilter: boxMode ? "blur(16px)" : "none",
             opacity: boxMode ? 1 : 0,
@@ -541,9 +541,9 @@ export function AmbientHome() {
             transform: "translateX(-50%)", width: rect.w, maxWidth: "86vw", zIndex: 7,
             display: "flex", flexDirection: "column", gap: 2,
             borderRadius: 14, padding: 6,
-            background: "color-mix(in srgb, #0b0f0d 58%, transparent)",
+            background: "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 58%, transparent)",
             backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-            border: "1px solid rgba(244,245,244,0.10)", boxShadow: "0 16px 50px rgba(0,0,0,0.5)",
+            border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.10)", boxShadow: "0 16px 50px rgba(0,0,0,0.5)",
           }}
         >
           {suggestions.map((n, i) => (
@@ -556,18 +556,18 @@ export function AmbientHome() {
                 display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2,
                 textAlign: "left", padding: "8px 12px", borderRadius: 10, cursor: "pointer",
                 border: "none", fontFamily: FONT, width: "100%",
-                background: i === activeIdx ? "rgba(244,245,244,0.08)" : "transparent",
+                background: i === activeIdx ? "rgb(var(--gooni-ink, 244 245 244) / 0.08)" : "transparent",
               }}
             >
               <span style={{
-                fontSize: 13.5, color: "#F4F5F4", fontWeight: 500,
+                fontSize: 13.5, color: "rgb(var(--gooni-ink, 244 245 244))", fontWeight: 500,
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%",
               }}>
                 {n.title || "untitled"}
               </span>
               {n.excerpt && (
                 <span style={{
-                  fontSize: 11.5, color: "rgba(244,245,244,0.4)",
+                  fontSize: 11.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)",
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%",
                 }}>
                   {n.excerpt}
@@ -593,8 +593,8 @@ export function AmbientHome() {
             onClick={() => setLogMode(true)}
             style={{
               padding: "5px 16px", borderRadius: 999, cursor: "pointer", fontFamily: FONT, fontSize: 12,
-              border: "1px solid rgba(244,245,244,0.2)", background: "rgba(11,15,13,0.5)",
-              color: "rgba(244,245,244,0.6)",
+              border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.2)", background: "rgb(var(--gooni-surf, 11 15 13) / 0.5)",
+              color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)",
             }}
           >
             trackables ▾
@@ -607,9 +607,9 @@ export function AmbientHome() {
             style={{
               display: "flex", alignItems: "center", gap: 6,
               padding: "5px 14px", borderRadius: 999, cursor: "pointer", fontFamily: FONT, fontSize: 12,
-              border: "1px solid rgba(244,245,244,0.2)",
-              background: voiceMode ? "rgba(74,222,128,0.12)" : "rgba(11,15,13,0.5)",
-              color: voiceMode ? "rgba(74,222,128,0.9)" : "rgba(244,245,244,0.5)",
+              border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.2)",
+              background: voiceMode ? "rgba(74,222,128,0.12)" : "rgb(var(--gooni-surf, 11 15 13) / 0.5)",
+              color: voiceMode ? "rgba(74,222,128,0.9)" : "rgb(var(--gooni-ink, 244 245 244) / 0.5)",
             }}
           >
             {voiceMode ? <Mic size={13} /> : <MicOff size={13} />}
@@ -639,7 +639,7 @@ export function AmbientHome() {
             left: "50%", top: rect.cy + PEEK_H / 2 + 44, transform: "translateX(-50%)",
             width: "min(600px, 86vw)", textAlign: "center", zIndex: 5, pointerEvents: "none",
             fontFamily: FONT, fontSize: 15.5, lineHeight: 1.55, fontStyle: "italic",
-            color: "rgba(244,245,244,0.5)", textShadow: "0 1px 14px rgba(0,0,0,0.7)",
+            color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)", textShadow: "0 1px 14px rgba(0,0,0,0.7)",
           }}
         >
           {liveTranscript}
@@ -654,7 +654,7 @@ export function AmbientHome() {
             left: "50%", top: rect.cy + PEEK_H / 2 + 44, transform: "translateX(-50%)",
             width: "min(600px, 86vw)", textAlign: "center", zIndex: 5,
             pointerEvents: "none", fontFamily: FONT, fontSize: 15.5, lineHeight: 1.55,
-            color: "rgba(244,245,244,0.86)", textShadow: "0 1px 14px rgba(0,0,0,0.7)",
+            color: "rgb(var(--gooni-ink, 244 245 244) / 0.86)", textShadow: "0 1px 14px rgba(0,0,0,0.7)",
             opacity: replyShown ? 1 : 0, transition: "opacity 420ms ease",
           }}
         >
@@ -667,7 +667,7 @@ export function AmbientHome() {
         style={{
           position: "fixed", bottom: 22, left: 0, right: 0, textAlign: "center",
           zIndex: 1, pointerEvents: "none", fontSize: 11.5, letterSpacing: 0.4,
-          color: "rgba(244,245,244,0.28)",
+          color: "rgb(var(--gooni-ink, 244 245 244) / 0.28)",
           opacity: needsWake || boxMode || logMode || thinking || replyText || liveTranscript ? 0 : 1,
           transition: "opacity 300ms ease",
         }}
@@ -677,7 +677,7 @@ export function AmbientHome() {
           : (
             <>
               press <kbd style={{
-                fontFamily: FONT, fontWeight: 700, color: "rgba(244,245,244,0.5)",
+                fontFamily: FONT, fontWeight: 700, color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)",
                 padding: "1px 6px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.12)",
               }}>/</kbd> or hover to capture a thought
             </>
@@ -703,18 +703,18 @@ export function AmbientHome() {
           }}>
             <Mic size={26} />
           </div>
-          <div style={{ fontFamily: FONT, fontSize: 16, color: "#F4F5F4", letterSpacing: 0.3 }}>
+          <div style={{ fontFamily: FONT, fontSize: 16, color: "rgb(var(--gooni-ink, 244 245 244))", letterSpacing: 0.3 }}>
             tap to wake
           </div>
-          <div style={{ fontFamily: FONT, fontSize: 12.5, color: "rgba(244,245,244,0.45)" }}>
+          <div style={{ fontFamily: FONT, fontSize: 12.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)" }}>
             then just talk — Gooni listens + speaks back
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); disableVoice(); }}
             style={{
               marginTop: 6, padding: "4px 12px", borderRadius: 999, cursor: "pointer",
-              fontFamily: FONT, fontSize: 11.5, color: "rgba(244,245,244,0.4)",
-              background: "transparent", border: "1px solid rgba(244,245,244,0.14)",
+              fontFamily: FONT, fontSize: 11.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)",
+              background: "transparent", border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.14)",
             }}
           >
             type instead

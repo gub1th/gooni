@@ -308,7 +308,7 @@ export const StickyLayer = forwardRef<
               position: "absolute", left: x, top: y, width: s.w, height: s.h,
               pointerEvents: "auto", cursor: s.editing ? "text" : dragging ? "grabbing" : "grab",
               ...frost.panel, borderRadius: 14,
-              border: `1px solid rgba(244,245,244,${s.editing ? 0.2 : 0.1})`,
+              border: `1px solid rgb(var(--gooni-ink, 244 245 244) / ${s.editing ? 0.2 : 0.1})`,
               boxShadow: dragging
                 ? "0 0 0 1px rgba(74,222,128,0.5), 0 24px 70px rgba(0,0,0,0.6)"
                 : "0 12px 40px rgba(0,0,0,0.4)",
@@ -335,12 +335,12 @@ export const StickyLayer = forwardRef<
                 spellCheck={false}
                 style={{
                   width: "100%", height: "100%", resize: "none", outline: "none", border: "none",
-                  background: "transparent", color: "#F4F5F4", fontFamily: FONT, fontSize: 13.5, lineHeight: 1.5,
+                  background: "transparent", color: "rgb(var(--gooni-ink, 244 245 244))", fontFamily: FONT, fontSize: 13.5, lineHeight: 1.5,
                 }}
               />
             ) : (
               <div style={{
-                width: "100%", height: "100%", overflow: "hidden", color: "rgba(244,245,244,0.88)",
+                width: "100%", height: "100%", overflow: "hidden", color: "rgb(var(--gooni-ink, 244 245 244) / 0.88)",
                 fontSize: 13.5, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", userSelect: "none",
               }}>
                 {s.text}
@@ -358,7 +358,7 @@ export const StickyLayer = forwardRef<
                   position: "absolute", top: 6, right: 6, width: 22, height: 22,
                   display: "flex", alignItems: "center", justifyContent: "center",
                   borderRadius: 7, border: "none", cursor: "pointer", pointerEvents: "auto",
-                  background: "rgba(0,0,0,0.35)", color: "rgba(244,245,244,0.6)",
+                  background: "rgba(0,0,0,0.35)", color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)",
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.background = "rgba(248,113,113,0.25)";
@@ -366,7 +366,7 @@ export const StickyLayer = forwardRef<
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.background = "rgba(0,0,0,0.35)";
-                  e.currentTarget.style.color = "rgba(244,245,244,0.6)";
+                  e.currentTarget.style.color = "rgb(var(--gooni-ink, 244 245 244) / 0.6)";
                 }}
               >
                 <X size={13} strokeWidth={2} />

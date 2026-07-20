@@ -50,7 +50,7 @@ export function CalendarCompact({ onExpand }: WidgetCompactProps) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: 11, color: "rgba(244,245,244,0.45)", letterSpacing: 0.3 }}>
+      <div style={{ fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)", letterSpacing: 0.3 }}>
         {dateLabel}
       </div>
 
@@ -79,7 +79,7 @@ export function CalendarCompact({ onExpand }: WidgetCompactProps) {
               <span
                 style={{
                   fontSize: 12.5,
-                  color: "rgba(244,245,244,0.9)",
+                  color: "rgb(var(--gooni-ink, 244 245 244) / 0.9)",
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -102,10 +102,10 @@ export function CalendarCompact({ onExpand }: WidgetCompactProps) {
           padding: 0,
           cursor: "pointer",
           fontSize: 11,
-          color: "rgba(244,245,244,0.5)",
+          color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)",
         }}
         onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(74,222,128,0.9)")}
-        onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(244,245,244,0.5)")}
+        onMouseLeave={(e) => (e.currentTarget.style.color = "rgb(var(--gooni-ink, 244 245 244) / 0.5)")}
       >
         {extra > 0 ? `+${extra} more · open week ▸` : "open week ▸"}
       </button>
@@ -115,6 +115,6 @@ export function CalendarCompact({ onExpand }: WidgetCompactProps) {
 
 function Muted({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: 12, color: "rgba(244,245,244,0.4)" }}>{children}</div>
+    <div style={{ fontSize: 12, color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)" }}>{children}</div>
   );
 }

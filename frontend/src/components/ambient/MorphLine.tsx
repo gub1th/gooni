@@ -1,6 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
-import { GREEN, WHITE, mixColor, roundedRectPoints } from "./wavePath";
+import { GREEN, mixColor, roundedRectPoints } from "./wavePath";
 import { useReducedMotion } from "../creative/useReducedMotion";
+import { useGooniThemeStore, WAVE_REST_COLOR } from "../../stores/useGooniThemeStore";
 
 // THE line. One continuous stroke that IS the waveform at rest and BENDS into
 // the input's rounded-rect outline when you capture — in place, so it reads as
@@ -47,6 +48,15 @@ export function MorphLine({
   const morphRef = useRef(0);
   const hRef = useRef(rect.h);
   const reduce = useReducedMotion();
+
+  // The line sets its own `stroke` each frame (JS, so no CSS var), so it can't
+  // theme via the ambient vars — it picks the rest color by theme: near-white
+  // on the black void, ink-dark on the light off-white (a white line vanishes).
+  // Held in a ref so the ref-driven rAF loop reads the live value without deps.
+  const theme = useGooniThemeStore((s) => s.theme);
+  const rest = WAVE_REST_COLOR[theme];
+  const restRef = useRef(rest);
+  restRef.current = rest;
 
   const boxRef = useRef(boxMode);
   boxRef.current = boxMode;
@@ -114,7 +124,8 @@ export function MorphLine({
       }
       d = d.trim();
 
-      const stroke = e.cur > 0.02 ? mixColor(WHITE, GREEN, Math.min(1, e.cur)) : WHITE;
+      const restC = restRef.current;
+      const stroke = e.cur > 0.02 ? mixColor(restC, GREEN, Math.min(1, e.cur)) : restC;
       if (crispRef.current) {
         crispRef.current.setAttribute("d", d);
         crispRef.current.setAttribute("stroke", stroke);
@@ -144,7 +155,7 @@ export function MorphLine({
       <path
         ref={glowRef}
         fill="none"
-        stroke={WHITE}
+        stroke={rest}
         strokeWidth={3}
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -155,7 +166,7 @@ export function MorphLine({
       <path
         ref={crispRef}
         fill="none"
-        stroke={WHITE}
+        stroke={rest}
         strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"

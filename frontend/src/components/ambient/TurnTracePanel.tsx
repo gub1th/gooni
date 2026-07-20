@@ -120,7 +120,7 @@ export function TurnTracePanel({ messageId, onClose }: { messageId: number; onCl
             alignItems: "center",
             gap: 12,
             padding: "14px 18px",
-            borderBottom: "1px solid rgba(244,245,244,0.08)",
+            borderBottom: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.08)",
           }}
         >
           <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2 }}>Turn audit</span>
@@ -570,7 +570,7 @@ function DeepLinkFooter({ messageId, onClose }: { messageId: number; onClose: ()
         alignItems: "center",
         gap: 10,
         padding: "12px 18px",
-        borderTop: "1px solid rgba(244,245,244,0.08)",
+        borderTop: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.08)",
       }}
     >
       {status === "none" && (
@@ -666,7 +666,7 @@ function PromptModal({
             alignItems: "center",
             gap: 10,
             padding: "14px 18px",
-            borderBottom: "1px solid rgba(244,245,244,0.08)",
+            borderBottom: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.08)",
           }}
         >
           <span style={{ fontSize: 13, fontWeight: 700 }}>Assembled prompt</span>
@@ -778,7 +778,7 @@ function Who({ who }: { who: "you" | "gooni" }) {
 
 function Said({ text, strong }: { text: string; strong?: boolean }) {
   return (
-    <span style={{ fontSize: 13.5, lineHeight: 1.5, color: strong ? MUT_1 : "rgba(244,245,244,0.85)", whiteSpace: "pre-wrap" }}>
+    <span style={{ fontSize: 13.5, lineHeight: 1.5, color: strong ? MUT_1 : "rgb(var(--gooni-ink, 244 245 244) / 0.85)", whiteSpace: "pre-wrap" }}>
       {text}
     </span>
   );

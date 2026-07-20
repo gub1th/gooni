@@ -40,7 +40,7 @@ function labelFor(it: ActivityItem): { label: string; color: string } {
     case "message":
       return it.role === "assistant"
         ? { label: "gooni", color: GREEN + "0.75)" }
-        : { label: SOURCE_BADGE[it.source ?? ""] ?? "you", color: "rgba(244,245,244,0.42)" };
+        : { label: SOURCE_BADGE[it.source ?? ""] ?? "you", color: "rgb(var(--gooni-ink, 244 245 244) / 0.42)" };
     case "note":
       return { label: it.verb === "edited" ? "note ·edit" : "note", color: "rgba(150,180,255,0.6)" };
     case "promise":
@@ -48,7 +48,7 @@ function labelFor(it: ActivityItem): { label: string; color: string } {
         label: `promise ${it.verb ?? ""}`.trim(),
         color: it.state === "kept" ? GREEN + "0.8)"
           : it.state === "broken" ? "rgba(248,150,150,0.75)"
-          : "rgba(244,245,244,0.42)",
+          : "rgb(var(--gooni-ink, 244 245 244) / 0.42)",
       };
     case "trackable": {
       // external syncs are NOT things Daniel logged — separate "you vs system":
@@ -62,7 +62,7 @@ function labelFor(it: ActivityItem): { label: string; color: string } {
       return { label: "logged", color: GREEN + "0.5)" };
     }
     default:
-      return { label: "", color: "rgba(244,245,244,0.42)" };
+      return { label: "", color: "rgb(var(--gooni-ink, 244 245 244) / 0.42)" };
   }
 }
 
@@ -81,7 +81,7 @@ function Row({ item, onAudit }: { item: ActivityItem; onAudit: () => void }) {
         // neighbours (faint bg + brighter ink) so "you're here" survives even
         // though the whole block already went full-opacity
         margin: "0 -6px", padding: `2px ${canAudit ? 20 : 6}px 2px 6px`, borderRadius: 6,
-        background: rowHover ? "rgba(244,245,244,0.05)" : "transparent",
+        background: rowHover ? "rgb(var(--gooni-ink, 244 245 244) / 0.05)" : "transparent",
         transition: "background 140ms ease",
       }}
     >
@@ -89,12 +89,12 @@ function Row({ item, onAudit }: { item: ActivityItem; onAudit: () => void }) {
         <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, color: meta.color, flexShrink: 0 }}>
           {meta.label}
         </span>
-        <span style={{ fontSize: 9.5, color: "rgba(244,245,244,0.25)", marginLeft: "auto", flexShrink: 0 }}>
+        <span style={{ fontSize: 9.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.25)", marginLeft: "auto", flexShrink: 0 }}>
           {ago(item.at)}
         </span>
       </div>
       <div style={{
-        fontSize: 12.5, lineHeight: 1.45, color: rowHover ? "rgba(244,245,244,0.98)" : "rgba(244,245,244,0.82)",
+        fontSize: 12.5, lineHeight: 1.45, color: rowHover ? "rgb(var(--gooni-ink, 244 245 244) / 0.98)" : "rgb(var(--gooni-ink, 244 245 244) / 0.82)",
         transition: "color 140ms ease",
         display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
       }}>
@@ -215,10 +215,10 @@ export function ActivityRail({ hidden, anchor }: { hidden?: boolean; anchor: Rai
             <Row key={it.key} item={it} onAudit={() => it.message_id && setTraceId(it.message_id)} />
           ))}
           {items.length === 0 && (
-            <div style={{ fontSize: 12, color: "rgba(244,245,244,0.3)", textAlign: "center" }}>nothing yet</div>
+            <div style={{ fontSize: 12, color: "rgb(var(--gooni-ink, 244 245 244) / 0.3)", textAlign: "center" }}>nothing yet</div>
           )}
           {!hasMore && items.length > 0 && (
-            <div style={{ fontSize: 10.5, color: "rgba(244,245,244,0.22)", textAlign: "center", paddingTop: 6 }}>
+            <div style={{ fontSize: 10.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.22)", textAlign: "center", paddingTop: 6 }}>
               — beginning —
             </div>
           )}
