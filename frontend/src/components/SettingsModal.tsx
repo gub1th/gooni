@@ -63,7 +63,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         onClick={(e) => e.stopPropagation()}
         style={{
           background: "var(--gooni-card, #fff)",
-          border: "0.5px solid rgba(0,0,0,0.1)",
+          border: "0.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.1)",
           borderRadius: 14,
           width: 720,
           maxWidth: "calc(100vw - 32px)",
@@ -77,8 +77,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         {/* Tab sidebar */}
         <aside style={{
           width: 180, flexShrink: 0,
-          background: "rgba(0,0,0,0.025)",
-          borderRight: "0.5px solid rgba(0,0,0,0.08)",
+          background: "rgb(var(--gooni-tint, 0 0 0) / 0.025)",
+          borderRight: "0.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)",
           display: "flex", flexDirection: "column",
           padding: "16px 8px",
         }}>
@@ -104,7 +104,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   onClick={() => setTab(t.id)}
                   style={{
                     border: "none",
-                    background: active ? "rgba(0,0,0,0.08)" : "transparent",
+                    background: active ? "rgb(var(--gooni-tint, 0 0 0) / 0.08)" : "transparent",
                     cursor: "pointer",
                     fontFamily: FONT,
                     fontSize: 13,
@@ -115,7 +115,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     textAlign: "left",
                     transition: "background 0.1s",
                   }}
-                  onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.04)"; }}
+                  onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.04)"; }}
                   onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
                 >
                   {t.label}
@@ -188,7 +188,7 @@ function AppearanceTab() {
                   padding: 6, borderRadius: 10,
                   background: "transparent",
                   border: "none",
-                  outline: selected ? "2px solid #4ADE80" : "1px solid rgba(0,0,0,0.08)",
+                  outline: selected ? "2px solid #4ADE80" : "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)",
                   outlineOffset: selected ? "-2px" : "-1px",
                   cursor: "pointer",
                   display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
@@ -198,7 +198,7 @@ function AppearanceTab() {
                 <div style={{
                   width: 48, height: 40, borderRadius: 6, overflow: "hidden",
                   display: "flex",
-                  border: "0.5px solid rgba(0,0,0,0.08)",
+                  border: "0.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)",
                 }}>
                   <div style={{ flex: 1, background: p.sidebar }} />
                   <div style={{ flex: 1, background: p.main }} />
@@ -307,7 +307,7 @@ function ProfileTab() {
                     ...btn,
                     background: "transparent",
                     color: "#64748B",
-                    border: "1px solid rgba(0,0,0,0.10)",
+                    border: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.10)",
                   }}
                 >
                   Reset to default
@@ -548,7 +548,7 @@ function DeploymentsBlock() {
             placeholder="https://your-app.vercel.app"
             style={{
               width: "100%", padding: "6px 8px", borderRadius: 6,
-              border: "1px solid rgba(0,0,0,0.1)",
+              border: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.1)",
               fontSize: 12.5, fontFamily: "'SF Mono', Menlo, monospace",
               outline: "none", boxSizing: "border-box", marginBottom: 8,
             }}
@@ -591,7 +591,7 @@ function DeploymentCard({ name, url, dashboardUrl, state, onRecheck, onEditUrl, 
   useNow(1000);
   return (
     <div style={{
-      border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10,
+      border: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)", borderRadius: 10,
       padding: "12px 14px", background: "var(--gooni-card, #FDFCFA)",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -711,7 +711,7 @@ function WidgetsTab() {
               style={{
                 display: "flex", alignItems: "center", gap: 12,
                 padding: "12px 4px",
-                borderBottom: "0.5px solid rgba(0,0,0,0.06)",
+                borderBottom: "0.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.06)",
               }}
             >
               <w.Icon size={18} color="var(--gooni-text, #1C1C1E)" />
@@ -736,7 +736,7 @@ function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) =
       onClick={() => onChange(!on)}
       style={{
         width: 40, height: 24, borderRadius: 999, border: "none", cursor: "pointer",
-        background: on ? "#16A34A" : "rgba(0,0,0,0.2)",
+        background: on ? "#16A34A" : "rgb(var(--gooni-tint, 0 0 0) / 0.2)",
         position: "relative", transition: "background 0.15s", flexShrink: 0, padding: 0,
       }}
     >

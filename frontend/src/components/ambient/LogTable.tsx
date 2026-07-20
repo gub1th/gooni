@@ -111,6 +111,27 @@ export function LogTable() {
     try {
       const all = (await fetchTrackables()).filter(isDaily);
       all.sort((a, b) => {
+        // iOS-Shortcuts telemetry (app opens, arrive/leave, …) is ambient noise
+        // next to the OG trackables — push it all to the right of the matrix so
+        // calories/protein/weight etc. stay clustered and readable.
+        const aS = a.source === "shortcuts";
+        const bS = b.source === "shortcuts";
+        if (aS !== bS) return aS ? 1 : -1;
+        if (aS) {
+          // Within the shortcuts block, group by event token (the last word:
+          // "open" / "arrive" / "leave" / …) so all the app-opens sit together;
+          // "open" leads since app launches are the densest signal.
+          const ae = a.name.split(" ").pop() ?? "";
+          const be = b.name.split(" ").pop() ?? "";
+          if (ae !== be) {
+            if (ae === "open") return -1;
+            if (be === "open") return 1;
+            return ae.localeCompare(be);
+          }
+          return a.name.localeCompare(b.name);
+        }
+        // OG trackables: booleans first, then user-flagged important, then name
+        // (leaves calories · protein · weight adjacent — the nutrition/body run).
         if (a.kind !== b.kind) return a.kind === "boolean" ? -1 : 1;
         if (a.is_important !== b.is_important) return a.is_important ? -1 : 1;
         return a.name.localeCompare(b.name);
@@ -284,12 +305,12 @@ export function LogTable() {
       style={{ width: "100%", height: "100%", overflow: "auto", padding: "22px 24px", boxSizing: "border-box" }}
     >
       {loading ? (
-        <div style={{ color: "rgba(244,245,244,0.35)", fontSize: 13, padding: 20 }}>loading…</div>
+        <div style={{ color: "rgb(var(--gooni-ink, 244 245 244) / 0.35)", fontSize: 13, padding: 20 }}>loading…</div>
       ) : (
-        <table style={{ borderCollapse: "separate", borderSpacing: 0, color: "#F4F5F4", margin: 0 }}>
+        <table style={{ borderCollapse: "separate", borderSpacing: 0, color: "rgb(var(--gooni-ink, 244 245 244))", margin: 0 }}>
           <thead>
             <tr>
-              <th style={{ ...thBase, textAlign: "left", position: "sticky", left: 0, background: "rgba(11,15,13,0.9)" }} />
+              <th style={{ ...thBase, textAlign: "left", position: "sticky", left: 0, background: "rgb(var(--gooni-surf, 11 15 13) / 0.9)" }} />
               {cols.map((t) => (
                 <th key={t.id} style={thBase} title={t.name}>{t.name}</th>
               ))}
@@ -301,7 +322,7 @@ export function LogTable() {
               <tr key={date}>
                 <td style={{
                   ...tdBase, textAlign: "left", position: "sticky", left: 0, whiteSpace: "nowrap",
-                  background: "rgba(11,15,13,0.9)", color: ri === 0 ? GREEN : "rgba(244,245,244,0.5)", fontWeight: ri === 0 ? 600 : 400,
+                  background: "rgb(var(--gooni-surf, 11 15 13) / 0.9)", color: ri === 0 ? GREEN : "rgb(var(--gooni-ink, 244 245 244) / 0.5)", fontWeight: ri === 0 ? 600 : 400,
                 }}>
                   {ri === 0 ? "today" : date.slice(5).replace("-", "/")}
                 </td>
@@ -318,7 +339,7 @@ export function LogTable() {
                             style={{
                               width: 16, height: 16, borderRadius: 999, cursor: "pointer", padding: 0, boxSizing: "border-box",
                               background: v === true ? GREEN : "transparent",
-                              border: v === true ? "none" : "1.5px solid rgba(244,245,244,0.35)",
+                              border: v === true ? "none" : "1.5px solid rgb(var(--gooni-ink, 244 245 244) / 0.35)",
                               boxShadow: v === true ? "0 0 8px 1px rgba(74,222,128,0.5)" : "none",
                             }}
                           />
@@ -336,7 +357,7 @@ export function LogTable() {
                                 style={{
                                   width: 52, fontSize: 9.5, textAlign: "center", fontFamily: FONT,
                                   padding: "1px 3px", borderRadius: 5, outline: "none",
-                                  border: `1px solid ${GREEN}`, background: "rgba(11,15,13,0.85)", color: "#F4F5F4",
+                                  border: `1px solid ${GREEN}`, background: "rgb(var(--gooni-surf, 11 15 13) / 0.85)", color: "rgb(var(--gooni-ink, 244 245 244))",
                                 }}
                               />
                             ) : (
@@ -347,7 +368,7 @@ export function LogTable() {
                                   fontSize: 9, letterSpacing: 0.3, lineHeight: 1, fontFamily: FONT, cursor: "pointer",
                                   padding: "1px 3px", borderRadius: 4, border: "none", background: "transparent",
                                   maxWidth: 60, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                                  color: labels[t.id]?.[date] ? "rgba(74,222,128,0.7)" : "rgba(244,245,244,0.22)",
+                                  color: labels[t.id]?.[date] ? "rgba(74,222,128,0.7)" : "rgb(var(--gooni-ink, 244 245 244) / 0.22)",
                                 }}
                               >
                                 {labels[t.id]?.[date] || "+"}
@@ -365,7 +386,7 @@ export function LogTable() {
                           inputMode="decimal"
                           style={{
                             width: 48, fontSize: 12.5, fontWeight: 600, padding: "3px 6px", borderRadius: 7, textAlign: "center",
-                            border: `1px solid ${GREEN}`, background: "rgba(11,15,13,0.8)", color: "#F4F5F4", outline: "none", fontFamily: FONT,
+                            border: `1px solid ${GREEN}`, background: "rgb(var(--gooni-surf, 11 15 13) / 0.8)", color: "rgb(var(--gooni-ink, 244 245 244))", outline: "none", fontFamily: FONT,
                           }}
                         />
                       ) : (
@@ -374,7 +395,7 @@ export function LogTable() {
                           style={{
                             minWidth: 40, padding: "3px 8px", borderRadius: 7, cursor: "pointer",
                             border: "1px solid transparent", background: "transparent",
-                            color: v == null ? "rgba(244,245,244,0.25)" : "#F4F5F4", fontSize: 12.5, fontWeight: 600, fontFamily: FONT,
+                            color: v == null ? "rgb(var(--gooni-ink, 244 245 244) / 0.25)" : "rgb(var(--gooni-ink, 244 245 244))", fontSize: 12.5, fontWeight: 600, fontFamily: FONT,
                           }}
                         >
                           {typeof v === "number" ? v : "–"}
@@ -399,7 +420,7 @@ export function LogTable() {
                       placeholder="…"
                       style={{
                         width: 240, minHeight: 26, fontSize: 12.5, padding: "4px 8px", borderRadius: 7, resize: "vertical",
-                        border: `1px solid ${GREEN}`, background: "rgba(11,15,13,0.8)", color: "#F4F5F4", outline: "none", fontFamily: FONT, lineHeight: 1.4,
+                        border: `1px solid ${GREEN}`, background: "rgb(var(--gooni-surf, 11 15 13) / 0.8)", color: "rgb(var(--gooni-ink, 244 245 244))", outline: "none", fontFamily: FONT, lineHeight: 1.4,
                       }}
                     />
                   ) : (
@@ -409,7 +430,7 @@ export function LogTable() {
                       style={{
                         maxWidth: 260, textAlign: "left", padding: "3px 8px", borderRadius: 7, cursor: "text",
                         border: "1px solid transparent", background: "transparent", fontFamily: FONT, fontSize: 12.5,
-                        color: notes[date]?.text ? "rgba(244,245,244,0.85)" : "rgba(244,245,244,0.25)",
+                        color: notes[date]?.text ? "rgb(var(--gooni-ink, 244 245 244) / 0.85)" : "rgb(var(--gooni-ink, 244 245 244) / 0.25)",
                         whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block",
                       }}
                     >
@@ -423,7 +444,7 @@ export function LogTable() {
         </table>
       )}
       {!loading && (loadingMore || exhausted) && (
-        <div style={{ textAlign: "center", padding: "12px 0 4px", fontSize: 11, color: "rgba(244,245,244,0.3)" }}>
+        <div style={{ textAlign: "center", padding: "12px 0 4px", fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.3)" }}>
           {loadingMore ? "loading…" : "beginning of log"}
         </div>
       )}
@@ -433,12 +454,12 @@ export function LogTable() {
 
 const thBase: React.CSSProperties = {
   padding: "8px 10px", fontSize: 10.5, fontWeight: 500, letterSpacing: 0.4,
-  textTransform: "lowercase", color: "rgba(244,245,244,0.5)", textAlign: "center",
-  borderBottom: "1px solid rgba(244,245,244,0.1)", whiteSpace: "nowrap",
+  textTransform: "lowercase", color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)", textAlign: "center",
+  borderBottom: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.1)", whiteSpace: "nowrap",
 };
 const tdBase: React.CSSProperties = {
   // top-align so a tagged (taller) cell doesn't re-center its dot — every dot in
   // a row stays on the same line and the tag hangs below it.
   padding: "8px 10px", textAlign: "center", fontSize: 12.5, verticalAlign: "top",
-  borderBottom: "1px solid rgba(244,245,244,0.05)",
+  borderBottom: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.05)",
 };

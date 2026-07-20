@@ -87,7 +87,7 @@ function SidebarSection({
           background: active ? "rgba(10,132,255,0.08)" : "transparent",
           transition: "background 0.12s",
         }}
-        onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLDivElement).style.background = "rgba(0,0,0,0.03)"; }}
+        onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLDivElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.03)"; }}
         onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
       >
         <button
@@ -161,7 +161,7 @@ function SidebarChildRow({
     <div
       onMouseEnter={(e) => {
         setHovered(true);
-        if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgba(15,23,42,0.05)";
+        if (!selected) (e.currentTarget as HTMLDivElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.05)";
       }}
       onMouseLeave={(e) => {
         setHovered(false);
@@ -169,7 +169,7 @@ function SidebarChildRow({
       }}
       style={{
         display: "flex", alignItems: "center",
-        background: selected ? "rgba(0,0,0,0.05)" : "transparent",
+        background: selected ? "rgb(var(--gooni-tint, 0 0 0) / 0.05)" : "transparent",
         transition: "background 0.12s",
       }}
     >
@@ -315,7 +315,7 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
         style={{
           width: 240, minWidth: 240, height: "100vh",
           background: palette.sidebar, display: "flex", flexDirection: "column",
-          borderRight: "1px solid rgba(0,0,0,0.08)", boxSizing: "border-box",
+          borderRight: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)", boxSizing: "border-box",
           position: "relative",
         }}
       >
@@ -337,7 +337,7 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
               color: "var(--gooni-text, #1C1C1E)", transition: "background 0.1s", outline: "none",
               display: "flex", alignItems: "center", gap: 7,
             }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
           >
             <GooniLogo size={20} />
@@ -349,7 +349,7 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
                 onClick={onCompose}
                 title="New note"
                 style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gooni-text, #3C3C43)", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
               >
                 <PenLine size={14} strokeWidth={1.6} />
@@ -360,7 +360,7 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
                 onClick={onClose}
                 title="Close sidebar"
                 style={{ width: 28, height: 28, borderRadius: 7, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--gooni-text, #3C3C43)", padding: 0, flexShrink: 0, transition: "background 0.1s", outline: "none" }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
                 onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
               >
                 <PanelLeftClose size={15} strokeWidth={1.7} />
@@ -373,13 +373,13 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
             when the user is scrolling. Static chunky scrollbar Daniel
             flagged was a leftover platform default. */}
         <style>{`
-          .gooni-sidebar-scroll { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0) transparent; transition: scrollbar-color 0.2s; }
-          .gooni-sidebar-scroll:hover { scrollbar-color: rgba(0,0,0,0.18) transparent; }
+          .gooni-sidebar-scroll { scrollbar-width: thin; scrollbar-color: rgb(var(--gooni-tint, 0 0 0) / 0) transparent; transition: scrollbar-color 0.2s; }
+          .gooni-sidebar-scroll:hover { scrollbar-color: rgb(var(--gooni-tint, 0 0 0) / 0.18) transparent; }
           .gooni-sidebar-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
           .gooni-sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
           .gooni-sidebar-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; transition: background 0.2s; }
-          .gooni-sidebar-scroll:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.22); }
-          .gooni-sidebar-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.36); }
+          .gooni-sidebar-scroll:hover::-webkit-scrollbar-thumb { background: rgb(var(--gooni-tint, 0 0 0) / 0.22); }
+          .gooni-sidebar-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--gooni-tint, 0 0 0) / 0.36); }
         `}</style>
         <div
           ref={(el) => {
@@ -464,7 +464,7 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
 
           {allTags.length > 0 && (
             <>
-              <div style={{ height: 1, margin: "8px 14px", background: "rgba(0,0,0,0.07)" }} />
+              <div style={{ height: 1, margin: "8px 14px", background: "rgb(var(--gooni-tint, 0 0 0) / 0.07)" }} />
 
               {/* === Tags section ===
                   Distinct labels across the whole corpus. Clicking one
@@ -496,14 +496,14 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
             bottom. */}
         <div style={{
           display: "flex", gap: 6, padding: "8px 8px 10px",
-          borderTop: "1px solid rgba(0,0,0,0.06)", flexShrink: 0,
+          borderTop: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.06)", flexShrink: 0,
         }}>
           <button
             onClick={() => navigate({ to: "/public" })}
             title="Public profile (visitors see this)"
             aria-label="Public profile"
             style={sidebarFooterBtn}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
           >
             <Globe size={13} strokeWidth={1.7} />
@@ -514,7 +514,7 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
             title="MCP — public connector page"
             aria-label="MCP"
             style={sidebarFooterBtn}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)")}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}
             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
           >
             <Plug size={13} strokeWidth={1.7} />

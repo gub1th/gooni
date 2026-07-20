@@ -31,10 +31,10 @@ const TRAIL_DAYS = 6;
 
 // shared dark frosted-glass recipe (home is black, so NOT the light overlay card)
 const GLASS: React.CSSProperties = {
-  background: "color-mix(in srgb, #0b0f0d 55%, transparent)",
+  background: "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 55%, transparent)",
   backdropFilter: "blur(20px)",
   WebkitBackdropFilter: "blur(20px)",
-  border: "1px solid rgba(244,245,244,0.10)",
+  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.10)",
   boxShadow: "0 18px 60px rgba(0,0,0,0.55)",
 };
 
@@ -229,7 +229,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
       >
         <div style={{
           fontSize: 10, letterSpacing: 2, textTransform: "uppercase",
-          color: "rgba(244,245,244,0.3)", marginBottom: 16, height: 12,
+          color: "rgb(var(--gooni-ink, 244 245 244) / 0.3)", marginBottom: 16, height: 12,
           opacity: expanded ? 0 : 1, transition: "opacity 200ms ease",
         }}>
           today
@@ -253,8 +253,8 @@ export function LogDots({ onClose }: { onClose: () => void }) {
               position: "absolute", top: 12, right: 14, zIndex: 3,
               width: 26, height: 26, borderRadius: 8, cursor: "pointer", padding: 0,
               display: "flex", alignItems: "center", justifyContent: "center",
-              border: "1px solid rgba(244,245,244,0.12)", background: "rgba(11,15,13,0.5)",
-              color: "rgba(244,245,244,0.5)",
+              border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.12)", background: "rgb(var(--gooni-surf, 11 15 13) / 0.5)",
+              color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)",
             }}
           >
             {expanded ? <Minimize2 size={13} strokeWidth={1.8} /> : <Maximize2 size={13} strokeWidth={1.8} />}
@@ -270,7 +270,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
             }}
           >
             {loading ? (
-              <div style={{ color: "rgba(244,245,244,0.35)", fontSize: 13 }}>loading…</div>
+              <div style={{ color: "rgb(var(--gooni-ink, 244 245 244) / 0.35)", fontSize: 13 }}>loading…</div>
             ) : (
               <>
               <div style={{ display: "flex", gap: 34, alignItems: "flex-end" }}>
@@ -309,16 +309,16 @@ export function LogDots({ onClose }: { onClose: () => void }) {
                         placeholder="name"
                         style={{
                           width: 84, fontSize: 12, padding: "5px 8px", borderRadius: 8, textAlign: "center",
-                          border: "1px solid rgba(244,245,244,0.25)", background: "rgba(11,15,13,0.6)",
-                          color: "#F4F5F4", outline: "none", fontFamily: FONT,
+                          border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.25)", background: "rgb(var(--gooni-surf, 11 15 13) / 0.6)",
+                          color: "rgb(var(--gooni-ink, 244 245 244))", outline: "none", fontFamily: FONT,
                         }}
                       />
                       <button
                         onClick={() => setAddKind((k) => (k === "boolean" ? "numeric" : "boolean"))}
                         style={{
                           fontSize: 10, padding: "2px 8px", borderRadius: 999, cursor: "pointer",
-                          border: "1px solid rgba(244,245,244,0.2)", background: "transparent",
-                          color: "rgba(244,245,244,0.6)", fontFamily: FONT,
+                          border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.2)", background: "transparent",
+                          color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)", fontFamily: FONT,
                         }}
                       >
                         {addKind === "boolean" ? "yes/no" : "number"}
@@ -330,15 +330,15 @@ export function LogDots({ onClose }: { onClose: () => void }) {
                       aria-label="Add trackable"
                       style={{
                         width: 18, height: 18, borderRadius: 999, cursor: "pointer",
-                        border: "1.5px dashed rgba(244,245,244,0.3)", background: "transparent",
-                        color: "rgba(244,245,244,0.4)", display: "flex", alignItems: "center", justifyContent: "center",
+                        border: "1.5px dashed rgb(var(--gooni-ink, 244 245 244) / 0.3)", background: "transparent",
+                        color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)", display: "flex", alignItems: "center", justifyContent: "center",
                         fontSize: 13, lineHeight: 1, padding: 0,
                       }}
                     >
                       +
                     </button>
                   )}
-                  <div style={{ fontSize: 11, color: "rgba(244,245,244,0.45)", marginTop: 12 }}>add</div>
+                  <div style={{ fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)", marginTop: 12 }}>add</div>
                   {/* mirror Column's tag slot so the row stays bottom-aligned */}
                   <div style={{ height: 13, marginTop: 1 }} />
                 </div>
@@ -346,7 +346,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
 
               {/* today's note — a freeform "what happened" line under the metrics */}
               {today && (
-                <div style={{ width: "min(560px, 88%)", borderTop: "1px solid rgba(244,245,244,0.08)", paddingTop: 13 }}>
+                <div style={{ width: "min(560px, 88%)", borderTop: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.08)", paddingTop: 13 }}>
                   <input
                     value={noteDraft}
                     onChange={(e) => setNoteDraft(e.target.value)}
@@ -356,7 +356,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
                     spellCheck={false}
                     style={{
                       width: "100%", background: "transparent", border: "none", outline: "none",
-                      color: "#F4F5F4", fontFamily: FONT, fontSize: 13.5, textAlign: "center", caretColor: GREEN,
+                      color: "rgb(var(--gooni-ink, 244 245 244))", fontFamily: FONT, fontSize: 13.5, textAlign: "center", caretColor: GREEN,
                     }}
                   />
                 </div>
@@ -432,7 +432,7 @@ function Column({
               style={{
                 width: size, height: size, borderRadius: 999, boxSizing: "border-box",
                 background: did ? `rgba(74,222,128,${op})` : "transparent",
-                border: did ? "none" : `1px solid rgba(244,245,244,${op * 0.7})`,
+                border: did ? "none" : `1px solid rgb(var(--gooni-ink, 244 245 244) / ${op * 0.7})`,
               }}
             />
           );
@@ -447,7 +447,7 @@ function Column({
           style={{
             width: 18, height: 18, borderRadius: 999, cursor: "pointer", padding: 0, boxSizing: "border-box",
             background: today === true ? GREEN : "transparent",
-            border: today === true ? "none" : "1.5px solid rgba(244,245,244,0.45)",
+            border: today === true ? "none" : "1.5px solid rgb(var(--gooni-ink, 244 245 244) / 0.45)",
             boxShadow: today === true ? `0 0 10px 1px rgba(74,222,128,0.6)` : "none",
           }}
         />
@@ -461,7 +461,7 @@ function Column({
           inputMode="decimal"
           style={{
             width: 60, fontSize: 13, fontWeight: 600, padding: "4px 8px", borderRadius: 999, textAlign: "center",
-            border: `1px solid ${GREEN}`, background: "rgba(11,15,13,0.7)", color: "#F4F5F4",
+            border: `1px solid ${GREEN}`, background: "rgb(var(--gooni-surf, 11 15 13) / 0.7)", color: "rgb(var(--gooni-ink, 244 245 244))",
             outline: "none", fontFamily: FONT,
           }}
         />
@@ -470,15 +470,15 @@ function Column({
           onClick={onOpenNumber}
           style={{
             minWidth: 40, padding: "4px 12px", borderRadius: 999, cursor: "pointer",
-            border: "1px solid rgba(244,245,244,0.35)", background: "transparent",
-            color: "#F4F5F4", fontSize: 13, fontWeight: 600, fontFamily: FONT,
+            border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.35)", background: "transparent",
+            color: "rgb(var(--gooni-ink, 244 245 244))", fontSize: 13, fontWeight: 600, fontFamily: FONT,
           }}
         >
           {typeof today === "number" ? today : "–"}
         </button>
       )}
 
-      <div style={{ fontSize: 11, color: "rgba(244,245,244,0.45)", marginTop: 12, letterSpacing: 0.3 }}>
+      <div style={{ fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)", marginTop: 12, letterSpacing: 0.3 }}>
         {t.name}
       </div>
 
@@ -499,7 +499,7 @@ function Column({
               style={{
                 width: 58, fontSize: 10, textAlign: "center", fontFamily: FONT,
                 padding: "2px 4px", borderRadius: 6, outline: "none",
-                border: `1px solid ${GREEN}`, background: "rgba(11,15,13,0.8)", color: "#F4F5F4",
+                border: `1px solid ${GREEN}`, background: "rgb(var(--gooni-surf, 11 15 13) / 0.8)", color: "rgb(var(--gooni-ink, 244 245 244))",
               }}
             />
           ) : (
@@ -509,7 +509,7 @@ function Column({
               style={{
                 fontSize: 10, letterSpacing: 0.4, fontFamily: FONT, cursor: "pointer",
                 padding: "1px 4px", borderRadius: 5, border: "none", background: "transparent",
-                color: todayLabel ? "rgba(74,222,128,0.72)" : "rgba(244,245,244,0.3)",
+                color: todayLabel ? "rgba(74,222,128,0.72)" : "rgb(var(--gooni-ink, 244 245 244) / 0.3)",
               }}
             >
               {todayLabel || "+ tag"}
@@ -582,7 +582,7 @@ function FeedTile({ title, note, children }: { title: string; note?: string; chi
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 }}>
         <span style={{
           fontSize: 9, letterSpacing: 1.6, textTransform: "uppercase",
-          color: "rgba(244,245,244,0.35)",
+          color: "rgb(var(--gooni-ink, 244 245 244) / 0.35)",
         }}>
           {title}
         </span>
@@ -601,20 +601,20 @@ function FeedTile({ title, note, children }: { title: string; note?: string; chi
 function Metric({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <div style={{ fontSize: 16, fontWeight: 600, color: accent ? GREEN : "#F4F5F4", lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 9.5, color: "rgba(244,245,244,0.4)", letterSpacing: 0.3 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 600, color: accent ? GREEN : "rgb(var(--gooni-ink, 244 245 244))", lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 9.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)", letterSpacing: 0.3 }}>{label}</div>
     </div>
   );
 }
 
 function Dim({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 13, color: "rgba(244,245,244,0.35)" }}>{children}</div>;
+  return <div style={{ fontSize: 13, color: "rgb(var(--gooni-ink, 244 245 244) / 0.35)" }}>{children}</div>;
 }
 
 const connectBtn: React.CSSProperties = {
   fontSize: 11, padding: "4px 12px", borderRadius: 999, cursor: "pointer",
-  border: "1px solid rgba(244,245,244,0.25)", background: "transparent",
-  color: "rgba(244,245,244,0.6)", fontFamily: FONT,
+  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.25)", background: "transparent",
+  color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)", fontFamily: FONT,
 };
 
 function fmt(v: number | null | undefined): string {

@@ -6,7 +6,13 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-import { THEME_PALETTES, useGooniThemeStore } from "../stores/useGooniThemeStore";
+import {
+  THEME_PALETTES,
+  AMBIENT_PALETTES,
+  FROST_INK_PALETTES,
+  FROST_SURFACE_PALETTES,
+  useGooniThemeStore,
+} from "../stores/useGooniThemeStore";
 import { QuickNav } from "../components/QuickNav";
 import { QuickComposer } from "../components/QuickComposer";
 import { ErrorView, NotFoundView } from "../components/ErrorView";
@@ -26,6 +32,8 @@ function ThemeVarSync() {
   const theme = useGooniThemeStore((s) => s.theme);
   useEffect(() => {
     const palette = THEME_PALETTES[theme];
+    const ambient = AMBIENT_PALETTES[theme];
+    const frostSurf = FROST_SURFACE_PALETTES[theme];
     const root = document.documentElement;
     const tokens: Record<string, string | undefined> = {
       "--gooni-bg":        palette.bg,
@@ -43,7 +51,25 @@ function ThemeVarSync() {
       // glow dot brightens slightly on dark so it reads through the frost.
       "--gooni-overlay-blur": "18px",
       "--gooni-glow-dot":  theme === "dark" ? "#3B9CFF" : "#0A84FF",
+      // Ambient-surface bases — the void home + its chrome read these as
+      // `rgb(var(--gooni-ink) / α)` etc. Triplets so one var carries all alphas.
+      "--gooni-ink":       ambient.ink,
+      "--gooni-surf":      ambient.surf,
+      "--gooni-void":      ambient.void,
+      // Frost-glass fills (blur lives in the token; only the tint themes).
+      "--gooni-frost-chrome": frostSurf.chrome,
+      "--gooni-frost-panel":  frostSurf.panel,
+      "--gooni-frost-sheet":  frostSurf.sheet,
+      // Neutral surface-tint base for hovers/borders/dividers on themed cards
+      // (settings, notes). White on dark, black on light — so a `rgb(var(
+      // --gooni-tint) / α)` hairline is visible in BOTH themes (the historical
+      // hardcoded rgba(0,0,0,…) vanished on dark). NOT for shadows/scrims.
+      "--gooni-tint":      theme === "dark" ? "255 255 255" : "0 0 0",
     };
+    // Frost-ink palette (audit/eval/memories chrome) → --gooni-fi-<key>.
+    for (const [k, v] of Object.entries(FROST_INK_PALETTES[theme])) {
+      tokens[`--gooni-fi-${k}`] = v;
+    }
     for (const [k, v] of Object.entries(tokens)) {
       if (v == null) root.style.removeProperty(k);
       else root.style.setProperty(k, v);
@@ -237,7 +263,7 @@ function AppShell() {
           scrollbar-color: transparent transparent;
         }
         *:hover {
-          scrollbar-color: rgba(15,23,42,0.20) transparent;
+          scrollbar-color: rgb(var(--gooni-tint, 0 0 0) / 0.20) transparent;
         }
         *::-webkit-scrollbar {
           width: 8px;
@@ -252,10 +278,10 @@ function AppShell() {
           transition: background 0.18s ease;
         }
         *:hover::-webkit-scrollbar-thumb {
-          background: rgba(15,23,42,0.18);
+          background: rgb(var(--gooni-tint, 0 0 0) / 0.18);
         }
         *::-webkit-scrollbar-thumb:hover {
-          background: rgba(15,23,42,0.32);
+          background: rgb(var(--gooni-tint, 0 0 0) / 0.32);
         }
         *::-webkit-scrollbar-corner {
           background: transparent;
@@ -286,7 +312,7 @@ function AppShell() {
           height: "100vh",
           overflow: "hidden",
           // The void is the app's ground; views float on it as sheets.
-          background: isImmersive ? "var(--gooni-bg, #FFFFFF)" : "#000000",
+          background: isImmersive ? "var(--gooni-bg, #FFFFFF)" : "var(--gooni-void, #000000)",
           position: "relative",
         }}
       >

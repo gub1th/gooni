@@ -62,7 +62,7 @@ function RailButton({
         height: 36,
         borderRadius: 8,
         border: "none",
-        background: active ? "rgba(0,0,0,0.09)" : "transparent",
+        background: active ? "rgb(var(--gooni-tint, 0 0 0) / 0.09)" : "transparent",
         cursor: "pointer",
         display: "flex",
         alignItems: "center",
@@ -72,7 +72,7 @@ function RailButton({
         flexShrink: 0,
       }}
       onMouseEnter={(e) => {
-        if (!active) (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)";
+        if (!active) (e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.05)";
       }}
       onMouseLeave={(e) => {
         if (!active) (e.currentTarget as HTMLButtonElement).style.background = "transparent";
@@ -111,7 +111,7 @@ export function CollapsedSidebar({
         minWidth: 56,
         height: "100vh",
         background: palette.sidebar,
-        borderRight: "1px solid rgba(0,0,0,0.08)",
+        borderRight: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -145,7 +145,7 @@ export function CollapsedSidebar({
           marginBottom: 10,
           transition: "background 0.12s",
         }}
-        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.05)")}
+        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.05)")}
         onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
       >
         <GooniLogo size={22} />

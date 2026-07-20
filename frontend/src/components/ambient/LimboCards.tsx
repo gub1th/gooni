@@ -48,7 +48,7 @@ export function LimboCards({
       ))}
       {overflow > 0 && (
         <div style={{
-          textAlign: "center", fontSize: 11, color: "rgba(244,245,244,0.4)",
+          textAlign: "center", fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)",
           letterSpacing: 0.3, pointerEvents: "none",
         }}>
           +{overflow} more waiting
@@ -88,8 +88,8 @@ function LimboCard({
     >
       <div
         style={{
-          padding: "12px 14px", borderRadius: 14, color: "#F4F5F4",
-          background: "color-mix(in srgb, #0b0f0d 58%, transparent)",
+          padding: "12px 14px", borderRadius: 14, color: "rgb(var(--gooni-ink, 244 245 244))",
+          background: "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 58%, transparent)",
           backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
         }}
       >
@@ -104,7 +104,7 @@ function LimboCard({
             </div>
             <div style={{
               display: "flex", gap: 8, marginTop: 5, flexWrap: "wrap",
-              fontSize: 11, color: "rgba(244,245,244,0.55)",
+              fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.55)",
             }}>
               {primary && cadenceLabel(primary) && (
                 <span style={{
@@ -123,7 +123,7 @@ function LimboCard({
           </div>
           <button
             onClick={onDismiss} title="Dismiss" aria-label="Dismiss"
-            style={{ border: "none", background: "transparent", cursor: "pointer", color: "rgba(244,245,244,0.5)", padding: 2, flexShrink: 0 }}
+            style={{ border: "none", background: "transparent", cursor: "pointer", color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)", padding: 2, flexShrink: 0 }}
           >
             <X size={14} strokeWidth={2.2} />
           </button>
@@ -145,8 +145,8 @@ function LimboCard({
             style={{
               display: "inline-flex", alignItems: "center", gap: 5,
               fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 9,
-              cursor: "pointer", border: "1px solid rgba(244,245,244,0.18)",
-              background: "transparent", color: "rgba(244,245,244,0.75)",
+              cursor: "pointer", border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.18)",
+              background: "transparent", color: "rgb(var(--gooni-ink, 244 245 244) / 0.75)",
             }}
           >
             Dismiss

@@ -487,7 +487,7 @@ function EditedChip({
             borderRadius: 10,
             padding: "10px 12px",
             boxShadow:
-              "0 12px 28px rgba(15,23,42,0.16), 0 2px 6px rgba(15,23,42,0.10), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
+              "0 12px 28px rgb(var(--gooni-tint, 0 0 0) / 0.16), 0 2px 6px rgb(var(--gooni-tint, 0 0 0) / 0.10), inset 0 0 0 0.5px rgb(var(--gooni-tint, 0 0 0) / 0.06)",
             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
             zIndex: 30,
           }}
@@ -1512,7 +1512,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           backdropFilter: "blur(22px) saturate(1.8)",
           WebkitBackdropFilter: "blur(22px) saturate(1.8)",
           boxShadow:
-            "0 4px 18px rgba(15,23,42,0.08), 0 0 0 0.5px rgba(15,23,42,0.06)",
+            "0 4px 18px rgb(var(--gooni-tint, 0 0 0) / 0.08), 0 0 0 0.5px rgb(var(--gooni-tint, 0 0 0) / 0.06)",
         }}
       >
         {/* Save status — only render when actively saving or errored. The
@@ -2189,7 +2189,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       // hairline border so it reads as paper floating above
                       // the editor surface, no harsh dark slab.
                       boxShadow:
-                        "0 8px 22px rgba(15,23,42,0.14), 0 1px 3px rgba(15,23,42,0.10), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
+                        "0 8px 22px rgb(var(--gooni-tint, 0 0 0) / 0.14), 0 1px 3px rgb(var(--gooni-tint, 0 0 0) / 0.10), inset 0 0 0 0.5px rgb(var(--gooni-tint, 0 0 0) / 0.06)",
                     }}
                   >
                     {/* H1/H2 leading the menu so highlighted text can be
@@ -2363,8 +2363,8 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                             <span
                               style={{
                                 width: 12, height: 12, borderRadius: "50%",
-                                border: "1.5px solid rgba(15,23,42,0.15)",
-                                borderTopColor: "rgba(15,23,42,0.55)",
+                                border: "1.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.15)",
+                                borderTopColor: "rgb(var(--gooni-tint, 0 0 0) / 0.55)",
                                 animation: "gooni-spin 0.7s linear infinite",
                               }}
                             />
@@ -2404,7 +2404,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
                       padding: "5px 6px",
                       gap: 2,
                       boxShadow:
-                        "0 8px 22px rgba(15,23,42,0.14), 0 1px 3px rgba(15,23,42,0.10), inset 0 0 0 0.5px rgba(15,23,42,0.06)",
+                        "0 8px 22px rgb(var(--gooni-tint, 0 0 0) / 0.14), 0 1px 3px rgb(var(--gooni-tint, 0 0 0) / 0.10), inset 0 0 0 0.5px rgb(var(--gooni-tint, 0 0 0) / 0.06)",
                     }}
                   >
                     {([

@@ -133,7 +133,7 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
           alignItems: "center",
           gap: 12,
           padding: "14px 16px",
-          borderBottom: "1px solid rgba(244,245,244,0.08)",
+          borderBottom: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.08)",
         }}
       >
         <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2 }}>Calendar</span>
@@ -155,7 +155,7 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
             <span
               style={{
                 fontSize: 12.5,
-                color: "rgba(244,245,244,0.75)",
+                color: "rgb(var(--gooni-ink, 244 245 244) / 0.75)",
                 minWidth: 116,
                 textAlign: "center",
                 fontVariantNumeric: "tabular-nums",
@@ -188,7 +188,7 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
           <Center>
             Calendar not connected.
             <br />
-            <span style={{ color: "rgba(244,245,244,0.5)", fontSize: 13 }}>
+            <span style={{ color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)", fontSize: 13 }}>
               Connect Google Calendar in Settings ▸ Integrations.
             </span>
           </Center>
@@ -206,7 +206,7 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
                   style={{
                     flex: 1,
                     minWidth: 0,
-                    borderRight: "1px solid rgba(244,245,244,0.06)",
+                    borderRight: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.06)",
                     display: "flex",
                     flexDirection: "column",
                   }}
@@ -215,10 +215,10 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
                     style={{
                       padding: "8px 6px",
                       textAlign: "center",
-                      borderBottom: "1px solid rgba(244,245,244,0.06)",
+                      borderBottom: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.06)",
                     }}
                   >
-                    <div style={{ fontSize: 10.5, color: "rgba(244,245,244,0.45)", textTransform: "uppercase", letterSpacing: 0.4 }}>
+                    <div style={{ fontSize: 10.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)", textTransform: "uppercase", letterSpacing: 0.4 }}>
                       {fmtDayLabel(day)}
                     </div>
                     <div
@@ -231,7 +231,7 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
                         lineHeight: "26px",
                         borderRadius: "50%",
                         margin: "2px auto 0",
-                        color: isToday ? "#0b0f0d" : "rgba(244,245,244,0.85)",
+                        color: isToday ? "rgb(var(--gooni-surf, 11 15 13))" : "rgb(var(--gooni-ink, 244 245 244) / 0.85)",
                         background: isToday ? GREEN : "transparent",
                       }}
                     >
@@ -411,7 +411,7 @@ function EventEditor({
         </div>
 
         {editor.allDay && (
-          <div style={{ fontSize: 11, color: "rgba(244,245,244,0.45)", marginTop: 8 }}>
+          <div style={{ fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)", marginTop: 8 }}>
             All-day event — rename only.
           </div>
         )}
@@ -469,7 +469,7 @@ function AgendaList({
                 gap: 8,
                 fontSize: 12,
                 fontWeight: 600,
-                color: "rgba(244,245,244,0.6)",
+                color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)",
                 marginBottom: 8,
               }}
             >
@@ -510,7 +510,7 @@ function EventChip({ ev, onClick }: { ev: CalendarEvent; onClick: () => void }) 
         padding: "4px 6px",
         background: "rgba(74,222,128,0.13)",
         borderLeft: "2px solid rgba(74,222,128,0.7)",
-        color: "rgba(244,245,244,0.92)",
+        color: "rgb(var(--gooni-ink, 244 245 244) / 0.92)",
         fontFamily: FONT,
         display: "flex",
         flexDirection: "column",
@@ -539,7 +539,7 @@ function Segmented<T extends string>({
   options: { value: T; label: string }[];
 }) {
   return (
-    <div style={{ display: "flex", gap: 2, background: "rgba(244,245,244,0.07)", borderRadius: 8, padding: 2 }}>
+    <div style={{ display: "flex", gap: 2, background: "rgb(var(--gooni-ink, 244 245 244) / 0.07)", borderRadius: 8, padding: 2 }}>
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -554,7 +554,7 @@ function Segmented<T extends string>({
               fontWeight: active ? 600 : 500,
               padding: "4px 12px",
               borderRadius: 6,
-              color: active ? "#0b0f0d" : "rgba(244,245,244,0.7)",
+              color: active ? "rgb(var(--gooni-surf, 11 15 13))" : "rgb(var(--gooni-ink, 244 245 244) / 0.7)",
               background: active ? GREEN : "transparent",
             }}
           >
@@ -589,7 +589,7 @@ function NavBtn({
         border: "none",
         background: "transparent",
         cursor: "pointer",
-        color: "rgba(244,245,244,0.7)",
+        color: "rgb(var(--gooni-ink, 244 245 244) / 0.7)",
       }}
       onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
@@ -611,7 +611,7 @@ function Center({ children }: { children: React.ReactNode }) {
         justifyContent: "center",
         textAlign: "center",
         gap: 4,
-        color: "rgba(244,245,244,0.7)",
+        color: "rgb(var(--gooni-ink, 244 245 244) / 0.7)",
         fontSize: 14,
         padding: 24,
       }}
@@ -628,9 +628,9 @@ function hhmm(iso: string): string {
 
 const todayBtnStyle: React.CSSProperties = {
   marginLeft: 4,
-  border: "1px solid rgba(244,245,244,0.2)",
+  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.2)",
   background: "transparent",
-  color: "rgba(244,245,244,0.7)",
+  color: "rgb(var(--gooni-ink, 244 245 244) / 0.7)",
   borderRadius: 999,
   padding: "3px 10px",
   fontSize: 11.5,
@@ -648,7 +648,7 @@ const fabStyle: React.CSSProperties = {
   border: "none",
   cursor: "pointer",
   background: GREEN,
-  color: "#0b0f0d",
+  color: "rgb(var(--gooni-surf, 11 15 13))",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -669,7 +669,7 @@ const editorCard: React.CSSProperties = {
   width: 360,
   maxWidth: "calc(100% - 40px)",
   background: "#121715",
-  border: "1px solid rgba(244,245,244,0.14)",
+  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.14)",
   borderRadius: 14,
   padding: "18px 18px 16px",
   boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
@@ -679,11 +679,11 @@ const editorCard: React.CSSProperties = {
 const editorInput: React.CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
-  background: "rgba(244,245,244,0.06)",
-  border: "1px solid rgba(244,245,244,0.14)",
+  background: "rgb(var(--gooni-ink, 244 245 244) / 0.06)",
+  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.14)",
   borderRadius: 8,
   padding: "9px 11px",
-  color: "#F4F5F4",
+  color: "rgb(var(--gooni-ink, 244 245 244))",
   fontFamily: FONT,
   fontSize: 14,
   outline: "none",
@@ -701,7 +701,7 @@ const fieldLabel: React.CSSProperties = {
   flexDirection: "column",
   gap: 4,
   fontSize: 10.5,
-  color: "rgba(244,245,244,0.5)",
+  color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)",
   textTransform: "uppercase",
   letterSpacing: 0.4,
   flex: 1,
@@ -711,7 +711,7 @@ const primaryBtn: React.CSSProperties = {
   border: "none",
   cursor: "pointer",
   background: GREEN,
-  color: "#0b0f0d",
+  color: "rgb(var(--gooni-surf, 11 15 13))",
   fontWeight: 600,
   borderRadius: 8,
   padding: "7px 16px",
@@ -720,10 +720,10 @@ const primaryBtn: React.CSSProperties = {
 };
 
 const ghostBtn: React.CSSProperties = {
-  border: "1px solid rgba(244,245,244,0.18)",
+  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.18)",
   cursor: "pointer",
   background: "transparent",
-  color: "rgba(244,245,244,0.75)",
+  color: "rgb(var(--gooni-ink, 244 245 244) / 0.75)",
   borderRadius: 8,
   padding: "7px 14px",
   fontSize: 13,
@@ -749,11 +749,11 @@ const agendaRow: React.CSSProperties = {
   gap: 10,
   textAlign: "left",
   border: "none",
-  background: "rgba(244,245,244,0.04)",
+  background: "rgb(var(--gooni-ink, 244 245 244) / 0.04)",
   borderRadius: 8,
   padding: "8px 12px",
   cursor: "pointer",
-  color: "rgba(244,245,244,0.9)",
+  color: "rgb(var(--gooni-ink, 244 245 244) / 0.9)",
   fontFamily: FONT,
 };
 
@@ -765,7 +765,7 @@ const agendaAddBtn: React.CSSProperties = {
   height: 20,
   borderRadius: 6,
   border: "none",
-  background: "rgba(244,245,244,0.08)",
-  color: "rgba(244,245,244,0.6)",
+  background: "rgb(var(--gooni-ink, 244 245 244) / 0.08)",
+  color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)",
   cursor: "pointer",
 };

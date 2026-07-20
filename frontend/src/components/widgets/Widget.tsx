@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { X, Maximize2, type LucideIcon } from "lucide-react";
 import { FONT, frost, z } from "../../ui";
 import { useWidgetLayoutStore } from "../../stores/useWidgetLayoutStore";
@@ -38,6 +38,29 @@ export function Widget({
   const [dragGrab, setDragGrab] = useState<{ dx: number; dy: number } | null>(null);
   const [livePos, setLivePos] = useState<{ x: number; y: number } | null>(null);
   const dragging = dragGrab != null;
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  // Keep a dragged widget on-screen when the window shrinks. Stored positions
+  // are absolute top-left px (only clamped on drag-release), so without this a
+  // widget parked toward the right/bottom edge falls off-viewport and becomes
+  // unreachable after a resize. Re-clamp its stored pos into the new viewport.
+  // Un-dragged widgets (no stored pos) use the responsive `right: 20` default
+  // and already track the edge, so skip them.
+  useEffect(() => {
+    if (!pos) return;
+    function onResize() {
+      const el = ref.current;
+      if (!el || !pos) return;
+      const rect = el.getBoundingClientRect();
+      const clamped = {
+        x: Math.max(EDGE, Math.min(window.innerWidth - rect.width - EDGE, pos.x)),
+        y: Math.max(EDGE, Math.min(window.innerHeight - rect.height - EDGE, pos.y)),
+      };
+      if (clamped.x !== pos.x || clamped.y !== pos.y) setPos(id, clamped);
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [pos, id, setPos]);
 
   function startDrag(e: React.PointerEvent, rect: DOMRect) {
     setDragGrab({ dx: e.clientX - rect.left, dy: e.clientY - rect.top });
@@ -83,6 +106,7 @@ export function Widget({
 
   return (
     <div
+      ref={ref}
       data-widget
       onPointerDown={(e) => {
         const target = e.target as HTMLElement;
@@ -100,13 +124,13 @@ export function Widget({
         zIndex: z.overlay,
         borderRadius: 16,
         overflow: "hidden",
-        border: "1px solid rgba(244,245,244,0.1)",
+        border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.1)",
         boxShadow: dragging
           ? "0 0 0 1px rgba(74,222,128,0.5), 0 22px 64px rgba(0,0,0,0.6)"
           : "0 18px 60px rgba(0,0,0,0.5)",
         ...frost.panel,
         fontFamily: FONT,
-        color: "#F4F5F4",
+        color: "rgb(var(--gooni-ink, 244 245 244))",
         transition: dragging ? "none" : "box-shadow 200ms ease",
         userSelect: dragging ? "none" : undefined,
         touchAction: "none",
@@ -118,7 +142,7 @@ export function Widget({
           alignItems: "center",
           gap: 8,
           padding: "9px 8px 9px 12px",
-          borderBottom: "1px solid rgba(244,245,244,0.07)",
+          borderBottom: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.07)",
         }}
       >
         <div
@@ -186,16 +210,16 @@ function HeaderBtn({
         border: "none",
         background: "transparent",
         cursor: "pointer",
-        color: "rgba(244,245,244,0.55)",
+        color: "rgb(var(--gooni-ink, 244 245 244) / 0.55)",
         flexShrink: 0,
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = "rgba(255,255,255,0.08)";
-        e.currentTarget.style.color = "rgba(244,245,244,0.9)";
+        e.currentTarget.style.color = "rgb(var(--gooni-ink, 244 245 244) / 0.9)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = "transparent";
-        e.currentTarget.style.color = "rgba(244,245,244,0.55)";
+        e.currentTarget.style.color = "rgb(var(--gooni-ink, 244 245 244) / 0.55)";
       }}
     >
       {children}

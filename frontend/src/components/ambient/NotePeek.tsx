@@ -38,10 +38,10 @@ export function NotePeek({ note, onClose }: { note: ApiNote; onClose: () => void
         style={{
           position: "relative", width: "min(680px, 88vw)", maxHeight: "76vh", overflowY: "auto",
           borderRadius: 22, padding: "34px 40px 40px",
-          background: "color-mix(in srgb, #0b0f0d 62%, transparent)",
+          background: "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 62%, transparent)",
           backdropFilter: "blur(26px)", WebkitBackdropFilter: "blur(26px)",
-          border: "1px solid rgba(244,245,244,0.12)", boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
-          color: "#F4F5F4",
+          border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.12)", boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+          color: "rgb(var(--gooni-ink, 244 245 244))",
         }}
       >
         <button
@@ -49,8 +49,8 @@ export function NotePeek({ note, onClose }: { note: ApiNote; onClose: () => void
           aria-label="Close"
           style={{
             position: "absolute", top: 16, right: 18, width: 26, height: 26, borderRadius: 999,
-            border: "1px solid rgba(244,245,244,0.18)", background: "transparent",
-            color: "rgba(244,245,244,0.55)", cursor: "pointer", fontSize: 14, lineHeight: 1,
+            border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.18)", background: "transparent",
+            color: "rgb(var(--gooni-ink, 244 245 244) / 0.55)", cursor: "pointer", fontSize: 14, lineHeight: 1,
           }}
         >
           ×
@@ -64,14 +64,14 @@ export function NotePeek({ note, onClose }: { note: ApiNote; onClose: () => void
 
         <div
           className="gooni-note-peek"
-          style={{ fontSize: 15, lineHeight: 1.62, color: "rgba(244,245,244,0.9)" }}
+          style={{ fontSize: 15, lineHeight: 1.62, color: "rgb(var(--gooni-ink, 244 245 244) / 0.9)" }}
           dangerouslySetInnerHTML={{ __html: html }}
         />
 
         <style>{`
           .gooni-note-peek img { max-width: 100%; border-radius: 8px; }
           .gooni-note-peek a { color: ${"#4ADE80"}; }
-          .gooni-note-peek h1, .gooni-note-peek h2, .gooni-note-peek h3 { color: #F4F5F4; }
+          .gooni-note-peek h1, .gooni-note-peek h2, .gooni-note-peek h3 { color: rgb(var(--gooni-ink, 244 245 244)); }
           .gooni-note-peek pre { background: rgba(0,0,0,0.35); padding: 12px; border-radius: 8px; overflow-x: auto; }
           .gooni-note-peek code { background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 4px; }
           .gooni-note-peek ul, .gooni-note-peek ol { padding-left: 22px; }
