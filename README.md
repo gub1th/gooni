@@ -46,11 +46,13 @@ datasette db/gooni.db -p 8002   # pip install datasette first (not in requiremen
 ### Focus MCP server (the claude.ai custom connector)
 ```bash
 # Serves the 6-tool "focus system" over remote streamable-HTTP at http://127.0.0.1:8001/mcp
-GOONI_URL=http://localhost:8000 GOONI_AUTH_PASSWORD="$AUTH_PASSWORD" FOCUS_MCP_PORT=8001 \
+GOONI_URL=http://localhost:8000 GOONI_AUTH_PASSWORD="$AUTH_PASSWORD" \
+  FOCUS_MCP_PORT=8001 FOCUS_MCP_ALLOWED_HOSTS="*" \
   python mcp/focus_server.py        # run as a script — mcp/ shadows the pip package
 
-# Expose it publicly, then add the printed URL + /mcp at claude.ai → Settings → Connectors:
-ngrok http 8001                     # or cloudflared tunnel --url http://localhost:8001
+# Expose it publicly (cloudflared, NOT ngrok — ngrok's interstitial breaks the
+# OAuth discovery probes), then add the printed URL + /mcp at claude.ai:
+cloudflared tunnel --url http://localhost:8001
 ```
 See `docs/focus_connector_instructions.md` for the full connect + auto-logging setup. The kiosk dashboard lives at http://localhost:5173/focus.
 
@@ -147,3 +149,4 @@ tests/                       # plain-script tests: signal routing, overlay ranke
 | `GOONI_FRONTEND_URL` | MCP only | Public host of the SPA, used by `mcp__gooni__add_note` to surface deep-link URLs (default `http://localhost:5173`) |
 | `GOONI_URL`, `GOONI_AUTH_PASSWORD` | MCP only | Focus/legacy MCP → backend base URL + password (→ sha256 → Bearer). Set `GOONI_AUTH_PASSWORD` = `AUTH_PASSWORD` so the connector can reach the gated backend |
 | `FOCUS_MCP_HOST`, `FOCUS_MCP_PORT` | Focus MCP | Bind for `mcp/focus_server.py` streamable-HTTP transport (default `127.0.0.1:8001`) |
+| `FOCUS_MCP_ALLOWED_HOSTS` | Focus MCP | Comma-separated Host allowlist for the transport's DNS-rebinding protection; `*` disables it. Required (or `*`) when serving behind a tunnel — the public Host is 421-rejected otherwise |

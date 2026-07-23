@@ -52,11 +52,37 @@ if _AUTH_PASSWORD:
 
 _session = httpx.Client(headers=_session_headers, timeout=15)
 
+# DNS-rebinding protection: the streamable-HTTP transport rejects any request
+# whose Host header isn't in allowed_hosts (default: localhost only) with a 421.
+# Behind a tunnel, the inbound Host is the PUBLIC hostname (e.g.
+# <sub>.trycloudflare.com), so it must be allowlisted or the connector's probes
+# 421 before a session opens. Configure via FOCUS_MCP_ALLOWED_HOSTS
+# (comma-separated hostnames); the sentinel "*" disables the protection entirely
+# — acceptable here because the server is DELIBERATELY public behind the tunnel
+# (rebinding protection guards localhost-only servers from browser attacks; a
+# public tunnel URL that rotates makes a strict allowlist impractical). Leave
+# unset for pure-local use (localhost stays trusted).
+_allowed_hosts = [h.strip() for h in os.getenv("FOCUS_MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+_transport_security = None
+if _allowed_hosts == ["*"]:
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    _transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+elif _allowed_hosts:
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    _transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_allowed_hosts + [f"{h}:443" for h in _allowed_hosts],
+        allowed_origins=[f"https://{h}" for h in _allowed_hosts],
+    )
+
 # host/port only matter for the streamable-HTTP transport (remote connector).
 mcp = FastMCP(
     "gooni-focus",
     host=os.getenv("FOCUS_MCP_HOST", "127.0.0.1"),
     port=int(os.getenv("FOCUS_MCP_PORT", "8001")),
+    transport_security=_transport_security,
 )
 
 
