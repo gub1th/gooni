@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.209.0 — 2026-07-23 (minor)
+
+- feat(focus-mcp): mount connector in-app at /mcp for Fly (always-on, no tunnel) (#432)
+
 ## 0.208.1 — 2026-07-23 (patch)
 
 - fix(focus-mcp): allowlist tunnel Host + cloudflared-over-ngrok for remote connect (#431)
