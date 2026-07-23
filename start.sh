@@ -13,5 +13,10 @@ export PYTHONUNBUFFERED=1
 # Telegram bot — long polling, runs in background
 python -m scripts.telegram_bot &
 
-# FastAPI server — foreground so the container stays alive
-exec uvicorn app.main:app --host 0.0.0.0 --port 8080
+# FastAPI server — foreground so the container stays alive.
+# --proxy-headers + --forwarded-allow-ips='*': trust Fly's TLS-terminating
+# proxy so uvicorn sees X-Forwarded-Proto=https. Without it, redirects (e.g. the
+# /mcp → /mcp/ mount redirect for the Focus MCP connector) are emitted with an
+# http:// scheme, which Fly's force_https then bounces back to https → a loop the
+# MCP client hangs on. Trusting the forwarded proto makes those redirects https.
+exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --proxy-headers --forwarded-allow-ips='*'

@@ -293,6 +293,12 @@ async def auth_middleware(request: Request, call_next):
         # run in-process, so there's no backend hop to protect. Authless by design.
         or path == "/mcp"
         or path.startswith("/mcp/")
+        # OAuth discovery probes claude.ai fires when adding the connector. With
+        # AUTH_PASSWORD set (prod), the middleware would 401 these instead of
+        # 404 — a 401 reads as "auth required" and pushes the client into an
+        # OAuth flow our authless server can't complete. Exempt so they 404 clean
+        # and the connector registers authless (matches local behavior).
+        or path.startswith("/.well-known/oauth")
         or path == "/"
         or request.method == "OPTIONS"
     ):
