@@ -1,8 +1,21 @@
 # Focus system — connector setup + auto-logging
 
-How to wire the `mcp/focus_server.py` connector into claude.ai so you log to Gooni just by talking — no "log a thought" incantation.
+How to wire the Focus MCP connector into claude.ai so you log to Gooni just by talking — no "log a thought" incantation.
 
-## 1. Run the server + tunnel
+## 0. Prod (Fly) — the real path, no tunnel
+
+The MCP connector is **mounted into the main app** at `/mcp` (`app/focus_mcp.py`), so it deploys with the backend on merge → main. Once deployed, the connector URL is stable and always-on:
+
+- claude.ai → Settings → Connectors → **Add custom connector**
+  - **Name:** `Gooni Focus`
+  - **Remote MCP server URL:** `https://gooni-bot.fly.dev/mcp`
+  - OAuth blank → **Add**
+- No tunnel, no local server, works from your phone (this is what replaces WhatsApp on the go).
+- Auth: the `/mcp` endpoint is authless-by-design (exempt from the Bearer middleware; tools run in-process). Access = the endpoint's obscurity + (later) OAuth. DNS-rebinding protection is off by default there (deliberately public); pin hosts with the `FOCUS_MCP_ALLOWED_HOSTS` fly secret if you want it on.
+
+Then jump to §3 (auto-logging). §1–2 below are the LOCAL-DEV path (standalone `mcp/focus_server.py` + a tunnel) — only needed to iterate before a Fly deploy exists.
+
+## 1. Local dev: run the standalone server + tunnel
 
 ```bash
 # Backend already running on :8000. Then:

@@ -16,6 +16,18 @@ from .db.models import (
     Visit,
 )
 
+# Focus MCP connector, mounted at /mcp (see app/focus_mcp.py). Import is guarded
+# so a failure to build the MCP app can NEVER stop the main app (and all its
+# surfaces — web, WhatsApp, Telegram) from booting.
+try:
+    from . import focus_mcp
+
+    _FOCUS_MCP_OK = True
+except Exception as _focus_mcp_err:  # pragma: no cover - defensive
+    focus_mcp = None
+    _FOCUS_MCP_OK = False
+    print(f"[focus-mcp] mount disabled at import: {_focus_mcp_err}", flush=True)
+
 
 def _alembic_upgrade(engine):
     """Apply Alembic migrations on boot — walks the DB cursor in
@@ -142,19 +154,37 @@ async def _lifespan(app: FastAPI):
     excerpt_task = asyncio.create_task(background._backfill_note_excerpts_loop())
     mem_task = asyncio.create_task(background._memory_watchdog_loop())
     refresh_task = asyncio.create_task(background._integration_refresh_loop())
-    try:
-        yield
-    finally:
-        for t in (
-            excerpt_task, mem_task, refresh_task,
-        ):
-            t.cancel()
+    from contextlib import AsyncExitStack
+
+    async with AsyncExitStack() as _stack:
+        # The mounted /mcp connector's session manager task group backs every
+        # MCP request; it must run for the app's lifetime. Guarded so a mount
+        # failure can never keep the app from booting.
+        if _FOCUS_MCP_OK:
             try:
-                await t
-            except (asyncio.CancelledError, Exception):
-                pass
+                await _stack.enter_async_context(focus_mcp.session_manager.run())
+            except Exception as _e:  # pragma: no cover - defensive
+                print(f"[focus-mcp] session manager start failed: {_e}", flush=True)
+        try:
+            yield
+        finally:
+            for t in (
+                excerpt_task, mem_task, refresh_task,
+            ):
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
 
 app = FastAPI(lifespan=_lifespan)
+
+# Mount the Focus MCP connector at /mcp (streamable-HTTP). The sub-app serves at
+# its own root, so /mcp is the external endpoint claude.ai / Claude Code connect
+# to. Exempted from the Bearer middleware below (authless by design — tools run
+# in-process). Guarded: no mount if the import failed.
+if _FOCUS_MCP_OK:
+    app.mount("/mcp", focus_mcp.http_app)
 
 _origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 
@@ -258,6 +288,11 @@ async def auth_middleware(request: Request, call_next):
         or path == "/healthz"
         or path.startswith("/assets")
         or path.startswith("/webhooks/")
+        # Focus MCP connector: the claude.ai dialog offers only OAuth (no static
+        # Bearer field), so the connector→server hop can't carry our token. Tools
+        # run in-process, so there's no backend hop to protect. Authless by design.
+        or path == "/mcp"
+        or path.startswith("/mcp/")
         or path == "/"
         or request.method == "OPTIONS"
     ):
