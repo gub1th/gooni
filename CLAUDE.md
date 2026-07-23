@@ -101,6 +101,30 @@ Route shapes are grep-able — one `app/routers/<domain>.py` module per domain (
 **Stats**: `get_leetcode_activity`
 Killed in the nuke: all Todo/Focus/Habit/Backlog/List/Space/Comment/CapabilityFacet tools.
 
+### Focus MCP Server (`mcp/focus_server.py`) — SEPARATE, 6-tool remote connector
+
+A SECOND, standalone MCP server (the legacy `mcp/server.py` above is untouched). This is the "focus system" surface (see the Focus system section) — deliberately six tools, not thirty, because Claude selects tools from the description string alone with no orchestrator to disambiguate. Exposed as a **remote streamable-HTTP** server so it can be added as a custom connector at claude.ai (replacing WhatsApp as the ambient logging surface). Thin httpx wrappers over the `/focus/*` backend routes — all logic is server-side.
+
+**Tools**: `log_thought(content, topic, new_batch?)`, `list_topics()`, `create_topic(name, parent?)`, `query_thoughts(topic?, since?, text?)`, `set_reminder(content, due_at?, owed_to?, from_thought?)`, `list_reminders(day?)`.
+
+Config (same env scheme as the legacy server): `GOONI_URL`, `GOONI_AUTH_PASSWORD` (→ sha256 → Bearer to the backend), plus `FOCUS_MCP_HOST`/`FOCUS_MCP_PORT` (default `127.0.0.1:8001`). Streamable-HTTP mounts at `/mcp`. Run as a script (`python mcp/focus_server.py`) — the repo's `mcp/` dir shadows the pip package, so `import mcp.focus_server` from the repo root fails (same constraint as `mcp/server.py`; `tests/test_imports.py` skips `mcp/`). **Connector→server hop is unauthenticated** (the claude.ai dialog offers only OAuth, no static-bearer field) — prototype auth = URL secrecy behind a tunnel; the server→backend hop stays Bearer-gated. Public exposure (tunnel/Fly) + adding at claude.ai are manual steps.
+
+## Focus system (2026-07-23, `docs/` PRD `gooni-focus-system-plan.md` — ADDITIVE, alongside v2)
+
+The Claude-as-intelligence-layer pivot: **Claude** does extraction/intent/batching/query-formulation (via the Focus MCP connector, in-conversation); **Gooni** is pure persistence + a glanceable kiosk display; the display (not any agent) provides proactivity — an always-on screen showing what's due + which topics went stale needs no between-conversation machinery. A NEW clean primitive set, NOT reusing Promise/Note/Trackable, so it ships fast without entangling the chat pipeline. Overlap (Topic≈nuked Focus/Space, Thought≈Note/Message, Reminder≈Promise) is intentional.
+
+- **`Topic`** (`topics`) — a subject, self-FK `parent_id` for subtopics. `salience` float **bumped on write** (a logged thought, `+0.08` clamped to `[0.01,0.99]`), **decayed on read**: displayed = `salience × 0.5^(Δdays_since_last_touched / 7)`, floored `0.01`. No cron — decay is a pure function of `now`, recomputed per read (like computing age from birthdate). `color` = per-topic identity (persisted, not meaning). Size on the dashboard = decayed salience; pulse = growth (touched within 24h).
+- **`ThoughtBatch`** (`thought_batches`) — a run of related thinking; same-topic thoughts within **30 min** append to the open batch, a larger gap / `new_batch` / clear subject-turn opens a new one. `label` = Claude-written summary (the right-hand log renders these).
+- **`Thought`** (`thoughts`) — one logged thought; topic reached THROUGH the batch (one topic per thought).
+- **`Person`** (`focus_people`) + **`Mention`** (`mentions`, join) — scope-disciplined: a table + a join, nothing more. Mention is schema-ready but UNWRITTEN in v1 (no tool populates it yet).
+- **`Reminder`** (`reminders`) — `type` `reminder|promise`. A promise = a reminder with `owed_to` (→ Person; null = self). Promises frequently have no `due_at` so they surface by **age** ("owed to Yash · 6d"), reminders by **time**. `parent_id` reserved (unused v1) for on-screen checklists.
+
+**Backend**: `app/services/focus_service.py` (deterministic — decay, batch rule, salience, reminders, dashboard assembly, seed; NO LLM). `app/routers/focus.py` → `POST/GET /focus/thoughts`, `POST/GET /focus/topics`, `POST/GET/PATCH /focus/reminders`, `GET /focus/dashboard`. Migration `1aee2da7e158` (6 tables; hand-trimmed from autogenerate to strip FTS-drop + server-default drift). Topics seeded on boot in `main._lifespan` (idempotent). Decay net: `tests/test_focus_decay.py`.
+
+**Frontend**: standalone chromeless kiosk route **`/focus`** (`frontend/src/routes/focus.tsx` + `components/focus/`). Notch (top-center, iPhone-X-style) merges Google Calendar events (read-only, **client-side** — never synced into SQLite) + dated reminders by time, then promises by age. Center = hand-drawn wobbly rotating SVG circles (`TopicCircles.tsx` — mockup math verbatim; radius←decayed salience, pulse←growth, 5 fixed slots by rank, mismatched rotation periods, drop-shadow glow, view-only). Left sidebar = 5-day activity from existing trackables + a TBD goals block. Right = low-contrast batch-label log. Polls `/focus/dashboard` every 25s. Merge logic is pure + tested (`notchMerge.ts` + `.test.ts`).
+
+**Deferred / gated** (NOT built): displacement notification + hysteresis (`// TODO(displacement)`, `overflow_topics` already plumbed); focus cam (step 6 — a SEPARATE webcam CV daemon, unrelated to the "Focus cam" seed topic); scheduled reflection/notifications (need cron + API, can't live in a tool call); the API refactor (step 7, separate project — delete Gooni's intelligence layer, real ReAct loop). Host decision (Fly vs idle PC) + connector registration are Daniel's manual steps.
+
 ## Running
 
 ```bash
