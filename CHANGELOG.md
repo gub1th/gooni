@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.210.0 — 2026-07-23 (minor)
+
+- feat(focus): drop the boot topic-seed → empty state until real logging (#434)
+
 ## 0.209.1 — 2026-07-23 (patch)
 
 - fix(focus-mcp): trust Fly proxy proto (https redirects) + exempt OAuth discovery (#433)
