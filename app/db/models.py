@@ -739,6 +739,150 @@ class Edge(Base):
     )
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# Focus system (2026-07-23, PRD `gooni-focus-system-plan.md`)
+#
+# A NEW primitive set that lives ALONGSIDE the ambient-loop v2 tables — the
+# plan is explicitly additive, not a rewrite. Claude (via MCP) is the
+# intelligence layer; these tables are pure persistence + a glanceable
+# dashboard. Overlap with existing primitives is intentional and accepted:
+#   Topic     ≈ the nuked Focus/Space, reborn with time-decay
+#   Thought   ≈ a lightweight, topic-scoped Note/Message
+#   Reminder  ≈ Promise, but simpler + person-aware (owed_to)
+# We do NOT reuse Promise/Note here — the focus system is its own clean surface
+# so it can ship fast without entangling the v2 chat pipeline.
+# ───────────────────────────────────────────────────────────────────────────
+
+
+class Topic(Base):
+    """A subject Daniel thinks about — replaces the old "focus area". Topics
+    nest (parent_id self-FK → subtopics) and carry a *decaying* salience.
+
+    Salience model (deterministic, no scheduled job):
+      - `salience` is the STORED value, bumped on every write to the topic
+        (a logged thought). Clamped to [0.01, 0.99] — never 0, so nothing
+        ever fully disappears.
+      - The DISPLAYED value is `salience × decay(now - last_touched)`, floored
+        at 0.01. Computed on read in focus_service.decayed_salience — the
+        column is never mutated by the passage of time, only by writes.
+    Size on the dashboard = decayed salience; pulse = growth (recent bump).
+    """
+
+    __tablename__ = "topics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    # Self-FK for subtopics. Null = a root topic.
+    parent_id = Column(Integer, ForeignKey("topics.id"), nullable=True, index=True)
+    # Stored salience in [0.01, 0.99]. Bumped on write, decayed on read.
+    salience = Column(Float, nullable=False, default=0.3)
+    # Last write to this topic (a logged thought). Anchors the decay curve.
+    last_touched = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Per-topic identity color (hex). NOT meaning — a permanently-red circle
+    # becomes wallpaper. Stable per topic so Daniel learns where each lives.
+    # Small addition beyond the specced table: lets the circle color persist
+    # + be overridden rather than hashing it from the name each render.
+    color = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ThoughtBatch(Base):
+    """A run of related thinking on one topic. Thoughts seconds-to-hours apart
+    coalesce into a batch while the subject holds; a >30-min gap (or an
+    explicit new_batch / a clear subject turn) opens a fresh one. The batch
+    `label` is a short Claude-written summary — it's what the dashboard's
+    right-hand log renders, one line per batch.
+    """
+
+    __tablename__ = "thought_batches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    topic_id = Column(Integer, ForeignKey("topics.id"), nullable=False, index=True)
+    label = Column(Text, nullable=True)  # short summary, written by Claude
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # Bumped to now() every time a thought appends — drives the 30-min batch
+    # window and orders the log.
+    ended_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class Thought(Base):
+    """A single logged thought. Topic is reached THROUGH the batch (one topic
+    per thought — a thought spanning two topics has to pick one)."""
+
+    __tablename__ = "thoughts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    content = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    batch_id = Column(Integer, ForeignKey("thought_batches.id"), nullable=False, index=True)
+
+
+class Person(Base):
+    """Someone Daniel mentions or owes something to. Scope discipline (plan):
+    a table and a join, nothing more — no relationship graph, no contact sync,
+    no interaction-frequency tracking. Staleness-for-people is a deferred v2."""
+
+    __tablename__ = "focus_people"  # 'people' is a common reserved-ish name; prefix to be safe
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    # How Daniel knows them — "CMU club tennis". Free text.
+    context = Column(Text, nullable=True)
+    first_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Mention(Base):
+    """Join: a Thought mentions a Person. Rolls up to batches/topics for free.
+    Schema-ready but UNWRITTEN in v1 — none of the six MCP tools populate it
+    yet (like Reminder.parent_id). Reserved for when thought-logging starts
+    tagging people."""
+
+    __tablename__ = "mentions"
+    __table_args__ = (
+        UniqueConstraint("thought_id", "person_id", name="uq_mention_thought_person"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    thought_id = Column(Integer, ForeignKey("thoughts.id"), nullable=False, index=True)
+    person_id = Column(Integer, ForeignKey("focus_people.id"), nullable=False, index=True)
+
+
+class Reminder(Base):
+    """A thing to do (reminder) or a thing owed to someone (promise). The
+    difference that matters for the dashboard:
+
+      - type='reminder' — usually has a `due_at`; surfaces in the notch
+        ordered by TIME, merged with Google Calendar events at display time.
+      - type='promise'  — a Reminder with a Person attached (`owed_to`);
+        frequently has NO due_at, so it can't be time-ordered. Surfaces by
+        AGE instead ("owed to Yash · 6d") in a separate notch section. An
+        undated promise that never surfaces is exactly the one you break.
+
+    Most promises are owed to yourself — `owed_to` null = self, and the
+    display drops the "owed to" prefix in that case.
+    """
+
+    __tablename__ = "reminders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # 'reminder' | 'promise'. A promise is just a reminder with owed_to set,
+    # but the type is explicit so the notch can section without inferring.
+    type = Column(String, nullable=False, default="reminder", index=True)
+    content = Column(String, nullable=False)
+    # Person this is owed to. Null = owed to yourself (the common case).
+    owed_to = Column(Integer, ForeignKey("focus_people.id"), nullable=True, index=True)
+    # Nullable — promises frequently have none; time-ordering only applies
+    # to dated rows.
+    due_at = Column(DateTime, nullable=True, index=True)
+    done = Column(Boolean, nullable=False, default=False, index=True)
+    # Often a reminder falls out of a thought ("remind me to..."). Optional.
+    thought_id = Column(Integer, ForeignKey("thoughts.id"), nullable=True, index=True)
+    # UNUSED in v1 — reserved for on-screen checklists (multi-step tasks).
+    parent_id = Column(Integer, ForeignKey("reminders.id"), nullable=True, index=True)
+    attachment_path = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class Attachment(Base):
     """File attached to a Note (PDF, doc, archive, etc.). Stored on R2; the
     DB row carries metadata + the public URL. Distinct from inline <img>

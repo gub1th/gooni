@@ -61,9 +61,15 @@ function ThemeVarSync() {
 const SIDEBAR_BREAKPOINT = 768;
 
 // Paths that render their own chrome — sidebar stays unmounted there so
-// the public portfolio doesn't leak owner-only affordances.
+// the public portfolio doesn't leak owner-only affordances. `/focus` is the
+// focus-system kiosk: a bare second-monitor display, so the ambient nav /
+// sidebar / widget overlays stand down there too (it brings its own PasswordGate).
 function isChromelessPath(pathname: string): boolean {
-  return pathname === "/public" || pathname.startsWith("/public/");
+  return (
+    pathname === "/public" ||
+    pathname.startsWith("/public/") ||
+    pathname === "/focus"
+  );
 }
 
 // Immersive paths hide the ambient chrome (SummonedNav + widget overlays).

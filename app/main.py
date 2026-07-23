@@ -124,6 +124,21 @@ async def _lifespan(app: FastAPI):
     except Exception as e:
         print(f"[fly-revive] boot scan failed: {e}", flush=True)
 
+    # Focus system: seed the current topics on first boot. Idempotent —
+    # a no-op once any topic exists (Daniel renames/adds via create_topic).
+    try:
+        from .services import focus_service
+        seed_db = SessionLocal()
+        try:
+            seeded = focus_service.seed_topics(seed_db)
+            if seeded:
+                seed_db.commit()
+                print(f"[focus] seeded {len(seeded)} topics", flush=True)
+        finally:
+            seed_db.close()
+    except Exception as e:
+        print(f"[focus] topic seed failed: {e}", flush=True)
+
     excerpt_task = asyncio.create_task(background._backfill_note_excerpts_loop())
     mem_task = asyncio.create_task(background._memory_watchdog_loop())
     refresh_task = asyncio.create_task(background._integration_refresh_loop())

@@ -30,4 +30,5 @@ ROUTER_MODULES = [
     "whoop",
     "integrations",
     "reflections",
+    "focus",
 ]

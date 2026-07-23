@@ -1586,6 +1586,62 @@ export async function createPromise(text: string): Promise<ApiPromise> {
   return res.json();
 }
 
+// ── Focus dashboard (kiosk) ────────────────────────────────────────────────
+// The always-on glanceable display (`gooni-focus-system-plan.md`). One assembled
+// payload of Gooni-OWNED data — Google Calendar events are merged CLIENT-SIDE
+// (the plan forbids syncing gcal into SQLite; the notch reads both sources and
+// merges at display time). Backend: focus_service.dashboard.
+
+export interface FocusCircle {
+  id: number;
+  name: string;
+  color: string | null;
+  parent_id: number | null;
+  // Stored salience (bumps on write). Kept for the deferred displacement math.
+  salience_stored: number;
+  // Decayed value — drives circle SIZE. 0.01..0.99.
+  salience_decayed: number;
+  last_touched: string | null;
+  // Touched within the growth window → circle PULSES.
+  growth: boolean;
+}
+
+export interface FocusReminder {
+  id: number;
+  type: "reminder" | "promise";
+  content: string;
+  // Person name, or null = owed to self (drop the "owed to" prefix).
+  owed_to: string | null;
+  // ISO datetime, or null (undated promises surface by age instead).
+  due_at: string | null;
+  done: boolean;
+  age_days: number;
+  thought_id: number | null;
+}
+
+export interface FocusLogRow {
+  batch_id: number;
+  label: string;
+  topic: string;
+  color: string | null;
+  ended_at: string | null;
+}
+
+export interface FocusDashboard {
+  circles: FocusCircle[];
+  // Ranked below the top-5 slots — feeds the deferred displacement notice.
+  overflow_topics: FocusCircle[];
+  notch: { reminders: FocusReminder[]; promises: FocusReminder[] };
+  log: FocusLogRow[];
+  generated_at: string;
+}
+
+export async function fetchFocusDashboard(): Promise<FocusDashboard> {
+  const res = await apiFetch(`${BASE}/focus/dashboard`);
+  if (!res.ok) throw new Error("Failed to fetch focus dashboard");
+  return res.json();
+}
+
 // ── Open Graph link previews ──────────────────────────────────────────────
 
 export interface OgMetadata {
