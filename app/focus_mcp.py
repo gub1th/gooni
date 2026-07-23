@@ -1,0 +1,270 @@
+"""In-process Focus MCP server, mounted into the main FastAPI app at `/mcp`
+(see app/main.py). This is the PROD path for the claude.ai custom connector:
+deploying the main app to Fly ships a stable `https://gooni-bot.fly.dev/mcp`
+endpoint, always-on, no tunnel.
+
+Distinct from the standalone `mcp/focus_server.py`, which is the LOCAL-dev path
+(run as a script + cloudflared tunnel). Same six tools, same descriptions — but
+here the tools call `focus_service` DIRECTLY against a DB session (no httpx, no
+Bearer round-trip), because we're already inside the backend process.
+
+Auth: the mounted `/mcp` endpoint is exempt from the app's Bearer middleware
+(the claude.ai dialog offers only OAuth, no static-bearer field) — the tools
+operate in-process, so there's no backend hop to authenticate. The endpoint is
+authless-by-design; access control is the obscure tunnel/host + (later) OAuth.
+
+Transport security: streamable-HTTP has DNS-rebinding protection that 421s any
+non-localhost Host. Behind Fly's proxy the Host is the public app hostname, so
+we disable the check by default (FOCUS_MCP_ALLOWED_HOSTS unset) — the endpoint
+is deliberately public. Set FOCUS_MCP_ALLOWED_HOSTS to pin specific hosts.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+
+def _import_real_mcp():
+    """The repo's `mcp/` dir has an (empty) __init__.py, making it a regular
+    package that SHADOWS the pip `mcp` package whenever the repo root is on
+    sys.path — which it is under `uvicorn app.main:app` from the repo root. So
+    `from mcp.server.fastmcp import FastMCP` resolves to the repo dir and fails.
+
+    Fix: drop the repo root from sys.path + purge the shadow modules, import the
+    REAL site-packages mcp, then restore sys.path (leaving the real mcp cached in
+    sys.modules for the rest of the process)."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    saved_path = list(sys.path)
+    sys.path[:] = [p for p in sys.path if os.path.abspath(p or os.getcwd()) != repo_root]
+    for k in [m for m in list(sys.modules) if m == "mcp" or m.startswith("mcp.")]:
+        del sys.modules[k]
+    try:
+        from mcp.server.fastmcp import FastMCP as _FastMCP
+        from mcp.server.transport_security import (
+            TransportSecuritySettings as _TSS,
+        )
+        return _FastMCP, _TSS
+    finally:
+        sys.path[:] = saved_path
+
+
+FastMCP, TransportSecuritySettings = _import_real_mcp()
+
+from .db.database import SessionLocal  # noqa: E402
+from .services import focus_service  # noqa: E402
+
+_allowed_hosts = [h.strip() for h in os.getenv("FOCUS_MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
+if _allowed_hosts and _allowed_hosts != ["*"]:
+    _transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_allowed_hosts + [f"{h}:443" for h in _allowed_hosts],
+        allowed_origins=[f"https://{h}" for h in _allowed_hosts],
+    )
+else:
+    # Default (and "*"): disable — the mounted endpoint is intentionally public.
+    _transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+# stateless_http=True: each request is self-contained (no persistent SSE session
+# to keep alive), which is the right fit for a mounted sub-app and keeps the
+# lifespan wiring simple. streamable_http_path="/" so mounting the sub-app at
+# "/mcp" yields the external path exactly /mcp (no /mcp/mcp doubling).
+mcp = FastMCP(
+    "gooni-focus",
+    stateless_http=True,
+    streamable_http_path="/",
+    transport_security=_transport_security,
+)
+
+
+@mcp.tool()
+def log_thought(content: str, topic: str, new_batch: bool = False) -> dict:
+    """Capture a single thought, idea, or observation into Gooni under a subject.
+    THIS IS THE DEFAULT ACTION whenever Daniel shares something worth remembering
+    that is NOT a future to-do — a reflection, an idea, a decision, a realization,
+    a note about a person or project. When in doubt between capturing and setting a
+    reminder, capture here; use set_reminder ONLY for a future obligation.
+
+    `topic` is the subject line these thoughts group under (e.g. "job search",
+    "focus cam", "climbing"). Reuse an existing topic name from list_topics when
+    one fits — matching is case-insensitive; an unknown name auto-creates the
+    topic, so never call create_topic just to log. Set `new_batch=true` to force a
+    fresh thinking-run when the subject clearly turns even within the same ~30-min
+    window (otherwise consecutive thoughts on a topic merge into one batch).
+
+    Returns {thought:{id,content,timestamp}, batch:{id,label,topic_id},
+    topic:{...decayed salience + growth...}} — the topic's salience_decayed is
+    bumped by this write. Use the returned thought.id as `from_thought` if the same
+    message also creates a reminder.
+    """
+    db = SessionLocal()
+    try:
+        result = focus_service.log_thought(db, content=content, topic_name=topic, new_batch=new_batch)
+        db.commit()
+        return result
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def list_topics() -> list:
+    """The current salience landscape: every topic ranked hottest-first by decayed
+    salience. Call this to see WHAT IS TOP OF MIND RIGHT NOW, to pick the correct
+    existing `topic` name before log_thought, or to answer "what have I been
+    focused on lately." Salience decays with time-since-last-touched and bumps on
+    every logged thought, so this is a live "recency × frequency" ranking, not a
+    catalogue.
+
+    Use this for the landscape; use query_thoughts to read the actual thoughts
+    inside a topic. Returns a list of
+    {id,name,parent_id,color,salience_stored,salience_decayed,last_touched,growth}
+    — `salience_decayed` drives the ranking and `growth=true` flags a topic
+    touched within the recent growth window (heating up).
+    """
+    db = SessionLocal()
+    try:
+        return focus_service.list_topics(db)
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def create_topic(name: str, parent: str | None = None) -> dict:
+    """Explicitly create a topic (optionally nested under a `parent` topic name for
+    a subtopic). ONLY call this when Daniel is deliberately ORGANIZING his subjects
+    — e.g. "make a topic called X" or "put Y under Z". For ordinary capture do NOT
+    use this: log_thought auto-creates any unknown topic on the fly, so reaching
+    here first is almost always wrong. If you just want to record a thought, call
+    log_thought directly.
+
+    Returns {id,name,parent_id,color,salience}.
+    """
+    db = SessionLocal()
+    try:
+        topic = focus_service.create_topic(db, name=name, parent=parent)
+        db.commit()
+        return {
+            "id": topic.id,
+            "name": topic.name,
+            "parent_id": topic.parent_id,
+            "color": topic.color,
+            "salience": topic.salience,
+        }
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def query_thoughts(
+    topic: str | None = None,
+    since: str | None = None,
+    text: str | None = None,
+) -> list:
+    """Retrieve PAST thoughts, newest-first. Call this to recall what Daniel
+    previously said — "what did I think about X", "what have I logged this week",
+    "did I ever mention Y". Filters combine (AND):
+      - `topic`: restrict to one subject (exact name, case-insensitive)
+      - `since`: ISO date "YYYY-MM-DD" — only thoughts on or after that day
+      - `text`: case-insensitive substring match on thought content
+    All optional; with none it returns the most recent thoughts across every topic.
+
+    This reads the thoughts themselves — use list_topics instead when you only need
+    the ranked landscape of subjects, not their contents. Returns a list of
+    {id,content,timestamp,topic,batch_id,batch_label}.
+    """
+    from datetime import datetime
+
+    from .common import _parse_iso_date
+
+    since_dt = None
+    if since:
+        d = _parse_iso_date(since)
+        if d is not None:
+            since_dt = datetime(d.year, d.month, d.day)
+    db = SessionLocal()
+    try:
+        return focus_service.query_thoughts(db, topic=topic, since=since_dt, text=text)
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def set_reminder(
+    content: str,
+    due_at: str | None = None,
+    owed_to: str | None = None,
+    from_thought: int | None = None,
+) -> dict:
+    """Record a FUTURE OBLIGATION — a to-do, a thing to follow up on, or a promise.
+    Reach here (NOT log_thought) whenever the message is forward-looking: "remind
+    me to…", "I need to…", "don't let me forget…", "I owe X…", "I'll get back to Y
+    about…". Thoughts are things Daniel HAS thought; reminders are things he still
+    HAS TO DO.
+
+    `owed_to` is what turns a reminder into a PROMISE: pass a person's name when the
+    obligation is owed to someone ("I owe Yash the deck") and the row is typed
+    'promise' and surfaces by age rather than due time. Leave it null for a
+    reminder owed to yourself. `due_at` is an ISO-8601 datetime; many promises have
+    no due date and that is fine (they surface by age instead). `from_thought` is
+    the id returned by a log_thought call in the same message, linking the reminder
+    to the thought that spawned it.
+
+    Returns the reminder dict {id,type,content,owed_to,due_at,done,age_days,
+    thought_id} where type is 'reminder' or 'promise'.
+    """
+    from datetime import datetime
+
+    due_dt = None
+    if due_at:
+        try:
+            due_dt = datetime.fromisoformat(str(due_at).replace("Z", "+00:00")).replace(tzinfo=None)
+        except (ValueError, TypeError):
+            due_dt = None
+    db = SessionLocal()
+    try:
+        result = focus_service.set_reminder(
+            db, content=content, due_at=due_dt, owed_to=owed_to, from_thought=from_thought
+        )
+        db.commit()
+        return result
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def list_reminders(day: str | None = None) -> list:
+    """List open (not-yet-done) reminders and promises — what Daniel still owes.
+    Call this for "what's on my plate", "what am I forgetting", "what do I owe
+    people". `day` optionally scopes DATED reminders to one day: pass the literal
+    "today" or an ISO date "YYYY-MM-DD"; undated promises always pass through
+    regardless of `day` (they surface by age, not time). Omit `day` for everything
+    open.
+
+    Ordering: dated items by due time first, then undated promises oldest-first.
+    Returns a list of {id,type,content,owed_to,due_at,done,age_days,thought_id};
+    `type='promise'` rows carry an `owed_to` name and lean on `age_days`.
+    """
+    from datetime import datetime
+
+    from .common import _parse_iso_date, local_today
+
+    db = SessionLocal()
+    try:
+        day_dt = None
+        if day == "today":
+            day_dt = datetime.combine(local_today(db), datetime.min.time())
+        elif day:
+            d = _parse_iso_date(day)
+            if d is not None:
+                day_dt = datetime(d.year, d.month, d.day)
+        return focus_service.list_reminders(db, day=day_dt)
+    finally:
+        db.close()
+
+
+# Built once at import so main.py can mount it and wire its lifespan. The Starlette
+# ASGI app serves the streamable-HTTP endpoint at the sub-app root ("/"), so it's
+# mounted at "/mcp" in main.py. `session_manager` must be run inside the main app's
+# lifespan (its task group backs every request).
+http_app = mcp.streamable_http_app()
+session_manager = mcp.session_manager

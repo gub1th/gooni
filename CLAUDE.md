@@ -101,9 +101,12 @@ Route shapes are grep-able — one `app/routers/<domain>.py` module per domain (
 **Stats**: `get_leetcode_activity`
 Killed in the nuke: all Todo/Focus/Habit/Backlog/List/Space/Comment/CapabilityFacet tools.
 
-### Focus MCP Server (`mcp/focus_server.py`) — SEPARATE, 6-tool remote connector
+### Focus MCP — 6-tool remote connector, TWO deploy shapes
 
-A SECOND, standalone MCP server (the legacy `mcp/server.py` above is untouched). This is the "focus system" surface (see the Focus system section) — deliberately six tools, not thirty, because Claude selects tools from the description string alone with no orchestrator to disambiguate. Exposed as a **remote streamable-HTTP** server so it can be added as a custom connector at claude.ai (replacing WhatsApp as the ambient logging surface). Thin httpx wrappers over the `/focus/*` backend routes — all logic is server-side.
+The "focus system" MCP surface (see the Focus system section) — deliberately six tools, not thirty, because Claude selects tools from the description string alone with no orchestrator to disambiguate. Two implementations of the SAME six tools + descriptions (legacy `mcp/server.py` is untouched by both):
+
+- **`app/focus_mcp.py` — PROD (Fly), the primary path.** An in-process FastMCP mounted into the main FastAPI app at **`/mcp`** (streamable-HTTP). Tools call `focus_service` DIRECTLY against a DB session (no httpx, no Bearer round-trip). Deploying the main app to Fly ships a stable, always-on `https://gooni-bot.fly.dev/mcp` — no tunnel. The mount is exempt from the Bearer middleware (authless by design — tools run in-process; the claude.ai dialog offers only OAuth, no static-bearer field). Wiring in `main.py`: guarded import (`_FOCUS_MCP_OK` — a mount failure can NEVER stop app boot), `session_manager.run()` inside `_lifespan` via `AsyncExitStack`, `app.mount("/mcp", …)`, and `/mcp` added to the auth-exempt list. `stateless_http=True`; DNS-rebinding protection defaults OFF (the endpoint is deliberately public) unless `FOCUS_MCP_ALLOWED_HOSTS` pins hosts. **Import shim:** the repo's `mcp/` dir has an empty `__init__.py` (regular package) that shadows the pip `mcp`; `_import_real_mcp()` drops the repo root from sys.path for the FastMCP import.
+- **`mcp/focus_server.py` — LOCAL DEV only.** A standalone streamable-HTTP server (thin httpx wrappers over `/focus/*`), run as a script + a cloudflared tunnel for quick iteration before the Fly deploy exists.
 
 **Tools**: `log_thought(content, topic, new_batch?)`, `list_topics()`, `create_topic(name, parent?)`, `query_thoughts(topic?, since?, text?)`, `set_reminder(content, due_at?, owed_to?, from_thought?)`, `list_reminders(day?)`.
 
