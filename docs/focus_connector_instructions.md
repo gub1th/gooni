@@ -7,26 +7,41 @@ How to wire the `mcp/focus_server.py` connector into claude.ai so you log to Goo
 ```bash
 # Backend already running on :8000. Then:
 cd <repo>
-export $(grep -E '^(AUTH_PASSWORD|GOONI_URL)=' .env | xargs)
-GOONI_URL="${GOONI_URL:-http://localhost:8000}" \
+export $(grep -E '^AUTH_PASSWORD=' .env | xargs)
+GOONI_URL=http://localhost:8000 \
 GOONI_AUTH_PASSWORD="$AUTH_PASSWORD" \
 FOCUS_MCP_PORT=8001 \
+FOCUS_MCP_ALLOWED_HOSTS="*" \
 python mcp/focus_server.py            # → http://127.0.0.1:8001/mcp
 
-# In another tab, expose it:
-ngrok http 8001                       # or: cloudflared tunnel --url http://localhost:8001
+# In another tab, expose it — use cloudflared, NOT ngrok (see below):
+cloudflared tunnel --url http://localhost:8001   # → prints https://<random>.trycloudflare.com
 ```
 
-`GOONI_AUTH_PASSWORD="$AUTH_PASSWORD"` is the load-bearing line — it makes the server's Bearer token match the gated backend. The **connector→server hop is unauthenticated** (the claude.ai dialog offers only OAuth, no static-bearer field); prototype security = the unguessable tunnel URL. Anyone who learns the URL can read/write your graph — fine for a private prototype, not for anything public. Real auth later = OAuth, or a stable named tunnel / Fly deploy.
+Two load-bearing env vars:
+- `GOONI_AUTH_PASSWORD="$AUTH_PASSWORD"` — makes the server's Bearer token match the gated backend so it can actually reach `/focus/*`.
+- `FOCUS_MCP_ALLOWED_HOSTS="*"` — the streamable-HTTP transport has **DNS-rebinding protection** that 421-rejects any request whose `Host` header isn't localhost. Behind a tunnel the Host is the public hostname, so without this the connector's probes 421 before a session opens. `*` disables the check (fine here — the server is deliberately public behind the tunnel; the protection only matters for localhost-only servers). On Fly, pin it to your stable hostname instead of `*`.
+
+**Use cloudflared, not ngrok.** ngrok-free wraps every response in a browser-interstitial/sign-in page. claude.ai probes `/.well-known/oauth-*` during "Add" to discover auth; ngrok's HTML page intercepts those probes → registration fails ("couldn't register with … Ngrok's sign-in service"). cloudflared quick tunnels have no interstitial → the probes 404 cleanly → claude.ai proceeds authless.
+
+The **connector→server hop is unauthenticated** (the claude.ai dialog offers only OAuth, no static-bearer field); prototype security = the unguessable tunnel URL. Anyone who learns the URL can read/write your graph — fine for a private prototype, not for anything public. Real auth later = OAuth, or a stable named tunnel / Fly deploy.
 
 ## 2. Add at claude.ai
 
 Settings → Connectors → **Add custom connector**:
 - **Name:** `Gooni Focus`
-- **Remote MCP server URL:** `https://<tunnel>/mcp`  ← keep the `/mcp` suffix
+- **Remote MCP server URL:** `https://<random>.trycloudflare.com/mcp`  ← keep the `/mcp` suffix
 - OAuth fields: leave blank → **Add**
 
-`trycloudflare`/`ngrok-free` URLs rotate on restart — re-add when the URL changes. A named tunnel or Fly gives a stable URL.
+`trycloudflare` URLs rotate on restart — re-add when the URL changes (and delete the stale connector). A named tunnel or Fly gives a stable URL.
+
+### Also usable from Claude Code
+
+Claude Code is just another MCP client — point it at the LOCAL server (no tunnel needed, same machine):
+```bash
+claude mcp add --transport http gooni-focus http://localhost:8001/mcp
+```
+Loads at session start, so it's live the next Claude Code session. Two surfaces (claude.ai chat + Claude Code) feed the one graph.
 
 ## 3. Auto-logging — talk, don't command
 
