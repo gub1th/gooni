@@ -202,7 +202,24 @@ export function FocusDashboard() {
 
       {/* ── centre: the topic circles ─────────────────────────────────── */}
       <main style={{ flex: 1, position: "relative", minWidth: 0 }}>
-        {data && <TopicCircles circles={data.circles} />}
+        {data && data.circles.length > 0 && <TopicCircles circles={data.circles} />}
+        {data && data.circles.length === 0 && (
+          // Empty state: no seed topics — the field fills as Daniel logs.
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: C.dim,
+              fontSize: 13,
+              letterSpacing: "0.02em",
+            }}
+          >
+            nothing logged yet
+          </div>
+        )}
       </main>
 
       {/* ── right: subtle batch-label log ─────────────────────────────── */}
