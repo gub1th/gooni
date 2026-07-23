@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.208.0 — 2026-07-23 (minor)
+
+- feat(focus): Claude-as-intelligence focus system — topics/thoughts/reminders + 6-tool MCP connector + kiosk dashboard (#430)
+
 ## 0.207.0 — 2026-07-20 (minor)
 
 - feat(theme): app-wide light/dark toggle + widget resize + log order (#429)
