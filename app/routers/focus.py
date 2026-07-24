@@ -146,6 +146,23 @@ def toggle_reminder(reminder_id: int, body: dict, db: Session = Depends(get_db))
     return result
 
 
+# ── Stream (arcs canvas) ─────────────────────────────────────────────────────
+
+
+@router.get("/focus/stream")
+def stream(days: int = 7, end: str | None = None, db: Session = Depends(get_db)):
+    """The arcs-canvas chronological stream: thought batch-cards + Shortcuts
+    device events merged newest-first over a LOCAL-day window. `end` (ISO date)
+    + `days` page back in time for infinite scroll; default = last 7 days."""
+    end_date = None
+    if end:
+        d = _parse_iso_date(end)
+        if d is None:
+            raise HTTPException(status_code=400, detail=f"bad end date: {end!r}")
+        end_date = d
+    return focus_service.stream(db, days=days, end=end_date)
+
+
 # ── Dashboard ────────────────────────────────────────────────────────────────
 
 

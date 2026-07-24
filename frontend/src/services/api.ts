@@ -1645,6 +1645,46 @@ export async function fetchFocusDashboard(): Promise<FocusDashboard> {
   return res.json();
 }
 
+// ── Focus stream (the arcs canvas) ──────────────────────────────────────────
+// One day-bounded, newest-first chronological stream merging thought batch-cards
+// with Shortcuts device-event cards. `at` is UTC-aware ISO — convert to local.
+// Backend: focus_service.stream.
+
+export interface StreamThought {
+  type: "thought";
+  batch_id: number;
+  topic: string;
+  color: string | null;
+  sentence: string | null;
+  at: string;
+  thought_count: number;
+}
+
+export interface StreamEvent {
+  type: "event";
+  label: string;
+  kind: string;
+  at: string;
+  count: number;
+}
+
+export type FocusStreamItem = StreamThought | StreamEvent;
+
+export interface FocusStream {
+  items: FocusStreamItem[];
+  start: string;
+  end: string;
+  generated_at: string;
+}
+
+export async function fetchFocusStream(days = 7, end?: string): Promise<FocusStream> {
+  const qs = new URLSearchParams({ days: String(days) });
+  if (end) qs.set("end", end);
+  const res = await apiFetch(`${BASE}/focus/stream?${qs.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch focus stream");
+  return res.json();
+}
+
 // ── Focus-cam (webcam focus sidecar — /focus/cam/*, walled off from the
 // generic trackable surfaces; read ONLY here + the focus widget) ─────────────
 
