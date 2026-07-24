@@ -49,6 +49,9 @@ function isDaily(t: Trackable): boolean {
   if (t.kind === "json") return false;
   if (t.source === "whoop" || t.source === "leetcode") return false;
   if (t.source === "shortcuts") return false;
+  // focus-cam telemetry is walled off server-side (never reaches /trackables) —
+  // this is belt-and-suspenders so a loosened backend filter can't leak it here.
+  if (t.source === "focus_cam") return false;
   if (t.name === "note") return false;
   return true;
 }

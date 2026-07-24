@@ -31,4 +31,5 @@ ROUTER_MODULES = [
     "integrations",
     "reflections",
     "focus",
+    "focus_cam",
 ]

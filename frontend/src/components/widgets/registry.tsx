@@ -1,7 +1,8 @@
-import { CalendarDays, type LucideIcon } from "lucide-react";
+import { CalendarDays, Video, type LucideIcon } from "lucide-react";
 import type { WidgetView } from "../../stores/useWidgetOverlayStore";
 import { CalendarCompact } from "./CalendarWidget";
 import { CalendarPanel } from "./CalendarPanel";
+import { FocusCamCompact, FocusCamPanel } from "./FocusCamWidget";
 
 // THE widget registry. Adding a widget = append one entry here + write its
 // Compact (and optionally Panel) component. Everything downstream is derived:
@@ -39,6 +40,15 @@ export const WIDGETS: WidgetDef[] = [
     defaultEnabled: true,
     Compact: CalendarCompact,
     Panel: CalendarPanel,
+  },
+  {
+    id: "focus_cam",
+    title: "Focus",
+    Icon: Video,
+    // Off by default — only useful once the local webcam sidecar is running.
+    defaultEnabled: false,
+    Compact: FocusCamCompact,
+    Panel: FocusCamPanel,
   },
 ];
 

@@ -173,6 +173,7 @@ _FEED_SOURCES = {"whoop", "leetcode", "derived"}
 
 def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
     from ..db.models import Trackable, TrackableEntry
+    from . import trackable_service
 
     try:
         q = (
@@ -183,6 +184,10 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
                 Trackable.name, Trackable.unit, Trackable.kind,
             )
             .join(Trackable, TrackableEntry.trackable_id == Trackable.id)
+            # Wall off focus_cam telemetry from the rail (mirrors the list_all
+            # exclusion the matrix/dots/overlay ride). Filter on the DEFINITION's
+            # source since a stray entry-level source could still leak the row.
+            .filter(Trackable.source.notin_(trackable_service.HIDDEN_SOURCES))
         )
         if before_naive is not None:
             q = q.filter(TrackableEntry.created_at < before_naive)
