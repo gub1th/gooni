@@ -33,6 +33,15 @@ from ..db.models import Trackable, TrackableEntry
 VALID_KINDS = ("boolean", "numeric", "json")
 VALID_AGGS = ("sum", "last")
 
+# Sources walled off from every generic trackable-listing surface (the log
+# matrix, daily-dots glance, activity rail, overlay, chat read_trackable). The
+# rows still store idiomatically in Trackable/TrackableEntry — they're just
+# invisible to the shared read paths and read ONLY via their own surface.
+# focus_cam = the local webcam focus sidecar (served via /focus/cam/*). This is
+# a stronger version of the client-side `source=shortcuts` drop: enforced at the
+# query so no client can accidentally surface it.
+HIDDEN_SOURCES = ("focus_cam",)
+
 
 def _norm_name(name: str) -> str:
     return (name or "").strip().lower()
@@ -49,8 +58,15 @@ def get(db: Session, trackable_id: int) -> Trackable | None:
     return db.query(Trackable).filter(Trackable.id == trackable_id).first()
 
 
-def list_all(db: Session) -> list[Trackable]:
-    return db.query(Trackable).order_by(Trackable.name.asc()).all()
+def list_all(db: Session, *, include_hidden: bool = False) -> list[Trackable]:
+    """All trackable definitions, name-sorted. Excludes HIDDEN_SOURCES
+    (walled-off surfaces like focus_cam) unless `include_hidden=True` — so the
+    matrix/dots/overlay/chat callers that ride this stay clean by default while
+    an explicit debug/admin read can still see everything."""
+    q = db.query(Trackable)
+    if not include_hidden:
+        q = q.filter(Trackable.source.notin_(HIDDEN_SOURCES))
+    return q.order_by(Trackable.name.asc()).all()
 
 
 def create(

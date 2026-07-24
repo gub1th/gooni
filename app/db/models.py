@@ -340,6 +340,13 @@ class Settings(Base):
     # hidden). Server-side so the selection survives devices.
     overlay_anchor_note_id = Column(Integer, nullable=True)
     overlay_whoop_keys = Column(Text, nullable=False, default="[]")
+    # focus-cam control + live state (a local webcam sidecar senses focus and
+    # reports up; Gooni stores + serves via /focus/cam/*). Text-not-JSON so the
+    # blob shape can grow without a migration (same convention as
+    # overlay_whoop_keys / Note.home_pos). NULL → treat as {"control":"idle"}.
+    # Shape: {control: idle|running, state: focused|distracted|away|paused|null,
+    #         score: float|null, app: str|null, session_id: str|null, at: iso|null}.
+    focus_cam = Column(Text, nullable=True)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )

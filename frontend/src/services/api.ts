@@ -1645,6 +1645,51 @@ export async function fetchFocusDashboard(): Promise<FocusDashboard> {
   return res.json();
 }
 
+// ── Focus-cam (webcam focus sidecar — /focus/cam/*, walled off from the
+// generic trackable surfaces; read ONLY here + the focus widget) ─────────────
+
+export type FocusCamControl = "idle" | "running";
+export type FocusCamState = "focused" | "distracted" | "away" | "paused" | null;
+
+export interface FocusCamBlob {
+  control: FocusCamControl;
+  state: FocusCamState;
+  score: number | null;
+  app: string | null;
+  session_id: string | null;
+  at: string | null;
+}
+
+export interface FocusCamToday {
+  date: string;
+  sessions: Record<string, unknown>[];
+  events: Record<string, number>;
+}
+
+export async function fetchFocusCam(): Promise<FocusCamBlob> {
+  const res = await apiFetch(`${BASE}/focus/cam`);
+  if (!res.ok) throw new Error("Failed to fetch focus-cam state");
+  return res.json();
+}
+
+export async function setFocusCamControl(
+  control: FocusCamControl
+): Promise<{ control: FocusCamControl }> {
+  const res = await apiFetch(`${BASE}/focus/cam/control`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ control }),
+  });
+  if (!res.ok) throw new Error("Failed to set focus-cam control");
+  return res.json();
+}
+
+export async function fetchFocusCamToday(): Promise<FocusCamToday> {
+  const res = await apiFetch(`${BASE}/focus/cam/today`);
+  if (!res.ok) throw new Error("Failed to fetch focus-cam today");
+  return res.json();
+}
+
 // ── Open Graph link previews ──────────────────────────────────────────────
 
 export interface OgMetadata {
