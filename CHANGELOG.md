@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.212.1 — 2026-07-24 (patch)
+
+- fix(focus): store reminder due_at as UTC, not stripped local wall-time (#437)
+
 ## 0.212.0 — 2026-07-24 (minor)
 
 - feat(focus): arcs canvas + focus-cam widget lifecycle (#436)
