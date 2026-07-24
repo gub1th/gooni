@@ -13,7 +13,7 @@ Endpoints:
   GET    /focus/dashboard         assembled glanceable payload
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -31,9 +31,17 @@ def _parse_due(body: dict, db: Session) -> datetime | None:
     raw = body.get("due_at")
     if raw:
         try:
-            return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).replace(tzinfo=None)
+            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail=f"bad due_at: {raw!r}")
+        # Offset-aware input (…+00:00 / -07:00 / Z) → convert to UTC BEFORE
+        # dropping tzinfo, so the naive-UTC column stores the right instant. A
+        # naive input is assumed already-UTC (the storage convention). Without
+        # the astimezone a local-offset time kept its wall-clock digits and
+        # landed hours off.
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=None)
     hint = body.get("due_hint")
     if hint and str(hint).strip():
         return parse_due_hint(str(hint), db)
