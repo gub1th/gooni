@@ -222,12 +222,18 @@ def set_reminder(
     Returns the reminder dict {id,type,content,owed_to,due_at,done,age_days,
     thought_id} where type is 'reminder' or 'promise'.
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     due_dt = None
     if due_at:
         try:
-            due_dt = datetime.fromisoformat(str(due_at).replace("Z", "+00:00")).replace(tzinfo=None)
+            _dt = datetime.fromisoformat(str(due_at).replace("Z", "+00:00"))
+            # Aware input → convert to UTC before dropping tzinfo (the column is
+            # naive-UTC); naive input is assumed already-UTC. Skipping the
+            # astimezone made a local-offset time land hours off.
+            if _dt.tzinfo is not None:
+                _dt = _dt.astimezone(timezone.utc)
+            due_dt = _dt.replace(tzinfo=None)
         except (ValueError, TypeError):
             due_dt = None
     db = SessionLocal()
