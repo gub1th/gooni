@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.211.0 — 2026-07-24 (minor)
+
+- feat(focus-cam): ingest + storage + widget for webcam focus sidecar (brain side) (#435)
+
 ## 0.210.0 — 2026-07-23 (minor)
 
 - feat(focus): drop the boot topic-seed → empty state until real logging (#434)
