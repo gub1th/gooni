@@ -13,10 +13,11 @@ through common.local_today so it honors Settings.nudge_tz.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
+from datetime import date as _date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from ..common import local_now
 from ..db.models import (
     Person,
     Reminder,
@@ -373,6 +374,108 @@ def _reminder_dict(db: Session, r: Reminder) -> dict:
     }
 
 
+# ── Stream (chronological arcs canvas) ───────────────────────────────────────
+
+STREAM_DEFAULT_DAYS = 7
+STREAM_MAX_DAYS = 60
+
+
+def stream(
+    db: Session,
+    *,
+    days: int = STREAM_DEFAULT_DAYS,
+    end: _date | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """The arcs-canvas read: ONE day-bounded, newest-first chronological stream
+    merging thought batch-cards + Shortcuts device-event cards — the merged
+    said-vs-done timeline. Thoughts render as sentences (the batch label);
+    events interleave quietly. Google Calendar is still merged CLIENT-side.
+
+    Window = [end-(days-1), end] in LOCAL calendar days (Settings tz), so a
+    late-night thought lands on the right day, not UTC-tomorrow. Each item:
+      thought → {type, batch_id, topic, color, sentence, at, thought_count}
+      event   → {type, label, kind, at, count}
+    `at` is UTC-aware ISO (client converts to local).
+    """
+    now = now or datetime.utcnow()
+    now_local = local_now(db)
+    tz = now_local.tzinfo
+    end_date = end or now_local.date()
+    days = max(1, min(days, STREAM_MAX_DAYS))
+    start_date = end_date - timedelta(days=days - 1)
+
+    # Local-day window edges → naive-UTC bounds for the naive-UTC batch column.
+    start_utc = (
+        datetime.combine(start_date, datetime.min.time())
+        .replace(tzinfo=tz)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    end_utc = (
+        datetime.combine(end_date + timedelta(days=1), datetime.min.time())
+        .replace(tzinfo=tz)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    rows = (
+        db.query(ThoughtBatch, Topic)
+        .join(Topic, ThoughtBatch.topic_id == Topic.id)
+        .filter(ThoughtBatch.started_at >= start_utc, ThoughtBatch.started_at < end_utc)
+        .order_by(ThoughtBatch.started_at.desc())
+        .all()
+    )
+    batch_ids = [b.id for b, _ in rows]
+    counts: dict[int, int] = {}
+    if batch_ids:
+        counts = dict(
+            db.query(Thought.batch_id, _sa_func.count(Thought.id))
+            .filter(Thought.batch_id.in_(batch_ids))
+            .group_by(Thought.batch_id)
+            .all()
+        )
+
+    items: list[dict] = [
+        {
+            "type": "thought",
+            "batch_id": b.id,
+            "topic": tp.name,
+            "color": tp.color,
+            "sentence": b.label,
+            "at": _iso(b.started_at),
+            "thought_count": counts.get(b.id, 0),
+        }
+        for b, tp in rows
+    ]
+
+    # Shortcuts device events (already tz-aware in value_json.at), clustered.
+    from . import event_service  # local import — avoids a module-load cycle
+
+    items.extend(event_service.list_recent_events(db, start=start_date, end=end_date))
+
+    items.sort(key=lambda it: _sort_key(it.get("at")), reverse=True)
+    return {
+        "items": items,
+        "start": start_date.isoformat(),
+        "end": end_date.isoformat(),
+        "generated_at": _iso(now),
+    }
+
+
+def _sort_key(iso: str | None) -> float:
+    """Epoch seconds for the merge-sort; unparseable → 0 (sinks to the bottom)."""
+    if not iso:
+        return 0.0
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
 # ── Dashboard assembly ───────────────────────────────────────────────────────
 
 
@@ -457,7 +560,16 @@ def _snippet(text: str, n: int = 48) -> str:
 
 
 def _iso(dt: datetime | None) -> str | None:
-    return dt.isoformat() if dt is not None else None
+    """Serialize as UTC-aware ISO-8601. Stored focus datetimes are naive-UTC
+    (Column defaults are datetime.utcnow); stamp +00:00 so the client parses
+    them as UTC and converts to LOCAL. Without the offset a naive ISO string is
+    read as local time and every timestamp lands hours off (the display-tz bug).
+    Already-aware datetimes normalize to UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 # SQLite is case-sensitive on = by default; lower() both sides for name lookups.

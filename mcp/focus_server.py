@@ -101,7 +101,7 @@ def _post(path: str, body: dict):
 
 
 @mcp.tool()
-def log_thought(content: str, topic: str, new_batch: bool = False) -> dict:
+def log_thought(content: str, topic: str, new_batch: bool = False, label: str | None = None) -> dict:
     """Capture a single thought, idea, or observation into Gooni under a subject.
     THIS IS THE DEFAULT ACTION whenever Daniel shares something worth remembering
     that is NOT a future to-do — a reflection, an idea, a decision, a realization,
@@ -115,6 +115,14 @@ def log_thought(content: str, topic: str, new_batch: bool = False) -> dict:
     fresh thinking-run when the subject clearly turns even within the same ~30-min
     window (otherwise consecutive thoughts on a topic merge into one batch).
 
+    `label` is a SHORT THIRD-PERSON SENTENCE summarizing this batch as it reads on
+    Daniel's timeline — refer to Daniel as "Gooni". E.g. "Gooni decided the store
+    should stay dumb.", "Gooni is losing 6-7 to Curtis in smash.", "Gooni promised
+    not to smoke till Tuesday." It's the card the timeline renders, so write a real
+    sentence (not a topic label), and re-send an updated one whenever the batch
+    meaningfully advances — it OVERWRITES the batch's rendered card. Omit to keep
+    the prior label / an auto-snippet of the content.
+
     Returns {thought:{id,content,timestamp}, batch:{id,label,topic_id},
     topic:{...decayed salience + growth...}} — the topic's salience_decayed is
     bumped by this write. Use the returned thought.id as `from_thought` if the same
@@ -122,7 +130,7 @@ def log_thought(content: str, topic: str, new_batch: bool = False) -> dict:
     """
     return _post(
         "/focus/thoughts",
-        {"content": content, "topic": topic, "new_batch": new_batch},
+        {"content": content, "topic": topic, "new_batch": new_batch, "label": label},
     )
 
 

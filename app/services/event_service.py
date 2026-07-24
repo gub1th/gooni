@@ -15,8 +15,9 @@ no session pairing yet (counts only).
 
 from __future__ import annotations
 
+import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,10 @@ from ..common import local_now
 from . import trackable_service
 
 SOURCE = "shortcuts"
+
+# Same-trackable pings within this window collapse into ONE stream card — the
+# focus stream's "aggregate hard" rule (one card per run, not per app-switch).
+EVENT_CLUSTER_GAP = timedelta(minutes=60)
 
 # Strip anything that isn't a letter/digit/space so subject/event stay clean,
 # human-readable trackable parts. "Instagram" → "instagram", "Gym!" → "gym".
@@ -103,3 +108,77 @@ def log_event(db: Session, *, subject: str, event: str, at=None) -> dict:
         "count": int(count),
         "at": when.isoformat(),
     }
+
+
+def _to_utc(raw) -> datetime | None:
+    """Parse an ISO-8601 string (offset or trailing Z; a naive one is assumed
+    UTC) into an aware UTC datetime. None on anything unparseable."""
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def list_recent_events(db: Session, *, start, end) -> list[dict]:
+    """Shortcuts events across the [start, end] LOCAL-day window, aggregated
+    HARD: each run of same-trackable pings within EVENT_CLUSTER_GAP collapses
+    to ONE card (count = pings in the run), timed at the run's latest ping.
+    Powers the focus stream's device-event interleave — quiet telemetry beside
+    the thoughts. Newest-first. Each item:
+      {type:'event', label, kind, at (UTC-aware ISO), count}
+
+    NOTE: this shows every event kind (clustered), NOT anomalies-only — baseline
+    deviation filtering is a deferred stream-polish step. The clustering + the
+    FE's quiet styling keep it from drowning the thoughts.
+    """
+    from ..db.models import Trackable
+
+    trackables = db.query(Trackable).filter(Trackable.source == SOURCE).all()
+    items: list[dict] = []
+    for t in trackables:
+        times: list[datetime] = []
+        for e in trackable_service.entries_for(db, t, start=start, end=end):
+            at = None
+            if e.value_json:
+                try:
+                    at = _to_utc(json.loads(e.value_json).get("at"))
+                except (TypeError, ValueError, AttributeError):
+                    at = None
+            if at is None and e.date is not None:  # fallback: day start
+                at = _to_utc(e.date.isoformat())
+            if at is not None:
+                times.append(at)
+        if not times:
+            continue
+        times.sort()
+        kind = t.name.split()[-1] if t.name else ""
+
+        # Cluster the ping times into runs; emit one card per run.
+        runs: list[tuple[datetime, int]] = []  # (latest_ping, count)
+        run_latest, run_count = times[0], 1
+        for at in times[1:]:
+            if at - run_latest <= EVENT_CLUSTER_GAP:
+                run_latest, run_count = at, run_count + 1
+            else:
+                runs.append((run_latest, run_count))
+                run_latest, run_count = at, 1
+        runs.append((run_latest, run_count))
+
+        for latest, count in runs:
+            items.append(
+                {
+                    "type": "event",
+                    "label": t.name,
+                    "kind": kind,
+                    "at": latest.isoformat(),
+                    "count": count,
+                }
+            )
+
+    items.sort(key=lambda it: it["at"], reverse=True)
+    return items
