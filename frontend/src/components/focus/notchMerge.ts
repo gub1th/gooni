@@ -23,14 +23,16 @@ export interface NotchItem {
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-// ISO/date → local "h:mm" (e.g. "6:30"). Null-safe.
+// ISO/date → local clock WITH meridiem (e.g. "6:30 pm"). Null-safe. The old
+// form hand-built "h:mm" off getHours(), which dropped am/pm — so a 3pm due
+// read as a bare "3:00" that was indistinguishable from 3am (the display-tz
+// bug). toLocaleTimeString renders local time + am/pm in one shot; due_at
+// arrives UTC-offset-tagged from the backend so new Date converts it correctly.
 export function fmtTime(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  const h = d.getHours();
-  const m = d.getMinutes();
-  return `${h}:${m.toString().padStart(2, "0")}`;
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase();
 }
 
 // ISO/date → local weekday abbrev (all-day events show a day, not a time).

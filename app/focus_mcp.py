@@ -204,6 +204,7 @@ def set_reminder(
     due_at: str | None = None,
     owed_to: str | None = None,
     from_thought: int | None = None,
+    is_promise: bool = False,
 ) -> dict:
     """Record a FUTURE OBLIGATION — a to-do, a thing to follow up on, or a promise.
     Reach here (NOT log_thought) whenever the message is forward-looking: "remind
@@ -211,16 +212,23 @@ def set_reminder(
     about…". Thoughts are things Daniel HAS thought; reminders are things he still
     HAS TO DO.
 
-    `owed_to` is what turns a reminder into a PROMISE: pass a person's name when the
-    obligation is owed to someone ("I owe Yash the deck") and the row is typed
-    'promise' and surfaces by age rather than due time. Leave it null for a
-    reminder owed to yourself. `due_at` is an ISO-8601 datetime; many promises have
-    no due date and that is fine (they surface by age instead). `from_thought` is
-    the id returned by a log_thought call in the same message, linking the reminder
-    to the thought that spawned it.
+    Two flags decide PROMISE vs reminder — a promise is a COMMITMENT that carries
+    the said-vs-done lifecycle (active → kept | broken), a reminder is a plain
+    check-off:
+      - `owed_to`: a person's name when the obligation is owed to someone ("I owe
+        Yash the deck") → typed 'promise', surfaces by age.
+      - `is_promise=true`: mark a commitment owed to YOURSELF as a promise ("I
+        won't smoke till Tuesday", "I'll ship this by Friday"). Use this for any
+        real commitment/resolution about your own behaviour, so it lands in the
+        said-vs-done section instead of collapsing into an undated reminder.
+    `due_at` is an ISO-8601 datetime; many promises have no due date and that is
+    fine (they surface by age). A dated promise auto-breaks when its deadline
+    passes. `from_thought` is the id returned by a log_thought call in the same
+    message, linking the reminder to the thought that spawned it.
 
-    Returns the reminder dict {id,type,content,owed_to,due_at,done,age_days,
-    thought_id} where type is 'reminder' or 'promise'.
+    Returns the reminder dict {id,type,content,owed_to,due_at,done,state,
+    resolved_at,age_days,lasted_days,thought_id} where type is 'reminder' or
+    'promise' and state is 'active' | 'kept' | 'broken'.
     """
     from datetime import datetime, timezone
 
@@ -239,8 +247,37 @@ def set_reminder(
     db = SessionLocal()
     try:
         result = focus_service.set_reminder(
-            db, content=content, due_at=due_dt, owed_to=owed_to, from_thought=from_thought
+            db,
+            content=content,
+            due_at=due_dt,
+            owed_to=owed_to,
+            from_thought=from_thought,
+            is_promise=is_promise,
         )
+        db.commit()
+        return result
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def set_reminder_state(reminder_id: int, state: str) -> dict:
+    """Resolve a promise (or reminder) — the SAID-VS-DONE close. `state` is one of
+    'kept' (fulfilled — you did the thing), 'broken' (you didn't — you smoked, the
+    resolution failed), or 'active' (reopen). Reach here the MOMENT a commitment's
+    fate is known: if Daniel says he smoked after promising not to, break the
+    matching promise NOW rather than leaving it standing. Find the id via
+    list_reminders. Broken/kept stamp the resolution time, which the dashboard
+    renders as how long the promise lasted (created → resolved) in the warn colour.
+    There is no delete — resolve, don't remove.
+
+    Returns the updated reminder dict, or raises if the id is unknown.
+    """
+    db = SessionLocal()
+    try:
+        result = focus_service.set_reminder_state(db, reminder_id, state)
+        if result is None:
+            raise ValueError(f"no reminder with id {reminder_id}")
         db.commit()
         return result
     finally:

@@ -882,6 +882,17 @@ class Reminder(Base):
     # to dated rows.
     due_at = Column(DateTime, nullable=True, index=True)
     done = Column(Boolean, nullable=False, default=False, index=True)
+    # Promise lifecycle — the said-vs-done spine. 'active' = still standing;
+    # 'kept' = fulfilled; 'broken' = failed (he smoked, the deadline blew by).
+    # Reminders effectively only ever go active→kept (a check-off), but promises
+    # need the third state so the dashboard can render the GAP: a broken promise
+    # in warn colour with how long it lasted (created_at → resolved_at). `done`
+    # stays as the legacy check-off boolean and is kept in sync (done = state
+    # != 'active') so old callers don't break.
+    state = Column(String, nullable=False, default="active", index=True)
+    # Stamped when state leaves 'active' (kept/broken); cleared on revive. The
+    # broken card reads "lasted Nd" off (resolved_at - created_at).
+    resolved_at = Column(DateTime, nullable=True)
     # Often a reminder falls out of a thought ("remind me to..."). Optional.
     thought_id = Column(Integer, ForeignKey("thoughts.id"), nullable=True, index=True)
     # UNUSED in v1 — reserved for on-screen checklists (multi-step tasks).
