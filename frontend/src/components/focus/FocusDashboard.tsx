@@ -8,46 +8,23 @@ import {
   fetchTrackables,
   type CalendarEvent,
   type FocusDashboard as FocusDashboardData,
+  type FocusReminder,
   type Trackable,
   type TrackableDay,
 } from "../../services/api";
-import { TopicCircles } from "./TopicCircles";
-import { buildNotchItems, fmtTime, type NotchItem } from "./notchMerge";
+import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
+import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
+import { FocusStream } from "./FocusStream";
+import { fmtPromiseMeta, fmtTime, fmtWeekday } from "./notchMerge";
 
-// The kiosk. A browser on a second monitor points here — always on, glanceable,
-// no chrome, no interaction. Poll every REFRESH_MS to stay live; the display IS
-// the proactivity (a screen that shows what's due + what's gone stale produces
-// the effect of an always-running agent with none of the machinery).
-//
-// TODO(displacement): the plan wants a "Purchases pushed Focus Cam out of the
-// top 5" notification with hysteresis (a displacer must beat the incumbent by a
-// margin, or the set re-evaluates once daily) — fired on recompute (i.e. when
-// Daniel logs). dashboard.overflow_topics carries the below-the-cut topics for
-// exactly this. Deferred: get the core glanceable display solid first.
+// The focus kiosk. A browser on a second monitor points here — always on,
+// glanceable, no chrome. The CENTRE is the arcs canvas (FocusStream, the
+// chronological said-vs-done timeline). The left rail holds what's owed + due +
+// scheduled + the 5-day activity grid — the three schedule-ish data types
+// VISUALLY SEPARATED (promises are source data, not a calendar). Poll to stay
+// live; the display IS the proactivity.
 
 const REFRESH_MS = 25_000;
-
-// Palette lifted from the mockup so the kiosk reads as one dark, low-contrast
-// surface. The right log especially is deliberately subtle — "there when you
-// want it, invisible when you don't."
-const C = {
-  bg: "#0b0b0c",
-  label: "#6e6e6a", // section labels + day names
-  value: "#c9c9c5", // activity values
-  dim: "#8a8a86", // notch secondary / log text
-  ink: "#e8e8e6", // notch primary
-  notchBg: "#1a1a1c",
-  hair: "#242426",
-  logTime: "#4e4e4a",
-  logText: "#8d8d89",
-  logLabel: "#5c5c58",
-  check: "#5dcaa5",
-} as const;
-
-// ── Left sidebar: 5 days of existing trackables ──────────────────────────────
-// Reuses the SAME trackable endpoints the ambient log surface uses — no new
-// backend. The plan names exercise / protein / calories / physical therapy;
-// we render whichever of these actually exist, in this order.
 const ACTIVITY_DAYS = 5;
 const ACTIVITY_PREF: { match: string[]; short: string }[] = [
   { match: ["protein"], short: "pro" },
@@ -64,8 +41,6 @@ interface ActivityCol {
 
 const WEEK_ABBR = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 function dayAbbr(dateStr: string): string {
-  // TrackableDay.date is "YYYY-MM-DD" — parse at local noon so the weekday is
-  // stable regardless of timezone.
   const d = new Date(`${dateStr}T12:00:00`);
   return Number.isNaN(d.getTime()) ? "" : WEEK_ABBR[d.getDay()];
 }
@@ -78,10 +53,12 @@ function todayWindowISO(): { startISO: string; endISO: string } {
 }
 
 export function FocusDashboard() {
+  const theme = useGooniThemeStore((s) => s.theme);
+  const pal = FOCUS_PALETTES[theme];
+
   const [data, setData] = useState<FocusDashboardData | null>(null);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [activity, setActivity] = useState<ActivityCol[]>([]);
-  // Which trackables to fetch — resolved once, then reused across polls.
   const activityDefsRef = useRef<{ t: Trackable; short: string }[] | null>(null);
 
   const loadActivity = useCallback(async () => {
@@ -112,18 +89,15 @@ export function FocusDashboard() {
 
   const load = useCallback(async () => {
     try {
-      const d = await fetchFocusDashboard();
-      setData(d);
+      setData(await fetchFocusDashboard());
     } catch {
-      /* keep the last good frame on a transient error */
+      /* keep the last good frame */
     }
-    // Calendar is merged client-side; 401 (not connected) or any error just
-    // means the notch shows Gooni items only — never an error state.
     try {
       const { startISO, endISO } = todayWindowISO();
       setEvents(await fetchCalendarEvents(startISO, endISO));
     } catch {
-      setEvents([]);
+      setEvents([]); // 401 / not connected → Gooni items only, never an error
     }
     void loadActivity();
   }, [loadActivity]);
@@ -134,27 +108,28 @@ export function FocusDashboard() {
     return () => window.clearInterval(id);
   }, [load]);
 
-  // Full-bleed black kiosk — kill the page margin + any scrollbars while mounted.
+  // Full-bleed kiosk — own the page ground (theme-aware) while mounted.
   useEffect(() => {
-    const prevBodyBg = document.body.style.background;
-    const prevMargin = document.body.style.margin;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.background = C.bg;
+    const prev = {
+      bg: document.body.style.background,
+      margin: document.body.style.margin,
+      overflow: document.body.style.overflow,
+    };
+    document.body.style.background = pal.paper;
     document.body.style.margin = "0";
     document.body.style.overflow = "hidden";
     return () => {
-      document.body.style.background = prevBodyBg;
-      document.body.style.margin = prevMargin;
-      document.body.style.overflow = prevOverflow;
+      document.body.style.background = prev.bg;
+      document.body.style.margin = prev.margin;
+      document.body.style.overflow = prev.overflow;
     };
-  }, []);
+  }, [pal.paper]);
 
-  const notchItems: NotchItem[] = useMemo(
-    () =>
-      data
-        ? buildNotchItems(events, data.notch.reminders, data.notch.promises)
-        : [],
-    [data, events],
+  const reminders = data?.notch.reminders ?? [];
+  const promises = data?.notch.promises ?? [];
+  const sortedEvents = useMemo(
+    () => [...events].sort((a, b) => (a.start || "").localeCompare(b.start || "")),
+    [events],
   );
 
   return (
@@ -162,218 +137,159 @@ export function FocusDashboard() {
       style={{
         position: "fixed",
         inset: 0,
-        background: C.bg,
-        color: C.value,
+        background: pal.paper,
+        color: pal.ink,
         fontFamily: FONT,
         fontSize: 12,
         overflow: "hidden",
         display: "flex",
       }}
     >
-      {/* ── left: 5-day activity + goals ──────────────────────────────── */}
+      {/* ── left rail ─────────────────────────────────────────────────────── */}
       <aside
         style={{
-          width: 232,
+          width: 250,
           flexShrink: 0,
-          borderRight: `0.5px solid ${C.hair}`,
-          padding: "22px 20px",
-          position: "relative",
+          borderRight: `1px solid ${pal.rule}`,
+          padding: "24px 20px",
           display: "flex",
           flexDirection: "column",
-        }}
-      >
-        <div style={{ color: C.label, fontSize: 11, marginBottom: 16 }}>activity</div>
-        <ActivityGrid cols={activity} />
-
-        {/* Goals — bottom of the column. Content TBD (Daniel to define); render
-            a labelled empty slot per the plan, nothing invented. */}
-        <div
-          style={{
-            marginTop: "auto",
-            borderTop: `0.5px solid ${C.hair}`,
-            paddingTop: 12,
-            color: C.label,
-            fontSize: 11,
-          }}
-        >
-          goals
-        </div>
-      </aside>
-
-      {/* ── centre: the topic circles ─────────────────────────────────── */}
-      <main style={{ flex: 1, position: "relative", minWidth: 0 }}>
-        {data && data.circles.length > 0 && <TopicCircles circles={data.circles} />}
-        {data && data.circles.length === 0 && (
-          // Empty state: no seed topics — the field fills as Daniel logs.
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: C.dim,
-              fontSize: 13,
-              letterSpacing: "0.02em",
-            }}
-          >
-            nothing logged yet
-          </div>
-        )}
-      </main>
-
-      {/* ── right: subtle batch-label log ─────────────────────────────── */}
-      <aside
-        style={{
-          width: 210,
-          flexShrink: 0,
-          borderLeft: `0.5px solid ${C.hair}`,
-          padding: "22px 18px",
+          gap: 22,
           overflow: "hidden",
         }}
       >
-        <div style={{ color: C.logLabel, fontSize: 11, marginBottom: 14 }}>log</div>
-        <div style={{ color: C.logText, fontSize: 11.5, lineHeight: 1.5 }}>
-          {(data?.log ?? []).map((row) => (
-            <div key={row.batch_id} style={{ display: "flex", gap: 9, padding: "4px 0" }}>
-              <span style={{ color: C.logTime, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
-                {fmtTime(row.ended_at)}
-              </span>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {row.label}
-              </span>
-            </div>
-          ))}
+        {promises.length > 0 && (
+          <RailSection label="owed" pal={pal}>
+            {promises.map((p) => (
+              <RailRow key={`p${p.id}`} label={p.content} right={fmtPromiseMeta(p.owed_to, p.age_days)} pal={pal} dim />
+            ))}
+          </RailSection>
+        )}
+
+        {reminders.length > 0 && (
+          <RailSection label="reminders" pal={pal}>
+            {reminders.map((r: FocusReminder) => (
+              <RailRow key={`r${r.id}`} label={r.content} right={fmtTime(r.due_at)} pal={pal} />
+            ))}
+          </RailSection>
+        )}
+
+        {sortedEvents.length > 0 && (
+          <RailSection label="schedule" pal={pal}>
+            {sortedEvents.map((e) => (
+              <RailRow
+                key={`e${e.id}`}
+                label={e.summary || "(untitled)"}
+                right={e.all_day ? fmtWeekday(e.start) : fmtTime(e.start)}
+                pal={pal}
+              />
+            ))}
+          </RailSection>
+        )}
+
+        {/* activity grid — kept form, pinned to the bottom */}
+        <div style={{ marginTop: "auto" }}>
+          <SectionLabel pal={pal}>activity</SectionLabel>
+          <ActivityGrid cols={activity} pal={pal} />
         </div>
       </aside>
 
-      {/* ── notch: what's due, hanging from the top edge ──────────────── */}
-      <Notch items={notchItems} />
+      {/* ── centre: the arcs canvas ───────────────────────────────────────── */}
+      <main style={{ flex: 1, position: "relative", minWidth: 0 }}>
+        <FocusStream />
+      </main>
     </div>
   );
 }
 
-// ── notch ────────────────────────────────────────────────────────────────────
-// A narrow iPhone-X-style notch (rounded bottom corners only) — NOT a full-width
-// bar. Merged calendar + dated reminders (time-ordered), then promises by age.
-function Notch({ items }: { items: NotchItem[] }) {
+// ── rail bits ────────────────────────────────────────────────────────────────
+
+function SectionLabel({ children, pal }: { children: React.ReactNode; pal: FocusPalette }) {
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: 0,
-        left: "50%",
-        transform: "translateX(-50%)",
-        minWidth: 268,
-        maxWidth: 360,
-        background: C.notchBg,
-        borderRadius: "0 0 20px 20px",
-        padding: "10px 18px 13px",
-        boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
-      }}
-    >
-      {items.length === 0 ? (
-        <div style={{ color: C.dim, textAlign: "center", padding: "2px 0" }}>nothing due</div>
-      ) : (
-        items.map((it) => (
-          <div
-            key={it.key}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 16,
-              padding: "2px 0",
-              color: it.dim ? C.dim : C.ink,
-            }}
-          >
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {it.label}
-            </span>
-            <span style={{ color: it.dim ? C.dim : C.label, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-              {it.right}
-            </span>
-          </div>
-        ))
-      )}
+    <div style={{ color: pal.ink3, fontSize: 10.5, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10 }}>
+      {children}
+    </div>
+  );
+}
+
+function RailSection({ label, pal, children }: { label: string; pal: FocusPalette; children: React.ReactNode }) {
+  return (
+    <div>
+      <SectionLabel pal={pal}>{label}</SectionLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{children}</div>
+    </div>
+  );
+}
+
+function RailRow({ label, right, pal, dim }: { label: string; right: string; pal: FocusPalette; dim?: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+      <span
+        style={{
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          fontSize: 12.5,
+          color: dim ? pal.ink2 : pal.ink,
+        }}
+      >
+        {label}
+      </span>
+      <span style={{ color: pal.ink3, flexShrink: 0, fontVariantNumeric: "tabular-nums", fontSize: 11.5 }}>{right}</span>
     </div>
   );
 }
 
 // ── activity grid ────────────────────────────────────────────────────────────
-function ActivityGrid({ cols }: { cols: ActivityCol[] }) {
-  if (cols.length === 0) {
-    return <div style={{ color: C.label, fontSize: 11 }}>—</div>;
-  }
 
-  // Row spine = the newest column's day axis (all cols share the same gap-filled
-  // window, newest-first). Keep newest at the top, matching the mockup.
+function ActivityGrid({ cols, pal }: { cols: ActivityCol[]; pal: FocusPalette }) {
+  if (cols.length === 0) {
+    return <div style={{ color: pal.ink3, fontSize: 11 }}>—</div>;
+  }
   const dates = cols[0].days.slice(0, ACTIVITY_DAYS).map((d) => d.date);
-  // grid: [day] [col1] [col2] … — day label narrow, values flex.
   const template = `26px ${cols.map(() => "1fr").join(" ")}`;
 
   return (
     <div>
-      {/* header */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: template,
-          gap: "4px 8px",
-          color: C.dim,
-          fontSize: 11,
-          marginBottom: 8,
-        }}
-      >
+      <div style={{ display: "grid", gridTemplateColumns: template, gap: "4px 8px", color: pal.ink2, fontSize: 11, marginBottom: 8 }}>
         <span />
         {cols.map((c) => (
           <span key={c.t.id}>{c.short}</span>
         ))}
       </div>
-
-      {/* rows, newest-first */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: template,
-          gap: "9px 8px",
-          fontSize: 11,
-          color: C.value,
-        }}
-      >
+      <div style={{ display: "grid", gridTemplateColumns: template, gap: "9px 8px", fontSize: 11, color: pal.ink }}>
         {dates.map((date, rowIdx) => (
-          <Row key={date} date={date} rowIdx={rowIdx} cols={cols} />
+          <Row key={date} date={date} rowIdx={rowIdx} cols={cols} pal={pal} />
         ))}
       </div>
     </div>
   );
 }
 
-function Row({ date, rowIdx, cols }: { date: string; rowIdx: number; cols: ActivityCol[] }) {
+function Row({ date, rowIdx, cols, pal }: { date: string; rowIdx: number; cols: ActivityCol[]; pal: FocusPalette }) {
   return (
     <>
-      <span style={{ color: C.label }}>{dayAbbr(date)}</span>
-      {cols.map((c) => {
-        const day = c.days[rowIdx];
-        return <Cell key={c.t.id} t={c.t} day={day} />;
-      })}
+      <span style={{ color: pal.ink3 }}>{dayAbbr(date)}</span>
+      {cols.map((c) => (
+        <Cell key={c.t.id} t={c.t} day={c.days[rowIdx]} pal={pal} />
+      ))}
     </>
   );
 }
 
-function Cell({ t, day }: { t: Trackable; day: TrackableDay | undefined }) {
+function Cell({ t, day, pal }: { t: Trackable; day: TrackableDay | undefined; pal: FocusPalette }) {
   const v = day?.value;
   if (t.kind === "boolean") {
     return v === true ? (
-      <span style={{ color: C.check, display: "inline-flex", alignItems: "center" }}>
+      <span style={{ color: pal.accent, display: "inline-flex", alignItems: "center" }}>
         <Check size={12} strokeWidth={2.4} />
       </span>
     ) : (
-      <span style={{ color: C.label }}>·</span>
+      <span style={{ color: pal.ink3 }}>·</span>
     );
   }
-  // numeric / other
   if (typeof v === "number") {
     return <span>{Math.round(v)}</span>;
   }
-  return <span style={{ color: C.label }}>—</span>;
+  return <span style={{ color: pal.ink3 }}>—</span>;
 }
