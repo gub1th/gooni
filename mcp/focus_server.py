@@ -100,6 +100,13 @@ def _post(path: str, body: dict):
     return resp.json()
 
 
+def _patch(path: str, body: dict):
+    """PATCH json to {BASE_URL}{path}. Raises httpx.HTTPError on non-2xx."""
+    resp = _session.patch(f"{BASE_URL}{path}", json=body)
+    resp.raise_for_status()
+    return resp.json()
+
+
 @mcp.tool()
 def log_thought(content: str, topic: str, new_batch: bool = False, label: str | None = None) -> dict:
     """Capture a single thought, idea, or observation into Gooni under a subject.
@@ -200,6 +207,7 @@ def set_reminder(
     due_at: str | None = None,
     owed_to: str | None = None,
     from_thought: int | None = None,
+    is_promise: bool = False,
 ) -> dict:
     """Record a FUTURE OBLIGATION — a to-do, a thing to follow up on, or a promise.
     Reach here (NOT log_thought) whenever the message is forward-looking: "remind
@@ -207,16 +215,18 @@ def set_reminder(
     about…". Thoughts are things Daniel HAS thought; reminders are things he still
     HAS TO DO.
 
-    `owed_to` is what turns a reminder into a PROMISE: pass a person's name when the
-    obligation is owed to someone ("I owe Yash the deck") and the row is typed
-    'promise' and surfaces by age rather than due time. Leave it null for a
-    reminder owed to yourself. `due_at` is an ISO-8601 datetime; many promises have
-    no due date and that is fine (they surface by age instead). `from_thought` is
-    the id returned by a log_thought call in the same message, linking the reminder
-    to the thought that spawned it.
+    Two flags decide PROMISE vs reminder — a promise is a COMMITMENT that carries
+    the said-vs-done lifecycle (active → kept | broken):
+      - `owed_to`: a person's name when owed to someone ("I owe Yash the deck").
+      - `is_promise=true`: mark a commitment owed to YOURSELF as a promise ("I
+        won't smoke till Tuesday"), so it lands in the said-vs-done section
+        instead of collapsing into an undated reminder.
+    `due_at` is an ISO-8601 datetime; a dated promise auto-breaks when its
+    deadline passes. `from_thought` links the reminder to the thought that
+    spawned it.
 
-    Returns the reminder dict {id,type,content,owed_to,due_at,done,age_days,
-    thought_id} where type is 'reminder' or 'promise'.
+    Returns the reminder dict {id,type,content,owed_to,due_at,done,state,
+    resolved_at,age_days,lasted_days,thought_id}.
     """
     body: dict = {"content": content}
     if due_at is not None:
@@ -225,7 +235,24 @@ def set_reminder(
         body["owed_to"] = owed_to
     if from_thought is not None:
         body["from_thought"] = from_thought
+    if is_promise:
+        body["is_promise"] = True
     return _post("/focus/reminders", body)
+
+
+@mcp.tool()
+def set_reminder_state(reminder_id: int, state: str) -> dict:
+    """Resolve a promise (or reminder) — the SAID-VS-DONE close. `state` is one of
+    'kept' (fulfilled), 'broken' (failed — you smoked, the resolution slipped), or
+    'active' (reopen). Reach here the MOMENT a commitment's fate is known: if
+    Daniel says he smoked after promising not to, break the matching promise NOW.
+    Find the id via list_reminders. Broken/kept stamp the resolution time, which
+    the dashboard renders as how long the promise lasted (created → resolved). No
+    delete — resolve, don't remove.
+
+    Returns the updated reminder dict.
+    """
+    return _patch(f"/focus/reminders/{reminder_id}", {"state": state})
 
 
 @mcp.tool()

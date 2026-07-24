@@ -21,7 +21,6 @@ import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
 
 const X = 56; // node x inside the gutter
 const GUTTER_W = 78;
-const WAVE_W = 660;
 const REFRESH_MS = 25_000;
 const PAGE_DAYS = 7; // window size; "load older" grows it by this
 const MAX_DAYS = 60;
@@ -68,6 +67,25 @@ function dayKey(at: string): string {
   if (Number.isNaN(d.getTime())) return "";
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
+// Shortcuts events arrive as a raw "{subject} {event}" label ("claude open",
+// "home arrive", "office leave"). Rephrase the common device verbs so app-opens
+// AND location arrivals/leaves read like sentences rather than machine tokens.
+// Unknown shapes pass through untouched (the vocab is open-ended server-side).
+function formatEventLabel(raw: string): string {
+  const s = (raw || "").trim();
+  const m = s.match(/^(.*?)\s+(arrived?|left|leave|opened?|closed?|unlocked?|locked?|charging|plugged)$/i);
+  if (!m) return s;
+  const subject = m[1].trim();
+  const verb = m[2].toLowerCase();
+  if (verb.startsWith("arriv")) return `arrived at ${subject}`;
+  if (verb === "left" || verb === "leave") return `left ${subject}`;
+  if (verb.startsWith("open")) return `opened ${subject}`;
+  if (verb.startsWith("close")) return `closed ${subject}`;
+  if (verb.startsWith("unlock")) return `unlocked ${subject}`;
+  if (verb.startsWith("lock")) return `locked ${subject}`;
+  return s;
+}
+
 function dayHeading(at: string): { weekday: string; date: string } {
   const d = new Date(at);
   return {
@@ -87,7 +105,6 @@ export function FocusStream() {
 
   const frameRef = useRef<HTMLDivElement>(null);
   const gutRef = useRef<SVGSVGElement>(null);
-  const wavePathRef = useRef<SVGPathElement>(null);
   const cardRefs = useRef<(HTMLElement | null)[]>([]);
   const ysRef = useRef<number[]>([]);
   const linksRef = useRef<Link[]>([]);
@@ -258,13 +275,6 @@ export function FocusStream() {
         l.glow.setAttribute("stroke-dasharray", `${dash} ${len + dash}`);
         l.glow.setAttribute("stroke-dashoffset", String(dash - prog * (len + dash)));
       }
-      // capture wave — two sine terms drifting against each other
-      const pts: string[] = [];
-      for (let x = 0; x <= WAVE_W; x += 8) {
-        const y = 28 + Math.sin(x / 112 + s * 0.3) * 7 + Math.sin(x / 49 - s * 0.17) * 3;
-        pts.push(`${x ? "L" : "M"}${x} ${y.toFixed(2)}`);
-      }
-      wavePathRef.current?.setAttribute("d", pts.join(" "));
       if (!reduce) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -322,16 +332,6 @@ export function FocusStream() {
               </div>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* capture wave */}
-      <div style={{ maxWidth: 660, margin: "0 auto", width: "100%", padding: "0 24px 34px" }}>
-        <svg viewBox={`0 0 ${WAVE_W} 56`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: 56, overflow: "visible" }} aria-hidden>
-          <path ref={wavePathRef} fill="none" stroke={pal.accent} strokeWidth={1.4} strokeLinecap="round" opacity={0.5} />
-        </svg>
-        <div style={{ textAlign: "center", color: pal.ink3, fontSize: 12, marginTop: 6 }}>
-          logged through Gooni · here when you look
         </div>
       </div>
     </div>
@@ -422,7 +422,7 @@ const EventCard = forwardRef<HTMLDivElement, { it: StreamEvent; pal: FocusPalett
           {fmtClock(it.at)}
         </span>
         <span>
-          {it.label}
+          {formatEventLabel(it.label)}
           {it.count > 1 && ` ×${it.count}`}
         </span>
       </div>

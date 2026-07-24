@@ -127,6 +127,7 @@ def set_reminder(body: dict, db: Session = Depends(get_db)):
         due_at=due_at,
         owed_to=(body.get("owed_to") or None),
         from_thought=int(from_thought) if from_thought else None,
+        is_promise=bool(body.get("is_promise")),
     )
     db.commit()
     return result
@@ -147,7 +148,17 @@ def list_reminders(day: str | None = None, include_done: bool = False, db: Sessi
 
 @router.patch("/focus/reminders/{reminder_id}")
 def toggle_reminder(reminder_id: int, body: dict, db: Session = Depends(get_db)):
-    result = focus_service.set_reminder_done(db, reminder_id, done=bool(body.get("done", True)))
+    """Dashboard check-off / promise lifecycle. Pass `state` (active|kept|broken)
+    to drive the said-vs-done spine directly, or `done` for the legacy boolean
+    check-off (done → kept)."""
+    state = body.get("state")
+    if state is not None:
+        try:
+            result = focus_service.set_reminder_state(db, reminder_id, str(state))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    else:
+        result = focus_service.set_reminder_done(db, reminder_id, done=bool(body.get("done", True)))
     if result is None:
         raise HTTPException(status_code=404, detail="reminder not found")
     db.commit()
@@ -179,4 +190,8 @@ def dashboard(db: Session = Depends(get_db)):
     """Assembled glanceable payload. Google Calendar events + trackable
     activity are merged CLIENT-SIDE from their existing endpoints — this
     returns only Gooni-owned focus data."""
-    return focus_service.dashboard(db)
+    payload = focus_service.dashboard(db)
+    # dashboard() runs auto_break_overdue (flushed, not committed) — persist the
+    # self-heal so a blown deadline stays broken across requests.
+    db.commit()
+    return payload

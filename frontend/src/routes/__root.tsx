@@ -19,6 +19,7 @@ import { ErrorView, NotFoundView } from "../components/ErrorView";
 import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
 import { SummonedNav } from "../components/ambient/SummonedNav";
+import { TopRightControls } from "../components/ambient/TopRightControls";
 import { WidgetOverlays } from "../components/widgets/WidgetOverlays";
 import { sheetFrame } from "../ui";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
@@ -115,10 +116,11 @@ function AppShell() {
   const navigate = useNavigate();
   const routerState = useRouterState();
   const windowWidth = useWindowWidth();
-  const [sidebarOpen, setSidebarOpen] = useState(windowWidth >= SIDEBAR_BREAKPOINT);
+  const isWide = windowWidth >= SIDEBAR_BREAKPOINT;
+  const [sidebarOpen, setSidebarOpen] = useState(isWide);
   useEffect(() => {
-    setSidebarOpen(windowWidth >= SIDEBAR_BREAKPOINT);
-  }, [windowWidth >= SIDEBAR_BREAKPOINT]);
+    setSidebarOpen(isWide);
+  }, [isWide]);
 
   // Store actions invoked by Sidebar's compose / new-chat buttons.
   // Lifted from routes/index.tsx so the buttons work on every route.
@@ -223,8 +225,11 @@ function AppShell() {
 
   // /creative is its own immersive world — exempt from the sheet frame.
   const isImmersive = isImmersivePath(location.pathname);
+  // /home is the waveform capture surface — full-bleed like the Focus home at
+  // "/", not a summoned sheet (it paints its own void ground).
+  const isAmbient = location.pathname === "/home";
   // Every non-home authed surface renders as a summoned layer over the void.
-  const isSheet = !isHome && !isImmersive && !isChromelessPath(location.pathname);
+  const isSheet = !isHome && !isAmbient && !isImmersive && !isChromelessPath(location.pathname);
 
   // Esc = drop the summoned layer, back to presence. Skips text inputs and
   // open dialogs (the canonical Modal stopPropagation()s Escape at the
@@ -391,6 +396,9 @@ function AppShell() {
         </div>
         </div>
         {!isImmersive && <SummonedNav />}
+        {/* Visible top-right chrome (focus/home jump + theme toggle) — the two
+            controls Daniel pulled out of the hover nav. */}
+        {!isImmersive && <TopRightControls isFocusHome={isHome} />}
         {!isImmersive && <WidgetOverlays />}
       </div>
     </PasswordGate>

@@ -296,15 +296,19 @@ def set_reminder(
     due_at: datetime | None = None,
     owed_to: str | None = None,
     from_thought: int | None = None,
+    is_promise: bool = False,
 ) -> dict:
-    """Create a reminder or promise. If `owed_to` (a person name) is set the
-    row is typed 'promise' and the person is resolved/created."""
+    """Create a reminder or promise. The row is typed 'promise' when EITHER an
+    `owed_to` person is named OR `is_promise` is set — the latter lets a promise
+    owed to yourself ("I won't smoke till Tuesday") be a promise rather than
+    collapsing into an undated reminder. Promises carry the active→kept|broken
+    lifecycle; reminders stay a simple done check-off."""
     content = (content or "").strip()
     if not content:
         raise ValueError("reminder content required")
 
     owed_id = None
-    rtype = "reminder"
+    rtype = "promise" if is_promise else "reminder"
     if owed_to and owed_to.strip():
         owed_id = resolve_person(db, owed_to).id
         rtype = "promise"
@@ -316,6 +320,7 @@ def set_reminder(
         due_at=due_at,
         thought_id=from_thought,
         done=False,
+        state="active",
     )
     db.add(reminder)
     db.flush()
@@ -352,8 +357,60 @@ def set_reminder_done(db: Session, reminder_id: int, done: bool = True) -> dict 
     if reminder is None:
         return None
     reminder.done = done
+    # Keep the lifecycle in sync with the legacy check-off: done = kept (a
+    # reminder you tick off is a kept commitment), undone = back to active.
+    _set_state(reminder, "kept" if done else "active")
     db.flush()
     return _reminder_dict(db, reminder)
+
+
+VALID_STATES = ("active", "kept", "broken")
+
+
+def _set_state(r: Reminder, state: str, now: datetime | None = None) -> None:
+    """Mutate a reminder's lifecycle state, stamping/clearing resolved_at and
+    keeping the legacy `done` boolean in sync (done = left 'active')."""
+    now = now or datetime.utcnow()
+    r.state = state
+    r.done = state != "active"
+    r.resolved_at = None if state == "active" else now
+
+
+def set_reminder_state(db: Session, reminder_id: int, state: str) -> dict | None:
+    """Transition a reminder/promise to active | kept | broken. Broken/kept
+    stamp resolved_at (the "lasted Nd" anchor); reviving to active clears it."""
+    if state not in VALID_STATES:
+        raise ValueError(f"bad state {state!r}; expected one of {VALID_STATES}")
+    reminder = db.query(Reminder).filter(Reminder.id == reminder_id).first()
+    if reminder is None:
+        return None
+    _set_state(reminder, state)
+    db.flush()
+    return _reminder_dict(db, reminder)
+
+
+def auto_break_overdue(db: Session, now: datetime | None = None) -> int:
+    """Sweep DATED promises whose due_at has passed while still active → broken.
+    Undated promises never auto-break (that's the whole point — they surface by
+    age until manually resolved). Returns the count broken. Mirrors the main
+    Promise model's overdue sweep so a blown deadline renders the gap on its own.
+    """
+    now = now or datetime.utcnow()
+    stale = (
+        db.query(Reminder)
+        .filter(
+            Reminder.type == "promise",
+            Reminder.state == "active",
+            Reminder.due_at.isnot(None),
+            Reminder.due_at < now,
+        )
+        .all()
+    )
+    for r in stale:
+        _set_state(r, "broken", now)
+    if stale:
+        db.flush()
+    return len(stale)
 
 
 def _reminder_dict(db: Session, r: Reminder) -> dict:
@@ -362,6 +419,10 @@ def _reminder_dict(db: Session, r: Reminder) -> dict:
         person = db.query(Person).filter(Person.id == r.owed_to).first()
         owed_name = person.name if person else None
     age_days = max(0, (datetime.utcnow() - r.created_at).days)
+    # "lasted" = how long the promise stood: created → resolved (broken/kept),
+    # or created → now while still active. Drives the broken card's warn meta.
+    end = r.resolved_at if r.resolved_at is not None else datetime.utcnow()
+    lasted_days = max(0, (end - r.created_at).days)
     return {
         "id": r.id,
         "type": r.type,
@@ -369,7 +430,10 @@ def _reminder_dict(db: Session, r: Reminder) -> dict:
         "owed_to": owed_name,  # null = owed to self
         "due_at": _iso(r.due_at),
         "done": r.done,
+        "state": r.state,
+        "resolved_at": _iso(r.resolved_at),
         "age_days": age_days,
+        "lasted_days": lasted_days,
         "thought_id": r.thought_id,
     }
 
@@ -490,13 +554,33 @@ def dashboard(db: Session, now: datetime | None = None) -> dict:
     - log: recent batch labels with timestamps
     """
     now = now or datetime.utcnow()
+    # Self-heal: a promise whose dated deadline blew by renders the gap on its
+    # own (no manual close needed). Flushed here; the route commits.
+    auto_break_overdue(db, now)
     topics = list_topics(db, now)
-    reminders = list_reminders(db)
 
-    notch_reminders = [r for r in reminders if r["type"] == "reminder"]
-    notch_promises = [r for r in reminders if r["type"] == "promise"]
-    # Promises surface by age — oldest first (most at risk of quietly breaking).
-    notch_promises.sort(key=lambda r: r["age_days"], reverse=True)
+    # Reminders = the dated-todo section: open (not done) type='reminder' only.
+    notch_reminders = [r for r in list_reminders(db) if r["type"] == "reminder"]
+
+    # Promises = the said-vs-done section: still-standing (active) AND recently
+    # broken (the loud signal). Kept promises drop off — a fulfilled commitment
+    # isn't a live concern. list_reminders' done-filter hides broken (done=True),
+    # so query promises directly.
+    promise_rows = (
+        db.query(Reminder)
+        .filter(Reminder.type == "promise", Reminder.state.in_(("active", "broken")))
+        .all()
+    )
+    promises = [_reminder_dict(db, r) for r in promise_rows]
+    # Active first, oldest → most at-risk; then broken, most-recent break first
+    # (the freshest gap reads at the top of the broken run).
+    def _promise_sort(r: dict):
+        broken = r["state"] == "broken"
+        # active: (0, -age) so oldest-active bubbles up; broken: (1, -resolved-ish)
+        return (1 if broken else 0, -r["age_days"] if not broken else -r["lasted_days"])
+
+    promises.sort(key=_promise_sort)
+    notch_promises = promises
 
     log_rows = (
         db.query(ThoughtBatch, Topic)

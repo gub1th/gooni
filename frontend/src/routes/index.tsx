@@ -5,15 +5,14 @@ import { EvalView } from "../components/eval/EvalView";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
-import { AmbientHome } from "../components/ambient/AmbientHome";
+import { FocusDashboard } from "../components/focus/FocusDashboard";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { fetchNote } from "../services/api";
 
-// Ambient-loop v2 "presence" pass: the WAVEFORM is the app's home. Default =
-// home — a near-empty black surface with the reactive waveform; everything
-// else (log, notes, nav) is hover-summoned frosted glass on top.
-// The log demoted from default to ?view=log. Stats retired — the log surface
-// absorbed the trackables + whoop/leetcode feed tiles.
+// The FOCUS dashboard is the app's home now — the said-vs-done timeline + rail
+// is what "/" lands on. The old waveform/capture home moved to /home (still a
+// tap away via the top-right button); the bare second-monitor kiosk lives on at
+// /focus. Everything else (log, notes, nav) is hover-summoned glass on top.
 
 type View = "home" | "notes" | "log" | "eval";
 
@@ -120,7 +119,7 @@ function LogPage() {
   return (
     <>
       {view === "home" ? (
-        <AmbientHome />
+        <FocusDashboard />
       ) : view === "log" ? (
         <ChatLogView />
       ) : view === "eval" ? (

@@ -21,7 +21,10 @@ function reminder(partial: Partial<FocusReminder>): FocusReminder {
     owed_to: null,
     due_at: null,
     done: false,
+    state: "active",
+    resolved_at: null,
     age_days: 0,
+    lasted_days: 0,
     thought_id: null,
     ...partial,
   };
@@ -59,7 +62,8 @@ describe("buildNotchItems", () => {
     const out = buildNotchItems(events, [], [], 10);
     const timed = out.find((i) => i.label === "Timed")!;
     const allday = out.find((i) => i.label === "AllDay")!;
-    expect(timed.right).toBe("6:30");
+    // fmtTime now carries the meridiem (fixed the "3:00 vs 15:00" ambiguity)
+    expect(timed.right).toBe("6:30 am");
     expect(allday.right).toBe("Mon");
   });
 

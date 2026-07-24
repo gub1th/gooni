@@ -1618,7 +1618,12 @@ export interface FocusReminder {
   // ISO datetime, or null (undated promises surface by age instead).
   due_at: string | null;
   done: boolean;
+  // Said-vs-done lifecycle. 'broken' renders in warn colour + "lasted Nd".
+  state: "active" | "kept" | "broken";
+  resolved_at: string | null;
   age_days: number;
+  // How long the promise stood: created → resolved (broken/kept) or → now.
+  lasted_days: number;
   thought_id: number | null;
 }
 
