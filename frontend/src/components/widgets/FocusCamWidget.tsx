@@ -26,6 +26,11 @@ import type { WidgetCompactProps, WidgetPanelProps } from "./registry";
 const POLL_MS = 2000; // GET /focus/cam — matches the app's polling convention (no SSE)
 const TODAY_MS = 10_000; // GET /focus/cam/today — slower; also refetched when a session ends
 
+// Frames ship ≤10s, so 40s = 4 missed → the sidecar isn't really sensing. Past
+// this, hide the (stale) thumbnail and say so — the same liveness signal that
+// stops a dead sidecar from masquerading as RECORDING.
+const FRAME_STALE_SEC = 40;
+
 // A dedicated "recording" red for the session-active signal — deliberately
 // INDEPENDENT of the focus-state color (green/amber), so "the camera is on" and
 // "you're currently focused" read as two separate facts, not one.
@@ -106,6 +111,60 @@ function ensurePulseStyle() {
     "@keyframes focusCamPulse{0%,100%{opacity:1}50%{opacity:.3}}" +
     "@media (prefers-reduced-motion:reduce){.focus-cam-live-dot{animation:none!important}}";
   document.head.appendChild(el);
+}
+
+// Live preview thumbnail — the "a sidecar is really alive" proof. Self-ticks
+// every second so "updated Ns ago" counts up AND the view flips to offline the
+// instant frames go stale (freshness = liveness). Only mounted while running,
+// so a running control with no fresh frame reads as "offline · not sensing" —
+// exactly the dead-sidecar-looks-like-RECORDING bug this closes.
+function FramePreview({ frame, frameAt }: { frame: string | null; frameAt: string | null }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const ageSec = frameAt ? (Date.now() - Date.parse(frameAt)) / 1000 : Infinity;
+  const fresh = frame != null && Number.isFinite(ageSec) && ageSec >= 0 && ageSec <= FRAME_STALE_SEC;
+
+  if (!fresh) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          aspectRatio: "4 / 3",
+          borderRadius: 10,
+          background: "rgb(var(--gooni-ink, 244 245 244) / 0.05)",
+          border: "1px dashed rgb(var(--gooni-ink, 244 245 244) / 0.18)",
+          fontSize: 11.5,
+          color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)",
+        }}
+      >
+        offline · not sensing
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <img
+        src={frame}
+        alt="focus preview"
+        style={{
+          display: "block",
+          width: "100%",
+          aspectRatio: "4 / 3",
+          objectFit: "cover",
+          borderRadius: 10,
+          border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.1)",
+        }}
+      />
+      <span style={{ fontSize: 10, color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)" }}>
+        updated {fmtElapsed(ageSec)} ago
+      </span>
+    </div>
+  );
 }
 
 // Shared control-flip: optimistic, refetch-safe. Returns {running, busy, toggle}.
@@ -236,6 +295,8 @@ export function FocusCamCompact({ onExpand }: WidgetCompactProps) {
           {blob.app}
         </div>
       )}
+
+      {running && <FramePreview frame={blob?.frame ?? null} frameAt={blob?.frame_at ?? null} />}
 
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <button
@@ -404,6 +465,7 @@ export function FocusCamPanel({ onClose }: WidgetPanelProps) {
                   </span>
                 )}
               </div>
+              <FramePreview frame={blob?.frame ?? null} frameAt={blob?.frame_at ?? null} />
             </>
           ) : (
             <div style={{ fontSize: 14, color: "rgb(var(--gooni-ink, 244 245 244) / 0.55)" }}>

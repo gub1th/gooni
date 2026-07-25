@@ -24,7 +24,8 @@ self-healing — a Start clicked while the sidecar was asleep takes effect on wa
 
 ```
 GET /focus/cam
-→ {control, state, score, app, session_id, at}
+→ {control, state, score, app, session_id, at,
+   frame, frame_at}          # frame = data:image/jpeg;base64,… | null (see Preview frame)
 ```
 
 Poll ~every 2s. Read `control`:
@@ -45,6 +46,27 @@ POST /focus/cam/state
 
 Send on state-change **and** a ~30s keepalive (keeps Settings churn low). Merges
 into the blob; leaves `control` untouched.
+
+## Preview frame (liveness)
+
+```
+POST /focus/cam/frame
+{ "session_id": str, "at": iso8601+tz,
+  "state": "focused"|"distracted"|"away"|null,
+  "jpeg_b64": str }              # base64 JPEG, ~320px wide, no data: prefix
+→ {ok}
+```
+
+Ship on a ~10s timer **and** on every state flip while running. ~10–20 KB
+(320px, JPEG q60). **Latest only — Gooni overwrites, no history** (folded into
+the same Settings blob as live state; nothing per-frame is persisted). Server
+caps the payload at 200 KB base64. Gooni re-exposes it on `GET /focus/cam` as
+`frame` (a ready-to-render `data:` URL) + `frame_at`.
+
+**Freshness = liveness.** The widget hides the thumbnail and shows
+"offline · not sensing" once `frame_at` is older than ~40s (4 missed frames) —
+the signal that stops a dead sidecar from looking like it's still `RECORDING`.
+So keep frames flowing the whole time a session runs.
 
 ## Discrete events
 

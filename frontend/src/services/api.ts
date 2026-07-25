@@ -1706,6 +1706,11 @@ export interface FocusCamBlob {
   app: string | null;
   session_id: string | null;
   at: string | null;
+  // Live preview thumbnail (data: URL) + its timestamp. Freshness of frame_at
+  // is the widget's liveness proof — a running control with a stale frame means
+  // the sidecar is actually dead. null until the first frame ships.
+  frame: string | null;
+  frame_at: string | null;
 }
 
 export interface FocusCamToday {

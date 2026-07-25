@@ -5,9 +5,10 @@ Deliberately NAMESPACED under /focus/cam/* to stay clear of the Focus SYSTEM
 (topics/thoughts/reminders on /focus/*) — same word, unrelated surface.
 
   GET   /focus/cam            → the control+state blob (sidecar reads control;
-                               frontend reads state/score/app)
+                               frontend reads state/score/app + live preview frame)
   POST  /focus/cam/state      → sidecar reports live state (on change + ~30s keepalive)
   POST  /focus/cam/control    → UI Start/Stop sets desired control (running|idle)
+  POST  /focus/cam/frame      → sidecar ships the latest preview thumbnail (~10s)
   POST  /focus/cam/events     → sidecar reports one discrete event (+1 counter)
   POST  /focus/cam/sessions   → sidecar reports a finished session (on stop)
   GET   /focus/cam/today      → the widget read: today's sessions + event counts
@@ -24,12 +25,18 @@ from ..services import focus_cam_service
 
 router = APIRouter()
 
+# Preview frame is ~10-20KB base64 (320px, JPEG q60). Cap well above that so a
+# malformed/oversized payload can't bloat the single Settings row; the sidecar
+# never sends anything near this.
+_MAX_FRAME_B64_CHARS = 200_000
+
 
 @router.get("/focus/cam")
 def get_focus_cam(db: Session = Depends(get_db)):
     """The current control+state blob. Both the sidecar and the frontend read
-    this (sidecar → control; frontend → state/score/app)."""
-    return focus_cam_service.get_blob(db)
+    this (sidecar → control; frontend → state/score/app + the live preview
+    frame). `frame` is a ready-to-render data: URL; `frame_at` its timestamp."""
+    return focus_cam_service.get_public_blob(db)
 
 
 @router.post("/focus/cam/state")
@@ -58,6 +65,30 @@ def post_focus_cam_control(body: dict, db: Session = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"control": blob["control"]}
+
+
+@router.post("/focus/cam/frame")
+def post_focus_cam_frame(body: dict, db: Session = Depends(get_db)):
+    """Sidecar ships the latest preview thumbnail (~10s cadence + on state flip).
+    Store LATEST ONLY — overwrite, no history (a stale thumbnail is worthless).
+    A live frame is the widget's liveness proof; freshness of `frame_at` is what
+    tells a really-running sidecar from a dead one that still reads control=running."""
+    jpeg_b64 = body.get("jpeg_b64")
+    if not jpeg_b64 or not isinstance(jpeg_b64, str):
+        raise HTTPException(status_code=400, detail="jpeg_b64 required")
+    if len(jpeg_b64) > _MAX_FRAME_B64_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"frame too large: {len(jpeg_b64)} chars (max {_MAX_FRAME_B64_CHARS})",
+        )
+    focus_cam_service.set_frame(
+        db,
+        session_id=body.get("session_id"),
+        at=body.get("at"),
+        state=body.get("state"),
+        jpeg_b64=jpeg_b64,
+    )
+    return {"ok": True}
 
 
 @router.post("/focus/cam/events")
