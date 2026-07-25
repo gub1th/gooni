@@ -283,6 +283,11 @@ async def auth_middleware(request: Request, call_next):
         # run in-process, so there's no backend hop to protect. Authless by design.
         or path == "/mcp"
         or path.startswith("/mcp/")
+        # Focus image-card ingest: the caller is a Claude code-execution sandbox
+        # POSTing a photo the model can't forward itself. The master Bearer must
+        # never sit in a chat, so this route guards itself with a separate,
+        # revocable FOCUS_UPLOAD_KEY (see app/routers/focus.py::post_image_card).
+        or path == "/focus/cards/image"
         # OAuth discovery probes claude.ai fires when adding the connector. With
         # AUTH_PASSWORD set (prod), the middleware would 401 these instead of
         # 404 — a 401 reads as "auth required" and pushes the client into an
