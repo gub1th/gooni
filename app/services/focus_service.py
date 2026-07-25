@@ -180,10 +180,16 @@ def log_thought(
     topic_name: str,
     new_batch: bool = False,
     label: str | None = None,
+    image_url: str | None = None,
     now: datetime | None = None,
 ) -> dict:
     """THE core write. Resolve (or create) the topic, apply the 30-minute
     batch rule, insert the thought, bump the topic's salience.
+
+    `image_url` pins an R2-hosted image to the batch card (set by the
+    /focus/cards/image ingest). Set on batch open; on append it overwrites
+    only when provided (mirrors the label-refine rule) — a plain text thought
+    never clears an existing image.
 
     Returns the created thought + its batch + the (post-bump, decayed) topic.
     """
@@ -199,6 +205,7 @@ def log_thought(
         batch = ThoughtBatch(
             topic_id=topic.id,
             label=(label or _snippet(content)),
+            image_url=image_url,
             started_at=now,
             ended_at=now,
         )
@@ -208,6 +215,8 @@ def log_thought(
         batch.ended_at = now
         if label:  # Claude can refine the running batch's summary
             batch.label = label
+        if image_url:
+            batch.image_url = image_url
 
     thought = Thought(content=content, timestamp=now, batch_id=batch.id)
     db.add(thought)
@@ -219,7 +228,7 @@ def log_thought(
     growth_cutoff = now - timedelta(hours=GROWTH_WINDOW_HOURS)
     return {
         "thought": {"id": thought.id, "content": thought.content, "timestamp": _iso(thought.timestamp)},
-        "batch": {"id": batch.id, "label": batch.label, "topic_id": batch.topic_id},
+        "batch": {"id": batch.id, "label": batch.label, "image_url": batch.image_url, "topic_id": batch.topic_id},
         "topic": _topic_dict(topic, now, growth_cutoff),
     }
 
@@ -507,6 +516,7 @@ def stream(
             "topic": tp.name,
             "color": tp.color,
             "sentence": b.label,
+            "image_url": b.image_url,
             "at": _iso(b.started_at),
             "thought_count": counts.get(b.id, 0),
         }

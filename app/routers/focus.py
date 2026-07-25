@@ -13,9 +13,11 @@ Endpoints:
   GET    /focus/dashboard         assembled glanceable payload
 """
 
+import os
+import secrets
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from ..common import _parse_iso_date, local_today, parse_due_hint
@@ -23,6 +25,10 @@ from ..db.database import get_db
 from ..services import focus_service
 
 router = APIRouter()
+
+# Phone photos are large; the code sandbox can downscale before POST, so this
+# is a backstop, not the expected size. Matches /uploads/image's cap.
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 def _parse_due(body: dict, db: Session) -> datetime | None:
@@ -68,6 +74,73 @@ def log_thought(body: dict, db: Session = Depends(get_db)):
     )
     db.commit()
     return result
+
+
+@router.post("/focus/cards/image")
+async def post_image_card(
+    file: UploadFile = File(...),
+    caption: str = Form(""),
+    topic: str = Form("captures"),
+    authorization: str = Header(""),
+    db: Session = Depends(get_db),
+):
+    """Ingest a photo into the arcs canvas as an image card.
+
+    Scoped-key authed (FOCUS_UPLOAD_KEY) — NOT the master Bearer — because the
+    caller is a Claude code-execution sandbox. A photo uploaded in a Claude
+    conversation can't reach Gooni through the model (tool-call args are text,
+    and the model has no handle to the upload's bytes), but the sandbox reads
+    the bytes AND has network egress, so it POSTs them here. This route is
+    exempt from the global Bearer middleware (main.py) and guards itself with a
+    revocable, upload-only key so the master token never has to sit in a chat.
+
+    Bytes → R2 → a new batch card carrying the public url + caption. One card
+    per post (new_batch=True), threaded to `topic` like every other card.
+    """
+    expected = (os.getenv("FOCUS_UPLOAD_KEY") or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="FOCUS_UPLOAD_KEY not configured")
+    # Constant-time compare — the key is a shared secret; don't leak length via
+    # early-exit timing.
+    if not secrets.compare_digest(authorization.strip(), f"Bearer {expected}"):
+        raise HTTPException(status_code=401, detail="bad upload key")
+
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=415, detail=f"unsupported content-type: {content_type}")
+    data = await file.read()
+    if len(data) == 0:
+        raise HTTPException(status_code=400, detail="empty upload")
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"image too large: {len(data)} bytes (max {_MAX_IMAGE_BYTES})",
+        )
+
+    from ..services import image_storage
+
+    if not image_storage.is_configured():
+        raise HTTPException(status_code=503, detail="R2 image storage not configured")
+    try:
+        result = image_storage.upload_image(data, content_type, file.filename)
+    except image_storage.R2NotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:  # noqa: BLE001 — generic 502, don't leak bucket internals
+        print(f"R2 upload failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="upload failed")
+
+    caption = (caption or "").strip()
+    topic = (topic or "").strip() or "captures"
+    card = focus_service.log_thought(
+        db,
+        content=(caption or "[image]"),
+        topic_name=topic,
+        new_batch=True,  # each photo is its own card
+        label=(caption or "Gooni pinned a photo"),
+        image_url=result["url"],
+    )
+    db.commit()
+    return card
 
 
 @router.get("/focus/thoughts")

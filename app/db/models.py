@@ -806,6 +806,11 @@ class ThoughtBatch(Base):
     id = Column(Integer, primary_key=True, index=True)
     topic_id = Column(Integer, ForeignKey("topics.id"), nullable=False, index=True)
     label = Column(Text, nullable=True)  # short summary, written by Claude
+    # Public R2 URL of an image pinned to this card (nullable). Set via the
+    # /focus/cards/image ingest — a photo uploaded in a Claude conversation,
+    # POSTed out by the code-execution sandbox (the model can't forward bytes;
+    # the sandbox can). The arcs canvas renders <img src> above the label.
+    image_url = Column(Text, nullable=True)
     started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     # Bumped to now() every time a thought appends — drives the 30-min batch
     # window and orders the log.

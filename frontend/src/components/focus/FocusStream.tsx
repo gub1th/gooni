@@ -389,6 +389,21 @@ const ThoughtCard = forwardRef<HTMLDivElement, { it: StreamThought; pal: FocusPa
           {it.topic} · {fmtClock(it.at)}
           {it.thought_count > 1 && <span style={{ opacity: 0.7 }}>· {it.thought_count}</span>}
         </span>
+        {it.image_url && (
+          <img
+            src={it.image_url}
+            alt={it.sentence || "pinned image"}
+            loading="lazy"
+            style={{
+              display: "block",
+              width: "100%",
+              maxHeight: 320,
+              objectFit: "cover",
+              borderRadius: 12,
+              margin: "10px 0 0",
+            }}
+          />
+        )}
         <p style={{ fontSize: 16.5, lineHeight: 1.5, margin: "8px 0 0", letterSpacing: "-0.005em", color: pal.ink }}>
           {it.sentence || "…"}
         </p>

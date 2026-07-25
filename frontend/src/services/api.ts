@@ -1661,6 +1661,9 @@ export interface StreamThought {
   topic: string;
   color: string | null;
   sentence: string | null;
+  // R2 url of a photo pinned to this card (POSTed via /focus/cards/image from
+  // a Claude code sandbox); null for ordinary text cards.
+  image_url: string | null;
   at: string;
   thought_count: number;
 }
