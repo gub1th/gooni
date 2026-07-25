@@ -109,6 +109,45 @@ def set_control(db: Session, control: str) -> dict:
     return _write_blob(db, blob)
 
 
+def set_frame(
+    db: Session,
+    *,
+    session_id: str | None,
+    at: str | None,
+    state: str | None,
+    jpeg_b64: str,
+) -> dict:
+    """Store the LATEST preview thumbnail (overwrite, no history) folded into the
+    same blob. A low-res live frame is the widget's proof a sidecar is actually
+    alive — freshness = liveness. The raw base64 rides in `frame_b64`; the public
+    read (get_public_blob) expands it to a data: URL so the widget stays a dumb
+    <img src>. Kept out of _DEFAULT_BLOB so a frameless blob carries no bloat;
+    get_blob preserves the key across state/control writes."""
+    blob = get_blob(db)
+    blob["frame_b64"] = jpeg_b64
+    blob["frame_at"] = at
+    # Only accept a known state (or null); a garbage value keeps the last.
+    if state is None or state in VALID_STATES:
+        blob["frame_state"] = state
+    blob["frame_session"] = session_id
+    return _write_blob(db, blob)
+
+
+def get_public_blob(db: Session) -> dict:
+    """The GET /focus/cam response: the control+state blob with the raw stored
+    frame expanded into a `frame` data: URL + `frame_at` (the two fields the
+    widget renders). The internal `frame_b64`/`frame_state`/`frame_session`
+    storage keys are stripped — callers see only presentation-ready fields."""
+    blob = get_blob(db)
+    b64 = blob.pop("frame_b64", None)
+    frame_at = blob.pop("frame_at", None)
+    blob.pop("frame_state", None)
+    blob.pop("frame_session", None)
+    blob["frame"] = f"data:image/jpeg;base64,{b64}" if b64 else None
+    blob["frame_at"] = frame_at
+    return blob
+
+
 # ── discrete events + session summaries (Trackables) ─────────────────────────
 
 
