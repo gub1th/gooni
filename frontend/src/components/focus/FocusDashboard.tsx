@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Maximize2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { FONT } from "../../ui";
 import {
+  createFocusReminder,
+  deleteFocusReminder,
   fetchCalendarEvents,
   fetchFocusDashboard,
   fetchLeetcodeToday,
   fetchTrackableDays,
   fetchTrackables,
   fetchWhoopToday,
+  updateFocusReminder,
   type CalendarEvent,
   type FocusDashboard as FocusDashboardData,
   type FocusReminder,
@@ -110,6 +113,16 @@ export function FocusDashboard() {
     void loadStreaks();
   }, [loadStreaks]);
 
+  // Lighter than load(): a rail mutation (add/edit/delete) only needs the
+  // dashboard payload refreshed, not the calendar / whoop / streak fan-out.
+  const reloadDashboard = useCallback(async () => {
+    try {
+      setData(await fetchFocusDashboard());
+    } catch {
+      /* keep the last good frame */
+    }
+  }, []);
+
   useEffect(() => {
     void load();
     const id = window.setInterval(() => void load(), REFRESH_MS);
@@ -166,21 +179,9 @@ export function FocusDashboard() {
           overflowY: "auto",
         }}
       >
-        {promises.length > 0 && (
-          <RailSection label="promises" pal={pal}>
-            {promises.map((p) => (
-              <PromiseRow key={`p${p.id}`} p={p} pal={pal} />
-            ))}
-          </RailSection>
-        )}
+        <PromisesSection promises={promises} pal={pal} onMutate={reloadDashboard} />
 
-        {reminders.length > 0 && (
-          <RailSection label="reminders" pal={pal}>
-            {reminders.map((r: FocusReminder) => (
-              <RailRow key={`r${r.id}`} title={r.content} meta={fmtTime(r.due_at)} pal={pal} />
-            ))}
-          </RailSection>
-        )}
+        <RemindersSection reminders={reminders} pal={pal} onMutate={reloadDashboard} />
 
         {sortedEvents.length > 0 && (
           <RailSection label="schedule" pal={pal} onExpand={() => openWidget("calendar", "agenda")}>
@@ -219,10 +220,14 @@ function SectionLabel({
   children,
   pal,
   onExpand,
+  onAdd,
+  addActive,
 }: {
   children: React.ReactNode;
   pal: FocusPalette;
   onExpand?: () => void;
+  onAdd?: () => void;
+  addActive?: boolean;
 }) {
   return (
     <div
@@ -238,31 +243,66 @@ function SectionLabel({
       }}
     >
       <span>{children}</span>
-      {onExpand && (
-        <button
-          onClick={onExpand}
-          aria-label="Expand"
-          title="Expand"
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 6,
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            color: pal.ink3,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 0,
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = pal.ink)}
-          onMouseLeave={(e) => (e.currentTarget.style.color = pal.ink3)}
-        >
-          <Maximize2 size={12} strokeWidth={2} />
-        </button>
-      )}
+      <div style={{ display: "flex", gap: 2 }}>
+        {onAdd && (
+          <IconBtn pal={pal} label={addActive ? "Cancel" : "Add"} onClick={onAdd}>
+            {addActive ? <X size={12} strokeWidth={2} /> : <Plus size={13} strokeWidth={2} />}
+          </IconBtn>
+        )}
+        {onExpand && (
+          <IconBtn pal={pal} label="Expand" onClick={onExpand}>
+            <Maximize2 size={12} strokeWidth={2} />
+          </IconBtn>
+        )}
+      </div>
     </div>
+  );
+}
+
+// Small square ghost button — the shared rail control (add / expand / edit /
+// delete / confirm). Brightens ink3 → ink (or warn when `danger`) on hover.
+function IconBtn({
+  children,
+  pal,
+  label,
+  onClick,
+  danger,
+  disabled,
+}: {
+  children: React.ReactNode;
+  pal: FocusPalette;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
+  const base = danger ? pal.warn : pal.ink3;
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      style={{
+        width: 20,
+        height: 20,
+        borderRadius: 6,
+        border: "none",
+        background: "transparent",
+        cursor: disabled ? "default" : "pointer",
+        color: base,
+        opacity: disabled ? 0.4 : 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+        flexShrink: 0,
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.color = danger ? pal.warn : pal.ink)}
+      onMouseLeave={(e) => (e.currentTarget.style.color = base)}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -349,6 +389,339 @@ function PromiseRow({ p, pal }: { p: FocusReminder; pal: FocusPalette }) {
     );
   }
   return <RailRow title={p.content} meta={fmtPromiseMeta(p.owed_to, p.age_days)} pal={pal} />;
+}
+
+// ── promises / reminders CRUD sections ────────────────────────────────────────
+// Both rail sections are backed by Reminder rows. They ALWAYS render now (even
+// empty) so the "+" add affordance is always reachable. Row controls are
+// hover-revealed → the kiosk stays glanceable at rest. Mutations refetch the
+// dashboard (onMutate) rather than mutating local state — the payload is small
+// and the source of truth stays server-side.
+
+type RailKind = "promise" | "reminder";
+
+function PromisesSection({
+  promises,
+  pal,
+  onMutate,
+}: {
+  promises: FocusReminder[];
+  pal: FocusPalette;
+  onMutate: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <div>
+      <SectionLabel pal={pal} onAdd={() => setAdding((a) => !a)} addActive={adding}>
+        promises
+      </SectionLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+        {adding && (
+          <RailEditor
+            kind="promise"
+            pal={pal}
+            submitLabel="add"
+            onCancel={() => setAdding(false)}
+            onSubmit={async ({ content, secondary }) => {
+              await createFocusReminder({ content, is_promise: true, owed_to: secondary || null });
+              setAdding(false);
+              onMutate();
+            }}
+          />
+        )}
+        {promises.map((p) => (
+          <RailItem key={`p${p.id}`} item={p} kind="promise" pal={pal} onMutate={onMutate} />
+        ))}
+        {promises.length === 0 && !adding && <EmptyHint pal={pal}>none</EmptyHint>}
+      </div>
+    </div>
+  );
+}
+
+function RemindersSection({
+  reminders,
+  pal,
+  onMutate,
+}: {
+  reminders: FocusReminder[];
+  pal: FocusPalette;
+  onMutate: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <div>
+      <SectionLabel pal={pal} onAdd={() => setAdding((a) => !a)} addActive={adding}>
+        reminders
+      </SectionLabel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+        {adding && (
+          <RailEditor
+            kind="reminder"
+            pal={pal}
+            submitLabel="add"
+            onCancel={() => setAdding(false)}
+            onSubmit={async ({ content, secondary }) => {
+              await createFocusReminder({ content, is_promise: false, due_hint: secondary || null });
+              setAdding(false);
+              onMutate();
+            }}
+          />
+        )}
+        {reminders.map((r) => (
+          <RailItem key={`r${r.id}`} item={r} kind="reminder" pal={pal} onMutate={onMutate} />
+        ))}
+        {reminders.length === 0 && !adding && <EmptyHint pal={pal}>none</EmptyHint>}
+      </div>
+    </div>
+  );
+}
+
+// A single rail row + its hover controls. Three modes: view (the display row),
+// edit (inline RailEditor), confirmDelete (a two-step guard so a stray click on
+// a glance surface can't nuke a promise).
+function RailItem({
+  item,
+  kind,
+  pal,
+  onMutate,
+}: {
+  item: FocusReminder;
+  kind: RailKind;
+  pal: FocusPalette;
+  onMutate: () => void;
+}) {
+  const [mode, setMode] = useState<"view" | "edit" | "confirm">("view");
+  const [hover, setHover] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  if (mode === "edit") {
+    return (
+      <RailEditor
+        kind={kind}
+        pal={pal}
+        submitLabel="save"
+        initialContent={item.content}
+        initialSecondary={kind === "promise" ? item.owed_to ?? "" : ""}
+        // Reminder due can't be reverse-rendered as a hint, so an existing due
+        // gets an explicit "clear due" toggle. A promise owner IS prefilled, so
+        // clearing it = emptying the field (handled below).
+        showClearToggle={kind === "reminder" && item.due_at != null}
+        onCancel={() => setMode("view")}
+        onSubmit={async ({ content, secondary, clearSecondary }) => {
+          const patch: Parameters<typeof updateFocusReminder>[1] = {};
+          if (content !== item.content) patch.content = content;
+          if (kind === "promise") {
+            if (secondary) patch.owed_to = secondary;
+            else if (item.owed_to) patch.clear_owed = true;
+          } else if (clearSecondary) {
+            patch.clear_due = true;
+          } else if (secondary) {
+            patch.due_hint = secondary;
+          }
+          if (Object.keys(patch).length > 0) await updateFocusReminder(item.id, patch);
+          setMode("view");
+          onMutate();
+        }}
+      />
+    );
+  }
+
+  const controlsVisible = hover || mode === "confirm";
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ display: "flex", alignItems: "flex-start", gap: 6 }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {kind === "promise" ? (
+          <PromiseRow p={item} pal={pal} />
+        ) : (
+          <RailRow title={item.content} meta={fmtTime(item.due_at)} pal={pal} />
+        )}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 3,
+          alignItems: "center",
+          flexShrink: 0,
+          opacity: controlsVisible ? 1 : 0,
+          pointerEvents: controlsVisible ? "auto" : "none",
+          transition: "opacity 120ms",
+        }}
+      >
+        {mode === "confirm" ? (
+          <>
+            <span style={{ fontSize: 10, color: pal.warn, letterSpacing: "0.04em" }}>delete?</span>
+            <IconBtn
+              pal={pal}
+              danger
+              disabled={busy}
+              label="Confirm delete"
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await deleteFocusReminder(item.id);
+                  onMutate();
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Check size={12} strokeWidth={2.2} />
+            </IconBtn>
+            <IconBtn pal={pal} label="Cancel delete" onClick={() => setMode("view")}>
+              <X size={12} strokeWidth={2} />
+            </IconBtn>
+          </>
+        ) : (
+          <>
+            <IconBtn pal={pal} label="Edit" onClick={() => setMode("edit")}>
+              <Pencil size={11} strokeWidth={2} />
+            </IconBtn>
+            <IconBtn pal={pal} label="Delete" onClick={() => setMode("confirm")}>
+              <Trash2 size={11} strokeWidth={2} />
+            </IconBtn>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Shared inline form for BOTH add and edit. Emits content + a kind-specific
+// secondary (promise → owed-to person; reminder → a due hint like "friday").
+// clearSecondary rides the reminder "clear due" toggle only.
+function RailEditor({
+  kind,
+  pal,
+  submitLabel,
+  initialContent = "",
+  initialSecondary = "",
+  showClearToggle = false,
+  onSubmit,
+  onCancel,
+}: {
+  kind: RailKind;
+  pal: FocusPalette;
+  submitLabel: string;
+  initialContent?: string;
+  initialSecondary?: string;
+  showClearToggle?: boolean;
+  onSubmit: (v: { content: string; secondary: string; clearSecondary: boolean }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [content, setContent] = useState(initialContent);
+  const [secondary, setSecondary] = useState(initialSecondary);
+  const [clearDue, setClearDue] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const secondaryPlaceholder =
+    kind === "promise" ? "owed to — blank = yourself" : "when — e.g. friday (optional)";
+
+  async function submit() {
+    const c = content.trim();
+    if (!c || busy) return;
+    setBusy(true);
+    try {
+      await onSubmit({ content: c, secondary: secondary.trim(), clearSecondary: clearDue });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void submit();
+    } else if (e.key === "Escape") {
+      onCancel();
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <input
+        autoFocus
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        onKeyDown={onKey}
+        placeholder="what"
+        style={fieldStyle(pal)}
+      />
+      <input
+        value={secondary}
+        onChange={(e) => {
+          setSecondary(e.target.value);
+          if (e.target.value) setClearDue(false);
+        }}
+        onKeyDown={onKey}
+        placeholder={secondaryPlaceholder}
+        style={fieldStyle(pal)}
+      />
+      {showClearToggle && (
+        <label
+          style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: pal.ink3, cursor: "pointer" }}
+        >
+          <input type="checkbox" checked={clearDue} onChange={(e) => setClearDue(e.target.checked)} />
+          clear due
+        </label>
+      )}
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <button
+          onClick={() => void submit()}
+          disabled={busy || !content.trim()}
+          style={{
+            fontFamily: FONT,
+            fontSize: 11,
+            padding: "4px 12px",
+            borderRadius: 7,
+            border: "none",
+            cursor: busy || !content.trim() ? "default" : "pointer",
+            background: pal.accent,
+            color: pal.paper,
+            opacity: busy || !content.trim() ? 0.5 : 1,
+          }}
+        >
+          {submitLabel}
+        </button>
+        <button
+          onClick={onCancel}
+          style={{
+            fontFamily: FONT,
+            fontSize: 11,
+            padding: "4px 10px",
+            borderRadius: 7,
+            border: `1px solid ${pal.rule}`,
+            cursor: "pointer",
+            background: "transparent",
+            color: pal.ink3,
+          }}
+        >
+          cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EmptyHint({ children, pal }: { children: React.ReactNode; pal: FocusPalette }) {
+  return <div style={{ fontSize: 11, color: pal.ink3, opacity: 0.55 }}>{children}</div>;
+}
+
+function fieldStyle(pal: FocusPalette): React.CSSProperties {
+  return {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "transparent",
+    border: `1px solid ${pal.rule}`,
+    borderRadius: 7,
+    padding: "6px 8px",
+    color: pal.ink,
+    fontFamily: FONT,
+    fontSize: 12,
+    outline: "none",
+  };
 }
 
 // ── streak strip (paged) ──────────────────────────────────────────────────────
