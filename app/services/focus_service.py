@@ -398,6 +398,55 @@ def set_reminder_state(db: Session, reminder_id: int, state: str) -> dict | None
     return _reminder_dict(db, reminder)
 
 
+def update_reminder(
+    db: Session,
+    reminder_id: int,
+    *,
+    content: str | None = None,
+    due_at: datetime | None = None,
+    clear_due: bool = False,
+    owed_to: str | None = None,
+    clear_owed: bool = False,
+) -> dict | None:
+    """Edit a reminder/promise's content / due / owed-to. Only provided fields
+    change (None = "leave alone"); pass `clear_due` / `clear_owed` to explicitly
+    NULL a field — distinct from omitting it. Naming a person via `owed_to`
+    promotes a reminder to a promise (matches set_reminder's rule); clearing the
+    owner does NOT demote (a self-owed promise stays a promise). State/done are
+    untouched here — those ride set_reminder_state / set_reminder_done."""
+    r = db.query(Reminder).filter(Reminder.id == reminder_id).first()
+    if r is None:
+        return None
+    if content is not None:
+        c = content.strip()
+        if not c:
+            raise ValueError("content cannot be empty")
+        r.content = c
+    if clear_due:
+        r.due_at = None
+    elif due_at is not None:
+        r.due_at = due_at
+    if clear_owed:
+        r.owed_to = None
+    elif owed_to is not None and owed_to.strip():
+        r.owed_to = resolve_person(db, owed_to).id
+        r.type = "promise"
+    db.flush()
+    return _reminder_dict(db, r)
+
+
+def delete_reminder(db: Session, reminder_id: int) -> bool:
+    """Hard-delete a reminder/promise. Nothing FKs onto Reminder (parent_id is a
+    reserved self-FK, unused in v1), so the row drops clean. Returns False if the
+    id was already gone."""
+    r = db.query(Reminder).filter(Reminder.id == reminder_id).first()
+    if r is None:
+        return False
+    db.delete(r)
+    db.flush()
+    return True
+
+
 def auto_break_overdue(db: Session, now: datetime | None = None) -> int:
     """Sweep DATED promises whose due_at has passed while still active → broken.
     Undated promises never auto-break (that's the whole point — they surface by

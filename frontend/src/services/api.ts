@@ -1650,6 +1650,52 @@ export async function fetchFocusDashboard(): Promise<FocusDashboard> {
   return res.json();
 }
 
+// ── Focus reminder/promise CRUD (rail add / edit / delete) ──────────────────
+// The rail sections are backed by Reminder rows (type=reminder|promise). Create
+// = POST; edit fields / clear due|owed = PATCH; delete = DELETE. State toggles
+// (kept/broken) also ride PATCH but the dashboard rail doesn't drive them yet.
+
+export async function createFocusReminder(input: {
+  content: string;
+  is_promise?: boolean;
+  owed_to?: string | null;
+  due_hint?: string | null;
+}): Promise<FocusReminder> {
+  const res = await apiFetch(`${BASE}/focus/reminders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error("Failed to create reminder");
+  return res.json();
+}
+
+// Only send the fields you want changed. clear_due / clear_owed explicitly NULL
+// a field (distinct from omitting it); a due_hint ("friday") is parsed server-side.
+export async function updateFocusReminder(
+  id: number,
+  patch: {
+    content?: string;
+    due_hint?: string;
+    clear_due?: boolean;
+    owed_to?: string;
+    clear_owed?: boolean;
+  },
+): Promise<FocusReminder> {
+  const res = await apiFetch(`${BASE}/focus/reminders/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Failed to update reminder");
+  return res.json();
+}
+
+export async function deleteFocusReminder(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/focus/reminders/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete reminder");
+}
+
 // ── Focus stream (the arcs canvas) ──────────────────────────────────────────
 // One day-bounded, newest-first chronological stream merging thought batch-cards
 // with Shortcuts device-event cards. `at` is UTC-aware ISO — convert to local.
