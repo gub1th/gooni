@@ -122,12 +122,26 @@ export function WalkPage() {
         }
         .walk-root :where(h1,h2,h3){ font-family:${DISPLAY}; font-weight:500;
           letter-spacing:-0.022em; text-wrap:balance; margin:0; }
+        /* Snapped anchors. Each station is one stop; the browser owns
+           the easing, which beats hand-rolling an animation that fights
+           trackpad momentum. Mandatory (not proximity) because the ask
+           was distinct anchors — that only stays safe because every
+           card is height-capped below, so no content can hide between
+           two snap points. */
+        html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
         .walk-sec { position:relative; z-index:1; min-height:100svh;
-          display:flex; align-items:center; padding:14vh 0; }
+          display:flex; align-items:center; padding:8vh 0;
+          scroll-snap-align:center; scroll-snap-stop:always; }
         .walk-col { width:min(520px, calc(100vw - 48px)); margin-left:max(40px, 7vw);
           background:var(--w-panel); backdrop-filter:blur(18px) saturate(150%);
           -webkit-backdrop-filter:blur(18px) saturate(150%);
-          border:1px solid var(--w-line); border-radius:18px; padding:32px 34px; }
+          border:1px solid var(--w-line); border-radius:18px; padding:30px 32px;
+          /* A card taller than the viewport would strand its own tail
+             between snap points. Cap it and let the long ones (Gooni)
+             scroll inside instead. */
+          max-height:82svh; overflow-y:auto; overscroll-behavior:contain; }
+        .walk-col::-webkit-scrollbar { width:0; }
+        .walk-col { scrollbar-width:none; }
         .walk-eyebrow { font-family:${MONO}; font-size:10.5px; letter-spacing:.16em;
           text-transform:uppercase; margin-bottom:12px; }
         .walk-meta { font-family:${MONO}; font-size:11.5px; color:var(--w-dim);
@@ -141,8 +155,8 @@ export function WalkPage() {
           font-variant-numeric:tabular-nums; }
         .walk-stats .l { font-family:${MONO}; font-size:9.5px; letter-spacing:.1em;
           text-transform:uppercase; color:var(--w-dim); margin-top:6px; }
-        .walk-beats { list-style:none; margin:22px 0 0; padding:0; }
-        .walk-beats li { position:relative; padding:9px 0 9px 24px; font-size:14.5px;
+        .walk-beats { list-style:none; margin:18px 0 0; padding:0; }
+        .walk-beats li { position:relative; padding:7px 0 7px 22px; font-size:13.5px;
           color:var(--w-ink2); border-bottom:1px solid var(--w-line); }
         .walk-beats li:last-child { border-bottom:none; }
         .walk-beats li::before { content:""; position:absolute; left:2px; top:17px;
@@ -173,9 +187,15 @@ export function WalkPage() {
         .walk-rail .dot.on { transform:scale(1.5); border-color:transparent; }
         .walk-rail button:focus-visible { outline:2px solid var(--w-ink); outline-offset:4px; }
         @media (max-width:760px) { .walk-rail { display:none; }
-          .walk-col { margin-left:0; margin-right:0; width:100%; }
-          .walk-sec { padding:10vh 20px; min-height:auto; } }
-        @media (prefers-reduced-motion: reduce) { * { scroll-behavior:auto !important; } }
+          .walk-col { margin-left:0; margin-right:0; width:100%; max-height:none; }
+          .walk-sec { padding:10vh 20px; min-height:auto;
+            /* Phones read; they don't tour. Snapping a document someone
+               is skimming with a thumb fights them. */
+            scroll-snap-align:none; }
+          html { scroll-snap-type:none; } }
+        @media (prefers-reduced-motion: reduce) {
+          html { scroll-behavior:auto !important; scroll-snap-type:none !important; }
+          .walk-sec { scroll-snap-align:none !important; } }
       `}</style>
 
       {webgl && <WalkScene />}
@@ -333,6 +353,7 @@ function Footer() {
         position: "relative",
         zIndex: 1,
         padding: "60px max(40px,7vw) 90px",
+        scrollSnapAlign: "end",
         borderTop: "1px solid var(--w-line)",
         color: "var(--w-dim)",
         fontSize: 13,
