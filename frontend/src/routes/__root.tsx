@@ -95,6 +95,12 @@ function isChromelessPath(pathname: string): boolean {
   return (
     pathname === "/public" ||
     pathname.startsWith("/public/") ||
+    // The plaza is the public portfolio's front door, so it renders
+    // bare — outside PasswordGate — like the rest of /public. It was
+    // previously behind the gate, which meant the "wander the plaza"
+    // link on the public page dead-ended at a password prompt for
+    // every visitor. It reads only public notes + static content.
+    pathname === "/creative" ||
     pathname === "/focus"
   );
 }

@@ -15,6 +15,8 @@ import { LandingCamera } from "./LandingCamera";
 import { IntroCamera, ORBIT_BASELINE } from "./IntroCamera";
 import { NoteReaderOverlay } from "./NoteReaderOverlay";
 import { NotePeekHost } from "./NotePeekHost";
+import { Landmarks } from "./Landmarks";
+import { LandmarkPeekHost } from "./LandmarkPeekHost";
 import { setPeekState } from "./peekBus";
 import { AmbientAudio } from "./AmbientAudio";
 import { PostFX } from "./PostFX";
@@ -384,6 +386,10 @@ export function Scene() {
           initialDelayMs={600}
         />
         {entered && introDone && <NoteCoins onSelect={handleSelect} />}
+        {/* Portfolio landmarks. Mounted alongside the note-coins and
+            gated the same way, but sourced from content rather than the
+            network — see Landmarks / landmarkPlacement. */}
+        {entered && introDone && <Landmarks />}
 
         {/* Landing bird's-eye — runs while overlay is up; hands off to
             IntroCamera on click. */}
@@ -446,6 +452,7 @@ export function Scene() {
       />
 
       {entered && introDone && !selectedNote && <NotePeekHost />}
+      {entered && introDone && !selectedNote && <LandmarkPeekHost />}
 
       {entered && <BrandingMark />}
       {entered && <NotesLink visible={introDone && !selectedNote} />}

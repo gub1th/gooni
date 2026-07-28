@@ -1,5 +1,6 @@
 import type { PublicNote } from "../../services/api";
 import { isTileBlocked } from "./useDanielControls";
+import { isReservedTile } from "./landmarkPlacement";
 import { tileKey, type BaseTile } from "./tileGrid";
 
 // Deterministic note → tile mapping. Same note.id always lands on the
@@ -50,21 +51,12 @@ export function buildNoteTileMap(
   const taken = new Set<string>();
   const out: NoteTileAssignment[] = [];
 
-  // Spawn-anchor the top pinned note so the player lands on the
-  // "what is Gooni" coin immediately. Falls through to hashed placement
-  // if the spawn tile is somehow blocked or missing.
-  let remaining: PublicNote[] = ranked;
-  const topPinned = ranked.find((n) => n.is_public_pinned);
-  if (topPinned) {
-    const spawn = tiles.find((t) => isSpawnTile(t));
-    if (spawn && !isTileBlocked(spawn.gx, spawn.gz)) {
-      taken.add(tileKey(spawn.gx, spawn.gz));
-      out.push({ note: topPinned, tile: spawn });
-      remaining = ranked.filter((n) => n.id !== topPinned.id);
-    }
-  }
-
-  for (const note of remaining) {
+  // Spawn used to anchor the top pinned note. It's now the Gooni
+  // monument's tile (landmarkPlacement) — the first thing a visitor
+  // stands on should be the work, not a note about the work — so every
+  // note, pinned or not, goes through hashed placement and skips the
+  // tiles landmarks own.
+  for (const note of ranked) {
     const start = knuthHash(note.id) % tiles.length;
     let placed = false;
     for (let i = 0; i < tiles.length; i++) {
@@ -73,6 +65,7 @@ export function buildNoteTileMap(
       const key = tileKey(t.gx, t.gz);
       if (taken.has(key)) continue;
       if (isSpawnTile(t)) continue;
+      if (isReservedTile(t.gx, t.gz)) continue;
       if (isTileBlocked(t.gx, t.gz)) continue;
       taken.add(key);
       out.push({ note, tile: t });
