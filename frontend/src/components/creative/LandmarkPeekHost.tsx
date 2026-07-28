@@ -267,6 +267,25 @@ function LandmarkCard({ landmark, onClose }: { landmark: Landmark | null; onClos
           {shown.subtitle}
         </p>
 
+        {/* Screenshot hero. Sits above the stats so the eye gets the
+            product before the numbers — the numbers only mean something
+            once you know what the thing looks like. */}
+        {p?.image && (
+          <img
+            src={p.image}
+            alt={p.imageAlt ?? ""}
+            loading="lazy"
+            style={{
+              display: "block",
+              width: "100%",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.10)",
+              marginBottom: 20,
+              background: "rgba(255,255,255,0.03)",
+            }}
+          />
+        )}
+
         {p?.stats && p.stats.length > 0 && (
           <div
             style={{

@@ -38,6 +38,11 @@ export type Project = {
   color: string;
   /** Years active, shown as metadata. */
   period?: string;
+  /** Screenshot under /public/portfolio. Doubles as the card hero and
+   *  the texture on the landmark's floating billboard, so it wants a
+   *  landscape crop that survives being shrunk to ~200px wide. */
+  image?: string;
+  imageAlt?: string;
 };
 
 export type Role = {
@@ -136,6 +141,8 @@ export const PROJECTS: Project[] = [
     weight: "monument",
     color: "#F0A868",
     period: "2024 — 2025",
+    image: "/portfolio/kreatify.jpg",
+    imageAlt: "The Kreatify campaign workspace — deliverables, milestones and contracts for one influencer partnership.",
   },
   {
     id: "lucid",
@@ -149,6 +156,8 @@ export const PROJECTS: Project[] = [
     weight: "pylon",
     color: "#8FB3E0",
     period: "2025 — 2026",
+    image: "/portfolio/lucid.jpg",
+    imageAlt: "Lucid turning journal entries into a navigable graph of people, goals and events.",
   },
   {
     id: "empyrean",
@@ -159,6 +168,8 @@ export const PROJECTS: Project[] = [
     weight: "archive",
     color: "#B79BE0",
     period: "CMU",
+    image: "/portfolio/empyrean.jpg",
+    imageAlt: "Empyrean — the steampunk battle-royale arena.",
   },
   {
     id: "housemates",
@@ -182,6 +193,8 @@ export const PROJECTS: Project[] = [
     weight: "archive",
     color: "#84CC8B",
     period: "CMU",
+    image: "/portfolio/mapp.jpg",
+    imageAlt: "MAPP — browsing and sharing scenic places.",
   },
   {
     id: "cubewalker",
@@ -192,6 +205,8 @@ export const PROJECTS: Project[] = [
     weight: "archive",
     color: "#E8B45A",
     period: "CMU",
+    image: "/portfolio/cubewalker.jpg",
+    imageAlt: "Cubewalker — the endless runner mid-run.",
   },
   {
     id: "pong-league",
@@ -202,6 +217,8 @@ export const PROJECTS: Project[] = [
     weight: "archive",
     color: "#E88A8A",
     period: "CMU",
+    image: "/portfolio/pong-league.jpg",
+    imageAlt: "The Brotherhood Pong League standings table.",
   },
 ];
 

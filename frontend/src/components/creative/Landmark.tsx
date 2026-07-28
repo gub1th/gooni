@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useRef, useState } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
+import { useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import { getToonGradient } from "./toonGradient";
 import { useReducedMotion } from "./useReducedMotion";
@@ -103,6 +104,78 @@ export function Landmark({ data, isNear, isVisited, onSelect }: Props) {
       {data.kind === "kiosk" && <KioskBody lit={lit} stone={stone} />}
       {data.kind === "signpost" && <SignpostBody lit={lit} stone={stone} floatRef={floatRef} />}
       {data.kind === "archive" && <ArchiveBody lit={lit} stone={stone} />}
+
+      {/* Floating screenshot. Suspense-wrapped and fallback-null so a
+          missing or slow texture never blocks the landmark itself from
+          rendering — the geometry is the load-bearing part, the picture
+          is the payoff. */}
+      {data.project?.image && (
+        <Suspense fallback={null}>
+          <Billboard
+            src={data.project.image}
+            y={BILLBOARD_Y[data.kind] ?? 2.6}
+            color={data.color}
+            glow={glow}
+          />
+        </Suspense>
+      )}
+    </group>
+  );
+}
+
+// Clear of each silhouette's tallest element.
+const BILLBOARD_Y: Record<string, number> = {
+  monument: 3.5,
+  pylon: 2.5,
+  kiosk: 2.0,
+  signpost: 2.4,
+  archive: 1.7,
+};
+
+const BILLBOARD_W = 1.7;
+
+function Billboard({ src, y, color, glow }: { src: string; y: number; color: string; glow: number }) {
+  const ref = useRef<THREE.Group>(null);
+  const tex = useTexture(src);
+  const reduceMotion = useReducedMotion();
+
+  // Preserve the source aspect so a wide dashboard shot isn't squashed
+  // into the frame's proportions.
+  const h = useMemo(() => {
+    const img = tex.image as { width?: number; height?: number } | undefined;
+    const ratio = img?.width && img?.height ? img.height / img.width : 0.62;
+    return BILLBOARD_W * ratio;
+  }, [tex]);
+
+  // Face the camera on Y only. A full lookAt would let the panel pitch
+  // toward the camera's height and read as tumbling when you orbit.
+  useFrame((state) => {
+    const g = ref.current;
+    if (!g) return;
+    const cam = state.camera.position;
+    g.rotation.y = Math.atan2(cam.x - g.parent!.position.x, cam.z - g.parent!.position.z);
+    if (!reduceMotion) {
+      g.position.y = y + Math.sin(performance.now() / 1000 * 0.6) * 0.05;
+    }
+  });
+
+  return (
+    <group ref={ref} position={[0, y, 0]}>
+      {/* Backing plate doubles as the frame border. */}
+      <mesh position={[0, 0, -0.012]}>
+        <planeGeometry args={[BILLBOARD_W + 0.09, h + 0.09]} />
+        <meshBasicMaterial color={color} transparent opacity={0.55} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh>
+        <planeGeometry args={[BILLBOARD_W, h]} />
+        <meshBasicMaterial map={tex} toneMapped={false} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Tether down to the structure so the panel reads as mounted
+          rather than coincidentally hovering. */}
+      <mesh position={[0, -h / 2 - 0.3, -0.012]}>
+        <planeGeometry args={[0.02, 0.6]} />
+        <meshBasicMaterial color={color} transparent opacity={0.3 + glow * 0.4} side={THREE.DoubleSide} />
+      </mesh>
     </group>
   );
 }
