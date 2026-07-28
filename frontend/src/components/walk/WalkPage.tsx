@@ -46,6 +46,7 @@ export function WalkPage() {
   useEffect(() => {
     let raf = 0;
     let queued = false;
+    let settle: ReturnType<typeof setTimeout> | undefined;
 
     function sample() {
       queued = false;
@@ -75,6 +76,18 @@ export function WalkPage() {
 
       setScroll({ progress, station: nearest, velocity: vel.current });
       setActive((cur) => (cur === nearest ? cur : nearest));
+
+      // Hard-stop the walk once scrolling actually ends. The smoothing
+      // above is an IIR filter — it approaches zero but never arrives,
+      // so the walk-vs-idle threshold alone left the character striding
+      // on the spot forever after the page came to rest. Scroll events
+      // stop firing when motion stops, so a short timer is the only
+      // reliable "settled" signal.
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        vel.current = 0;
+        setScroll({ velocity: 0 });
+      }, 120);
     }
 
     function onScroll() {
@@ -88,6 +101,7 @@ export function WalkPage() {
     window.addEventListener("resize", onScroll);
     return () => {
       cancelAnimationFrame(raf);
+      clearTimeout(settle);
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
     };

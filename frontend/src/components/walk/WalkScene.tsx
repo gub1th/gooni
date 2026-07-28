@@ -7,6 +7,7 @@ import { Clouds } from "../creative/Clouds";
 import { Atmosphere } from "../creative/Atmosphere";
 import { GLTFGooni, type GooniHandle } from "../creative/GLTFGooni";
 import { getToonGradient } from "../creative/toonGradient";
+import { getIdentity } from "../creative/avatarIdentity";
 import { STATIONS } from "../../content/walk";
 import { getScroll } from "./scrollBus";
 
@@ -154,26 +155,30 @@ function Clutter() {
   const items = useMemo(() => {
     const out: {
       x: number; y: number; z: number; s: number; rot: number;
-      kind: "rock" | "shroom" | "shard"; color: string;
+      kind: "rock" | "shroom"; color: string;
     }[] = [];
-    // Walk the road and roll for props. Sampling by density means the
-    // opening is crowded and the last stretch is nearly bare without
-    // any hand placement.
-    for (let z = 12; z > -LENGTH; z -= 1.5) {
+    // Walk the road and roll for props. Sampled sparsely and pushed
+    // well clear of the shoulder — the first pass scattered something
+    // every 1.5 units right against the road and read as visual noise
+    // rather than as density. Clutter has to be legible as "there is a
+    // lot here" at a glance; past that it's just mess.
+    for (let z = 12; z > -LENGTH; z -= 4) {
       const d = densityAt(z);
       for (let side = -1; side <= 1; side += 2) {
-        const roll = pseudo(z * 3.7 + side * 91);
-        if (roll > d * 0.85) continue;
-        const off = HALF_WIDTH * TILE + 1.2 + pseudo(z * 5.1 + side) * 7;
-        const k = pseudo(z * 11.3 + side * 17);
+        if (pseudo(z * 3.7 + side * 91) > d * 0.4) continue;
+        // Start 3.5 units off the shoulder so nothing crowds the walker.
+        const off = HALF_WIDTH * TILE + 3.5 + pseudo(z * 5.1 + side) * 6;
+        const isRock = pseudo(z * 11.3 + side * 17) < 0.62;
         out.push({
           x: side * off,
           y: 0,
-          z: z + pseudo(z * 2.2) * 1.2,
-          s: 0.4 + pseudo(z * 7.7 + side) * 0.7,
+          z: z + pseudo(z * 2.2) * 2,
+          s: 0.45 + pseudo(z * 7.7 + side) * 0.6,
           rot: pseudo(z * 13.1) * Math.PI * 2,
-          kind: k < 0.45 ? "rock" : k < 0.8 ? "shroom" : "shard",
-          color: k < 0.45 ? "#7C7365" : k < 0.8 ? "#D8D2C4" : "#9A8F7C",
+          // Two prop types, not three. The cone "shards" read as debris
+          // and made the roadside look like a landfill.
+          kind: isRock ? "rock" : "shroom",
+          color: isRock ? "#7C7365" : "#D8D2C4",
         });
       }
     }
@@ -201,12 +206,6 @@ function Clutter() {
                 <meshToonMaterial color={it.color} gradientMap={toon} />
               </mesh>
             </group>
-          )}
-          {it.kind === "shard" && (
-            <mesh position={[0, 0.45, 0]} rotation={[0.2, 0, 0.3]} castShadow>
-              <coneGeometry args={[0.22, 0.9, 4]} />
-              <meshToonMaterial color={it.color} gradientMap={toon} />
-            </mesh>
           )}
         </group>
       ))}
@@ -415,9 +414,14 @@ function Walker() {
     g.rotation.y += (facing - g.rotation.y) * Math.min(1, dt * 6);
   });
 
+  // The colour chosen in the plaza. Reading it here is what makes the
+  // drop feel like travel rather than a scene change — you fell in, so
+  // it should still be you on the other side.
+  const me = useMemo(() => getIdentity(), []);
+
   return (
     <group ref={group} position={[1.6, 0.35, 0]}>
-      <GLTFGooni ref={gooni} bodyColor="#4ADE80" accentColor="#3AAD6E" />
+      <GLTFGooni ref={gooni} bodyColor={me.bodyColor} accentColor={me.accentColor} />
     </group>
   );
 }

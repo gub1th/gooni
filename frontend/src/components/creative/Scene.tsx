@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { AdaptiveDpr, AdaptiveEvents, OrbitControls, useProgress } from "@react-three/drei";
 import * as THREE from "three";
+import { useNavigate } from "@tanstack/react-router";
 import { Volume2, VolumeX, Activity } from "lucide-react";
 import { Atmosphere } from "./Atmosphere";
 import { SkyDome } from "./SkyDome";
@@ -15,8 +16,8 @@ import { LandingCamera } from "./LandingCamera";
 import { IntroCamera, ORBIT_BASELINE } from "./IntroCamera";
 import { NoteReaderOverlay } from "./NoteReaderOverlay";
 import { NotePeekHost } from "./NotePeekHost";
-import { Landmarks } from "./Landmarks";
-import { LandmarkPeekHost } from "./LandmarkPeekHost";
+import { Portal } from "./Portal";
+import { setIdentity } from "./avatarIdentity";
 import { setPeekState } from "./peekBus";
 import { AmbientAudio } from "./AmbientAudio";
 import { PostFX } from "./PostFX";
@@ -264,6 +265,9 @@ const DEFAULT_PLAYER_NAME = "too lazy";
 export function Scene() {
   const mobile = useIsMobile();
   const debug = useDebugFlag();
+  const navigate = useNavigate();
+  // Drop-through-the-hole transition into the walk.
+  const [dropping, setDropping] = useState(false);
   const [entered, setEntered] = useState(false);
   const [swoopLanded, setSwoopLanded] = useState(false);
   const [introDone, setIntroDone] = useState(false);
@@ -322,6 +326,9 @@ export function Scene() {
   function handleEnter(name: string, color: string) {
     setPlayerName(name);
     setPlayerColor(color);
+    // Carried across the drop so the walk is walked by the same
+    // character, not a stranger in the default green.
+    setIdentity(name, color);
     setEntered(true);
     setTimeout(() => setOverlayMounted(false), 720);
   }
@@ -386,10 +393,17 @@ export function Scene() {
           initialDelayMs={600}
         />
         {entered && introDone && <NoteCoins onSelect={handleSelect} />}
-        {/* Portfolio landmarks. Mounted alongside the note-coins and
-            gated the same way, but sourced from content rather than the
-            network — see Landmarks / landmarkPlacement. */}
-        {entered && introDone && <Landmarks />}
+        {/* The way into the walk. The landmark system that used to sit
+            here is superseded by it — the plaza is the front door now,
+            and the portfolio content lives on the other side of this
+            hole rather than being duplicated around the island. */}
+        {entered && introDone && (
+          <Portal armed={!dropping} onEnter={() => setDropping(true)} />
+        )}
+        <DropCamera
+          active={dropping}
+          onDone={() => navigate({ to: "/walk" })}
+        />
 
         {/* Landing bird's-eye — runs while overlay is up; hands off to
             IntroCamera on click. */}
@@ -452,8 +466,22 @@ export function Scene() {
       />
 
       {entered && introDone && !selectedNote && <NotePeekHost />}
-      {entered && introDone && !selectedNote && <LandmarkPeekHost />}
 
+      {/* Drop veil. The camera dives into the hole while this fades to
+          the shaft's black, so the route change lands under cover
+          instead of cutting mid-scene. */}
+      <div
+        aria-hidden
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "#05070A",
+          opacity: dropping ? 1 : 0,
+          transition: "opacity 900ms cubic-bezier(.6,0,.9,.4) 320ms",
+          pointerEvents: "none",
+          zIndex: 40,
+        }}
+      />
       {entered && <BrandingMark />}
       {entered && <ShortVersionLink visible={introDone && !selectedNote} />}
     </>
@@ -1003,4 +1031,48 @@ function NavHint() {
       arrows to hop · drag to orbit · land on a coin to peek, click to read
     </div>
   );
+}
+
+
+// Camera dive through the hole. Runs for DROP_MS, pitching down into
+// the shaft and accelerating, then hands off to the walk. The veil
+// above covers the last third, so the route change is never visible.
+const DROP_MS = 1250;
+
+function DropCamera({ active, onDone }: { active: boolean; onDone: () => void }) {
+  const start = useRef<number | null>(null);
+  const from = useRef(new THREE.Vector3());
+  const fired = useRef(false);
+
+  useFrame((state) => {
+    if (!active) {
+      start.current = null;
+      fired.current = false;
+      return;
+    }
+    if (start.current === null) {
+      start.current = performance.now();
+      from.current.copy(state.camera.position);
+      // Hand control away from OrbitControls/CameraDirector for the
+      // duration, or they fight the dive frame by frame.
+      setControlsEnabled(false);
+    }
+    const t = Math.min(1, (performance.now() - start.current) / DROP_MS);
+    // Ease-in: the fall should accelerate, not glide.
+    const e = t * t;
+    const hx = 0;
+    const hz = -4; // PORTAL_TILE (0,-2) in world units
+    state.camera.position.set(
+      from.current.x + (hx - from.current.x) * e,
+      from.current.y + (-14 - from.current.y) * e,
+      from.current.z + (hz + 2.4 - from.current.z) * e,
+    );
+    state.camera.lookAt(hx, -22 * e, hz);
+    if (t >= 1 && !fired.current) {
+      fired.current = true;
+      onDone();
+    }
+  });
+
+  return null;
 }
