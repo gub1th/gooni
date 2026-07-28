@@ -455,15 +455,24 @@ export function Scene() {
       {entered && introDone && !selectedNote && <LandmarkPeekHost />}
 
       {entered && <BrandingMark />}
-      {entered && <NotesLink visible={introDone && !selectedNote} />}
+      {entered && <ShortVersionLink visible={introDone && !selectedNote} />}
     </>
   );
 }
 
-function NotesLink({ visible }: { visible: boolean }) {
+// The permanent way out. A reviewer with two minutes should never have
+// to walk the island to find out what he's done — this pill is pinned
+// top-left the whole time and lands on the flat page.
+//
+// Pointed at /public/cv rather than /public: the notes index is a
+// reading surface, not a summary, so it answered the wrong question for
+// someone scanning. Notes stay reachable from the flat page's footer.
+// One escape hatch, not two — a second pill would be clutter on a
+// surface whose whole argument is subtraction.
+function ShortVersionLink({ visible }: { visible: boolean }) {
   return (
     <a
-      href="/public"
+      href="/public/cv"
       style={{
         position: "fixed",
         top: 22,
@@ -529,7 +538,7 @@ function NotesLink({ visible }: { visible: boolean }) {
       >
         <NotebookIcon />
       </span>
-      <span>read my notes</span>
+      <span>the short version</span>
       <span style={{ fontSize: 14, lineHeight: 1, marginLeft: 1, color: "#555" }}>→</span>
     </a>
   );
