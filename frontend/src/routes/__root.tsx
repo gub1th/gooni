@@ -101,6 +101,7 @@ function isChromelessPath(pathname: string): boolean {
     // link on the public page dead-ended at a password prompt for
     // every visitor. It reads only public notes + static content.
     pathname === "/creative" ||
+    pathname === "/walk" ||
     pathname === "/focus"
   );
 }

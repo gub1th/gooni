@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WalkRouteImport } from './routes/walk'
 import { Route as PublicRouteImport } from './routes/public'
 import { Route as MemoriesRouteImport } from './routes/memories'
 import { Route as HomeRouteImport } from './routes/home'
@@ -20,6 +21,11 @@ import { Route as PublicMcpRouteImport } from './routes/public.mcp'
 import { Route as PublicCvRouteImport } from './routes/public.cv'
 import { Route as PublicNoteIdRouteImport } from './routes/public.$noteId'
 
+const WalkRoute = WalkRouteImport.update({
+  id: '/walk',
+  path: '/walk',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PublicRoute = PublicRouteImport.update({
   id: '/public',
   path: '/public',
@@ -78,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/home': typeof HomeRoute
   '/memories': typeof MemoriesRoute
   '/public': typeof PublicRouteWithChildren
+  '/walk': typeof WalkRoute
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/cv': typeof PublicCvRoute
   '/public/mcp': typeof PublicMcpRoute
@@ -89,6 +96,7 @@ export interface FileRoutesByTo {
   '/focus': typeof FocusRoute
   '/home': typeof HomeRoute
   '/memories': typeof MemoriesRoute
+  '/walk': typeof WalkRoute
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/cv': typeof PublicCvRoute
   '/public/mcp': typeof PublicMcpRoute
@@ -102,6 +110,7 @@ export interface FileRoutesById {
   '/home': typeof HomeRoute
   '/memories': typeof MemoriesRoute
   '/public': typeof PublicRouteWithChildren
+  '/walk': typeof WalkRoute
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/cv': typeof PublicCvRoute
   '/public/mcp': typeof PublicMcpRoute
@@ -116,6 +125,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/memories'
     | '/public'
+    | '/walk'
     | '/public/$noteId'
     | '/public/cv'
     | '/public/mcp'
@@ -127,6 +137,7 @@ export interface FileRouteTypes {
     | '/focus'
     | '/home'
     | '/memories'
+    | '/walk'
     | '/public/$noteId'
     | '/public/cv'
     | '/public/mcp'
@@ -139,6 +150,7 @@ export interface FileRouteTypes {
     | '/home'
     | '/memories'
     | '/public'
+    | '/walk'
     | '/public/$noteId'
     | '/public/cv'
     | '/public/mcp'
@@ -152,10 +164,18 @@ export interface RootRouteChildren {
   HomeRoute: typeof HomeRoute
   MemoriesRoute: typeof MemoriesRoute
   PublicRoute: typeof PublicRouteWithChildren
+  WalkRoute: typeof WalkRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/walk': {
+      id: '/walk'
+      path: '/walk'
+      fullPath: '/walk'
+      preLoaderRoute: typeof WalkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/public': {
       id: '/public'
       path: '/public'
@@ -253,6 +273,7 @@ const rootRouteChildren: RootRouteChildren = {
   HomeRoute: HomeRoute,
   MemoriesRoute: MemoriesRoute,
   PublicRoute: PublicRouteWithChildren,
+  WalkRoute: WalkRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
