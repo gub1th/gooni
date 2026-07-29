@@ -428,19 +428,29 @@ function Walker() {
     // Ease toward the scroll target rather than snapping, so the
     // browser's snap animation reads as a walk rather than a teleport.
     const targetZ = zAt(progress);
-    g.position.z += (targetZ - g.position.z) * Math.min(1, dt * 3.2);
+    const prevZ = g.position.z;
+    g.position.z += (targetZ - prevZ) * Math.min(1, dt * 3.2);
+    // How far the body actually moved THIS frame. Driving the walk clip
+    // off the character's own displacement (not the smoothed scroll
+    // velocity, which lingers as the body eases into place) is what
+    // stops the "striding/hovering in place" — the legs move exactly
+    // while the body moves, and stop the instant it arrives.
+    const stepped = Math.abs(g.position.z - prevZ);
     g.position.y = 0.35;
     // Sit right of centre: the copy card occupies the left third, and a
     // walker hidden behind it defeats the point of having one.
     g.position.x = 1.6;
 
-    const wantMoving = Math.abs(velocity) > 0.2;
+    const wantMoving = stepped > 0.008 || Math.abs(velocity) > 0.25;
     if (wantMoving !== moving.current) {
       moving.current = wantMoving;
       gooni.current?.setClip(wantMoving ? "Walk" : "Idle", { loop: true, fadeMs: 180 });
     }
-    const facing = velocity < -0.2 ? Math.PI : 0;
-    g.rotation.y += (facing - g.rotation.y) * Math.min(1, dt * 6);
+    // Always face forward down the path. The old 180° flip on up-scroll
+    // snap-turned the character to moonwalk backward, which read as a
+    // teleport; the walk is one-directional ("the only direction is
+    // forward"), so the body stays pointed ahead whichever way you scroll.
+    g.rotation.y += (0 - g.rotation.y) * Math.min(1, dt * 6);
   });
 
   // The colour chosen in the plaza. Reading it here is what makes the
