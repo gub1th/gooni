@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.217.1 — 2026-07-29 (patch)
+
+- fix(dash): cap + centre the board so a sparse day reads as calm (#447)
+
 ## 0.217.0 — 2026-07-29 (minor)
 
 - feat(focus): ambient dash rebuild — kill the log, state machine, promise-bound focus (#446)
