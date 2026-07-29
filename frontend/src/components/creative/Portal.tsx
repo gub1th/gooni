@@ -58,28 +58,28 @@ export function Portal({ onEnter, armed, near = false }: Props) {
     });
   }, [onEnter]);
 
-  const rings = useMemo(() => [0, 0.34, 0.67], []);
-
   useFrame(() => {
     if (reduce) return;
     const now = performance.now();
     const g = ringsRef.current;
     if (g) {
-      g.children.forEach((child, i) => {
-        const m = child as THREE.Mesh;
-        const t = (now / 2400 + rings[i]) % 1;
-        m.position.y = -t * (DEPTH - 1.5);
+      // ONE slow ring drifting down and fading — a single calm pulse that
+      // says "down" without the old three-ring strobe. Long period + low
+      // opacity so it reads as a breath, not a flicker.
+      const m = g.children[0] as THREE.Mesh | undefined;
+      if (m) {
+        const t = (now / 4200) % 1;
+        m.position.y = -0.2 - t * (DEPTH - 2.2);
         const mat = m.material as THREE.MeshBasicMaterial;
-        mat.opacity = Math.sin(t * Math.PI) * 0.42;
-        const s = 1 - t * 0.3;
+        mat.opacity = Math.sin(t * Math.PI) * 0.2;
+        const s = 1 - t * 0.22;
         m.scale.set(s, 1, s);
-      });
+      }
     }
     if (boardRef.current) {
-      // Gentle sway on the hanging board — the sign is the thing you're
-      // meant to notice, and stillness is invisible in a scene that
-      // already has clouds moving.
-      boardRef.current.rotation.z = Math.sin(now / 1100) * 0.045;
+      // Barely-there sway on the board — enough that it isn't dead still,
+      // slow enough that it never competes with the hole for attention.
+      boardRef.current.rotation.z = Math.sin(now / 1500) * 0.03;
     }
   });
 
@@ -102,7 +102,7 @@ export function Portal({ onEnter, armed, near = false }: Props) {
       {([[0, 1], [0, -1], [1, 0], [-1, 0]] as const).map(([ox, oz], i) => (
         <mesh
           key={i}
-          position={[(ox * HOLE) / 2, -0.12, (oz * HOLE) / 2]}
+          position={[(ox * HOLE) / 2, -0.22, (oz * HOLE) / 2]}
           rotation={[0, ox !== 0 ? Math.PI / 2 : 0, 0]}
         >
           <planeGeometry args={[HOLE, 0.44]} />
@@ -115,12 +115,10 @@ export function Portal({ onEnter, armed, near = false }: Props) {
       ))}
 
       <group ref={ringsRef}>
-        {rings.map((_, i) => (
-          <mesh key={i} rotation={[-Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[HOLE * 0.34, HOLE * 0.44, 4]} />
-            <meshBasicMaterial color="#8FE9BE" transparent opacity={0.4} depthWrite={false} />
-          </mesh>
-        ))}
+        <mesh rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[HOLE * 0.34, HOLE * 0.44, 4]} />
+          <meshBasicMaterial color="#8FE9BE" transparent opacity={0.2} depthWrite={false} />
+        </mesh>
       </group>
 
       <Signpost boardRef={boardRef} lit={hot || near} />
@@ -188,18 +186,21 @@ function Signpost({
   // spawn so you read it head-on as you walk up.
   return (
     <group position={[1.75, 0, 1.5]} rotation={[0, -0.42, 0]}>
-      {/* Timber post — chunky and square-cut, not a thin dowel. */}
-      <mesh position={[0, 1.05, 0]} castShadow>
-        <boxGeometry args={[0.22, 2.1, 0.22]} />
-        <meshToonMaterial color="#8A6A44" gradientMap={toon} />
-      </mesh>
       {/* Base stones, so the post is planted rather than stuck in. */}
       <mesh position={[0, 0.12, 0]} castShadow>
-        <boxGeometry args={[0.52, 0.24, 0.52]} />
+        <boxGeometry args={[0.56, 0.24, 0.56]} />
         <meshToonMaterial color="#7C7365" gradientMap={toon} />
       </mesh>
+      {/* Timber post — chunky and square-cut, not a thin dowel. It stops
+          just under the board's backing so the post NEVER crosses the
+          lettering (which sits on the face plane above 2.48). This is the
+          "pole covering the sign" fix — a lollipop silhouette. */}
+      <mesh position={[0, 1.32, 0]} castShadow>
+        <boxGeometry args={[0.24, 2.24, 0.24]} />
+        <meshToonMaterial color="#8A6A44" gradientMap={toon} />
+      </mesh>
 
-      <group ref={boardRef} position={[0, 2.28, 0]}>
+      <group ref={boardRef} position={[0, 3.05, 0]}>
         {/* Dark backing slightly larger than the face — reads as the
             board's edge and gives the lettering a hard outline. */}
         <mesh position={[0, 0, -0.05]} castShadow>
