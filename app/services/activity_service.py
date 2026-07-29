@@ -24,11 +24,48 @@ can't take down the whole feed (same posture as recent_activity.py).
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from ..common import stale_day_label as _stale_day_label
+
+
+# Shortcuts device pings store as a raw "{subject} {event}" trackable name
+# ("instagram open", "office arrive") with a meaningless per-ping +1 count.
+# Rephrase the common verbs into a sentence and drop the count. MIRROR of
+# frontend FocusStream.formatEventLabel — keep the two in sync. Unknown shapes
+# pass through untouched (the device vocab is open-ended server-side).
+# Match BASE and past forms: iOS Shortcuts sends the imperative ("instagram
+# open", "office arrive"), not past tense. `opened?`/`locked?` only reach
+# "opene"/"locke"+d, so the bare verbs slipped through untouched — hence
+# `(?:ed)?` on the consonant-final stems.
+_EVENT_VERB = re.compile(
+    r"^(.*?)\s+(arrived?|left|leave|open(?:ed)?|closed?|unlock(?:ed)?|lock(?:ed)?|charging|plugged)$",
+    re.IGNORECASE,
+)
+
+
+def _event_phrase(name: str) -> str:
+    s = (name or "").strip()
+    m = _EVENT_VERB.match(s)
+    if not m:
+        return s
+    subject, verb = m.group(1).strip(), m.group(2).lower()
+    if verb.startswith("arriv"):
+        return f"arrived at {subject}"
+    if verb in ("left", "leave"):
+        return f"left {subject}"
+    if verb.startswith("open"):
+        return f"opened {subject}"
+    if verb.startswith("close"):
+        return f"closed {subject}"
+    if verb.startswith("unlock"):
+        return f"unlocked {subject}"
+    if verb.startswith("lock"):
+        return f"locked {subject}"
+    return s
 
 
 def _utc(dt: datetime | None) -> datetime | None:
@@ -55,12 +92,17 @@ def parse_before(raw: str | None) -> datetime | None:
 
 
 def _num(value: float | None) -> str:
-    """Trim a float for display: 70.0 → '70', 70.2 → '70.2'."""
+    """Trim a float for display: 70.0 → '70', 70.234 → '70.2'.
+
+    Round to ONE decimal — `:g` kept 6 sig-figs, so a raw Whoop reading leaked
+    as "hrv 92.2238 ms" / "strain 20.4936". The rail is a glance, not a lab.
+    """
     if value is None:
         return ""
-    if float(value).is_integer():
-        return str(int(value))
-    return f"{value:g}"
+    r = round(float(value), 1)
+    if r.is_integer():
+        return str(int(r))
+    return f"{r:.1f}"
 
 
 def _messages(db: Session, before_aware, limit: int) -> list[dict]:
@@ -222,7 +264,10 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
             if src in _FEED_SOURCES and label.lower().startswith(f"{src} "):
                 label = label[len(src) + 1:]
             frag = f"{label} {_num(vnum)}{(' ' + unit) if unit else ''}".strip()
-            single_text = f"{name} {_num(vnum)}{(' ' + unit) if unit else ''}".strip()
+            if src == "shortcuts":
+                single_text = _event_phrase(name)  # "instagram open 1" → "opened instagram"
+            else:
+                single_text = f"{name} {_num(vnum)}{(' ' + unit) if unit else ''}".strip()
         else:  # json master — its raw payload is noise; drop from the collapsed line
             frag = None
             single_text = f"{name} updated"
@@ -248,13 +293,19 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
             })
 
     out = list(singles)
+    # Identical polls collapse: a Whoop/LeetCode re-sync that changed NOTHING
+    # (same numbers) wrote a fresh mirror-set every poll, so the rail showed the
+    # same "leetcode · streak 10, solved 312" twice. Keep only the most-recent
+    # occurrence per (source, rendered text) — the stale-day label is part of the
+    # text, so a genuinely different reading (or a day-tag flip) still stands.
+    feed_rows: dict[tuple, dict] = {}
     for (src, sec_iso), g in groups.items():
         # consistency-over-availability: name the subject-day when it isn't today
         # ("whoop (yesterday) · …") so a stale feed never reads as a fresh reading.
         lbl = _stale_day_label(today, g.get("date"))
         head = f"{src} ({lbl})" if lbl else src
         text = f"{head} · " + ", ".join(g["frags"]) if g["frags"] else f"{head} synced"
-        out.append({
+        row = {
             "key": f"feed-{src}-{sec_iso}",
             "kind": "trackable",
             "at": _utc(g["at"]),
@@ -262,7 +313,11 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
             "name": src,
             "source": src,
             "day_label": lbl,  # '' when current — consumed by recent_activity too
-        })
+        }
+        prev = feed_rows.get((src, text))
+        if prev is None or row["at"] > prev["at"]:
+            feed_rows[(src, text)] = row
+    out.extend(feed_rows.values())
     return out
 
 

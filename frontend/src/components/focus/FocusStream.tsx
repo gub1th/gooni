@@ -73,7 +73,10 @@ function dayKey(at: string): string {
 // Unknown shapes pass through untouched (the vocab is open-ended server-side).
 function formatEventLabel(raw: string): string {
   const s = (raw || "").trim();
-  const m = s.match(/^(.*?)\s+(arrived?|left|leave|opened?|closed?|unlocked?|locked?|charging|plugged)$/i);
+  // BASE + past forms — Shortcuts sends the imperative ("home open"), and
+  // `opened?`/`locked?` only reach "opene"/"locke"+d, so the bare verbs slipped
+  // through. `(?:ed)?` on the consonant-final stems. Mirror of activity_service._EVENT_VERB.
+  const m = s.match(/^(.*?)\s+(arrived?|left|leave|open(?:ed)?|closed?|unlock(?:ed)?|lock(?:ed)?|charging|plugged)$/i);
   if (!m) return s;
   const subject = m[1].trim();
   const verb = m[2].toLowerCase();
