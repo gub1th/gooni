@@ -50,6 +50,19 @@ const REFRESH_MS = 25_000;
 const STREAK_TRAIL = 5; // trailing days shown per streak column
 const STREAK_PER_PAGE = 4; // columns visible before the ‹ › pager
 
+// The board is capped and centred rather than filling the monitor.
+//
+// The failure it fixes is a sparse one, not a spacing one: this layout was
+// tuned for a full board, and the normal state is one overdue promise and three
+// longer-term ones. Stretched edge-to-edge on a wide monitor that reads as a
+// page that failed to load — a 1500px column holding a 185px sentence, with the
+// whole right third structurally unreachable. Symmetric margin around a slab
+// reads as deliberate; the same emptiness pushed into the corners doesn't.
+//
+// `92vw` keeps it honest on a laptop, where capping would just add margin to a
+// board that already fits.
+const BOARD_MAX = "min(1440px, 92vw)";
+
 // Human labels for the backend's bucket keys.
 const BUCKET_LABEL: Record<ShortBucket, string> = {
   overdue: "overdue",
@@ -188,60 +201,89 @@ export function FocusDashboard() {
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
+        alignItems: "center",
       }}
     >
-      <NoteChips pal={pal} />
-
+      {/* The capped board — chips ride inside it so they share the columns'
+          left edge. */}
       <div
         style={{
+          width: "100%",
+          maxWidth: BOARD_MAX,
           flex: 1,
           minHeight: 0,
-          display: "grid",
-          // Short-term earns the room: it's the only column you act on.
-          gridTemplateColumns: "minmax(0, 1.45fr) minmax(0, 1fr)",
-          gap: 34,
-          padding: "10px 34px 30px",
-          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          // Float the WHOLE board — chips included. Centring only the grid
+          // strands the chips against the top bezel with a dead gap beneath
+          // them, which looks more broken than the corner-jam it replaced.
+          //
+          // `safe` is load-bearing, not decoration. Plain `center` on a
+          // scrolling box pushes the first rows ABOVE the scroll origin once
+          // content outgrows the viewport, where no scrollbar can reach them.
+          // `safe` falls back to `start` exactly then — so a full board
+          // top-anchors and scrolls normally, and only a sparse one centres.
+          justifyContent: "safe center",
         }}
       >
-        <ShortTermPanel
-          buckets={shortTerm}
-          pal={pal}
-          onMutate={reloadDashboard}
-          onFocus={setFocusTarget}
-        />
+        <NoteChips pal={pal} />
 
         <div
           style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 26,
-            overflowY: "auto",
+            // Sized by content so the board above can float it, but free to
+            // shrink (and scroll) the moment content outgrows the screen.
+            flex: "0 1 auto",
             minHeight: 0,
+            display: "grid",
+            // Equal halves. The old 1.45fr gave the MOST width to short-term on
+            // the grounds that it's the column you act on — true, but a promise
+            // is one line of text. It earns vertical room, not horizontal, and
+            // the narrow half was carrying five stacked panels against the wide
+            // half's one list. Equal also survives the busy case, which a split
+            // tuned for either extreme does not.
+            gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+            // Columns share a top edge rather than stretching to match the
+            // taller one — the two section labels must sit on the same line.
+            alignItems: "start",
+            gap: 34,
+            padding: "10px 34px 30px",
+            // The board scrolls as one. Two independent scrollers on a glance
+            // surface means the wheel does different things depending on which
+            // half the pointer happens to be over.
+            overflowY: "auto",
           }}
         >
-          <Panel label="trackables" pal={pal} onExpand={() => setMatrixOpen(true)}>
-            <StreakStrip cols={streaks} pal={pal} />
-          </Panel>
+          <ShortTermPanel
+            buckets={shortTerm}
+            pal={pal}
+            onMutate={reloadDashboard}
+            onFocus={setFocusTarget}
+          />
 
-          <LongTermPanel promises={longTerm} pal={pal} onMutate={reloadDashboard} />
-
-          {sortedEvents.length > 0 && (
-            <Panel label="schedule" pal={pal} onExpand={() => openWidget("calendar", "agenda")}>
-              {sortedEvents.map((e) => (
-                <Row
-                  key={`e${e.id}`}
-                  title={e.summary || "(untitled)"}
-                  meta={e.all_day ? fmtWeekday(e.start) : fmtTime(e.start)}
-                  pal={pal}
-                />
-              ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
+            <Panel label="trackables" pal={pal} onExpand={() => setMatrixOpen(true)}>
+              <StreakStrip cols={streaks} pal={pal} />
             </Panel>
-          )}
 
-          <RollupPanel rollups={rollups} pal={pal} />
+            <LongTermPanel promises={longTerm} pal={pal} onMutate={reloadDashboard} />
 
-          <FeedLine whoop={whoop} lc={lc} pal={pal} />
+            {sortedEvents.length > 0 && (
+              <Panel label="schedule" pal={pal} onExpand={() => openWidget("calendar", "agenda")}>
+                {sortedEvents.map((e) => (
+                  <Row
+                    key={`e${e.id}`}
+                    title={e.summary || "(untitled)"}
+                    meta={e.all_day ? fmtWeekday(e.start) : fmtTime(e.start)}
+                    pal={pal}
+                  />
+                ))}
+              </Panel>
+            )}
+
+            <RollupPanel rollups={rollups} pal={pal} />
+
+            <FeedLine whoop={whoop} lc={lc} pal={pal} />
+          </div>
         </div>
       </div>
 
@@ -557,7 +599,8 @@ function ShortTermPanel({
   const total = buckets ? Object.values(buckets).reduce((n, rows) => n + rows.length, 0) : 0;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+    // Sizes to its content — the board above owns the scrolling now.
+    <div style={{ display: "flex", flexDirection: "column" }}>
       <SectionLabel pal={pal} onAdd={() => setAdding((a) => !a)} addActive={adding}>
         short term
       </SectionLabel>
