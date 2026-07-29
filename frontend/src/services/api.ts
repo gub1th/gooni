@@ -1615,8 +1615,14 @@ export interface FocusReminder {
   content: string;
   // Person name, or null = owed to self (drop the "owed to" prefix).
   owed_to: string | null;
-  // ISO datetime, or null (undated promises surface by age instead).
+  // ISO datetime. Every row created since the ambient-dash rebuild has one
+  // (the backend defaults an omitted due to today's local EOD); null only on
+  // legacy rows.
   due_at: string | null;
+  // True when the backend picked this date because none was given. A defaulted
+  // due never auto-breaks and rolls forward instead of reading overdue — the UI
+  // uses it to decide whether a past date is a real miss or just placement.
+  due_is_default: boolean;
   done: boolean;
   // Said-vs-done lifecycle. 'broken' renders in warn colour + "lasted Nd".
   state: "active" | "kept" | "broken";
@@ -1635,12 +1641,29 @@ export interface FocusLogRow {
   ended_at: string | null;
 }
 
+// Short-term buckets, most urgent first. Mirrors focus_service.SHORT_BUCKETS —
+// the backend owns the placement, the panel just renders in this order.
+export const SHORT_BUCKETS = ["overdue", "today", "tomorrow", "this_week"] as const;
+export type ShortBucket = (typeof SHORT_BUCKETS)[number];
+
+// One line of aggregated device telemetry: `instagram open · 12`. This is what
+// replaced the raw event stream — the count IS the analysis.
+export interface FocusRollup {
+  label: string;
+  count: number;
+}
+
 export interface FocusDashboard {
   circles: FocusCircle[];
   // Ranked below the top-5 slots — feeds the deferred displacement notice.
   overflow_topics: FocusCircle[];
   notch: { reminders: FocusReminder[]; promises: FocusReminder[] };
   log: FocusLogRow[];
+  // ── the rebuilt dashboard reads these three ────────────────────────────────
+  // `notch` / `circles` / `log` remain for older consumers.
+  short_term: Record<ShortBucket, FocusReminder[]>;
+  long_term: FocusReminder[];
+  rollups: FocusRollup[];
   generated_at: string;
 }
 
@@ -1680,6 +1703,9 @@ export async function updateFocusReminder(
     clear_due?: boolean;
     owed_to?: string;
     clear_owed?: boolean;
+    // Lifecycle. The backend dispatches PATCH by body shape: any edit key wins,
+    // otherwise `state` drives the said-vs-done spine. Never send both.
+    state?: "active" | "kept" | "broken";
   },
 ): Promise<FocusReminder> {
   const res = await apiFetch(`${BASE}/focus/reminders/${id}`, {
@@ -1772,12 +1798,15 @@ export async function fetchFocusCam(): Promise<FocusCamBlob> {
 }
 
 export async function setFocusCamControl(
-  control: FocusCamControl
-): Promise<{ control: FocusCamControl }> {
+  control: FocusCamControl,
+  // The short-term promise this session is FOR. Lets the post-session report
+  // name what you worked on and offer to mark it kept. Cleared on stop.
+  targetReminderId?: number | null,
+): Promise<{ control: FocusCamControl; target_reminder_id: number | null }> {
   const res = await apiFetch(`${BASE}/focus/cam/control`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ control }),
+    body: JSON.stringify({ control, target_reminder_id: targetReminderId ?? null }),
   });
   if (!res.ok) throw new Error("Failed to set focus-cam control");
   return res.json();
@@ -1786,6 +1815,37 @@ export async function setFocusCamControl(
 export async function fetchFocusCamToday(): Promise<FocusCamToday> {
   const res = await apiFetch(`${BASE}/focus/cam/today`);
   if (!res.ok) throw new Error("Failed to fetch focus-cam today");
+  return res.json();
+}
+
+// ── Ambient display state (the persistent kiosk's reconcile target) ──────────
+// The /focus kiosk polls this and reconciles. Writers are remote and dumb: an
+// iOS Shortcuts automation on leaving/arriving home, and the desk button.
+
+export type DisplayState = "deep_rest" | "rest" | "awake" | "dash";
+
+export interface DisplayBlob {
+  desired: DisplayState;
+  at: string | null;
+  source: string | null;
+}
+
+export async function fetchDisplay(): Promise<DisplayBlob> {
+  const res = await apiFetch(`${BASE}/display`);
+  if (!res.ok) throw new Error("Failed to fetch display state");
+  return res.json();
+}
+
+export async function setDisplayState(
+  desired: DisplayState,
+  source?: string,
+): Promise<DisplayBlob> {
+  const res = await apiFetch(`${BASE}/display/control`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ desired, source: source ?? "ui" }),
+  });
+  if (!res.ok) throw new Error("Failed to set display state");
   return res.json();
 }
 

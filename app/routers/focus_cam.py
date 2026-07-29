@@ -58,13 +58,21 @@ def post_focus_cam_state(body: dict, db: Session = Depends(get_db)):
 @router.post("/focus/cam/control")
 def post_focus_cam_control(body: dict, db: Session = Depends(get_db)):
     """The UI Start/Stop button. Sets desired control; the sidecar polls GET
-    /focus/cam and reconciles. (The sidecar owns session_id — not generated here.)"""
+    /focus/cam and reconciles. (The sidecar owns session_id — not generated here.)
+
+    Optional `target_reminder_id` binds the run to one short-term promise, so the
+    post-session report can name it and offer to mark it kept."""
     control = (body.get("control") or "").strip()
+    raw_target = body.get("target_reminder_id")
     try:
-        blob = focus_cam_service.set_control(db, control)
+        target = int(raw_target) if raw_target is not None else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="target_reminder_id must be an int")
+    try:
+        blob = focus_cam_service.set_control(db, control, target_reminder_id=target)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"control": blob["control"]}
+    return {"control": blob["control"], "target_reminder_id": blob.get("target_reminder_id")}
 
 
 @router.post("/focus/cam/frame")

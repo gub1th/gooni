@@ -20,6 +20,7 @@ function reminder(partial: Partial<FocusReminder>): FocusReminder {
     content: "r",
     owed_to: null,
     due_at: null,
+    due_is_default: false,
     done: false,
     state: "active",
     resolved_at: null,
