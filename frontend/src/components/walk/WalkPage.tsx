@@ -141,16 +141,17 @@ export function WalkPage() {
         }
         .walk-root :where(h1,h2,h3){ font-family:${DISPLAY}; font-weight:500;
           letter-spacing:-0.022em; text-wrap:balance; margin:0; }
-        /* Snapped anchors. Each station is one stop; the browser owns
-           the easing, which beats hand-rolling an animation that fights
-           trackpad momentum. Mandatory (not proximity) because the ask
-           was distinct anchors — that only stays safe because every
-           card is height-capped below, so no content can hide between
-           two snap points. */
-        html { scroll-snap-type: y mandatory; scroll-behavior: smooth; }
+        /* Snap anchors, PROXIMITY not mandatory. Mandatory + snap-stop
+           yanked the page back the instant a card moved a few pixels,
+           which made scrolling feel like it was fighting you and made
+           the walk cycle stutter (the character chases scroll velocity,
+           and mandatory produces constant tiny reversals). Proximity
+           settles you onto a station when you stop near one and
+           otherwise leaves the scroll alone. */
+        html { scroll-snap-type: y proximity; scroll-behavior: smooth; }
         .walk-sec { position:relative; z-index:1; min-height:100svh;
           display:flex; align-items:center; padding:8vh 0;
-          scroll-snap-align:center; scroll-snap-stop:always; }
+          scroll-snap-align:center; }
         .walk-col { width:min(520px, calc(100vw - 48px)); margin-left:max(40px, 7vw);
           background:var(--w-panel); backdrop-filter:blur(18px) saturate(150%);
           -webkit-backdrop-filter:blur(18px) saturate(150%);
@@ -222,6 +223,23 @@ export function WalkPage() {
       `}</style>
 
       {webgl && <WalkScene />}
+
+      {/* Always-visible way out to the flat page. A reviewer who wants the
+          summary should never have to scroll a 3D world to find it. */}
+      <a
+        href="/public/cv"
+        style={{
+          position: "fixed", top: 20, right: 20, zIndex: 4,
+          display: "inline-flex", alignItems: "center", gap: 8,
+          padding: "9px 15px", borderRadius: 999,
+          background: "var(--w-panel)", color: "var(--w-ink)",
+          border: "1px solid var(--w-line)", textDecoration: "none",
+          fontFamily: MONO, fontSize: 11.5, letterSpacing: ".06em",
+          backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
+        }}
+      >
+        READ THE PAGE INSTEAD →
+      </a>
 
       {/* Station rail — the quick-scan affordance. A reviewer who wants
           the summary jumps straight to a station instead of scrolling

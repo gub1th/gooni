@@ -113,9 +113,10 @@ export const PROJECTS: Project[] = [
       { value: "5 mo", label: "solo" },
     ],
     stack: ["FastAPI", "React", "TypeScript", "SQLite", "Fly.io", "MCP"],
-    // Source link removed: the repo is private, so it 404'd for every
-    // visitor. Restore it if gub1th/gooni goes public.
-    links: [{ label: "You're standing in it", href: "/public" }],
+    links: [
+      { label: "Source", href: "https://github.com/gub1th/gooni" },
+      { label: "You're standing in it", href: "/public" },
+    ],
     weight: "monument",
     color: "#4ADE80",
     period: "2026 — present",

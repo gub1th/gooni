@@ -168,8 +168,7 @@ export const STATIONS: Station[] = [
       { value: "−32,252", label: "lines, that same PR" },
       { value: "119k", label: "lines deleted overall" },
     ],
-    // No Source link: github.com/gub1th/gooni is private, so the link
-    // 404'd for every visitor. Restore it if the repo goes public.
+    links: [{ label: "Source", href: "https://github.com/gub1th/gooni" }],
     color: "#4ADE80",
     density: 0.18,
   },
