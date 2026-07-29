@@ -326,16 +326,19 @@ export function WalkPage() {
       {webgl && <WalkScene />}
 
       {/* Always-visible way out to the flat page. A reviewer who wants the
-          summary should never have to scroll a 3D world to find it. */}
+          summary should never have to scroll a 3D world to find it. Sits
+          top-LEFT with the reading column — the words live on the left, so
+          the alternative to reading them does too, leaving the right side
+          clear for the station rail and the walker. */}
       <a
         href="/public/cv"
         style={{
-          position: "fixed", top: 20, right: 20, zIndex: 4,
+          position: "fixed", top: 20, left: 20, zIndex: 4,
           display: "inline-flex", alignItems: "center", gap: 8,
-          padding: "9px 15px", borderRadius: 999,
+          padding: "8px 14px", borderRadius: 999,
           background: "var(--w-panel)", color: "var(--w-ink)",
           border: "1px solid var(--w-line)", textDecoration: "none",
-          fontFamily: MONO, fontSize: 11.5, letterSpacing: ".06em",
+          fontFamily: MONO, fontSize: 11, letterSpacing: ".06em",
           backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
         }}
       >
