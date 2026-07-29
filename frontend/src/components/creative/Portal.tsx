@@ -3,43 +3,47 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { getToonGradient } from "./toonGradient";
 import { subscribeLandings } from "./useDanielControls";
+import { PORTAL_TILE } from "./tileGrid";
 import { useReducedMotion } from "./useReducedMotion";
 
-// The hole.
+// The hole, and the sign that tells you to jump in it.
 //
-// The plaza is the front door — familiar, playable, no reading required.
-// This is the one thing in it that promises somewhere else: an opening
-// in the floor directly ahead of spawn, with a sign leaning over it.
-// Land on it and you fall into the walk.
+// The plaza is the front door — familiar, playable, nothing to read.
+// This is the one thing in it that promises somewhere else.
 //
-// It has to out-signal everything else in the scene without being loud,
-// so it works on three channels at once: a shape that reads as absence
-// (a dark shaft where floor should be), motion nothing else has (a slow
-// descending pulse), and language (an arrow that literally points down).
+// SQUARE, not round: the floor is a square grid, so a circular pit
+// reads as a decal dropped on top of the tiles. A square opening the
+// exact size of one tile reads as a tile that is missing, which is the
+// actual fiction.
+//
+// The sign is deliberately old — thick timber, painted board, fat
+// outlined lettering. It's the one object allowed to look like a game
+// prop, because it's the only thing in the scene giving an instruction.
 
 const toon = getToonGradient();
 
-/** Grid tile the hole occupies — dead ahead of spawn, two hops north,
- *  close enough to find immediately and far enough that you don't fall
- *  in before you've looked around. */
-export const PORTAL_TILE = { gx: 0, gz: -2 };
 const TILE = 2.0;
+const HOLE = TILE * 0.99;   // hole spans the missing tile exactly
+const DEPTH = 7;
 
 type Props = {
-  /** Fires once when the player lands on the hole. */
+  /** Fires when the player lands on the hole. */
   onEnter: () => void;
-  /** Suppresses the trigger while a transition is already running. */
+  /** False while a transition is already running. */
   armed: boolean;
+  /** True when the player is standing next to the hole — the sign and
+   *  the rim brighten so it's obvious what the prompt refers to. */
+  near?: boolean;
 };
 
-export function Portal({ onEnter, armed }: Props) {
+export function Portal({ onEnter, armed, near = false }: Props) {
   const x = PORTAL_TILE.gx * TILE;
   const z = PORTAL_TILE.gz * TILE;
   const reduce = useReducedMotion();
   const [hot, setHot] = useState(false);
 
   const ringsRef = useRef<THREE.Group>(null);
-  const signRef = useRef<THREE.Group>(null);
+  const boardRef = useRef<THREE.Group>(null);
   const armedRef = useRef(armed);
   useEffect(() => {
     armedRef.current = armed;
@@ -54,117 +58,171 @@ export function Portal({ onEnter, armed }: Props) {
     });
   }, [onEnter]);
 
-  // Three rings descending on a loop — the only downward motion in the
-  // plaza, which is what makes the hole read as "down" rather than as a
-  // dark tile.
-  const rings = useMemo(() => [0, 0.33, 0.66], []);
+  const rings = useMemo(() => [0, 0.34, 0.67], []);
 
   useFrame(() => {
     if (reduce) return;
+    const now = performance.now();
     const g = ringsRef.current;
     if (g) {
       g.children.forEach((child, i) => {
         const m = child as THREE.Mesh;
-        const t = ((performance.now() / 2600 + rings[i]) % 1);
-        m.position.y = -t * 3.4;
+        const t = (now / 2400 + rings[i]) % 1;
+        m.position.y = -t * (DEPTH - 1.5);
         const mat = m.material as THREE.MeshBasicMaterial;
-        // Fade in at the lip, out in the dark — a ring popping in at
-        // full strength would read as a glitch.
-        mat.opacity = Math.sin(t * Math.PI) * 0.5;
-        const s = 1 - t * 0.35;
-        m.scale.set(s, s, s);
+        mat.opacity = Math.sin(t * Math.PI) * 0.42;
+        const s = 1 - t * 0.3;
+        m.scale.set(s, 1, s);
       });
     }
-    if (signRef.current) {
-      signRef.current.position.y = 2.5 + Math.sin(performance.now() / 900) * 0.07;
+    if (boardRef.current) {
+      // Gentle sway on the hanging board — the sign is the thing you're
+      // meant to notice, and stillness is invisible in a scene that
+      // already has clouds moving.
+      boardRef.current.rotation.z = Math.sin(now / 1100) * 0.045;
     }
   });
 
   return (
     <group position={[x, 0, z]}>
-      {/* Shaft. Open-ended cylinder with the inside faces showing, so
-          you see down it rather than at it. */}
-      <mesh position={[0, -1.8, 0]}>
-        <cylinderGeometry args={[0.94, 0.7, 3.6, 24, 1, true]} />
-        <meshBasicMaterial color="#0B0D10" side={THREE.BackSide} />
+      {/* Shaft — a box seen from the inside. */}
+      <mesh position={[0, -DEPTH / 2, 0]}>
+        <boxGeometry args={[HOLE, DEPTH, HOLE]} />
+        <meshBasicMaterial color="#0A0C10" side={THREE.BackSide} />
       </mesh>
-      {/* Floor of the shaft — pure black, no shading, so it reads as
-          depth rather than as a surface. */}
-      <mesh position={[0, -3.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[0.72, 24]} />
-        <meshBasicMaterial color="#05070A" />
+      {/* Bottom, unlit, so the shaft bottoms out in black rather than
+          showing a floor. */}
+      <mesh position={[0, -DEPTH + 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[HOLE, HOLE]} />
+        <meshBasicMaterial color="#04060A" />
       </mesh>
 
-      {/* Rim — the cut edge of the floor. */}
-      <mesh position={[0, 0.06, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.94, 1.12, 32]} />
-        <meshToonMaterial color={hot ? "#9FE1CB" : "#8C8272"} gradientMap={toon} side={THREE.DoubleSide} />
-      </mesh>
+      {/* Cut edge — four short walls at the lip so the floor has real
+          thickness where it's been broken through. */}
+      {([[0, 1], [0, -1], [1, 0], [-1, 0]] as const).map(([ox, oz], i) => (
+        <mesh
+          key={i}
+          position={[(ox * HOLE) / 2, -0.12, (oz * HOLE) / 2]}
+          rotation={[0, ox !== 0 ? Math.PI / 2 : 0, 0]}
+        >
+          <planeGeometry args={[HOLE, 0.44]} />
+          <meshToonMaterial
+            color={hot || near ? "#B9A98C" : "#8C8272"}
+            gradientMap={toon}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      ))}
 
       <group ref={ringsRef}>
         {rings.map((_, i) => (
           <mesh key={i} rotation={[-Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[0.62, 0.76, 28]} />
-            <meshBasicMaterial color="#7DE8B4" transparent opacity={0.4} depthWrite={false} />
+            <ringGeometry args={[HOLE * 0.34, HOLE * 0.44, 4]} />
+            <meshBasicMaterial color="#8FE9BE" transparent opacity={0.4} depthWrite={false} />
           </mesh>
         ))}
       </group>
 
-      {/* Light spilling up out of the hole. */}
-      <mesh position={[0, 0.9, 0]}>
-        <cylinderGeometry args={[0.8, 0.94, 1.8, 20, 1, true]} />
-        <meshBasicMaterial
-          color="#7DE8B4"
-          transparent
-          opacity={hot ? 0.16 : 0.09}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      </mesh>
-
-      <ArrowSign boardRef={signRef} />
+      <Signpost boardRef={boardRef} lit={hot || near} />
     </group>
   );
 }
 
-// Post with a board and a down-arrow. Language is the third channel:
-// shape says absence, motion says down, and this says it in words.
-function ArrowSign({ boardRef }: { boardRef: React.RefObject<THREE.Group> }) {
+// ── the sign ────────────────────────────────────────────────────────
+
+/** Painted board, drawn to a canvas. Text as geometry would need a font
+ *  asset and text as separate meshes can't say a word — a texture is
+ *  the only way to get real lettering with no dependency. */
+function useSignTexture(): THREE.CanvasTexture | null {
+  return useMemo(() => {
+    const w = 512;
+    const h = 256;
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const g = c.getContext("2d");
+    if (!g) return null;
+
+    g.fillStyle = "#F6E7C4";
+    g.fillRect(0, 0, w, h);
+    // Inner border, the way a painted trail sign has a routed edge.
+    g.strokeStyle = "#6B4E2E";
+    g.lineWidth = 12;
+    g.strokeRect(16, 16, w - 32, h - 32);
+
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    // Fat outlined lettering — outline first, fill on top, which is how
+    // the era's sprite text got its readability at low resolution.
+    g.font = "bold 92px Georgia, 'Iowan Old Style', serif";
+    g.lineWidth = 14;
+    g.strokeStyle = "#3B2A16";
+    g.strokeText("JUMP IN", w / 2, h / 2 - 22);
+    g.fillStyle = "#2E7D57";
+    g.fillText("JUMP IN", w / 2, h / 2 - 22);
+
+    g.font = "bold 34px Georgia, 'Iowan Old Style', serif";
+    g.lineWidth = 7;
+    g.strokeStyle = "#3B2A16";
+    g.strokeText("▼  the way down  ▼", w / 2, h / 2 + 58);
+    g.fillStyle = "#6B4E2E";
+    g.fillText("▼  the way down  ▼", w / 2, h / 2 + 58);
+
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return t;
+  }, []);
+}
+
+function Signpost({
+  boardRef,
+  lit,
+}: {
+  boardRef: React.RefObject<THREE.Group>;
+  lit: boolean;
+}) {
+  const tex = useSignTexture();
+
+  // Stands on the near-right corner of the hole, angled back toward
+  // spawn so you read it head-on as you walk up.
   return (
-      <group position={[1.55, 0, 0.5]} rotation={[0, -0.55, 0]}>
-        <mesh position={[0, 1.25, 0]} castShadow>
-          <cylinderGeometry args={[0.075, 0.095, 2.5, 8]} />
-          <meshToonMaterial color="#6B5B45" gradientMap={toon} />
+    <group position={[1.75, 0, 1.5]} rotation={[0, -0.42, 0]}>
+      {/* Timber post — chunky and square-cut, not a thin dowel. */}
+      <mesh position={[0, 1.05, 0]} castShadow>
+        <boxGeometry args={[0.22, 2.1, 0.22]} />
+        <meshToonMaterial color="#8A6A44" gradientMap={toon} />
+      </mesh>
+      {/* Base stones, so the post is planted rather than stuck in. */}
+      <mesh position={[0, 0.12, 0]} castShadow>
+        <boxGeometry args={[0.52, 0.24, 0.52]} />
+        <meshToonMaterial color="#7C7365" gradientMap={toon} />
+      </mesh>
+
+      <group ref={boardRef} position={[0, 2.28, 0]}>
+        {/* Dark backing slightly larger than the face — reads as the
+            board's edge and gives the lettering a hard outline. */}
+        <mesh position={[0, 0, -0.05]} castShadow>
+          <boxGeometry args={[2.5, 1.32, 0.12]} />
+          <meshToonMaterial color="#5A3F24" gradientMap={toon} />
         </mesh>
-        <group ref={boardRef} position={[0, 2.5, 0]}>
-          <mesh castShadow>
-            <boxGeometry args={[1.35, 0.62, 0.08]} />
-            <meshToonMaterial color="#F2EBDA" gradientMap={toon} />
+        <mesh position={[0, 0, 0.03]}>
+          <planeGeometry args={[2.3, 1.15]} />
+          {tex ? (
+            <meshBasicMaterial map={tex} toneMapped={false} />
+          ) : (
+            <meshBasicMaterial color="#F6E7C4" />
+          )}
+        </mesh>
+        {/* Warm wash when the player is close enough for the prompt to
+            be live. */}
+        {lit && (
+          <mesh position={[0, 0, 0.05]}>
+            <planeGeometry args={[2.3, 1.15]} />
+            <meshBasicMaterial color="#FFF0B8" transparent opacity={0.16} depthWrite={false} />
           </mesh>
-          {/* Arrow, pointing down at the hole. Shaft + head as two
-              meshes rather than a texture so it stays crisp at any
-              distance and needs no asset. */}
-          <mesh position={[-0.42, -0.02, 0.055]}>
-            <boxGeometry args={[0.09, 0.3, 0.02]} />
-            <meshBasicMaterial color="#1D9E75" />
-          </mesh>
-          <mesh position={[-0.42, -0.26, 0.055]} rotation={[0, 0, Math.PI]}>
-            <coneGeometry args={[0.15, 0.22, 3]} />
-            <meshBasicMaterial color="#1D9E75" />
-          </mesh>
-          <mesh position={[0.22, 0.11, 0.055]}>
-            <boxGeometry args={[0.72, 0.075, 0.02]} />
-            <meshBasicMaterial color="#3C3A34" />
-          </mesh>
-          <mesh position={[0.13, -0.05, 0.055]}>
-            <boxGeometry args={[0.54, 0.06, 0.02]} />
-            <meshBasicMaterial color="#6E6A60" />
-          </mesh>
-          <mesh position={[0.16, -0.19, 0.055]}>
-            <boxGeometry args={[0.6, 0.06, 0.02]} />
-            <meshBasicMaterial color="#6E6A60" />
-          </mesh>
-        </group>
+        )}
       </group>
+    </group>
   );
 }

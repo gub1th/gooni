@@ -31,3 +31,13 @@ export function buildTileGrid(): BaseTile[] {
 export function tileKey(gx: number, gz: number): string {
   return `${gx},${gz}`;
 }
+
+/** The hole into the walk. Lives here rather than in Portal.tsx so
+ *  TileFloor can skip RENDERING it while the grid still REGISTERS it:
+ *  the tile has to stay walkable or you could never hop in, but a
+ *  drawn tile sits across the opening and cuts it in half. */
+export const PORTAL_TILE = { gx: 0, gz: -2 };
+
+export function isPortalTile(gx: number, gz: number): boolean {
+  return gx === PORTAL_TILE.gx && gz === PORTAL_TILE.gz;
+}

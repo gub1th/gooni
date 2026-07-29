@@ -9,7 +9,7 @@ import {
   subscribeLandings,
   type LandingEvent,
 } from "./useDanielControls";
-import { buildTileGrid } from "./tileGrid";
+import { buildTileGrid, isPortalTile, PORTAL_TILE } from "./tileGrid";
 import { getToonGradient } from "./toonGradient";
 import { fireVfx } from "./vfx";
 import { playTileBreak, playTileHeal } from "./sfx";
@@ -104,7 +104,11 @@ export function TileFloor() {
   const meshRef = useRef<THREE.InstancedMesh>(null);
 
   const tiles = useMemo<TileEntry[]>(() => {
-    return buildTileGrid().map(({ gx, gz, x, z }) => {
+    // Skip the portal tile: it stays in the grid (registerTileExists
+    // below still runs for it, so you can hop in) but drawing a slab
+    // across the opening made the hole read as a tinted rectangle
+    // rather than a hole.
+    return buildTileGrid().filter((t) => !isPortalTile(t.gx, t.gz)).map(({ gx, gz, x, z }) => {
       const h = Math.abs(gx * 37 + gz * 71 + gx * gz * 13) & 0xff;
       const palIdx = h % PALETTE.length;
       const colorJitter = ((h >> 4) / 255 - 0.5) * 0.04;
@@ -131,6 +135,10 @@ export function TileFloor() {
 
   useLayoutEffect(() => {
     tiles.forEach((t) => registerTileExists(t.gx, t.gz));
+    // The portal tile is filtered out of the rendered set above, but it
+    // must stay walkable — hopping INTO the hole is the whole point, so
+    // register it by hand.
+    registerTileExists(PORTAL_TILE.gx, PORTAL_TILE.gz);
   }, [tiles]);
 
   const fragmentsRef = useRef<Fragment[]>([]);
