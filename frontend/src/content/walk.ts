@@ -52,9 +52,9 @@ export const STATIONS: Station[] = [
     id: "attempts",
     eyebrow: "Before any of it worked",
     title: "Four runs at the same idea",
-    meta: "life_ai · flow · lucid — then gooni",
+    meta: "lucid · life_ai · flow — then gooni",
     body: [
-      "Gooni wasn't the first attempt. It was the fourth. Before it came life_ai, flow and Lucid — each a different angle on the same itch: a system that actually understands the mess of your own life instead of making you file it.",
+      "Gooni wasn't the first attempt. It was the fourth. Before it came Lucid, then life_ai, then flow — each a different angle on the same itch: a system that actually understands the mess of your own life instead of making you file it.",
       "flow's final commit reads, in full: \"prob ass. im bailing on this one\".",
     ],
     pull: "Four tries at one idea is a better opening line than any finished project.",

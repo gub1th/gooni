@@ -158,6 +158,8 @@ export const PROJECTS: Project[] = [
     stack: ["FastAPI", "PostgreSQL", "React", "OpenAI"],
     weight: "pylon",
     color: "#8FB3E0",
+    // Ordering confirmed against commit history: Lucid came first
+    // (585 commits in 2024), before life_ai and flow.
     period: "2024 — 2025",
     image: "/portfolio/lucid.jpg",
     imageAlt: "Lucid turning journal entries into a navigable graph of people, goals and events.",
