@@ -167,12 +167,16 @@ function Clutter() {
       const d = densityAt(z);
       for (let side = -1; side <= 1; side += 2) {
         if (pseudo(z * 3.7 + side * 91) > d * 0.4) continue;
-        // Start 3.5 units off the shoulder so nothing crowds the walker.
-        const off = HALF_WIDTH * TILE + 3.5 + pseudo(z * 5.1 + side) * 6;
+        // Must stay ON the tile field — beyond it there is no ground and
+        // props hover in mid-air. Outer columns only, clear of the centre
+        // line the character walks.
+        const off = 3.0 + pseudo(z * 5.1 + side) * 1.6;
         const isRock = pseudo(z * 11.3 + side * 17) < 0.62;
         out.push({
           x: side * off,
-          y: 0,
+          // Tile boxes are TILE_HEIGHT tall centred near 0, so the walking
+          // surface sits at +TILE_HEIGHT/2.
+          y: TILE_HEIGHT / 2,
           z: z + pseudo(z * 2.2) * 2,
           s: 0.45 + pseudo(z * 7.7 + side) * 0.6,
           rot: pseudo(z * 13.1) * Math.PI * 2,
@@ -243,12 +247,33 @@ function Ghosts() {
 
 // Placed off-path, never labelled, never blocking. A text CV writes
 // "Interests: tennis, basketball". A world just has a court in it.
+/** Small floating island under an off-path prop. Without it the scenery
+ *  hangs in the void; with it the world reads as an archipelago. */
+function Islet({ x, z, r }: { x: number; z: number; r: number }) {
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, -0.15, 0]} receiveShadow>
+        <cylinderGeometry args={[r, r * 0.72, 0.55, 7]} />
+        <meshToonMaterial color="#C4B49A" gradientMap={toon} />
+      </mesh>
+      <mesh position={[0, -1.0, 0]}>
+        <coneGeometry args={[r * 0.7, 1.7, 7]} />
+        <meshToonMaterial color="#8C7C5E" gradientMap={toon} />
+      </mesh>
+    </group>
+  );
+}
+
 function Scenery() {
   return (
     <group>
+      <Islet x={-16} z={stationZ(1) - 6} r={6.5} />
       <TennisCourt z={stationZ(1) - 6} x={-16} />
+      <Islet x={15} z={stationZ(2) - 3} r={3.4} />
       <Hoop z={stationZ(2) - 3} x={15} />
+      <Islet x={-13} z={stationZ(3) - 4} r={2.6} />
       <MicStand z={stationZ(3) - 4} x={-13} />
+      <Islet x={14} z={stationZ(4) - 5} r={2.6} />
       <Lectern z={stationZ(4) - 5} x={14} />
     </group>
   );
