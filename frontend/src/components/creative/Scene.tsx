@@ -331,13 +331,6 @@ export function Scene() {
     });
   }, []);
 
-  // TEMP probe — remove once the intro handoff is confirmed.
-  useEffect(() => {
-    (window as unknown as Record<string, unknown>).__plaza = {
-      entered, introDone, swoopLanded, dropping, nearPortal: false,
-    };
-  });
-
   function handleClose() {
     setSelectedNote(null);
   }
