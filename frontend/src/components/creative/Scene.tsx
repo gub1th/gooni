@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { AdaptiveDpr, AdaptiveEvents, OrbitControls, useProgress } from "@react-three/drei";
 import * as THREE from "three";
+import { useNavigate } from "@tanstack/react-router";
 import { Volume2, VolumeX, Activity } from "lucide-react";
 import { Atmosphere } from "./Atmosphere";
 import { SkyDome } from "./SkyDome";
@@ -15,6 +16,9 @@ import { LandingCamera } from "./LandingCamera";
 import { IntroCamera, ORBIT_BASELINE } from "./IntroCamera";
 import { NoteReaderOverlay } from "./NoteReaderOverlay";
 import { NotePeekHost } from "./NotePeekHost";
+import { Portal } from "./Portal";
+import { PORTAL_TILE } from "./tileGrid";
+import { setIdentity } from "./avatarIdentity";
 import { setPeekState } from "./peekBus";
 import { AmbientAudio } from "./AmbientAudio";
 import { PostFX } from "./PostFX";
@@ -262,6 +266,13 @@ const DEFAULT_PLAYER_NAME = "too lazy";
 export function Scene() {
   const mobile = useIsMobile();
   const debug = useDebugFlag();
+  const navigate = useNavigate();
+  // Drop-through-the-hole transition into the walk.
+  const [dropping, setDropping] = useState(false);
+  // Where the player is standing. Drives the portal prompt and the
+  // scripted camera — both need to engage on approach and let go the
+  // moment the player walks off, so they can't be one-shot effects.
+  const [playerGrid, setPlayerGrid] = useState<{ gx: number; gz: number } | null>(null);
   const [entered, setEntered] = useState(false);
   const [swoopLanded, setSwoopLanded] = useState(false);
   const [introDone, setIntroDone] = useState(false);
@@ -313,6 +324,13 @@ export function Scene() {
     setPeekState({ note: null });
   }
 
+  useEffect(() => {
+    return subscribeLandings((e) => {
+      if (e.actor !== "player") return;
+      setPlayerGrid(e.fellOff ? null : { gx: e.gx, gz: e.gz });
+    });
+  }, []);
+
   function handleClose() {
     setSelectedNote(null);
   }
@@ -320,11 +338,24 @@ export function Scene() {
   function handleEnter(name: string, color: string) {
     setPlayerName(name);
     setPlayerColor(color);
+    // Carried across the drop so the walk is walked by the same
+    // character, not a stranger in the default green.
+    setIdentity(name, color);
     setEntered(true);
     setTimeout(() => setOverlayMounted(false), 720);
   }
 
-  const orbitEnabled = introDone && !selectedNote;
+  // One tile away, orthogonally. Diagonals are excluded on purpose:
+  // from a diagonal you can't hop straight in, so promising "jump in"
+  // there would be a lie.
+  const nearPortal =
+    playerGrid !== null &&
+    !dropping &&
+    Math.abs(playerGrid.gx - PORTAL_TILE.gx) + Math.abs(playerGrid.gz - PORTAL_TILE.gz) === 1;
+
+  // The scripted camera takes the wheel on approach, so the free
+  // director has to stand down or the two fight frame by frame.
+  const orbitEnabled = introDone && !selectedNote && !nearPortal && !dropping;
   // Char mounts only AFTER the camera reaches impact pose (swoopLanded).
   // Before that, the player sees an empty plaza while the camera drops
   // in — so the get-up isn't visible mid-camera-spin. Spec Phase 4:
@@ -384,6 +415,18 @@ export function Scene() {
           initialDelayMs={600}
         />
         {entered && introDone && <NoteCoins onSelect={handleSelect} />}
+        {/* The way into the walk. The landmark system that used to sit
+            here is superseded by it — the plaza is the front door now,
+            and the portfolio content lives on the other side of this
+            hole rather than being duplicated around the island. */}
+        {entered && introDone && (
+          <Portal armed={!dropping} near={nearPortal} onEnter={() => setDropping(true)} />
+        )}
+        <ApproachCamera active={nearPortal} danielRef={danielRef} />
+        <DropCamera
+          active={dropping}
+          onDone={() => navigate({ to: "/walk" })}
+        />
 
         {/* Landing bird's-eye — runs while overlay is up; hands off to
             IntroCamera on click. */}
@@ -447,16 +490,46 @@ export function Scene() {
 
       {entered && introDone && !selectedNote && <NotePeekHost />}
 
+      {/* Retro prompt. Appears only while the player is standing beside
+          the hole, the way an era-appropriate game puts the instruction
+          in a box at the bottom of the screen rather than floating it
+          in world space. */}
+      {nearPortal && <PromptBox />}
+
+      {/* The fade. Deliberately late and fast: the jump plays, the beat
+          holds, THEN the screen goes dark — that ordering is what makes
+          it read as a cutscene rather than as a page transition. */}
+      <div
+        aria-hidden
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "#05070A",
+          opacity: dropping ? 1 : 0,
+          transition: "opacity 420ms linear 780ms",
+          pointerEvents: "none",
+          zIndex: 40,
+        }}
+      />
       {entered && <BrandingMark />}
-      {entered && <NotesLink visible={introDone && !selectedNote} />}
+      {entered && <ShortVersionLink visible={introDone && !selectedNote} />}
     </>
   );
 }
 
-function NotesLink({ visible }: { visible: boolean }) {
+// The permanent way out. A reviewer with two minutes should never have
+// to walk the island to find out what he's done — this pill is pinned
+// top-left the whole time and lands on the flat page.
+//
+// Pointed at /public/cv rather than /public: the notes index is a
+// reading surface, not a summary, so it answered the wrong question for
+// someone scanning. Notes stay reachable from the flat page's footer.
+// One escape hatch, not two — a second pill would be clutter on a
+// surface whose whole argument is subtraction.
+function ShortVersionLink({ visible }: { visible: boolean }) {
   return (
     <a
-      href="/public"
+      href="/public/cv"
       style={{
         position: "fixed",
         top: 22,
@@ -522,7 +595,7 @@ function NotesLink({ visible }: { visible: boolean }) {
       >
         <NotebookIcon />
       </span>
-      <span>read my notes</span>
+      <span>the short version</span>
       <span style={{ fontSize: 14, lineHeight: 1, marginLeft: 1, color: "#555" }}>→</span>
     </a>
   );
@@ -985,6 +1058,153 @@ function NavHint() {
       boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
     }}>
       arrows to hop · drag to orbit · land on a coin to peek, click to read
+    </div>
+  );
+}
+
+
+// The drop, as a cutscene rather than a camera move.
+//
+// Daniel's note: the retro games didn't fly the camera anywhere. The
+// character acts, everything holds for a beat, the screen goes black,
+// and you're somewhere else. A dive would read as modern — and modern
+// is the thing this whole sequence is trying not to be.
+//
+//   0–560ms   the hop plays out, camera holds where it was
+//   560–780ms the beat. Nothing moves. This is the whole trick.
+//   780–1200ms the veil takes the screen
+const DROP_MS = 1250;
+
+function DropCamera({ active, onDone }: { active: boolean; onDone: () => void }) {
+  const start = useRef<number | null>(null);
+  const held = useRef(new THREE.Vector3());
+  const target = useRef(new THREE.Vector3());
+  const fired = useRef(false);
+
+  useFrame((state) => {
+    if (!active) {
+      start.current = null;
+      fired.current = false;
+      return;
+    }
+    if (start.current === null) {
+      start.current = performance.now();
+      held.current.copy(state.camera.position);
+      target.current.set(0, 0.4, -4); // the hole, in world units
+      // Take the wheel so OrbitControls/CameraDirector can't fight the
+      // hold frame by frame.
+      setControlsEnabled(false);
+    }
+    const t = Math.min(1, (performance.now() - start.current) / DROP_MS);
+    // A very small push in — enough to feel intent, not enough to read
+    // as a camera move.
+    const push = Math.min(1, t / 0.45) * 0.12;
+    state.camera.position.lerpVectors(held.current, target.current, push);
+    state.camera.lookAt(target.current.x, 0.2, target.current.z);
+    if (t >= 1 && !fired.current) {
+      fired.current = true;
+      onDone();
+    }
+  });
+
+  return null;
+}
+
+// Scripted framing on approach: close, low, over the character's left
+// shoulder, with the sign filling a good part of frame. Engages when
+// the player steps next to the hole and lets go the instant they move
+// away — walking off returns them to the free camera, so the framing is
+// an offer rather than a trap.
+function ApproachCamera({
+  active,
+  danielRef,
+}: {
+  active: boolean;
+  danielRef: React.MutableRefObject<DanielHandle | null>;
+}) {
+  const look = useRef(new THREE.Vector3());
+  const inited = useRef(false);
+  const pos = useRef(new THREE.Vector3());
+
+  useFrame((state, rawDt) => {
+    if (!active) {
+      inited.current = false;
+      return;
+    }
+    const d = danielRef.current;
+    if (!d?.group) return;
+    const dt = Math.min(rawDt, 0.05);
+    d.group.getWorldPosition(pos.current);
+
+    // Up and back off the character's back-left. Tight enough that the
+    // sign reads at full size instead of being a distant prop.
+    const desired = new THREE.Vector3(
+      pos.current.x - 1.9,
+      pos.current.y + 2.0,
+      pos.current.z + 3.4,
+    );
+    if (!inited.current) {
+      inited.current = true;
+      // Ease in from wherever the free camera left off rather than
+      // cutting — a hard cut here would feel like a bug.
+      state.camera.position.lerp(desired, 0.12);
+      look.current.copy(pos.current);
+    }
+    state.camera.position.lerp(desired, Math.min(1, dt * 3.2));
+
+    // Look between the character and the sign, biased toward the sign
+    // so the instruction is what the shot is actually about.
+    look.current.lerp(
+      new THREE.Vector3(pos.current.x + 1.0, pos.current.y + 1.0, pos.current.z - 1.8),
+      Math.min(1, dt * 3.2),
+    );
+    state.camera.lookAt(look.current);
+  });
+
+  return null;
+}
+
+// Bottom-of-screen instruction box.
+function PromptBox() {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: "50%",
+        bottom: 34,
+        transform: "translateX(-50%)",
+        zIndex: 30,
+        width: "min(600px, calc(100vw - 40px))",
+        // Thick double border + hard shadow: the era's dialogue boxes
+        // were drawn, not blurred. No backdrop-filter anywhere here on
+        // purpose — frosted glass is the tell of a modern UI.
+        background: "#FBF4E2",
+        border: "4px solid #2E2418",
+        boxShadow: "0 0 0 4px #FBF4E2, 0 6px 0 4px #2E2418",
+        borderRadius: 6,
+        padding: "16px 20px",
+        fontFamily: DISPLAY,
+        fontSize: 19,
+        color: "#2E2418",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+        letterSpacing: "0.01em",
+      }}
+    >
+      <span>There's a hole here. Jump in?</span>
+      <span
+        aria-hidden
+        style={{
+          fontSize: 14,
+          color: "#6B4E2E",
+          animation: "gooniBlink 1s steps(2, start) infinite",
+        }}
+      >
+        ▼
+      </span>
+      <style>{`@keyframes gooniBlink { 0%,100% { opacity: 1 } 50% { opacity: 0 } }`}</style>
     </div>
   );
 }

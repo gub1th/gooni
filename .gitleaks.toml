@@ -1,0 +1,17 @@
+# gitleaks config.
+#
+# The default `generic-api-key` rule fires on any `*_KEY = "..."` assignment,
+# which catches our localStorage key names. They are namespaced UI storage
+# keys, not credentials — allowlisted by value so a real secret assigned to a
+# similarly-named constant would still be caught.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[rules.allowlist]
+regexTarget = "match"
+regexes = [
+  '''gooni-plaza-landmarks-v\d+''',
+  '''gooni-creative-read-v\d+''',
+]
