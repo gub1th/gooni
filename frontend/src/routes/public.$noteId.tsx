@@ -94,7 +94,7 @@ function PublicNotePage() {
       <div style={{ maxWidth: 680, margin: "0 auto", padding: "60px 24px 120px" }}>
         {/* Back link */}
         <Link
-          to="/public"
+          to="/public/notes"
           style={{ fontSize: 13.5, color: "var(--gooni-muted, #888)", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 40 }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#111")}
           onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#888")}

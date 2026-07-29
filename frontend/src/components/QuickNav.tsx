@@ -78,9 +78,9 @@ export function QuickNav() {
     {
       key: "public",
       label: "Public profile",
-      hint: "/public",
+      hint: "/public/notes",
       icon: <Globe size={14} strokeWidth={1.7} />,
-      onSelect: () => navigate({ to: "/public" }),
+      onSelect: () => navigate({ to: "/public/notes" }),
     },
     {
       key: "mcp",

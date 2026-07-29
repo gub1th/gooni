@@ -17,6 +17,7 @@ import { Route as FocusRouteImport } from './routes/focus'
 import { Route as CreativeRouteImport } from './routes/creative'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PublicIndexRouteImport } from './routes/public.index'
+import { Route as PublicNotesRouteImport } from './routes/public.notes'
 import { Route as PublicMcpRouteImport } from './routes/public.mcp'
 import { Route as PublicCvRouteImport } from './routes/public.cv'
 import { Route as PublicNoteIdRouteImport } from './routes/public.$noteId'
@@ -61,6 +62,11 @@ const PublicIndexRoute = PublicIndexRouteImport.update({
   path: '/',
   getParentRoute: () => PublicRoute,
 } as any)
+const PublicNotesRoute = PublicNotesRouteImport.update({
+  id: '/notes',
+  path: '/notes',
+  getParentRoute: () => PublicRoute,
+} as any)
 const PublicMcpRoute = PublicMcpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
@@ -88,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/cv': typeof PublicCvRoute
   '/public/mcp': typeof PublicMcpRoute
+  '/public/notes': typeof PublicNotesRoute
   '/public/': typeof PublicIndexRoute
 }
 export interface FileRoutesByTo {
@@ -100,6 +107,7 @@ export interface FileRoutesByTo {
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/cv': typeof PublicCvRoute
   '/public/mcp': typeof PublicMcpRoute
+  '/public/notes': typeof PublicNotesRoute
   '/public': typeof PublicIndexRoute
 }
 export interface FileRoutesById {
@@ -114,6 +122,7 @@ export interface FileRoutesById {
   '/public/$noteId': typeof PublicNoteIdRoute
   '/public/cv': typeof PublicCvRoute
   '/public/mcp': typeof PublicMcpRoute
+  '/public/notes': typeof PublicNotesRoute
   '/public/': typeof PublicIndexRoute
 }
 export interface FileRouteTypes {
@@ -129,6 +138,7 @@ export interface FileRouteTypes {
     | '/public/$noteId'
     | '/public/cv'
     | '/public/mcp'
+    | '/public/notes'
     | '/public/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -141,6 +151,7 @@ export interface FileRouteTypes {
     | '/public/$noteId'
     | '/public/cv'
     | '/public/mcp'
+    | '/public/notes'
     | '/public'
   id:
     | '__root__'
@@ -154,6 +165,7 @@ export interface FileRouteTypes {
     | '/public/$noteId'
     | '/public/cv'
     | '/public/mcp'
+    | '/public/notes'
     | '/public/'
   fileRoutesById: FileRoutesById
 }
@@ -225,6 +237,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PublicIndexRouteImport
       parentRoute: typeof PublicRoute
     }
+    '/public/notes': {
+      id: '/public/notes'
+      path: '/notes'
+      fullPath: '/public/notes'
+      preLoaderRoute: typeof PublicNotesRouteImport
+      parentRoute: typeof PublicRoute
+    }
     '/public/mcp': {
       id: '/public/mcp'
       path: '/mcp'
@@ -253,6 +272,7 @@ interface PublicRouteChildren {
   PublicNoteIdRoute: typeof PublicNoteIdRoute
   PublicCvRoute: typeof PublicCvRoute
   PublicMcpRoute: typeof PublicMcpRoute
+  PublicNotesRoute: typeof PublicNotesRoute
   PublicIndexRoute: typeof PublicIndexRoute
 }
 
@@ -260,6 +280,7 @@ const PublicRouteChildren: PublicRouteChildren = {
   PublicNoteIdRoute: PublicNoteIdRoute,
   PublicCvRoute: PublicCvRoute,
   PublicMcpRoute: PublicMcpRoute,
+  PublicNotesRoute: PublicNotesRoute,
   PublicIndexRoute: PublicIndexRoute,
 }
 

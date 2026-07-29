@@ -247,7 +247,7 @@ function LinkRow({
 
 function PlazaInvite() {
   return (
-    <Link to="/creative" className="cv-plaza">
+    <Link to="/public" className="cv-plaza">
       <span
         aria-hidden
         style={{
@@ -686,7 +686,7 @@ function CvPage() {
             style={{ gap: "12px 24px" }}
           />
           <div style={{ marginTop: 26 }}>
-            <Link className="cv-u" to="/creative" style={{ fontSize: 14, color: "var(--cv-muted)" }}>
+            <Link className="cv-u" to="/public" style={{ fontSize: 14, color: "var(--cv-muted)" }}>
               Or walk through it in 3D
               <span aria-hidden style={{ marginLeft: 6, opacity: 0.6 }}>→</span>
             </Link>
