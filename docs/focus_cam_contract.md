@@ -25,6 +25,7 @@ self-healing — a Start clicked while the sidecar was asleep takes effect on wa
 ```
 GET /focus/cam
 → {control, state, score, app, session_id, at,
+   target_reminder_id,       # int | null — the promise this session is FOR
    frame, frame_at}          # frame = data:image/jpeg;base64,… | null (see Preview frame)
 ```
 
@@ -33,6 +34,12 @@ Poll ~every 2s. Read `control`:
 - `idle` and you're running → stop + finalize (POST the session), then go quiet.
 
 The **sidecar owns `session_id`** — Gooni never generates it.
+
+`target_reminder_id` is set when the session was started from the dashboard's
+per-promise `▶ focus` control, so the post-session report can name what you were
+working on and offer to mark that promise kept. Echo it back on `/sessions` if you
+can; Gooni stamps it server-side from the control blob if you don't, so an older
+sidecar keeps working unchanged. Cleared whenever control goes `idle`.
 
 ## Reporting live state
 
@@ -90,6 +97,7 @@ POST /focus/cam/sessions
   "duration_sec": int, "focus_score": float,
   "presence_pct": float, "eyes_on_pct": float, "active_pct": float, "engaged_pct": float,
   "counts": {"distracted": int, "phone": int, "vape": int, "stand": int, "left_desk": int},
+  "target_reminder_id": int|null,   # optional — Gooni fills it from the control blob
   "note": str|null, "activity_summary": null }
 → {ok, entry_id}
 ```
@@ -102,7 +110,8 @@ The whole body is stored verbatim in `value_json` (loose — extra fields are fi
 - Focus data is **walled off** from every existing Gooni trackable surface (log
   matrix, dots, activity rail, overlay, chat). It's visible only in the Focus
   widget / the `/focus/cam/*` reads. Don't expect it in `/trackables`.
-- The UI Start/Stop button hits `POST /focus/cam/control {control: running|idle}`
+- The UI Start/Stop button hits
+  `POST /focus/cam/control {control: running|idle, target_reminder_id: int|null}`
   — you only ever *read* control, never set it.
 - The auth model for the prototype is URL/token secrecy; the sidecar→Gooni hop is
   the standard Bearer-gated path.

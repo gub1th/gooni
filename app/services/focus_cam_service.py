@@ -48,6 +48,9 @@ _DEFAULT_BLOB = {
     "app": None,
     "session_id": None,
     "at": None,
+    # The short-term promise this session is FOR (focus_service Reminder id), set
+    # by the dashboard's per-promise ▶ focus control. None = an untargeted block.
+    "target_reminder_id": None,
 }
 
 
@@ -99,13 +102,22 @@ def merge_state(
     return _write_blob(db, blob)
 
 
-def set_control(db: Session, control: str) -> dict:
+def set_control(db: Session, control: str, target_reminder_id: int | None = None) -> dict:
     """Set desired control (the reconcile target the sidecar polls). Only
-    control changes; live-state fields are preserved."""
+    control + target change; live-state fields are preserved.
+
+    `target_reminder_id` binds the session to ONE short-term promise (the
+    dashboard's `▶ focus` control). It's what lets the post-session report say
+    *what* you focused on and offer to mark that promise kept, instead of
+    reporting an anonymous block of time. Starting a session always rewrites the
+    target (including to None); stopping clears it, since a target outliving its
+    session would mislabel the next one.
+    """
     if control not in VALID_CONTROLS:
         raise ValueError(f"control must be one of {VALID_CONTROLS}")
     blob = get_blob(db)
     blob["control"] = control
+    blob["target_reminder_id"] = target_reminder_id if control == "running" else None
     return _write_blob(db, blob)
 
 
@@ -204,10 +216,20 @@ def log_event(
 def log_session(db: Session, body: dict) -> dict:
     """Record a finished session as one json Trackable entry on the LOCAL day of
     `ended_at`, storing the entire report in value_json. Also mirrors
-    `focus_score` to a numeric Trackable (same day) for future charting."""
+    `focus_score` to a numeric Trackable (same day) for future charting.
+
+    The session inherits the blob's `target_reminder_id` (the promise the UI was
+    focusing on) unless the sidecar named one itself. Stamping it HERE rather
+    than trusting the sidecar keeps the binding correct even for a sidecar that
+    predates the field — it reads control and never has to know about promises.
+    """
     now_local = local_now(db)
     ended = _parse_at(body.get("ended_at"), now_local)
     day = ended.astimezone(now_local.tzinfo).date()
+
+    body = dict(body)
+    if body.get("target_reminder_id") is None:
+        body["target_reminder_id"] = get_blob(db).get("target_reminder_id")
 
     sess = trackable_service.create(
         db,

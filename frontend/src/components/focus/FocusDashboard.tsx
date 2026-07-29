@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Maximize2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Maximize2, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { FONT } from "../../ui";
 import {
   createFocusReminder,
+  createNote,
   deleteFocusReminder,
   fetchCalendarEvents,
   fetchFocusDashboard,
@@ -11,10 +12,13 @@ import {
   fetchTrackables,
   fetchWhoopToday,
   updateFocusReminder,
+  SHORT_BUCKETS,
   type CalendarEvent,
   type FocusDashboard as FocusDashboardData,
   type FocusReminder,
+  type FocusRollup,
   type LeetcodeToday,
+  type ShortBucket,
   type Trackable,
   type TrackableDay,
   type WhoopToday,
@@ -23,21 +27,36 @@ import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { useWidgetOverlayStore } from "../../stores/useWidgetOverlayStore";
 import { LogTable } from "../ambient/LogTable";
 import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
-import { FocusStream } from "./FocusStream";
+import { FocusRunner } from "./FocusRunner";
 import { fmtPromiseMeta, fmtTime, fmtWeekday } from "./notchMerge";
 
-// The focus kiosk / home. The CENTRE is the arcs canvas (FocusStream, the
-// chronological said-vs-done timeline). The left rail holds what matters right
-// now, FLOWING top-down (no bottom-pin — a rail that ends early beats one
-// stretched around a dead gap):
-//   promises (said-vs-done state) · reminders · schedule · streaks · feeds
-// Times live UNDER each line as metadata, not in a right column that squeezed
-// the text into a mid-word ellipsis. Poll to stay live; the display IS the
-// proactivity.
+// The dashboard (whiteboard, 2026-07-28). What replaced the arcs canvas.
+//
+// The old centre was a chronological stream of every event — the thing Daniel
+// called "all this data": a log you have to read and total in your head. Nothing
+// here renders a raw event row. Device telemetry arrives pre-aggregated
+// (`instagram open · 12`), which is the analysis, done deterministically by the
+// backend rather than narrated by a model.
+//
+// Two columns, matching the sketch:
+//   LEFT   short-term promises — the actionable now, bucketed by due day, each
+//          row startable as a focus session.
+//   RIGHT  trackables · longer-term promises · today's roll-ups · feeds
+// Above both, the notes chips: capture first, browse second.
+//
+// Poll to stay live; the display IS the proactivity.
 
 const REFRESH_MS = 25_000;
 const STREAK_TRAIL = 5; // trailing days shown per streak column
 const STREAK_PER_PAGE = 4; // columns visible before the ‹ › pager
+
+// Human labels for the backend's bucket keys.
+const BUCKET_LABEL: Record<ShortBucket, string> = {
+  overdue: "overdue",
+  today: "today",
+  tomorrow: "tomorrow",
+  this_week: "this week",
+};
 
 interface StreakCol {
   t: Trackable;
@@ -73,6 +92,9 @@ export function FocusDashboard() {
   const [whoop, setWhoop] = useState<WhoopToday | null>(null);
   const [lc, setLc] = useState<LeetcodeToday | null>(null);
   const [matrixOpen, setMatrixOpen] = useState(false);
+  // The promise a focus session is running for. Owned HERE rather than by the
+  // kiosk shell so `/` (a plain browser tab, no state machine) can focus too.
+  const [focusTarget, setFocusTarget] = useState<FocusReminder | null>(null);
   const streakDefsRef = useRef<Trackable[] | null>(null);
 
   const loadStreaks = useCallback(async () => {
@@ -92,7 +114,7 @@ export function FocusDashboard() {
       );
       setStreaks(cols);
     } catch {
-      /* rail stays quiet on error */
+      /* panel stays quiet on error */
     }
   }, []);
 
@@ -113,8 +135,8 @@ export function FocusDashboard() {
     void loadStreaks();
   }, [loadStreaks]);
 
-  // Lighter than load(): a rail mutation (add/edit/delete) only needs the
-  // dashboard payload refreshed, not the calendar / whoop / streak fan-out.
+  // Lighter than load(): a mutation (add/edit/delete) only needs the dashboard
+  // payload refreshed, not the calendar / whoop / streak fan-out.
   const reloadDashboard = useCallback(async () => {
     try {
       setData(await fetchFocusDashboard());
@@ -146,8 +168,9 @@ export function FocusDashboard() {
     };
   }, [pal.paper]);
 
-  const reminders = data?.notch.reminders ?? [];
-  const promises = data?.notch.promises ?? [];
+  const shortTerm = data?.short_term;
+  const longTerm = data?.long_term ?? [];
+  const rollups = data?.rollups ?? [];
   const sortedEvents = useMemo(
     () => [...events].sort((a, b) => (a.start || "").localeCompare(b.start || "")),
     [events],
@@ -164,57 +187,194 @@ export function FocusDashboard() {
         fontSize: 12,
         overflow: "hidden",
         display: "flex",
+        flexDirection: "column",
       }}
     >
-      {/* ── left rail (flows top-down; scrolls if tall) ───────────────────── */}
-      <aside
+      <NoteChips pal={pal} />
+
+      <div
         style={{
-          width: 258,
-          flexShrink: 0,
-          borderRight: `1px solid ${pal.rule}`,
-          padding: "24px 20px 28px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 22,
-          overflowY: "auto",
+          flex: 1,
+          minHeight: 0,
+          display: "grid",
+          // Short-term earns the room: it's the only column you act on.
+          gridTemplateColumns: "minmax(0, 1.45fr) minmax(0, 1fr)",
+          gap: 34,
+          padding: "10px 34px 30px",
+          overflow: "hidden",
         }}
       >
-        <PromisesSection promises={promises} pal={pal} onMutate={reloadDashboard} />
+        <ShortTermPanel
+          buckets={shortTerm}
+          pal={pal}
+          onMutate={reloadDashboard}
+          onFocus={setFocusTarget}
+        />
 
-        <RemindersSection reminders={reminders} pal={pal} onMutate={reloadDashboard} />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 26,
+            overflowY: "auto",
+            minHeight: 0,
+          }}
+        >
+          <Panel label="trackables" pal={pal} onExpand={() => setMatrixOpen(true)}>
+            <StreakStrip cols={streaks} pal={pal} />
+          </Panel>
 
-        {sortedEvents.length > 0 && (
-          <RailSection label="schedule" pal={pal} onExpand={() => openWidget("calendar", "agenda")}>
-            {sortedEvents.map((e) => (
-              <RailRow
-                key={`e${e.id}`}
-                title={e.summary || "(untitled)"}
-                meta={e.all_day ? fmtWeekday(e.start) : fmtTime(e.start)}
-                pal={pal}
-              />
-            ))}
-          </RailSection>
-        )}
+          <LongTermPanel promises={longTerm} pal={pal} onMutate={reloadDashboard} />
 
-        <RailSection label="streaks" pal={pal} onExpand={() => setMatrixOpen(true)}>
-          <StreakStrip cols={streaks} pal={pal} />
-        </RailSection>
+          {sortedEvents.length > 0 && (
+            <Panel label="schedule" pal={pal} onExpand={() => openWidget("calendar", "agenda")}>
+              {sortedEvents.map((e) => (
+                <Row
+                  key={`e${e.id}`}
+                  title={e.summary || "(untitled)"}
+                  meta={e.all_day ? fmtWeekday(e.start) : fmtTime(e.start)}
+                  pal={pal}
+                />
+              ))}
+            </Panel>
+          )}
 
-        <FeedLine whoop={whoop} lc={lc} pal={pal} />
-      </aside>
+          <RollupPanel rollups={rollups} pal={pal} />
 
-      {/* ── centre: the arcs canvas ───────────────────────────────────────── */}
-      <main style={{ flex: 1, position: "relative", minWidth: 0 }}>
-        <FocusStream />
-      </main>
+          <FeedLine whoop={whoop} lc={lc} pal={pal} />
+        </div>
+      </div>
 
-      {/* activity matrix — the full editable log, "as the main page does" */}
+      {/* the full editable log, "as the main page does" */}
       {matrixOpen && <MatrixOverlay onClose={() => setMatrixOpen(false)} />}
+
+      {focusTarget && (
+        <FocusRunner
+          target={focusTarget}
+          pal={pal}
+          onClose={() => {
+            setFocusTarget(null);
+            void reloadDashboard();
+          }}
+        />
+      )}
     </div>
   );
 }
 
-// ── rail scaffolding ──────────────────────────────────────────────────────────
+// ── notes chips ───────────────────────────────────────────────────────────────
+// The whiteboard's two chips. `new` is the CAPTURE path — the ambient home's
+// wave (the only other way to write from a screen) is going away, and a
+// notebook you can't write to is just a report. `all` hands off to the notes
+// browser.
+
+function NoteChips({ pal }: { pal: FocusPalette }) {
+  const [composing, setComposing] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function submit() {
+    const body = text.trim();
+    if (!body || busy) return;
+    setBusy(true);
+    try {
+      // First line becomes the title, the rest the body — the same shape a
+      // quick capture takes everywhere else in Gooni.
+      const [first, ...rest] = body.split("\n");
+      await createNote("general", { title: first.slice(0, 120), content: rest.join("\n") });
+      setText("");
+      setComposing(false);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2200);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ padding: "22px 34px 4px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Chip pal={pal} active={composing} onClick={() => setComposing((c) => !c)}>
+          <Plus size={12} strokeWidth={2.2} />
+          new note
+        </Chip>
+        <Chip pal={pal} onClick={() => { window.location.href = "/?view=notes"; }}>
+          all notes
+        </Chip>
+        {saved && (
+          <span style={{ fontSize: 10.5, color: pal.accent, letterSpacing: "0.04em" }}>saved</span>
+        )}
+      </div>
+
+      {composing && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 620 }}>
+          <textarea
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter commits, shift+Enter newlines — capture should cost one key.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void submit();
+              } else if (e.key === "Escape") {
+                setComposing(false);
+              }
+            }}
+            rows={3}
+            placeholder="what's on your mind"
+            style={{ ...fieldStyle(pal), resize: "vertical", lineHeight: 1.5 }}
+          />
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <PrimaryBtn pal={pal} disabled={busy || !text.trim()} onClick={() => void submit()}>
+              save
+            </PrimaryBtn>
+            <GhostBtn pal={pal} onClick={() => setComposing(false)}>
+              cancel
+            </GhostBtn>
+            <span style={{ fontSize: 10, color: pal.ink3 }}>enter saves · shift+enter newline</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Chip({
+  children,
+  pal,
+  active,
+  onClick,
+}: {
+  children: React.ReactNode;
+  pal: FocusPalette;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        fontFamily: FONT,
+        fontSize: 11.5,
+        padding: "5px 12px",
+        borderRadius: 999,
+        cursor: "pointer",
+        border: `1px solid ${active ? pal.accent : pal.rule}`,
+        background: "transparent",
+        color: active ? pal.accent : pal.ink2,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ── panels ────────────────────────────────────────────────────────────────────
 
 function SectionLabel({
   children,
@@ -259,8 +419,8 @@ function SectionLabel({
   );
 }
 
-// Small square ghost button — the shared rail control (add / expand / edit /
-// delete / confirm). Brightens ink3 → ink (or warn when `danger`) on hover.
+// Small square ghost button — the shared control (add / expand / edit / delete /
+// confirm). Brightens ink3 → ink (or warn when `danger`) on hover.
 function IconBtn({
   children,
   pal,
@@ -306,20 +466,24 @@ function IconBtn({
   );
 }
 
-function RailSection({
+function Panel({
   label,
   pal,
   onExpand,
+  onAdd,
+  addActive,
   children,
 }: {
   label: string;
   pal: FocusPalette;
   onExpand?: () => void;
+  onAdd?: () => void;
+  addActive?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div>
-      <SectionLabel pal={pal} onExpand={onExpand}>
+      <SectionLabel pal={pal} onExpand={onExpand} onAdd={onAdd} addActive={addActive}>
         {label}
       </SectionLabel>
       <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>{children}</div>
@@ -327,10 +491,10 @@ function RailSection({
   );
 }
 
-// A rail line: title takes the FULL width and wraps to two lines; the time /
-// meta rides UNDERNEATH as small print. No right-hand column, so nothing gets
+// A line: title takes the FULL width and wraps to two lines; the time / meta
+// rides UNDERNEATH as small print. No right-hand column, so nothing gets
 // clipped mid-word.
-function RailRow({
+function Row({
   title,
   meta,
   pal,
@@ -373,34 +537,90 @@ function RailRow({
   );
 }
 
-// A promise renders its said-vs-done STATE in the meta line: active shows who
-// it's owed to + age; broken flips the whole row to warn + "lasted Nd" — the
-// gap rendering itself instead of being narrated.
-function PromiseRow({ p, pal }: { p: FocusReminder; pal: FocusPalette }) {
-  if (p.state === "broken") {
-    return (
-      <RailRow
-        title={p.content}
-        meta={`broke · lasted ${p.lasted_days}d`}
-        pal={pal}
-        tone="warn"
-        metaWarn
-      />
-    );
-  }
-  return <RailRow title={p.content} meta={fmtPromiseMeta(p.owed_to, p.age_days)} pal={pal} />;
+// ── short-term panel ──────────────────────────────────────────────────────────
+// "Short-term things. Promises that are more to-do based ± can do them soon and
+// 'focus' on them." Bucketed by due day, most urgent first. Empty buckets don't
+// render — a panel of empty headers is noise.
+
+function ShortTermPanel({
+  buckets,
+  pal,
+  onMutate,
+  onFocus,
+}: {
+  buckets: Record<ShortBucket, FocusReminder[]> | undefined;
+  pal: FocusPalette;
+  onMutate: () => void;
+  onFocus: (r: FocusReminder) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const total = buckets ? Object.values(buckets).reduce((n, rows) => n + rows.length, 0) : 0;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+      <SectionLabel pal={pal} onAdd={() => setAdding((a) => !a)} addActive={adding}>
+        short term
+      </SectionLabel>
+
+      {adding && (
+        <div style={{ marginBottom: 16 }}>
+          <Editor
+            kind="reminder"
+            pal={pal}
+            submitLabel="add"
+            onCancel={() => setAdding(false)}
+            onSubmit={async ({ content, secondary }) => {
+              await createFocusReminder({ content, due_hint: secondary || null });
+              setAdding(false);
+              onMutate();
+            }}
+          />
+        </div>
+      )}
+
+      {total === 0 && !adding && <EmptyHint pal={pal}>nothing due — add something</EmptyHint>}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {SHORT_BUCKETS.map((b) => {
+          const rows = buckets?.[b] ?? [];
+          if (rows.length === 0) return null;
+          return (
+            <div key={b}>
+              <div
+                style={{
+                  fontSize: 10,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                  color: b === "overdue" ? pal.warn : pal.ink2,
+                  marginBottom: 9,
+                }}
+              >
+                {BUCKET_LABEL[b]}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+                {rows.map((r) => (
+                  <Item
+                    key={`${r.type}${r.id}`}
+                    item={r}
+                    kind={r.type}
+                    pal={pal}
+                    overdue={b === "overdue"}
+                    onMutate={onMutate}
+                    onFocus={() => onFocus(r)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
-// ── promises / reminders CRUD sections ────────────────────────────────────────
-// Both rail sections are backed by Reminder rows. They ALWAYS render now (even
-// empty) so the "+" add affordance is always reachable. Row controls are
-// hover-revealed → the kiosk stays glanceable at rest. Mutations refetch the
-// dashboard (onMutate) rather than mutating local state — the payload is small
-// and the source of truth stays server-side.
+// ── longer-term panel ─────────────────────────────────────────────────────────
 
-type RailKind = "promise" | "reminder";
-
-function PromisesSection({
+function LongTermPanel({
   promises,
   pal,
   onMutate,
@@ -411,84 +631,76 @@ function PromisesSection({
 }) {
   const [adding, setAdding] = useState(false);
   return (
-    <div>
-      <SectionLabel pal={pal} onAdd={() => setAdding((a) => !a)} addActive={adding}>
-        promises
-      </SectionLabel>
-      <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-        {adding && (
-          <RailEditor
-            kind="promise"
-            pal={pal}
-            submitLabel="add"
-            onCancel={() => setAdding(false)}
-            onSubmit={async ({ content, secondary }) => {
-              await createFocusReminder({ content, is_promise: true, owed_to: secondary || null });
-              setAdding(false);
-              onMutate();
-            }}
-          />
-        )}
-        {promises.map((p) => (
-          <RailItem key={`p${p.id}`} item={p} kind="promise" pal={pal} onMutate={onMutate} />
-        ))}
-        {promises.length === 0 && !adding && <EmptyHint pal={pal}>none</EmptyHint>}
-      </div>
-    </div>
+    <Panel label="longer term" pal={pal} onAdd={() => setAdding((a) => !a)} addActive={adding}>
+      {adding && (
+        <Editor
+          kind="promise"
+          pal={pal}
+          submitLabel="add"
+          onCancel={() => setAdding(false)}
+          onSubmit={async ({ content, secondary }) => {
+            await createFocusReminder({
+              content,
+              is_promise: true,
+              // No hint → today EOD, which is short-term. A longer-term item
+              // needs a real horizon, so default it out a month.
+              due_hint: secondary || "in 1 month",
+            });
+            setAdding(false);
+            onMutate();
+          }}
+        />
+      )}
+      {promises.map((p) => (
+        <Item key={`l${p.id}`} item={p} kind={p.type} pal={pal} onMutate={onMutate} />
+      ))}
+      {promises.length === 0 && !adding && <EmptyHint pal={pal}>none</EmptyHint>}
+    </Panel>
   );
 }
 
-function RemindersSection({
-  reminders,
-  pal,
-  onMutate,
-}: {
-  reminders: FocusReminder[];
-  pal: FocusPalette;
-  onMutate: () => void;
-}) {
-  const [adding, setAdding] = useState(false);
+// ── roll-ups ──────────────────────────────────────────────────────────────────
+// The replacement for the event stream. Counts, not rows.
+
+function RollupPanel({ rollups, pal }: { rollups: FocusRollup[]; pal: FocusPalette }) {
+  if (rollups.length === 0) return null;
   return (
-    <div>
-      <SectionLabel pal={pal} onAdd={() => setAdding((a) => !a)} addActive={adding}>
-        reminders
-      </SectionLabel>
-      <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-        {adding && (
-          <RailEditor
-            kind="reminder"
-            pal={pal}
-            submitLabel="add"
-            onCancel={() => setAdding(false)}
-            onSubmit={async ({ content, secondary }) => {
-              await createFocusReminder({ content, is_promise: false, due_hint: secondary || null });
-              setAdding(false);
-              onMutate();
-            }}
-          />
-        )}
-        {reminders.map((r) => (
-          <RailItem key={`r${r.id}`} item={r} kind="reminder" pal={pal} onMutate={onMutate} />
+    <Panel label="today" pal={pal}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "7px 16px" }}>
+        {rollups.map((r) => (
+          <span
+            key={r.label}
+            style={{ fontSize: 11.5, color: pal.ink2, fontVariantNumeric: "tabular-nums" }}
+          >
+            {r.label} <span style={{ color: pal.ink, fontWeight: 600 }}>{r.count}</span>
+          </span>
         ))}
-        {reminders.length === 0 && !adding && <EmptyHint pal={pal}>none</EmptyHint>}
       </div>
-    </div>
+    </Panel>
   );
 }
 
-// A single rail row + its hover controls. Three modes: view (the display row),
-// edit (inline RailEditor), confirmDelete (a two-step guard so a stray click on
-// a glance surface can't nuke a promise).
-function RailItem({
+// ── a single promise/reminder row + its controls ─────────────────────────────
+// Three modes: view, edit (inline Editor), confirmDelete (a two-step guard so a
+// stray click on a glance surface can't nuke a promise). Controls are
+// hover-revealed → the kiosk stays glanceable at rest.
+
+type RailKind = "promise" | "reminder";
+
+function Item({
   item,
   kind,
   pal,
+  overdue,
   onMutate,
+  onFocus,
 }: {
   item: FocusReminder;
   kind: RailKind;
   pal: FocusPalette;
+  overdue?: boolean;
   onMutate: () => void;
+  onFocus?: () => void;
 }) {
   const [mode, setMode] = useState<"view" | "edit" | "confirm">("view");
   const [hover, setHover] = useState(false);
@@ -496,25 +708,19 @@ function RailItem({
 
   if (mode === "edit") {
     return (
-      <RailEditor
+      <Editor
         kind={kind}
         pal={pal}
         submitLabel="save"
         initialContent={item.content}
         initialSecondary={kind === "promise" ? item.owed_to ?? "" : ""}
-        // Reminder due can't be reverse-rendered as a hint, so an existing due
-        // gets an explicit "clear due" toggle. A promise owner IS prefilled, so
-        // clearing it = emptying the field (handled below).
-        showClearToggle={kind === "reminder" && item.due_at != null}
         onCancel={() => setMode("view")}
-        onSubmit={async ({ content, secondary, clearSecondary }) => {
+        onSubmit={async ({ content, secondary }) => {
           const patch: Parameters<typeof updateFocusReminder>[1] = {};
           if (content !== item.content) patch.content = content;
           if (kind === "promise") {
             if (secondary) patch.owed_to = secondary;
             else if (item.owed_to) patch.clear_owed = true;
-          } else if (clearSecondary) {
-            patch.clear_due = true;
           } else if (secondary) {
             patch.due_hint = secondary;
           }
@@ -534,11 +740,13 @@ function RailItem({
       style={{ display: "flex", alignItems: "flex-start", gap: 6 }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        {kind === "promise" ? (
-          <PromiseRow p={item} pal={pal} />
-        ) : (
-          <RailRow title={item.content} meta={fmtTime(item.due_at)} pal={pal} />
-        )}
+        <Row
+          title={item.content}
+          meta={itemMeta(item, kind)}
+          pal={pal}
+          tone={item.state === "broken" ? "warn" : "normal"}
+          metaWarn={item.state === "broken" || overdue}
+        />
       </div>
       <div
         style={{
@@ -577,6 +785,27 @@ function RailItem({
           </>
         ) : (
           <>
+            <IconBtn
+              pal={pal}
+              label="Mark done"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await updateFocusReminder(item.id, { state: "kept" });
+                  onMutate();
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Check size={12} strokeWidth={2.2} />
+            </IconBtn>
+            {onFocus && (
+              <IconBtn pal={pal} label="Focus on this" onClick={onFocus}>
+                <Play size={11} strokeWidth={2.2} />
+              </IconBtn>
+            )}
             <IconBtn pal={pal} label="Edit" onClick={() => setMode("edit")}>
               <Pencil size={11} strokeWidth={2} />
             </IconBtn>
@@ -590,16 +819,28 @@ function RailItem({
   );
 }
 
-// Shared inline form for BOTH add and edit. Emits content + a kind-specific
-// secondary (promise → owed-to person; reminder → a due hint like "friday").
-// clearSecondary rides the reminder "clear due" toggle only.
-function RailEditor({
+// The meta line under a row. A broken promise renders the GAP ("lasted 4d")
+// instead of a due time — the failure is the information. An owed-to promise
+// keeps its age, which is what makes an old debt feel old.
+function itemMeta(item: FocusReminder, kind: RailKind): string | undefined {
+  if (item.state === "broken") return `broke · lasted ${item.lasted_days}d`;
+  if (kind === "promise" && item.owed_to) return fmtPromiseMeta(item.owed_to, item.age_days);
+  // A defaulted due is placement, not a deadline — showing "11:59 PM" for it
+  // would be inventing precision Daniel never asked for.
+  if (item.due_is_default) return undefined;
+  return fmtTime(item.due_at);
+}
+
+// ── shared inline editor ──────────────────────────────────────────────────────
+// Emits content + a kind-specific secondary (promise → owed-to person;
+// reminder → a due hint like "friday").
+
+function Editor({
   kind,
   pal,
   submitLabel,
   initialContent = "",
   initialSecondary = "",
-  showClearToggle = false,
   onSubmit,
   onCancel,
 }: {
@@ -608,23 +849,21 @@ function RailEditor({
   submitLabel: string;
   initialContent?: string;
   initialSecondary?: string;
-  showClearToggle?: boolean;
-  onSubmit: (v: { content: string; secondary: string; clearSecondary: boolean }) => Promise<void>;
+  onSubmit: (v: { content: string; secondary: string }) => Promise<void>;
   onCancel: () => void;
 }) {
   const [content, setContent] = useState(initialContent);
   const [secondary, setSecondary] = useState(initialSecondary);
-  const [clearDue, setClearDue] = useState(false);
   const [busy, setBusy] = useState(false);
   const secondaryPlaceholder =
-    kind === "promise" ? "owed to — blank = yourself" : "when — e.g. friday (optional)";
+    kind === "promise" ? "owed to — blank = yourself" : "when — e.g. friday (blank = today)";
 
   async function submit() {
     const c = content.trim();
     if (!c || busy) return;
     setBusy(true);
     try {
-      await onSubmit({ content: c, secondary: secondary.trim(), clearSecondary: clearDue });
+      await onSubmit({ content: c, secondary: secondary.trim() });
     } finally {
       setBusy(false);
     }
@@ -651,57 +890,80 @@ function RailEditor({
       />
       <input
         value={secondary}
-        onChange={(e) => {
-          setSecondary(e.target.value);
-          if (e.target.value) setClearDue(false);
-        }}
+        onChange={(e) => setSecondary(e.target.value)}
         onKeyDown={onKey}
         placeholder={secondaryPlaceholder}
         style={fieldStyle(pal)}
       />
-      {showClearToggle && (
-        <label
-          style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: pal.ink3, cursor: "pointer" }}
-        >
-          <input type="checkbox" checked={clearDue} onChange={(e) => setClearDue(e.target.checked)} />
-          clear due
-        </label>
-      )}
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <button
-          onClick={() => void submit()}
-          disabled={busy || !content.trim()}
-          style={{
-            fontFamily: FONT,
-            fontSize: 11,
-            padding: "4px 12px",
-            borderRadius: 7,
-            border: "none",
-            cursor: busy || !content.trim() ? "default" : "pointer",
-            background: pal.accent,
-            color: pal.paper,
-            opacity: busy || !content.trim() ? 0.5 : 1,
-          }}
-        >
+        <PrimaryBtn pal={pal} disabled={busy || !content.trim()} onClick={() => void submit()}>
           {submitLabel}
-        </button>
-        <button
-          onClick={onCancel}
-          style={{
-            fontFamily: FONT,
-            fontSize: 11,
-            padding: "4px 10px",
-            borderRadius: 7,
-            border: `1px solid ${pal.rule}`,
-            cursor: "pointer",
-            background: "transparent",
-            color: pal.ink3,
-          }}
-        >
+        </PrimaryBtn>
+        <GhostBtn pal={pal} onClick={onCancel}>
           cancel
-        </button>
+        </GhostBtn>
       </div>
     </div>
+  );
+}
+
+function PrimaryBtn({
+  children,
+  pal,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  pal: FocusPalette;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        fontFamily: FONT,
+        fontSize: 11,
+        padding: "4px 12px",
+        borderRadius: 7,
+        border: "none",
+        cursor: disabled ? "default" : "pointer",
+        background: pal.accent,
+        color: pal.paper,
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function GhostBtn({
+  children,
+  pal,
+  onClick,
+}: {
+  children: React.ReactNode;
+  pal: FocusPalette;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        fontFamily: FONT,
+        fontSize: 11,
+        padding: "4px 10px",
+        borderRadius: 7,
+        border: `1px solid ${pal.rule}`,
+        cursor: "pointer",
+        background: "transparent",
+        color: pal.ink3,
+      }}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -776,7 +1038,7 @@ function PagerBtn({
     <button
       onClick={onClick}
       disabled={disabled}
-      aria-label={dir === "left" ? "Previous streaks" : "More streaks"}
+      aria-label={dir === "left" ? "Previous trackables" : "More trackables"}
       style={{
         width: 20,
         height: 20,

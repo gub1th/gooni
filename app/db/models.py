@@ -347,6 +347,16 @@ class Settings(Base):
     # Shape: {control: idle|running, state: focused|distracted|away|paused|null,
     #         score: float|null, app: str|null, session_id: str|null, at: iso|null}.
     focus_cam = Column(Text, nullable=True)
+    # Ambient display state — the SAME declarative reconcile-poll shape as
+    # focus_cam, one level up: the UI/Shortcuts write a DESIRED state, the kiosk
+    # polls GET /display and reconciles. Text-not-JSON for the same reason (the
+    # blob grows without a migration). NULL → treat as {"desired": "rest"}.
+    # Shape: {desired: deep_rest|rest|awake|dash, at: iso|null, source: str|null}.
+    #   deep_rest — away from home (Shortcuts "left house"); dimmest, no data
+    #   rest      — home, Gooni asleep on the desk
+    #   awake     — Gooni up behind the desk, still no data
+    #   dash      — the dashboard, summoned deliberately (desk button)
+    display = Column(Text, nullable=True)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
@@ -860,18 +870,25 @@ class Mention(Base):
 
 
 class Reminder(Base):
-    """A thing to do (reminder) or a thing owed to someone (promise). The
-    difference that matters for the dashboard:
+    """A thing to do (reminder) or a thing owed to someone (promise).
 
-      - type='reminder' — usually has a `due_at`; surfaces in the notch
-        ordered by TIME, merged with Google Calendar events at display time.
-      - type='promise'  — a Reminder with a Person attached (`owed_to`);
-        frequently has NO due_at, so it can't be time-ordered. Surfaces by
-        AGE instead ("owed to Yash · 6d") in a separate notch section. An
-        undated promise that never surfaces is exactly the one you break.
+      - type='reminder' — a dated todo; merged with Google Calendar events at
+        display time.
+      - type='promise'  — carries the active→kept|broken lifecycle. `owed_to`
+        names the Person it's owed to; null = owed to yourself (the common
+        case), and the display drops the "owed to" prefix.
 
-    Most promises are owed to yourself — `owed_to` null = self, and the
-    display drops the "owed to" prefix in that case.
+    DEADLINES (changed 2026-07-28, the ambient-dash rebuild). Every row now
+    carries a `due_at`: the dashboard splits SHORT-TERM (due ≤ 7d, bucketed
+    overdue/today/tomorrow/this week) from LONGER-TERM (further out), and a
+    row with no date can't land in either. `set_reminder` therefore defaults an
+    omitted due to today's local EOD and flags it `due_is_default`.
+
+    That flag is what keeps the change honest. A due Gooni invented must never
+    feed the broken-promise machinery — see `due_is_default` below and the
+    guard in `auto_break_overdue`. Age is still surfaced for promises owed to
+    other people ("owed to Yash · 6d"), where how long you've owed it is the
+    point; it's no longer the ordering mechanism.
     """
 
     __tablename__ = "reminders"
@@ -883,9 +900,18 @@ class Reminder(Base):
     content = Column(String, nullable=False)
     # Person this is owed to. Null = owed to yourself (the common case).
     owed_to = Column(Integer, ForeignKey("focus_people.id"), nullable=True, index=True)
-    # Nullable — promises frequently have none; time-ordering only applies
-    # to dated rows.
+    # Still nullable at the schema level (pre-rebuild rows have none, and the
+    # column is written by several paths), but every NEW row gets one — see the
+    # class docstring. Read it together with `due_is_default`.
     due_at = Column(DateTime, nullable=True, index=True)
+    # True when NOBODY chose this deadline — the service defaulted it to today's
+    # local EOD because every promise now carries a due date (the dashboard
+    # splits short-term vs longer-term on due distance). The distinction is
+    # load-bearing, not bookkeeping: `auto_break_overdue` must NEVER break a
+    # defaulted due. Gooni inventing a deadline and then marking you broken for
+    # missing it is the system lying about a commitment you never made. A
+    # defaulted due that goes stale rolls forward to today instead.
+    due_is_default = Column(Boolean, nullable=False, default=False)
     done = Column(Boolean, nullable=False, default=False, index=True)
     # Promise lifecycle — the said-vs-done spine. 'active' = still standing;
     # 'kept' = fulfilled; 'broken' = failed (he smoked, the deadline blew by).

@@ -2,9 +2,14 @@
 Run: python tests/test_focus_decay.py
 """
 
+import os
+import sys
 from datetime import datetime, timedelta
 
-from app.services import focus_service as fs
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+
+from app.services import focus_service as fs  # noqa: E402
 
 
 def _approx(a, b, tol=1e-6):

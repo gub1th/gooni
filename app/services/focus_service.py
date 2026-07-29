@@ -17,7 +17,7 @@ from datetime import date as _date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from ..common import local_now
+from ..common import local_now, parse_due_hint
 from ..db.models import (
     Person,
     Reminder,
@@ -311,7 +311,11 @@ def set_reminder(
     `owed_to` person is named OR `is_promise` is set — the latter lets a promise
     owed to yourself ("I won't smoke till Tuesday") be a promise rather than
     collapsing into an undated reminder. Promises carry the active→kept|broken
-    lifecycle; reminders stay a simple done check-off."""
+    lifecycle; reminders stay a simple done check-off.
+
+    An omitted `due_at` DEFAULTS to today's local EOD (flagged `due_is_default`)
+    so the row can be placed on the short-term/longer-term dashboard split. See
+    the Reminder docstring — a defaulted due never auto-breaks."""
     content = (content or "").strip()
     if not content:
         raise ValueError("reminder content required")
@@ -322,11 +326,19 @@ def set_reminder(
         owed_id = resolve_person(db, owed_to).id
         rtype = "promise"
 
+    # Every row gets a deadline. `parse_due_hint` is THE deadline parser
+    # (app/common.py) — local-EOD anchored, converted to the naive-UTC storage
+    # convention. Never grow a second resolver here.
+    due_is_default = due_at is None
+    if due_is_default:
+        due_at = parse_due_hint("today", db)
+
     reminder = Reminder(
         type=rtype,
         content=content,
         owed_to=owed_id,
         due_at=due_at,
+        due_is_default=due_is_default,
         thought_id=from_thought,
         done=False,
         state="active",
@@ -410,7 +422,9 @@ def update_reminder(
 ) -> dict | None:
     """Edit a reminder/promise's content / due / owed-to. Only provided fields
     change (None = "leave alone"); pass `clear_due` / `clear_owed` to explicitly
-    NULL a field — distinct from omitting it. Naming a person via `owed_to`
+    reset a field — distinct from omitting it. `clear_due` resets to the
+    today-EOD default rather than NULL (see the Reminder docstring: every row
+    carries a date, and a NULL falls out of both dashboard panels). Naming a person via `owed_to`
     promotes a reminder to a promise (matches set_reminder's rule); clearing the
     owner does NOT demote (a self-owed promise stays a promise). State/done are
     untouched here — those ride set_reminder_state / set_reminder_done."""
@@ -423,9 +437,15 @@ def update_reminder(
             raise ValueError("content cannot be empty")
         r.content = c
     if clear_due:
-        r.due_at = None
+        # Explicitly clearing a due drops back to the default (today EOD) rather
+        # than to NULL — every row carries a date now, and a NULL would fall out
+        # of both dashboard panels entirely.
+        r.due_at = parse_due_hint("today", db)
+        r.due_is_default = True
     elif due_at is not None:
         r.due_at = due_at
+        # You named this deadline, so it counts: it can now auto-break.
+        r.due_is_default = False
     if clear_owed:
         r.owed_to = None
     elif owed_to is not None and owed_to.strip():
@@ -448,10 +468,18 @@ def delete_reminder(db: Session, reminder_id: int) -> bool:
 
 
 def auto_break_overdue(db: Session, now: datetime | None = None) -> int:
-    """Sweep DATED promises whose due_at has passed while still active → broken.
-    Undated promises never auto-break (that's the whole point — they surface by
-    age until manually resolved). Returns the count broken. Mirrors the main
-    Promise model's overdue sweep so a blown deadline renders the gap on its own.
+    """Sweep promises whose EXPLICIT due_at has passed while still active →
+    broken. Returns the count broken. Mirrors the main Promise model's overdue
+    sweep so a blown deadline renders the gap on its own.
+
+    Two exclusions, both deliberate:
+      - undated promises (legacy rows) — nothing to blow past.
+      - `due_is_default` rows — since the ambient-dash rebuild every new promise
+        gets a due date, defaulted to today's EOD when you didn't name one.
+        Breaking those would mark you broken at midnight on a deadline GOONI
+        invented, every single night. A defaulted due is a placement hint for
+        the dashboard, not a commitment. It rolls forward instead (see
+        `_due_bucket`).
     """
     now = now or datetime.utcnow()
     stale = (
@@ -460,6 +488,7 @@ def auto_break_overdue(db: Session, now: datetime | None = None) -> int:
             Reminder.type == "promise",
             Reminder.state == "active",
             Reminder.due_at.isnot(None),
+            Reminder.due_is_default.is_(False),
             Reminder.due_at < now,
         )
         .all()
@@ -493,6 +522,7 @@ def _reminder_dict(db: Session, r: Reminder) -> dict:
         "age_days": age_days,
         "lasted_days": lasted_days,
         "thought_id": r.thought_id,
+        "due_is_default": bool(r.due_is_default),
     }
 
 
@@ -599,6 +629,74 @@ def _sort_key(iso: str | None) -> float:
     return dt.timestamp()
 
 
+# ── Short-term / longer-term split ───────────────────────────────────────────
+# The dashboard's spine (whiteboard, 2026-07-28): "short-term things, promises
+# that are more to-do based ± can do them soon and 'focus' on them" on the left;
+# the slower commitments in their own card on the right. The split is DERIVED
+# from due distance — no flag to set, no second way to be wrong.
+
+SHORT_TERM_DAYS = 7  # due within this many days = short-term
+
+
+def _due_bucket(due_at: datetime | None, is_default: bool, local_now_dt: datetime) -> str:
+    """Place a due date in a display bucket, in LOCAL calendar days.
+
+    `due_at` is stored naive UTC; `local_now_dt` is tz-AWARE (from
+    common.local_now). Both sides must be compared in the local zone — an
+    EOD-anchored due like 11:59pm PT is stored as 06:59 the NEXT UTC day, so
+    differencing raw UTC dates would file every "today" under "tomorrow".
+
+    A stale DEFAULTED due rolls forward to `today` instead of reading overdue:
+    Gooni picked that date, so it can't accuse you of missing it. An explicit
+    one that's passed is genuinely `overdue`.
+    """
+    if due_at is None:
+        return "long"  # legacy undated rows sit with the slow stuff
+    due_local = due_at.replace(tzinfo=timezone.utc).astimezone(local_now_dt.tzinfo)
+    days = (due_local.date() - local_now_dt.date()).days
+    if days < 0:
+        return "today" if is_default else "overdue"
+    if days == 0:
+        return "today"
+    if days == 1:
+        return "tomorrow"
+    if days <= SHORT_TERM_DAYS:
+        return "this_week"
+    return "long"
+
+
+# Render order for the short-term panel — most urgent first.
+SHORT_BUCKETS = ("overdue", "today", "tomorrow", "this_week")
+
+
+def _device_rollups(db: Session, local_now_dt: datetime) -> list[dict]:
+    """Today's Shortcuts telemetry, AGGREGATED — `instagram open · 12`, not
+    twelve rows.
+
+    This is what replaced the arcs canvas on the dashboard. The old surface
+    rendered every device ping as its own entry, which is the thing Daniel
+    called "all this data" — a log you have to read and total in your head. The
+    counts are the analysis, and they're deterministic (a sum over the day's
+    sum-agg entries), not an LLM summary.
+
+    Descending by count, so the thing you did most is the thing you see.
+    """
+    from ..db.models import Trackable
+    from . import trackable_service
+
+    today = local_now_dt.date()
+    rows = db.query(Trackable).filter(Trackable.source == "shortcuts").all()
+    out: list[dict] = []
+    for t in rows:
+        entries = trackable_service.entries_for(db, t, start=today, end=today)
+        count = trackable_service.day_value(entries, t)
+        if not count:
+            continue
+        out.append({"label": t.name, "count": int(count)})
+    out.sort(key=lambda r: (-r["count"], r["label"]))
+    return out
+
+
 # ── Dashboard assembly ───────────────────────────────────────────────────────
 
 
@@ -641,6 +739,28 @@ def dashboard(db: Session, now: datetime | None = None) -> dict:
     promises.sort(key=_promise_sort)
     notch_promises = promises
 
+    # ── The dashboard split (whiteboard 2026-07-28) ──────────────────────────
+    # One pass over everything open — reminders AND still-active promises — and
+    # bucket by due distance. Broken promises stay out: the short-term panel is
+    # a to-do surface, and a broken row isn't actionable.
+    local = local_now(db)
+    open_rows = notch_reminders + [p for p in promises if p["state"] == "active"]
+    short_term: dict[str, list[dict]] = {b: [] for b in SHORT_BUCKETS}
+    long_term: list[dict] = []
+    for row in open_rows:
+        due = _parse_iso(row.get("due_at"))
+        bucket = _due_bucket(due, row.get("due_is_default", False), local)
+        if bucket == "long":
+            long_term.append(row)
+        else:
+            short_term[bucket].append(row)
+
+    # Within a bucket: by due time, earliest first (a naive-UTC sort is fine —
+    # ordering is monotonic regardless of zone).
+    for rows in short_term.values():
+        rows.sort(key=lambda r: r.get("due_at") or "")
+    long_term.sort(key=lambda r: r.get("due_at") or "")
+
     log_rows = (
         db.query(ThoughtBatch, Topic)
         .join(Topic, ThoughtBatch.topic_id == Topic.id)
@@ -664,6 +784,12 @@ def dashboard(db: Session, now: datetime | None = None) -> dict:
         "overflow_topics": topics[DASHBOARD_SLOTS:],  # for displacement notices
         "notch": {"reminders": notch_reminders, "promises": notch_promises},
         "log": log,
+        # ── the ambient dashboard reads these three ──────────────────────────
+        # `notch` / `circles` / `log` stay for the kiosk's older consumers; the
+        # rebuilt dash ignores them.
+        "short_term": short_term,  # {overdue|today|tomorrow|this_week: [row]}
+        "long_term": long_term,
+        "rollups": _device_rollups(db, local),
         "generated_at": _iso(now),
     }
 
@@ -700,6 +826,21 @@ def seed_topics(db: Session) -> list[Topic]:
 def _snippet(text: str, n: int = 48) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+
+def _parse_iso(s: str | None) -> datetime | None:
+    """Inverse of `_iso` — back to the naive-UTC storage convention. Used by the
+    dashboard split, which buckets the already-serialized reminder dicts rather
+    than re-querying the rows."""
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def _iso(dt: datetime | None) -> str | None:
