@@ -112,9 +112,14 @@ export function WalkPage() {
       <style>{`
         .walk-root {
           --w-ink: #F2EFE8;
-          --w-ink2: rgba(242,239,232,0.70);
-          --w-dim: rgba(242,239,232,0.44);
-          --w-panel: rgba(14,17,20,0.62);
+          /* Alphas raised after a contrast audit: over a BRIGHT sky the
+             old panel (0.62) left body text near 4.1:1 and the mono meta
+             near 2.6:1 — both under the 4.5:1 floor. The panel has to
+             carry the contrast because the backdrop is deliberately
+             light and changes as you scroll. */
+          --w-ink2: rgba(242,239,232,0.88);
+          --w-dim: rgba(242,239,232,0.66);
+          --w-panel: rgba(12,15,18,0.84);
           --w-line: rgba(242,239,232,0.14);
           --w-cut: #E9736F;
           background: #0C0F12;
@@ -152,8 +157,12 @@ export function WalkPage() {
           border:1px solid var(--w-line); border-radius:18px; padding:30px 32px;
           /* A card taller than the viewport would strand its own tail
              between snap points. Cap it and let the long ones (Gooni)
-             scroll inside instead. */
-          max-height:82svh; overflow-y:auto; overscroll-behavior:contain; }
+             scroll inside instead.
+             NOT overscroll-behavior:contain — that blocks scroll
+             chaining, so the wheel would stop dead at the end of the
+             Gooni card and the reader had to move the pointer off it to
+             continue the page. Chaining is what we want here. */
+          max-height:82svh; overflow-y:auto; }
         .walk-col::-webkit-scrollbar { width:0; }
         .walk-col { scrollbar-width:none; }
         .walk-eyebrow { font-family:${MONO}; font-size:10.5px; letter-spacing:.16em;
@@ -245,7 +254,10 @@ export function WalkPage() {
           }}
           aria-labelledby={`st-${s.id}`}
         >
-          <div className="walk-col" style={{ color: s.color }}>
+          {/* tabIndex on the scroll container: without it a keyboard
+              user cannot scroll an overflowing card at all (WCAG 2.1.1),
+              and the Gooni card overflows by design. */}
+          <div className="walk-col" tabIndex={0} style={{ color: s.color }}>
             <StationBody station={s} />
           </div>
         </section>

@@ -877,16 +877,10 @@ function PublicPage() {
           flexWrap: "wrap",
         }}>
           <span>written in <span style={{ color: "#4ADE80", fontWeight: 600 }}>gooni</span>, my personal AI notebook</span>
-          <a
-            href="https://github.com/gub1th/gooni"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "var(--gooni-faint, #b5b5b5)", textDecoration: "none", borderBottom: "1px dashed rgba(0,0,0,0.12)" }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#777")}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = "#b5b5b5")}
-          >
-            source on github
-          </a>
+          {/* The "source on github" link pointed at gub1th/gooni, which is
+              private — so it 404'd for every visitor on the live site.
+              Dropped rather than left broken; restore it if the repo is
+              ever made public. */}
         </div>
       </div>
 

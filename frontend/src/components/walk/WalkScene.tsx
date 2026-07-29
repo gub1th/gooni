@@ -8,6 +8,7 @@ import { Atmosphere } from "../creative/Atmosphere";
 import { GLTFGooni, type GooniHandle } from "../creative/GLTFGooni";
 import { getToonGradient } from "../creative/toonGradient";
 import { getIdentity } from "../creative/avatarIdentity";
+import { useReducedMotion } from "../creative/useReducedMotion";
 import { STATIONS } from "../../content/walk";
 import { getScroll } from "./scrollBus";
 
@@ -349,8 +350,11 @@ function Markers() {
 function Marker({ index, color, density }: { index: number; color: string; density: number }) {
   const ringRef = useRef<THREE.Mesh>(null);
   const z = stationZ(index);
+  // The repo already has this hook and Portal/Landmark honor it; the
+  // walk was the one surface still spinning under reduced-motion.
+  const reduce = useReducedMotion();
   useFrame((_, dt) => {
-    if (ringRef.current) ringRef.current.rotation.y += dt * 0.35;
+    if (!reduce && ringRef.current) ringRef.current.rotation.y += dt * 0.35;
   });
 
   // Markers stand off the road so the walker passes them rather than
@@ -430,6 +434,12 @@ function Walker() {
 
 function Rig() {
   const look = useRef(new THREE.Vector3(1.6, 1.2, -4));
+  const reduce = useReducedMotion();
+  // Scratch vectors, reused every frame. Allocating two Vector3s per
+  // frame here was the one spot in this file doing it — CameraDirector
+  // in the plaza already uses this pattern.
+  const desired = useRef(new THREE.Vector3()).current;
+  const lookTarget = useRef(new THREE.Vector3()).current;
 
   useFrame((state, rawDt) => {
     const dt = Math.min(rawDt, 0.05);
@@ -440,14 +450,12 @@ function Rig() {
     // road and the walker into the right two-thirds of frame — clear of
     // the copy card. It rises and pulls back slightly as the walk goes
     // on so the emptying world stays readable.
-    const target = new THREE.Vector3(
-      -7.5 + Math.sin(progress * Math.PI * 1.6) * 1.8,
-      7.2 + progress * 2.6,
-      z + 15.5,
-    );
-    state.camera.position.lerp(target, Math.min(1, dt * 1.8));
+    const sway = reduce ? 0 : Math.sin(progress * Math.PI * 1.6) * 1.8;
+    desired.set(-7.5 + sway, 7.2 + progress * 2.6, z + 15.5);
+    state.camera.position.lerp(desired, Math.min(1, dt * 1.8));
 
-    look.current.lerp(new THREE.Vector3(1.6, 1.2, z - 5), Math.min(1, dt * 2.2));
+    lookTarget.set(1.6, 1.2, z - 5);
+    look.current.lerp(lookTarget, Math.min(1, dt * 2.2));
     state.camera.lookAt(look.current);
   });
 

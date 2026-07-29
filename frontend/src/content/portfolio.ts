@@ -100,19 +100,22 @@ export const PROJECTS: Project[] = [
       "the commitment-shaped ones, surfaces what matters right now through deterministic " +
       "rankers, and builds a memory of how I think. I built a bespoke intelligence layer for " +
       "it, measured it with an eval harness, and then deleted the parts the numbers " +
-      "condemned — collapsing about twenty tables down to six in a single pull request. " +
+      "condemned — dropping twenty-two tables in a single pull request. " +
       "The deleting turned out to be the skill worth showing.",
+    // See the note in content/walk.ts — the previous figures didn't
+    // reproduce and contradicted the ones published on the other page.
+    // These are checkable: PR #404 is +1,298 / -32,252 and drops 22
+    // tables; total deletions across main are ~119k.
     stats: [
-      { value: "831", label: "commits" },
-      { value: "63.6k", label: "lines" },
-      { value: "62%", label: "deleted" },
-      { value: "20→6", label: "tables" },
+      { value: "22", label: "tables dropped, one PR" },
+      { value: "−32,252", label: "lines, that same PR" },
+      { value: "119k", label: "lines deleted overall" },
+      { value: "5 mo", label: "solo" },
     ],
     stack: ["FastAPI", "React", "TypeScript", "SQLite", "Fly.io", "MCP"],
-    links: [
-      { label: "Source", href: "https://github.com/gub1th/gooni" },
-      { label: "You're standing in it", href: "/public" },
-    ],
+    // Source link removed: the repo is private, so it 404'd for every
+    // visitor. Restore it if gub1th/gooni goes public.
+    links: [{ label: "You're standing in it", href: "/public" }],
     weight: "monument",
     color: "#4ADE80",
     period: "2026 — present",
@@ -155,7 +158,7 @@ export const PROJECTS: Project[] = [
     stack: ["FastAPI", "PostgreSQL", "React", "OpenAI"],
     weight: "pylon",
     color: "#8FB3E0",
-    period: "2025 — 2026",
+    period: "2024 — 2025",
     image: "/portfolio/lucid.jpg",
     imageAlt: "Lucid turning journal entries into a navigable graph of people, goals and events.",
   },

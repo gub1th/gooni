@@ -412,17 +412,36 @@ function AppShell() {
   );
 }
 
+/** Cmd+K / Cmd+E, mounted only on authed surfaces. */
+function OwnerShortcuts() {
+  const location = useLocation();
+  if (isChromelessPath(location.pathname)) return null;
+  return (
+    <>
+      {/* Cmd+K command palette — works on every authed route, including
+          ones where the sidebar isn't mounted. Solves #134: getting from
+          any page to a list (or any other surface) in two keystrokes. */}
+      <QuickNav />
+      {/* Cmd+E quick-capture composer — body-only, saves to General. */}
+      <QuickComposer />
+    </>
+  );
+}
+
 export const Route = createRootRoute({
   component: () => (
     <>
       <ThemeVarSync />
       <AppShell />
-      {/* Cmd+K command palette — works on every route, including /public/*
-          where the sidebar isn't mounted. Solves #134: getting from any
-          page to a list (or any other surface) in two keystrokes. */}
-      <QuickNav />
-      {/* Cmd+E quick-capture composer — body-only, saves to General. */}
-      <QuickComposer />
+      {/* Owner-only shortcuts. These are siblings of AppShell, so the
+          chromeless early-return inside it does NOT cover them — without
+          this gate a visitor on /public, /creative or /walk could press
+          Cmd+K and read the private app's navigation (Log, All Notes,
+          Memories, Eval/Audit), or Cmd+E and get a composer that POSTs to
+          the authed /notes. The requests 401, so nothing leaks, but it
+          discloses the internal structure and hands visitors dead
+          controls. */}
+      <OwnerShortcuts />
     </>
   ),
   // Tanstack Router's `errorComponent` doubles as a React error boundary

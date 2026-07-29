@@ -52,10 +52,10 @@ export const STATIONS: Station[] = [
     id: "attempts",
     eyebrow: "Before any of it worked",
     title: "Four runs at the same idea",
-    meta: "life_ai · flow · lucid · gooni",
+    meta: "life_ai · flow · lucid — then gooni",
     body: [
-      "Gooni wasn't the first attempt. It was the fourth. Before it there was life_ai, then flow, then Lucid — each one a different angle on the same itch: a system that actually understands the mess of your own life instead of making you file it.",
-      "flow's final commit reads, in full: \"prob ass. im bailing on this one.\"",
+      "Gooni wasn't the first attempt. It was the fourth. Before it came life_ai, flow and Lucid — each a different angle on the same itch: a system that actually understands the mess of your own life instead of making you file it.",
+      "flow's final commit reads, in full: \"prob ass. im bailing on this one\".",
     ],
     pull: "Four tries at one idea is a better opening line than any finished project.",
     color: "#6B7280",
@@ -129,7 +129,7 @@ export const STATIONS: Station[] = [
     id: "gooni",
     eyebrow: "The obsession",
     title: "Gooni",
-    meta: "831 commits · 5 months · the site you're standing in",
+    meta: "5 months, solo · the site you're standing in",
     body: [
       "I was working on chat interfaces at work and wanted to understand how they actually worked underneath. So I built one. It became an ambient assistant — every thought lands in one log, it notices the commitment-shaped ones, and surfaces what matters now.",
       "What it taught me wasn't how to add features. It was when to take them out.",
@@ -156,12 +156,20 @@ export const STATIONS: Station[] = [
       },
     ],
     pull: "I built the thing that told me to delete my own work, and then I listened.",
+    // Every figure here is checkable against the repo. The earlier set
+    // (831 commits / 190,101 written / "20→6 tables") did not survive
+    // an audit: the commit count rots with every push, the insertion
+    // total doesn't reproduce under --shortstat OR --numstat, and
+    // "20→6" described the primitive layer, not the schema — there are
+    // 25 tables today, so a reader with repo access would catch it.
+    // PR #404 verifies at exactly +1,298 / -32,252 via `gh pr view`.
     stats: [
-      { value: "190,101", label: "lines written" },
-      { value: "118,852", label: "lines deleted" },
-      { value: "20→6", label: "tables, one PR" },
+      { value: "22", label: "tables dropped, one PR" },
+      { value: "−32,252", label: "lines, that same PR" },
+      { value: "119k", label: "lines deleted overall" },
     ],
-    links: [{ label: "Source", href: "https://github.com/gub1th/gooni" }],
+    // No Source link: github.com/gub1th/gooni is private, so the link
+    // 404'd for every visitor. Restore it if the repo goes public.
     color: "#4ADE80",
     density: 0.18,
   },
@@ -180,8 +188,11 @@ export const STATIONS: Station[] = [
 
 /** Off-path scenery. Never labelled in-world — found, not presented. */
 export const SCENERY = [
-  { id: "tennis", label: "Tennis — 6th nationally in Indonesia, junior level" },
+  // Ranking claim pulled: nothing public or on the resume backs it,
+  // and an unbackable number on a portfolio is the one kind of error
+  // that costs more than it gains.
+  { id: "tennis", label: "Tennis, competitively for 10+ years" },
   { id: "hoop", label: "Basketball" },
   { id: "mic", label: "Freestyle rap" },
-  { id: "lectern", label: "CS teaching assistant — 15+ recitations at CMU" },
+  { id: "lectern", label: "CS teaching assistant — 15+ cohorts at CMU" },
 ];
