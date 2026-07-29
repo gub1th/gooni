@@ -247,7 +247,7 @@ function LinkRow({
 
 function PlazaInvite() {
   return (
-    <Link to="/creative" className="cv-plaza">
+    <Link to="/public" className="cv-plaza">
       <span
         aria-hidden
         style={{
@@ -589,7 +589,9 @@ function CvPage() {
 
         {/* ── monuments ──────────────────────────────────────────── */}
         {MONUMENTS.length > 0 && (
-          <section style={{ marginBottom: 24 }}>
+          // Trailing Monument carries 74px below; +14 lands the gap to the
+          // next section on the page's 88px rhythm.
+          <section style={{ marginBottom: 14 }}>
             <SectionHead>Selected work</SectionHead>
             {MONUMENTS.map((p, i) => (
               <Monument key={p.id} project={p} index={i} />
@@ -599,7 +601,8 @@ function CvPage() {
 
         {/* ── pylons ─────────────────────────────────────────────── */}
         {PYLONS.length > 0 && (
-          <section style={{ marginBottom: 88 }}>
+          // Trailing Pylon carries 34px below; +54 holds the 88px rhythm.
+          <section style={{ marginBottom: 54 }}>
             <SectionHead>Also built</SectionHead>
             {PYLONS.map((p) => (
               <Pylon key={p.id} project={p} />
@@ -629,7 +632,8 @@ function CvPage() {
 
         {/* ── skills ─────────────────────────────────────────────── */}
         {SKILLS.length > 0 && (
-          <section style={{ marginBottom: 88 }}>
+          // Trailing skills row carries 22px below; +66 holds the rhythm.
+          <section style={{ marginBottom: 66 }}>
             <SectionHead>Skills</SectionHead>
             {SKILLS.map((g) => (
               <div key={g.group} className="cv-row" style={{ marginBottom: 22 }}>
@@ -686,7 +690,7 @@ function CvPage() {
             style={{ gap: "12px 24px" }}
           />
           <div style={{ marginTop: 26 }}>
-            <Link className="cv-u" to="/creative" style={{ fontSize: 14, color: "var(--cv-muted)" }}>
+            <Link className="cv-u" to="/public" style={{ fontSize: 14, color: "var(--cv-muted)" }}>
               Or walk through it in 3D
               <span aria-hidden style={{ marginLeft: 6, opacity: 0.6 }}>→</span>
             </Link>

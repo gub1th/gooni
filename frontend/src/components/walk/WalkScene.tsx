@@ -75,7 +75,6 @@ export function WalkScene() {
         <Atmosphere mobile={false} />
         <Clouds />
         <Causeway />
-        <Clutter />
         <Ghosts />
         <Scenery />
         <Markers />
@@ -147,74 +146,6 @@ function Causeway() {
       <boxGeometry args={[TILE_VISIBLE, TILE_HEIGHT, TILE_VISIBLE]} />
       <meshToonMaterial color="#ffffff" gradientMap={toon} />
     </instancedMesh>
-  );
-}
-
-// ── clutter: the density gradient made physical ─────────────────────
-
-function Clutter() {
-  const items = useMemo(() => {
-    const out: {
-      x: number; y: number; z: number; s: number; rot: number;
-      kind: "rock" | "shroom"; color: string;
-    }[] = [];
-    // Walk the road and roll for props. Sampled sparsely and pushed
-    // well clear of the shoulder — the first pass scattered something
-    // every 1.5 units right against the road and read as visual noise
-    // rather than as density. Clutter has to be legible as "there is a
-    // lot here" at a glance; past that it's just mess.
-    for (let z = 12; z > -LENGTH; z -= 4) {
-      const d = densityAt(z);
-      for (let side = -1; side <= 1; side += 2) {
-        if (pseudo(z * 3.7 + side * 91) > d * 0.4) continue;
-        // Must stay ON the tile field — beyond it there is no ground and
-        // props hover in mid-air. Outer columns only, clear of the centre
-        // line the character walks.
-        const off = 3.0 + pseudo(z * 5.1 + side) * 1.6;
-        const isRock = pseudo(z * 11.3 + side * 17) < 0.62;
-        out.push({
-          x: side * off,
-          // Tile boxes are TILE_HEIGHT tall centred near 0, so the walking
-          // surface sits at +TILE_HEIGHT/2.
-          y: TILE_HEIGHT / 2,
-          z: z + pseudo(z * 2.2) * 2,
-          s: 0.45 + pseudo(z * 7.7 + side) * 0.6,
-          rot: pseudo(z * 13.1) * Math.PI * 2,
-          // Two prop types, not three. The cone "shards" read as debris
-          // and made the roadside look like a landfill.
-          kind: isRock ? "rock" : "shroom",
-          color: isRock ? "#7C7365" : "#D8D2C4",
-        });
-      }
-    }
-    return out;
-  }, []);
-
-  return (
-    <group>
-      {items.map((it, i) => (
-        <group key={i} position={[it.x, it.y, it.z]} rotation={[0, it.rot, 0]} scale={it.s}>
-          {it.kind === "rock" && (
-            <mesh position={[0, 0.3, 0]} castShadow>
-              <dodecahedronGeometry args={[0.5, 0]} />
-              <meshToonMaterial color={it.color} gradientMap={toon} />
-            </mesh>
-          )}
-          {it.kind === "shroom" && (
-            <group>
-              <mesh position={[0, 0.28, 0]}>
-                <cylinderGeometry args={[0.09, 0.12, 0.56, 7]} />
-                <meshToonMaterial color="#E8E2D4" gradientMap={toon} />
-              </mesh>
-              <mesh position={[0, 0.62, 0]}>
-                <sphereGeometry args={[0.26, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
-                <meshToonMaterial color={it.color} gradientMap={toon} />
-              </mesh>
-            </group>
-          )}
-        </group>
-      ))}
-    </group>
   );
 }
 
@@ -428,19 +359,29 @@ function Walker() {
     // Ease toward the scroll target rather than snapping, so the
     // browser's snap animation reads as a walk rather than a teleport.
     const targetZ = zAt(progress);
-    g.position.z += (targetZ - g.position.z) * Math.min(1, dt * 3.2);
+    const prevZ = g.position.z;
+    g.position.z += (targetZ - prevZ) * Math.min(1, dt * 3.2);
+    // How far the body actually moved THIS frame. Driving the walk clip
+    // off the character's own displacement (not the smoothed scroll
+    // velocity, which lingers as the body eases into place) is what
+    // stops the "striding/hovering in place" — the legs move exactly
+    // while the body moves, and stop the instant it arrives.
+    const stepped = Math.abs(g.position.z - prevZ);
     g.position.y = 0.35;
     // Sit right of centre: the copy card occupies the left third, and a
     // walker hidden behind it defeats the point of having one.
     g.position.x = 1.6;
 
-    const wantMoving = Math.abs(velocity) > 0.2;
+    const wantMoving = stepped > 0.008 || Math.abs(velocity) > 0.25;
     if (wantMoving !== moving.current) {
       moving.current = wantMoving;
       gooni.current?.setClip(wantMoving ? "Walk" : "Idle", { loop: true, fadeMs: 180 });
     }
-    const facing = velocity < -0.2 ? Math.PI : 0;
-    g.rotation.y += (facing - g.rotation.y) * Math.min(1, dt * 6);
+    // Always face forward down the path. The old 180° flip on up-scroll
+    // snap-turned the character to moonwalk backward, which read as a
+    // teleport; the walk is one-directional ("the only direction is
+    // forward"), so the body stays pointed ahead whichever way you scroll.
+    g.rotation.y += (0 - g.rotation.y) * Math.min(1, dt * 6);
   });
 
   // The colour chosen in the plaza. Reading it here is what makes the

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { STATIONS, type Station } from "../../content/walk";
 import { PROFILE } from "../../content/portfolio";
 import { setScroll } from "./scrollBus";
@@ -37,8 +37,17 @@ export function WalkPage() {
   const webgl = useWebGL();
   const [active, setActive] = useState(0);
   const sectionRefs = useRef<(HTMLElement | null)[]>([]);
+  const heroRef = useRef<HTMLElement | null>(null);
+  const footerRef = useRef<HTMLElement | null>(null);
   const lastY = useRef(0);
   const vel = useRef(0);
+  // Current anchor across the whole document: 0 = hero, 1..n = stations,
+  // n+1 = footer. Arrow keys step this; the scroll sampler keeps it in
+  // sync with where the reader actually is.
+  const navIndex = useRef(0);
+  // True while a programmatic snap/hop scroll is animating, so the idle
+  // sampler doesn't try to re-snap on the scroll events it generates.
+  const snapping = useRef(false);
 
   // One rAF-throttled listener drives both the 3D rig and the active
   // station. Scroll fires far faster than paint; doing this work per
@@ -47,6 +56,50 @@ export function WalkPage() {
     let raf = 0;
     let queued = false;
     let settle: ReturnType<typeof setTimeout> | undefined;
+    const prefersReduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // hero + stations + footer, in document order.
+    const anchors = () => [heroRef.current, ...sectionRefs.current, footerRef.current];
+
+    function nearestAnchor(): number {
+      const mid = window.innerHeight * 0.5;
+      let idx = navIndex.current;
+      let best = Infinity;
+      anchors().forEach((el, i) => {
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const d = Math.abs(r.top + r.height / 2 - mid);
+        if (d < best) {
+          best = d;
+          idx = i;
+        }
+      });
+      return idx;
+    }
+
+    // Ease onto the nearest station once scrolling settles — a firm,
+    // eased anchor instead of the browser's proximity snap (which fired
+    // mid-scroll and felt like it was fighting you). Skipped for the
+    // short footer, when already centred (deadzone), and under reduced
+    // motion.
+    function maybeSnap() {
+      // Phones read, they don't tour — snapping a thumb-skimmed document
+      // fights the reader. Anchor only on the desktop tour (>760px).
+      if (snapping.current || prefersReduce || window.innerWidth <= 760) return;
+      const idx = navIndex.current;
+      if (idx === sectionRefs.current.length + 1) return; // footer: let it rest
+      const el = anchors()[idx];
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const offset = r.top + r.height / 2 - window.innerHeight * 0.5;
+      if (Math.abs(offset) > 14) {
+        snapping.current = true;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.setTimeout(() => {
+          snapping.current = false;
+        }, 700);
+      }
+    }
 
     function sample() {
       queued = false;
@@ -74,20 +127,22 @@ export function WalkPage() {
         }
       });
 
+      navIndex.current = nearestAnchor();
       setScroll({ progress, station: nearest, velocity: vel.current });
       setActive((cur) => (cur === nearest ? cur : nearest));
 
-      // Hard-stop the walk once scrolling actually ends. The smoothing
-      // above is an IIR filter — it approaches zero but never arrives,
-      // so the walk-vs-idle threshold alone left the character striding
-      // on the spot forever after the page came to rest. Scroll events
-      // stop firing when motion stops, so a short timer is the only
-      // reliable "settled" signal.
+      // Hard-stop the walk once scrolling actually ends, then anchor.
+      // The smoothing above is an IIR filter — it approaches zero but
+      // never arrives, so the walk-vs-idle threshold alone left the
+      // character striding on the spot forever after the page came to
+      // rest. Scroll events stop firing when motion stops, so a short
+      // timer is the only reliable "settled" signal.
       clearTimeout(settle);
       settle = setTimeout(() => {
         vel.current = 0;
         setScroll({ velocity: 0 });
-      }, 120);
+        maybeSnap();
+      }, 160);
     }
 
     function onScroll() {
@@ -105,6 +160,55 @@ export function WalkPage() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
     };
+  }, []);
+
+  // Keyboard navigation — arrow/page keys hop station to station (the
+  // character walks the gap), the way the plaza was navigated. Scroll
+  // still works; this is additive. Focus inside a scrollable card or a
+  // field is left alone so those keep their own arrow behaviour.
+  useEffect(() => {
+    const prefersReduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    function hop(target: number) {
+      const list = [heroRef.current, ...sectionRefs.current, footerRef.current];
+      const clamped = Math.max(0, Math.min(list.length - 1, target));
+      const el = list[clamped];
+      if (!el) return;
+      navIndex.current = clamped;
+      snapping.current = true;
+      window.setTimeout(() => {
+        snapping.current = false;
+      }, 700);
+      el.scrollIntoView({
+        behavior: prefersReduce ? "auto" : "smooth",
+        block: clamped === list.length - 1 ? "end" : "center",
+      });
+    }
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (t && t.closest(".walk-col, input, textarea, [contenteditable='true']")) return;
+      switch (e.key) {
+        case "ArrowDown":
+        case "PageDown":
+          e.preventDefault();
+          hop(navIndex.current + 1);
+          break;
+        case "ArrowUp":
+        case "PageUp":
+          e.preventDefault();
+          hop(navIndex.current - 1);
+          break;
+        case "Home":
+          e.preventDefault();
+          hop(0);
+          break;
+        case "End":
+          e.preventDefault();
+          hop(9999);
+          break;
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   return (
@@ -141,17 +245,14 @@ export function WalkPage() {
         }
         .walk-root :where(h1,h2,h3){ font-family:${DISPLAY}; font-weight:500;
           letter-spacing:-0.022em; text-wrap:balance; margin:0; }
-        /* Snap anchors, PROXIMITY not mandatory. Mandatory + snap-stop
-           yanked the page back the instant a card moved a few pixels,
-           which made scrolling feel like it was fighting you and made
-           the walk cycle stutter (the character chases scroll velocity,
-           and mandatory produces constant tiny reversals). Proximity
-           settles you onto a station when you stop near one and
-           otherwise leaves the scroll alone. */
-        html { scroll-snap-type: y proximity; scroll-behavior: smooth; }
+        /* Anchoring is done in JS (snap-on-idle in WalkPage), not CSS
+           snap. Native snap fired mid-scroll and felt like it was
+           fighting you; the JS version waits until scrolling settles,
+           then eases onto the nearest station — a firm anchor with a
+           clean ease-in/out, and no tug-of-war with the walk cycle. */
+        html { scroll-behavior: smooth; }
         .walk-sec { position:relative; z-index:1; min-height:100svh;
-          display:flex; align-items:center; padding:8vh 0;
-          scroll-snap-align:center; }
+          display:flex; align-items:center; padding:8vh 0; }
         .walk-col { width:min(520px, calc(100vw - 48px)); margin-left:max(40px, 7vw);
           background:var(--w-panel); backdrop-filter:blur(18px) saturate(150%);
           -webkit-backdrop-filter:blur(18px) saturate(150%);
@@ -225,16 +326,19 @@ export function WalkPage() {
       {webgl && <WalkScene />}
 
       {/* Always-visible way out to the flat page. A reviewer who wants the
-          summary should never have to scroll a 3D world to find it. */}
+          summary should never have to scroll a 3D world to find it. Sits
+          top-LEFT with the reading column — the words live on the left, so
+          the alternative to reading them does too, leaving the right side
+          clear for the station rail and the walker. */}
       <a
         href="/public/cv"
         style={{
-          position: "fixed", top: 20, right: 20, zIndex: 4,
+          position: "fixed", top: 20, left: 20, zIndex: 4,
           display: "inline-flex", alignItems: "center", gap: 8,
-          padding: "9px 15px", borderRadius: 999,
+          padding: "8px 14px", borderRadius: 999,
           background: "var(--w-panel)", color: "var(--w-ink)",
           border: "1px solid var(--w-line)", textDecoration: "none",
-          fontFamily: MONO, fontSize: 11.5, letterSpacing: ".06em",
+          fontFamily: MONO, fontSize: 11, letterSpacing: ".06em",
           backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
         }}
       >
@@ -261,7 +365,7 @@ export function WalkPage() {
         ))}
       </nav>
 
-      <Hero />
+      <Hero innerRef={heroRef} />
 
       {STATIONS.map((s, i) => (
         <section
@@ -281,7 +385,7 @@ export function WalkPage() {
         </section>
       ))}
 
-      <Footer />
+      <Footer innerRef={footerRef} />
     </div>
   );
 }
@@ -350,9 +454,9 @@ function StationBody({ station: s }: { station: Station }) {
   );
 }
 
-function Hero() {
+function Hero({ innerRef }: { innerRef?: Ref<HTMLElement> }) {
   return (
-    <section className="walk-sec" style={{ minHeight: "100svh" }}>
+    <section ref={innerRef} className="walk-sec" style={{ minHeight: "100svh" }}>
       <div className="walk-col" style={{ color: "#4ADE80" }}>
         <h1 style={{ fontSize: "clamp(40px,6.5vw,60px)", lineHeight: 1.02, color: "var(--w-ink)" }}>
           {PROFILE.name}
@@ -390,21 +494,21 @@ function Hero() {
   );
 }
 
-function Footer() {
+function Footer({ innerRef }: { innerRef?: Ref<HTMLElement> }) {
   return (
     <footer
+      ref={innerRef}
       style={{
         position: "relative",
         zIndex: 1,
         padding: "60px max(40px,7vw) 90px",
-        scrollSnapAlign: "end",
         borderTop: "1px solid var(--w-line)",
         color: "var(--w-dim)",
         fontSize: 13,
       }}
     >
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
-        <a href="/public" style={{ color: "inherit" }}>
+        <a href="/public/notes" style={{ color: "inherit" }}>
           Writing
         </a>
         <a href={PROFILE.resumeHref} style={{ color: "inherit" }} target="_blank" rel="noopener noreferrer">

@@ -11,7 +11,6 @@
 // keep that framing.
 
 export type StationId =
-  | "attempts"
   | "origin"
   | "atlassian"
   | "kreatify"
@@ -49,19 +48,6 @@ export type Station = {
 
 export const STATIONS: Station[] = [
   {
-    id: "attempts",
-    eyebrow: "Before any of it worked",
-    title: "Four runs at the same idea",
-    meta: "lucid · life_ai · flow — then gooni",
-    body: [
-      "Gooni wasn't the first attempt. It was the fourth. Before it came Lucid, then life_ai, then flow — each a different angle on the same itch: a system that actually understands the mess of your own life instead of making you file it.",
-      "flow's final commit reads, in full: \"prob ass. im bailing on this one\".",
-    ],
-    pull: "Four tries at one idea is a better opening line than any finished project.",
-    color: "#6B7280",
-    density: 1,
-  },
-  {
     id: "origin",
     eyebrow: "How I started",
     title: "Thirty minutes a night, gone",
@@ -75,7 +61,7 @@ export const STATIONS: Station[] = [
     image: "/portfolio/logger.jpg",
     imageAlt: "Raw trading log output on the left, the parsed spreadsheet it becomes on the right.",
     color: "#F0A868",
-    density: 0.86,
+    density: 1,
   },
   {
     id: "atlassian",
@@ -99,7 +85,7 @@ export const STATIONS: Station[] = [
       },
     ],
     color: "#7BA8D9",
-    density: 0.62,
+    density: 0.7,
   },
   {
     id: "kreatify",
@@ -123,15 +109,16 @@ export const STATIONS: Station[] = [
     image: "/portfolio/kreatify.jpg",
     imageAlt: "The Kreatify campaign workspace — deliverables, milestones and contracts for one partnership.",
     color: "#E8B45A",
-    density: 0.44,
+    density: 0.48,
   },
   {
     id: "gooni",
     eyebrow: "The obsession",
     title: "Gooni",
-    meta: "5 months, solo · the site you're standing in",
+    meta: "attempt four · 5 months, solo · the site you're standing in",
     body: [
-      "I was working on chat interfaces at work and wanted to understand how they actually worked underneath. So I built one. It became an ambient assistant — every thought lands in one log, it notices the commitment-shaped ones, and surfaces what matters now.",
+      "Gooni wasn't the first attempt — it was the fourth. Before it came Lucid, then life_ai, then flow, each a different angle on the same itch: a system that actually understands the mess of your own life instead of making you file it. flow's final commit reads, in full: \"prob ass. im bailing on this one\".",
+      "The fourth one stuck. I was working on chat interfaces at work and wanted to understand how they actually worked underneath, so I built one. It became an ambient assistant — every thought lands in one log, it notices the commitment-shaped ones, and surfaces what matters now.",
       "What it taught me wasn't how to add features. It was when to take them out.",
     ],
     beats: [
@@ -181,7 +168,7 @@ export const STATIONS: Station[] = [
       "I want to be challenged. I want something I can bet on and pour a lot of energy into. I want to work with cracked people, learn from them, and let that push me forward.",
     ],
     color: "#E88AA0",
-    density: 0.04,
+    density: 0.02,
   },
 ];
 

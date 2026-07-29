@@ -499,8 +499,8 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
           borderTop: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.06)", flexShrink: 0,
         }}>
           <button
-            onClick={() => navigate({ to: "/public" })}
-            title="Public profile (visitors see this)"
+            onClick={() => navigate({ to: "/public/notes" })}
+            title="Public profile (your notes list)"
             aria-label="Public profile"
             style={sidebarFooterBtn}
             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.06)")}

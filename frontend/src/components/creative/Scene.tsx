@@ -419,7 +419,7 @@ export function Scene() {
             here is superseded by it — the plaza is the front door now,
             and the portfolio content lives on the other side of this
             hole rather than being duplicated around the island. */}
-        {entered && introDone && (
+        {entered && (
           <Portal armed={!dropping} near={nearPortal} onEnter={() => setDropping(true)} />
         )}
         <ApproachCamera active={nearPortal} danielRef={danielRef} />
@@ -1153,9 +1153,11 @@ function ApproachCamera({
     state.camera.position.lerp(desired, Math.min(1, dt * 3.2));
 
     // Look between the character and the sign, biased toward the sign
-    // so the instruction is what the shot is actually about.
+    // so the instruction is what the shot is actually about. Y lifted so
+    // the raised board frames without being top-cut, while the hole still
+    // sits in the lower third.
     look.current.lerp(
-      new THREE.Vector3(pos.current.x + 1.0, pos.current.y + 1.0, pos.current.z - 1.8),
+      new THREE.Vector3(pos.current.x + 1.0, pos.current.y + 1.5, pos.current.z - 1.8),
       Math.min(1, dt * 3.2),
     );
     state.camera.lookAt(look.current);
