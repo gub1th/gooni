@@ -117,6 +117,29 @@ const CSS = `
 .cv-plaza-arrow { transition: transform .2s ease; }
 .cv-plaza:hover .cv-plaza-arrow { transform: translateX(4px); }
 
+/* Before / After: raw log -> parsed spreadsheet, side by side. */
+.cv-ba {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 16px;
+  align-items: center;
+  margin-top: 36px;
+}
+.cv-ba figure { margin: 0; min-width: 0; }
+.cv-ba img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--cv-rule);
+  border-radius: 10px;
+  background: var(--cv-wash);
+}
+.cv-ba-arrow { color: var(--cv-faint); font-size: 22px; text-align: center; }
+@media (max-width: 640px) {
+  .cv-ba { grid-template-columns: 1fr; }
+  .cv-ba-arrow { transform: rotate(90deg); }
+}
+
 /* Monument stat row — 4 up, 2 up on narrow. */
 .cv-stats {
   display: grid;
@@ -315,6 +338,41 @@ function WalkingGooni() {
         @keyframes plazaCtaArmBack { 0%,100% { transform: rotate(-10deg); } 50% { transform: rotate(10deg); } }
       `}</style>
     </svg>
+  );
+}
+
+// The trading-log origin, shown: raw logger output on the left, the same data
+// parsed into a reviewable spreadsheet on the right. Stacks on narrow screens.
+function BeforeAfter() {
+  const cap: React.CSSProperties = {
+    fontFamily: MONO,
+    fontSize: 11,
+    letterSpacing: "0.16em",
+    textTransform: "uppercase",
+    color: "var(--cv-faint)",
+    marginBottom: 10,
+    display: "block",
+  };
+  return (
+    <div className="cv-ba">
+      <figure>
+        <span style={cap}>Before</span>
+        <img
+          src="/portfolio/logger.jpg"
+          alt="Raw trading-log output: dense market data, execution flags and reject reasons."
+          loading="lazy"
+        />
+      </figure>
+      <span aria-hidden className="cv-ba-arrow">→</span>
+      <figure>
+        <span style={cap}>After</span>
+        <img
+          src="/portfolio/logger-excel.webp"
+          alt="The same data parsed by a Python script into a clean, reviewable spreadsheet."
+          loading="lazy"
+        />
+      </figure>
+    </div>
   );
 }
 
@@ -611,17 +669,33 @@ function CvPage() {
           >
             {PROFILE.thesis}
           </p>
+
+          <Body style={{ marginTop: 22, maxWidth: 620 }}>{PROFILE.now}</Body>
         </header>
 
         <div style={{ marginBottom: 84 }}>
           <PlazaInvite />
         </div>
 
-        {/* ── now ────────────────────────────────────────────────── */}
+        {/* ── how I started ──────────────────────────────────────── */}
         <section style={{ marginBottom: 88 }}>
-          <SectionHead>Now</SectionHead>
-          <Body>{PROFILE.now}</Body>
-          <Body style={{ marginTop: 20, color: "var(--cv-muted)" }}>{PROFILE.origin}</Body>
+          <SectionHead>How I started</SectionHead>
+          {PROFILE.story.map((para, i) => (
+            <Body key={i} style={{ marginTop: i === 0 ? 0 : 18 }}>
+              {para}
+            </Body>
+          ))}
+          <BeforeAfter />
+        </section>
+
+        {/* ── what I'm looking for ───────────────────────────────── */}
+        <section style={{ marginBottom: 88 }}>
+          <SectionHead>What I'm looking for</SectionHead>
+          {PROFILE.looking.map((para, i) => (
+            <Body key={i} style={{ marginTop: i === 0 ? 0 : 18 }}>
+              {para}
+            </Body>
+          ))}
         </section>
 
         {/* ── monuments ──────────────────────────────────────────── */}

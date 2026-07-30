@@ -74,17 +74,30 @@ export const PROFILE = {
   location: "San Francisco, CA",
   // His line, not a generated one.
   thesis: "I build thoughtful software where product, systems, and user experience meet.",
-  // The origin story. Real, specific, and it predates every job here.
-  origin:
-    "My first real program automated my own busywork. I was spending thirty to sixty " +
-    "minutes a day hand-processing trading logs, so I wrote a Python script that did it in " +
-    "under a minute. Most of what I've built since has started the same way: I notice " +
-    "something repetitive, then I get rid of it.",
+  // The current line + the longer story below are HIS verbatim prose (from
+  // danis-website). Kept exactly, em dashes and all: it's his voice, not slop.
   now:
-    "At Atlassian I work on Rovo, the enterprise search and AI chat product. Lately I " +
-    "started an AI platform service there from scratch, and I own a handful of the growth " +
-    "and third-party connector surfaces. On the side I'm building Gooni, an ambient " +
-    "assistant that has taught me more about deleting code than writing it.",
+    "Currently working on Rovo across search, chat, and its Chrome extension — with a focus " +
+    "on performance-sensitive, state-heavy user flows.",
+  // "How I started" — the trading-log origin, in his words. One entry per paragraph.
+  story: [
+    "I started coding early, mostly by building small tools and games. What really pulled " +
+      "me in was using code to deal with messy, real-world problems.",
+    "A relative I worked with was in high-frequency trading and had a lot of manual work " +
+      "around daily log files. The logs were huge — market data plus a bunch of execution " +
+      "flags, reject reasons, and other indicators.",
+    "My job was to sift through that output, pull out the relevant events, and paste them " +
+      "into a spreadsheet so they could be reviewed. After a while I realized there was a " +
+      "pattern, learned Python, and automated the parsing — turning 30–60 minutes of " +
+      "repetitive work into scripts that ran in under a minute.",
+  ] as string[],
+  // "What I'm looking for" — his words, verbatim.
+  looking: [
+    "I'm drawn to small, product-driven teams where engineers own problems end to end and " +
+      "grow alongside the system.",
+    "I want to be challenged. I want something I can bet on and pour a lot of energy into. I " +
+      "want to work with cracked people, learn from them, and let that push me forward.",
+  ] as string[],
   links: [
     { label: "Email", href: "mailto:danielfgunawan1@gmail.com" },
     { label: "LinkedIn", href: "https://www.linkedin.com/in/danielfgunawan/" },
