@@ -195,3 +195,33 @@ export function playFallOff() {
   osc.start(t);
   osc.stop(t + 0.78);
 }
+
+// Long cartoon "aaAaAa" falling scream — a saw tone sweeping down over ~1.2s
+// with a vibrato wobble. Synthesized (no external asset; the Roblox "oof" is
+// copyrighted). Fired when the character freefalls into the hole / off the
+// edge of the walk.
+export function playFall() {
+  if (muted) return;
+  const c = ensureCtx();
+  if (!c || c.state === "suspended") return;
+  const t = c.currentTime;
+  const osc = c.createOscillator();
+  const g = c.createGain();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(760, t);
+  osc.frequency.exponentialRampToValueAtTime(90, t + 1.15);
+  // Vibrato → the wobbling "aaAaAa".
+  const vib = c.createOscillator();
+  const vibGain = c.createGain();
+  vib.frequency.value = 12;
+  vibGain.gain.value = 45;
+  vib.connect(vibGain).connect(osc.frequency);
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(0.11, t + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 1.25);
+  osc.connect(g).connect(c.destination);
+  osc.start(t);
+  osc.stop(t + 1.3);
+  vib.start(t);
+  vib.stop(t + 1.3);
+}

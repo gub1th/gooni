@@ -2,10 +2,10 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-// Soft procedural cloud puffs drifting BELOW the sky island. Each
-// "cloud" is a cluster of overlapping translucent spheres — reads as
-// fluffy Paper-Mario-style cumulus rather than the boulder-shaped
-// Quaternius cloud GLTFs. Visible when looking over the island edge.
+// Procedural cloud puffs drifting BELOW the sky island. Each "cloud" is a
+// cluster of overlapping LOW-POLY icosahedra (flat-shaded, faceted) so they
+// match the faceted pedestal/poster clouds instead of reading as a separate
+// smooth-sphere family. Visible when looking over the island edge.
 
 const COUNT = 7;
 const PUFFS_PER_CLOUD = 8;
@@ -63,7 +63,7 @@ export function Clouds() {
     if (!mesh) return;
     puffs.forEach((p, i) => {
       dummy.position.set(p.cx + p.ox, p.cy + p.oy, p.cz + p.oz);
-      dummy.scale.setScalar(p.scale);
+      dummy.scale.set(p.scale, p.scale * 0.6, p.scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
     });
@@ -78,7 +78,7 @@ export function Clouds() {
       p.cz += DRIFT_SPEED * dt;
       if (p.cz > FIELD_RADIUS) p.cz -= FIELD_RADIUS * 2;
       dummy.position.set(p.cx + p.ox, p.cy + p.oy, p.cz + p.oz);
-      dummy.scale.setScalar(p.scale);
+      dummy.scale.set(p.scale, p.scale * 0.6, p.scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
     });
@@ -87,11 +87,15 @@ export function Clouds() {
 
   return (
     <instancedMesh ref={meshRef} args={[undefined, undefined, TOTAL]} castShadow={false}>
-      <sphereGeometry args={[1, 12, 10]} />
-      <meshBasicMaterial
+      <icosahedronGeometry args={[1, 0]} />
+      <meshStandardMaterial
         color="#ffffff"
+        flatShading
+        roughness={1}
+        emissive="#eef2f6"
+        emissiveIntensity={0.45}
         transparent
-        opacity={0.92}
+        opacity={0.95}
         depthWrite={false}
         fog={false}
       />

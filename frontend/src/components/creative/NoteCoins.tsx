@@ -204,6 +204,14 @@ export function NoteCoins({ onSelect }: Props) {
         const isNear =
           playerGrid !== null &&
           Math.abs(playerGrid.gx - tile.gx) + Math.abs(playerGrid.gz - tile.gz) <= PROXIMITY_TILES;
+        // Fade coins WAY down near the player — they crowd the close-up and
+        // the peek card already shows the content. On the tile → nearly
+        // invisible, one tile away → faint, else full.
+        const dist =
+          playerGrid !== null
+            ? Math.abs(playerGrid.gx - tile.gx) + Math.abs(playerGrid.gz - tile.gz)
+            : 99;
+        const fadeTarget = dist === 0 ? 0.06 : dist === 1 ? 0.3 : 1;
         return (
           <NoteCoin
             key={note.id}
@@ -211,6 +219,7 @@ export function NoteCoins({ onSelect }: Props) {
             tile={tile}
             isRead={isRead}
             isNear={isNear}
+            fadeTarget={fadeTarget}
             onSelect={onSelect}
           />
         );

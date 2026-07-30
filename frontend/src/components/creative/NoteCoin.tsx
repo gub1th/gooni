@@ -55,22 +55,75 @@ const READ_COIN_COLOR = "#D7D2CA";
 const READ_COIN_EMISSIVE = "#9C9A93";
 const READ_BEAM_COLOR = "#CFCBC3";
 
+// A little page-with-lines glyph stamped on the coin faces so it reads as
+// a NOTE, not a blank chip. Drawn once to a canvas, shared across every
+// coin (module-level singleton — one texture, not one per coin).
+let _noteIcon: THREE.CanvasTexture | null | undefined;
+function noteIconTexture(): THREE.CanvasTexture | null {
+  if (_noteIcon !== undefined) return _noteIcon;
+  const s = 128;
+  const c = document.createElement("canvas");
+  c.width = s;
+  c.height = s;
+  const g = c.getContext("2d");
+  if (!g) {
+    _noteIcon = null;
+    return null;
+  }
+  // Just a few soft ruled lines — "writing on the note" — instead of a
+  // hard dark page icon. Tonal + semi-transparent, so it reads as text on
+  // the coin's OWN paper colour (cream / violet / grey) rather than a
+  // pasted-on glyph.
+  g.strokeStyle = "rgba(58,46,30,0.4)";
+  g.lineCap = "round";
+  g.lineWidth = 8;
+  const lx = 42;
+  const rx = s - 42;
+  const rows = [50, 72, 94];
+  rows.forEach((ly, i) => {
+    g.beginPath();
+    g.moveTo(lx, ly);
+    g.lineTo(i === rows.length - 1 ? rx - 24 : rx, ly); // last line runs short
+    g.stroke();
+  });
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  _noteIcon = t;
+  return t;
+}
+
 type Props = {
   note: PublicNote;
   tile: BaseTile;
   isRead: boolean;
   isNear: boolean;
+  /** Target opacity multiplier (1 = full, low = faded near the player). */
+  fadeTarget: number;
   onSelect: (note: PublicNote, worldPos: THREE.Vector3) => void;
 };
 
-export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
+export function NoteCoin({ note, tile, isRead, isNear, fadeTarget, onSelect }: Props) {
   const spinnerRef = useRef<THREE.Group>(null);
   const beamRef = useRef<THREE.Mesh>(null);
+  const coinMatRef = useRef<THREE.MeshToonMaterial>(null);
+  const fadeRef = useRef(1); // eased opacity multiplier, → low when on-tile
   const [tileAlive, setTileAlive] = useState(true);
   const [hovered, setHovered] = useState(false);
   const reduceMotion = useReducedMotion();
 
   const toonGradient = useMemo(() => getToonGradient(), []);
+  const noteIcon = useMemo(() => noteIconTexture(), []);
+  const ICON_SIZE = COIN_RADIUS * 1.5;
+  // One shared material for both coin faces so a single opacity write fades
+  // the glyph in step with the coin body.
+  const iconMat = useMemo(
+    () =>
+      noteIcon
+        ? new THREE.MeshBasicMaterial({ map: noteIcon, transparent: true, depthWrite: false, toneMapped: false })
+        : null,
+    [noteIcon],
+  );
 
   const isPinned = Boolean(note.is_public_pinned);
 
@@ -118,12 +171,18 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
     const now = performance.now() / 1000;
     const bob = bobAmp === 0 ? 0 : Math.sin(now * BOB_FREQ + tile.gx + tile.gz) * bobAmp;
     spinner.position.y = COIN_BASE_Y + bob;
+    // Ease toward the target fade — coin, glyph + beam all dim together so
+    // the coin gets out of the way near the player / its own peek card.
+    fadeRef.current += (fadeTarget - fadeRef.current) * Math.min(1, dt * 8);
+    const fade = fadeRef.current;
+    if (coinMatRef.current) coinMatRef.current.opacity = COIN_OPACITY * fade;
+    if (iconMat) iconMat.opacity = fade;
     if (beam) {
       const mat = beam.material as THREE.MeshBasicMaterial;
       const pulse = reduceMotion
         ? beamOpacityBase + beamOpacityBoost
         : beamOpacityBase + beamOpacityBoost + 0.08 * (0.5 + 0.5 * Math.sin(now * BOB_FREQ + tile.gx));
-      mat.opacity = pulse;
+      mat.opacity = pulse * fade;
     }
   });
 
@@ -176,6 +235,7 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
         >
           <cylinderGeometry args={[COIN_RADIUS, COIN_RADIUS, COIN_THICKNESS, 32]} />
           <meshToonMaterial
+            ref={coinMatRef}
             color={coinColor}
             emissive={coinEmissive}
             emissiveIntensity={activeEmissive}
@@ -184,6 +244,21 @@ export function NoteCoin({ note, tile, isRead, isNear, onSelect }: Props) {
             opacity={COIN_OPACITY}
             depthWrite={false}
           />
+          {/* Note glyph on both faces (the cylinder axis is local Y after
+              the tilt, so the faces sit at ±Y). Shared material → fades with
+              the coin. */}
+          {iconMat && (
+            <>
+              <mesh position={[0, COIN_THICKNESS / 2 + 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2}>
+                <planeGeometry args={[ICON_SIZE, ICON_SIZE]} />
+                <primitive object={iconMat} attach="material" />
+              </mesh>
+              <mesh position={[0, -COIN_THICKNESS / 2 - 0.002, 0]} rotation={[Math.PI / 2, 0, 0]} renderOrder={2}>
+                <planeGeometry args={[ICON_SIZE, ICON_SIZE]} />
+                <primitive object={iconMat} attach="material" />
+              </mesh>
+            </>
+          )}
         </mesh>
       </group>
 

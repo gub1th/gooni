@@ -106,6 +106,19 @@ export function setControlsEnabled(on: boolean) {
   }
 }
 
+// Programmatic one-shot hop, no keypress. Used for the scripted intro
+// auto-hop that carries the freshly-stood-up character the one tile up
+// to the lip of the hole, so the close-up frames itself without the
+// player having to find the arrow keys first. Uses the same fixed-world
+// snap as the keyboard, so it moves in the same direction a real press
+// would. Bypasses `input.enabled` on purpose — it's the scene driving,
+// not the user — but the avatar still only consumes it once it's idle
+// and controllable, so it can't fire mid-get-up.
+export function queueHop(dir: Direction) {
+  input.queued = dir;
+  input.queuedSnap = FIXED_SNAP;
+}
+
 export type QueuedHop = { dir: Direction; snap: Snap };
 
 export function consumeQueuedHop(): QueuedHop | null {

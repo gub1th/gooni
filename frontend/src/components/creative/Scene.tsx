@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { AdaptiveDpr, AdaptiveEvents, OrbitControls, useProgress } from "@react-three/drei";
 import * as THREE from "three";
@@ -27,12 +27,13 @@ import { PerfSampler, type PerfMetrics } from "./PerfSampler";
 import { Particles } from "./Particles";
 import { TreeFader } from "./TreeFader";
 import {
+  queueHop,
   setCameraForward,
   setControlsEnabled,
   subscribeLandings,
   useDanielKeyboard,
 } from "./useDanielControls";
-import { setSfxMuted } from "./sfx";
+import { setSfxMuted, playFall } from "./sfx";
 import { fireVfx } from "./vfx";
 import { useCountryFlag } from "./useCountryFlag";
 import type { PublicNote } from "../../services/api";
@@ -276,7 +277,12 @@ export function Scene() {
   const [entered, setEntered] = useState(false);
   const [swoopLanded, setSwoopLanded] = useState(false);
   const [introDone, setIntroDone] = useState(false);
-  const [overlayMounted, setOverlayMounted] = useState(true);
+  const [overlayMounted, setOverlayMounted] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+  // The scripted auto-jump + camera pan into the close-up. While it runs the
+  // player can't steer (it's ~1.5s). It only starts once the welcome modal
+  // is closed via ↑ / the X / clicking out — NOT on a sideways key.
+  const [autoJumping, setAutoJumping] = useState(false);
   const [muted, setMuted] = useState(false);
   const [perfOpen, setPerfOpen] = useState(true);
   const [perf, setPerf] = useState<PerfMetrics>({ fps: 0, ms: 0, draws: 0, tris: 0 });
@@ -291,8 +297,48 @@ export function Scene() {
   useDanielKeyboard();
 
   useEffect(() => {
-    setControlsEnabled(introDone && !selectedNote);
-  }, [introDone, selectedNote]);
+    // Steering is off while the welcome modal is up AND during the scripted
+    // auto-jump pan — the character only obeys the player once both clear.
+    setControlsEnabled(introDone && !selectedNote && !showWelcome && !autoJumping);
+  }, [introDone, selectedNote, showWelcome, autoJumping]);
+
+  // Scripted intro auto-hop. The character spawns two tiles back from the
+  // hole and stands up there — that beat is the scene-setter. Then, a
+  // moment later, it hops itself one tile forward onto the lip, which
+  // trips `nearPortal` and frames the close-up (ApproachCamera + the
+  // "Jump in?" prompt) without the player having to find the arrow keys
+  // first. The avatar only consumes the queued hop once it's idle and
+  // controllable, so this can't fire mid-get-up. introDone latches
+  // true once, so the timer runs exactly once.
+  // Welcome modal pops once the intro settles — it carries the greeting +
+  // controls + the choice of paths. Nothing auto-moves until it closes.
+  useEffect(() => {
+    if (introDone) setShowWelcome(true);
+  }, [introDone]);
+
+  // How the modal was closed decides what happens next:
+  //   ↑ / X / click-out → scripted auto-jump forward into the close-up
+  //   ↓ / ← / →         → just move that way, normally
+  const handleWelcomeClose = (key?: string) => {
+    setShowWelcome(false);
+    if (!key || key === "ArrowUp") {
+      // Forward. Lock steering, then fire the hop AFTER a half-second beat.
+      // The delay is deliberate (a breath before it moves) AND load-bearing:
+      // flipping autoJumping calls setControlsEnabled(false), which CLEARS
+      // the input queue — firing queueHop immediately got wiped, so the
+      // auto-jump never happened. Queue it after that clear instead.
+      setAutoJumping(true);
+      // Near-immediate. The tiny delay only clears the input queue after
+      // setControlsEnabled(false) runs (a 0 would race it); it reads as instant.
+      window.setTimeout(() => {
+        queueHop("up");
+        window.setTimeout(() => setAutoJumping(false), 1400);
+      }, 60);
+    } else {
+      const dir = key === "ArrowDown" ? "down" : key === "ArrowLeft" ? "left" : "right";
+      queueHop(dir);
+    }
+  };
 
   useEffect(() => {
     setSfxMuted(muted);
@@ -345,6 +391,16 @@ export function Scene() {
     setTimeout(() => setOverlayMounted(false), 720);
   }
 
+  // No nickname/pause gate. Show the bird's-eye briefly, then drop in
+  // automatically with the default identity — the user's nametag is hidden
+  // anyway, so there's nothing to collect. (The StartOverlay component is
+  // kept for reference but no longer mounted.)
+  useEffect(() => {
+    const t = window.setTimeout(() => handleEnter(DEFAULT_PLAYER_NAME, DEFAULT_PLAYER_COLOR), 1300);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // One tile away, orthogonally. Diagonals are excluded on purpose:
   // from a diagonal you can't hop straight in, so promising "jump in"
   // there would be a lie.
@@ -355,7 +411,8 @@ export function Scene() {
 
   // The scripted camera takes the wheel on approach, so the free
   // director has to stand down or the two fight frame by frame.
-  const orbitEnabled = introDone && !selectedNote && !nearPortal && !dropping;
+  const orbitEnabled =
+    introDone && !selectedNote && !nearPortal && !dropping && !showWelcome && !autoJumping;
   // Char mounts only AFTER the camera reaches impact pose (swoopLanded).
   // Before that, the player sees an empty plaza while the camera drops
   // in — so the get-up isn't visible mid-camera-spin. Spec Phase 4:
@@ -401,7 +458,7 @@ export function Scene() {
             onIntroComplete={() => setIntroDone(true)}
             name={playerName}
             bodyColor={playerColor}
-            showNametag={introDone}
+            showNametag={false}
             flag={countryFlag}
           />
         )}
@@ -409,7 +466,7 @@ export function Scene() {
           startGx={3}
           startGz={-2}
           name="goonie"
-          showNametag={entered}
+          showNametag={false}
           bodyColor="#5aa6ff"
           accentColor="#3d7fcc"
           initialDelayMs={600}
@@ -422,7 +479,7 @@ export function Scene() {
         {entered && (
           <Portal armed={!dropping} near={nearPortal} onEnter={() => setDropping(true)} />
         )}
-        <ApproachCamera active={nearPortal} danielRef={danielRef} />
+        <ApproachCamera active={nearPortal} />
         <DropCamera
           active={dropping}
           onDone={() => navigate({ to: "/walk" })}
@@ -494,7 +551,9 @@ export function Scene() {
           the hole, the way an era-appropriate game puts the instruction
           in a box at the bottom of the screen rather than floating it
           in world space. */}
-      {nearPortal && <PromptBox />}
+      <PromptBox visible={nearPortal} />
+
+      {showWelcome && <WelcomeModal onClose={handleWelcomeClose} />}
 
       {/* The fade. Deliberately late and fast: the jump plays, the beat
           holds, THEN the screen goes dark — that ordering is what makes
@@ -506,7 +565,9 @@ export function Scene() {
           inset: 0,
           background: "#05070A",
           opacity: dropping ? 1 : 0,
-          transition: "opacity 420ms linear 780ms",
+          // Eases in under the dive so the last of the light fades as the
+          // camera reaches the bottom of the shaft — finishes, not cuts.
+          transition: "opacity 600ms ease 600ms",
           pointerEvents: "none",
           zIndex: 40,
         }}
@@ -595,8 +656,8 @@ function ShortVersionLink({ visible }: { visible: boolean }) {
       >
         <NotebookIcon />
       </span>
-      <span>the short version</span>
-      <span style={{ fontSize: 14, lineHeight: 1, marginLeft: 1, color: "#555" }}>→</span>
+      <span>view cv</span>
+      <span style={{ fontSize: 14, lineHeight: 1, marginLeft: 1, color: "#555" }}>↗</span>
     </a>
   );
 }
@@ -1063,25 +1124,25 @@ function NavHint() {
 }
 
 
-// The drop, as a cutscene rather than a camera move.
+// The drop — a smooth DIVE into the hole. The static "hold, then black"
+// read goofy: the shaft looked like a lone black pillar and the character
+// just sat visible on it. Instead the camera plunges toward + down INTO
+// the opening, tilting to follow the sinking character down the shaft, so
+// the frame naturally fills with the shaft's darkness. The veil only
+// finishes the fade.
 //
-// Daniel's note: the retro games didn't fly the camera anywhere. The
-// character acts, everything holds for a beat, the screen goes black,
-// and you're somewhere else. A dive would read as modern — and modern
-// is the thing this whole sequence is trying not to be.
-//
-//   0–560ms   the hop plays out, camera holds where it was
-//   560–780ms the beat. Nothing moves. This is the whole trick.
-//   780–1200ms the veil takes the screen
+//   camera eases to just over the rim, look-point descends into the shaft
+//   → the character sinks ahead of it → darkness → navigate.
 const DROP_MS = 1250;
 
 function DropCamera({ active, onDone }: { active: boolean; onDone: () => void }) {
   const start = useRef<number | null>(null);
   const held = useRef(new THREE.Vector3());
-  const target = useRef(new THREE.Vector3());
+  const heldFov = useRef(56);
   const fired = useRef(false);
 
   useFrame((state) => {
+    const cam = state.camera as THREE.PerspectiveCamera;
     if (!active) {
       start.current = null;
       fired.current = false;
@@ -1089,18 +1150,21 @@ function DropCamera({ active, onDone }: { active: boolean; onDone: () => void })
     }
     if (start.current === null) {
       start.current = performance.now();
-      held.current.copy(state.camera.position);
-      target.current.set(0, 0.4, -4); // the hole, in world units
-      // Take the wheel so OrbitControls/CameraDirector can't fight the
-      // hold frame by frame.
+      held.current.copy(cam.position);
+      heldFov.current = cam.fov;
+      // Take the wheel so OrbitControls/CameraDirector can't fight it.
       setControlsEnabled(false);
+      playFall();
     }
     const t = Math.min(1, (performance.now() - start.current) / DROP_MS);
-    // A very small push in — enough to feel intent, not enough to read
-    // as a camera move.
-    const push = Math.min(1, t / 0.45) * 0.12;
-    state.camera.position.lerpVectors(held.current, target.current, push);
-    state.camera.lookAt(target.current.x, 0.2, target.current.z);
+    const e = t * t; // accelerate, like gravity
+    // FREEFALL: the frame falls, not a sprite down a box. The camera plunges
+    // straight down over the hole while the FOV widens, so the shaft walls
+    // rush up past you — reads as falling, not as staring into a black box.
+    cam.position.set(0, held.current.y - 16 * e, -4 + (held.current.z + 4) * (1 - e));
+    cam.lookAt(0, held.current.y - 16 * e - 4, -4);
+    cam.fov = heldFov.current + 26 * e;
+    cam.updateProjectionMatrix();
     if (t >= 1 && !fired.current) {
       fired.current = true;
       onDone();
@@ -1110,56 +1174,32 @@ function DropCamera({ active, onDone }: { active: boolean; onDone: () => void })
   return null;
 }
 
-// Scripted framing on approach: close, low, over the character's left
-// shoulder, with the sign filling a good part of frame. Engages when
-// the player steps next to the hole and lets go the instant they move
-// away — walking off returns them to the free camera, so the framing is
-// an offer rather than a trap.
-function ApproachCamera({
-  active,
-  danielRef,
-}: {
-  active: boolean;
-  danielRef: React.MutableRefObject<DanielHandle | null>;
-}) {
+// Scripted framing on approach. Uses a FIXED close-up pose (the char sits at
+// (0,-1) → world (0,·,-2), hole at (0,-2) → world (0,·,-4)), NOT the live
+// character position — following the character coupled the camera to its
+// hop/settle bob, which read as jitter + "the jump moves the camera up".
+const APPROACH_POS = new THREE.Vector3(-2.6, 2.6, 0.7);
+const APPROACH_LOOK = new THREE.Vector3(0.6, 1.1, -3.6);
+function ApproachCamera({ active }: { active: boolean }) {
   const look = useRef(new THREE.Vector3());
   const inited = useRef(false);
-  const pos = useRef(new THREE.Vector3());
+  const fwd = useRef(new THREE.Vector3());
 
   useFrame((state, rawDt) => {
     if (!active) {
       inited.current = false;
       return;
     }
-    const d = danielRef.current;
-    if (!d?.group) return;
     const dt = Math.min(rawDt, 0.05);
-    d.group.getWorldPosition(pos.current);
-
-    // Up and back off the character's back-left. Tight enough that the
-    // sign reads at full size instead of being a distant prop.
-    const desired = new THREE.Vector3(
-      pos.current.x - 1.9,
-      pos.current.y + 2.0,
-      pos.current.z + 3.4,
-    );
     if (!inited.current) {
       inited.current = true;
-      // Ease in from wherever the free camera left off rather than
-      // cutting — a hard cut here would feel like a bug.
-      state.camera.position.lerp(desired, 0.12);
-      look.current.copy(pos.current);
+      // Ease the look from wherever the camera currently points, so the pan
+      // glides instead of snapping.
+      state.camera.getWorldDirection(fwd.current);
+      look.current.copy(state.camera.position).addScaledVector(fwd.current, 4);
     }
-    state.camera.position.lerp(desired, Math.min(1, dt * 3.2));
-
-    // Look between the character and the sign, biased toward the sign
-    // so the instruction is what the shot is actually about. Y lifted so
-    // the raised board frames without being top-cut, while the hole still
-    // sits in the lower third.
-    look.current.lerp(
-      new THREE.Vector3(pos.current.x + 1.0, pos.current.y + 1.5, pos.current.z - 1.8),
-      Math.min(1, dt * 3.2),
-    );
+    state.camera.position.lerp(APPROACH_POS, Math.min(1, dt * 2.2));
+    look.current.lerp(APPROACH_LOOK, Math.min(1, dt * 2.2));
     state.camera.lookAt(look.current);
   });
 
@@ -1167,44 +1207,228 @@ function ApproachCamera({
 }
 
 // Bottom-of-screen instruction box.
-function PromptBox() {
+const PIXEL_FONT = "'Press Start 2P', ui-monospace, monospace";
+
+// Little key-cap glyphs (arrows aren't in Press Start 2P, so these render in
+// a system font inside a cap).
+function KeyCap({ ch }: { ch: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        fontFamily: "system-ui, sans-serif",
+        fontSize: 13,
+        lineHeight: 1,
+        background: "#fff",
+        border: "2px solid #2E2418",
+        borderRadius: 5,
+        padding: "2px 5px",
+        margin: "0 2px",
+        color: "#2E7D57",
+      }}
+    >
+      {ch}
+    </span>
+  );
+}
+
+// The landing greeting + wayfinding, as a paper modal (no black border). It
+// HOLDS everything — nothing auto-moves until it closes. How it closes drives
+// what happens next (↑/X/click-out → forward jump; ↓←→ → move that way),
+// handled by the parent's onClose.
+function WelcomeModal({ onClose }: { onClose: (key?: string) => void }) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const r = requestAnimationFrame(() => setShown(true)); // fade IN
+    return () => cancelAnimationFrame(r);
+  }, []);
+  // Fade OUT, then hand off to the parent (which starts the jump after its
+  // own short beat).
+  const close = useCallback(
+    (key?: string) => {
+      setShown(false);
+      window.setTimeout(() => onClose(key), 170);
+    },
+    [onClose],
+  );
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+        close(e.key);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={() => close()}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(20,16,10,0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 60,
+        padding: 20,
+        opacity: shown ? 1 : 0,
+        transition: "opacity 200ms ease",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: "relative",
+          width: "min(470px, 100%)",
+          background: "#FBF4E2",
+          borderRadius: 16,
+          padding: "34px 30px 28px",
+          boxShadow: "0 22px 60px rgba(0,0,0,0.35)",
+          fontFamily: PIXEL_FONT,
+          color: "#2E2418",
+          textAlign: "center",
+          opacity: shown ? 1 : 0,
+          transform: shown ? "scale(1)" : "scale(0.95)",
+          transition: "opacity 200ms ease, transform 200ms cubic-bezier(0.2,0.8,0.3,1)",
+        }}
+      >
+        <button
+          onClick={() => close()}
+          aria-label="Close"
+          style={{
+            position: "absolute",
+            top: 10,
+            right: 12,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            fontFamily: "system-ui, sans-serif",
+            fontSize: 22,
+            lineHeight: 1,
+            color: "#6B4E2E",
+          }}
+        >
+          ×
+        </button>
+
+        <div style={{ fontSize: 15, color: "#2E7D57", lineHeight: 1.7, marginBottom: 22 }}>
+          WELCOME TO
+          <br />
+          GOONI&apos;S PLAZA
+        </div>
+
+        <div style={{ fontSize: 10, lineHeight: 2, color: "#3a3226" }}>
+          MOVE WITH
+          <div style={{ marginTop: 10 }}>
+            <KeyCap ch="↑" />
+            <KeyCap ch="↓" />
+            <KeyCap ch="←" />
+            <KeyCap ch="→" />
+          </div>
+        </div>
+
+        {/* Primary CTA — the interactive path. Closing forward runs the
+            scripted auto-jump (same as ↑ / X / click-out). */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            close();
+          }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            marginTop: 28,
+            fontFamily: PIXEL_FONT,
+            fontSize: 11,
+            color: "#FBF4E2",
+            background: "#2E7D57",
+            padding: "15px 22px",
+            border: "none",
+            borderRadius: 10,
+            cursor: "pointer",
+            lineHeight: 1.4,
+            boxShadow: "0 6px 16px rgba(46,125,87,0.35)",
+          }}
+        >
+          JUMP FORWARD <KeyCap ch="↑" /> TO EXPLORE
+        </button>
+
+        {/* Secondary — clearly a link. */}
+        <div style={{ marginTop: 18 }}>
+          <a
+            href="/public/cv"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              fontFamily: PIXEL_FONT,
+              fontSize: 9,
+              color: "#6B4E2E",
+              textDecoration: "underline",
+              textUnderlineOffset: 4,
+              cursor: "pointer",
+            }}
+          >
+            or view cv
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PromptBox({ visible }: { visible: boolean }) {
   return (
     <div
       style={{
         position: "fixed",
         left: "50%",
         bottom: 34,
-        transform: "translateX(-50%)",
+        transform: `translateX(-50%) translateY(${visible ? 0 : 16}px)`,
         zIndex: 30,
         width: "min(600px, calc(100vw - 40px))",
-        // Thick double border + hard shadow: the era's dialogue boxes
-        // were drawn, not blurred. No backdrop-filter anywhere here on
-        // purpose — frosted glass is the tell of a modern UI.
-        background: "#FBF4E2",
-        border: "4px solid #2E2418",
-        boxShadow: "0 0 0 4px #FBF4E2, 0 6px 0 4px #2E2418",
-        borderRadius: 6,
-        padding: "16px 20px",
-        fontFamily: DISPLAY,
-        fontSize: 19,
-        color: "#2E2418",
+        // Dark frosted card — matches the note-peek theme; keeps the pixel font.
+        background: "rgba(16,20,18,0.82)",
+        backdropFilter: "blur(20px) saturate(140%)",
+        WebkitBackdropFilter: "blur(20px) saturate(140%)",
+        border: "1px solid rgba(242,239,232,0.14)",
+        boxShadow: "0 18px 50px rgba(0,0,0,0.45)",
+        borderRadius: 16,
+        padding: "16px 22px",
+        fontFamily: PIXEL_FONT,
+        fontSize: 12,
+        color: "rgba(242,239,232,0.92)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
         gap: 16,
         letterSpacing: "0.01em",
+        opacity: visible ? 1 : 0,
+        pointerEvents: visible ? "auto" : "none",
+        transition: "opacity 260ms ease, transform 260ms ease",
       }}
     >
-      <span>There's a hole here. Jump in?</span>
-      <span
-        aria-hidden
-        style={{
-          fontSize: 14,
-          color: "#6B4E2E",
-          animation: "gooniBlink 1s steps(2, start) infinite",
-        }}
-      >
-        ▼
+      {/* Single interactive CTA. The static-page route lives on the
+          persistent top-left switch, so it is NOT repeated here. */}
+      <span style={{ display: "inline-flex", alignItems: "center" }}>
+        Jump in to learn more
+        <span
+          aria-hidden
+          style={{
+            marginLeft: 12,
+            fontSize: 18,
+            lineHeight: 1,
+            color: "#4ADE80",
+            animation: "gooniBlink 0.85s steps(2, start) infinite",
+          }}
+        >
+          !
+        </span>
       </span>
       <style>{`@keyframes gooniBlink { 0%,100% { opacity: 1 } 50% { opacity: 0 } }`}</style>
     </div>
