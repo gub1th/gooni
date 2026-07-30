@@ -12,14 +12,28 @@ export type ScrollState = {
   station: number;
   /** Pixels/frame, smoothed — drives walk-vs-idle animation. */
   velocity: number;
+  /** Continuous station-space position of the reader: exactly `i` when
+   *  station `i`'s section is centred, interpolating between. Negative in
+   *  the hero, > last-index at the footer. This — not `progress` — is
+   *  what places the walker + camera, so a poster fixed at station `i`'s
+   *  Z is framed precisely when its card is the one being read. `progress`
+   *  (whole-document) never lined up with the per-section anchors, which
+   *  is why the framed poster used to lag the active card by a station. */
+  walkPos: number;
+  /** Set once the reader over-scrolls past the end: the walker drops off
+   *  the edge of the world and the page loops back to the plaza, mirroring
+   *  the plaza's jump-in. The 3D Walker reads this to play the fall. */
+  falling: boolean;
 };
 
-const state: ScrollState = { progress: 0, station: 0, velocity: 0 };
+const state: ScrollState = { progress: 0, station: 0, velocity: 0, walkPos: 0, falling: false };
 
 export function setScroll(next: Partial<ScrollState>) {
   if (next.progress !== undefined) state.progress = next.progress;
   if (next.station !== undefined) state.station = next.station;
   if (next.velocity !== undefined) state.velocity = next.velocity;
+  if (next.walkPos !== undefined) state.walkPos = next.walkPos;
+  if (next.falling !== undefined) state.falling = next.falling;
 }
 
 export function getScroll(): ScrollState {

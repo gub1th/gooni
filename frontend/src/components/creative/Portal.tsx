@@ -24,7 +24,7 @@ const toon = getToonGradient();
 
 const TILE = 2.0;
 const HOLE = TILE * 0.99;   // hole spans the missing tile exactly
-const DEPTH = 7;
+const DEPTH = 12;           // deep enough that the sinking char recedes into black
 
 type Props = {
   /** Fires when the player lands on the hole. */
@@ -42,7 +42,6 @@ export function Portal({ onEnter, armed, near = false }: Props) {
   const reduce = useReducedMotion();
   const [hot, setHot] = useState(false);
 
-  const ringsRef = useRef<THREE.Group>(null);
   const boardRef = useRef<THREE.Group>(null);
   const armedRef = useRef(armed);
   useEffect(() => {
@@ -61,21 +60,6 @@ export function Portal({ onEnter, armed, near = false }: Props) {
   useFrame(() => {
     if (reduce) return;
     const now = performance.now();
-    const g = ringsRef.current;
-    if (g) {
-      // ONE slow ring drifting down and fading — a single calm pulse that
-      // says "down" without the old three-ring strobe. Long period + low
-      // opacity so it reads as a breath, not a flicker.
-      const m = g.children[0] as THREE.Mesh | undefined;
-      if (m) {
-        const t = (now / 4200) % 1;
-        m.position.y = -0.2 - t * (DEPTH - 2.2);
-        const mat = m.material as THREE.MeshBasicMaterial;
-        mat.opacity = Math.sin(t * Math.PI) * 0.2;
-        const s = 1 - t * 0.22;
-        m.scale.set(s, 1, s);
-      }
-    }
     if (boardRef.current) {
       // Barely-there sway on the board — enough that it isn't dead still,
       // slow enough that it never competes with the hole for attention.
@@ -85,16 +69,13 @@ export function Portal({ onEnter, armed, near = false }: Props) {
 
   return (
     <group position={[x, 0, z]}>
-      {/* Shaft — a box seen from the inside. */}
+      {/* Shaft — a box seen from the inside, unlit + fog-exempt. No separate
+          bottom plane: it used to sit 0.02 above the box's own bottom face
+          and the two z-fought pixel-by-pixel (the "constant flashing"). The
+          box's back bottom face already bottoms it out in black. */}
       <mesh position={[0, -DEPTH / 2, 0]}>
         <boxGeometry args={[HOLE, DEPTH, HOLE]} />
-        <meshBasicMaterial color="#0A0C10" side={THREE.BackSide} />
-      </mesh>
-      {/* Bottom, unlit, so the shaft bottoms out in black rather than
-          showing a floor. */}
-      <mesh position={[0, -DEPTH + 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[HOLE, HOLE]} />
-        <meshBasicMaterial color="#04060A" />
+        <meshBasicMaterial color="#07090D" side={THREE.BackSide} fog={false} />
       </mesh>
 
       {/* Cut edge — four short walls at the lip so the floor has real
@@ -114,13 +95,6 @@ export function Portal({ onEnter, armed, near = false }: Props) {
         </mesh>
       ))}
 
-      <group ref={ringsRef}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[HOLE * 0.34, HOLE * 0.44, 4]} />
-          <meshBasicMaterial color="#8FE9BE" transparent opacity={0.2} depthWrite={false} />
-        </mesh>
-      </group>
-
       <Signpost boardRef={boardRef} lit={hot || near} />
     </group>
   );
@@ -128,10 +102,23 @@ export function Portal({ onEnter, armed, near = false }: Props) {
 
 // ── the sign ────────────────────────────────────────────────────────
 
-/** Painted board, drawn to a canvas. Text as geometry would need a font
- *  asset and text as separate meshes can't say a word — a texture is
- *  the only way to get real lettering with no dependency. */
+/** Painted board — just the branding now ("WELCOME TO GOONI"). The controls
+ *  + the choices moved into the welcome MODAL; the board only sells the
+ *  place. Drawn to a canvas in the pixel font (Press Start 2P); re-draws
+ *  once the web font resolves so it isn't a monospace fallback. */
 function useSignTexture(): THREE.CanvasTexture | null {
+  const [fontReady, setFontReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    document.fonts
+      ?.load("32px 'Press Start 2P'")
+      .then(() => alive && setFontReady(true))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   return useMemo(() => {
     const w = 512;
     const h = 256;
@@ -141,36 +128,27 @@ function useSignTexture(): THREE.CanvasTexture | null {
     const g = c.getContext("2d");
     if (!g) return null;
 
-    g.fillStyle = "#F6E7C4";
+    g.fillStyle = "#FBF4E2";
     g.fillRect(0, 0, w, h);
-    // Inner border, the way a painted trail sign has a routed edge.
-    g.strokeStyle = "#6B4E2E";
-    g.lineWidth = 12;
-    g.strokeRect(16, 16, w - 32, h - 32);
 
     g.textAlign = "center";
     g.textBaseline = "middle";
-    // Fat outlined lettering — outline first, fill on top, which is how
-    // the era's sprite text got its readability at low resolution.
-    g.font = "bold 92px Georgia, 'Iowan Old Style', serif";
-    g.lineWidth = 14;
-    g.strokeStyle = "#3B2A16";
-    g.strokeText("JUMP IN", w / 2, h / 2 - 22);
+    const pixel = "'Press Start 2P', monospace";
+    // "WELCOME TO" small, "GOONI" big — pixel caps, forest green with a soft
+    // dark drop for a game-title read.
+    g.fillStyle = "#3B6B4A";
+    g.font = `20px ${pixel}`;
+    g.fillText("WELCOME TO", w / 2, 92);
     g.fillStyle = "#2E7D57";
-    g.fillText("JUMP IN", w / 2, h / 2 - 22);
-
-    g.font = "bold 34px Georgia, 'Iowan Old Style', serif";
-    g.lineWidth = 7;
-    g.strokeStyle = "#3B2A16";
-    g.strokeText("▼  the way down  ▼", w / 2, h / 2 + 58);
-    g.fillStyle = "#6B4E2E";
-    g.fillText("▼  the way down  ▼", w / 2, h / 2 + 58);
+    g.font = `52px ${pixel}`;
+    g.fillText("GOONI", w / 2, 158);
 
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = 4;
     return t;
-  }, []);
+    // fontReady in deps: redraw with the real pixel font once it loads.
+  }, [fontReady]);
 }
 
 function Signpost({
@@ -183,9 +161,10 @@ function Signpost({
   const tex = useSignTexture();
 
   // Stands on the near-right corner of the hole, angled back toward
-  // spawn so you read it head-on as you walk up.
+  // spawn so you read it head-on as you walk up. Scaled down — it teaches,
+  // it shouldn't be the biggest object on screen.
   return (
-    <group position={[1.75, 0, 1.5]} rotation={[0, -0.42, 0]}>
+    <group position={[1.75, 0, 1.5]} rotation={[0, -0.42, 0]} scale={0.66}>
       {/* Base stones, so the post is planted rather than stuck in. */}
       <mesh position={[0, 0.12, 0]} castShadow>
         <boxGeometry args={[0.56, 0.24, 0.56]} />

@@ -258,12 +258,19 @@ export function TileFloor() {
           }
         }
       }
-      if (!e.fellOff && e.from) {
+      if (!e.fellOff && e.from && !isPortalTile(e.gx, e.gz)) {
         // Spec: NO glow on the very first tile (no previous-tile context).
         // Daniel's get-up no longer fires a synthetic landing event so
         // this branch only triggers on real hops — keeping the guard
         // anyway so any future caller (e.g. respawn) can opt-out by
         // passing from=null.
+        //
+        // AND never on the portal tile: the highlight is a full-tile
+        // emissive plane + ring pulse drawn at y≈0, i.e. a lit square
+        // laid straight across the open hole. It read as a lid over the
+        // pit — "jumping onto the tile above the hole" — so the jump-in
+        // never looked like a fall. The char sinks into the shaft
+        // instead (DanielAvatar), and the mouth stays open.
         spawnRingPulseAt(e.world);
         spawnHighlightAt(e.gx, e.gz, e.world);
       }

@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { Volume2, VolumeX, Home, FileText, Footprints } from "lucide-react";
 import { STATIONS, type Station } from "../../content/walk";
 import { PROFILE } from "../../content/portfolio";
+import { AmbientAudio } from "../creative/AmbientAudio";
+import { setSfxMuted } from "../creative/sfx";
 import { setScroll } from "./scrollBus";
 import { WalkScene } from "./WalkScene";
 
@@ -35,6 +39,9 @@ function useWebGL(): boolean {
 
 export function WalkPage() {
   const webgl = useWebGL();
+  const navigate = useNavigate();
+  const [falling, setFalling] = useState(false);
+  const fallingRef = useRef(false);
   const [active, setActive] = useState(0);
   const sectionRefs = useRef<(HTMLElement | null)[]>([]);
   const heroRef = useRef<HTMLElement | null>(null);
@@ -75,6 +82,34 @@ export function WalkPage() {
         }
       });
       return idx;
+    }
+
+    // Continuous station-space position from the ACTUAL section geometry.
+    // The 3D walker rides this, not whole-document `progress`: anchors are
+    // [hero, st0..st4, footer], so anchor-index `k` maps to station-space
+    // `k - 1` (hero = -1, station i = i, footer = last). Interpolating
+    // between the two anchors the viewport centre sits between is what
+    // keeps a poster fixed at station i's Z framed exactly when card i is
+    // centred — the mapping raw `progress` never had.
+    function walkPos(): number {
+      const list = anchors();
+      const vdc = window.scrollY + window.innerHeight * 0.5;
+      const centers: number[] = [];
+      for (const el of list) {
+        if (!el) return 0; // not all mounted yet
+        const r = el.getBoundingClientRect();
+        centers.push(r.top + window.scrollY + r.height / 2);
+      }
+      const last = centers.length - 1;
+      if (vdc <= centers[0]) return -1;
+      if (vdc >= centers[last]) return last - 1;
+      for (let k = 0; k < last; k++) {
+        if (vdc >= centers[k] && vdc <= centers[k + 1]) {
+          const t = (vdc - centers[k]) / (centers[k + 1] - centers[k]);
+          return k + t - 1;
+        }
+      }
+      return last - 1;
     }
 
     // Ease onto the nearest station once scrolling settles — a firm,
@@ -128,7 +163,7 @@ export function WalkPage() {
       });
 
       navIndex.current = nearestAnchor();
-      setScroll({ progress, station: nearest, velocity: vel.current });
+      setScroll({ progress, station: nearest, velocity: vel.current, walkPos: walkPos() });
       setActive((cur) => (cur === nearest ? cur : nearest));
 
       // Hard-stop the walk once scrolling actually ends, then anchor.
@@ -162,6 +197,17 @@ export function WalkPage() {
     };
   }, []);
 
+  // Fall back to the plaza — shared by the over-scroll gesture AND pressing
+  // forward (↑) at the very end, so the arrow keys keep working at the edge.
+  const doFall = useCallback(() => {
+    if (fallingRef.current) return;
+    fallingRef.current = true;
+    setFalling(true);
+    setScroll({ falling: true });
+    // Let the drop + veil play, then hand off to the plaza.
+    window.setTimeout(() => navigate({ to: "/public" }), 1100);
+  }, [navigate]);
+
   // Keyboard navigation — arrow/page keys hop station to station (the
   // character walks the gap), the way the plaza was navigated. Scroll
   // still works; this is additive. Focus inside a scrollable card or a
@@ -170,6 +216,13 @@ export function WalkPage() {
     const prefersReduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     function hop(target: number) {
       const list = [heroRef.current, ...sectionRefs.current, footerRef.current];
+      // Forward from the LAST STATION = walk off the edge → fall to plaza.
+      // `>=` (not `>`) so ↑ at the edge falls in ONE press instead of first
+      // stopping on the footer; the footer stays reachable by scroll.
+      if (target >= list.length - 1) {
+        doFall();
+        return;
+      }
       const clamped = Math.max(0, Math.min(list.length - 1, target));
       const el = list[clamped];
       if (!el) return;
@@ -187,12 +240,16 @@ export function WalkPage() {
       const t = e.target as HTMLElement | null;
       if (t && t.closest(".walk-col, input, textarea, [contenteditable='true']")) return;
       switch (e.key) {
-        case "ArrowDown":
+        // Up = forward. The walk's metaphor is "press forward to advance"
+        // (W/↑), not "scroll the document down" — so ↑ walks deeper and ↓
+        // steps back. PageDown/PageUp stay conventional for readers who
+        // expect page paging.
+        case "ArrowUp":
         case "PageDown":
           e.preventDefault();
           hop(navIndex.current + 1);
           break;
-        case "ArrowUp":
+        case "ArrowDown":
         case "PageUp":
           e.preventDefault();
           hop(navIndex.current - 1);
@@ -203,13 +260,40 @@ export function WalkPage() {
           break;
         case "End":
           e.preventDefault();
-          hop(9999);
+          hop(sectionRefs.current.length); // last station (the edge)
           break;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [doFall]);
+
+  // The loop back to the plaza. Over-scroll past the very bottom and the
+  // walker drops off the edge of the world → we fall back into the plaza,
+  // the mirror of jumping into the hole there. scrollBus is module-level
+  // and survives the route change, so reset the flag on mount too.
+  useEffect(() => {
+    fallingRef.current = false;
+    setScroll({ falling: false });
+
+    let over = 0;
+    const atBottom = () =>
+      window.scrollY >= document.documentElement.scrollHeight - window.innerHeight - 2;
+    function onWheel(e: WheelEvent) {
+      if (fallingRef.current) return;
+      // A deliberate push PAST the end, not merely arriving at it: only
+      // count downward wheel once already pinned to the bottom, and bleed
+      // it off otherwise so idling at the footer never trips it.
+      if (atBottom() && e.deltaY > 0) {
+        over += e.deltaY;
+        if (over > 380) doFall();
+      } else {
+        over = Math.max(0, over - 24);
+      }
+    }
+    window.addEventListener("wheel", onWheel, { passive: true });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, [doFall]);
 
   return (
     <div className="walk-root">
@@ -251,9 +335,12 @@ export function WalkPage() {
            then eases onto the nearest station — a firm anchor with a
            clean ease-in/out, and no tug-of-war with the walk cycle. */
         html { scroll-behavior: smooth; }
+        /* Sections are click-THROUGH so the empty area over the 3D floor
+           reaches the canvas (the engraved link tiles are clickable there);
+           the copy cards inside re-enable pointer events for their own links. */
         .walk-sec { position:relative; z-index:1; min-height:100svh;
-          display:flex; align-items:center; padding:8vh 0; }
-        .walk-col { width:min(520px, calc(100vw - 48px)); margin-left:max(40px, 7vw);
+          display:flex; align-items:center; padding:8vh 0; pointer-events:none; }
+        .walk-col { position:relative; pointer-events:auto; width:min(520px, calc(100vw - 48px)); margin-left:max(40px, 7vw);
           background:var(--w-panel); backdrop-filter:blur(18px) saturate(150%);
           -webkit-backdrop-filter:blur(18px) saturate(150%);
           border:1px solid var(--w-line); border-radius:18px; padding:30px 32px;
@@ -297,10 +384,36 @@ export function WalkPage() {
           border:1px solid var(--w-line); color:inherit; text-decoration:none;
           transition:background .16s ease; }
         .walk-links a:hover { background:rgba(255,255,255,0.07); }
+        .walk-cvrow { position:absolute; top:16px; right:18px; margin:0; z-index:2; }
+        .walk-cv { display:inline-flex; align-items:center; gap:8px; text-decoration:none;
+          font-family:${SANS}; font-size:12.5px; color:var(--w-ink2);
+          padding:5px 12px 5px 6px; border-radius:999px; border:1px solid var(--w-line);
+          background:rgba(255,255,255,0.03); transition:background .16s ease; }
+        .walk-cv:hover { background:rgba(255,255,255,0.09); }
+        .walk-cv .ic { display:inline-flex; align-items:center; justify-content:center;
+          width:20px; height:20px; border-radius:50%; background:rgba(74,222,128,0.15);
+          color:#4ADE80; }
+        /* Scroll cue — a row at the bottom of the hero card. Keys float. */
+        .walk-scrollcue { display:flex; align-items:center; gap:12px;
+          margin-top:26px; padding-top:18px; border-top:1px solid var(--w-line); }
+        .wsc-label { font-family:${SANS}; font-size:12.5px; letter-spacing:.03em;
+          color:var(--w-dim); }
+        .wsc-keys { display:flex; gap:7px; }
+        .wsc-key { display:inline-flex; align-items:center; justify-content:center;
+          width:28px; height:28px; border-radius:7px;
+          border:1px solid rgba(242,239,232,0.30); background:rgba(242,239,232,0.08);
+          font-family:${SANS}; font-size:14px; color:var(--w-ink); line-height:1;
+          animation:wsc-bob 2s ease-in-out infinite; }
+        .wsc-key:nth-child(2) { animation-delay:.18s; }
+        @keyframes wsc-bob {
+          0%,100% { transform:translateY(0); }
+          50%     { transform:translateY(4px); }
+        }
+        @media (prefers-reduced-motion: reduce) { .wsc-key { animation:none; } }
         .walk-shot { width:100%; border-radius:12px; border:1px solid var(--w-line);
           margin-top:22px; display:block; }
         .walk-rail { position:fixed; right:26px; top:50%; transform:translateY(-50%);
-          z-index:3; display:flex; flex-direction:column; gap:14px; }
+          z-index:3; display:flex; flex-direction:column-reverse; gap:14px; }
         .walk-rail button { all:unset; cursor:pointer; display:flex; align-items:center;
           gap:10px; justify-content:flex-end; }
         .walk-rail .lbl { font-family:${MONO}; font-size:10px; letter-spacing:.1em;
@@ -325,25 +438,26 @@ export function WalkPage() {
 
       {webgl && <WalkScene />}
 
-      {/* Always-visible way out to the flat page. A reviewer who wants the
-          summary should never have to scroll a 3D world to find it. Sits
-          top-LEFT with the reading column — the words live on the left, so
-          the alternative to reading them does too, leaving the right side
-          clear for the station rail and the walker. */}
-      <a
-        href="/public/cv"
+      <WalkControls />
+
+      {/* Fall-to-plaza veil. Same late, dark wash the plaza uses on the
+          jump-in, so the two transitions read as one loop. Always mounted
+          so the opacity flip actually animates. */}
+      <div
+        aria-hidden
         style={{
-          position: "fixed", top: 20, left: 20, zIndex: 4,
-          display: "inline-flex", alignItems: "center", gap: 8,
-          padding: "8px 14px", borderRadius: 999,
-          background: "var(--w-panel)", color: "var(--w-ink)",
-          border: "1px solid var(--w-line)", textDecoration: "none",
-          fontFamily: MONO, fontSize: 11, letterSpacing: ".06em",
-          backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
+          position: "fixed",
+          inset: 0,
+          background: "#05070A",
+          opacity: falling ? 1 : 0,
+          transition: "opacity 800ms ease 150ms",
+          pointerEvents: falling ? "auto" : "none",
+          zIndex: 60,
         }}
-      >
-        READ THE PAGE INSTEAD →
-      </a>
+      />
+
+      {/* The way to the flat page now lives on the cards themselves (top-
+          right of each, scrolling with them), not as a fixed pill. */}
 
       {/* Station rail — the quick-scan affordance. A reviewer who wants
           the summary jumps straight to a station instead of scrolling
@@ -390,6 +504,23 @@ export function WalkPage() {
   );
 }
 
+// Small "view cv" link — lives at the top-right of each card, scrolling with
+// it. Notebook icon matches the plaza pill.
+function CvLink() {
+  return (
+    <a className="walk-cv" href="/public/cv">
+      <span className="ic">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden>
+          <rect x="3.5" y="2" width="9" height="12" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M3.5 5h9M3.5 8h6M3.5 11h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+      </span>
+      view cv
+      <span aria-hidden style={{ marginLeft: 1 }}>↗</span>
+    </a>
+  );
+}
+
 function StationBody({ station: s }: { station: Station }) {
   return (
     <>
@@ -400,6 +531,18 @@ function StationBody({ station: s }: { station: Station }) {
         {s.title}
       </h2>
       {s.meta && <div className="walk-meta">{s.meta}</div>}
+
+      {/* Project links up here (under the title), small — for long cards the
+          old bottom placement scrolled out of sight. */}
+      {s.links && (
+        <div className="walk-links" style={{ marginTop: 12 }}>
+          {s.links.map((l) => (
+            <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer">
+              {l.label} ↗
+            </a>
+          ))}
+        </div>
+      )}
 
       <div className="walk-body">
         {s.body.map((p) => (
@@ -440,16 +583,6 @@ function StationBody({ station: s }: { station: Station }) {
           {s.pull}
         </p>
       )}
-
-      {s.links && (
-        <div className="walk-links">
-          {s.links.map((l) => (
-            <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer">
-              {l.label} ↗
-            </a>
-          ))}
-        </div>
-      )}
     </>
   );
 }
@@ -458,37 +591,33 @@ function Hero({ innerRef }: { innerRef?: Ref<HTMLElement> }) {
   return (
     <section ref={innerRef} className="walk-sec" style={{ minHeight: "100svh" }}>
       <div className="walk-col" style={{ color: "#4ADE80" }}>
+        {/* view cv pinned to the corner so it never pushes the name down —
+            the name reads tight to the top of the card. */}
+        <div className="walk-cvrow">
+          <CvLink />
+        </div>
         <h1 style={{ fontSize: "clamp(40px,6.5vw,60px)", lineHeight: 1.02, color: "var(--w-ink)" }}>
-          {PROFILE.name}
+          Daniel G.
         </h1>
         <div className="walk-meta" style={{ marginTop: 14 }}>
-          {PROFILE.role} · {PROFILE.location}
+          Builder (SWE) · {PROFILE.location}
         </div>
         <div className="walk-body" style={{ marginTop: 4 }}>
           <p style={{ fontSize: 17 }}>{PROFILE.thesis}</p>
         </div>
-        <div className="walk-links">
-          <a href={PROFILE.resumeHref} target="_blank" rel="noopener noreferrer">
-            Résumé ↗
-          </a>
-          {PROFILE.links.map((l) => (
-            <a key={l.href} href={l.href} target="_blank" rel="noopener noreferrer">
-              {l.label} ↗
-            </a>
-          ))}
+        {/* Link buttons removed — the floor tiles (view cv / résumé / linkedin
+            / github) carry them now. */}
+
+        {/* Scroll cue lives at the BOTTOM of the card (the floating version was
+            cut off below the fold). "scroll or press" + two floating arrow
+            keycaps that bob. Keys are light so they read on the dark card. */}
+        <div className="walk-scrollcue" aria-hidden>
+          <span className="wsc-label">scroll or press</span>
+          <span className="wsc-keys">
+            <kbd className="wsc-key">↑</kbd>
+            <kbd className="wsc-key">↓</kbd>
+          </span>
         </div>
-        <p
-          style={{
-            fontFamily: MONO,
-            fontSize: 11,
-            letterSpacing: ".1em",
-            color: "var(--w-dim)",
-            marginTop: 30,
-            marginBottom: 0,
-          }}
-        >
-          SCROLL — THE ONLY DIRECTION IS FORWARD
-        </p>
       </div>
     </section>
   );
@@ -521,5 +650,111 @@ function Footer({ innerRef }: { innerRef?: Ref<HTMLElement> }) {
         ))}
       </div>
     </footer>
+  );
+}
+
+// Fixed top-right cluster: back-to-plaza, view CV, restart-the-walk, and the
+// music/SFX mute. The synth music (same bossa loop as the plaza) + the hop
+// SFX only start once the reader has interacted (browsers gate AudioContext
+// on a user gesture), so `entered` flips on the first wheel/key/pointer.
+function WalkControls() {
+  const navigate = useNavigate();
+  const [muted, setMuted] = useState(false);
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    if (entered) return;
+    const wake = () => setEntered(true);
+    const opts: AddEventListenerOptions = { once: true, passive: true };
+    window.addEventListener("wheel", wake, opts);
+    window.addEventListener("keydown", wake, opts);
+    window.addEventListener("pointerdown", wake, opts);
+    window.addEventListener("touchstart", wake, opts);
+    return () => {
+      window.removeEventListener("wheel", wake);
+      window.removeEventListener("keydown", wake);
+      window.removeEventListener("pointerdown", wake);
+      window.removeEventListener("touchstart", wake);
+    };
+  }, [entered]);
+
+  // One mute governs both the music (AmbientAudio) and the hop SFX.
+  useEffect(() => {
+    setSfxMuted(muted);
+  }, [muted]);
+
+  return (
+    <>
+      {entered && <AmbientAudio muted={muted} />}
+      <div style={{ position: "fixed", top: 18, right: 18, zIndex: 70, display: "flex", gap: 10 }}>
+        <CtrlButton label="Back to the plaza" onClick={() => navigate({ to: "/public" })}>
+          <Home size={17} strokeWidth={1.8} />
+        </CtrlButton>
+        <CtrlButton label="View CV" onClick={() => navigate({ to: "/public/cv" })}>
+          <FileText size={17} strokeWidth={1.8} />
+        </CtrlButton>
+        <CtrlButton label="Restart the walk" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+          <Footprints size={17} strokeWidth={1.8} />
+        </CtrlButton>
+        <CtrlButton label={muted ? "Unmute" : "Mute"} onClick={() => setMuted((m) => !m)}>
+          {muted ? <VolumeX size={17} strokeWidth={1.8} /> : <Volume2 size={17} strokeWidth={1.8} />}
+        </CtrlButton>
+      </div>
+    </>
+  );
+}
+
+function CtrlButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      style={{
+        all: "unset",
+        boxSizing: "border-box",
+        width: 40,
+        height: 40,
+        borderRadius: 999,
+        cursor: "pointer",
+        background: "rgba(18,22,20,0.66)",
+        border: "1px solid rgba(242,239,232,0.16)",
+        color: "#E8E6DF",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backdropFilter: "blur(14px) saturate(140%)",
+        WebkitBackdropFilter: "blur(14px) saturate(140%)",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
+        transition: "background 160ms ease, transform 120ms ease",
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget;
+        el.style.background = "rgba(30,36,33,0.82)";
+        el.style.transform = "scale(1.06)";
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget;
+        el.style.background = "rgba(18,22,20,0.66)";
+        el.style.transform = "scale(1.0)";
+      }}
+      onFocus={(e) => {
+        e.currentTarget.style.outline = "2px solid rgba(74,222,128,0.6)";
+        e.currentTarget.style.outlineOffset = "2px";
+      }}
+      onBlur={(e) => {
+        e.currentTarget.style.outline = "none";
+      }}
+    >
+      {children}
+    </button>
   );
 }

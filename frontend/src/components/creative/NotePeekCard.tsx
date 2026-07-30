@@ -67,12 +67,13 @@ export function NotePeekCard({ note, onExpand, onDismiss }: Props) {
   const spaceName = displayed.space_name;
   const readMin = displayed.read_time_minutes;
 
-  // Accent matches coin palette: gold for regular, violet for pinned
-  // (the spawn-anchored "what is Gooni" intro coin).
-  const accent = isPinned
-    ? "linear-gradient(135deg, #c4a8ff 0%, #7c3aed 100%)"
-    : "linear-gradient(135deg, #ffe79a 0%, #ffaa1f 100%)";
-  const accentSolid = isPinned ? "#7c3aed" : "#ffaa1f";
+  // Dark frosted skin — matches the "view cv" pill language (dark surface,
+  // glowing-green accent, muted-gray text) so the callouts feel on-brand
+  // instead of the old cream retro box.
+  const INK = "rgba(242,239,232,0.92)";
+  const DIM = "rgba(242,239,232,0.60)";
+  const LINE = "rgba(242,239,232,0.14)";
+  const GREEN = "#4ADE80";
 
   return createPortal(
     <div
@@ -82,17 +83,18 @@ export function NotePeekCard({ note, onExpand, onDismiss }: Props) {
       style={{
         position: "fixed",
         left: "50%",
-        bottom: 28,
+        bottom: 34,
         transform: `translateX(-50%) translateY(${visible ? 0 : 130}%)`,
-        width: "min(620px, calc(100vw - 32px))",
-        background: "rgba(20,22,28,0.92)",
-        color: "#fff",
+        width: "min(620px, calc(100vw - 40px))",
+        background: "rgba(16,20,18,0.82)",
+        backdropFilter: "blur(20px) saturate(140%)",
+        WebkitBackdropFilter: "blur(20px) saturate(140%)",
+        color: INK,
+        border: `1px solid ${LINE}`,
+        boxShadow: "0 18px 50px rgba(0,0,0,0.45)",
         borderRadius: 18,
-        padding: "16px 20px 14px",
-        fontFamily: FONT,
-        boxShadow: "0 18px 42px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.30), 0 0 0 1px rgba(255,255,255,0.10) inset",
-        backdropFilter: "blur(14px) saturate(170%)",
-        WebkitBackdropFilter: "blur(14px) saturate(170%)",
+        padding: "16px 22px 15px",
+        fontFamily: DISPLAY,
         cursor: "pointer",
         // Sits above drei <Html> nametags (which render in zIndexRange
         // [40, 50]) so avatar names don't pierce the peek card.
@@ -101,48 +103,33 @@ export function NotePeekCard({ note, onExpand, onDismiss }: Props) {
         transition: "transform 320ms cubic-bezier(0.20, 0.84, 0.30, 1), opacity 240ms ease",
         userSelect: "none",
       }}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget as HTMLDivElement;
-        el.style.boxShadow = "0 22px 50px rgba(0,0,0,0.62), 0 2px 6px rgba(0,0,0,0.30), 0 0 0 1px rgba(255,255,255,0.20) inset";
-      }}
-      onMouseLeave={(e) => {
-        const el = e.currentTarget as HTMLDivElement;
-        el.style.boxShadow = "0 18px 42px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.30), 0 0 0 1px rgba(255,255,255,0.10) inset";
-      }}
     >
-      {/* Top accent bar — picks up coin color */}
-      <div style={{
-        position: "absolute",
-        top: 0, left: 18, right: 18,
-        height: 3,
-        background: accent,
-        borderRadius: 999,
-      }} />
-
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
         <span style={{
-          fontSize: 10.5,
+          fontSize: 11,
           fontWeight: 700,
           textTransform: "uppercase",
-          letterSpacing: "0.10em",
-          color: accentSolid,
+          letterSpacing: "0.12em",
+          color: GREEN,
+          fontFamily: FONT,
         }}>
           {isPinned ? "🌟 start here" : "🪙 note"}
         </span>
         {spaceName && (
           <span style={{
             fontSize: 11,
-            color: "rgba(255,255,255,0.55)",
-            border: "1px solid rgba(255,255,255,0.18)",
+            color: DIM,
+            border: `1px solid ${LINE}`,
             borderRadius: 999,
             padding: "1px 8px",
             fontWeight: 500,
+            fontFamily: FONT,
           }}>
             {spaceName}
           </span>
         )}
         {readMin > 0 && (
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)" }}>
+          <span style={{ fontSize: 11, color: DIM, fontFamily: FONT }}>
             {readMin} min read
           </span>
         )}
@@ -150,11 +137,11 @@ export function NotePeekCard({ note, onExpand, onDismiss }: Props) {
 
       <div style={{
         fontFamily: DISPLAY,
-        fontSize: 22,
+        fontSize: 23,
         lineHeight: 1.2,
         letterSpacing: "-0.01em",
         marginBottom: excerpt ? 8 : 4,
-        color: "#fff",
+        color: INK,
         whiteSpace: "nowrap",
         overflow: "hidden",
         textOverflow: "ellipsis",
@@ -166,8 +153,9 @@ export function NotePeekCard({ note, onExpand, onDismiss }: Props) {
         <div style={{
           fontSize: 14,
           lineHeight: 1.5,
-          color: "rgba(255,255,255,0.78)",
+          color: "rgba(242,239,232,0.72)",
           marginBottom: 10,
+          fontFamily: FONT,
           display: "-webkit-box",
           WebkitLineClamp: 3,
           WebkitBoxOrient: "vertical",
@@ -182,7 +170,10 @@ export function NotePeekCard({ note, onExpand, onDismiss }: Props) {
         alignItems: "center",
         justifyContent: "space-between",
         fontSize: 12.5,
-        color: "rgba(255,255,255,0.55)",
+        color: DIM,
+        fontFamily: FONT,
+        borderTop: `1px solid ${LINE}`,
+        paddingTop: 10,
       }}>
         <span style={{ fontStyle: "italic" }}>
           step off the tile to dismiss
@@ -191,8 +182,8 @@ export function NotePeekCard({ note, onExpand, onDismiss }: Props) {
           display: "inline-flex",
           alignItems: "center",
           gap: 6,
-          fontWeight: 600,
-          color: accentSolid,
+          fontWeight: 700,
+          color: GREEN,
         }}>
           tap to read <span style={{ fontSize: 14, lineHeight: 1 }}>→</span>
         </span>

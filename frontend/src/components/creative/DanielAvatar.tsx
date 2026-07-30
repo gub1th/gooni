@@ -11,6 +11,7 @@ import {
   recordPlayerSpawn,
   tileWithin,
 } from "./useDanielControls";
+import { isPortalTile } from "./tileGrid";
 import { playJumpGrunt, playLandThud, playFallOff, playInvalidMove } from "./sfx";
 import { fireVfx } from "./vfx";
 import { GLTFGooni, type GooniHandle } from "./GLTFGooni";
@@ -40,7 +41,7 @@ export type DanielHandle = {
 
 export type DanielPhase =
   | "lying" | "getting-up"
-  | "idle" | "hopping" | "settling" | "falling" | "respawning";
+  | "idle" | "hopping" | "settling" | "falling" | "respawning" | "sinking";
 
 type Props = {
   active: boolean;
@@ -115,6 +116,13 @@ const BUMP_REACH = 0.40;     // fraction of pitch the char travels forward
 const BUMP_ARC = 0.30;       // peak height of the abortive hop arc
 const FALL_DUR = 1.0;
 const FALL_DROP = 14;
+// Sink into the hole. NOT the fall-off tumble above — this is the
+// jump-in cutscene: land on the portal tile, then drop straight down the
+// open shaft. Portal.tsx's shaft is DEPTH=7; stop short of its black
+// floor. Roughly matches DropCamera's DROP_MS so the body is deep in the
+// dark by the time the veil takes the screen.
+const SINK_DUR = 0.85;
+const SINK_DEPTH = 10;
 // Sky respawn — char reappears above plaza center, face-flat, gravity-
 // falls back to the lying pose. Avoids the black-screen fade.
 const SKY_RESPAWN_DUR = 0.95;
@@ -174,6 +182,7 @@ export const DanielAvatar = forwardRef<DanielHandle, Props>(function DanielAvata
     breaksTile: boolean;
   }>({ active: false, t: 0, fromX: 0, fromZ: 0, toX: 0, toZ: 0, fromY: 0, toY: 0, toGx: 0, toGz: 0, fromGx: 0, fromGz: 0, facing: 0, breaksTile: true });
   const fallRef = useRef({ active: false, t: 0, startX: 0, startZ: 0 });
+  const sinkRef = useRef({ active: false, t: 0, x: 0, z: 0, fromY: 0 });
   const respawnRef = useRef({ active: false, t: 0 });
   const settleRef = useRef({ active: false, t: 0 });
   const invulnRef = useRef({ active: false, t: 0 });
@@ -263,7 +272,7 @@ export const DanielAvatar = forwardRef<DanielHandle, Props>(function DanielAvata
     } else if (phase === "hopping") {
       // Sync clip duration roughly to hop arc (Quaternius Jump clip ~0.6s).
       setClipIfChanged("Jump", { loop: false, timeScale: 1.6, fadeMs: 80 });
-    } else if (phase === "falling") {
+    } else if (phase === "falling" || phase === "sinking") {
       setClipIfChanged("HitReact", { loop: false, fadeMs: 80 });
     }
 
@@ -335,6 +344,26 @@ export const DanielAvatar = forwardRef<DanielHandle, Props>(function DanielAvata
         respawnRef.current.t = 0;
         phaseRef.current = "respawning";
       }
+      return;
+    }
+
+    // ── Sink into the hole. Landing on the portal tile drops the char
+    // straight down the open shaft instead of settling on the rim — the
+    // "fall in" the scene has always claimed. The DropCamera + veil
+    // (Scene) navigate away before this would need to resolve, so there's
+    // no landing tail here: it just recedes into the dark.
+    if (sinkRef.current.active) {
+      const s = sinkRef.current;
+      s.t += dt;
+      const u = Math.min(1, s.t / SINK_DUR);
+      const drop = u * u;                 // accelerate like gravity
+      const y = s.fromY - SINK_DEPTH * drop;
+      root.position.set(s.x, y, s.z);
+      // Tumble hard + shrink to NOTHING, so it recedes to a point in the
+      // dark rather than sitting visible at the bottom of a black box.
+      inner.rotation.set(u * 3.0, headingRef.current + u * 2.0, u * 1.2);
+      const shrink = Math.max(0, 1 - u * 1.15);
+      inner.scale.set(shrink, shrink, shrink);
       return;
     }
 
@@ -553,6 +582,28 @@ export const DanielAvatar = forwardRef<DanielHandle, Props>(function DanielAvata
             world: { x: h.toX, z: h.toZ },
             from: { gx: h.fromGx, gz: h.fromGz },
             fellOff: true,
+            impactVel: 0,
+            breaksTile: h.breaksTile,
+            actor: "player",
+          });
+        } else if (isPortalTile(h.toGx, h.toGz)) {
+          // Landed on the hole. Don't stand on the rim — drop in. Fire
+          // the landing (so Portal picks it up and starts the drop
+          // cutscene), then hand the body to the sink animation. No
+          // occupant registered: the character is leaving the world.
+          const w = gridToWorld(h.toGx, h.toGz);
+          sinkRef.current.active = true;
+          sinkRef.current.t = 0;
+          sinkRef.current.x = w.x;
+          sinkRef.current.z = w.z;
+          sinkRef.current.fromY = 0;
+          phaseRef.current = "sinking";
+          playFallOff();
+          fireLanding({
+            gx: h.toGx, gz: h.toGz,
+            world: { x: h.toX, z: h.toZ },
+            from: { gx: h.fromGx, gz: h.fromGz },
+            fellOff: false,
             impactVel: 0,
             breaksTile: h.breaksTile,
             actor: "player",

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { Scene } from "./Scene";
 import { HamsterWheel } from "../animations/HamsterWheel";
 
@@ -26,6 +27,14 @@ const HAND_CURSOR = `url("data:image/svg+xml;utf8,${HAND_CURSOR_SVG}") 8 3, poin
 
 export function CreativeExperience() {
   const [canvasReady, setCanvasReady] = useState(false);
+  const navigate = useNavigate();
+
+  // Touch / no-keyboard devices can't drive the arrow-key 3D nav — send them
+  // straight to the static page rather than trapping them in a dead world.
+  useEffect(() => {
+    const touchOnly = window.matchMedia?.("(hover: none) and (pointer: coarse)")?.matches;
+    if (touchOnly) navigate({ to: "/public/cv" });
+  }, [navigate]);
 
   useEffect(() => {
     const prevHtmlBg = document.documentElement.style.background;

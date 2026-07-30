@@ -113,7 +113,7 @@ const CSS = `
   background: var(--cv-wash);
   transition: border-color .2s ease, transform .2s ease;
 }
-.cv-plaza:hover { border-color: var(--cv-rule-firm); transform: translateY(-1px); }
+.cv-plaza:hover { border-color: rgba(74,222,128,0.55); transform: translateY(-2px); }
 .cv-plaza-arrow { transition: transform .2s ease; }
 .cv-plaza:hover .cv-plaza-arrow { transform: translateX(4px); }
 
@@ -251,33 +251,70 @@ function PlazaInvite() {
       <span
         aria-hidden
         style={{
-          width: 30,
-          height: 30,
+          width: 40,
+          height: 40,
           flexShrink: 0,
           borderRadius: "50%",
-          border: "1px solid var(--cv-rule-firm)",
+          background: "rgba(74,222,128,0.14)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontFamily: DISPLAY,
-          fontSize: 15,
-          color: "var(--cv-ink)",
+          overflow: "hidden",
         }}
       >
-        3D
+        <WalkingGooni />
       </span>
       <span style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
-        <span style={{ fontSize: 15, color: "var(--cv-ink)" }}>Step into the plaza</span>
-        <Meta style={{ letterSpacing: "0.06em" }}>the same work, walkable</Meta>
+        <span style={{ fontSize: 15, color: "var(--cv-ink)" }}>Wander the plaza</span>
+        <Meta style={{ letterSpacing: "0.06em" }}>explore in 3D</Meta>
       </span>
       <span
         aria-hidden
         className="cv-plaza-arrow"
-        style={{ color: "var(--cv-muted)", fontSize: 17, marginLeft: 4 }}
+        style={{ color: "#4ADE80", fontSize: 18, marginLeft: 4 }}
       >
         →
       </span>
     </Link>
+  );
+}
+
+// The little Gooni marching in place — lifted from the original /public
+// plaza CTA (the version Daniel liked). SVG, self-contained keyframes.
+function WalkingGooni() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden>
+      <g style={{ animation: "plazaCtaWalkBob 0.5s ease-in-out infinite" }}>
+        <circle cx="15" cy="8" r="5" fill="#F5F5F0" />
+        <circle cx="14" cy="7.5" r="1" fill="#1a1a1a" />
+        <circle cx="14.3" cy="7.2" r="0.3" fill="#fff" />
+        <path d="M13 9.5 Q14.5 10.8 15.5 9.8" stroke="#1a1a1a" strokeWidth="0.5" fill="none" />
+        <rect x="12" y="13" width="6" height="6" rx="2" fill="#4ADE80" />
+        <rect
+          x="10.5" y="14.5" width="2" height="1.2" rx="0.6" fill="#4ADE80"
+          style={{ animation: "plazaCtaArmBack 0.5s ease-in-out infinite", transformOrigin: "12.5px 14.5px" }}
+        />
+        <rect
+          x="17.5" y="14.5" width="2" height="1.2" rx="0.6" fill="#4ADE80"
+          style={{ animation: "plazaCtaArmFront 0.5s ease-in-out infinite", transformOrigin: "17.5px 14.5px" }}
+        />
+        <rect
+          x="12.5" y="19" width="1.8" height="3" rx="0.7" fill="#3AAD6E"
+          style={{ animation: "plazaCtaLegFront 0.5s ease-in-out infinite", transformOrigin: "13.4px 19px" }}
+        />
+        <rect
+          x="15.5" y="19" width="1.8" height="3" rx="0.7" fill="#3AAD6E"
+          style={{ animation: "plazaCtaLegBack 0.5s ease-in-out infinite", transformOrigin: "16.4px 19px" }}
+        />
+      </g>
+      <style>{`
+        @keyframes plazaCtaWalkBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1.5px); } }
+        @keyframes plazaCtaLegFront { 0%,100% { transform: rotate(-15deg); } 50% { transform: rotate(15deg); } }
+        @keyframes plazaCtaLegBack { 0%,100% { transform: rotate(15deg); } 50% { transform: rotate(-15deg); } }
+        @keyframes plazaCtaArmFront { 0%,100% { transform: rotate(10deg); } 50% { transform: rotate(-10deg); } }
+        @keyframes plazaCtaArmBack { 0%,100% { transform: rotate(-10deg); } 50% { transform: rotate(10deg); } }
+      `}</style>
+    </svg>
   );
 }
 
