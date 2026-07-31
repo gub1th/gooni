@@ -78,8 +78,8 @@ export const STATIONS: Station[] = [
     title: "Rovo, at Atlassian",
     meta: "P40, Central AI — growth & search · Jun 2024 → now",
     body: [
-      "I work on Rovo across search, chat, and its Chrome extension — mostly on performance-sensitive, state-heavy user flows.",
-      "I built and scaled the extension that surfaces AI chat and enterprise search, designed URL routing handling ten thousand daily requests across four teams' DNS migrations, and defined the growth team's experimentation infrastructure.",
+      "My day job is Rovo — Atlassian's AI assistant. I work across search, chat, and the Chrome extension, mostly on the stateful, high-traffic parts of the UI that quietly fall apart when enough people hit them at once.",
+      "I built the extension that puts AI chat and enterprise search a shortcut away and grew it from 8K to 20K+ installs. The chat button I shipped pushed its daily actives up 74.5%. Since then it's been 15+ experiments across Jira, Confluence and Townsquare, and a from-scratch AI platform service I started — a prompt template plus your data in, a judged model response out.",
     ],
     stats: [
       { value: "20K+", label: "downloads" },
@@ -102,9 +102,9 @@ export const STATIONS: Station[] = [
     title: "Kreatify",
     meta: "co-founder & CTO · Oct 2024 → Apr 2025 · alongside the full-time job",
     body: [
-      "Built with influencer agency The Viralist Group to close a real gap in influencer marketing: campaigns ran with almost no transparency. Influencers had little visibility into the process, which meant delays, missed steps, and bad responsiveness.",
-      "Kreatify is a multi-tenant platform where managers lay out and track campaigns, influencers watch their own progress and centralize deliverables, and brands see campaign status in real time. OAuth onboarding, role-based access control, file handling, and Phyllo integrations across YouTube, TikTok and Instagram.",
-      "I ran the user interviews myself and rebuilt the UX around what came back.",
+      "I co-founded Kreatify with an influencer agency, The Viralist Group, and built it while holding the full-time job. The problem was dumb but real: campaigns ran with almost no transparency. Nobody could see what stage anything was at, so things slipped — missed steps, dead air, blown timelines.",
+      "So I built the whole thing. One place where agencies run campaigns, influencers track their own progress and dump deliverables, and brands watch it happen live. Next.js and Supabase, OAuth onboarding, role-based access, file handling, and Phyllo wired into YouTube, TikTok and Instagram.",
+      "I ran the user interviews myself and rebuilt the UX around what people actually said.",
     ],
     stats: [
       { value: "7", label: "agencies" },

@@ -114,13 +114,12 @@ export const PROJECTS: Project[] = [
     name: "Gooni",
     tagline: "A personal AI notebook that became an ambient assistant.",
     blurb:
-      "Gooni captures everything I think, from web, Telegram and WhatsApp, into one " +
-      "append-only log. I built it around a custom orchestrator, a persistent memory system " +
-      "that extracts and reconciles what it learns, and an evaluation harness I wrote myself. " +
-      "Then I used those evals to cut what didn't earn its place, including a ReAct/Reflexion " +
-      "layer that never beat the simpler pipeline. One pass dropped twenty-two tables and " +
-      "32,252 lines once the numbers stopped justifying them. It's deployed and I use it " +
-      "every day.",
+      "Gooni eats everything I think — web, Telegram, WhatsApp — into one append-only log. " +
+      "Under it: a custom orchestrator, a memory system that extracts and reconciles what it " +
+      "learns, and an eval harness I wrote to grade myself. Then I used those evals to gut what " +
+      "wasn't pulling weight, including a whole ReAct/Reflexion layer that never beat the dumb " +
+      "pipeline. One pass alone killed 22 tables and 32,252 lines the day the numbers stopped " +
+      "backing them up. It's deployed. I use it every day.",
     // Checkable: PR #404 is +1,298 / -32,252 and drops 22 tables; total
     // deletions across main are ~119k.
     stats: [
@@ -143,11 +142,11 @@ export const PROJECTS: Project[] = [
     name: "Kreatify",
     tagline: "An influencer CRM for talent agencies. Co-founded it, built it, ran it.",
     blurb:
-      "Zero to one as co-founder and CTO, while holding a full-time engineering job. I built " +
-      "the product on Next.js and Supabase: OAuth onboarding, role-based access control, file " +
-      "handling, Phyllo integrations across YouTube, TikTok and Instagram, and a Notion-style " +
-      "generic filtering engine. I ran the user interviews myself, iterated the UX around what " +
-      "they said, and took it to a private beta with 40+ users across seven talent agencies.",
+      "Zero to one as co-founder and CTO, nights and weekends around the full-time job. I built " +
+      "the product on Next.js and Supabase — OAuth onboarding, role-based access, file handling, " +
+      "Phyllo wired into YouTube, TikTok and Instagram, and a Notion-style filter engine I'm " +
+      "still weirdly proud of. Ran the interviews myself, rebuilt the UX around what people " +
+      "actually said, and shipped a private beta to 40+ users across seven agencies.",
     stats: [
       { value: "7", label: "agencies" },
       { value: "40+", label: "beta users" },
@@ -170,9 +169,9 @@ export const PROJECTS: Project[] = [
     name: "Lucid",
     tagline: "Free-form journals into a knowledge graph of people, goals and events.",
     blurb:
-      "A personal system that reads unstructured journal entries and pulls out the entities " +
-      "underneath (who you mentioned, what you're chasing, what actually happened), then " +
-      "wires them into a navigable life map instead of a pile of text.",
+      "Reads your raw journal entries and pulls out the people, goals and events buried in " +
+      "them, then wires those into a life map you can actually navigate instead of a pile of " +
+      "text you'll never reread.",
     stack: ["FastAPI", "PostgreSQL", "React", "OpenAI"],
     weight: "pylon",
     color: "#8FB3E0",
@@ -259,11 +258,11 @@ export const ROLES: Role[] = [
     period: "Jun 2024 – present",
     current: true,
     points: [
-      "Started and lead a from-scratch AI platform service that turns a prompt template plus hydrated user data into a served model response, with offline evaluation and configurable LLM judges gating every deploy. Also own the frontend and nudge-scheduling system for a personalized AI surface, across the application and Redis caching layers.",
-      "Built and scaled the Rovo Chrome extension (TypeScript, React) surfacing AI chat and enterprise search, growing it from 8K to 20K+ installs at ~7K monthly actives. Shipped the chat CTA that drove a 74.5% lift in extension DAU.",
-      "Shipped 15+ experiments across Rovo's most prominent surfaces (Jira, Confluence, Townsquare), driving a 45% lift in Rovo button usage and 20.1% in chat usage events. Helped define the team's experimentation infrastructure with custom metrics and standardized Statsig tagging.",
-      "De facto feature lead on 4 concurrent initiatives, owning scoping, sequencing and experiment strategy across product, design and engineering. 270 PRs and 500+ code reviews across four repositories, plus cross-team Sev3 incident response and a migration that removed ~$10k/month in cost.",
-      "Own the frontend for third-party connectors across every Atlassian surface. Built a generic 3P frontend config so a connector added on the backend needs no bespoke frontend work, and shipped a portable connector-settings package now used by other teams including Confluence and Townsquare, driving a 23.7% lift in third-party auth completions.",
+      "Started and now lead an AI platform service from scratch: a prompt template plus a user's hydrated data goes in, a served model response comes out, and offline evals with configurable LLM judges gate every deploy. I also own the frontend and nudge-scheduling for a personalized AI surface, down through the app and Redis caching layers.",
+      "Built and scaled the Rovo Chrome extension (TypeScript, React) — AI chat and enterprise search a shortcut away — from 8K to 20K+ installs at ~7K monthly actives. The chat CTA I shipped pushed daily actives on it up 74.5%.",
+      "Ran 15+ experiments across Rovo's biggest surfaces — Jira, Confluence, Townsquare — for a 45% lift in button usage and 20.1% in chat events. Set up a lot of how the team runs experiments now: custom metrics, standardized Statsig tagging.",
+      "Ended up the de facto lead on 4 things at once — scoping them, sequencing them, working out how to test them across product, design and eng. 270 PRs and 500+ reviews across four repos, some Sev3 incident response, and one migration that cut ~$10k/month.",
+      "Own the frontend for third-party connectors across every Atlassian surface. Built a generic config so a connector added on the backend needs zero bespoke frontend work, plus a portable settings package other teams (Confluence, Townsquare) now use — worth a 23.7% lift in third-party auth completions.",
     ],
   },
   {
@@ -272,9 +271,9 @@ export const ROLES: Role[] = [
     location: "San Francisco, CA",
     period: "Oct 2024 – Apr 2025",
     points: [
-      "Co-founded and built an influencer CRM for talent agencies (Next.js, Supabase): OAuth onboarding, role-based access control, file handling, and Phyllo integrations across YouTube, TikTok and Instagram.",
-      "Independently designed and built the UX and owned several core systems, including a Notion-style generic filtering engine.",
-      "Ran user interviews, iterated the product, and shipped a private beta to 40+ users across 7 talent agencies, all while holding a full-time engineering role.",
+      "Co-founded and built an influencer CRM for talent agencies on Next.js and Supabase — OAuth onboarding, role-based access, file handling, Phyllo wired into YouTube, TikTok and Instagram.",
+      "Designed and built the UX solo, and owned a few core systems — including a Notion-style filter engine.",
+      "Ran the interviews, iterated on what came back, and shipped a private beta to 40+ users across 7 agencies — all on nights and weekends around the full-time job.",
     ],
   },
   {
@@ -283,7 +282,7 @@ export const ROLES: Role[] = [
     location: "New York City, NY",
     period: "May – Aug 2023",
     points: [
-      "Migrated a Slack ticketing bot from legacy Slack messaging to Block Kit, modernizing the conversational ticket-creation flow.",
+      "Moved a Slack ticketing bot off legacy messaging onto Block Kit, so creating a ticket in-chat actually felt modern.",
     ],
   },
   {
@@ -292,7 +291,7 @@ export const ROLES: Role[] = [
     location: "Pittsburgh, PA",
     period: "Aug 2022 – May 2024",
     points: [
-      "Led recitations for 15+ cohorts on programming fundamentals in Python and database design.",
+      "Ran recitations for 15+ cohorts on programming fundamentals — Python and database design.",
     ],
   },
   {
@@ -301,8 +300,8 @@ export const ROLES: Role[] = [
     location: "Philadelphia, PA",
     period: "May – Aug 2022",
     points: [
-      "Prototyped a transformer-based headline classifier at 97% accuracy, deployed on embedded devices.",
-      "Built D3.js visualizations over Splunk datasets to surface anomalies.",
+      "Prototyped a transformer-based headline classifier at 97% accuracy and got it running on embedded devices.",
+      "Built D3.js views over Splunk data to make anomalies jump out.",
     ],
   },
 ];
