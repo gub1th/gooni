@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useRef, useState, type Ref } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Volume2, VolumeX, Home, FileText, Footprints } from "lucide-react";
 import { STATIONS, type Station } from "../../content/walk";
 import { PROFILE } from "../../content/portfolio";
+import { CtrlButton } from "../CtrlButton";
 import { AmbientAudio } from "../creative/AmbientAudio";
 import { setSfxMuted } from "../creative/sfx";
 import { setScroll } from "./scrollBus";
@@ -412,6 +413,13 @@ export function WalkPage() {
         @media (prefers-reduced-motion: reduce) { .wsc-key { animation:none; } }
         .walk-shot { width:100%; border-radius:12px; border:1px solid var(--w-line);
           margin-top:22px; display:block; }
+        .walk-shots { margin-top:22px; display:flex; flex-direction:column; gap:8px; }
+        .walk-shots .walk-shot { margin-top:0; }
+        .walk-figure { margin:0; }
+        .walk-caption { font-family:${MONO}; font-size:10px; letter-spacing:.09em;
+          text-transform:uppercase; color:var(--w-dim); margin-top:7px; }
+        .walk-arrow { font-size:15px; line-height:1; color:var(--w-dim);
+          text-align:center; margin:2px 0; }
         .walk-rail { position:fixed; right:26px; top:50%; transform:translateY(-50%);
           z-index:3; display:flex; flex-direction:column-reverse; gap:14px; }
         .walk-rail button { all:unset; cursor:pointer; display:flex; align-items:center;
@@ -550,9 +558,24 @@ function StationBody({ station: s }: { station: Station }) {
         ))}
       </div>
 
-      {s.image && (
-        <img className="walk-shot" src={s.image} alt={s.imageAlt ?? ""} loading="lazy" />
-      )}
+      {s.image &&
+        (s.imageAfter ? (
+          <div className="walk-shots">
+            <figure className="walk-figure">
+              <img className="walk-shot" src={s.image} alt={s.imageAlt ?? ""} loading="lazy" />
+              <figcaption className="walk-caption">the log — sifted by hand</figcaption>
+            </figure>
+            <div className="walk-arrow" aria-hidden>
+              ↓
+            </div>
+            <figure className="walk-figure">
+              <img className="walk-shot" src={s.imageAfter} alt={s.imageAfterAlt ?? ""} loading="lazy" />
+              <figcaption className="walk-caption">the script — under a minute</figcaption>
+            </figure>
+          </div>
+        ) : (
+          <img className="walk-shot" src={s.image} alt={s.imageAlt ?? ""} loading="lazy" />
+        ))}
 
       {s.beats && (
         <ul className="walk-beats">
@@ -704,57 +727,3 @@ function WalkControls() {
   );
 }
 
-function CtrlButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      style={{
-        all: "unset",
-        boxSizing: "border-box",
-        width: 40,
-        height: 40,
-        borderRadius: 999,
-        cursor: "pointer",
-        background: "rgba(18,22,20,0.66)",
-        border: "1px solid rgba(242,239,232,0.16)",
-        color: "#E8E6DF",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backdropFilter: "blur(14px) saturate(140%)",
-        WebkitBackdropFilter: "blur(14px) saturate(140%)",
-        boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
-        transition: "background 160ms ease, transform 120ms ease",
-      }}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget;
-        el.style.background = "rgba(30,36,33,0.82)";
-        el.style.transform = "scale(1.06)";
-      }}
-      onMouseLeave={(e) => {
-        const el = e.currentTarget;
-        el.style.background = "rgba(18,22,20,0.66)";
-        el.style.transform = "scale(1.0)";
-      }}
-      onFocus={(e) => {
-        e.currentTarget.style.outline = "2px solid rgba(74,222,128,0.6)";
-        e.currentTarget.style.outlineOffset = "2px";
-      }}
-      onBlur={(e) => {
-        e.currentTarget.style.outline = "none";
-      }}
-    >
-      {children}
-    </button>
-  );
-}

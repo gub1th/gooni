@@ -40,6 +40,10 @@ export type Station = {
   links?: { label: string; href: string }[];
   image?: string;
   imageAlt?: string;
+  /** Optional "after" image. When set, `image` and `imageAfter` render as a
+      before→after pair rather than one screenshot. */
+  imageAfter?: string;
+  imageAfterAlt?: string;
   /** Accent for this leg of the walk. */
   color: string;
   /** 0–1: how cluttered the world is here. Drives prop density. */
@@ -50,16 +54,21 @@ export const STATIONS: Station[] = [
   {
     id: "origin",
     eyebrow: "How I started",
-    title: "Thirty minutes a night, gone",
+    title: "Building shit from scratch",
     meta: "high-frequency trading logs · the first thing I ever automated",
     body: [
-      "I started coding early, mostly by building small tools and games. What really pulled me in was using code to deal with messy, real-world problems.",
-      "A relative I worked with was in high-frequency trading and had a lot of manual work around daily log files. The logs were huge — market data plus a bunch of execution flags, reject reasons, and other indicators.",
-      "My job was to sift through that output, pull out the relevant events, and paste them into a spreadsheet so they could be reviewed. After a while I realized there was a pattern, learned Python, and automated the parsing — turning 30–60 minutes of repetitive work into scripts that ran in under a minute.",
+      "I first started coding in high school, through the CS classes we had. At the time, I wasn't particularly enthusiastic. Our classes involved a lot of broad theory, spanning the history of computers to the societal implications of software.",
+      "Algorithms were somewhat of a foreign concept. We were taught to memorize sorting technique code, but not how the code primitives themselves worked. We were never taught what a function was, or how you would create one.",
+      "The summer right after grad, I was twiddling my fingers, so I decided to work for my relative, who was an independent high frequency trader. The work he gave me revolved around a lot of manual work with daily log files.",
+      "The logs were huge — market data plus a bunch of execution flags, reject reasons, and other indicators. My job was to sift through that output, pull out the relevant events, and paste them into a spreadsheet so they could be reviewed.",
+      "After doing this for weeks, I was getting tired. This felt like the most manual of labor. I knew this was a repetitive scanning task that I could offload to a program. Perhaps I could use whatever knowledge I had accumulated during high school.",
+      "So I said fuck it. I learned Python, and automated the parsing, turning 30–60 minutes of repetitive work into scripts that ran in under a minute.",
     ],
     pull: "My first real act as an engineer was deleting my own job.",
     image: "/portfolio/logger.jpg",
-    imageAlt: "Raw trading log output on the left, the parsed spreadsheet it becomes on the right.",
+    imageAlt: "The raw trading log — thousands of lines I sifted through by hand.",
+    imageAfter: "/portfolio/logger-excel.webp",
+    imageAfterAlt: "The clean spreadsheet the Python script pulls out of that log in under a minute.",
     color: "#F0A868",
     density: 1,
   },
@@ -139,7 +148,7 @@ export const STATIONS: Station[] = [
         why: "removed — too much friction, not enough value",
       },
       {
-        text: "Now: expose MCP and let Claude do the thinking. Gooni is persistence, display, and ingestion for the data Claude can't reach on its own.",
+        text: "For a while I exposed MCP and let Claude do the thinking — Gooni was just persistence, display, and ingestion. Now I'm pulling the inference back in-house: Gooni does its own thinking again, leaner than the first time.",
       },
     ],
     pull: "I built the thing that told me to delete my own work, and then I listened.",
