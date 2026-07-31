@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { AdaptiveDpr, AdaptiveEvents, OrbitControls, useProgress } from "@react-three/drei";
 import * as THREE from "three";
 import { useNavigate } from "@tanstack/react-router";
-import { Volume2, VolumeX, Activity } from "lucide-react";
+import { Volume2, VolumeX, Activity, FileText } from "lucide-react";
 import { Atmosphere } from "./Atmosphere";
 import { SkyDome } from "./SkyDome";
 import { Plaza } from "./Plaza";
@@ -38,6 +38,7 @@ import { fireVfx } from "./vfx";
 import { useCountryFlag } from "./useCountryFlag";
 import type { PublicNote } from "../../services/api";
 import { FONT } from "../../ui";
+import { CtrlButton } from "../CtrlButton";
 
 const DISPLAY = "'Iowan Old Style', 'Hoefler Text', Georgia, 'Times New Roman', serif";
 
@@ -522,12 +523,28 @@ export function Scene() {
 
       {introDone && !selectedNote && <NavHint />}
 
-      <div style={{ position: "fixed", top: 22, right: 22, display: "flex", gap: 10, zIndex: 8 }}>
-        {entered && debug && (
-          <PerfToggle open={perfOpen} onToggle={() => setPerfOpen((v) => !v)} />
-        )}
-        <MuteToggle muted={muted} onToggle={() => setMuted(!muted)} entered={entered} />
-      </div>
+      {/* Top-right control cluster — the SAME dark round icon buttons as the
+          /walk page (Daniel: "same buttons in /public"). View CV + Mute; the
+          plaza has no walk to restart and is already the plaza, so those two
+          walk buttons don't cross over. Perf toggle rides along in debug. */}
+      {entered && (
+        <div style={{ position: "fixed", top: 22, right: 22, display: "flex", gap: 10, zIndex: 8 }}>
+          {debug && (
+            <CtrlButton
+              label={perfOpen ? "Hide perf stats" : "Show perf stats"}
+              onClick={() => setPerfOpen((v) => !v)}
+            >
+              <Activity size={17} strokeWidth={1.8} />
+            </CtrlButton>
+          )}
+          <CtrlButton label="View CV" onClick={() => navigate({ to: "/public/cv" })}>
+            <FileText size={17} strokeWidth={1.8} />
+          </CtrlButton>
+          <CtrlButton label={muted ? "Unmute" : "Mute"} onClick={() => setMuted(!muted)}>
+            {muted ? <VolumeX size={17} strokeWidth={1.8} /> : <Volume2 size={17} strokeWidth={1.8} />}
+          </CtrlButton>
+        </div>
+      )}
       {entered && debug && perfOpen && <PerfPanel metrics={perf} />}
 
       {overlayMounted && (
@@ -573,101 +590,7 @@ export function Scene() {
         }}
       />
       {entered && <BrandingMark />}
-      {entered && <ShortVersionLink visible={introDone && !selectedNote} />}
     </>
-  );
-}
-
-// The permanent way out. A reviewer with two minutes should never have
-// to walk the island to find out what he's done — this pill is pinned
-// top-left the whole time and lands on the flat page.
-//
-// Pointed at /public/cv rather than /public: the notes index is a
-// reading surface, not a summary, so it answered the wrong question for
-// someone scanning. Notes stay reachable from the flat page's footer.
-// One escape hatch, not two — a second pill would be clutter on a
-// surface whose whole argument is subtraction.
-function ShortVersionLink({ visible }: { visible: boolean }) {
-  return (
-    <a
-      href="/public/cv"
-      style={{
-        position: "fixed",
-        top: 22,
-        left: 22,
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        padding: "9px 16px 9px 14px",
-        borderRadius: 999,
-        // Glass pill on the 3D scene — matches MuteToggle/PerfToggle
-        // styling so the top-corner cluster reads as one family. No
-        // shadow saturation; quiet but legible.
-        background: "rgba(255,255,255,0.86)",
-        color: "#1a1a1a",
-        textDecoration: "none",
-        fontFamily: FONT,
-        fontSize: 13,
-        fontWeight: 500,
-        letterSpacing: "0.01em",
-        border: "1px solid rgba(0,0,0,0.06)",
-        boxShadow: "0 4px 14px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06)",
-        backdropFilter: "blur(14px) saturate(160%)",
-        WebkitBackdropFilter: "blur(14px) saturate(160%)",
-        zIndex: 8,
-        opacity: visible ? 1 : 0,
-        transform: visible ? "translateY(0)" : "translateY(-8px)",
-        transition: "opacity 320ms ease, transform 200ms ease, background 180ms ease",
-        pointerEvents: visible ? "auto" : "none",
-      }}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget as HTMLAnchorElement;
-        el.style.background = "rgba(255,255,255,0.96)";
-        el.style.transform = "translateY(-1px)";
-      }}
-      onMouseLeave={(e) => {
-        const el = e.currentTarget as HTMLAnchorElement;
-        el.style.background = "rgba(255,255,255,0.86)";
-        el.style.transform = "translateY(0)";
-      }}
-    >
-      <span
-        aria-hidden
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          background: "#1b8b4a",
-          boxShadow: "0 0 0 3px rgba(74,222,128,0.20)",
-        }}
-      />
-      <span
-        aria-hidden
-        style={{
-          width: 22,
-          height: 22,
-          borderRadius: "50%",
-          background: "#E1F5EE",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
-      >
-        <NotebookIcon />
-      </span>
-      <span>view cv</span>
-      <span style={{ fontSize: 14, lineHeight: 1, marginLeft: 1, color: "#555" }}>↗</span>
-    </a>
-  );
-}
-
-function NotebookIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <rect x="3.5" y="2" width="9" height="12" rx="1.2" stroke="#1D9E75" strokeWidth="1.3" />
-      <path d="M3.5 5h9M3.5 8h6M3.5 11h6" stroke="#1D9E75" strokeWidth="1.1" strokeLinecap="round" />
-    </svg>
   );
 }
 
@@ -927,77 +850,6 @@ function StartOverlay({
         }
       `}</style>
     </div>
-  );
-}
-
-function MuteToggle({ muted, onToggle, entered }: { muted: boolean; onToggle: () => void; entered: boolean }) {
-  if (!entered) return null;
-  return (
-    <button
-      onClick={onToggle}
-      aria-label={muted ? "Unmute" : "Mute"}
-      title={muted ? "Unmute" : "Mute"}
-      style={{
-        background: "rgba(255,255,255,0.86)",
-        border: "1px solid rgba(0,0,0,0.06)",
-        borderRadius: 999,
-        width: 40,
-        height: 40,
-        cursor: "pointer",
-        boxShadow: "0 4px 14px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backdropFilter: "blur(14px) saturate(160%)",
-        WebkitBackdropFilter: "blur(14px) saturate(160%)",
-        transition: "background 180ms ease, transform 120ms ease",
-      }}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget as HTMLButtonElement;
-        el.style.background = "rgba(255,255,255,0.96)";
-        el.style.transform = "scale(1.04)";
-      }}
-      onMouseLeave={(e) => {
-        const el = e.currentTarget as HTMLButtonElement;
-        el.style.background = "rgba(255,255,255,0.86)";
-        el.style.transform = "scale(1.0)";
-      }}
-    >
-      {muted ? <VolumeX size={17} color="#2a2a2a" strokeWidth={1.8} /> : <Volume2 size={17} color="#2a2a2a" strokeWidth={1.8} />}
-    </button>
-  );
-}
-
-function PerfToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  return (
-    <button
-      onClick={onToggle}
-      aria-label={open ? "Hide perf stats" : "Show perf stats"}
-      title="Toggle perf stats"
-      style={{
-        background: open ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.78)",
-        border: "1px solid rgba(0,0,0,0.06)",
-        borderRadius: 999,
-        width: 40,
-        height: 40,
-        cursor: "pointer",
-        boxShadow: "0 4px 14px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        backdropFilter: "blur(14px) saturate(160%)",
-        WebkitBackdropFilter: "blur(14px) saturate(160%)",
-        transition: "background 180ms ease, transform 120ms ease",
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.04)";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.0)";
-      }}
-    >
-      <Activity size={17} color="#2a2a2a" strokeWidth={1.8} />
-    </button>
   );
 }
 
