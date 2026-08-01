@@ -8,6 +8,7 @@ import {
   isTileSolid,
   tileWithin,
 } from "./useDanielControls";
+import { isPortalTile } from "./tileGrid";
 import { fireVfx } from "./vfx";
 import { GLTFGooni, type GooniHandle } from "./GLTFGooni";
 import { Nametag } from "./Nametag";
@@ -320,7 +321,12 @@ export function NpcAvatar({
         h.active = false;
         const within = tileWithin(h.toGx, h.toGz);
         const solid = isTileSolid(h.toGx, h.toGz);
-        if (!within || !solid) {
+        // The portal tile is registered as EXISTING so the player can land
+        // on it and trigger the jump-in — but there's no floor there, so
+        // for the NPC it has to behave like the void: hop in, fall, get
+        // sky-respawned. Without this it lands on nothing and stands in
+        // mid-air over the opening.
+        if (!within || !solid || isPortalTile(h.toGx, h.toGz)) {
           fallRef.current.active = true;
           fallRef.current.t = 0;
           fallRef.current.startX = h.toX;
