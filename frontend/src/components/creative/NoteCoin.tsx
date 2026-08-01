@@ -32,6 +32,15 @@ const BOB_FREQ = (2 * Math.PI) / 3.0;    // 3s bob cycle
 const BEAM_HEIGHT = 0.85;
 const BEAM_RADIUS = 0.14;
 const COIN_OPACITY = 0.80;
+// Spawn-in: the coin scales up out of the tile and fades to full over
+// this long, starting spawnDelayMs after mount. Scaling the OUTER group
+// (not the spinner) means the beam grows with it and the coin lifts to
+// its float height, so it reads as rising out of the tile rather than
+// inflating in mid-air.
+const APPEAR_DUR = 0.62;
+const APPEAR_MIN_SCALE = 0.25;
+// Below this the coin is too faint to be a believable click target.
+const APPEAR_INTERACTIVE_AT = 0.40;
 // Tilt the disc ~17° off vertical so it reads as a floating page,
 // not a perfect coin face.
 const COIN_TILT_Z = (17 * Math.PI) / 180;
@@ -100,14 +109,23 @@ type Props = {
   isNear: boolean;
   /** Target opacity multiplier (1 = full, low = faded near the player). */
   fadeTarget: number;
+  /** Milliseconds to wait after mount before this coin starts appearing —
+   *  NoteCoins staggers these so the plaza fills as a wave. */
+  spawnDelayMs: number;
   onSelect: (note: PublicNote, worldPos: THREE.Vector3) => void;
 };
 
-export function NoteCoin({ note, tile, isRead, isNear, fadeTarget, onSelect }: Props) {
+export function NoteCoin({ note, tile, isRead, isNear, fadeTarget, spawnDelayMs, onSelect }: Props) {
+  const rootRef = useRef<THREE.Group>(null);
   const spinnerRef = useRef<THREE.Group>(null);
   const beamRef = useRef<THREE.Mesh>(null);
   const coinMatRef = useRef<THREE.MeshToonMaterial>(null);
   const fadeRef = useRef(1); // eased opacity multiplier, → low when on-tile
+  // Spawn-in progress 0→1. Clock starts on the first rendered frame, not
+  // on mount: the coins mount the instant the query resolves, which can
+  // be a frame or two before the scene is actually drawing them.
+  const appearStartRef = useRef<number | null>(null);
+  const appearRef = useRef(0);
   const [tileAlive, setTileAlive] = useState(true);
   const [hovered, setHovered] = useState(false);
   const reduceMotion = useReducedMotion();
@@ -171,10 +189,34 @@ export function NoteCoin({ note, tile, isRead, isNear, fadeTarget, onSelect }: P
     const now = performance.now() / 1000;
     const bob = bobAmp === 0 ? 0 : Math.sin(now * BOB_FREQ + tile.gx + tile.gz) * bobAmp;
     spinner.position.y = COIN_BASE_Y + bob;
+
+    // Staggered spawn-in. raw runs 0→1 over APPEAR_DUR once this coin's
+    // delay has elapsed; opacity eases out-cubic, scale eases out-BACK so
+    // the coin overshoots slightly and settles — the pop that makes it
+    // read as arriving rather than being switched on.
+    if (appearStartRef.current === null) appearStartRef.current = now;
+    const age = now - appearStartRef.current - spawnDelayMs / 1000;
+    const raw = THREE.MathUtils.clamp(age / APPEAR_DUR, 0, 1);
+    appearRef.current = raw;
+    const appearFade = 1 - Math.pow(1 - raw, 3);
+    if (rootRef.current) {
+      let s: number;
+      if (reduceMotion) {
+        s = 1;
+      } else {
+        // easeOutBack, c1 = 1.20 → ~9% overshoot at the tail.
+        const c1 = 1.2;
+        const c3 = c1 + 1;
+        const back = 1 + c3 * Math.pow(raw - 1, 3) + c1 * Math.pow(raw - 1, 2);
+        s = APPEAR_MIN_SCALE + (1 - APPEAR_MIN_SCALE) * back;
+      }
+      rootRef.current.scale.setScalar(s);
+    }
+
     // Ease toward the target fade — coin, glyph + beam all dim together so
     // the coin gets out of the way near the player / its own peek card.
     fadeRef.current += (fadeTarget - fadeRef.current) * Math.min(1, dt * 8);
-    const fade = fadeRef.current;
+    const fade = fadeRef.current * appearFade;
     if (coinMatRef.current) coinMatRef.current.opacity = COIN_OPACITY * fade;
     if (iconMat) iconMat.opacity = fade;
     if (beam) {
@@ -189,12 +231,16 @@ export function NoteCoin({ note, tile, isRead, isNear, fadeTarget, onSelect }: P
   function handleClick(e: ThreeEvent<MouseEvent>) {
     e.stopPropagation();
     if (!tileAlive) return;
+    // A coin still fading in is a tiny, near-invisible mesh — clicking it
+    // would feel like hitting nothing.
+    if (appearRef.current < APPEAR_INTERACTIVE_AT) return;
     const world = new THREE.Vector3(tile.x, COIN_BASE_Y, tile.z);
     onSelect(note, world);
   }
 
   function handlePointerEnter(e: ThreeEvent<PointerEvent>) {
     e.stopPropagation();
+    if (appearRef.current < APPEAR_INTERACTIVE_AT) return;
     setHovered(true);
     document.body.style.cursor = "pointer";
   }
@@ -207,7 +253,11 @@ export function NoteCoin({ note, tile, isRead, isNear, fadeTarget, onSelect }: P
   if (!tileAlive) return null;
 
   return (
-    <group position={[tile.x, 0, tile.z]}>
+    // Scaled by the spawn-in: everything inside (beam included) grows from
+    // the tile surface, so the coin rises to its float height as it arrives.
+    // Starts at APPEAR_MIN_SCALE, never 0 — a zero-scale matrix makes three
+    // complain about degenerate normals.
+    <group ref={rootRef} position={[tile.x, 0, tile.z]} scale={APPEAR_MIN_SCALE}>
       {/* Vertical beam — visible-from-far marker, dialed way down so it
           ambient-glows the tile instead of advertising. */}
       <mesh ref={beamRef} position={[0, BEAM_HEIGHT / 2 + 0.15, 0]}>

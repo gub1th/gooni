@@ -117,10 +117,11 @@ const BUMP_ARC = 0.30;       // peak height of the abortive hop arc
 const FALL_DUR = 1.0;
 const FALL_DROP = 14;
 // Sink into the hole. NOT the fall-off tumble above — this is the
-// jump-in cutscene: land on the portal tile, then drop straight down the
-// open shaft. Portal.tsx's shaft is DEPTH=7; stop short of its black
-// floor. Roughly matches DropCamera's DROP_MS so the body is deep in the
-// dark by the time the veil takes the screen.
+// jump-in cutscene: land on the portal tile, then drop straight down
+// through the opening. There is no shaft any more (Portal.tsx renders the
+// hole as genuinely open sky), so this just falls through air. Roughly
+// matches DropCamera's DROP_MS so the body has shrunk to nothing by the
+// time the veil takes the screen.
 const SINK_DUR = 0.85;
 const SINK_DEPTH = 10;
 // Sky respawn — char reappears above plaza center, face-flat, gravity-

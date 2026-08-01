@@ -27,6 +27,16 @@ import { FONT } from "../../ui";
 const READ_STORAGE_KEY = "gooni-creative-read-v1";
 const PROXIMITY_TILES = 2;
 
+// Staggered arrival: coins appear nearest-to-player first and ripple
+// outward instead of all popping on the same frame. The first coin fires
+// with zero delay, so the wave STARTS exactly where the old all-at-once
+// spawn happened — it only spreads out behind that beat.
+// The total is held roughly constant regardless of note count: a wide
+// plaza shouldn't take twice as long to fill as a sparse one, and one
+// fixed per-coin step would do exactly that.
+const SPAWN_WAVE_MS = 1750;
+const SPAWN_STEP_MAX_MS = 150;
+
 function loadReadIds(): Set<number> {
   if (typeof window === "undefined") return new Set();
   try {
@@ -88,6 +98,36 @@ export function NoteCoins({ onSelect }: Props) {
     const last = getLastPlayerLanding();
     return last ? { gx: last.gx, gz: last.gz } : null;
   });
+
+  // Where the wave starts from. Captured ONCE at mount (spawn tile) — if
+  // this tracked playerGrid, walking around would re-sort the delays and
+  // any coin remounting later would arrive on a shuffled clock.
+  const waveAnchorRef = useRef<{ gx: number; gz: number }>(
+    (() => {
+      const last = getLastPlayerLanding();
+      return last ? { gx: last.gx, gz: last.gz } : { gx: 0, gz: 0 };
+    })(),
+  );
+
+  // note.id → ms to wait before appearing. Sorted by tile-distance from
+  // the spawn anchor so the plaza fills outward from where you're standing;
+  // note.id breaks ties so the order is stable across refetches.
+  const spawnDelays = useMemo(() => {
+    const anchor = waveAnchorRef.current;
+    const distOf = (t: { gx: number; gz: number }) =>
+      Math.abs(anchor.gx - t.gx) + Math.abs(anchor.gz - t.gz);
+    const ordered = [...assignments].sort((a, b) => {
+      const d = distOf(a.tile) - distOf(b.tile);
+      return d !== 0 ? d : a.note.id - b.note.id;
+    });
+    const step =
+      ordered.length <= 1
+        ? 0
+        : Math.min(SPAWN_STEP_MAX_MS, SPAWN_WAVE_MS / (ordered.length - 1));
+    const m = new Map<number, number>();
+    ordered.forEach((a, i) => m.set(a.note.id, i * step));
+    return m;
+  }, [assignments]);
 
   // Refs let the landing subscriber read current assignment + read
   // state without re-subscribing on every change.
@@ -220,6 +260,7 @@ export function NoteCoins({ onSelect }: Props) {
             isRead={isRead}
             isNear={isNear}
             fadeTarget={fadeTarget}
+            spawnDelayMs={spawnDelays.get(note.id) ?? 0}
             onSelect={onSelect}
           />
         );
