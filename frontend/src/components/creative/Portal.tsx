@@ -20,27 +20,29 @@ import { useReducedMotion } from "./useReducedMotion";
 // outlined lettering. It's the one object allowed to look like a game
 // prop, because it's the only thing in the scene giving an instruction.
 //
-// THERE IS NO SHAFT. A drawn black box read as a black rectangular PRISM
-// sitting in the floor — an object, not an absence. The opening is
-// genuinely open: you see straight through to the sky under the island,
-// and updraft wisps blow up through the gap. That sells "the floor is
-// missing here" in a way a dark fill never could, and the jump-in falls
-// through real air, with the veil doing the darkening.
+// THERE IS NO SHAFT and THERE ARE NO WALLS. Nothing is drawn below the
+// floor line at all.
 //
-// The lip walls are the ONLY thing below the floor line, and they match
-// the tile slab's actual thickness. When they were deeper than the floor
-// they hung into the open space and the hole read as a shallow crate.
+// The shaft was a black box, and it read as a rectangular PRISM sitting
+// in the floor — an object where an absence was wanted. The opening is
+// genuinely open now: you see straight through to the sky under the
+// island, updraft wisps blow up through the gap, and the jump-in falls
+// through real air with the veil doing the darkening.
+//
+// The lip walls went with it, because the surrounding tiles were always
+// already the walls. TileFloor draws each tile as a real box at
+// GRID_PITCH*0.97 = 1.94 on a 2.0 pitch, so a neighbour's inner face sits
+// 1.03 from this tile's centre; the lip planes sat at HOLE/2 = 0.99, a
+// second set of walls 0.04 in front of the real ones. They also stood
+// proud of the floor once sized to cover the tiles' yJitter. What they
+// bought was a darker cut-edge colour and a rim that brightened on
+// approach — the first is better solved by the contrast of open sky
+// beyond the gap, and the second is redundant with the sign lighting up.
 
 const toon = getToonGradient();
 
 const TILE = 2.0;
 const HOLE = TILE * 0.99;   // hole spans the missing tile exactly
-// TileFloor draws each tile as a TILE_HEIGHT=0.10 slab centred at
-// Y_OFFSET=0.05, so the floor occupies y 0.00→0.10. The cut edge has to
-// match that, plus a hair of overhang to cover the tiles' ±0.02 yJitter
-// and stop a hairline gap opening at the rim.
-const LIP_HEIGHT = 0.16;
-const LIP_CENTER_Y = 0.05;
 
 type Props = {
   /** Fires when the player lands on the hole. */
@@ -88,24 +90,8 @@ export function Portal({ onEnter, armed, near = false }: Props) {
       {/* The updraft — what you see in the gap instead of a dark fill. */}
       <WindGusts originX={x} originZ={z} near={hot || near} />
 
-      {/* Cut edge — four short walls at the lip so the floor has real
-          thickness where it's been broken through. Sized to the tile slab:
-          any deeper and they hang into the open space below and the hole
-          reads as a shallow crate instead of an opening. */}
-      {([[0, 1], [0, -1], [1, 0], [-1, 0]] as const).map(([ox, oz], i) => (
-        <mesh
-          key={i}
-          position={[(ox * HOLE) / 2, LIP_CENTER_Y, (oz * HOLE) / 2]}
-          rotation={[0, ox !== 0 ? Math.PI / 2 : 0, 0]}
-        >
-          <planeGeometry args={[HOLE, LIP_HEIGHT]} />
-          <meshToonMaterial
-            color={hot || near ? "#B9A98C" : "#8C8272"}
-            gradientMap={toon}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      ))}
+      {/* No cut-edge geometry: the four surrounding tiles are real boxes
+          and their inner faces already are the walls of this opening. */}
 
       <Signpost boardRef={boardRef} lit={hot || near} />
     </group>
