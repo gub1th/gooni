@@ -18,7 +18,9 @@ import { QuickComposer } from "../components/QuickComposer";
 import { ErrorView, NotFoundView } from "../components/ErrorView";
 import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
-import { SummonedNav } from "../components/ambient/SummonedNav";
+// Nav prototype swap: IconRail (persistent pill) replaced the hover-summoned
+// SummonedNav. To revert: import SummonedNav and render it at the mount below.
+import { IconRail } from "../components/ambient/IconRail";
 import { TopRightControls } from "../components/ambient/TopRightControls";
 import { WidgetOverlays } from "../components/widgets/WidgetOverlays";
 import { sheetFrame } from "../ui";
@@ -332,6 +334,10 @@ function AppShell() {
           // The void is the app's ground; views float on it as sheets.
           background: isImmersive ? "var(--gooni-bg, #FFFFFF)" : "var(--gooni-void, #000000)",
           position: "relative",
+          // Reserve a permanent left lane for the persistent IconRail so nothing
+          // underlaps it. STATIC (not hover-driven) → no reflow jank. Immersive
+          // surfaces hide the rail, so no lane.
+          paddingLeft: isImmersive ? 0 : 68,
         }}
       >
         <div
@@ -402,7 +408,7 @@ function AppShell() {
           <Outlet />
         </div>
         </div>
-        {!isImmersive && <SummonedNav />}
+        {!isImmersive && <IconRail />}
         {/* Visible top-right chrome (focus/home jump + theme toggle) — the two
             controls Daniel pulled out of the hover nav. */}
         {!isImmersive && <TopRightControls isFocusHome={isHome} />}
