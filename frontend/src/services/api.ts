@@ -105,10 +105,11 @@ export async function fetchSpaceNotes(_spaceId: number | "general"): Promise<Api
 }
 
 // Semantic note search — uses the note embeddings + cosine similarity.
-// Same backend route the MCP server hits via search_notes; surfaced here
-// so the frontend's All-Notes discovery view can reuse it.
+// Was `/mcp/notes/search`; that path is dead (the focus-MCP app mounted at
+// `/mcp` shadows every router route under the prefix), so it 404'd silently
+// behind a .catch. Now `/notes/search`, same service call underneath.
 export async function searchNotes(query: string, limit = 12): Promise<ApiNote[]> {
-  const res = await apiFetch(`${BASE}/mcp/notes/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+  const res = await apiFetch(`${BASE}/notes/search?q=${encodeURIComponent(query)}&limit=${limit}`);
   if (!res.ok) throw new Error("Failed to search notes");
   return res.json();
 }

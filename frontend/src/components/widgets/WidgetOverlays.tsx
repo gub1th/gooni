@@ -59,7 +59,6 @@ export function WidgetOverlays() {
           borderRadius: 18,
           overflow: "hidden",
           border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.13)",
-          boxShadow: "0 30px 90px rgba(0,0,0,0.6)",
           ...frost.sheet,
           color: "rgb(var(--gooni-ink, 244 245 244))",
           display: "flex",
