@@ -701,6 +701,20 @@ def search_note_titles(q: str = "", limit: int = 8, db: Session = Depends(get_db
     return [_serialize_note_lite(n) for n in notes]
 
 
+@router.get("/notes/search")
+def search_notes(q: str, limit: int = 8, db: Session = Depends(get_db)):
+    """Semantic note search (embedding cosine) for the home QuickFind bar.
+
+    Same service call as the older `/mcp/notes/search`, re-homed under
+    `/notes/*` because `app.mount("/mcp", focus_mcp.http_app)` in main.py
+    swallows EVERY `/mcp/*` path — a Starlette mount shadows router routes
+    sharing its prefix, so the mcp router's search endpoints 404. Declared
+    before `/notes/{note_id}` so "search" isn't parsed as an id.
+    """
+    notes = note_service.search_by_query(q, limit, db)
+    return [_serialize_note_lite(n) for n in notes]
+
+
 @router.get("/notes/{note_id}")
 def get_note(note_id: int, db: Session = Depends(get_db)):
     """Return a single note by ID. Tacks on `unique_viewers` so the editor

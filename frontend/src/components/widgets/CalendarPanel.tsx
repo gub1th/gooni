@@ -652,7 +652,6 @@ const fabStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  boxShadow: "0 8px 24px rgba(74,222,128,0.3)",
 };
 
 const editorScrim: React.CSSProperties = {
@@ -672,7 +671,6 @@ const editorCard: React.CSSProperties = {
   border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.14)",
   borderRadius: 14,
   padding: "18px 18px 16px",
-  boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
   fontFamily: FONT,
 };
 

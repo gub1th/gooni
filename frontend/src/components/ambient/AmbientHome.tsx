@@ -9,13 +9,12 @@ import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import { WidgetHost } from "../widgets/WidgetHost";
 import { ActivityRail } from "./ActivityRail";
+import { QuickFind } from "./QuickFind";
 import {
   createConversation,
   dismissMessageGlow,
   fetchMessageLog,
   promoteMessage,
-  searchNoteTitles,
-  searchNotes,
   sendConversationMessage,
   type ApiNote,
   type LogMessage,
@@ -31,6 +30,11 @@ import {
 // reply back, then resumes listening. No button, no textbox, no Enter. The mic
 // pauses while Gooni talks (no echo) and while you type. Toggle voice off (pill,
 // persisted) to fall back to the typed capture box.
+//
+// SEARCH LIVES ELSEWHERE. The capture box used to double as an omnibox — every
+// keystroke ran a note search and a suggestion dropdown hung under it. That's
+// gone: the box only captures now, and recall moved to `QuickFind` (the bar at
+// the top), which searches notes AND promises/reminders/memories/trackables.
 
 const POLL_MS = 15_000;
 const WAVE_WIDTH = 440;
@@ -48,19 +52,6 @@ function energyFor(count: number): number {
   return Math.min(1, 0.14 + count * 0.28);
 }
 
-// dedupe two note lists by id (title-matches first, then semantic), capped
-function mergeNotes(a: ApiNote[], b: ApiNote[], cap = 6): ApiNote[] {
-  const seen = new Set<number>();
-  const out: ApiNote[] = [];
-  for (const n of [...a, ...b]) {
-    if (seen.has(n.id)) continue;
-    seen.add(n.id);
-    out.push(n);
-    if (out.length >= cap) break;
-  }
-  return out;
-}
-
 export function AmbientHome() {
   const energyRef = useRef(0);
   const activeRef = useRef(0);
@@ -74,16 +65,12 @@ export function AmbientHome() {
   const [thinking, setThinking] = useState(false);
   const [replyText, setReplyText] = useState<string | null>(null);
   const [replyShown, setReplyShown] = useState(false);
-  const [suggestions, setSuggestions] = useState<ApiNote[]>([]);
-  const [activeIdx, setActiveIdx] = useState(-1);
   const [peekNote, setPeekNote] = useState<ApiNote | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickyRef = useRef<StickyHandle>(null);
   const focusedRef = useRef(false);
   const hideTimer = useRef<number | null>(null);
   const enterTimer = useRef<number | null>(null);
-  const searchTimer = useRef<number | null>(null);
-  const searchSeq = useRef(0);
   const replyTimer = useRef<number | null>(null);
   const replyHideTimer = useRef<number | null>(null);
 
@@ -310,35 +297,12 @@ export function AmbientHome() {
     setBoxH(h);
   }, []);
 
-  // Omnibox recall — unchanged. Instant title-substring per keystroke + semantic
-  // on a short pause; Enter commits unless a suggestion is highlighted.
-  const runRecall = useCallback((raw: string) => {
-    const seq = ++searchSeq.current;
-    if (searchTimer.current) { window.clearTimeout(searchTimer.current); searchTimer.current = null; }
-    const q = raw.trim();
-    setActiveIdx(-1);
-    if (!q) { setSuggestions([]); return; }
-    void searchNoteTitles(q, 6)
-      .then((r) => { if (seq === searchSeq.current) setSuggestions((prev) => mergeNotes(r, prev)); })
-      .catch(() => {});
-    searchTimer.current = window.setTimeout(() => {
-      void searchNotes(q, 6)
-        .then((sem) => { if (seq === searchSeq.current) setSuggestions((prev) => mergeNotes(prev, sem)); })
-        .catch(() => {});
-    }, 260);
-  }, []);
-
-  useEffect(() => {
-    if (!boxMode) { setSuggestions([]); setActiveIdx(-1); return; }
-    runRecall(value);
-  }, [value, boxMode, runRecall]);
-
-  function openNote(n: ApiNote) {
+  // A QuickFind hit that resolves to a note opens it inline (same NotePeek the
+  // old capture-box dropdown used) — the rest navigate or flip home-local state.
+  const openNote = useCallback((n: ApiNote) => {
     setPeekNote(n);
-    setSuggestions([]);
-    setActiveIdx(-1);
     inputRef.current?.blur();
-  }
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -430,24 +394,12 @@ export function AmbientHome() {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "ArrowDown" && suggestions.length) {
-      e.preventDefault();
-      setActiveIdx((i) => Math.min(suggestions.length - 1, i + 1));
-      return;
-    }
-    if (e.key === "ArrowUp" && suggestions.length) {
-      e.preventDefault();
-      setActiveIdx((i) => Math.max(-1, i - 1));
-      return;
-    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (activeIdx >= 0 && suggestions[activeIdx]) { openNote(suggestions[activeIdx]); return; }
       capture();
       return;
     }
     if (e.key === "Escape") {
-      if (activeIdx >= 0) { setActiveIdx(-1); return; }
       (e.target as HTMLTextAreaElement).blur();
       idleActive();
       if (!value.trim()) setBoxMode(false);
@@ -471,7 +423,7 @@ export function AmbientHome() {
   // createAt also refuses the forbidden centre/nav zones.
   function onRootDoubleClick(e: React.MouseEvent) {
     if (boxMode || logMode || needsWake || peekNote) return;
-    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-widget], [data-chat-ribbon], [data-activity-rail]")) return;
+    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-widget], [data-chat-ribbon], [data-activity-rail], [data-quickfind]")) return;
     stickyRef.current?.createAt(e.clientX, e.clientY);
   }
 
@@ -533,50 +485,13 @@ export function AmbientHome() {
         />
       </div>
 
-      {/* omnibox recall — live note suggestions under the box */}
-      {boxMode && suggestions.length > 0 && (
-        <div
-          style={{
-            position: "absolute", left: "50%", top: rect.cy + boxH / 2 + 10,
-            transform: "translateX(-50%)", width: rect.w, maxWidth: "86vw", zIndex: 7,
-            display: "flex", flexDirection: "column", gap: 2,
-            borderRadius: 14, padding: 6,
-            background: "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 58%, transparent)",
-            backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
-            border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.10)", boxShadow: "0 16px 50px rgba(0,0,0,0.5)",
-          }}
-        >
-          {suggestions.map((n, i) => (
-            <button
-              key={n.id}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setActiveIdx(i)}
-              onClick={() => openNote(n)}
-              style={{
-                display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2,
-                textAlign: "left", padding: "8px 12px", borderRadius: 10, cursor: "pointer",
-                border: "none", fontFamily: FONT, width: "100%",
-                background: i === activeIdx ? "rgb(var(--gooni-ink, 244 245 244) / 0.08)" : "transparent",
-              }}
-            >
-              <span style={{
-                fontSize: 13.5, color: "rgb(var(--gooni-ink, 244 245 244))", fontWeight: 500,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%",
-              }}>
-                {n.title || "untitled"}
-              </span>
-              {n.excerpt && (
-                <span style={{
-                  fontSize: 11.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)",
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%",
-                }}>
-                  {n.excerpt}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* quickfind — THE search surface. Top bar, its own thing, searches every
+          primitive (not just notes). Hidden only under full-screen surfaces. */}
+      <QuickFind
+        hidden={logMode || !!peekNote || needsWake}
+        onOpenNote={openNote}
+        onOpenTrackables={() => setLogMode(true)}
+      />
 
       {/* trackables + voice pills — always visible row below the wave (Daniel:
           fewer hidden hover controls). The activity log sits below this row (the

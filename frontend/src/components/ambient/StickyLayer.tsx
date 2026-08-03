@@ -309,9 +309,8 @@ export const StickyLayer = forwardRef<
               pointerEvents: "auto", cursor: s.editing ? "text" : dragging ? "grabbing" : "grab",
               ...frost.panel, borderRadius: 14,
               border: `1px solid rgb(var(--gooni-ink, 244 245 244) / ${s.editing ? 0.2 : 0.1})`,
-              boxShadow: dragging
-                ? "0 0 0 1px rgba(74,222,128,0.5), 0 24px 70px rgba(0,0,0,0.6)"
-                : "0 12px 40px rgba(0,0,0,0.4)",
+              // Ring on drag, nothing at rest — see Widget.tsx (same call).
+              boxShadow: dragging ? "0 0 0 1px rgba(74,222,128,0.5)" : "none",
               padding: 13, boxSizing: "border-box", fontFamily: FONT,
               transition: dragging
                 ? "none"

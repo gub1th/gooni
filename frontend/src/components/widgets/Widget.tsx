@@ -125,9 +125,10 @@ export function Widget({
         borderRadius: 16,
         overflow: "hidden",
         border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.1)",
-        boxShadow: dragging
-          ? "0 0 0 1px rgba(74,222,128,0.5), 0 22px 64px rgba(0,0,0,0.6)"
-          : "0 18px 60px rgba(0,0,0,0.5)",
+        // No drop shadow — frost + hairline carry the layer on their own, and a
+        // 60px black bloom under every widget is what made the home read heavy.
+        // The drag state keeps a 1px green RING (feedback, not depth).
+        boxShadow: dragging ? "0 0 0 1px rgba(74,222,128,0.5)" : "none",
         ...frost.panel,
         fontFamily: FONT,
         color: "rgb(var(--gooni-ink, 244 245 244))",
