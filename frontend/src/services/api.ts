@@ -1590,6 +1590,13 @@ export async function createPromise(text: string): Promise<ApiPromise> {
   return res.json();
 }
 
+// Hard-delete (row + edges) — the undo path for a promise created by mistake
+// from the timeline editor. Backend: DELETE /promises/{id}.
+export async function deletePromise(id: number): Promise<void> {
+  const res = await apiFetch(`${BASE}/promises/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete promise");
+}
+
 // ── Focus dashboard (kiosk) ────────────────────────────────────────────────
 // The always-on glanceable display (`gooni-focus-system-plan.md`). One assembled
 // payload of Gooni-OWNED data — Google Calendar events are merged CLIENT-SIDE

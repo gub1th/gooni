@@ -5,14 +5,16 @@ import { EvalView } from "../components/eval/EvalView";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
-import { FocusDashboard } from "../components/focus/FocusDashboard";
+import { HomeDashboard } from "../components/focus/HomeDashboard";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { fetchNote } from "../services/api";
 
-// The FOCUS dashboard is the app's home now — the said-vs-done timeline + rail
-// is what "/" lands on. The old waveform/capture home moved to /home (still a
-// tap away via the top-right button); the bare second-monitor kiosk lives on at
-// /focus. Everything else (log, notes, nav) is hover-summoned glass on top.
+// The B4 HomeDashboard is the app's home now — the adaptive banner over
+// timeline · finna-do · notes, reading v2 primitives (Promise/Trackable/Note).
+// The old waveform/capture home moved to /home (still a tap away via the
+// top-right button); the bare second-monitor kiosk lives on at /focus (still
+// the legacy FocusDashboard until the connector is repointed). Everything else
+// (log, notes, nav) is hover-summoned glass on top.
 
 type View = "home" | "notes" | "log" | "eval";
 
@@ -119,7 +121,7 @@ function LogPage() {
   return (
     <>
       {view === "home" ? (
-        <FocusDashboard />
+        <HomeDashboard />
       ) : view === "log" ? (
         <ChatLogView />
       ) : view === "eval" ? (

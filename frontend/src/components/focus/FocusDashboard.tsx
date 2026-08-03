@@ -268,7 +268,7 @@ export function FocusDashboard() {
             <LongTermPanel promises={longTerm} pal={pal} onMutate={reloadDashboard} />
 
             {sortedEvents.length > 0 && (
-              <Panel label="schedule" pal={pal} onExpand={() => openWidget("calendar", "agenda")}>
+              <Panel label="schedule" pal={pal} onExpand={() => openWidget("calendar", "week")}>
                 {sortedEvents.map((e) => (
                   <Row
                     key={`e${e.id}`}

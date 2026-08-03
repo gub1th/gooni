@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import {
   fetchCalendarEvents,
-  createCalendarEvent,
-  updateCalendarEvent,
-  deleteCalendarEvent,
   CalendarNotConnectedError,
   type CalendarEvent,
 } from "../../services/api";
@@ -19,36 +16,26 @@ import {
   fmtTime,
   fmtDayLabel,
   fmtRange,
-  localToIso,
 } from "./calendarDates";
+import { ItemEditor, type ItemEditorState } from "./ItemEditor";
 import type { WidgetPanelProps } from "./registry";
 
 type LoadState = "loading" | "ready" | "disconnected" | "error";
 
 const GREEN = "rgba(74,222,128,0.9)";
 
-interface EditorState {
-  mode: "create" | "edit";
-  id?: string;
-  summary: string;
-  dayKey: string;
-  startTime: string;
-  endTime: string;
-  allDay: boolean; // editing an all-day event → time fields locked
-}
-
-// Full calendar surface: a Monday-anchored week grid you can page ←/→, plus a
-// flat agenda list, backed by the live Google Calendar. Create by clicking a
-// day (or +), edit/delete by clicking an event. Every write refetches and
-// bumps the shared rev so the home compact stays in sync.
-export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
+// Full calendar surface: a Monday-anchored week grid you can page ←/→, backed
+// by the live Google Calendar. Create by clicking a day (or +), edit/delete by
+// clicking an event — all through the shared ItemEditor. Every write refetches
+// and bumps the shared rev so the home compact stays in sync. (The agenda view
+// was dropped — Daniel doesn't use it; the week grid is the whole surface now.)
+export function CalendarPanel({ onClose }: WidgetPanelProps) {
   const bump = useWidgetOverlayStore((s) => s.bump);
-  const [view, setView] = useState(initialView);
   const [weekOffset, setWeekOffset] = useState(0);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [state, setState] = useState<LoadState>("loading");
   const [reloadKey, setReloadKey] = useState(0);
-  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [editor, setEditor] = useState<ItemEditorState | null>(null);
 
   const today = useMemo(() => {
     const d = new Date();
@@ -66,13 +53,8 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
     [weekStart],
   );
 
-  // Fetch window: the visible week, or today→+14d for the agenda.
-  const { startISO, endISO } = useMemo(() => {
-    if (view === "week") {
-      return { startISO: weekStart.toISOString(), endISO: addDays(weekStart, 7).toISOString() };
-    }
-    return { startISO: today.toISOString(), endISO: addDays(today, 14).toISOString() };
-  }, [view, weekStart, today]);
+  const startISO = weekStart.toISOString();
+  const endISO = addDays(weekStart, 7).toISOString();
 
   useEffect(() => {
     let cancelled = false;
@@ -109,11 +91,20 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
   }, [events]);
 
   function openCreate(dayKey: string) {
-    setEditor({ mode: "create", summary: "", dayKey, startTime: "09:00", endTime: "10:00", allDay: false });
+    setEditor({
+      kind: "event",
+      mode: "create",
+      summary: "",
+      dayKey,
+      startTime: "09:00",
+      endTime: "10:00",
+      allDay: false,
+    });
   }
   function openEdit(ev: CalendarEvent) {
     const key = eventDayKey(ev);
     setEditor({
+      kind: "event",
       mode: "edit",
       id: ev.id,
       summary: ev.summary === "(untitled)" ? "" : ev.summary,
@@ -138,41 +129,30 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
       >
         <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2 }}>Calendar</span>
 
-        <Segmented
-          value={view}
-          onChange={setView}
-          options={[
-            { value: "week", label: "Week" },
-            { value: "agenda", label: "Agenda" },
-          ]}
-        />
-
-        {view === "week" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
-            <NavBtn label="Previous week" onClick={() => setWeekOffset((w) => w - 1)}>
-              <ChevronLeft size={16} />
-            </NavBtn>
-            <span
-              style={{
-                fontSize: 12.5,
-                color: "rgb(var(--gooni-ink, 244 245 244) / 0.75)",
-                minWidth: 116,
-                textAlign: "center",
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              {fmtRange(weekStart, addDays(weekStart, 6))}
-            </span>
-            <NavBtn label="Next week" onClick={() => setWeekOffset((w) => w + 1)}>
-              <ChevronRight size={16} />
-            </NavBtn>
-            {weekOffset !== 0 && (
-              <button onClick={() => setWeekOffset(0)} style={todayBtnStyle}>
-                Today
-              </button>
-            )}
-          </div>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+          <NavBtn label="Previous week" onClick={() => setWeekOffset((w) => w - 1)}>
+            <ChevronLeft size={16} />
+          </NavBtn>
+          <span
+            style={{
+              fontSize: 12.5,
+              color: "rgb(var(--gooni-ink, 244 245 244) / 0.75)",
+              minWidth: 116,
+              textAlign: "center",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {fmtRange(weekStart, addDays(weekStart, 6))}
+          </span>
+          <NavBtn label="Next week" onClick={() => setWeekOffset((w) => w + 1)}>
+            <ChevronRight size={16} />
+          </NavBtn>
+          {weekOffset !== 0 && (
+            <button onClick={() => setWeekOffset(0)} style={todayBtnStyle}>
+              Today
+            </button>
+          )}
+        </div>
 
         <div style={{ flex: 1 }} />
         <NavBtn label="Close" onClick={onClose}>
@@ -194,7 +174,7 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
           </Center>
         )}
 
-        {state === "ready" && view === "week" && (
+        {state === "ready" && (
           <div style={{ display: "flex", height: "100%" }}>
             {weekDays.map((day) => {
               const key = dayKeyLocal(day);
@@ -263,15 +243,11 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
           </div>
         )}
 
-        {state === "ready" && view === "agenda" && (
-          <AgendaList today={today} byDay={byDay} onEventClick={openEdit} onAdd={openCreate} />
-        )}
-
-        {/* floating add — creates on today (week: current day sits in view) */}
+        {/* floating add — creates on the first visible day */}
         {state === "ready" && (
           <button
             aria-label="New event"
-            onClick={() => openCreate(view === "week" ? dayKeyLocal(weekDays[0]) : todayKey)}
+            onClick={() => openCreate(dayKeyLocal(weekDays[0]))}
             style={fabStyle}
           >
             <Plus size={20} />
@@ -280,7 +256,7 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
       </div>
 
       {editor && (
-        <EventEditor
+        <ItemEditor
           editor={editor}
           onChange={setEditor}
           onClose={() => setEditor(null)}
@@ -290,207 +266,6 @@ export function CalendarPanel({ onClose, initialView }: WidgetPanelProps) {
           }}
         />
       )}
-    </div>
-  );
-}
-
-// ── event editor (create / edit / delete) ────────────────────────────────
-
-function EventEditor({
-  editor,
-  onChange,
-  onClose,
-  onSaved,
-}: {
-  editor: EditorState;
-  onChange: (e: EditorState) => void;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function save() {
-    const summary = editor.summary.trim();
-    if (!summary) {
-      setErr("Give the event a name");
-      return;
-    }
-    setSaving(true);
-    setErr(null);
-    try {
-      if (editor.mode === "create") {
-        await createCalendarEvent({
-          summary,
-          start_iso: localToIso(editor.dayKey, editor.startTime),
-          end_iso: localToIso(editor.dayKey, editor.endTime),
-        });
-      } else if (editor.id) {
-        await updateCalendarEvent(editor.id, {
-          summary,
-          // All-day events keep their span — only rename them here.
-          ...(editor.allDay
-            ? {}
-            : {
-                start_iso: localToIso(editor.dayKey, editor.startTime),
-                end_iso: localToIso(editor.dayKey, editor.endTime),
-              }),
-        });
-      }
-      onSaved();
-    } catch {
-      setErr("Save failed — try again");
-      setSaving(false);
-    }
-  }
-
-  async function del() {
-    if (!editor.id) return;
-    setSaving(true);
-    setErr(null);
-    try {
-      await deleteCalendarEvent(editor.id);
-      onSaved();
-    } catch {
-      setErr("Delete failed — try again");
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div onClick={onClose} style={editorScrim}>
-      <div onClick={(e) => e.stopPropagation()} style={editorCard}>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
-          {editor.mode === "create" ? "New event" : "Edit event"}
-        </div>
-
-        <input
-          autoFocus
-          value={editor.summary}
-          onChange={(e) => onChange({ ...editor, summary: e.target.value })}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void save();
-          }}
-          placeholder="What's happening?"
-          style={editorInput}
-        />
-
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <label style={fieldLabel}>
-            Date
-            <input
-              type="date"
-              value={editor.dayKey}
-              disabled={editor.allDay}
-              onChange={(e) => onChange({ ...editor, dayKey: e.target.value })}
-              style={editorSmall}
-            />
-          </label>
-          {!editor.allDay && (
-            <>
-              <label style={fieldLabel}>
-                Start
-                <input
-                  type="time"
-                  value={editor.startTime}
-                  onChange={(e) => onChange({ ...editor, startTime: e.target.value })}
-                  style={editorSmall}
-                />
-              </label>
-              <label style={fieldLabel}>
-                End
-                <input
-                  type="time"
-                  value={editor.endTime}
-                  onChange={(e) => onChange({ ...editor, endTime: e.target.value })}
-                  style={editorSmall}
-                />
-              </label>
-            </>
-          )}
-        </div>
-
-        {editor.allDay && (
-          <div style={{ fontSize: 11, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)", marginTop: 8 }}>
-            All-day event — rename only.
-          </div>
-        )}
-
-        {err && (
-          <div style={{ fontSize: 12, color: "#FF6B6B", marginTop: 10 }}>{err}</div>
-        )}
-
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16 }}>
-          {editor.mode === "edit" && (
-            <button aria-label="Delete event" onClick={del} disabled={saving} style={deleteBtn}>
-              <Trash2 size={15} />
-            </button>
-          )}
-          <div style={{ flex: 1 }} />
-          <button onClick={onClose} disabled={saving} style={ghostBtn}>
-            Cancel
-          </button>
-          <button onClick={save} disabled={saving} style={primaryBtn}>
-            {saving ? "…" : "Save"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── agenda ────────────────────────────────────────────────────────────────
-
-function AgendaList({
-  today,
-  byDay,
-  onEventClick,
-  onAdd,
-}: {
-  today: Date;
-  byDay: Record<string, CalendarEvent[]>;
-  onEventClick: (ev: CalendarEvent) => void;
-  onAdd: (dayKey: string) => void;
-}) {
-  const days = Array.from({ length: 14 }, (_, i) => addDays(today, i)).filter(
-    (d) => (byDay[dayKeyLocal(d)] ?? []).length > 0,
-  );
-  if (days.length === 0) return <Center>nothing scheduled in the next two weeks</Center>;
-  return (
-    <div style={{ height: "100%", overflowY: "auto", padding: "12px 18px 24px" }}>
-      {days.map((d) => {
-        const key = dayKeyLocal(d);
-        return (
-          <div key={key} style={{ marginBottom: 18 }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 12,
-                fontWeight: 600,
-                color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)",
-                marginBottom: 8,
-              }}
-            >
-              {d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}
-              <button aria-label="Add on this day" onClick={() => onAdd(key)} style={agendaAddBtn}>
-                <Plus size={13} />
-              </button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              {(byDay[key] ?? []).map((ev) => (
-                <button key={ev.id} onClick={() => onEventClick(ev)} style={agendaRow}>
-                  <span style={{ color: GREEN, fontSize: 12, minWidth: 66, textAlign: "left" }}>
-                    {ev.all_day ? "all-day" : fmtTime(ev.start)}
-                  </span>
-                  <span style={{ fontSize: 13.5 }}>{ev.summary}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -526,43 +301,6 @@ function EventChip({ ev, onClick }: { ev: CalendarEvent; onClick: () => void }) 
         {ev.summary}
       </span>
     </button>
-  );
-}
-
-function Segmented<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string }[];
-}) {
-  return (
-    <div style={{ display: "flex", gap: 2, background: "rgb(var(--gooni-ink, 244 245 244) / 0.07)", borderRadius: 8, padding: 2 }}>
-      {options.map((o) => {
-        const active = o.value === value;
-        return (
-          <button
-            key={o.value}
-            onClick={() => onChange(o.value)}
-            style={{
-              border: "none",
-              cursor: "pointer",
-              fontFamily: FONT,
-              fontSize: 12,
-              fontWeight: active ? 600 : 500,
-              padding: "4px 12px",
-              borderRadius: 6,
-              color: active ? "rgb(var(--gooni-surf, 11 15 13))" : "rgb(var(--gooni-ink, 244 245 244) / 0.7)",
-              background: active ? GREEN : "transparent",
-            }}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
   );
 }
 
@@ -652,118 +390,4 @@ const fabStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-};
-
-const editorScrim: React.CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  background: "rgba(0,0,0,0.45)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 5,
-};
-
-const editorCard: React.CSSProperties = {
-  width: 360,
-  maxWidth: "calc(100% - 40px)",
-  background: "#121715",
-  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.14)",
-  borderRadius: 14,
-  padding: "18px 18px 16px",
-  fontFamily: FONT,
-};
-
-const editorInput: React.CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  background: "rgb(var(--gooni-ink, 244 245 244) / 0.06)",
-  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.14)",
-  borderRadius: 8,
-  padding: "9px 11px",
-  color: "rgb(var(--gooni-ink, 244 245 244))",
-  fontFamily: FONT,
-  fontSize: 14,
-  outline: "none",
-};
-
-const editorSmall: React.CSSProperties = {
-  ...editorInput,
-  fontSize: 12.5,
-  padding: "7px 9px",
-  colorScheme: "dark",
-};
-
-const fieldLabel: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 4,
-  fontSize: 10.5,
-  color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)",
-  textTransform: "uppercase",
-  letterSpacing: 0.4,
-  flex: 1,
-};
-
-const primaryBtn: React.CSSProperties = {
-  border: "none",
-  cursor: "pointer",
-  background: GREEN,
-  color: "rgb(var(--gooni-surf, 11 15 13))",
-  fontWeight: 600,
-  borderRadius: 8,
-  padding: "7px 16px",
-  fontSize: 13,
-  fontFamily: FONT,
-};
-
-const ghostBtn: React.CSSProperties = {
-  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.18)",
-  cursor: "pointer",
-  background: "transparent",
-  color: "rgb(var(--gooni-ink, 244 245 244) / 0.75)",
-  borderRadius: 8,
-  padding: "7px 14px",
-  fontSize: 13,
-  fontFamily: FONT,
-};
-
-const deleteBtn: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: 32,
-  height: 32,
-  borderRadius: 8,
-  border: "1px solid rgba(255,107,107,0.3)",
-  background: "transparent",
-  color: "#FF6B6B",
-  cursor: "pointer",
-};
-
-const agendaRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "baseline",
-  gap: 10,
-  textAlign: "left",
-  border: "none",
-  background: "rgb(var(--gooni-ink, 244 245 244) / 0.04)",
-  borderRadius: 8,
-  padding: "8px 12px",
-  cursor: "pointer",
-  color: "rgb(var(--gooni-ink, 244 245 244) / 0.9)",
-  fontFamily: FONT,
-};
-
-const agendaAddBtn: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: 20,
-  height: 20,
-  borderRadius: 6,
-  border: "none",
-  background: "rgb(var(--gooni-ink, 244 245 244) / 0.08)",
-  color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)",
-  cursor: "pointer",
 };
