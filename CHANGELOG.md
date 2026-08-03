@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.222.0 — 2026-08-03 (minor)
+
+- feat(home): quickfind bar; strip drop shadows from ambient chrome (#455)
+
 ## 0.221.0 — 2026-08-01 (minor)
 
 - feat(portfolio): stagger coin spawn, open the portal hole to sky + updraft (#453)
