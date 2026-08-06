@@ -1,15 +1,23 @@
-// /public/cv — the flat text portfolio. The "fast lane" out of the 3D
+// /public/cv: the flat text portfolio. The "fast lane" out of the 3D
 // plaza at /creative: everything a recruiter on a phone needs, in one
 // column, no WebGL, no chrome.
 //
-// ALL copy comes from ../content/portfolio — this file owns layout and
+// ALL copy comes from ../content/portfolio; this file owns layout and
 // typography only. If a fact is missing here, add it there.
+//
+// Three type registers, one job each. Don't add a fourth:
+//   DISPLAY  proper nouns (his name, project names, orgs, schools)
+//   MONO     metadata (eyebrows, periods, stacks, stat lines)
+//   FONT     body prose, taglines, role titles
+// The italic-serif tagline and the bordered grid of giant serif stat
+// figures are gone on purpose: they were decoration standing in for the
+// screenshots the page already had the data to show.
 //
 // /public/* renders bare (see isChromelessPath in __root.tsx), so this
 // page owns its own palette. Theme handling is a scoped <style> block of
 // CSS custom properties: prefers-color-scheme for the OS default, plus
 // :root[data-theme="…"] overrides (higher specificity, so an explicit
-// app-set theme always wins) — inline styles then read var(--cv-*).
+// app-set theme always wins); inline styles then read var(--cv-*).
 
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -140,11 +148,23 @@ const CSS = `
   .cv-ba-arrow { transform: rotate(90deg); }
 }
 
-/* Monument stat row — 4 up, 2 up on narrow. */
-.cv-stats {
+/* Project row: prose left, screenshot right. Applied to EVERY project,
+   including the ones with no screenshot yet: the empty right column keeps
+   one measure down the whole section, and a project that runs full width
+   next to one that doesn't reads like a layout bug. */
+.cv-proj {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 22px 16px;
+  grid-template-columns: minmax(0, 1fr) 212px;
+  gap: 30px;
+  align-items: start;
+}
+.cv-shot {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid var(--cv-rule);
+  border-radius: 8px;
+  background: var(--cv-wash);
 }
 
 /* Metadata gutter + content. Collapses to one column on narrow. */
@@ -163,9 +183,9 @@ const CSS = `
 }
 
 @media (max-width: 640px) {
-  .cv-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 14px; }
-  .cv-row   { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-  .cv-arch  { grid-template-columns: minmax(0, 1fr); }
+  .cv-proj { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .cv-row  { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .cv-arch { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -178,22 +198,21 @@ const CSS = `
 
 // ── small presentational pieces ────────────────────────────────────────
 
+// Just the label. The trailing hairline this used to draw is the stock
+// editorial-template move, and it was the loudest thing on every section.
 function SectionHead({ children }: { children: ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 30 }}>
-      <span
-        style={{
-          fontFamily: MONO,
-          fontSize: 11,
-          letterSpacing: "0.2em",
-          textTransform: "uppercase",
-          color: "var(--cv-faint)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {children}
-      </span>
-      <span style={{ flex: 1, height: 1, background: "var(--cv-rule)" }} />
+    <div
+      style={{
+        marginBottom: 30,
+        fontFamily: MONO,
+        fontSize: 11,
+        letterSpacing: "0.2em",
+        textTransform: "uppercase",
+        color: "var(--cv-faint)",
+      }}
+    >
+      {children}
     </div>
   );
 }
@@ -230,12 +249,39 @@ function Body({ children, style }: { children: ReactNode; style?: React.CSSPrope
   );
 }
 
-/** Stack list — mono, dot-separated. Deliberately not pills. */
+/** Stack list: mono, dot-separated. Deliberately not pills. */
 function Stack({ items }: { items: string[] }) {
   return (
     <Meta style={{ color: "var(--cv-muted)", lineHeight: 1.9 }}>
       {items.join("  ·  ")}
     </Meta>
+  );
+}
+
+/** The numbers, as one mono line in the same voice as the stack.
+ *  They used to be a bordered four-up grid of giant serif figures, which
+ *  made checkable facts look like résumé decoration. */
+function StatLine({ stats }: { stats: { value: string; label: string }[] }) {
+  return (
+    <Meta
+      style={{
+        display: "block",
+        color: "var(--cv-muted)",
+        lineHeight: 1.9,
+        fontVariantNumeric: "tabular-nums",
+      }}
+    >
+      {stats.map((s) => `${s.value} ${s.label}`).join("  ·  ")}
+    </Meta>
+  );
+}
+
+/** Project screenshot. The data has carried these all along; the page
+ *  never rendered them, so every claim was told rather than shown. */
+function Shot({ project }: { project: Project }) {
+  if (!project.image) return null;
+  return (
+    <img className="cv-shot" src={project.image} alt={project.imageAlt ?? ""} loading="lazy" />
   );
 }
 
@@ -378,134 +424,88 @@ function BeforeAfter() {
 
 function Monument({ project, index }: { project: Project; index: number }) {
   return (
-    <article style={{ marginBottom: 74 }}>
-      <div aria-hidden style={{ width: 26, height: 2, background: project.color, marginBottom: 14 }} />
+    <article className="cv-proj" style={{ marginBottom: 64 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+          <Meta style={{ color: project.color, fontVariantNumeric: "tabular-nums" }}>
+            {String(index + 1).padStart(2, "0")}
+          </Meta>
+          {project.period && <Meta>{project.period}</Meta>}
+        </div>
 
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
-        <Meta style={{ color: project.color, fontVariantNumeric: "tabular-nums" }}>
-          {String(index + 1).padStart(2, "0")}
-        </Meta>
-        {project.period && <Meta>{project.period}</Meta>}
-      </div>
-
-      <h3
-        style={{
-          margin: "0 0 12px",
-          fontFamily: DISPLAY,
-          fontSize: "clamp(30px, 6.5vw, 38px)",
-          fontWeight: 500,
-          letterSpacing: "-0.5px",
-          lineHeight: 1.12,
-          color: "var(--cv-ink)",
-        }}
-      >
-        {project.name}
-      </h3>
-
-      <p
-        style={{
-          margin: "0 0 30px",
-          fontFamily: DISPLAY,
-          fontSize: "clamp(18px, 3.6vw, 20px)",
-          lineHeight: 1.5,
-          fontStyle: "italic",
-          color: "var(--cv-muted)",
-        }}
-      >
-        {project.tagline}
-      </p>
-
-      {project.stats && project.stats.length > 0 && (
-        <div
-          className="cv-stats"
+        <h3
           style={{
-            padding: "22px 0",
-            borderTop: "1px solid var(--cv-rule)",
-            borderBottom: "1px solid var(--cv-rule)",
-            marginBottom: 28,
+            margin: "0 0 10px",
+            fontFamily: DISPLAY,
+            fontSize: "clamp(28px, 5.5vw, 34px)",
+            fontWeight: 500,
+            letterSpacing: "-0.5px",
+            lineHeight: 1.12,
+            color: "var(--cv-ink)",
           }}
         >
-          {project.stats.map((s) => (
-            <div key={s.label} style={{ minWidth: 0 }}>
-              <div
-                style={{
-                  fontFamily: DISPLAY,
-                  fontSize: "clamp(24px, 5vw, 29px)",
-                  fontWeight: 500,
-                  letterSpacing: "-0.4px",
-                  lineHeight: 1.05,
-                  color: "var(--cv-ink)",
-                  fontVariantNumeric: "tabular-nums",
-                }}
-              >
-                {s.value}
-              </div>
-              <div
-                style={{
-                  marginTop: 7,
-                  fontFamily: MONO,
-                  fontSize: 10.5,
-                  letterSpacing: "0.14em",
-                  textTransform: "uppercase",
-                  color: "var(--cv-faint)",
-                }}
-              >
-                {s.label}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+          {project.name}
+        </h3>
 
-      {project.blurb && <Body style={{ marginBottom: 22 }}>{project.blurb}</Body>}
+        <Body style={{ fontSize: 17, color: "var(--cv-ink)", marginBottom: 14 }}>
+          {project.tagline}
+        </Body>
 
-      <Stack items={project.stack} />
+        {project.blurb && <Body style={{ marginBottom: 16 }}>{project.blurb}</Body>}
 
-      {project.links && project.links.length > 0 && (
-        <LinkRow links={project.links} style={{ marginTop: 16 }} />
-      )}
+        {project.stats && project.stats.length > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <StatLine stats={project.stats} />
+          </div>
+        )}
+
+        <Stack items={project.stack} />
+
+        {project.links && project.links.length > 0 && (
+          <LinkRow links={project.links} style={{ marginTop: 16 }} />
+        )}
+      </div>
+
+      <Shot project={project} />
     </article>
   );
 }
 
 function Pylon({ project }: { project: Project }) {
   return (
-    <article
-      style={{
-        borderLeft: `2px solid ${project.color}`,
-        paddingLeft: 22,
-        marginBottom: 34,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-        <h3
-          style={{
-            margin: 0,
-            fontFamily: DISPLAY,
-            fontSize: 23,
-            fontWeight: 500,
-            letterSpacing: "-0.3px",
-            color: "var(--cv-ink)",
-          }}
-        >
-          {project.name}
-        </h3>
-        {project.period && <Meta>{project.period}</Meta>}
+    <article className="cv-proj" style={{ marginBottom: 40 }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+          <span aria-hidden style={{ width: 5, height: 5, borderRadius: "50%", background: project.color, flexShrink: 0 }} />
+          <h3
+            style={{
+              margin: 0,
+              fontFamily: DISPLAY,
+              fontSize: 23,
+              fontWeight: 500,
+              letterSpacing: "-0.3px",
+              color: "var(--cv-ink)",
+            }}
+          >
+            {project.name}
+          </h3>
+          {project.period && <Meta>{project.period}</Meta>}
+        </div>
+
+        <Body style={{ fontSize: 16, marginTop: 8, color: "var(--cv-ink)" }}>{project.tagline}</Body>
+        {project.blurb && (
+          <Body style={{ fontSize: 15.5, marginTop: 10 }}>{project.blurb}</Body>
+        )}
+
+        <div style={{ marginTop: 14 }}>
+          <Stack items={project.stack} />
+        </div>
+        {project.links && project.links.length > 0 && (
+          <LinkRow links={project.links} style={{ marginTop: 12 }} />
+        )}
       </div>
 
-      <Body style={{ fontSize: 16, marginTop: 8 }}>{project.tagline}</Body>
-      {project.blurb && (
-        <Body style={{ fontSize: 15.5, marginTop: 10, color: "var(--cv-muted)" }}>
-          {project.blurb}
-        </Body>
-      )}
-
-      <div style={{ marginTop: 14 }}>
-        <Stack items={project.stack} />
-      </div>
-      {project.links && project.links.length > 0 && (
-        <LinkRow links={project.links} style={{ marginTop: 12 }} />
-      )}
+      <Shot project={project} />
     </article>
   );
 }
@@ -671,38 +671,25 @@ function CvPage() {
           </p>
 
           <Body style={{ marginTop: 22, maxWidth: 620 }}>{PROFILE.now}</Body>
+
+          {/* The story is worth reading but it isn't what a recruiter opened
+              this page for, so it sits at the bottom behind an opt-in jump. */}
+          <div style={{ marginTop: 20 }}>
+            <a className="cv-u" href="#story" style={{ fontSize: 14, color: "var(--cv-muted)" }}>
+              A longer TLDR
+              <span aria-hidden style={{ marginLeft: 6, opacity: 0.6 }}>↓</span>
+            </a>
+          </div>
         </header>
 
         <div style={{ marginBottom: 84 }}>
           <PlazaInvite />
         </div>
 
-        {/* ── how I started ──────────────────────────────────────── */}
-        <section style={{ marginBottom: 88 }}>
-          <SectionHead>How I started</SectionHead>
-          {PROFILE.story.map((para, i) => (
-            <Body key={i} style={{ marginTop: i === 0 ? 0 : 18 }}>
-              {para}
-            </Body>
-          ))}
-          <BeforeAfter />
-        </section>
-
-        {/* ── what I'm looking for ───────────────────────────────── */}
-        <section style={{ marginBottom: 88 }}>
-          <SectionHead>What I'm looking for</SectionHead>
-          {PROFILE.looking.map((para, i) => (
-            <Body key={i} style={{ marginTop: i === 0 ? 0 : 18 }}>
-              {para}
-            </Body>
-          ))}
-        </section>
-
         {/* ── monuments ──────────────────────────────────────────── */}
         {MONUMENTS.length > 0 && (
-          // Trailing Monument carries 74px below; +14 lands the gap to the
-          // next section on the page's 88px rhythm.
-          <section style={{ marginBottom: 14 }}>
+          // Trailing Monument carries 64px below; +24 holds the 88px rhythm.
+          <section style={{ marginBottom: 24 }}>
             <SectionHead>Selected work</SectionHead>
             {MONUMENTS.map((p, i) => (
               <Monument key={p.id} project={p} index={i} />
@@ -712,8 +699,8 @@ function CvPage() {
 
         {/* ── pylons ─────────────────────────────────────────────── */}
         {PYLONS.length > 0 && (
-          // Trailing Pylon carries 34px below; +54 holds the 88px rhythm.
-          <section style={{ marginBottom: 54 }}>
+          // Trailing Pylon carries 40px below; +48 holds the rhythm.
+          <section style={{ marginBottom: 48 }}>
             <SectionHead>Also built</SectionHead>
             {PYLONS.map((p) => (
               <Pylon key={p.id} project={p} />
@@ -757,7 +744,7 @@ function CvPage() {
 
         {/* ── archive ────────────────────────────────────────────── */}
         {ARCHIVE.length > 0 && (
-          <section style={{ marginBottom: 96 }}>
+          <section style={{ marginBottom: 88 }}>
             <SectionHead>Archive</SectionHead>
             {ARCHIVE.map((p) => (
               <div
@@ -793,6 +780,29 @@ function CvPage() {
             ))}
           </section>
         )}
+
+        {/* ── how I started ──────────────────────────────────────── */}
+        {/* Target of the hero's "A longer TLDR" jump. */}
+        <section id="story" style={{ marginBottom: 88, scrollMarginTop: 40 }}>
+          <SectionHead>How I started</SectionHead>
+          {PROFILE.story.map((para, i) => (
+            <Body key={i} style={{ marginTop: i === 0 ? 0 : 18 }}>
+              {para}
+            </Body>
+          ))}
+          <BeforeAfter />
+        </section>
+
+        {/* ── what I'm looking for ───────────────────────────────── */}
+        {/* Last section before the contact links: it reads as the ask. */}
+        <section style={{ marginBottom: 88 }}>
+          <SectionHead>What I'm looking for</SectionHead>
+          {PROFILE.looking.map((para, i) => (
+            <Body key={i} style={{ marginTop: i === 0 ? 0 : 18 }}>
+              {para}
+            </Body>
+          ))}
+        </section>
 
         {/* ── footer ─────────────────────────────────────────────── */}
         <footer style={{ paddingTop: 32, borderTop: "1px solid var(--cv-rule)" }}>
