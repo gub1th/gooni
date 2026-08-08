@@ -23,9 +23,11 @@ import {
   type TrackableDay,
   type WhoopToday,
 } from "../../services/api";
+import { useNowTick } from "../../hooks/useNowTick";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { useWidgetOverlayStore } from "../../stores/useWidgetOverlayStore";
 import { LogTable } from "../ambient/LogTable";
+import { freshness } from "../ambient/whoopFreshness";
 import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
 import { FocusRunner } from "./FocusRunner";
 import { fmtPromiseMeta, fmtTime, fmtWeekday } from "./notchMerge";
@@ -1188,6 +1190,13 @@ function FeedLine({
   lc: LeetcodeToday | null;
   pal: FocusPalette;
 }) {
+  // This screen is the 24/7 kiosk — nobody closes and reopens it to re-stamp
+  // the age, so the clock has to advance on its own. Staleness rule itself is
+  // NOT reimplemented here: `whoopFreshness` owns the 36h threshold and the
+  // age wording for both surfaces.
+  const now = useNowTick();
+  const fresh = whoop && whoop.date ? freshness(whoop.source_updated_at, now) : null;
+
   const whoopBits: string[] = [];
   if (whoop && whoop.date) {
     if (whoop.recovery_score != null) whoopBits.push(`rec ${Math.round(whoop.recovery_score)}`);
@@ -1207,6 +1216,13 @@ function FeedLine({
         <div>
           <FeedTag pal={pal}>whoop</FeedTag> {whoopBits.join(" · ")}
           {whoop?.day_label ? <span style={{ color: pal.warn }}> · {whoop.day_label}</span> : null}
+          {fresh && (
+            <span style={{ color: fresh.stale ? pal.warn : undefined }}>
+              {" · "}
+              {fresh.known ? `updated ${fresh.label}` : fresh.label}
+              {fresh.stale ? " ⚠ stale" : ""}
+            </span>
+          )}
         </div>
       )}
       {lcBits.length > 0 && (

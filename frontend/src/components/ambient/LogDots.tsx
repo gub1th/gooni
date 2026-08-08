@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { FONT, frostInk } from "../../ui";
+import { useNowTick } from "../../hooks/useNowTick";
 import { GREEN } from "./wavePath";
 import { LogTable } from "./LogTable";
 import { freshness, sleepClock } from "./whoopFreshness";
@@ -533,6 +534,9 @@ function Column({
 function FeedTiles() {
   const [whoop, setWhoop] = useState<WhoopToday | null | "err">(null);
   const [lc, setLc] = useState<LeetcodeToday | null | "err">(null);
+  // The panel can stay open for hours; without a tick the age below is frozen
+  // at mount and the 36h flip could never fire while you are looking at it.
+  const now = useNowTick();
 
   useEffect(() => {
     void fetchWhoopToday().then(setWhoop).catch(() => setWhoop("err"));
@@ -547,13 +551,13 @@ function FeedTiles() {
   // serving a frozen open-cycle strain, which without this reads as a real (bad)
   // day. Past 36h we say so loudly instead of implying the numbers are current.
   const w = whoop && whoop !== "err" && whoop.date ? whoop : null;
-  const fresh = w ? freshness(w.source_updated_at, Date.now()) : null;
+  const fresh = w ? freshness(w.source_updated_at, now) : null;
   const sleepWindow = w ? sleepClock(w.sleep_start_at, w.sleep_end_at) : null;
   const whoopFooter = fresh ? (
     <>
       {sleepWindow && <span>slept {sleepWindow}</span>}
       <span style={{ color: fresh.stale ? frostInk.warn : undefined }}>
-        {sleepWindow ? "· " : ""}updated {fresh.label}{fresh.stale ? " ⚠ stale" : ""}
+        {sleepWindow ? "· " : ""}{fresh.known ? `updated ${fresh.label}` : fresh.label}{fresh.stale ? " ⚠ stale" : ""}
       </span>
     </>
   ) : undefined;
