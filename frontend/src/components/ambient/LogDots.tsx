@@ -13,6 +13,7 @@ import {
   fetchTrackables,
   fetchWhoopToday,
   logTrackable,
+  FEED_REFRESH_MS,
   startWhoopOAuth,
   upsertDailyNote,
   type LeetcodeToday,
@@ -538,9 +539,27 @@ function FeedTiles() {
   // at mount and the 36h flip could never fire while you are looking at it.
   const now = useNowTick();
 
+  // …and the tick alone is only half of it: an age that advances against a
+  // payload fetched once at mount eventually cries "stale" about a strap that
+  // resumed syncing hours ago — a live feed made to look dead, the exact
+  // inverse of the bug the age exists to catch. So re-pull on the shared feed
+  // cadence (the same one the kiosk polls on) and let the age describe data
+  // that is actually current.
   useEffect(() => {
-    void fetchWhoopToday().then(setWhoop).catch(() => setWhoop("err"));
-    void fetchLeetcodeToday().then(setLc).catch(() => setLc("err"));
+    let alive = true;
+    // A refetch that fails must not discard a good reading — only the FIRST
+    // load may fall through to the error/connect state.
+    const pull = () => {
+      void fetchWhoopToday()
+        .then((d) => { if (alive) setWhoop(d); })
+        .catch(() => { if (alive) setWhoop((prev) => (prev === null ? "err" : prev)); });
+      void fetchLeetcodeToday()
+        .then((d) => { if (alive) setLc(d); })
+        .catch(() => { if (alive) setLc((prev) => (prev === null ? "err" : prev)); });
+    };
+    pull();
+    const id = window.setInterval(pull, FEED_REFRESH_MS);
+    return () => { alive = false; window.clearInterval(id); };
   }, []);
 
   // stale-tag: the served reading may be a day-old sleep (today's hasn't synced)

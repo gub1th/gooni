@@ -12,6 +12,7 @@ import {
   fetchTrackables,
   fetchWhoopToday,
   updateFocusReminder,
+  FEED_REFRESH_MS,
   SHORT_BUCKETS,
   type CalendarEvent,
   type FocusDashboard as FocusDashboardData,
@@ -48,7 +49,7 @@ import { fmtPromiseMeta, fmtTime, fmtWeekday } from "./notchMerge";
 //
 // Poll to stay live; the display IS the proactivity.
 
-const REFRESH_MS = 25_000;
+const REFRESH_MS = FEED_REFRESH_MS;
 const STREAK_TRAIL = 5; // trailing days shown per streak column
 const STREAK_PER_PAGE = 4; // columns visible before the ‹ › pager
 
