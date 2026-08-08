@@ -379,7 +379,11 @@ export interface WhoopToday {
   strain: number | null;
   sleep_minutes: number | null;
   sleep_performance_pct: number | null;
+  // ISO, NAIVE UTC (no offset) — bed time / wake time. Parse with parseUtc.
+  sleep_start_at: string | null;
+  sleep_end_at: string | null;
   updated_at: string | null;
+  // WHOOP's OWN record timestamp, not our poll — the staleness signal.
   source_updated_at: string | null;
 }
 export async function fetchWhoopToday(refresh = false): Promise<WhoopToday> {

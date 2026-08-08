@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
-import { FONT } from "../../ui";
+import { FONT, frostInk } from "../../ui";
 import { GREEN } from "./wavePath";
 import { LogTable } from "./LogTable";
+import { freshness, sleepClock } from "./whoopFreshness";
 import {
   createTrackable,
   fetchDailyNotes,
@@ -541,9 +542,25 @@ function FeedTiles() {
   // stale-tag: the served reading may be a day-old sleep (today's hasn't synced)
   const whoopNote = whoop && whoop !== "err" && whoop.day_label ? whoop.day_label : undefined;
 
+  // Footer: sleep window + data age. Age comes from WHOOP's OWN record stamp
+  // (source_updated_at), not our poll time — a strap that stopped syncing keeps
+  // serving a frozen open-cycle strain, which without this reads as a real (bad)
+  // day. Past 36h we say so loudly instead of implying the numbers are current.
+  const w = whoop && whoop !== "err" && whoop.date ? whoop : null;
+  const fresh = w ? freshness(w.source_updated_at, Date.now()) : null;
+  const sleepWindow = w ? sleepClock(w.sleep_start_at, w.sleep_end_at) : null;
+  const whoopFooter = fresh ? (
+    <>
+      {sleepWindow && <span>slept {sleepWindow}</span>}
+      <span style={{ color: fresh.stale ? frostInk.warn : undefined }}>
+        {sleepWindow ? "· " : ""}updated {fresh.label}{fresh.stale ? " ⚠ stale" : ""}
+      </span>
+    </>
+  ) : undefined;
+
   return (
     <div style={{ display: "flex", gap: 14, marginTop: 16 }}>
-      <FeedTile title="whoop" note={whoopNote}>
+      <FeedTile title="whoop" note={whoopNote} footer={whoopFooter}>
         {whoop === null ? (
           <Dim>…</Dim>
         ) : whoop === "err" || !whoop.date ? (
@@ -579,7 +596,9 @@ function FeedTiles() {
   );
 }
 
-function FeedTile({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
+function FeedTile({ title, note, children, footer }: {
+  title: string; note?: string; children: React.ReactNode; footer?: React.ReactNode;
+}) {
   return (
     <div style={{ ...GLASS, borderRadius: 18, padding: "14px 18px", minWidth: 150 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 }}>
@@ -597,6 +616,20 @@ function FeedTile({ title, note, children }: { title: string; note?: string; chi
         )}
       </div>
       <div style={{ display: "flex", gap: 16 }}>{children}</div>
+      {footer && (
+        // Sub-line under the metrics. A hairline carries the separation — no
+        // shadow, per the ambient home's flat-frost rule. Ink-var alpha so the
+        // rule and the muted text both invert with the theme.
+        <div style={{
+          marginTop: 11, paddingTop: 8,
+          borderTop: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.10)",
+          fontSize: 10, letterSpacing: 0.2,
+          color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)",
+          display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap",
+        }}>
+          {footer}
+        </div>
+      )}
     </div>
   );
 }
