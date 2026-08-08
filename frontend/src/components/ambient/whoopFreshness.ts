@@ -6,25 +6,21 @@
 // genuinely bad recovery day. These helpers turn WHOOP's own record timestamp
 // (`source_updated_at`, NOT our poll time) into a visible age + stale verdict.
 
+import { parseServerDate } from "../../utils/date";
+
 /** Past this age, WHOOP's own data is presumed dead, not merely bad. */
 export const STALE_MS = 36 * 3600 * 1000;
 
-// WHOOP timestamps come back as NAIVE UTC (no offset). `new Date()` on a
-// suffix-less ISO date-time parses as LOCAL, which silently shifts bed/wake by
-// the timezone offset. Force a `Z` — but ONLY when the string carries no offset
-// of its own, since appending to an already-offset stamp corrupts it (and in
-// practice yields NaN). Date-only strings are already UTC per spec, so they
-// pass through untouched.
-const OFFSET_RE = /(?:[Zz]|[+-]\d{2}:?\d{2})$/;
-
+// WHOOP timestamps come back as NAIVE UTC (no offset), which `new Date()` would
+// read as LOCAL and silently shift bed/wake by the viewer's offset. That
+// append-`Z`-only-when-there-is-no-offset rule has ONE owner: `parseServerDate`
+// in utils/date.ts — see it for why appending unconditionally is wrong. This is
+// just the epoch-ms wrapper the helpers below consume.
 export function parseUtc(iso: string | null | undefined): number | null {
   if (!iso) return null;
   const s = iso.trim();
   if (!s) return null;
-  const tIdx = s.indexOf("T");
-  const raw = tIdx < 0 ? s : OFFSET_RE.test(s.slice(tIdx + 1)) ? s : `${s}Z`;
-  const t = Date.parse(raw);
-  return Number.isNaN(t) ? null : t;
+  return parseServerDate(s)?.getTime() ?? null;
 }
 
 /** "11:20p" in the VIEWER's local timezone, or null if unparseable. */
