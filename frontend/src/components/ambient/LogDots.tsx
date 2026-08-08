@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
-import { FONT } from "../../ui";
+import { FONT, frostInk } from "../../ui";
+import { useNowTick } from "../../hooks/useNowTick";
 import { GREEN } from "./wavePath";
 import { LogTable } from "./LogTable";
+import { agePhrase, freshness, sleepClock } from "./whoopFreshness";
 import {
   createTrackable,
   fetchDailyNotes,
@@ -11,6 +13,7 @@ import {
   fetchTrackables,
   fetchWhoopToday,
   logTrackable,
+  FEED_REFRESH_MS,
   startWhoopOAuth,
   upsertDailyNote,
   type LeetcodeToday,
@@ -532,18 +535,59 @@ function Column({
 function FeedTiles() {
   const [whoop, setWhoop] = useState<WhoopToday | null | "err">(null);
   const [lc, setLc] = useState<LeetcodeToday | null | "err">(null);
+  // The panel can stay open for hours; without a tick the age below is frozen
+  // at mount and the 36h flip could never fire while you are looking at it.
+  const now = useNowTick();
 
+  // …and the tick alone is only half of it: an age that advances against a
+  // payload fetched once at mount eventually cries "stale" about a strap that
+  // resumed syncing hours ago — a live feed made to look dead, the exact
+  // inverse of the bug the age exists to catch. So re-pull on the shared feed
+  // cadence (the same one the kiosk polls on) and let the age describe data
+  // that is actually current.
   useEffect(() => {
-    void fetchWhoopToday().then(setWhoop).catch(() => setWhoop("err"));
-    void fetchLeetcodeToday().then(setLc).catch(() => setLc("err"));
+    let alive = true;
+    // A failed whoop refetch keeps the last good reading — only the FIRST load
+    // may fall through to the error/connect state. That guard is safe ONLY
+    // because whoop carries a self-advancing age that eventually says "stale";
+    // leetcode has no freshness signal, so holding its last payload through an
+    // outage would show frozen counts forever. It clears, which is itself the
+    // honest signal.
+    const pull = () => {
+      void fetchWhoopToday()
+        .then((d) => { if (alive) setWhoop(d); })
+        .catch(() => { if (alive) setWhoop((prev) => (prev === null ? "err" : prev)); });
+      void fetchLeetcodeToday()
+        .then((d) => { if (alive) setLc(d); })
+        .catch(() => { if (alive) setLc("err"); });
+    };
+    pull();
+    const id = window.setInterval(pull, FEED_REFRESH_MS);
+    return () => { alive = false; window.clearInterval(id); };
   }, []);
 
   // stale-tag: the served reading may be a day-old sleep (today's hasn't synced)
   const whoopNote = whoop && whoop !== "err" && whoop.day_label ? whoop.day_label : undefined;
 
+  // Footer: sleep window + data age. Age comes from WHOOP's OWN record stamp
+  // (source_updated_at), not our poll time — a strap that stopped syncing keeps
+  // serving a frozen open-cycle strain, which without this reads as a real (bad)
+  // day. Past 36h we say so loudly instead of implying the numbers are current.
+  const w = whoop && whoop !== "err" && whoop.date ? whoop : null;
+  const fresh = w ? freshness(w.source_updated_at, now) : null;
+  const sleepWindow = w ? sleepClock(w.sleep_start_at, w.sleep_end_at) : null;
+  const whoopFooter = fresh ? (
+    <>
+      {sleepWindow && <span>slept {sleepWindow}</span>}
+      <span style={{ color: fresh.stale ? frostInk.warn : undefined }}>
+        {sleepWindow ? "· " : ""}{agePhrase(fresh)}
+      </span>
+    </>
+  ) : undefined;
+
   return (
     <div style={{ display: "flex", gap: 14, marginTop: 16 }}>
-      <FeedTile title="whoop" note={whoopNote}>
+      <FeedTile title="whoop" note={whoopNote} footer={whoopFooter}>
         {whoop === null ? (
           <Dim>…</Dim>
         ) : whoop === "err" || !whoop.date ? (
@@ -579,7 +623,9 @@ function FeedTiles() {
   );
 }
 
-function FeedTile({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
+function FeedTile({ title, note, children, footer }: {
+  title: string; note?: string; children: React.ReactNode; footer?: React.ReactNode;
+}) {
   return (
     <div style={{ ...GLASS, borderRadius: 18, padding: "14px 18px", minWidth: 150 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 10 }}>
@@ -597,6 +643,20 @@ function FeedTile({ title, note, children }: { title: string; note?: string; chi
         )}
       </div>
       <div style={{ display: "flex", gap: 16 }}>{children}</div>
+      {footer && (
+        // Sub-line under the metrics. A hairline carries the separation — no
+        // shadow, per the ambient home's flat-frost rule. Ink-var alpha so the
+        // rule and the muted text both invert with the theme.
+        <div style={{
+          marginTop: 11, paddingTop: 8,
+          borderTop: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.10)",
+          fontSize: 10, letterSpacing: 0.2,
+          color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)",
+          display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap",
+        }}>
+          {footer}
+        </div>
+      )}
     </div>
   );
 }

@@ -368,6 +368,13 @@ export async function disconnectWhoop(): Promise<void> {
   if (!res.ok) throw new Error("Failed to disconnect Whoop");
 }
 
+// How often the whoop/leetcode-rendering surfaces re-pull. Shared by the
+// ambient log tiles and (as its whole-board poll) the kiosk dashboard: an age
+// label is only honest if the payload under it is current, so the two surfaces
+// that render data age refresh on one clock instead of drifting apart. Other
+// pollers (FocusStream, HomeDashboard) still carry their own literals.
+export const FEED_REFRESH_MS = 25_000;
+
 export interface WhoopToday {
   date: string | null;
   // '' when the reading is today's; else 'yesterday' / 'Jul 14' — the reading's
@@ -379,7 +386,11 @@ export interface WhoopToday {
   strain: number | null;
   sleep_minutes: number | null;
   sleep_performance_pct: number | null;
+  // ISO, NAIVE UTC (no offset) — bed time / wake time. Parse with parseUtc.
+  sleep_start_at: string | null;
+  sleep_end_at: string | null;
   updated_at: string | null;
+  // WHOOP's OWN record timestamp, not our poll — the staleness signal.
   source_updated_at: string | null;
 }
 export async function fetchWhoopToday(refresh = false): Promise<WhoopToday> {

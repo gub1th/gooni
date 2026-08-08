@@ -12,6 +12,7 @@ import {
   fetchTrackables,
   fetchWhoopToday,
   updateFocusReminder,
+  FEED_REFRESH_MS,
   SHORT_BUCKETS,
   type CalendarEvent,
   type FocusDashboard as FocusDashboardData,
@@ -23,9 +24,11 @@ import {
   type TrackableDay,
   type WhoopToday,
 } from "../../services/api";
+import { useNowTick } from "../../hooks/useNowTick";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { useWidgetOverlayStore } from "../../stores/useWidgetOverlayStore";
 import { LogTable } from "../ambient/LogTable";
+import { agePhrase, freshness } from "../ambient/whoopFreshness";
 import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
 import { FocusRunner } from "./FocusRunner";
 import { fmtPromiseMeta, fmtTime, fmtWeekday } from "./notchMerge";
@@ -46,7 +49,7 @@ import { fmtPromiseMeta, fmtTime, fmtWeekday } from "./notchMerge";
 //
 // Poll to stay live; the display IS the proactivity.
 
-const REFRESH_MS = 25_000;
+const REFRESH_MS = FEED_REFRESH_MS;
 const STREAK_TRAIL = 5; // trailing days shown per streak column
 const STREAK_PER_PAGE = 4; // columns visible before the ‹ › pager
 
@@ -143,7 +146,13 @@ export function FocusDashboard() {
     } catch {
       setEvents([]); // 401 / not connected → Gooni items only, never an error
     }
-    void fetchWhoopToday().then(setWhoop).catch(() => setWhoop(null));
+    // A failed whoop RE-fetch keeps the last good reading — that row carries a
+    // freshness claim now, and blanking it on a blip is a worse lie than an
+    // ageing number. State starts null, so a first load that fails still leaves
+    // the empty/not-connected state. Leetcode does NOT get this: it has no age
+    // signal, so a held payload would read as current forever through an
+    // outage. It clears, which is the only honest thing it can say.
+    void fetchWhoopToday().then(setWhoop).catch(() => {});
     void fetchLeetcodeToday().then(setLc).catch(() => setLc(null));
     void loadStreaks();
   }, [loadStreaks]);
@@ -1188,25 +1197,48 @@ function FeedLine({
   lc: LeetcodeToday | null;
   pal: FocusPalette;
 }) {
-  const whoopBits: string[] = [];
-  if (whoop && whoop.date) {
-    if (whoop.recovery_score != null) whoopBits.push(`rec ${Math.round(whoop.recovery_score)}`);
-    if (whoop.strain != null) whoopBits.push(`strain ${(Math.round(whoop.strain * 10) / 10).toFixed(1)}`);
-    if (whoop.sleep_minutes != null) whoopBits.push(`${Math.round((whoop.sleep_minutes / 60) * 10) / 10}h`);
-  }
+  // This screen is the 24/7 kiosk — nobody closes and reopens it to re-stamp
+  // the age, so the clock has to advance on its own. Staleness rule itself is
+  // NOT reimplemented here: `whoopFreshness` owns the 36h threshold and the
+  // age wording for both surfaces.
+  const now = useNowTick();
+  // A CONNECTED strap that has gone quiet nulls every metric (the backend's
+  // 4-day query window returns no scored records), so metric presence can't
+  // gate this row — that hides the feed exactly when its death is the news.
+  // Visibility follows "is there a payload at all"; a strap that never
+  // connected (no `date`) still renders nothing, as before.
+  const w = whoop && whoop.date ? whoop : null;
+  const fresh = w ? freshness(w.source_updated_at, now) : null;
+
+  // Every metric keeps its label and falls back to a dash, matching the ambient
+  // tile — in the dead-strap state an unlabelled dash is a reader asking which
+  // number went missing.
+  const whoopBits: string[] = w
+    ? [
+        `rec ${w.recovery_score != null ? Math.round(w.recovery_score) : "–"}`,
+        `strain ${w.strain != null ? (Math.round(w.strain * 10) / 10).toFixed(1) : "–"}`,
+        `sleep ${w.sleep_minutes != null ? `${Math.round((w.sleep_minutes / 60) * 10) / 10}h` : "–"}`,
+      ]
+    : [];
   const lcBits: string[] = [];
   if (lc && lc.available) {
     if (lc.today_count != null) lcBits.push(`${lc.today_count} today`);
     if (lc.streak != null) lcBits.push(`${lc.streak} streak`);
   }
-  if (whoopBits.length === 0 && lcBits.length === 0) return null;
+  if (!w && lcBits.length === 0) return null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10.5, color: pal.ink3 }}>
-      {whoopBits.length > 0 && (
+      {w && (
         <div>
           <FeedTag pal={pal}>whoop</FeedTag> {whoopBits.join(" · ")}
-          {whoop?.day_label ? <span style={{ color: pal.warn }}> · {whoop.day_label}</span> : null}
+          {w.day_label ? <span style={{ color: pal.warn }}> · {w.day_label}</span> : null}
+          {fresh && (
+            <span style={{ color: fresh.stale ? pal.warn : undefined }}>
+              {" · "}
+              {agePhrase(fresh)}
+            </span>
+          )}
         </div>
       )}
       {lcBits.length > 0 && (
