@@ -108,7 +108,13 @@ def _patch(path: str, body: dict):
 
 
 @mcp.tool()
-def log_thought(content: str, topic: str, new_batch: bool = False, label: str | None = None) -> dict:
+def log_thought(
+    content: str,
+    topic: str,
+    new_batch: bool = False,
+    label: str | None = None,
+    at: str | None = None,
+) -> dict:
     """Capture a single thought, idea, or observation into Gooni under a subject.
     THIS IS THE DEFAULT ACTION whenever Daniel shares something worth remembering
     that is NOT a future to-do — a reflection, an idea, a decision, a realization,
@@ -130,6 +136,13 @@ def log_thought(content: str, topic: str, new_batch: bool = False, label: str | 
     meaningfully advances — it OVERWRITES the batch's rendered card. Omit to keep
     the prior label / an auto-snippet of the content.
 
+    `at` BACKDATES the thought to when it actually happened — ISO-8601, and pass
+    UTC with an explicit "+00:00" offset (e.g. "2026-08-07T09:00:00+00:00"). Omit
+    it and the thought is stamped now, which is right for anything happening in
+    the moment. Use it when you're recording something from earlier in the
+    conversation or the day: a 1am study session logged at noon should read 1am.
+    Logging close to real time still beats backdating a guess.
+
     Returns {thought:{id,content,timestamp}, batch:{id,label,topic_id},
     topic:{...decayed salience + growth...}} — the topic's salience_decayed is
     bumped by this write. Use the returned thought.id as `from_thought` if the same
@@ -137,7 +150,13 @@ def log_thought(content: str, topic: str, new_batch: bool = False, label: str | 
     """
     return _post(
         "/focus/thoughts",
-        {"content": content, "topic": topic, "new_batch": new_batch, "label": label},
+        {
+            "content": content,
+            "topic": topic,
+            "new_batch": new_batch,
+            "label": label,
+            "at": at,
+        },
     )
 
 

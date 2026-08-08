@@ -550,6 +550,13 @@ def auto_mark_overdue(db: Session, now: datetime | None = None) -> int:
         # Recurring promises never auto-break on a date — a deadline on a
         # daily/weekly commitment is a parse artifact, not a term end.
         .filter(Promise.cadence == "once")
+        # Nor does a deadline GOONI invented (focus convergence, 2026-08-08).
+        # `set_reminder` defaults an omitted due to today's local EOD purely so
+        # the row can be placed on the dashboard's short-term/longer-term split.
+        # Breaking those would mark Daniel broken at midnight every night on a
+        # commitment he never made — the system lying about its own record.
+        # A stale defaulted due rolls forward instead (focus_service._due_bucket).
+        .filter(Promise.due_is_default.is_(False))
         .all()
     )
     n = 0
@@ -584,6 +591,11 @@ def serialize(p: Promise) -> dict[str, Any]:
         "slip_count": p.slip_count,
         "resolved_at": p.resolved_at.isoformat() if p.resolved_at else None,
         "source_message_id": p.source_message_id,
+        # Absorbed from Reminder (focus convergence). `owed_to` is the person id
+        # — the focus surface resolves it to a name; v2 consumers only need to
+        # know a commitment has an external creditor.
+        "owed_to": p.owed_to,
+        "due_is_default": bool(p.due_is_default),
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
