@@ -94,7 +94,8 @@ app/
     orchestrator/            # unified chat handler (web, telegram, whatsapp, imessage)
     memory_extraction/       # extract_signals — ONE LLM call emits promises/fitness/tone/memory
     intent_router.py + intent_handlers/   # dispatch extracted signals to writers
-    promise_service.py       # THE actionable primitive (absorbed todos/habits/focuses)
+    promise_service.py       # THE actionable primitive (absorbed todos/habits/focuses/reminders)
+    focus_service.py         # adapter: focus vocabulary (topics/thoughts/reminders) over Notes + Promises
     trackable_service.py     # generic measurement substrate (Notion-tables model)
     memory_service.py        # local SQL memory: LLM extract → reconcile → cosine retrieval
     overlay_service.py       # deterministic "what matters now" ranker (no LLM)
@@ -123,7 +124,7 @@ scripts/
 mcp/
   server.py                  # legacy 30-tool MCP server → Claude Code via stdio
   focus_server.py            # 6-tool "focus system" MCP → claude.ai connector (remote streamable-HTTP)
-tests/                       # plain-script tests: signal routing, overlay ranker, import smoke, focus decay
+tests/                       # plain-script tests: signal routing, overlay ranker, import smoke, focus decay + convergence
 ```
 
 ## Environment variables

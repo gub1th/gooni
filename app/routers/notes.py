@@ -41,13 +41,35 @@ def _encode_home_pos(raw) -> str | None:
         return None
 
 
+# Leaf thoughts (focus convergence, 2026-08-08) are real Notes, but they arrive
+# at conversation velocity — dozens a day, none of them written to be reopened.
+# Left unfiltered they bury 268 hand-written notes within a month.
+#
+# Their PARENT batch notes stay visible on purpose: one card per run of thinking,
+# carrying Claude's third-person label and any pinned image. That's the row worth
+# seeing in a browsing surface, and it's the one that makes photo cards render
+# again. `?tag=thought` still returns the leaves for anyone who asks directly.
+_BROWSE_HIDDEN_TAG = "thought"
+
+
+def _hide_thought_leaves(q):
+    return q.filter(
+        (Note.tags.is_(None)) | (~Note.tags.like(f'%"{_BROWSE_HIDDEN_TAG}"%'))
+    )
+
+
 @router.get("/notes")
 def list_notes(tag: str | None = None, db: Session = Depends(get_db)):
     """All notes, newest first (Slice 6: Spaces died — this replaces
-    GET /spaces/{id}/notes; optional ?tag= filters server-side)."""
+    GET /spaces/{id}/notes; optional ?tag= filters server-side).
+
+    Leaf `thought` notes are excluded unless explicitly asked for by tag —
+    see `_hide_thought_leaves`."""
     q = db.query(Note)
     if tag:
         q = q.filter(Note.tags.is_not(None), Note.tags.like(f'%"{tag.strip().lower()}"%'))
+    else:
+        q = _hide_thought_leaves(q)
     notes = q.order_by(_notes_order()).all()
     return [_serialize_note_lite(n) for n in notes]
 
@@ -83,8 +105,10 @@ def create_note(body: dict, db: Session = Depends(get_db)):
 
 @router.get("/notes/recent")
 def get_recent_notes(limit: int = 5, db: Session = Depends(get_db)):
+    """Newest notes for the dashboard's notes column. Leaf thoughts excluded —
+    at conversation velocity they'd be the only thing this ever returns."""
     notes = (
-        db.query(Note)
+        _hide_thought_leaves(db.query(Note))
         .order_by(_notes_order())
         .limit(limit)
         .all()
