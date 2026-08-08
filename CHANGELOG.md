@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.224.0 — 2026-08-08 (minor)
+
+- feat(portfolio): cut the CV's AI register, show the work instead of telling it (#457)
+
 ## 0.223.0 — 2026-08-03 (minor)
 
 - feat(home): B4 dashboard landing + interactive day timeline + persistent nav (#456)
