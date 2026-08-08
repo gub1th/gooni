@@ -563,14 +563,14 @@ function StationBody({ station: s }: { station: Station }) {
           <div className="walk-shots">
             <figure className="walk-figure">
               <img className="walk-shot" src={s.image} alt={s.imageAlt ?? ""} loading="lazy" />
-              <figcaption className="walk-caption">the log — sifted by hand</figcaption>
+              <figcaption className="walk-caption">the log, sifted by hand</figcaption>
             </figure>
             <div className="walk-arrow" aria-hidden>
               ↓
             </div>
             <figure className="walk-figure">
               <img className="walk-shot" src={s.imageAfter} alt={s.imageAfterAlt ?? ""} loading="lazy" />
-              <figcaption className="walk-caption">the script — under a minute</figcaption>
+              <figcaption className="walk-caption">the script, under a minute</figcaption>
             </figure>
           </div>
         ) : (

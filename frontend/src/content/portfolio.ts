@@ -75,23 +75,24 @@ export const PROFILE = {
   // His line, not a generated one.
   thesis: "I build thoughtful software where product, systems, and user experience meet.",
   // The current line + the longer story below are HIS verbatim prose (from
-  // danis-website). Kept exactly, em dashes and all: it's his voice, not slop.
+  // danis-website). Words untouched; only his em dashes are swapped for a
+  // comma or colon, per the no-em-dash rule at the top of this file.
   now:
-    "Currently working on Rovo across search, chat, and its Chrome extension — with a focus " +
+    "Currently working on Rovo across search, chat, and its Chrome extension, with a focus " +
     "on performance-sensitive, state-heavy user flows.",
-  // "How I started" — the trading-log origin, in his words. One entry per paragraph.
+  // "How I started": the trading-log origin, in his words. One entry per paragraph.
   story: [
     "I started coding early, mostly by building small tools and games. What really pulled " +
       "me in was using code to deal with messy, real-world problems.",
     "A relative I worked with was in high-frequency trading and had a lot of manual work " +
-      "around daily log files. The logs were huge — market data plus a bunch of execution " +
+      "around daily log files. The logs were huge: market data plus a bunch of execution " +
       "flags, reject reasons, and other indicators.",
     "My job was to sift through that output, pull out the relevant events, and paste them " +
       "into a spreadsheet so they could be reviewed. After a while I realized there was a " +
-      "pattern, learned Python, and automated the parsing — turning 30–60 minutes of " +
+      "pattern, learned Python, and automated the parsing, turning 30–60 minutes of " +
       "repetitive work into scripts that ran in under a minute.",
   ] as string[],
-  // "What I'm looking for" — his words, verbatim.
+  // "What I'm looking for": his words, verbatim.
   looking: [
     "I'm drawn to small, product-driven teams where engineers own problems end to end and " +
       "grow alongside the system.",
@@ -114,17 +115,15 @@ export const PROJECTS: Project[] = [
     name: "Gooni",
     tagline: "A personal AI notebook that became an ambient assistant.",
     blurb:
-      "Gooni eats everything I think — web, Telegram, WhatsApp — into one append-only log. " +
-      "Under it: a custom orchestrator, a memory system that extracts and reconciles what it " +
-      "learns, and an eval harness I wrote to grade myself. Then I used those evals to gut what " +
-      "wasn't pulling weight, including a whole ReAct/Reflexion layer that never beat the dumb " +
-      "pipeline. One pass alone killed 22 tables and 32,252 lines the day the numbers stopped " +
-      "backing them up. It's deployed. I use it every day.",
+      "Everything I think lands in one append-only log. I wrote an eval harness to grade the " +
+      "thing, then used the scores to delete what wasn't working, including a whole ReAct " +
+      "layer that never beat the dumb pipeline. I use it every day.",
     // Checkable: PR #404 is +1,298 / -32,252 and drops 22 tables; total
-    // deletions across main are ~119k.
+    // deletions across main are ~119k. Labels read as one inline mono line
+    // on /public/cv, so each has to make sense as "value label".
     stats: [
-      { value: "22", label: "tables dropped, one PR" },
-      { value: "−32,252", label: "lines, that same PR" },
+      { value: "22", label: "tables dropped" },
+      { value: "−32,252", label: "lines in that PR" },
       { value: "119k", label: "lines deleted overall" },
       { value: "5 mo", label: "solo" },
     ],
@@ -142,11 +141,10 @@ export const PROJECTS: Project[] = [
     name: "Kreatify",
     tagline: "An influencer CRM for talent agencies. Co-founded it, built it, ran it.",
     blurb:
-      "Zero to one as co-founder and CTO, nights and weekends around the full-time job. I built " +
-      "the product on Next.js and Supabase — OAuth onboarding, role-based access, file handling, " +
-      "Phyllo wired into YouTube, TikTok and Instagram, and a Notion-style filter engine I'm " +
-      "still weirdly proud of. Ran the interviews myself, rebuilt the UX around what people " +
-      "actually said, and shipped a private beta to 40+ users across seven agencies.",
+      "Zero to one as co-founder and CTO, on nights and weekends around the full-time job. " +
+      "OAuth onboarding, role-based access, Phyllo across YouTube, TikTok and Instagram, plus " +
+      "a Notion-style filter engine I'm still weirdly proud of. I ran the user interviews " +
+      "myself and rebuilt the UX around what came back.",
     stats: [
       { value: "7", label: "agencies" },
       { value: "40+", label: "beta users" },
@@ -169,9 +167,9 @@ export const PROJECTS: Project[] = [
     name: "Lucid",
     tagline: "Free-form journals into a knowledge graph of people, goals and events.",
     blurb:
-      "Reads your raw journal entries and pulls out the people, goals and events buried in " +
-      "them, then wires those into a life map you can actually navigate instead of a pile of " +
-      "text you'll never reread.",
+      "Reads raw journal entries and pulls out the people, goals and events buried in them, " +
+      "then wires those into a life map you can navigate instead of a pile of text you'll " +
+      "never reread.",
     stack: ["FastAPI", "PostgreSQL", "React", "OpenAI"],
     weight: "pylon",
     color: "#8FB3E0",
@@ -257,12 +255,16 @@ export const ROLES: Role[] = [
     location: "San Francisco, CA (Remote)",
     period: "Jun 2024 – present",
     current: true,
+    // Every number from the résumé survives; they're spread across more,
+    // shorter bullets instead of piled three-deep into one sentence. The
+    // pile-up was the thing that read as machine-written.
     points: [
-      "Started and now lead an AI platform service from scratch: a prompt template plus a user's hydrated data goes in, a served model response comes out, and offline evals with configurable LLM judges gate every deploy. I also own the frontend and nudge-scheduling for a personalized AI surface, down through the app and Redis caching layers.",
-      "Built and scaled the Rovo Chrome extension (TypeScript, React) — AI chat and enterprise search a shortcut away — from 8K to 20K+ installs at ~7K monthly actives. The chat CTA I shipped pushed daily actives on it up 74.5%.",
-      "Ran 15+ experiments across Rovo's biggest surfaces — Jira, Confluence, Townsquare — for a 45% lift in button usage and 20.1% in chat events. Set up a lot of how the team runs experiments now: custom metrics, standardized Statsig tagging.",
-      "Ended up the de facto lead on 4 things at once — scoping them, sequencing them, working out how to test them across product, design and eng. 270 PRs and 500+ reviews across four repos, some Sev3 incident response, and one migration that cut ~$10k/month.",
-      "Own the frontend for third-party connectors across every Atlassian surface. Built a generic config so a connector added on the backend needs zero bespoke frontend work, plus a portable settings package other teams (Confluence, Townsquare) now use — worth a 23.7% lift in third-party auth completions.",
+      "Started and now lead an AI platform service from scratch: a prompt template plus a user's hydrated data goes in, a served model response comes out. Offline evals with configurable LLM judges gate every deploy.",
+      "Own the frontend and nudge scheduling for a personalized AI surface, down through the app and Redis caching layers.",
+      "Built and scaled the Rovo Chrome extension, AI chat and enterprise search a shortcut away, from 8K to 20K+ installs at ~7K monthly actives. The chat CTA I shipped pushed daily actives up 74.5%.",
+      "Ran 15+ experiments across Jira, Confluence and Townsquare: 45% lift in button usage, 20.1% in chat events. Set up how the team runs them now, custom metrics and standardized Statsig tagging.",
+      "Own the frontend for third-party connectors across every Atlassian surface. A generic config means a connector added on the backend needs no bespoke frontend work, and the portable settings package I built is now used by Confluence and Townsquare. Auth completions up 23.7%.",
+      "De facto lead on four workstreams at once: 270 PRs, 500+ reviews, Sev3 incident response, and one migration that cut ~$10k/month.",
     ],
   },
   {
@@ -271,9 +273,9 @@ export const ROLES: Role[] = [
     location: "San Francisco, CA",
     period: "Oct 2024 – Apr 2025",
     points: [
-      "Co-founded and built an influencer CRM for talent agencies on Next.js and Supabase — OAuth onboarding, role-based access, file handling, Phyllo wired into YouTube, TikTok and Instagram.",
-      "Designed and built the UX solo, and owned a few core systems — including a Notion-style filter engine.",
-      "Ran the interviews, iterated on what came back, and shipped a private beta to 40+ users across 7 agencies — all on nights and weekends around the full-time job.",
+      "Co-founded and built an influencer CRM for talent agencies on Next.js and Supabase: OAuth onboarding, role-based access, file handling, Phyllo across YouTube, TikTok and Instagram.",
+      "Designed and built the UX solo, and owned a few core systems including a Notion-style filter engine.",
+      "Ran the interviews, iterated on what came back, and shipped a private beta to 40+ users across 7 agencies, all on nights and weekends around the full-time job.",
     ],
   },
   {
@@ -282,7 +284,7 @@ export const ROLES: Role[] = [
     location: "New York City, NY",
     period: "May – Aug 2023",
     points: [
-      "Moved a Slack ticketing bot off legacy messaging onto Block Kit, so creating a ticket in-chat actually felt modern.",
+      "Moved a Slack ticketing bot off legacy messaging onto Block Kit, so creating a ticket in chat actually felt modern.",
     ],
   },
   {
@@ -291,7 +293,7 @@ export const ROLES: Role[] = [
     location: "Pittsburgh, PA",
     period: "Aug 2022 – May 2024",
     points: [
-      "Ran recitations for 15+ cohorts on programming fundamentals — Python and database design.",
+      "Ran recitations for 15+ cohorts on programming fundamentals: Python and database design.",
     ],
   },
   {
