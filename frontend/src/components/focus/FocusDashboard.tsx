@@ -28,7 +28,7 @@ import { useNowTick } from "../../hooks/useNowTick";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { useWidgetOverlayStore } from "../../stores/useWidgetOverlayStore";
 import { LogTable } from "../ambient/LogTable";
-import { freshness } from "../ambient/whoopFreshness";
+import { agePhrase, freshness } from "../ambient/whoopFreshness";
 import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
 import { FocusRunner } from "./FocusRunner";
 import { fmtPromiseMeta, fmtTime, fmtWeekday } from "./notchMerge";
@@ -146,12 +146,14 @@ export function FocusDashboard() {
     } catch {
       setEvents([]); // 401 / not connected → Gooni items only, never an error
     }
-    // A failed RE-fetch keeps the last good reading — the row carries a
+    // A failed whoop RE-fetch keeps the last good reading — that row carries a
     // freshness claim now, and blanking it on a blip is a worse lie than an
-    // ageing number. State starts null, so a first load that fails still
-    // leaves the empty/not-connected state.
+    // ageing number. State starts null, so a first load that fails still leaves
+    // the empty/not-connected state. Leetcode does NOT get this: it has no age
+    // signal, so a held payload would read as current forever through an
+    // outage. It clears, which is the only honest thing it can say.
     void fetchWhoopToday().then(setWhoop).catch(() => {});
-    void fetchLeetcodeToday().then(setLc).catch(() => {});
+    void fetchLeetcodeToday().then(setLc).catch(() => setLc(null));
     void loadStreaks();
   }, [loadStreaks]);
 
@@ -1208,13 +1210,14 @@ function FeedLine({
   const w = whoop && whoop.date ? whoop : null;
   const fresh = w ? freshness(w.source_updated_at, now) : null;
 
-  // Dashes for missing numbers, matching the ambient tile's placeholders so the
-  // two surfaces read the same in all three states.
+  // Every metric keeps its label and falls back to a dash, matching the ambient
+  // tile — in the dead-strap state an unlabelled dash is a reader asking which
+  // number went missing.
   const whoopBits: string[] = w
     ? [
         `rec ${w.recovery_score != null ? Math.round(w.recovery_score) : "–"}`,
         `strain ${w.strain != null ? (Math.round(w.strain * 10) / 10).toFixed(1) : "–"}`,
-        w.sleep_minutes != null ? `${Math.round((w.sleep_minutes / 60) * 10) / 10}h` : "–",
+        `sleep ${w.sleep_minutes != null ? `${Math.round((w.sleep_minutes / 60) * 10) / 10}h` : "–"}`,
       ]
     : [];
   const lcBits: string[] = [];
@@ -1233,8 +1236,7 @@ function FeedLine({
           {fresh && (
             <span style={{ color: fresh.stale ? pal.warn : undefined }}>
               {" · "}
-              {fresh.known ? `updated ${fresh.label}` : fresh.label}
-              {fresh.stale ? " ⚠ stale" : ""}
+              {agePhrase(fresh)}
             </span>
           )}
         </div>

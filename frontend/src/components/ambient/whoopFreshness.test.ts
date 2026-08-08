@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-import { parseUtc, clock, sleepClock, relAge, freshness, STALE_MS } from "./whoopFreshness";
+import { parseUtc, clock, sleepClock, relAge, freshness, agePhrase, STALE_MS } from "./whoopFreshness";
 
 // The naive-UTC trap only shows up OFF UTC — under TZ=UTC a wrong parse and a
 // right one agree, so a CI box in UTC would green-light the bug. Pin a
@@ -103,5 +103,27 @@ describe("freshness", () => {
       expect(f).toEqual({ label: "age unknown", stale: false, known: false });
       expect(f.label).not.toMatch(/NaN/);
     }
+  });
+});
+
+describe("agePhrase", () => {
+  // Both whoop surfaces render THIS string, so the wording can't drift between
+  // them the way it would if each rebuilt the sentence from `label`.
+  const now = Date.UTC(2026, 6, 14, 12, 0, 0);
+
+  it("prefixes a known age", () => {
+    expect(agePhrase(freshness(new Date(now - 3 * 3600_000).toISOString(), now))).toBe("updated 3h ago");
+  });
+
+  it("appends the stale marker past the threshold", () => {
+    expect(agePhrase(freshness(new Date(now - STALE_MS - 60_000).toISOString(), now))).toBe(
+      "updated 36h ago ⚠ stale",
+    );
+  });
+
+  it("states the unknown case plainly, with no 'updated' claim", () => {
+    const phrase = agePhrase(freshness(null, now));
+    expect(phrase).toBe("age unknown");
+    expect(phrase).not.toMatch(/updated/);
   });
 });

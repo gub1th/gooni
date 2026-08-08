@@ -52,6 +52,7 @@ function livingStrap(ageMs: number): WhoopToday {
 }
 
 const fetchWhoopToday = vi.fn();
+const fetchLeetcodeToday = vi.fn();
 
 vi.mock("../../services/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../services/api")>();
@@ -61,7 +62,7 @@ vi.mock("../../services/api", async (importOriginal) => {
     fetchCalendarEvents: vi.fn(async () => []),
     fetchTrackables: vi.fn(async () => []),
     fetchTrackableDays: vi.fn(async () => ({ days: [] })),
-    fetchLeetcodeToday: vi.fn(async () => ({ available: false })),
+    fetchLeetcodeToday: (...args: unknown[]) => fetchLeetcodeToday(...args),
     fetchWhoopToday: (...args: unknown[]) => fetchWhoopToday(...args),
   };
 });
@@ -72,6 +73,8 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(NOW);
   fetchWhoopToday.mockReset();
+  fetchLeetcodeToday.mockReset();
+  fetchLeetcodeToday.mockResolvedValue({ available: false });
 });
 
 afterEach(() => {
@@ -87,8 +90,10 @@ describe("kiosk whoop feed line", () => {
     // The row exists at all — a dead feed that renders nothing is the original
     // bug in its worst form.
     await waitFor(() => expect(screen.getByText("whoop")).toBeInTheDocument());
-    // Placeholders, matching the ambient tile, plus the honest third state.
-    expect(screen.getByText(/rec – · strain – · –/)).toBeInTheDocument();
+    // Every metric labelled and dashed, matching the ambient tile, plus the
+    // honest third state. An unlabelled dash would leave the reader guessing
+    // which number went missing in exactly the state this row exists for.
+    expect(screen.getByText(/rec – · strain – · sleep –/)).toBeInTheDocument();
     expect(screen.getByText(/age unknown/)).toBeInTheDocument();
   });
 
@@ -109,8 +114,26 @@ describe("kiosk whoop feed line", () => {
     fetchWhoopToday.mockRejectedValue(new Error("network down"));
     await act(async () => { await vi.advanceTimersByTimeAsync(FEED_REFRESH_MS + 100); });
 
-    expect(screen.getByText(/rec 63 · strain 11.2 · 6.7h/)).toBeInTheDocument();
+    expect(screen.getByText(/rec 63 · strain 11.2 · sleep 6.7h/)).toBeInTheDocument();
     expect(screen.getByText("whoop")).toBeInTheDocument();
+  });
+
+  it("clears the leetcode row when its refetch fails", async () => {
+    // Leetcode deliberately does NOT get whoop's last-good guard: it carries no
+    // age, so holding a payload through an outage would show frozen counts with
+    // nothing saying they are frozen. Vanishing IS its freshness signal.
+    fetchWhoopToday.mockResolvedValue(livingStrap(2 * 3600_000));
+    fetchLeetcodeToday.mockResolvedValueOnce({ available: true, today_count: 3, streak: 12 });
+    render(<FocusDashboard />);
+
+    await waitFor(() => expect(screen.getByText(/3 today · 12 streak/)).toBeInTheDocument());
+
+    fetchLeetcodeToday.mockRejectedValue(new Error("backend down"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(FEED_REFRESH_MS + 100); });
+
+    await waitFor(() => expect(screen.queryByText(/3 today · 12 streak/)).not.toBeInTheDocument());
+    // whoop, which CAN report its own age, survives the same blip.
+    expect(screen.getByText(/updated 2h ago/)).toBeInTheDocument();
   });
 
   it("stays hidden for a strap that was never connected", async () => {

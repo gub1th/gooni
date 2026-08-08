@@ -4,7 +4,7 @@ import { FONT, frostInk } from "../../ui";
 import { useNowTick } from "../../hooks/useNowTick";
 import { GREEN } from "./wavePath";
 import { LogTable } from "./LogTable";
-import { freshness, sleepClock } from "./whoopFreshness";
+import { agePhrase, freshness, sleepClock } from "./whoopFreshness";
 import {
   createTrackable,
   fetchDailyNotes,
@@ -547,15 +547,19 @@ function FeedTiles() {
   // that is actually current.
   useEffect(() => {
     let alive = true;
-    // A refetch that fails must not discard a good reading — only the FIRST
-    // load may fall through to the error/connect state.
+    // A failed whoop refetch keeps the last good reading — only the FIRST load
+    // may fall through to the error/connect state. That guard is safe ONLY
+    // because whoop carries a self-advancing age that eventually says "stale";
+    // leetcode has no freshness signal, so holding its last payload through an
+    // outage would show frozen counts forever. It clears, which is itself the
+    // honest signal.
     const pull = () => {
       void fetchWhoopToday()
         .then((d) => { if (alive) setWhoop(d); })
         .catch(() => { if (alive) setWhoop((prev) => (prev === null ? "err" : prev)); });
       void fetchLeetcodeToday()
         .then((d) => { if (alive) setLc(d); })
-        .catch(() => { if (alive) setLc((prev) => (prev === null ? "err" : prev)); });
+        .catch(() => { if (alive) setLc("err"); });
     };
     pull();
     const id = window.setInterval(pull, FEED_REFRESH_MS);
@@ -576,7 +580,7 @@ function FeedTiles() {
     <>
       {sleepWindow && <span>slept {sleepWindow}</span>}
       <span style={{ color: fresh.stale ? frostInk.warn : undefined }}>
-        {sleepWindow ? "· " : ""}{fresh.known ? `updated ${fresh.label}` : fresh.label}{fresh.stale ? " ⚠ stale" : ""}
+        {sleepWindow ? "· " : ""}{agePhrase(fresh)}
       </span>
     </>
   ) : undefined;

@@ -57,7 +57,7 @@ export function relAge(ms: number): string {
 }
 
 export interface Freshness {
-  /** Ready-to-render age phrase. */
+  /** The bare age, e.g. "3h ago" / "age unknown". Prefer `agePhrase`. */
   label: string;
   /** Older than STALE_MS — render the warning treatment. */
   stale: boolean;
@@ -76,4 +76,12 @@ export function freshness(
   if (t == null) return { label: "age unknown", stale: false, known: false };
   const age = now - t;
   return { label: relAge(age), stale: age > STALE_MS, known: true };
+}
+
+// The whole rendered sentence, so the two whoop surfaces can't drift in
+// wording the way they would if each rebuilt it from `label`. Callers own only
+// the COLOUR (the one thing that legitimately differs: frostInk.warn on the
+// ambient home vs the kiosk's local pal.warn).
+export function agePhrase(f: Freshness): string {
+  return `${f.known ? `updated ${f.label}` : f.label}${f.stale ? " ⚠ stale" : ""}`;
 }
