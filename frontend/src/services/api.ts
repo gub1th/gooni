@@ -368,10 +368,11 @@ export async function disconnectWhoop(): Promise<void> {
   if (!res.ok) throw new Error("Failed to disconnect Whoop");
 }
 
-// How often a surface re-pulls the passive feeds (whoop/leetcode). ONE cadence
-// for every consumer: an age label is only honest if the payload under it is
-// current, so the surfaces that render data age must all refresh on the same
-// clock rather than each inventing a timing story.
+// How often the whoop/leetcode-rendering surfaces re-pull. Shared by the
+// ambient log tiles and (as its whole-board poll) the kiosk dashboard: an age
+// label is only honest if the payload under it is current, so the two surfaces
+// that render data age refresh on one clock instead of drifting apart. Other
+// pollers (FocusStream, HomeDashboard) still carry their own literals.
 export const FEED_REFRESH_MS = 25_000;
 
 export interface WhoopToday {

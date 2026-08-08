@@ -146,8 +146,12 @@ export function FocusDashboard() {
     } catch {
       setEvents([]); // 401 / not connected → Gooni items only, never an error
     }
-    void fetchWhoopToday().then(setWhoop).catch(() => setWhoop(null));
-    void fetchLeetcodeToday().then(setLc).catch(() => setLc(null));
+    // A failed RE-fetch keeps the last good reading — the row carries a
+    // freshness claim now, and blanking it on a blip is a worse lie than an
+    // ageing number. State starts null, so a first load that fails still
+    // leaves the empty/not-connected state.
+    void fetchWhoopToday().then(setWhoop).catch(() => {});
+    void fetchLeetcodeToday().then(setLc).catch(() => {});
     void loadStreaks();
   }, [loadStreaks]);
 
@@ -1196,27 +1200,36 @@ function FeedLine({
   // NOT reimplemented here: `whoopFreshness` owns the 36h threshold and the
   // age wording for both surfaces.
   const now = useNowTick();
-  const fresh = whoop && whoop.date ? freshness(whoop.source_updated_at, now) : null;
+  // A CONNECTED strap that has gone quiet nulls every metric (the backend's
+  // 4-day query window returns no scored records), so metric presence can't
+  // gate this row — that hides the feed exactly when its death is the news.
+  // Visibility follows "is there a payload at all"; a strap that never
+  // connected (no `date`) still renders nothing, as before.
+  const w = whoop && whoop.date ? whoop : null;
+  const fresh = w ? freshness(w.source_updated_at, now) : null;
 
-  const whoopBits: string[] = [];
-  if (whoop && whoop.date) {
-    if (whoop.recovery_score != null) whoopBits.push(`rec ${Math.round(whoop.recovery_score)}`);
-    if (whoop.strain != null) whoopBits.push(`strain ${(Math.round(whoop.strain * 10) / 10).toFixed(1)}`);
-    if (whoop.sleep_minutes != null) whoopBits.push(`${Math.round((whoop.sleep_minutes / 60) * 10) / 10}h`);
-  }
+  // Dashes for missing numbers, matching the ambient tile's placeholders so the
+  // two surfaces read the same in all three states.
+  const whoopBits: string[] = w
+    ? [
+        `rec ${w.recovery_score != null ? Math.round(w.recovery_score) : "–"}`,
+        `strain ${w.strain != null ? (Math.round(w.strain * 10) / 10).toFixed(1) : "–"}`,
+        w.sleep_minutes != null ? `${Math.round((w.sleep_minutes / 60) * 10) / 10}h` : "–",
+      ]
+    : [];
   const lcBits: string[] = [];
   if (lc && lc.available) {
     if (lc.today_count != null) lcBits.push(`${lc.today_count} today`);
     if (lc.streak != null) lcBits.push(`${lc.streak} streak`);
   }
-  if (whoopBits.length === 0 && lcBits.length === 0) return null;
+  if (!w && lcBits.length === 0) return null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 10.5, color: pal.ink3 }}>
-      {whoopBits.length > 0 && (
+      {w && (
         <div>
           <FeedTag pal={pal}>whoop</FeedTag> {whoopBits.join(" · ")}
-          {whoop?.day_label ? <span style={{ color: pal.warn }}> · {whoop.day_label}</span> : null}
+          {w.day_label ? <span style={{ color: pal.warn }}> · {w.day_label}</span> : null}
           {fresh && (
             <span style={{ color: fresh.stale ? pal.warn : undefined }}>
               {" · "}
