@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
 
 
 def _import_real_mcp():
@@ -77,8 +78,35 @@ mcp = FastMCP(
 )
 
 
+def _parse_at(raw: str | None) -> datetime | None:
+    """ISO-8601 string → the naive-UTC storage convention, or None.
+
+    Offset-aware input converts to UTC BEFORE tzinfo is dropped, so a local
+    offset stores the right instant rather than keeping its wall-clock digits
+    (the same trap `routers/focus.py::_parse_due` documents). Unparseable input
+    returns None — a bad timestamp should downgrade to "now", not lose the
+    thought.
+    """
+    if not raw or not str(raw).strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        print(f"[focus_mcp] unparseable at={raw!r} — stamping now instead")
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    return dt.replace(tzinfo=None)
+
+
 @mcp.tool()
-def log_thought(content: str, topic: str, new_batch: bool = False, label: str | None = None) -> dict:
+def log_thought(
+    content: str,
+    topic: str,
+    new_batch: bool = False,
+    label: str | None = None,
+    at: str | None = None,
+) -> dict:
     """Capture a single thought, idea, or observation into Gooni under a subject.
     THIS IS THE DEFAULT ACTION whenever Daniel shares something worth remembering
     that is NOT a future to-do — a reflection, an idea, a decision, a realization,
@@ -100,6 +128,13 @@ def log_thought(content: str, topic: str, new_batch: bool = False, label: str | 
     meaningfully advances — it OVERWRITES the batch's rendered card. Omit to keep
     the prior label / an auto-snippet of the content.
 
+    `at` BACKDATES the thought to when it actually happened — ISO-8601, and pass
+    UTC with an explicit "+00:00" offset (e.g. "2026-08-07T09:00:00+00:00"). Omit
+    it and the thought is stamped now, which is right for anything happening in
+    the moment. Use it when you're recording something from earlier in the
+    conversation or the day: a 1am study session logged at noon should read 1am.
+    Logging close to real time still beats backdating a guess.
+
     Returns {thought:{id,content,timestamp}, batch:{id,label,topic_id},
     topic:{...decayed salience + growth...}} — the topic's salience_decayed is
     bumped by this write. Use the returned thought.id as `from_thought` if the same
@@ -108,7 +143,12 @@ def log_thought(content: str, topic: str, new_batch: bool = False, label: str | 
     db = SessionLocal()
     try:
         result = focus_service.log_thought(
-            db, content=content, topic_name=topic, new_batch=new_batch, label=label
+            db,
+            content=content,
+            topic_name=topic,
+            new_batch=new_batch,
+            label=label,
+            at=_parse_at(at),
         )
         db.commit()
         return result

@@ -1,28 +1,46 @@
-"""Focus system service — the persistence logic behind the MCP tools and the
-glanceable dashboard (PRD `gooni-focus-system-plan.md`, 2026-07-23).
+"""Focus system service — an ADAPTER over the ambient-loop v2 primitives.
 
-Claude is the intelligence layer (extraction, intent, batching judgment); this
-module is deterministic persistence: topic resolution, the 30-minute batch
-rule, salience bump-on-write / decay-on-read, and reminder CRUD. No LLM here.
+Same shape `daily_metric_service` has over Trackable: the focus vocabulary
+(topics, thoughts, batches, reminders) is preserved at the seam, while the rows
+underneath are ordinary Notes and Promises.
 
-Datetimes are naive-UTC to match the rest of app/db/models.py (Column defaults
-are datetime.utcnow). User-facing "today" for reminder-day filtering goes
+    Thought       → Note, tag `thought`, `parent_note_id` → its batch
+    ThoughtBatch  → Note, tag `thought-batch`, title = Claude's label
+    batch image   → Attachment (note-owned already)
+    Reminder      → Promise + `owed_to` + `due_is_default`
+    thought_id    → Edge `derives_from`
+    Topic         → unchanged (identity + a decay curve nothing else models)
+    Person        → unchanged (v2 has no person primitive at all)
+
+WHY (2026-08-08): Claude reached Gooni through two connectors that wrote two
+disconnected schemas, and the same commitments ended up in both — all four
+`reminders` rows were verbatim twins of `promises` rows. Mark one kept and the
+other stood active forever. Convergence makes one of them the record.
+
+Every public function's SIGNATURE AND RETURN SHAPE is unchanged, so
+`app/routers/focus.py`, both MCP servers, `FocusDashboard` and the kiosk needed
+no edits. The response `id`s are now Note/Promise ids — nothing persists them
+across requests, so the renumbering is invisible.
+
+Still deterministic: decay, the batch rule, salience, bucketing. No LLM here.
+Datetimes stay naive-UTC to match app/db/models.py; user-facing "today" goes
 through common.local_today so it honors Settings.nudge_tz.
 """
 
 from __future__ import annotations
 
-import math
+import json
+import threading
 from datetime import date as _date, datetime, timedelta, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from ..common import local_now, parse_due_hint
 from ..db.models import (
+    Attachment,
+    Note,
     Person,
-    Reminder,
-    Thought,
-    ThoughtBatch,
+    Promise,
     Topic,
 )
 
@@ -51,6 +69,14 @@ BATCH_GAP_MINUTES = 30
 GROWTH_WINDOW_HOURS = 24
 # Dashboard shows at most this many circles (five slots, auto-ranked).
 DASHBOARD_SLOTS = 5
+
+# The two Note subtypes this adapter owns. Tags (not columns) because that's
+# how Note already carves out subtypes — `daily` for log notes, `sticky` for
+# home-canvas notes. A LIKE against the JSON tags column answers "is this a
+# thought" without a join, which is the documented pattern for low-cardinality
+# per-note tags.
+THOUGHT_TAG = "thought"
+BATCH_TAG = "thought-batch"
 
 # Palette assigned round-robin to new topics (matches the mockup's per-topic
 # identity colors). Color is per-topic identity, not meaning.
@@ -171,6 +197,68 @@ def _topic_dict(topic: Topic, now: datetime, growth_cutoff: datetime) -> dict:
     }
 
 
+# ── Note-subtype helpers ─────────────────────────────────────────────────────
+
+
+def _tagged(query, tag: str):
+    """Filter a Note query to rows carrying `tag`.
+
+    `Note.tags` is a JSON-encoded list of lowercase strings, so a LIKE on the
+    quoted token is an exact member test — `"thought"` can't partial-match
+    `"thoughtful"` because the quotes bound it. This is the documented pattern
+    for the tags column (low per-note cardinality, no join needed).
+    """
+    return query.filter(Note.tags.like(f'%"{tag}"%'))
+
+
+def _tags_json(*tags: str) -> str:
+    return json.dumps(list(tags))
+
+
+def _embed_note_async(note_id: int) -> None:
+    """Kick the note's embedding off-thread.
+
+    `log_thought` is a hot path — Claude calls it mid-conversation — and an
+    embedding round-trip inline would put ~200ms of OpenAI latency in front of
+    every logged thought. `update_embedding` opens its own session, so it's
+    safe to detach (same pattern as the /notes/{id}/embed route).
+
+    Deliberately NOT `classify_note`: that runs the LLM signal extractor, which
+    would mine Claude's own thought-logging for memories and feature requests.
+    Thoughts are already curated by the thing writing them.
+    """
+
+    def _run():
+        try:
+            from . import note_service
+
+            note_service.update_embedding(note_id)
+        except Exception as e:  # noqa: BLE001 — best-effort, never break a write
+            print(f"[focus] thought embed failed for note {note_id}: {e}")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _batch_image_urls(db: Session, note_ids: list[int]) -> dict[int, str]:
+    """note_id → first attachment url, for a whole page of batch cards.
+
+    One query for the set rather than one per card — `stream()` and the
+    dashboard log both render a window of batches at once.
+    """
+    if not note_ids:
+        return {}
+    rows = (
+        db.query(Attachment.note_id, Attachment.public_url)
+        .filter(Attachment.note_id.in_(note_ids))
+        .order_by(Attachment.id.asc())
+        .all()
+    )
+    out: dict[int, str] = {}
+    for note_id, url in rows:
+        out.setdefault(note_id, url)  # first attachment wins
+    return out
+
+
 # ── Thoughts + batching ──────────────────────────────────────────────────────
 
 
@@ -182,14 +270,21 @@ def log_thought(
     label: str | None = None,
     image_url: str | None = None,
     now: datetime | None = None,
+    at: datetime | None = None,
 ) -> dict:
     """THE core write. Resolve (or create) the topic, apply the 30-minute
-    batch rule, insert the thought, bump the topic's salience.
+    batch rule, insert the thought as a Note, bump the topic's salience.
 
-    `image_url` pins an R2-hosted image to the batch card (set by the
-    /focus/cards/image ingest). Set on batch open; on append it overwrites
-    only when provided (mirrors the label-refine rule) — a plain text thought
-    never clears an existing image.
+    `at` BACKDATES the thought (2026-08-08). The timestamp used to be stamped
+    at call time with no way to override it, so a session Claude logged an hour
+    late showed an hour late — and the instructions had to work around the gap
+    ("log the moment a thought lands"). A missing parameter isn't a law of
+    physics. `now` still exists for test determinism; `at` is the caller-facing
+    one and wins when both are passed.
+
+    `image_url` pins an R2-hosted image to the batch card as an Attachment.
+    Set on batch open; on append it overwrites only when provided (mirrors the
+    label-refine rule) — a plain text thought never clears an existing image.
 
     Returns the created thought + its batch + the (post-bump, decayed) topic.
     """
@@ -197,51 +292,113 @@ def log_thought(
     if not content:
         raise ValueError("thought content required")
     now = now or datetime.utcnow()
+    stamp = at or now
 
     topic = resolve_topic(db, topic_name) or create_topic(db, topic_name)
 
-    batch = None if new_batch else _open_batch(db, topic.id, now)
+    batch = None if new_batch else _open_batch(db, topic.id, stamp)
     if batch is None:
-        batch = ThoughtBatch(
+        batch = Note(
+            title=(label or _snippet(content)),
+            content="",
+            excerpt=_snippet(content, 240),
+            tags=_tags_json(BATCH_TAG),
             topic_id=topic.id,
-            label=(label or _snippet(content)),
-            image_url=image_url,
-            started_at=now,
-            ended_at=now,
+            created_at=stamp,
+            updated_at=stamp,
         )
         db.add(batch)
         db.flush()
     else:
-        batch.ended_at = now
+        # `ended_at` — Note has no onupdate on updated_at, so the batch window
+        # is advanced explicitly here.
+        batch.updated_at = stamp
         if label:  # Claude can refine the running batch's summary
-            batch.label = label
-        if image_url:
-            batch.image_url = image_url
+            batch.title = label
+        if batch.topic_id is None:
+            batch.topic_id = topic.id
+    if image_url:
+        _attach_image(db, batch.id, image_url)
 
-    thought = Thought(content=content, timestamp=now, batch_id=batch.id)
+    thought = Note(
+        title=None,
+        content=content,
+        excerpt=_snippet(content, 240),
+        tags=_tags_json(THOUGHT_TAG),
+        topic_id=topic.id,
+        parent_note_id=batch.id,
+        created_at=stamp,
+        updated_at=stamp,
+    )
     db.add(thought)
     db.flush()
 
-    bump_salience(db, topic, now)
+    bump_salience(db, topic, stamp)
     db.flush()
+
+    _embed_note_async(thought.id)
 
     growth_cutoff = now - timedelta(hours=GROWTH_WINDOW_HOURS)
     return {
-        "thought": {"id": thought.id, "content": thought.content, "timestamp": _iso(thought.timestamp)},
-        "batch": {"id": batch.id, "label": batch.label, "image_url": batch.image_url, "topic_id": batch.topic_id},
+        "thought": {
+            "id": thought.id,
+            "content": thought.content,
+            "timestamp": _iso(thought.created_at),
+        },
+        "batch": {
+            "id": batch.id,
+            "label": batch.title,
+            "image_url": _batch_image_urls(db, [batch.id]).get(batch.id),
+            "topic_id": batch.topic_id,
+        },
         "topic": _topic_dict(topic, now, growth_cutoff),
     }
 
 
-def _open_batch(db: Session, topic_id: int, now: datetime) -> ThoughtBatch | None:
-    """The topic's most-recent batch if it's still inside the 30-min window."""
-    batch = (
-        db.query(ThoughtBatch)
-        .filter(ThoughtBatch.topic_id == topic_id)
-        .order_by(ThoughtBatch.ended_at.desc())
+def _attach_image(db: Session, note_id: int, url: str) -> None:
+    """Pin an already-uploaded R2 image to a batch card.
+
+    Attachment is note-owned and carries a public_url, so the image card needs
+    no column of its own — and unlike the old `ThoughtBatch.image_url`, it
+    lands on a real Note, which means every note surface can render it.
+    """
+    existing = (
+        db.query(Attachment)
+        .filter(Attachment.note_id == note_id)
+        .order_by(Attachment.id.asc())
         .first()
     )
-    if batch and (now - batch.ended_at) <= timedelta(minutes=BATCH_GAP_MINUTES):
+    if existing is not None:
+        existing.public_url = url
+        db.flush()
+        return
+    filename = url.rsplit("/", 1)[-1] or "image"
+    db.add(
+        Attachment(
+            note_id=note_id,
+            filename=filename,
+            # The bytes were uploaded by routers/focus.py; the extension is the
+            # only type signal that survives the public URL.
+            mime_type="image/png" if filename.lower().endswith(".png") else "image/jpeg",
+            size_bytes=0,
+            storage_key=url.split(".r2.dev/", 1)[-1] if ".r2.dev/" in url else filename,
+            public_url=url,
+        )
+    )
+    db.flush()
+
+
+def _open_batch(db: Session, topic_id: int, now: datetime) -> Note | None:
+    """The topic's most-recent batch if it's still inside the 30-min window."""
+    batch = (
+        _tagged(db.query(Note), BATCH_TAG)
+        .filter(Note.topic_id == topic_id)
+        .order_by(Note.updated_at.desc())
+        .first()
+    )
+    if batch and batch.updated_at and (now - batch.updated_at) <= timedelta(
+        minutes=BATCH_GAP_MINUTES
+    ):
         return batch
     return None
 
@@ -253,27 +410,39 @@ def query_thoughts(
     text: str | None = None,
     limit: int = 50,
 ) -> list[dict]:
-    """Read thoughts, newest-first, filtered by topic name / recency / substring."""
-    q = db.query(Thought, ThoughtBatch, Topic).join(
-        ThoughtBatch, Thought.batch_id == ThoughtBatch.id
-    ).join(Topic, ThoughtBatch.topic_id == Topic.id)
+    """Read thoughts, newest-first, filtered by topic name / recency / substring.
+
+    Still a substring match, deliberately: this is the tool Claude calls to
+    check what it already logged, and an exact recall ("did I write down the
+    Straia number") is better served by LIKE than by cosine. Thoughts are real
+    Notes now, so semantic search over the same rows is available through
+    `GET /notes/search` — two ways in, one store.
+    """
+    # Self-join: thoughts and their batches are both Notes, so the parent side
+    # needs an alias or the tag filter would apply to both.
+    Batch = aliased(Note)
+    q = (
+        _tagged(db.query(Note, Batch, Topic), THOUGHT_TAG)
+        .outerjoin(Batch, Note.parent_note_id == Batch.id)
+        .join(Topic, Note.topic_id == Topic.id)
+    )
 
     if topic and topic.strip():
         q = q.filter(func_lower(Topic.name) == topic.strip().lower())
     if since:
-        q = q.filter(Thought.timestamp >= since)
+        q = q.filter(Note.created_at >= since)
     if text and text.strip():
-        q = q.filter(Thought.content.ilike(f"%{text.strip()}%"))
+        q = q.filter(Note.content.ilike(f"%{text.strip()}%"))
 
-    rows = q.order_by(Thought.timestamp.desc()).limit(min(limit, 200)).all()
+    rows = q.order_by(Note.created_at.desc()).limit(min(limit, 200)).all()
     return [
         {
             "id": th.id,
             "content": th.content,
-            "timestamp": _iso(th.timestamp),
+            "timestamp": _iso(th.created_at),
             "topic": tp.name,
-            "batch_id": b.id,
-            "batch_label": b.label,
+            "batch_id": b.id if b is not None else None,
+            "batch_label": b.title if b is not None else None,
         }
         for th, b, tp in rows
     ]
@@ -307,24 +476,29 @@ def set_reminder(
     from_thought: int | None = None,
     is_promise: bool = False,
 ) -> dict:
-    """Create a reminder or promise. The row is typed 'promise' when EITHER an
-    `owed_to` person is named OR `is_promise` is set — the latter lets a promise
-    owed to yourself ("I won't smoke till Tuesday") be a promise rather than
-    collapsing into an undated reminder. Promises carry the active→kept|broken
-    lifecycle; reminders stay a simple done check-off.
+    """Create a commitment. Routed through `promise_service.create`, which is
+    the point of the convergence: that path cosine-dedups at 0.85 against
+    active promises, so re-stating a commitment through the connector now
+    returns the existing row instead of minting the twin that put four
+    duplicate pairs in prod.
 
-    An omitted `due_at` DEFAULTS to today's local EOD (flagged `due_is_default`)
-    so the row can be placed on the short-term/longer-term dashboard split. See
-    the Reminder docstring — a defaulted due never auto-breaks."""
+    `is_promise` is accepted for signature compatibility but no longer changes
+    what gets stored — in v2 every row in `promises` IS a promise. The display
+    `type` is derived from `owed_to` (a commitment to another person reads
+    differently from one to yourself); only the legacy `notch` payload sections
+    on it, and nothing renders that anymore.
+
+    An omitted `due_at` DEFAULTS to today's local EOD (flagged
+    `due_is_default`) so the row can be placed on the short-term/longer-term
+    split. A defaulted due never auto-breaks — see `Promise.due_is_default`.
+    """
     content = (content or "").strip()
     if not content:
         raise ValueError("reminder content required")
 
     owed_id = None
-    rtype = "promise" if is_promise else "reminder"
     if owed_to and owed_to.strip():
         owed_id = resolve_person(db, owed_to).id
-        rtype = "promise"
 
     # Every row gets a deadline. `parse_due_hint` is THE deadline parser
     # (app/common.py) — local-EOD anchored, converted to the naive-UTC storage
@@ -333,81 +507,141 @@ def set_reminder(
     if due_is_default:
         due_at = parse_due_hint("today", db)
 
-    reminder = Reminder(
-        type=rtype,
-        content=content,
-        owed_to=owed_id,
-        due_at=due_at,
-        due_is_default=due_is_default,
-        thought_id=from_thought,
-        done=False,
-        state="active",
+    from . import promise_service
+
+    # Dedup returns an EXISTING row, so remember the high-water mark to tell a
+    # fresh insert from a match. Without this a re-statement would stomp a real
+    # deadline with the defaulted one.
+    max_id_before = db.query(_sa_func.max(Promise.id)).scalar() or 0
+    promise = promise_service.create(
+        db,
+        utterance=content,
+        summary=content,
+        inferred_due=due_at,
+        cadence="once",
     )
-    db.add(reminder)
+    is_new = promise.id > max_id_before
+
+    if is_new:
+        promise.due_is_default = due_is_default
+        promise.owed_to = owed_id
+    elif owed_id is not None:
+        # Naming a creditor on a re-statement is new information; adopt it.
+        promise.owed_to = owed_id
     db.flush()
-    return _reminder_dict(db, reminder)
+
+    if from_thought:
+        _link_thought(db, promise.id, int(from_thought))
+
+    return _reminder_dict(db, promise)
+
+
+def _link_thought(db: Session, promise_id: int, note_id: int) -> None:
+    """Record that a commitment fell out of a logged thought.
+
+    An Edge rather than a column: `edges` already models exactly this
+    ((kind, id) → (kind, id) with a `derives_from` kind) and adding an FK per
+    relation is what the table exists to prevent.
+    """
+    from . import edge_service
+
+    try:
+        edge_service.link(
+            db,
+            src_kind="promise",
+            src_id=promise_id,
+            dst_kind="note",
+            dst_id=note_id,
+            kind="derives_from",
+        )
+    except Exception as e:  # noqa: BLE001 — provenance is not worth a 500
+        print(f"[focus] thought link failed (promise {promise_id}): {e}")
+
+
+def _thought_ids(db: Session, promise_ids: list[int]) -> dict[int, int]:
+    """promise_id → source note id, for a page of rows in one query."""
+    if not promise_ids:
+        return {}
+    from ..db.models import Edge
+
+    rows = (
+        db.query(Edge.src_id, Edge.dst_id)
+        .filter(
+            Edge.src_kind == "promise",
+            Edge.dst_kind == "note",
+            Edge.kind == "derives_from",
+            Edge.src_id.in_(promise_ids),
+        )
+        .all()
+    )
+    out: dict[int, int] = {}
+    for src, dst in rows:
+        out.setdefault(src, dst)
+    return out
+
+
+def _open_promises(db: Session):
+    return db.query(Promise).filter(Promise.state == "active")
 
 
 def list_reminders(
     db: Session, day: datetime | None = None, include_done: bool = False
 ) -> list[dict]:
-    """Open reminders. If `day` is given, restrict dated reminders to that
-    calendar day (undated promises always pass through — they surface by age).
+    """Open commitments. If `day` is given, restrict dated rows to that
+    calendar day (undated rows always pass through — they surface by age).
     Ordered: dated by due time, then undated by age (oldest first)."""
-    q = db.query(Reminder)
+    q = db.query(Promise)
     if not include_done:
-        q = q.filter(Reminder.done.is_(False))
+        q = q.filter(Promise.state == "active")
     if day is not None:
         start = datetime(day.year, day.month, day.day)
         end = start + timedelta(days=1)
         q = q.filter(
-            (Reminder.due_at.is_(None)) | ((Reminder.due_at >= start) & (Reminder.due_at < end))
+            (Promise.inferred_due.is_(None))
+            | ((Promise.inferred_due >= start) & (Promise.inferred_due < end))
         )
     rows = q.all()
 
-    def _sort_key(r: Reminder):
+    def _sort_key(p: Promise):
         # Dated first (by time), then undated (by created_at asc = oldest first).
-        return (0, r.due_at) if r.due_at is not None else (1, r.created_at)
+        return (0, p.inferred_due) if p.inferred_due is not None else (1, p.created_at)
 
     rows.sort(key=_sort_key)
-    return [_reminder_dict(db, r) for r in rows]
+    return _reminder_dicts(db, rows)
 
 
 def set_reminder_done(db: Session, reminder_id: int, done: bool = True) -> dict | None:
-    reminder = db.query(Reminder).filter(Reminder.id == reminder_id).first()
-    if reminder is None:
+    p = db.query(Promise).filter(Promise.id == reminder_id).first()
+    if p is None:
         return None
-    reminder.done = done
     # Keep the lifecycle in sync with the legacy check-off: done = kept (a
     # reminder you tick off is a kept commitment), undone = back to active.
-    _set_state(reminder, "kept" if done else "active")
+    _set_state(p, "kept" if done else "active")
     db.flush()
-    return _reminder_dict(db, reminder)
+    return _reminder_dict(db, p)
 
 
 VALID_STATES = ("active", "kept", "broken")
 
 
-def _set_state(r: Reminder, state: str, now: datetime | None = None) -> None:
-    """Mutate a reminder's lifecycle state, stamping/clearing resolved_at and
-    keeping the legacy `done` boolean in sync (done = left 'active')."""
+def _set_state(p: Promise, state: str, now: datetime | None = None) -> None:
+    """Mutate a commitment's lifecycle state, stamping/clearing resolved_at."""
     now = now or datetime.utcnow()
-    r.state = state
-    r.done = state != "active"
-    r.resolved_at = None if state == "active" else now
+    p.state = state
+    p.resolved_at = None if state == "active" else now
 
 
 def set_reminder_state(db: Session, reminder_id: int, state: str) -> dict | None:
-    """Transition a reminder/promise to active | kept | broken. Broken/kept
-    stamp resolved_at (the "lasted Nd" anchor); reviving to active clears it."""
+    """Transition to active | kept | broken. Broken/kept stamp resolved_at
+    (the "lasted Nd" anchor); reviving to active clears it."""
     if state not in VALID_STATES:
         raise ValueError(f"bad state {state!r}; expected one of {VALID_STATES}")
-    reminder = db.query(Reminder).filter(Reminder.id == reminder_id).first()
-    if reminder is None:
+    p = db.query(Promise).filter(Promise.id == reminder_id).first()
+    if p is None:
         return None
-    _set_state(reminder, state)
+    _set_state(p, state)
     db.flush()
-    return _reminder_dict(db, reminder)
+    return _reminder_dict(db, p)
 
 
 def update_reminder(
@@ -420,109 +654,132 @@ def update_reminder(
     owed_to: str | None = None,
     clear_owed: bool = False,
 ) -> dict | None:
-    """Edit a reminder/promise's content / due / owed-to. Only provided fields
-    change (None = "leave alone"); pass `clear_due` / `clear_owed` to explicitly
-    reset a field — distinct from omitting it. `clear_due` resets to the
-    today-EOD default rather than NULL (see the Reminder docstring: every row
-    carries a date, and a NULL falls out of both dashboard panels). Naming a person via `owed_to`
-    promotes a reminder to a promise (matches set_reminder's rule); clearing the
-    owner does NOT demote (a self-owed promise stays a promise). State/done are
-    untouched here — those ride set_reminder_state / set_reminder_done."""
-    r = db.query(Reminder).filter(Reminder.id == reminder_id).first()
-    if r is None:
+    """Edit a commitment's content / due / owed-to. Only provided fields change
+    (None = "leave alone"); pass `clear_due` / `clear_owed` to explicitly reset
+    a field — distinct from omitting it. `clear_due` resets to the today-EOD
+    default rather than NULL (every row carries a date; a NULL falls out of both
+    dashboard panels). Naming a person promotes the display type to promise;
+    clearing the owner does NOT demote. State is untouched here — that rides
+    set_reminder_state / set_reminder_done."""
+    p = db.query(Promise).filter(Promise.id == reminder_id).first()
+    if p is None:
         return None
     if content is not None:
         c = content.strip()
         if not c:
             raise ValueError("content cannot be empty")
-        r.content = c
+        p.utterance = c
+        p.summary = c[:200]
     if clear_due:
         # Explicitly clearing a due drops back to the default (today EOD) rather
         # than to NULL — every row carries a date now, and a NULL would fall out
         # of both dashboard panels entirely.
-        r.due_at = parse_due_hint("today", db)
-        r.due_is_default = True
+        p.inferred_due = parse_due_hint("today", db)
+        p.due_is_default = True
     elif due_at is not None:
-        r.due_at = due_at
+        p.inferred_due = due_at
         # You named this deadline, so it counts: it can now auto-break.
-        r.due_is_default = False
+        p.due_is_default = False
     if clear_owed:
-        r.owed_to = None
+        p.owed_to = None
     elif owed_to is not None and owed_to.strip():
-        r.owed_to = resolve_person(db, owed_to).id
-        r.type = "promise"
+        p.owed_to = resolve_person(db, owed_to).id
     db.flush()
-    return _reminder_dict(db, r)
+    return _reminder_dict(db, p)
 
 
 def delete_reminder(db: Session, reminder_id: int) -> bool:
-    """Hard-delete a reminder/promise. Nothing FKs onto Reminder (parent_id is a
-    reserved self-FK, unused in v1), so the row drops clean. Returns False if the
-    id was already gone."""
-    r = db.query(Reminder).filter(Reminder.id == reminder_id).first()
-    if r is None:
-        return False
-    db.delete(r)
-    db.flush()
-    return True
+    """Hard-delete a commitment. Delegates to promise_service so the row's
+    edges go with it (the focus tables had no graph layer to clean up; Promise
+    does)."""
+    from . import promise_service
+
+    return promise_service.delete(db, reminder_id)
 
 
 def auto_break_overdue(db: Session, now: datetime | None = None) -> int:
-    """Sweep promises whose EXPLICIT due_at has passed while still active →
-    broken. Returns the count broken. Mirrors the main Promise model's overdue
-    sweep so a blown deadline renders the gap on its own.
+    """Sweep commitments whose EXPLICIT due has passed while still active →
+    broken. Returns the count broken.
 
     Two exclusions, both deliberate:
-      - undated promises (legacy rows) — nothing to blow past.
-      - `due_is_default` rows — since the ambient-dash rebuild every new promise
-        gets a due date, defaulted to today's EOD when you didn't name one.
-        Breaking those would mark you broken at midnight on a deadline GOONI
-        invented, every single night. A defaulted due is a placement hint for
-        the dashboard, not a commitment. It rolls forward instead (see
+      - undated rows (legacy) — nothing to blow past.
+      - `due_is_default` rows — since the ambient-dash rebuild every new
+        commitment gets a due date, defaulted to today's EOD when nobody named
+        one. Breaking those would mark Daniel broken at midnight on a deadline
+        GOONI invented, every single night. A defaulted due is a placement hint
+        for the dashboard, not a commitment. It rolls forward instead (see
         `_due_bucket`).
+
+    Recurring cadences are excluded too — a deadline on a daily commitment is a
+    parse artifact. That guard came with the v2 table and is new to this
+    surface; the focus system never had recurring rows to protect.
     """
     now = now or datetime.utcnow()
     stale = (
-        db.query(Reminder)
+        db.query(Promise)
         .filter(
-            Reminder.type == "promise",
-            Reminder.state == "active",
-            Reminder.due_at.isnot(None),
-            Reminder.due_is_default.is_(False),
-            Reminder.due_at < now,
+            Promise.state == "active",
+            Promise.inferred_due.isnot(None),
+            Promise.due_is_default.is_(False),
+            Promise.cadence == "once",
+            Promise.inferred_due < now,
         )
         .all()
     )
-    for r in stale:
-        _set_state(r, "broken", now)
+    for p in stale:
+        _set_state(p, "broken", now)
     if stale:
         db.flush()
     return len(stale)
 
 
-def _reminder_dict(db: Session, r: Reminder) -> dict:
-    owed_name = None
-    if r.owed_to is not None:
-        person = db.query(Person).filter(Person.id == r.owed_to).first()
-        owed_name = person.name if person else None
-    age_days = max(0, (datetime.utcnow() - r.created_at).days)
-    # "lasted" = how long the promise stood: created → resolved (broken/kept),
+def _reminder_dicts(db: Session, rows: list[Promise]) -> list[dict]:
+    """Serialize a page of commitments, batching the two lookups the shape
+    needs (creditor names, source-thought edges) instead of per-row queries."""
+    if not rows:
+        return []
+    owed_ids = {p.owed_to for p in rows if p.owed_to is not None}
+    names: dict[int, str] = {}
+    if owed_ids:
+        names = {
+            pid: nm
+            for pid, nm in db.query(Person.id, Person.name).filter(
+                Person.id.in_(owed_ids)
+            )
+        }
+    thoughts = _thought_ids(db, [p.id for p in rows])
+    return [_serialize_reminder(p, names, thoughts) for p in rows]
+
+
+def _reminder_dict(db: Session, p: Promise) -> dict:
+    return _reminder_dicts(db, [p])[0]
+
+
+def _serialize_reminder(
+    p: Promise, names: dict[int, str], thoughts: dict[int, int]
+) -> dict:
+    now = datetime.utcnow()
+    age_days = max(0, (now - p.created_at).days) if p.created_at else 0
+    # "lasted" = how long the commitment stood: created → resolved (broken/kept),
     # or created → now while still active. Drives the broken card's warn meta.
-    end = r.resolved_at if r.resolved_at is not None else datetime.utcnow()
-    lasted_days = max(0, (end - r.created_at).days)
+    end = p.resolved_at if p.resolved_at is not None else now
+    lasted_days = max(0, (end - p.created_at).days) if p.created_at else 0
     return {
-        "id": r.id,
-        "type": r.type,
-        "content": r.content,
-        "owed_to": owed_name,  # null = owed to self
-        "due_at": _iso(r.due_at),
-        "done": r.done,
-        "state": r.state,
-        "resolved_at": _iso(r.resolved_at),
+        "id": p.id,
+        # Derived, not stored: in v2 every row here is a promise. The split only
+        # ever drove the legacy `notch` sectioning, and a commitment owed to
+        # another person is the one that genuinely reads differently.
+        "type": "promise" if p.owed_to is not None else "reminder",
+        "content": p.summary or p.utterance,
+        "owed_to": names.get(p.owed_to) if p.owed_to is not None else None,
+        "due_at": _iso(p.inferred_due),
+        "done": p.state != "active",
+        "state": p.state,
+        "resolved_at": _iso(p.resolved_at),
         "age_days": age_days,
         "lasted_days": lasted_days,
-        "thought_id": r.thought_id,
-        "due_is_default": bool(r.due_is_default),
+        "thought_id": thoughts.get(p.id),
+        "due_is_default": bool(p.due_is_default),
     }
 
 
@@ -557,7 +814,7 @@ def stream(
     days = max(1, min(days, STREAM_MAX_DAYS))
     start_date = end_date - timedelta(days=days - 1)
 
-    # Local-day window edges → naive-UTC bounds for the naive-UTC batch column.
+    # Local-day window edges → naive-UTC bounds for the naive-UTC note columns.
     start_utc = (
         datetime.combine(start_date, datetime.min.time())
         .replace(tzinfo=tz)
@@ -572,21 +829,22 @@ def stream(
     )
 
     rows = (
-        db.query(ThoughtBatch, Topic)
-        .join(Topic, ThoughtBatch.topic_id == Topic.id)
-        .filter(ThoughtBatch.started_at >= start_utc, ThoughtBatch.started_at < end_utc)
-        .order_by(ThoughtBatch.started_at.desc())
+        _tagged(db.query(Note, Topic), BATCH_TAG)
+        .join(Topic, Note.topic_id == Topic.id)
+        .filter(Note.created_at >= start_utc, Note.created_at < end_utc)
+        .order_by(Note.created_at.desc())
         .all()
     )
     batch_ids = [b.id for b, _ in rows]
     counts: dict[int, int] = {}
     if batch_ids:
         counts = dict(
-            db.query(Thought.batch_id, _sa_func.count(Thought.id))
-            .filter(Thought.batch_id.in_(batch_ids))
-            .group_by(Thought.batch_id)
+            _tagged(db.query(Note.parent_note_id, _sa_func.count(Note.id)), THOUGHT_TAG)
+            .filter(Note.parent_note_id.in_(batch_ids))
+            .group_by(Note.parent_note_id)
             .all()
         )
+    images = _batch_image_urls(db, batch_ids)
 
     items: list[dict] = [
         {
@@ -594,9 +852,9 @@ def stream(
             "batch_id": b.id,
             "topic": tp.name,
             "color": tp.color,
-            "sentence": b.label,
-            "image_url": b.image_url,
-            "at": _iso(b.started_at),
+            "sentence": b.title,
+            "image_url": images.get(b.id),
+            "at": _iso(b.created_at),
             "thought_count": counts.get(b.id, 0),
         }
         for b, tp in rows
@@ -711,40 +969,39 @@ def dashboard(db: Session, now: datetime | None = None) -> dict:
     - log: recent batch labels with timestamps
     """
     now = now or datetime.utcnow()
-    # Self-heal: a promise whose dated deadline blew by renders the gap on its
-    # own (no manual close needed). Flushed here; the route commits.
+    # Self-heal: a commitment whose dated deadline blew by renders the gap on
+    # its own (no manual close needed). Flushed here; the route commits.
     auto_break_overdue(db, now)
     topics = list_topics(db, now)
 
-    # Reminders = the dated-todo section: open (not done) type='reminder' only.
+    # Reminders = the dated-todo section: open rows owed to nobody.
     notch_reminders = [r for r in list_reminders(db) if r["type"] == "reminder"]
 
     # Promises = the said-vs-done section: still-standing (active) AND recently
-    # broken (the loud signal). Kept promises drop off — a fulfilled commitment
-    # isn't a live concern. list_reminders' done-filter hides broken (done=True),
-    # so query promises directly.
+    # broken (the loud signal). Kept commitments drop off — a fulfilled one
+    # isn't a live concern.
     promise_rows = (
-        db.query(Reminder)
-        .filter(Reminder.type == "promise", Reminder.state.in_(("active", "broken")))
+        db.query(Promise)
+        .filter(Promise.state.in_(("active", "broken")), Promise.owed_to.isnot(None))
         .all()
     )
-    promises = [_reminder_dict(db, r) for r in promise_rows]
+    promises = _reminder_dicts(db, promise_rows)
     # Active first, oldest → most at-risk; then broken, most-recent break first
     # (the freshest gap reads at the top of the broken run).
     def _promise_sort(r: dict):
         broken = r["state"] == "broken"
-        # active: (0, -age) so oldest-active bubbles up; broken: (1, -resolved-ish)
+        # active: (0, -age) so oldest-active bubbles up; broken: (1, -lasted)
         return (1 if broken else 0, -r["age_days"] if not broken else -r["lasted_days"])
 
     promises.sort(key=_promise_sort)
     notch_promises = promises
 
     # ── The dashboard split (whiteboard 2026-07-28) ──────────────────────────
-    # One pass over everything open — reminders AND still-active promises — and
-    # bucket by due distance. Broken promises stay out: the short-term panel is
-    # a to-do surface, and a broken row isn't actionable.
+    # One pass over everything open and bucket by due distance. Broken rows stay
+    # out: the short-term panel is a to-do surface, and a broken row isn't
+    # actionable.
     local = local_now(db)
-    open_rows = notch_reminders + [p for p in promises if p["state"] == "active"]
+    open_rows = _reminder_dicts(db, _open_promises(db).all())
     short_term: dict[str, list[dict]] = {b: [] for b in SHORT_BUCKETS}
     long_term: list[dict] = []
     for row in open_rows:
@@ -762,19 +1019,19 @@ def dashboard(db: Session, now: datetime | None = None) -> dict:
     long_term.sort(key=lambda r: r.get("due_at") or "")
 
     log_rows = (
-        db.query(ThoughtBatch, Topic)
-        .join(Topic, ThoughtBatch.topic_id == Topic.id)
-        .order_by(ThoughtBatch.ended_at.desc())
+        _tagged(db.query(Note, Topic), BATCH_TAG)
+        .join(Topic, Note.topic_id == Topic.id)
+        .order_by(Note.updated_at.desc())
         .limit(12)
         .all()
     )
     log = [
         {
             "batch_id": b.id,
-            "label": b.label,
+            "label": b.title,
             "topic": tp.name,
             "color": tp.color,
-            "ended_at": _iso(b.ended_at),
+            "ended_at": _iso(b.updated_at),
         }
         for b, tp in log_rows
     ]
@@ -830,8 +1087,8 @@ def _snippet(text: str, n: int = 48) -> str:
 
 def _parse_iso(s: str | None) -> datetime | None:
     """Inverse of `_iso` — back to the naive-UTC storage convention. Used by the
-    dashboard split, which buckets the already-serialized reminder dicts rather
-    than re-querying the rows."""
+    dashboard split, which buckets the already-serialized dicts rather than
+    re-querying the rows."""
     if not s:
         return None
     try:
@@ -844,10 +1101,10 @@ def _parse_iso(s: str | None) -> datetime | None:
 
 
 def _iso(dt: datetime | None) -> str | None:
-    """Serialize as UTC-aware ISO-8601. Stored focus datetimes are naive-UTC
-    (Column defaults are datetime.utcnow); stamp +00:00 so the client parses
-    them as UTC and converts to LOCAL. Without the offset a naive ISO string is
-    read as local time and every timestamp lands hours off (the display-tz bug).
+    """Serialize as UTC-aware ISO-8601. Stored datetimes are naive-UTC (Column
+    defaults are datetime.utcnow); stamp +00:00 so the client parses them as UTC
+    and converts to LOCAL. Without the offset a naive ISO string is read as
+    local time and every timestamp lands hours off (the display-tz bug).
     Already-aware datetimes normalize to UTC."""
     if dt is None:
         return None

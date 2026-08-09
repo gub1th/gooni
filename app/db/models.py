@@ -199,6 +199,15 @@ class Note(Base):
     # for every other note. Text (not a JSON column) so the placement shape
     # can grow (pinned?, color?) without a migration.
     home_pos = Column(Text, nullable=True)
+    # The subject this note belongs to (focus convergence, 2026-08-08). A real
+    # FK, NOT a tag: `tags` are free-text strings with no identity, and Topic
+    # carries a decay curve anchored to `last_touched` — computing that by
+    # LIKE-matching a JSON column would be both slow and wrong the moment a
+    # topic is renamed. Tags stay for every other kind of grouping.
+    #
+    # Set on the two focus-derived note subtypes (`thought`, `thought-batch`)
+    # and free for ordinary notes to adopt. Null = ungrouped, the common case.
+    topic_id = Column(Integer, ForeignKey("topics.id"), nullable=True, index=True)
 
 
 class PublicProfile(Base):
@@ -702,6 +711,24 @@ class Promise(Base):
     # slip_count). Deferred — same pattern as Note.embedding so list
     # queries don't hydrate the ~31KB vector.
     embedding = deferred(Column(Text, nullable=True))
+    # ── absorbed from Reminder (focus convergence, 2026-08-08) ───────────────
+    # The person this is owed to. Null = owed to yourself, which is the common
+    # case and renders without an "owed to" prefix. This is the one thing the
+    # focus system's Reminder had that Promise couldn't express — a commitment
+    # to another human ("owed to Yash · 6d") reads differently from one you
+    # made to yourself, and the age meta only earns its place on the former.
+    owed_to = Column(
+        Integer, ForeignKey("focus_people.id"), nullable=True, index=True
+    )
+    # True when NOBODY chose this deadline — the service defaulted `inferred_due`
+    # to today's local EOD so the row can be placed on the dashboard's
+    # short-term/longer-term split (a dateless row lands in neither panel).
+    #
+    # Load-bearing, not bookkeeping: `auto_mark_overdue` must NEVER break a
+    # defaulted due. Gooni inventing a deadline and then marking you broken for
+    # missing it is the system lying about a commitment you never made. A stale
+    # defaulted due rolls forward to today instead.
+    due_is_default = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime,
@@ -757,17 +784,38 @@ class Edge(Base):
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# Focus system (2026-07-23, PRD `gooni-focus-system-plan.md`)
+# Focus system (2026-07-23) — CONVERGED into the v2 primitives 2026-08-08
 #
-# A NEW primitive set that lives ALONGSIDE the ambient-loop v2 tables — the
-# plan is explicitly additive, not a rewrite. Claude (via MCP) is the
-# intelligence layer; these tables are pure persistence + a glanceable
-# dashboard. Overlap with existing primitives is intentional and accepted:
-#   Topic     ≈ the nuked Focus/Space, reborn with time-decay
-#   Thought   ≈ a lightweight, topic-scoped Note/Message
-#   Reminder  ≈ Promise, but simpler + person-aware (owed_to)
-# We do NOT reuse Promise/Note here — the focus system is its own clean surface
-# so it can ship fast without entangling the v2 chat pipeline.
+# The original design shipped a parallel primitive set alongside ambient-loop
+# v2 so it could go out without entangling the chat pipeline. The duplication
+# was accepted on purpose: Topic ≈ the nuked Focus/Space, Thought ≈ a
+# lightweight Note, Reminder ≈ Promise.
+#
+# Six weeks of real writes made the cost concrete. Claude reached Gooni through
+# TWO connectors — claude.ai's `/mcp` wrote focus tables, Claude Code's stdio
+# server wrote v2 tables — and nothing linked them. By 2026-08-08 all four
+# `reminders` rows in prod were verbatim duplicates of `promises` rows: mark
+# one kept and the other stood active forever. No code copied them; the same
+# commitment was simply written through both doors.
+#
+# So the focus primitives now map onto v2 (`focus_service` is the adapter, the
+# same shape `daily_metric_service` has over Trackable):
+#   Thought       → Note, tag `thought`, `parent_note_id` → its batch
+#   ThoughtBatch  → Note, tag `thought-batch`, title = Claude's label
+#   batch image   → Attachment (note-owned already)
+#   Reminder      → Promise + `owed_to` + `due_is_default`
+#   reminder.thought_id → Edge `derives_from`
+#   Mention       → dropped (0 rows, no writer, no tool)
+#
+# SURVIVING focus tables: Topic (identity + a decay curve nothing else models)
+# and Person (v2 has no person primitive at all).
+#
+# The four absorbed tables below are RETAINED, unread, for one release — this
+# was an expand/contract migration, so `f4c81a92de70` backfilled their rows
+# into Notes/Promises without deleting the originals. A follow-up migration
+# drops them once the backfill has been eyeballed in prod. Nothing in the app
+# queries them anymore; `scripts/verify_focus_convergence.py` still does, to
+# diff old against new.
 # ───────────────────────────────────────────────────────────────────────────
 
 

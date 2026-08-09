@@ -66,12 +66,28 @@ def log_thought(body: dict, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="content required")
     if not topic:
         raise HTTPException(status_code=400, detail="topic required")
+    # `at` backdates the thought. The timestamp used to be stamped at call time
+    # with no override, so a session logged late showed late — and the connector
+    # instructions had to work around the gap instead of the tool closing it.
+    at = None
+    raw_at = body.get("at")
+    if raw_at:
+        try:
+            at = datetime.fromisoformat(str(raw_at).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"bad at: {raw_at!r}")
+        # Same offset-aware → naive-UTC normalization `_parse_due` does; a naive
+        # input is assumed already-UTC (the storage convention).
+        if at.tzinfo is not None:
+            at = at.astimezone(timezone.utc)
+        at = at.replace(tzinfo=None)
     result = focus_service.log_thought(
         db,
         content=content,
         topic_name=topic,
         new_batch=bool(body.get("new_batch")),
         label=(body.get("label") or None),
+        at=at,
     )
     db.commit()
     return result
