@@ -36,6 +36,12 @@ export const DROPPED_KEY = "gooni_dropped_count";
  * in `gooni_last_flush` would vanish the moment the next flush overwrote it.
  */
 export const REFUSED_KEY = "gooni_refused_count";
+
+/** The transient record of the most recent flush, read by the options page. */
+export const LAST_FLUSH_KEY = "gooni_last_flush";
+
+/** Epoch ms before which we honour a server's Retry-After and don't flush. */
+export const RETRY_UNTIL_KEY = "gooni_retry_until";
 export const MAX_BUFFERED = 5000;
 export const FLUSH_THRESHOLD = 25;
 export const MAX_BATCH = 200;
@@ -88,6 +94,41 @@ export const FLUSH_TIMEOUT_MS = 20000;
  * Retry-After as seconds, from either header form (delta-seconds or HTTP-date).
  * Null when absent/unparseable — the caller then uses its normal flush cadence.
  */
+/**
+ * Persist the outcome of a flush.
+ *
+ * A NO-OP flush leaves the previous record standing. The flush alarm fires
+ * every 60s regardless of buffer state, and the buffer is empty immediately
+ * after any successful flush, so writing a `{sent: 0}` record unconditionally
+ * erased the informative one within a minute — every minute.
+ *
+ * That erasure is not cosmetic. Buffer overflow has DROPPED_KEY and a refused
+ * batch has REFUSED_KEY, but a server-REJECTED row is acked and deleted from
+ * the buffer exactly like an accepted one, so this record is the ONLY trace it
+ * ever existed. The reachable case with no bug anywhere: a clock >5min fast
+ * makes the server reject every row as `future`; the flush that reports it is
+ * overwritten 60s later and the panel goes back to reading like a clean flush.
+ *
+ * The record is transient by nature even so — the durable counters stay the
+ * authoritative signal, and the panel should trust them if the two disagree.
+ *
+ * `retryAfterSec` bookkeeping is written either way: it is about the NEXT
+ * flush, not a report of this one.
+ */
+export async function recordFlush(
+  storage,
+  res,
+  { at = new Date().toISOString(), now = Date.now() } = {}
+) {
+  const patch = {
+    [RETRY_UNTIL_KEY]: res?.retryAfterSec ? now + res.retryAfterSec * 1000 : 0,
+  };
+  const record = (res?.sent ?? 0) > 0 ? { at, ...res } : null;
+  if (record) patch[LAST_FLUSH_KEY] = record;
+  await storage.set(patch);
+  return record;
+}
+
 export function retryAfterSeconds(res, now = Date.now()) {
   const raw = res?.headers?.get?.("Retry-After");
   if (raw === null || raw === undefined || raw === "") return null;

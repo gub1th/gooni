@@ -76,8 +76,11 @@
       <code>state</code> (whole name only, so <code>zip_code</code> survives),
       and the run-together names <code>jsessionid</code>,
       <code>phpsessid</code>, <code>sessionid</code>, <code>csrftoken</code>,
-      <code>accesstoken</code>, <code>apikey</code> (which also covers
-      <code>api_key</code>).
+      <code>accesstoken</code>, <code>apikey</code>, <code>xapikey</code>,
+      <code>xfunctionskey</code>, <code>subscriptionkey</code> — compared after
+      underscores and hyphens are removed, so those last four also cover
+      <code>api_key</code>, <code>x-api-key</code>, <code>x-functions-key</code>
+      and <code>subscription-key</code>.
     </p>
     <textarea id="scrubSegments"></textarea>
 

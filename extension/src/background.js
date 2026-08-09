@@ -15,14 +15,20 @@
  */
 
 import { FocusTracker } from "./tracker.js";
-import { IntervalBuffer, flushOnce, FLUSH_THRESHOLD } from "./buffer.js";
+import {
+  IntervalBuffer,
+  flushOnce,
+  recordFlush,
+  FLUSH_THRESHOLD,
+  LAST_FLUSH_KEY,
+  RETRY_UNTIL_KEY,
+} from "./buffer.js";
 import { scrubUrl } from "./scrub.js";
 import { createSerializer } from "./serial.js";
 import { resolveAttention, applyAttention, makeIdleProbe } from "./attention.js";
 import { loadConfig, ingestEndpoint, IDLE_DETECTION_SEC } from "./config.js";
 
 const OPEN_KEY = "gooni_open_interval";
-const RETRY_UNTIL_KEY = "gooni_retry_until";
 const HEARTBEAT_ALARM = "gooni_heartbeat";
 const FLUSH_ALARM = "gooni_flush";
 
@@ -91,10 +97,7 @@ async function _flush() {
     endpoint: ingestEndpoint(cfg.baseUrl),
     token: cfg.token,
   });
-  await storage.set({
-    gooni_last_flush: { at: new Date().toISOString(), ...res },
-    [RETRY_UNTIL_KEY]: res.retryAfterSec ? Date.now() + res.retryAfterSec * 1000 : 0,
-  });
+  await recordFlush(storage, res);
   return res;
 }
 
@@ -264,7 +267,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         buffer.size(),
         buffer.droppedCount(),
         buffer.refusedCount(),
-        storage.get(["gooni_last_flush", OPEN_KEY]),
+        storage.get([LAST_FLUSH_KEY, OPEN_KEY]),
       ]);
       sendResponse({
         enabled: cfg.enabled,
@@ -273,7 +276,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         buffered: size,
         dropped,
         refused,
-        lastFlush: got.gooni_last_flush || null,
+        lastFlush: got[LAST_FLUSH_KEY] || null,
         open: got[OPEN_KEY] || null,
       });
     })();

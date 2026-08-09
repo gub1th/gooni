@@ -12,10 +12,14 @@ import assert from "node:assert/strict";
 import {
   IntervalBuffer,
   flushOnce,
+  recordFlush,
   retryAfterSeconds,
   BUFFER_KEY,
+  LAST_FLUSH_KEY,
+  RETRY_UNTIL_KEY,
   MAX_RETRY_AFTER_SEC,
 } from "../src/buffer.js";
+import { formatLastFlush } from "../src/status.js";
 
 /** Stand-in for chrome.storage.local: survives across IntervalBuffer instances. */
 function fakeStorage(initial = {}) {
@@ -352,6 +356,85 @@ test("a batch is capped so one flush can't post the whole backlog", async () => 
   const buf = new IntervalBuffer({ storage, maxBatch: 2 });
   for (const id of ["a", "b", "c"]) await buf.append(interval(id));
   assert.deepEqual((await buf.peek()).map((i) => i.client_id), ["a", "b"]);
+});
+
+test("a no-op flush leaves the previous last-flush record standing", async () => {
+  // The flush alarm fires every 60s regardless of buffer state, and the buffer
+  // is empty right after any successful flush. Writing a `{sent: 0}` record
+  // unconditionally erased the informative one within a minute of it being
+  // written — every minute.
+  const storage = fakeStorage();
+  const buf = new IntervalBuffer({ storage });
+
+  await buf.append(interval("a"));
+  const rejecting = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      accepted: 0,
+      duplicates: 0,
+      rejected: [{ client_id: "a", reason: "future" }],
+    }),
+  });
+  const first = await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: rejecting });
+  await recordFlush(storage, first, { at: "2026-08-08T17:00:00.000Z" });
+
+  const recorded = (await storage.get([LAST_FLUSH_KEY]))[LAST_FLUSH_KEY];
+  assert.equal(recorded.rejected, 1, "the informative record was written");
+
+  // …now the alarm fires on an empty buffer, twice.
+  for (let i = 0; i < 2; i++) {
+    const noop = await flushOnce({
+      buffer: buf,
+      endpoint: "e",
+      token: "t",
+      fetchImpl: async () => {
+        throw new Error("a no-op flush must not even reach the network");
+      },
+    });
+    assert.equal(noop.sent, 0);
+    await recordFlush(storage, noop, { at: "2026-08-08T17:01:00.000Z" });
+  }
+
+  const after = (await storage.get([LAST_FLUSH_KEY]))[LAST_FLUSH_KEY];
+  assert.deepEqual(after, recorded, "a no-op flush must not overwrite the record");
+
+  // The panel is the ONLY place a rejected row's loss is visible — a rejected
+  // row is acked and deleted exactly like an accepted one — so the warning has
+  // to survive to be read.
+  const shown = formatLastFlush(after, { formatTime: () => "5:00:00 PM" }).join("\n");
+  assert.match(shown, /⚠/);
+  assert.match(shown, /future/);
+});
+
+test("a flush that DID send always records, replacing the previous report", async () => {
+  const storage = fakeStorage();
+  const buf = new IntervalBuffer({ storage });
+  await buf.append(interval("a"));
+  const ok = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ accepted: 1, duplicates: 0, rejected: [] }),
+  });
+  const res = await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: ok });
+  const written = await recordFlush(storage, res, { at: "2026-08-08T17:02:00.000Z" });
+  assert.equal(written.sent, 1);
+  assert.equal((await storage.get([LAST_FLUSH_KEY]))[LAST_FLUSH_KEY].at, "2026-08-08T17:02:00.000Z");
+});
+
+test("Retry-After bookkeeping is written even for a flush with nothing to report", async () => {
+  // It describes the NEXT flush, not this one, so it is not part of the report
+  // that a no-op must leave alone.
+  const storage = fakeStorage();
+  await recordFlush(storage, { sent: 2, retryAfterSec: 30 }, { now: 1000 });
+  assert.equal((await storage.get([RETRY_UNTIL_KEY]))[RETRY_UNTIL_KEY], 31000);
+
+  await recordFlush(storage, { sent: 0 }, { now: 99999 });
+  assert.equal(
+    (await storage.get([RETRY_UNTIL_KEY]))[RETRY_UNTIL_KEY],
+    0,
+    "an expired backoff must still clear"
+  );
 });
 
 test("a corrupt buffer key degrades to empty rather than throwing", async () => {

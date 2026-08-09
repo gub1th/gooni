@@ -75,11 +75,13 @@ both directions cost something real — over-redaction destroys the value before
 the interval is buffered (unrecoverable), under-redaction stores a live
 credential.
 
-1. **Squashed whole-name.** Lowercase, delete every `_`/`-`, compare against
-   `jsessionid`, `phpsessid`, `sessionid`, `csrftoken`, `accesstoken`, `apikey`.
-   This is the only check that can catch a run-together name with no boundary
-   to split on, and it is also what keeps `api_key` covered once `key` stops
-   being a segment.
+1. **Squashed whole-name.** Lowercase, delete every `_`/`-`, compare against a
+   set of glued credential names (`jsessionid`, `accesstoken`, `xapikey`, … —
+   `SCRUB_SQUASHED_NAMES` in `src/scrub.js` is the list). This is the only
+   check that can catch a run-together name with no boundary to split on, and
+   it is what keeps the `api_key` / `x-api-key` family covered once `key` stops
+   being a segment. Entries here are stored pre-squashed, since that is what
+   they are compared against.
 2. **Whole name only:** `code`, `key`, `state`. Bare `?code=`/`?state=` are the
    OAuth pair. They are deliberately *not* segments — as segments they ate
    `zip_code`, `country-code`, `error_code`, `promo_code`, `sort_key`,
