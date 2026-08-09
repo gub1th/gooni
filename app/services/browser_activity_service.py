@@ -62,7 +62,11 @@ MAX_INTERVAL_SEC = 6 * 60 * 60
 # "too_short" rather than stored — they'd triple the row count and mean nothing.
 MIN_INTERVAL_SEC = 1.0
 
-# Guards a clock-skewed client from writing the future into the log.
+# Guards a clock-skewed client from writing the future into the log. Checked
+# against BOTH ends of the interval: an NTP correction or a laptop resume
+# mid-interval stamps started_at on the old clock and ended_at on the new one,
+# and MAX_INTERVAL_SEC is far too loose to catch a jump of an hour or three —
+# such a row stores as a real multi-hour focus block ending in the future.
 MAX_FUTURE_SKEW = timedelta(minutes=5)
 
 _END_REASONS = {
@@ -83,23 +87,33 @@ def _parse_dt(raw) -> datetime | None:
     naive input is taken at face value and an aware one is converted. None on
     anything unparseable — the caller turns that into a per-row rejection, not
     a fallback-to-now (a made-up timestamp is worse than a dropped interval).
+
+    EVERY parse path sits under one guard, deliberately. `fromtimestamp` raises
+    OverflowError on an out-of-range epoch (a plain JSON integer like 1e20) and
+    ValueError on NaN (which `json.loads` accepts as a bare literal), and
+    `astimezone` raises OverflowError near datetime.min — none of them
+    ValueError-only. An escape here is not a local bug: it leaves `normalize`
+    and 500s the WHOLE batch, which the extension RETAINS and retries forever,
+    or 400s it, which makes the extension drop every valid row alongside the
+    bad one. The contract is that a malformed row costs that row and nothing
+    else, so unparseable is unparseable regardless of which exception says so.
     """
     if raw is None or raw == "":
         return None
     if isinstance(raw, bool):
         return None
-    if isinstance(raw, (int, float)):
-        return datetime.fromtimestamp(float(raw), tz=timezone.utc).replace(tzinfo=None)
-    s = str(raw).strip()
-    if s.replace(".", "", 1).isdigit():
-        return datetime.fromtimestamp(float(s), tz=timezone.utc).replace(tzinfo=None)
     try:
+        if isinstance(raw, (int, float)):
+            return datetime.fromtimestamp(float(raw), tz=timezone.utc).replace(tzinfo=None)
+        s = str(raw).strip()
+        if s.replace(".", "", 1).isdigit():
+            return datetime.fromtimestamp(float(s), tz=timezone.utc).replace(tzinfo=None)
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except ValueError:
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except (ValueError, OverflowError, OSError, TypeError, AttributeError):
         return None
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
 
 
 # Query params whose VALUE is a credential. Matched case-insensitively against
@@ -228,7 +242,8 @@ def normalize(item: dict) -> tuple[dict | None, str | None]:
         return None, "too_short"
     if duration > MAX_INTERVAL_SEC:
         return None, "too_long"
-    if started > datetime.utcnow() + MAX_FUTURE_SKEW:
+    horizon = datetime.utcnow() + MAX_FUTURE_SKEW
+    if started > horizon or ended > horizon:
         return None, "future"
 
     end_reason = _clean(item.get("end_reason"), 32)

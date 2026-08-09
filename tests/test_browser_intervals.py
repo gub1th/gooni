@@ -199,6 +199,88 @@ def main() -> int:
             "a rejected row was stored anyway",
         )
 
+    # ── an unparseable TIMESTAMP costs its row, not the batch ────────────────
+    # Same contract hole as the non-string url above, one field over. The
+    # numeric branches of _parse_dt call datetime.fromtimestamp, which raises
+    # OverflowError for an out-of-range epoch (a plain JSON integer — no exotic
+    # encoding needed) and ValueError for NaN, which json.loads accepts as a
+    # bare literal. Unguarded, the first escapes as a 500 the extension RETAINS
+    # and retries forever, and the second as a 400 — which is in the client's
+    # drop-allowlist, so it throws away every valid row in the batch too.
+    try:
+        clocks = bas.ingest_batch(
+            db,
+            [
+                {"client_id": "epoch-overflow", "host": "a.com",
+                 "started_at": 10 ** 20,
+                 "ended_at": (T0 + timedelta(seconds=60)).isoformat()},
+                {"client_id": "epoch-negative", "host": "a.com",
+                 "started_at": -1e20,
+                 "ended_at": (T0 + timedelta(seconds=60)).isoformat()},
+                {"client_id": "nan-end", "host": "a.com",
+                 "started_at": T0.isoformat(), "ended_at": float("nan")},
+                {"client_id": "inf-start", "host": "a.com",
+                 "started_at": float("inf"),
+                 "ended_at": (T0 + timedelta(seconds=60)).isoformat()},
+                _iv("clock-survivor", start=T0 + timedelta(minutes=11)),
+            ],
+        )
+    except Exception as e:  # noqa: BLE001 — a raise here IS the regression
+        clocks = None
+        fails.append(f"unparseable timestamp raised instead of rejecting: {type(e).__name__}: {e}")
+        db.rollback()
+
+    if clocks is not None:
+        by_id = {r["client_id"]: r["reason"] for r in clocks["rejected"]}
+        check(clocks["accepted"] == 1, f"only the valid row should land: {clocks}")
+        check(by_id.get("epoch-overflow") == "bad_started_at", f"overflow epoch: {by_id}")
+        check(by_id.get("epoch-negative") == "bad_started_at", f"negative epoch: {by_id}")
+        check(by_id.get("inf-start") == "bad_started_at", f"infinite epoch: {by_id}")
+        check(by_id.get("nan-end") == "bad_ended_at", f"NaN end: {by_id}")
+        check(
+            db.query(BrowserInterval).filter_by(client_id="clock-survivor").count() == 1,
+            "the valid row in a batch with an unparseable timestamp was lost",
+        )
+
+    # …and a REAL epoch still parses — the guard must not eat the happy path.
+    epoch_start = datetime(2026, 8, 8, 17, 0, tzinfo=timezone.utc)
+    bas.ingest_batch(
+        db,
+        [{"client_id": "epoch-ok", "host": "a.com",
+          "started_at": epoch_start.timestamp(),
+          "ended_at": epoch_start.timestamp() + 60}],
+    )
+    ep = db.query(BrowserInterval).filter_by(client_id="epoch-ok").one()
+    check(ep.started_at == datetime(2026, 8, 8, 17, 0), f"epoch parse: {ep.started_at}")
+    check(ep.duration_sec == 60.0, f"epoch duration: {ep.duration_sec}")
+
+    # ── an ended_at in the future is rejected, not just started_at ────────────
+    # An NTP correction or a laptop resume mid-interval stamps startedAt on the
+    # old clock and endedAt on the new one. A 3h forward jump sits under the 6h
+    # MAX_INTERVAL_SEC ceiling, so nothing else catches it and the row stores as
+    # a real three-hour focus block ending three hours from now.
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    skew = bas.ingest_batch(
+        db,
+        [
+            _iv("clock-jump", start=now_naive - timedelta(minutes=1), seconds=3 * 3600),
+            _iv("skew-survivor", start=T0 + timedelta(minutes=12)),
+        ],
+    )
+    check(skew["accepted"] == 1, f"only the sane row should land: {skew}")
+    check(
+        {r["client_id"]: r["reason"] for r in skew["rejected"]}.get("clock-jump") == "future",
+        f"a future ended_at must reject as `future`: {skew['rejected']}",
+    )
+    check(
+        db.query(BrowserInterval).filter_by(client_id="clock-jump").count() == 0,
+        "an interval ending hours in the future was stored",
+    )
+    check(
+        db.query(BrowserInterval).filter_by(client_id="skew-survivor").count() == 1,
+        "the sane row alongside a clock-jumped one was lost",
+    )
+
     # ── a valid row with NO url/path at all is still fine ────────────────────
     bas.ingest_batch(db, [{"client_id": "bare", "host": "example.com",
                            "started_at": T0.isoformat(),

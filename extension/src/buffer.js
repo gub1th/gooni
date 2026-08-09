@@ -57,6 +57,24 @@ export const DROP_BATCH_STATUSES = new Set([400, 413, 422]);
 export const MAX_RETRY_AFTER_SEC = 15 * 60;
 
 /**
+ * How long a flush waits for the server before giving up on the request.
+ *
+ * Same policy as the idle probe's IDLE_PROBE_TIMEOUT_MS, for the same reason:
+ * every flush runs inside the one-slot serial queue, so a request that never
+ * settles holds that slot and every later tab switch, blur and heartbeat queues
+ * behind it — the tracker stops updating `lastHeartbeatAt` and the sensor is
+ * silently dead. A server that accepts the connection and then goes quiet (a
+ * hung dev process, a captive-portal proxy) is exactly that case, and it is
+ * invisible without a bound because nothing errors.
+ *
+ * A timeout is RETRYABLE, not a drop: the server may well have stored the batch
+ * and only the response was lost, and the client_ids dedup on the way back in.
+ * Losing buffered attention because a socket went quiet would be the same
+ * data-loss class the 429/404 retention rules already closed.
+ */
+export const FLUSH_TIMEOUT_MS = 20000;
+
+/**
  * Retry-After as seconds, from either header form (delta-seconds or HTTP-date).
  * Null when absent/unparseable — the caller then uses its normal flush cadence.
  */
@@ -141,26 +159,55 @@ export class IntervalBuffer {
  * unless the status is in DROP_BATCH_STATUSES — see that constant for why the
  * drop branch is an allowlist rather than a catch-all.
  */
-export async function flushOnce({ buffer, endpoint, token, fetchImpl = fetch }) {
+export async function flushOnce({
+  buffer,
+  endpoint,
+  token,
+  fetchImpl = fetch,
+  timeoutMs = FLUSH_TIMEOUT_MS,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
   const batch = await buffer.peek();
   if (batch.length === 0) return { sent: 0, delivered: 0, remaining: 0, ok: true };
   if (!endpoint || !token) {
     return { sent: 0, delivered: 0, remaining: batch.length, ok: false, error: "not_configured" };
   }
 
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  let timer = null;
   let res;
   try {
-    res = await fetchImpl(endpoint, {
+    const request = fetchImpl(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ intervals: batch }),
+      signal: controller ? controller.signal : undefined,
     });
+    // Abort AND race. The signal is what frees the socket, but a fetch that
+    // ignores it would still never settle, and this slot has to be given back
+    // either way — the race is what guarantees that.
+    res =
+      timeoutMs > 0
+        ? await Promise.race([
+            request,
+            new Promise((_, reject) => {
+              timer = setTimer(() => {
+                if (controller) controller.abort();
+                reject(new Error("flush_timeout"));
+              }, timeoutMs);
+            }),
+          ])
+        : await request;
   } catch (e) {
-    // Offline / DNS / TLS. Buffer untouched; next flush retries.
+    // Offline / DNS / TLS / a server that went quiet. Buffer untouched; next
+    // flush retries.
     return { sent: batch.length, delivered: 0, remaining: await buffer.size(), ok: false, error: String(e) };
+  } finally {
+    if (timer !== null) clearTimer(timer);
   }
 
   if (res.status === 401 || res.status === 403) {

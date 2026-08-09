@@ -170,6 +170,71 @@ test("a 429 keeps the buffer — the server stored nothing", async () => {
   assert.equal(await buf.size(), 0);
 });
 
+test("a server that never answers times out, keeps the buffer, and gives the slot back", async () => {
+  const storage = fakeStorage();
+  const buf = new IntervalBuffer({ storage });
+  await buf.append(interval("a"));
+  await buf.append(interval("b"));
+
+  // A hung dev process or a captive-portal proxy: the connection is accepted
+  // and then nothing comes back, ever. Every flush runs inside the one-slot
+  // serial queue, so without a bound this holds the slot and every later tab
+  // switch, blur and heartbeat queues behind it — a silently dead sensor.
+  let aborted = false;
+  const neverAnswers = (_url, init) =>
+    new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => {
+        aborted = true;
+        reject(new Error("AbortError"));
+      });
+    });
+
+  const res = await flushOnce({
+    buffer: buf,
+    endpoint: "e",
+    token: "t",
+    fetchImpl: neverAnswers,
+    timeoutMs: 5,
+  });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.delivered, 0);
+  assert.equal(aborted, true, "the in-flight request must actually be aborted");
+  assert.equal(await buf.size(), 2, "a timed-out flush must not lose the buffer");
+
+  // The retry goes out with the SAME ids, so a batch the server did store but
+  // whose response was lost dedups instead of double-counting.
+  let sent = null;
+  const ok = async (_url, init) => {
+    sent = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ accepted: 2 }) };
+  };
+  await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: ok });
+  assert.deepEqual(sent.intervals.map((i) => i.client_id), ["a", "b"]);
+  assert.equal(await buf.size(), 0);
+});
+
+test("a fetch that ignores the abort signal still gives the slot back", async () => {
+  // The signal is what frees the socket; the race is what guarantees the queue
+  // slot comes back. An impl that never settles and never honours abort proves
+  // the second is not leaning on the first.
+  const storage = fakeStorage();
+  const buf = new IntervalBuffer({ storage });
+  await buf.append(interval("a"));
+
+  const res = await flushOnce({
+    buffer: buf,
+    endpoint: "e",
+    token: "t",
+    fetchImpl: () => new Promise(() => {}),
+    timeoutMs: 5,
+  });
+
+  assert.equal(res.ok, false);
+  assert.match(res.error, /flush_timeout/);
+  assert.equal(await buf.size(), 1);
+});
+
 test("a 404 keeps the buffer so fixing baseUrl recovers the backlog", async () => {
   const storage = fakeStorage();
   const buf = new IntervalBuffer({ storage });
