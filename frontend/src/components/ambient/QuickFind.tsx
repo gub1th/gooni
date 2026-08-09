@@ -29,11 +29,14 @@ import {
 // Sources, and why each is fetched the way it is:
 //   note       → server search: cheap title-substring per keystroke, semantic
 //                (embeddings) on a pause. Same two routes the old dropdown used.
-//   promise /  → BOTH commitment stores: the focus dashboard's rows
-//   reminder     (`type: reminder|promise`) and the v2 `Promise` table that
-//                chat-glow promotion writes. Each is one small payload pulled
-//                ONCE into a cache and filtered locally — neither has a
-//                server-side search route, and a hit in either is still a hit.
+//   promise /  → BOTH commitment read routes over the ONE `promises` table
+//   reminder     (a single store since the convergence): the focus dashboard's
+//                bucketed rows (`type: reminder|promise`, derived from
+//                `owed_to`) and the v2 `/promises` list that chat-glow
+//                promotion writes. The two filter differently, so neither is a
+//                superset. Each is one small payload pulled ONCE into a cache
+//                and filtered locally — neither has a server-side search route,
+//                and a hit in either is still a hit.
 //   trackable  → same deal: one small list, filtered locally.
 //   memory     → server-side `q` filter, debounced with the semantic pass.
 

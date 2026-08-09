@@ -37,8 +37,9 @@ import { FOCUS_PALETTES } from "./focusPalette";
 //   RIGHT  notes          — reverse-chron thought log + capture bar
 //
 // Reads v2 primitives ONLY (Promise/Trackable/Note) + gcal + device pings — the
-// convergence surface. The old FocusDashboard (Focus Reminder table) stays on
-// the /focus kiosk until the connector is repointed.
+// convergence surface. FocusDashboard stays on the /focus kiosk; since the
+// convergence it reads the same Promise rows through `focus_service`'s adapter
+// (its `reminders` table was dropped in `b8f3d1c07a45`).
 //
 // The banner is the "screen earns its space" thesis: the ONE element that
 // changes with your state. Everything below it is stable.
