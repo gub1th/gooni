@@ -114,6 +114,12 @@ That floor additionally strips HTTP-basic userinfo
 (`https://alice:hunter2@host/…` → `https://REDACTED@host/…`); the extension
 never sends it in the first place, since it rebuilds the URL from `u.host`.
 
+**Known limitation.** The matcher recognises credentials by parameter *name*,
+so an unusual name that is not in any of the three sets and has no recognisable
+segment will be stored verbatim. Add it to the segment list on the options page
+when you meet one; the server floor is a fixed non-editable minimum, not a
+complete guarantee.
+
 ## How an interval is measured
 
 Exactly one interval is open at a time, because exactly one tab in one focused

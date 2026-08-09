@@ -77,6 +77,35 @@ test("a transport error is still reported alongside the counts", () => {
   assert.doesNotMatch(out, /⚠/, "a retained batch is not a loss");
 });
 
+test("a batch the server refused outright reads as destruction, not as an error code", () => {
+  // 400/413/422 delete the batch from the buffer without it ever being stored.
+  // Rendering that as a bare `error http_413` reads like something to retry,
+  // when in fact the attention no longer exists anywhere.
+  const out = render({
+    at,
+    sent: 40,
+    accepted: 0,
+    duplicates: 0,
+    rejected: 0,
+    dropped: 40,
+    error: "http_413",
+  });
+  assert.match(out, /destroyed 40/, "the count is stated on the summary line");
+  assert.match(out, /⚠/, "irreversible loss is visually distinct");
+  assert.match(out, /40 interval\(s\) were DESTROYED/);
+  assert.match(out, /can never be redelivered/);
+  assert.match(out, /http_413/, "the status that caused it is carried through");
+
+  const retained = render({ at, sent: 40, accepted: 0, duplicates: 0, rejected: 0, error: "http_503" });
+  assert.notEqual(out, retained, "destruction must not render like a retained batch");
+});
+
+test("a flush with no destruction says nothing about it", () => {
+  const out = render({ at, sent: 5, accepted: 5, duplicates: 0, rejected: 0, dropped: 0 });
+  assert.doesNotMatch(out, /destroyed/i);
+  assert.doesNotMatch(out, /⚠/);
+});
+
 test("no flush yet renders nothing rather than zeroes", () => {
   assert.deepEqual(formatLastFlush(null), []);
   assert.deepEqual(formatLastFlush(undefined), []);

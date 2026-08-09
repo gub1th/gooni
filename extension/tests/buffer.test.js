@@ -137,6 +137,71 @@ test("only a permanently-broken batch shape is dropped", async () => {
   }
 });
 
+test("a dropped batch is COUNTED, durably, and not confused with overflow", async () => {
+  // Dropping is irreversible: those intervals were never stored anywhere and
+  // will never be resent. Acking them like a delivered batch and returning a
+  // bare `error http_400` reported permanent loss as a bad request — the
+  // options page's `dropped:` line still read 0 while rows were destroyed, and
+  // the next flush overwrote gooni_last_flush, erasing the only trace.
+  const storage = fakeStorage();
+  const buf = new IntervalBuffer({ storage });
+  await buf.append(interval("a"));
+  await buf.append(interval("b"));
+
+  const refused = async () => ({ ok: false, status: 413, json: async () => ({}) });
+  const res = await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: refused });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.error, "http_413");
+  assert.equal(res.dropped, 2, "the flush result must carry the destroyed count");
+  assert.equal(await buf.size(), 0);
+  assert.equal(await buf.refusedCount(), 2, "the durable counter must move");
+  assert.equal(
+    await buf.droppedCount(),
+    0,
+    "a server refusal is NOT buffer overflow — the two counters must stay distinct"
+  );
+
+  // Durability: the counter lives in storage, not in the last-flush blob, so a
+  // later successful flush cannot erase the record of the loss.
+  await buf.append(interval("c"));
+  const ok = async () => ({ ok: true, status: 200, json: async () => ({ accepted: 1 }) });
+  await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: ok });
+  const revived = new IntervalBuffer({ storage });
+  assert.equal(await revived.refusedCount(), 2, "the loss must survive later flushes");
+
+  // …and a second refusal accumulates rather than replacing.
+  await buf.append(interval("d"));
+  await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: refused });
+  assert.equal(await buf.refusedCount(), 3);
+});
+
+test("overflow and server-refusal counters move independently", async () => {
+  const storage = fakeStorage();
+  const buf = new IntervalBuffer({ storage, maxBuffered: 2 });
+  for (const id of ["a", "b", "c"]) await buf.append(interval(id));
+  assert.equal(await buf.droppedCount(), 1, "overflow counted");
+  assert.equal(await buf.refusedCount(), 0, "nothing was refused");
+
+  const refused = async () => ({ ok: false, status: 400, json: async () => ({}) });
+  await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: refused });
+  assert.equal(await buf.droppedCount(), 1, "a refusal must not inflate the overflow count");
+  assert.equal(await buf.refusedCount(), 2);
+});
+
+test("a retained failure destroys nothing and counts nothing", async () => {
+  const storage = fakeStorage();
+  const buf = new IntervalBuffer({ storage });
+  await buf.append(interval("a"));
+  for (const status of [500, 429, 404, 401]) {
+    const bad = async () => ({ ok: false, status, json: async () => ({}) });
+    const res = await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: bad });
+    assert.ok(!res.dropped, `status ${status} must not report a destruction`);
+  }
+  assert.equal(await buf.refusedCount(), 0);
+  assert.equal(await buf.size(), 1);
+});
+
 test("a 429 keeps the buffer — the server stored nothing", async () => {
   const storage = fakeStorage();
   const buf = new IntervalBuffer({ storage });

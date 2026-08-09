@@ -168,6 +168,14 @@ SCRUB_PARAM_SQUASHED_NAMES = frozenset(
         "csrftoken",
         "accesstoken",
         "apikey",
+        # The `x-`-prefixed API-key family walks past all three checks
+        # otherwise: `key` is whole-name-only (check 2, which is what keeps
+        # `sort_key`), so `x-api-key` has no matching segment and its squashed
+        # form is `xapikey`, not `apikey`. Entries here MUST be pre-squashed —
+        # a literal `x-api-key` would never match.
+        "xapikey",
+        "xfunctionskey",
+        "subscriptionkey",
     }
 )
 

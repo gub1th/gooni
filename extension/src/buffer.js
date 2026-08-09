@@ -26,6 +26,16 @@
 
 export const BUFFER_KEY = "gooni_interval_buffer";
 export const DROPPED_KEY = "gooni_dropped_count";
+
+/**
+ * Intervals destroyed because the SERVER refused the batch outright
+ * (DROP_BATCH_STATUSES). Deliberately a second counter rather than a reuse of
+ * DROPPED_KEY: that one means "buffer overflow after a very long outage", and
+ * the options page says so. Folding a server refusal into it would swap one
+ * wrong number for another. Both are durable — a refusal that only showed up
+ * in `gooni_last_flush` would vanish the moment the next flush overwrote it.
+ */
+export const REFUSED_KEY = "gooni_refused_count";
 export const MAX_BUFFERED = 5000;
 export const FLUSH_THRESHOLD = 25;
 export const MAX_BATCH = 200;
@@ -102,20 +112,25 @@ export class IntervalBuffer {
   }
 
   async _read() {
-    const got = (await this.storage.get([BUFFER_KEY, DROPPED_KEY])) || {};
+    const got = (await this.storage.get([BUFFER_KEY, DROPPED_KEY, REFUSED_KEY])) || {};
     return {
       items: Array.isArray(got[BUFFER_KEY]) ? got[BUFFER_KEY] : [],
       dropped: Number(got[DROPPED_KEY]) || 0,
+      refused: Number(got[REFUSED_KEY]) || 0,
     };
   }
 
-  async _write(items, dropped) {
-    await this.storage.set({ [BUFFER_KEY]: items, [DROPPED_KEY]: dropped });
+  async _write(items, dropped, refused) {
+    await this.storage.set({
+      [BUFFER_KEY]: items,
+      [DROPPED_KEY]: dropped,
+      [REFUSED_KEY]: refused,
+    });
   }
 
   /** Persist one closed interval. Returns the new buffer length. */
   async append(interval) {
-    const { items, dropped } = await this._read();
+    const { items, dropped, refused } = await this._read();
     items.push(interval);
     let newDropped = dropped;
     if (items.length > this.maxBuffered) {
@@ -123,7 +138,7 @@ export class IntervalBuffer {
       items.splice(0, overflow);
       newDropped += overflow;
     }
-    await this._write(items, newDropped);
+    await this._write(items, newDropped, refused);
     return items.length;
   }
 
@@ -131,8 +146,14 @@ export class IntervalBuffer {
     return (await this._read()).items.length;
   }
 
+  /** Intervals lost to buffer OVERFLOW. */
   async droppedCount() {
     return (await this._read()).dropped;
+  }
+
+  /** Intervals destroyed because the server REFUSED the batch. */
+  async refusedCount() {
+    return (await this._read()).refused;
   }
 
   /** Oldest-first peek. Does NOT remove — delivery has to be proven first. */
@@ -144,10 +165,25 @@ export class IntervalBuffer {
   /** Remove the given client_ids once the server confirms it holds them. */
   async ack(clientIds) {
     const gone = new Set(clientIds);
-    const { items, dropped } = await this._read();
+    const { items, dropped, refused } = await this._read();
     const kept = items.filter((i) => !gone.has(i.client_id));
-    await this._write(kept, dropped);
+    await this._write(kept, dropped, refused);
     return kept.length;
+  }
+
+  /**
+   * Throw away a batch the server refused outright, COUNTING what was
+   * destroyed. Separate from `ack` on purpose: ack means "the server has it",
+   * this means "nobody will ever have it", and the difference has to reach the
+   * options page or the panel reports irreversible loss as a quiet http_400.
+   */
+  async discardRefused(clientIds) {
+    const gone = new Set(clientIds);
+    const { items, dropped, refused } = await this._read();
+    const kept = items.filter((i) => !gone.has(i.client_id));
+    const destroyed = items.length - kept.length;
+    await this._write(kept, dropped, refused + destroyed);
+    return { remaining: kept.length, destroyed };
   }
 }
 
@@ -217,9 +253,21 @@ export async function flushOnce({
   }
   if (!res.ok && DROP_BATCH_STATUSES.has(res.status)) {
     // The server refused this batch SHAPE. Retrying it verbatim will fail
-    // identically forever, so drop it and record the loss.
-    const remaining = await buffer.ack(batch.map((i) => i.client_id));
-    return { sent: batch.length, delivered: 0, remaining, ok: false, error: `http_${res.status}` };
+    // identically forever, so drop it — and COUNT the loss, both in the result
+    // and in a durable counter. These intervals are gone for good; a flush
+    // result that only said `error http_400` rendered that as a bad request
+    // rather than as attention that no longer exists anywhere.
+    const { remaining, destroyed } = await buffer.discardRefused(
+      batch.map((i) => i.client_id)
+    );
+    return {
+      sent: batch.length,
+      delivered: 0,
+      dropped: destroyed,
+      remaining,
+      ok: false,
+      error: `http_${res.status}`,
+    };
   }
   if (!res.ok) {
     // Everything else — 5xx, 429, 404, 408 — keeps the buffer. Retaining data

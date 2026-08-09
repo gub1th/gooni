@@ -259,10 +259,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === "gooni:status") {
     (async () => {
-      const [cfg, size, dropped, got] = await Promise.all([
+      const [cfg, size, dropped, refused, got] = await Promise.all([
         loadConfig(storage),
         buffer.size(),
         buffer.droppedCount(),
+        buffer.refusedCount(),
         storage.get(["gooni_last_flush", OPEN_KEY]),
       ]);
       sendResponse({
@@ -271,6 +272,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         hasToken: Boolean(cfg.token),
         buffered: size,
         dropped,
+        refused,
         lastFlush: got.gooni_last_flush || null,
         open: got[OPEN_KEY] || null,
       });

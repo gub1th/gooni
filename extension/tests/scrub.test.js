@@ -68,6 +68,8 @@ const REDACTED_NAMES = [
   "auth_token", "access_token", "id_token", "api_key", "x-amz-signature",
   "accessToken", "idToken", "authToken", "sessionId", "clientSecret",
   "jsessionid", "phpsessid", "csrftoken",
+  "x-api-key", "xApiKey", "X-Api-Key", "x_api_key", "x-functions-key",
+  "subscription-key",
   // Extras beyond the pinned list, same spirit.
   "pwd", "otp", "passwd", "session", "apikey", "authorization", "credential",
   "signature", "client_secret", "session_id", "X-Amz-Security-Token",
@@ -100,6 +102,13 @@ test("each of the three checks is load-bearing on its own", () => {
   assert.equal(isSecretParam("jsessionid"), true);
   assert.equal(isSecretParam("api_key"), true);
   assert.equal(isSecretParam("apiKey"), true);
+  // The `x-` prefixed family reaches this check and NOTHING else: `key` is
+  // whole-name-only (check 2) and absent from the segment set (check 3), so
+  // `x-api-key` has no matching segment and squashes to `xapikey`, not
+  // `apikey`. Entries in the set must therefore be pre-squashed.
+  assert.equal(isSecretParam("x-api-key"), true);
+  assert.equal(isSecretParam("x-functions-key"), true);
+  assert.equal(isSecretParam("subscription-key"), true);
   // 2. whole-name only — bare OAuth params go, their compounds stay.
   assert.equal(isSecretParam("code"), true);
   assert.equal(isSecretParam("zip_code"), false);

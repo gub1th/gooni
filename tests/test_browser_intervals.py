@@ -359,6 +359,8 @@ def main() -> int:
         "auth_token", "access_token", "id_token", "api_key", "x-amz-signature",
         "accessToken", "idToken", "authToken", "sessionId", "clientSecret",
         "jsessionid", "phpsessid", "csrftoken",
+        "x-api-key", "xApiKey", "X-Api-Key", "x_api_key", "x-functions-key",
+        "subscription-key",
         # Extras beyond the pinned list, same spirit.
         "pwd", "otp", "passwd", "session", "apikey", "authorization",
         "credential", "signature", "client_secret", "session_id",
@@ -379,6 +381,13 @@ def main() -> int:
     #    boundary at all, and what keeps api_key covered now `key` isn't a segment.
     check(bas._is_secret_param("jsessionid") is True, "squashed check dead")
     check(bas._is_secret_param("apiKey") is True, "apiKey missed")
+    # The `x-` prefixed family reaches this check and NOTHING else: `key` is
+    # whole-name-only (check 2) and absent from the segment set (check 3), so
+    # `x-api-key` has no matching segment and squashes to `xapikey`, not
+    # `apikey`. Entries in the set must therefore be pre-squashed.
+    check(bas._is_secret_param("x-api-key") is True, "x-api-key leaked")
+    check(bas._is_secret_param("x-functions-key") is True, "x-functions-key leaked")
+    check(bas._is_secret_param("subscription-key") is True, "subscription-key leaked")
     # 2. whole-name only — bare OAuth params go, their compounds stay.
     check(bas._is_secret_param("code") is True, "bare code kept")
     check(bas._is_secret_param("zip_code") is False, "zip_code over-redacted")
@@ -395,7 +404,8 @@ def main() -> int:
         db,
         [_iv("gh-filter", host="github.com", path="/issues",
              url="https://github.com/issues?assignee=dani&author=dani&zip_code=94107"
-                 "&code=abc123&accessToken=sekrit&jsessionid=deadbeef")],
+                 "&code=abc123&accessToken=sekrit&jsessionid=deadbeef"
+                 "&x-api-key=LIVEKEY123")],
     )
     gh = db.query(BrowserInterval).filter_by(client_id="gh-filter").one()
     check("assignee=dani" in gh.url, f"assignee over-redacted on ingest: {gh.url}")
@@ -404,6 +414,7 @@ def main() -> int:
     check("code=REDACTED" in gh.url, f"oauth code survived ingest: {gh.url}")
     check("sekrit" not in gh.url, f"camelCase bearer token stored: {gh.url}")
     check("deadbeef" not in gh.url, f"session id stored: {gh.url}")
+    check("LIVEKEY123" not in gh.url, f"x-api-key stored: {gh.url}")
 
     # ── HTTP-basic userinfo never lands in the log ───────────────────────────
     # A `user:password@` is a strictly stronger credential than an OAuth code,

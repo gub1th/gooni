@@ -44,6 +44,7 @@ async function renderStatus() {
     `token:     ${s.hasToken ? "set" : "MISSING — save your password"}`,
     `buffered:  ${s.buffered} interval(s) awaiting delivery`,
     `dropped:   ${s.dropped} (buffer overflow — only after a very long outage)`,
+    `refused:   ${s.refused ?? 0} (DESTROYED — the server refused the batch outright)`,
     `open now:  ${s.open ? `${s.open.host} since ${new Date(s.open.startedAt).toLocaleTimeString()}` : "nothing focused"}`,
   ];
   lines.push(...formatLastFlush(s.lastFlush));

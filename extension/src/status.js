@@ -36,6 +36,7 @@ export function formatLastFlush(lastFlush, { formatTime = defaultFormatTime } = 
   const accepted = f.accepted ?? 0;
   const duplicates = f.duplicates ?? 0;
   const rejected = f.rejected ?? 0;
+  const dropped = f.dropped ?? 0;
 
   const parts = [
     `sent ${sent}`,
@@ -43,8 +44,20 @@ export function formatLastFlush(lastFlush, { formatTime = defaultFormatTime } = 
     `duplicates ${duplicates}`,
     `rejected ${rejected}`,
   ];
+  if (dropped > 0) parts.push(`destroyed ${dropped}`);
   if (f.error) parts.push(`error ${f.error}`);
   const lines = [`last flush: ${formatTime(f.at)} — ${parts.join(", ")}`];
+
+  // A batch the server refused outright (400/413/422) was deleted from the
+  // buffer without ever being stored — the same permanent loss as a rejected
+  // row, one layer up. Without this it read as a bare `error http_400`, which
+  // looks like a request to retry rather than attention that no longer exists.
+  if (dropped > 0) {
+    lines.push(
+      `  ⚠ ${dropped} interval(s) were DESTROYED — the server refused the whole batch` +
+        `${f.error ? ` (${f.error})` : ""} and it can never be redelivered.`
+    );
+  }
 
   if (rejected > 0) {
     const landed = accepted + duplicates;
