@@ -195,23 +195,13 @@ def _stamp_reminders(bind) -> None:
     migration's own kind, so `downgrade()` never has to consult a kind whose
     owner deletes promises on its way down.
     """
-    prior: dict[int, int] = {}
-    for src, dst in bind.execute(
-        sa.text(
-            "SELECT src_id, dst_id FROM edges WHERE kind = :k AND src_kind = 'reminder' "
-            "AND dst_kind = 'promise' ORDER BY id"
-        ),
-        {"k": LEGACY_REMINDER_EDGE},
-    ).fetchall():
-        prior.setdefault(src, dst)
+    prior = _provenance(bind, LEGACY_REMINDER_EDGE, "reminder", "promise")
 
     rows = bind.execute(sa.text("SELECT id, content FROM reminders ORDER BY id")).fetchall()
     for r in rows:
-        promise_id = prior.get(r.id)
-        if promise_id is not None and not bind.execute(
-            sa.text("SELECT 1 FROM promises WHERE id = :i"), {"i": promise_id}
-        ).scalar():
-            promise_id = None  # twin deleted since 2026-08-01 — fall through to text
+        # A twin deleted since 2026-08-01 falls through to the text match.
+        twin_row = _first_live(bind, PROMISE_EXISTS_SQL, prior.get(r.id, ()))
+        promise_id = twin_row.id if twin_row else None
         if promise_id is None:
             content = (r.content or "").strip()
             if not content:
@@ -322,7 +312,15 @@ def _recreate_tables(tables: set[str]) -> None:
 
 
 def _provenance(bind, kind: str, src_kind: str, dst_kind: str) -> dict:
-    """{source id → v2 id} from the edges upgrade() stamped."""
+    """{source id → [v2 id, …]} from the edges upgrade() stamped, oldest first.
+
+    A source id can carry more than one edge: `_edge` dedups on the 5-tuple, so a
+    down-then-up cycle that lands the source on a NEW v2 row adds a second edge
+    beside the first rather than replacing it — and the first now points at a row
+    that no longer exists. Callers walk the list and take the first destination
+    still present, so a dead stamp can't shadow the live one. Stamp order is the
+    tiebreak among live candidates, so repeated downgrades rebuild identically.
+    """
     rows = bind.execute(
         sa.text(
             "SELECT src_id, dst_id FROM edges WHERE kind = :k "
@@ -330,36 +328,53 @@ def _provenance(bind, kind: str, src_kind: str, dst_kind: str) -> dict:
         ),
         {"k": kind, "sk": src_kind, "dk": dst_kind},
     ).fetchall()
-    out: dict[int, int] = {}
+    out: dict[int, list[int]] = {}
     for src, dst in rows:
-        out.setdefault(src, dst)
+        bucket = out.setdefault(src, [])
+        if dst not in bucket:
+            bucket.append(dst)
     return out
+
+
+NOTE_SQL = "SELECT id, title, content, topic_id, parent_note_id, created_at, updated_at FROM notes WHERE id = :i"
+PROMISE_SQL = (
+    "SELECT id, utterance, owed_to, inferred_due, due_is_default, state, "
+    "       resolved_at, created_at FROM promises WHERE id = :i"
+)
+PROMISE_EXISTS_SQL = "SELECT id FROM promises WHERE id = :i"
+
+
+def _first_live(bind, sql: str, candidates) -> object | None:
+    """The first candidate whose v2 row still exists — None when none do."""
+    for dst_id in candidates:
+        row = bind.execute(sa.text(sql), {"i": dst_id}).fetchone()
+        if row is not None:
+            return row
+    return None
 
 
 def _restore_batches(bind) -> dict:
     """Rebuild thought_batches from their notes. Returns {batch id → note id}."""
-    mapping = _provenance(bind, BATCH_EDGE, "thought_batch", "note")
-    for batch_id, note_id in mapping.items():
+    resolved: dict[int, int] = {}
+    for batch_id, candidates in _provenance(bind, BATCH_EDGE, "thought_batch", "note").items():
+        note = _first_live(bind, NOTE_SQL, candidates)
+        if note is None:
+            continue
+        resolved[batch_id] = note.id
         if bind.execute(
             sa.text("SELECT 1 FROM thought_batches WHERE id = :i"), {"i": batch_id}
         ).scalar():
             continue
-        note = bind.execute(
-            sa.text(
-                "SELECT id, title, topic_id, created_at, updated_at FROM notes WHERE id = :i"
-            ),
-            {"i": note_id},
-        ).fetchone()
         # topic_id is NOT NULL on thought_batches; a note that lost its topic
         # can't be expressed as one. The note itself is untouched either way.
-        if note is None or note.topic_id is None:
+        if note.topic_id is None:
             continue
         image_url = bind.execute(
             sa.text(
                 "SELECT public_url FROM attachments WHERE note_id = :n "
                 "AND public_url IS NOT NULL ORDER BY id LIMIT 1"
             ),
-            {"n": note_id},
+            {"n": note.id},
         ).scalar()
         bind.execute(
             sa.text(
@@ -376,23 +391,21 @@ def _restore_batches(bind) -> dict:
                 "e": note.updated_at or note.created_at,
             },
         )
-    return mapping
+    return resolved
 
 
 def _restore_thoughts(bind, batch_map: dict) -> dict:
     """Rebuild thoughts from their notes. Returns {thought id → note id}."""
-    mapping = _provenance(bind, THOUGHT_EDGE, "thought", "note")
+    resolved: dict[int, int] = {}
     note_to_batch = {note_id: batch_id for batch_id, note_id in batch_map.items()}
-    for thought_id, note_id in mapping.items():
+    for thought_id, candidates in _provenance(bind, THOUGHT_EDGE, "thought", "note").items():
+        note = _first_live(bind, NOTE_SQL, candidates)
+        if note is None:
+            continue
+        resolved[thought_id] = note.id
         if bind.execute(
             sa.text("SELECT 1 FROM thoughts WHERE id = :i"), {"i": thought_id}
         ).scalar():
-            continue
-        note = bind.execute(
-            sa.text("SELECT content, created_at, parent_note_id FROM notes WHERE id = :i"),
-            {"i": note_id},
-        ).fetchone()
-        if note is None:
             continue
         batch_id = note_to_batch.get(note.parent_note_id)
         # batch_id is NOT NULL — a thought whose batch we can't name is one the
@@ -408,7 +421,7 @@ def _restore_thoughts(bind, batch_map: dict) -> dict:
             ),
             {"i": thought_id, "c": note.content, "t": note.created_at, "b": batch_id},
         )
-    return mapping
+    return resolved
 
 
 def _restore_reminders(bind, thought_map: dict) -> None:
@@ -419,22 +432,15 @@ def _restore_reminders(bind, thought_map: dict) -> None:
     back as a plain reminder; that distinction stopped existing when the type
     column stopped being read, and inventing it back would be a fiction.
     """
-    mapping = _provenance(bind, REMINDER_EDGE, "reminder", "promise")
     note_to_thought = {note_id: tid for tid, note_id in thought_map.items()}
-    for reminder_id, promise_id in mapping.items():
+    for reminder_id, candidates in _provenance(bind, REMINDER_EDGE, "reminder", "promise").items():
         if bind.execute(
             sa.text("SELECT 1 FROM reminders WHERE id = :i"), {"i": reminder_id}
         ).scalar():
             continue
-        p = bind.execute(
-            sa.text(
-                "SELECT id, utterance, owed_to, inferred_due, due_is_default, state, "
-                "       resolved_at, created_at FROM promises WHERE id = :i"
-            ),
-            {"i": promise_id},
-        ).fetchone()
+        p = _first_live(bind, PROMISE_SQL, candidates)
         if p is None:
-            continue  # promise deleted since the drop — nothing to rebuild from
+            continue  # every twin deleted since the drop — nothing to rebuild from
 
         # reminders.thought_id came back as a `derives_from` promise → note edge.
         thought_id = None
@@ -444,7 +450,7 @@ def _restore_reminders(bind, thought_map: dict) -> None:
                 "AND src_kind = 'promise' AND src_id = :p AND dst_kind = 'note' "
                 "ORDER BY id LIMIT 1"
             ),
-            {"p": promise_id},
+            {"p": p.id},
         ).scalar()
         if derived is not None:
             candidate = note_to_thought.get(derived)

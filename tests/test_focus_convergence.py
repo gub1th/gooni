@@ -279,6 +279,54 @@ def test_downgrade_through_prior_copy_spares_adopted(db_path: str) -> None:
     conn.close()
 
 
+def test_downgrade_prefers_live_provenance_edge(db_path: str) -> None:
+    """A dead provenance stamp must not shadow the live one.
+
+    Operator sequence that produces two edges for one source: roll back through
+    `d1a4c7f2b8e6` (it deletes the promises it copied and clears only its OWN
+    edge kind, so the `converged_from_reminder` edge is left pointing at a gone
+    row), then upgrade back to head — the reminder is re-copied to a NEW promise
+    id and stamped again beside the stale edge. The next downgrade has to rebuild
+    the reminder from the live stamp instead of giving up on the dead one.
+    """
+    import sqlite3
+
+    _seed_through_expand(db_path)
+    _alembic(db_path, CONTRACT_REVISION)
+    _alembic(db_path, BELOW_PRE_REVISION, direction="downgrade")
+    _alembic(db_path, "head")
+
+    print("\n[contract] a dead provenance stamp doesn't shadow the live one")
+    conn = sqlite3.connect(db_path)
+    stamps = [
+        r[0]
+        for r in conn.execute(
+            "select dst_id from edges where kind='converged_from_reminder' "
+            "and src_kind='reminder' and src_id=1 order by id"
+        )
+    ]
+    alive = [
+        d
+        for d in stamps
+        if conn.execute("select 1 from promises where id=?", (d,)).fetchone()
+    ]
+    # Precondition: without both a dead stamp AND a live one, this proves nothing.
+    check("reminder 1 carries more than one stamp", len(stamps) > 1, True)
+    check("the oldest stamp is dead", stamps[0] not in alive, True)
+    check("a later stamp is live", len(alive) > 0, True)
+    conn.close()
+
+    _alembic(db_path, EXPAND_REVISION, direction="downgrade")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rebuilt = conn.execute("select * from reminders where id=1").fetchall()
+    check("reminder rebuilt from the live stamp, not skipped", len(rebuilt), 1)
+    if rebuilt:
+        check("rebuilt from the promise the live stamp names", rebuilt[0]["content"], "Get plants for the new place")
+    conn.close()
+
+
 def test_adapter(db_path: str) -> None:
     """focus_service against the migrated DB — the seam the MCP tools call."""
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
@@ -372,8 +420,9 @@ def main() -> int:
         db_path = os.path.join(tmp, "convergence.db")
         test_migration(db_path)
         test_contract(db_path)
-        # Needs a DB the happy path hasn't already contracted.
+        # Need a DB the happy path hasn't already contracted.
         test_downgrade_through_prior_copy_spares_adopted(os.path.join(tmp, "rollback.db"))
+        test_downgrade_prefers_live_provenance_edge(os.path.join(tmp, "restamp.db"))
         test_adapter(db_path)
 
     print()
