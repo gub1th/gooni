@@ -6,21 +6,35 @@ and `reminders` into Notes/Promises and deliberately left all four source tables
 in prod. This is the contract half — it drops them.
 
 **Deploying this destroys the source tables.** `scripts/verify_focus_convergence.py`
-is the gate: it exits non-zero if any source row is unrepresented in v2. Run it
-against the target database before shipping this revision.
+is the belt-and-braces gate: it exits non-zero if any source row is unrepresented
+in v2. But `alembic upgrade head` runs at uvicorn boot, where nobody is around to
+invoke a script, so the guarantee lives HERE: after stamping, `upgrade()` re-counts
+and REFUSES TO DROP if a single row in `thought_batches`, `thoughts` or `reminders`
+came out without a provenance edge. It raises instead, the transaction rolls back,
+and the database is left exactly as it was found. A boot that fails loudly is
+recoverable; a row destroyed with no rebuild path is not.
 
 REVERSIBILITY. A migration that drops production tables has to be able to put
 them back, and "recreate four empty tables" is not a downgrade. So `upgrade()`
 STAMPS PROVENANCE BEFORE DROPPING: for every source row it writes the edge
 recording which v2 row absorbed it, keyed by the ORIGINAL source id.
 
-    thought_batch #N → note #M   kind `migrated_from_thought_batch`
-    thought       #N → note #M   kind `migrated_from_thought`
-    reminder      #N → promise #M kind `migrated_from_reminder`
+    thought_batch #N → note #M   kind `converged_from_thought_batch`
+    thought       #N → note #M   kind `converged_from_thought`
+    reminder      #N → promise #M kind `converged_from_reminder`
 
-The last one already exists for rows `d1a4c7f2b8e6` copied on 2026-08-01; this
-fills it in for the rest, using the same edge-then-text matcher the expand half
-used, so the two halves can never disagree about which promise a reminder became.
+These are deliberately NOT `d1a4c7f2b8e6`'s `migrated_from_reminder`. That
+migration's `downgrade()` hard-deletes every promise reachable by its own kind on
+the premise that it INSERTED them; stamping the same kind onto a promise this
+migration merely ADOPTED (connector-written, matched by text) would make
+`alembic downgrade b6e4c2a9d713` destroy a user-visible row. One greppable
+`converged_from_*` family, written only here, read only here.
+
+`_stamp_reminders` still READS the legacy `migrated_from_reminder` edge as its
+first-choice matcher — that exact provenance from the 2026-08-01 copy is how a
+reminder is matched even when the text drifted on one side — but it only ever
+WRITES the new kind, for every reminder it resolves.
+
 `downgrade()` walks those edges backwards and rebuilds each row — original ids
 included, which is what lets `reminders.thought_id` and `thoughts.batch_id` be
 restored as real foreign keys rather than dangling integers.
@@ -60,14 +74,25 @@ depends_on = None
 THOUGHT_TAG = '["thought"]'
 BATCH_TAG = '["thought-batch"]'
 
-BATCH_EDGE = "migrated_from_thought_batch"
-THOUGHT_EDGE = "migrated_from_thought"
-REMINDER_EDGE = "migrated_from_reminder"
+BATCH_EDGE = "converged_from_thought_batch"
+THOUGHT_EDGE = "converged_from_thought"
+REMINDER_EDGE = "converged_from_reminder"
+
+# `d1a4c7f2b8e6`'s kind — READ as a matcher, never written by this migration.
+LEGACY_REMINDER_EDGE = "migrated_from_reminder"
 
 # Child-first: mentions and reminders both FK into thoughts, thoughts FKs into
 # thought_batches. SQLite doesn't enforce FKs, but the order costs nothing and
 # keeps the migration honest on a backend that does.
 DROP_ORDER = ("mentions", "reminders", "thoughts", "thought_batches")
+
+# (source table, edge src_kind, edge kind) — every row of each must carry its
+# edge before the drop is allowed to proceed.
+STAMPED = (
+    ("thought_batches", "thought_batch", BATCH_EDGE),
+    ("thoughts", "thought", THOUGHT_EDGE),
+    ("reminders", "reminder", REMINDER_EDGE),
+)
 
 
 def _tables(bind) -> set[str]:
@@ -101,9 +126,55 @@ def upgrade():
         if "reminders" in tables and "promises" in tables:
             _stamp_reminders(bind)
 
+    # Nothing is destroyed that downgrade() couldn't rebuild.
+    _assert_every_row_accounted(bind, tables)
+
     for table in DROP_ORDER:
         if table in tables:
             op.drop_table(table)
+
+
+def _assert_every_row_accounted(bind, tables: set[str]) -> None:
+    """Refuse the drop unless every source row carries a provenance edge.
+
+    A row without one is a row `downgrade()` cannot bring back, so dropping it
+    is unrecoverable. The reachable way to get here: a reminder deleted through
+    the dashboard between the expand deploy and this one — `promise_service.delete`
+    wipes the promise AND every edge touching it, leaving the `reminders` row with
+    neither twin nor provenance.
+    """
+    for table, src_kind, kind in STAMPED:
+        if table not in tables:
+            continue
+        if "edges" in tables:
+            unaccounted = [
+                r[0]
+                for r in bind.execute(
+                    sa.text(
+                        f"SELECT s.id FROM {table} s WHERE NOT EXISTS ("  # noqa: S608 — fixed table names
+                        "  SELECT 1 FROM edges e WHERE e.kind = :k "
+                        "   AND e.src_kind = :sk AND e.src_id = s.id) ORDER BY s.id"
+                    ),
+                    {"k": kind, "sk": src_kind},
+                ).fetchall()
+            ]
+        else:
+            unaccounted = [
+                r[0]
+                for r in bind.execute(sa.text(f"SELECT id FROM {table} ORDER BY id")).fetchall()  # noqa: S608
+            ]
+        if not unaccounted:
+            continue
+        shown = ", ".join(str(i) for i in unaccounted[:10])
+        more = "" if len(unaccounted) <= 10 else f" (+{len(unaccounted) - 10} more)"
+        raise RuntimeError(
+            f"`{table}` has {len(unaccounted)} row(s) with no `{kind}` provenance "
+            f"edge: id {shown}{more}. They were never absorbed into v2, so dropping "
+            "the table would destroy them and downgrade() could not rebuild them. "
+            "Refusing to drop — nothing was changed. Run "
+            "`python scripts/verify_focus_convergence.py --verbose` against this "
+            "database to see what the expand half missed."
+        )
 
 
 def _edge(bind, src_kind: str, src_id: int, dst_kind: str, dst_id: int, kind: str) -> None:
@@ -164,33 +235,44 @@ def _stamp_thoughts(bind) -> None:
 def _stamp_reminders(bind) -> None:
     """reminder id → its promise. Same two-step matcher the expand half used:
     the 2026-08-01 copy's edge first (exact provenance survives text edits),
-    then a text match for rows the connector wrote after it."""
-    known = {
-        src
-        for (src,) in bind.execute(
-            sa.text(
-                "SELECT src_id FROM edges WHERE kind = :k AND src_kind = 'reminder' "
-                "AND dst_kind = 'promise'"
-            ),
-            {"k": REMINDER_EDGE},
-        ).fetchall()
-    }
+    then a text match for rows the connector wrote after it.
+
+    The legacy kind is READ ONLY. Every resolved reminder — including one that
+    already carries a `migrated_from_reminder` edge — is stamped under this
+    migration's own kind, so `downgrade()` never has to consult a kind whose
+    owner deletes promises on its way down.
+    """
+    prior: dict[int, int] = {}
+    for src, dst in bind.execute(
+        sa.text(
+            "SELECT src_id, dst_id FROM edges WHERE kind = :k AND src_kind = 'reminder' "
+            "AND dst_kind = 'promise' ORDER BY id"
+        ),
+        {"k": LEGACY_REMINDER_EDGE},
+    ).fetchall():
+        prior.setdefault(src, dst)
+
     rows = bind.execute(sa.text("SELECT id, content FROM reminders ORDER BY id")).fetchall()
     for r in rows:
-        if r.id in known:
-            continue
-        content = (r.content or "").strip()
-        if not content:
-            continue
-        twin = bind.execute(
-            sa.text(
-                "SELECT id FROM promises WHERE lower(trim(utterance)) = lower(:c) "
-                "ORDER BY (state = 'active') DESC, id ASC LIMIT 1"
-            ),
-            {"c": content.lower()},
-        ).fetchone()
-        if twin:
-            _edge(bind, "reminder", r.id, "promise", twin.id, REMINDER_EDGE)
+        promise_id = prior.get(r.id)
+        if promise_id is not None and not bind.execute(
+            sa.text("SELECT 1 FROM promises WHERE id = :i"), {"i": promise_id}
+        ).scalar():
+            promise_id = None  # twin deleted since 2026-08-01 — fall through to text
+        if promise_id is None:
+            content = (r.content or "").strip()
+            if not content:
+                continue
+            twin = bind.execute(
+                sa.text(
+                    "SELECT id FROM promises WHERE lower(trim(utterance)) = lower(:c) "
+                    "ORDER BY (state = 'active') DESC, id ASC LIMIT 1"
+                ),
+                {"c": content.lower()},
+            ).fetchone()
+            promise_id = twin.id if twin else None
+        if promise_id is not None:
+            _edge(bind, "reminder", r.id, "promise", promise_id, REMINDER_EDGE)
 
 
 # ── downgrade ───────────────────────────────────────────────────────────────

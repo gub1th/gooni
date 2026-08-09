@@ -398,17 +398,35 @@ def _migrate_reminders(bind) -> None:
 
 def downgrade():
     """Drop the three added columns. The backfilled Notes/Promises are LEFT —
-    deleting user-visible rows on a downgrade is worse than leaving duplicates,
-    and the source tables were never dropped, so nothing is unrecoverable."""
+    deleting user-visible rows on a downgrade is worse than leaving duplicates.
+
+    RECOVERABILITY, as of `b8f3d1c07a45` (the contract half): the source tables
+    are no longer standing beside the v2 rows. They come back through the
+    `converged_from_*` provenance edges that migration stamps before it drops
+    them — its own `downgrade()` walks those edges and rebuilds each row with its
+    original id. So a rollback that lands below this revision has to pass through
+    `b8f3d1c07a45.downgrade()` first; the edges, not the old tables, are what
+    makes it reversible."""
     bind = op.get_bind()
     tables = _tables(bind)
     if "promises" in tables:
         cols = _cols(bind, "promises")
+        # The index has to go BEFORE the batch rebuild: batch_alter_table
+        # reflects the table, builds the replacement without the column, then
+        # replays every reflected index onto it — including one that now names a
+        # column that isn't there.
+        _drop_index(bind, "promises", "ix_promises_owed_to")
         with op.batch_alter_table("promises") as batch:
             if "due_is_default" in cols:
                 batch.drop_column("due_is_default")
             if "owed_to" in cols:
                 batch.drop_column("owed_to")
     if "notes" in tables and "topic_id" in _cols(bind, "notes"):
+        _drop_index(bind, "notes", "ix_notes_topic_id")
         with op.batch_alter_table("notes") as batch:
             batch.drop_column("topic_id")
+
+
+def _drop_index(bind, table: str, name: str) -> None:
+    if any(i["name"] == name for i in sa.inspect(bind).get_indexes(table)):
+        op.drop_index(name, table_name=table)
