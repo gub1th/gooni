@@ -146,6 +146,12 @@ def scrub_url(raw: str | None) -> str | None:
     extension, and one that puts `/callback?code=…` in `path` would otherwise
     park a live OAuth code in the log.
 
+    Assumes a string (or None): `normalize` rejects any other type up front, so
+    the only exception this needs to survive is `urlsplit` choking on a genuinely
+    malformed *string*. Widening the guard past `ValueError` would let a real
+    bug in the strip pass silently, and this is the one path where a silent
+    failure means storing a credential verbatim.
+
     Values are replaced with `REDACTED` rather than dropped, so the log still
     shows that a callback URL *had* a code without recording it. The fragment
     is dropped wholesale — implicit-flow OAuth returns `#access_token=…` there
@@ -180,8 +186,9 @@ def normalize(item: dict) -> tuple[dict | None, str | None]:
     """Validate one raw interval. Returns (row_kwargs, None) or (None, reason).
 
     Reasons are stable strings so the extension can log them and a human can
-    grep them: missing_client_id, missing_host, bad_started_at, bad_ended_at,
-    negative_duration, too_short, too_long, future.
+    grep them: missing_client_id, missing_host, bad_path, bad_url,
+    bad_started_at, bad_ended_at, negative_duration, too_short, too_long,
+    future.
     """
     if not isinstance(item, dict):
         return None, "not_an_object"
@@ -189,6 +196,18 @@ def normalize(item: dict) -> tuple[dict | None, str | None]:
     client_id = _clean(item.get("client_id") or item.get("id"), 128)
     if not client_id:
         return None, "missing_client_id"
+
+    # Type-check the two fields that reach `scrub_url` unconverted. Every other
+    # field is coerced by `_clean`/`_parse_dt`, but these must stay raw until
+    # they are scrubbed, and `urlsplit` on a non-string raises AttributeError
+    # or TypeError — neither of which the route's `except ValueError` catches,
+    # so one such row would 500 the WHOLE batch. Validating here keeps the rule
+    # where every other field's rule lives, and keeps the cost of a malformed
+    # row at exactly that row.
+    for field in ("path", "url"):
+        value = item.get(field)
+        if value is not None and not isinstance(value, str):
+            return None, f"bad_{field}"
 
     host = _clean(item.get("host"), 255)
     if not host:

@@ -155,6 +155,57 @@ def main() -> int:
                  "too_short", "too_long", "future"):
         check(want in reasons, f"missing rejection reason {want}: {reasons}")
 
+    # ── a non-string url/path costs THAT ROW, not the batch ──────────────────
+    # `path`/`url` are the only fields that reach scrub_url uncoerced, and
+    # urlsplit() on a non-string raises AttributeError/TypeError — which the
+    # route's `except ValueError -> 400` does not catch, so the whole batch
+    # 500s. That is the one response the extension RETAINS on, so a hand-rolled
+    # client sending an int url would wedge its buffer behind a poison batch
+    # forever. The contract is per-row: a malformed row is rejected with a
+    # reason and its neighbours still land.
+    try:
+        typed = bas.ingest_batch(
+            db,
+            [
+                _iv("int-url", url=1234),
+                _iv("list-path", path=["/a", "/b"]),
+                _iv("dict-url", url={"href": "https://x.com"}),
+                _iv("bool-path", path=True),
+                _iv("survivor"),
+            ],
+        )
+    except Exception as e:  # noqa: BLE001 — a raise here IS the regression
+        typed = None
+        fails.append(f"non-string url/path raised instead of rejecting: {type(e).__name__}: {e}")
+        db.rollback()
+
+    if typed is not None:
+        check(typed["accepted"] == 1, f"only the valid row should land: {typed}")
+        by_id = {r["client_id"]: r["reason"] for r in typed["rejected"]}
+        check(by_id.get("int-url") == "bad_url", f"int url reason: {by_id}")
+        check(by_id.get("dict-url") == "bad_url", f"dict url reason: {by_id}")
+        check(by_id.get("list-path") == "bad_path", f"list path reason: {by_id}")
+        check(by_id.get("bool-path") == "bad_path", f"bool path reason: {by_id}")
+        check("survivor" not in by_id, f"valid row was rejected: {by_id}")
+        check(
+            db.query(BrowserInterval).filter_by(client_id="survivor").count() == 1,
+            "the valid row in a batch with a typed-wrong row was lost",
+        )
+        check(
+            db.query(BrowserInterval)
+            .filter(BrowserInterval.client_id.in_(["int-url", "list-path", "dict-url", "bool-path"]))
+            .count()
+            == 0,
+            "a rejected row was stored anyway",
+        )
+
+    # ── a valid row with NO url/path at all is still fine ────────────────────
+    bas.ingest_batch(db, [{"client_id": "bare", "host": "example.com",
+                           "started_at": T0.isoformat(),
+                           "ended_at": (T0 + timedelta(seconds=60)).isoformat()}])
+    bare = db.query(BrowserInterval).filter_by(client_id="bare").one()
+    check(bare.url is None and bare.path is None, f"absent url/path invented: {bare.url} {bare.path}")
+
     # ── scrub backstop: credentials never land even if the client sent them ──
     bas.ingest_batch(
         db,

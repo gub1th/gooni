@@ -130,7 +130,15 @@ export class FocusTracker {
     return this._close(at, "locked");
   }
 
-  /** Browser is going away and told us about it. */
+  /**
+   * Browser is going away and told us about it.
+   *
+   * NOT currently wired: background.js registers no chrome.runtime.onSuspend
+   * listener, because MV3 does not guarantee onSuspend runs — browser death is
+   * handled by the recoverOrphan() salvage path on the next boot instead, which
+   * cannot be missed. Kept as the honest end_reason for a host that CAN prove a
+   * clean shutdown.
+   */
   shutdown(at) {
     return this._close(at, "shutdown");
   }
