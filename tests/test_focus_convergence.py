@@ -20,7 +20,10 @@ against the schema it actually runs on):
      Both directions are also asserted to REPORT rather than refuse: a v2 row
      that drifted out of the old schema's reach costs its own row and not the
      rollback, and a source row the drop destroys unrecoverably is named in the
-     log before the table is gone.
+     log before the table is gone. And because the drop is unconditional, the
+     migration is asserted to match every twin `verify_focus_convergence.py`
+     counted — the gate clearing a row the migration then misses is the one
+     failure the sole-gate design has no answer for.
 
   3. ADAPTER — focus_service now writes Notes and Promises. Asserts the batch
      rule, the `at` backdate, and that the dashboard payload keeps every key
@@ -590,6 +593,91 @@ def test_upgrade_reports_the_rows_it_destroys(db_path: str) -> None:
     )
 
 
+# Byte-identical twin, written by the connector after the 2026-08-01 copy — so
+# no `migrated_from_reminder` edge names it and the text matcher is the only
+# thing that can find it. The É is the whole point: SQLite's `lower()` is
+# ASCII-only and Python's is not, so a matcher that folds one side in each
+# engine disagrees with the gate on exactly this input.
+NON_ASCII_TWIN = "Épargner pour le voyage"
+NON_ASCII_SEED = f"""
+INSERT INTO reminders (id,type,content,owed_to,due_at,due_is_default,done,state,
+                       resolved_at,thought_id,created_at)
+  VALUES (97,'reminder','{NON_ASCII_TWIN}',NULL,'2026-08-12 06:59:00',0,0,'active',
+          NULL,NULL,'2026-08-06 09:00:00');
+INSERT INTO promises (id,cadence,is_important,utterance,summary,inferred_due,state,
+                      needs_clarification,slip_count,created_at,updated_at)
+  VALUES (97,'once',0,'{NON_ASCII_TWIN}','{NON_ASCII_TWIN}','2026-08-12 06:59:00',
+          'active',0,0,'2026-08-06 09:00:00','2026-08-06 09:00:00');
+"""
+
+
+def _run_gate(db_path: str) -> tuple:
+    """The real gate, as an operator runs it: exit 0 means every source row is
+    accounted for and the contract migration is safe."""
+    proc = subprocess.run(
+        [sys.executable, "scripts/verify_focus_convergence.py", "--verbose"],
+        cwd=REPO,
+        env={**os.environ, "DATABASE_URL": f"sqlite:///{db_path}"},
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode, proc.stdout + proc.stderr
+
+
+def test_upgrade_stamps_every_twin_the_gate_counted(db_path: str) -> None:
+    """The gate and the migration must agree on what "accounted for" means.
+
+    An unconditional drop is only shippable because `verify_focus_convergence.py`
+    ran first and said nothing would be lost. If the migration's twin matcher is
+    stricter than the gate's on any input, the gate clears a row the migration
+    then drops with no provenance edge — permanently, and silently apart from a
+    WARNING nobody reads. Pre-folding the parameter in Python (full Unicode) and
+    comparing it against SQLite's ASCII-only `lower()` did exactly that.
+    """
+    import sqlite3
+
+    _seed_through_expand(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.executescript(NON_ASCII_SEED)
+    conn.commit()
+    conn.close()
+
+    print("\n[contract] the migration matches every twin the gate counted")
+    code, out = _run_gate(db_path)
+    # Precondition: if the gate doesn't clear this row, it never reaches the drop
+    # and the disagreement this test is about can't happen.
+    check("the gate clears the non-ASCII reminder", code, 0)
+    check("gate reports no unmatched reminder", "unmatched reminder #97" in out, False)
+
+    _alembic(db_path, CONTRACT_REVISION)
+
+    conn = sqlite3.connect(db_path)
+    stamped = conn.execute(
+        "select dst_id from edges where kind='converged_from_reminder' "
+        "and src_kind='reminder' and src_id=97"
+    ).fetchall()
+    check("the migration stamped the twin the gate counted", len(stamped), 1)
+    if stamped:
+        check("stamped at that twin, not another promise", stamped[0][0], 97)
+    conn.close()
+
+    _alembic(db_path, EXPAND_REVISION, direction="downgrade")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    rebuilt = conn.execute("select * from reminders where id=97").fetchall()
+    check("the row survives the round trip", len(rebuilt), 1)
+    if rebuilt:
+        check("with its content byte-identical", rebuilt[0]["content"], NON_ASCII_TWIN)
+        check("and its due intact", rebuilt[0]["due_at"], "2026-08-12 06:59:00")
+    check(
+        "the rows the gate already covered still come back",
+        conn.execute("select count(*) from reminders").fetchone()[0],
+        4,
+    )
+    conn.close()
+
+
 def test_adapter(db_path: str) -> None:
     """focus_service against the migrated DB — the seam the MCP tools call."""
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
@@ -689,6 +777,7 @@ def main() -> int:
         test_downgrade_is_partial_not_all_or_nothing(os.path.join(tmp, "partial.db"))
         test_downgrade_skips_a_note_the_old_schema_cant_hold(os.path.join(tmp, "drifted.db"))
         test_upgrade_reports_the_rows_it_destroys(os.path.join(tmp, "unstamped.db"))
+        test_upgrade_stamps_every_twin_the_gate_counted(os.path.join(tmp, "gate.db"))
         test_adapter(db_path)
 
     print()

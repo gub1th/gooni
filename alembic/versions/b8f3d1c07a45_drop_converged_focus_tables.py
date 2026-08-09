@@ -278,6 +278,16 @@ def _stamp_reminders(bind, tally: dict) -> None:
     already carries a `migrated_from_reminder` edge — is stamped under this
     migration's own kind, so `downgrade()` never has to consult a kind whose
     owner deletes promises on its way down.
+
+    THE TEXT PREDICATE BELOW IS CHARACTER-FOR-CHARACTER THE GATE'S. It has to
+    be: `scripts/verify_focus_convergence.py` asks `lower(trim(p.utterance)) =
+    lower(trim(r.content))`, and a row it calls accounted for that this matcher
+    then misses is dropped with no provenance and no way back — the one outcome
+    the sole-gate design can't absorb. So both sides go through SQLite's
+    `lower()` and both through `trim()`; nothing is pre-folded in Python, whose
+    `.lower()` is full-Unicode where SQLite's is ASCII-only (they disagree on
+    the first uppercase non-ASCII character either side). Editing one predicate
+    without the other reopens that gap.
     """
     prior = _provenance(bind, LEGACY_REMINDER_EDGE, "reminder", "promise")
 
@@ -298,10 +308,10 @@ def _stamp_reminders(bind, tally: dict) -> None:
                 continue
             twin = bind.execute(
                 sa.text(
-                    "SELECT id FROM promises WHERE lower(trim(utterance)) = lower(:c) "
+                    "SELECT id FROM promises WHERE lower(trim(utterance)) = lower(trim(:c)) "
                     "ORDER BY (state = 'active') DESC, id ASC LIMIT 1"
                 ),
-                {"c": content.lower()},
+                {"c": r.content},
             ).fetchone()
             promise_id = twin.id if twin else None
         if promise_id is not None:
