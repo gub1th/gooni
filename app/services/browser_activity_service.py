@@ -28,10 +28,11 @@ Two things this module is strict about:
 
 Privacy: full URLs are captured for every host (see BrowserInterval). The
 extension scrubs credential-bearing query params before buffering; `scrub_url`
-below re-runs the same strip as a server-side backstop, so an old extension
-build or a hand-rolled client still can't park an OAuth `code` in the log. The
-extension's list is the editable one (its options page); this one is a fixed
-floor.
+below re-runs the same strip as a server-side backstop over BOTH `url` and
+`path`, so an old extension build or a hand-rolled client still can't park an
+OAuth `code` in the log — including one that puts its query string in `path`.
+The extension's list is the editable one (its options page); this one is a
+fixed floor.
 """
 
 from __future__ import annotations
@@ -138,6 +139,13 @@ def _is_secret_param(name: str) -> bool:
 def scrub_url(raw: str | None) -> str | None:
     """Strip credential-bearing query params, keep everything else.
 
+    Takes a full URL *or* a bare path — `urlsplit` parses both, and the two
+    must go through this one function rather than a second path-shaped copy
+    that drifts out of sync with it. The extension only ever sends `pathname`
+    in `path`, but the floor exists precisely for clients that are not the
+    extension, and one that puts `/callback?code=…` in `path` would otherwise
+    park a live OAuth code in the log.
+
     Values are replaced with `REDACTED` rather than dropped, so the log still
     shows that a callback URL *had* a code without recording it. The fragment
     is dropped wholesale — implicit-flow OAuth returns `#access_token=…` there
@@ -214,7 +222,9 @@ def normalize(item: dict) -> tuple[dict | None, str | None]:
             "host": host,
             # Full URL for every host; the extension scrubbed credentials
             # already, scrub_url is the backstop for anything that didn't.
-            "path": _clean(item.get("path"), 2048),
+            # BOTH fields go through it — a client that puts a query string in
+            # `path` must not get under the floor that `url` sits behind.
+            "path": _clean(scrub_url(item.get("path")), 2048),
             "url": _clean(scrub_url(item.get("url")), 2048),
             "title": _clean(item.get("title"), 512),
             "started_at": started,

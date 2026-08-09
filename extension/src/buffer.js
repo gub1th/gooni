@@ -196,12 +196,19 @@ export async function flushOnce({ buffer, endpoint, token, fetchImpl = fetch }) 
   } catch {
     body = {};
   }
+  // A rejected row was ACKED like any other and is now gone from the buffer,
+  // so the reason is the only trace it ever existed. Carry the first one up:
+  // "sent 200, accepted 0" with no explanation is indistinguishable from a
+  // clean flush, and the clock-skew case (every row rejected as `future`)
+  // reads as success while the data is permanently lost.
+  const rejectedRows = body.rejected || [];
   return {
     sent: batch.length,
     delivered: batch.length,
     accepted: body.accepted,
     duplicates: body.duplicates,
-    rejected: (body.rejected || []).length,
+    rejected: rejectedRows.length,
+    rejectedReason: rejectedRows[0]?.reason || null,
     remaining,
     ok: true,
   };

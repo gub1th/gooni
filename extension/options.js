@@ -9,6 +9,7 @@
 
 import { CONFIG_KEYS, DEFAULT_BASE_URL, loadConfig } from "./src/config.js";
 import { SCRUB_SUBSTRINGS, SCRUB_EXACT } from "./src/scrub.js";
+import { formatLastFlush } from "./src/status.js";
 
 const storage = {
   get: (keys) => chrome.storage.local.get(keys),
@@ -46,14 +47,7 @@ async function renderStatus() {
     `dropped:   ${s.dropped} (buffer overflow — only after a very long outage)`,
     `open now:  ${s.open ? `${s.open.host} since ${new Date(s.open.startedAt).toLocaleTimeString()}` : "nothing focused"}`,
   ];
-  if (s.lastFlush) {
-    const f = s.lastFlush;
-    lines.push(
-      `last flush: ${new Date(f.at).toLocaleTimeString()} — sent ${f.sent ?? 0}, ` +
-        `accepted ${f.accepted ?? 0}, duplicates ${f.duplicates ?? 0}` +
-        (f.error ? `, error ${f.error}` : "")
-    );
-  }
+  lines.push(...formatLastFlush(s.lastFlush));
   $("status").textContent = lines.join("\n");
 }
 

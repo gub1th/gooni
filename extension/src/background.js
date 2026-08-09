@@ -18,6 +18,7 @@ import { FocusTracker } from "./tracker.js";
 import { IntervalBuffer, flushOnce, FLUSH_THRESHOLD } from "./buffer.js";
 import { scrubUrl } from "./scrub.js";
 import { createSerializer } from "./serial.js";
+import { resolveAttention, applyAttention, makeIdleProbe } from "./attention.js";
 import { loadConfig, ingestEndpoint, IDLE_DETECTION_SEC } from "./config.js";
 
 const OPEN_KEY = "gooni_open_interval";
@@ -100,18 +101,42 @@ async function _flush() {
 const withTracker = (fn) => serial(() => _withTracker(fn));
 const flush = () => serial(_flush);
 
-/** The page that currently has attention, or null if nothing does. */
-async function activeAttention() {
-  // lastFocusedWindow + active gives the one tab in the one focused window.
-  // If no chrome window is focused the query comes back empty — which is
-  // exactly right: a background browser is not attention.
-  const win = await chrome.windows.getLastFocused().catch(() => null);
-  if (!win || !win.focused) return null;
-  const [tab] = await chrome.tabs.query({ active: true, windowId: win.id });
-  if (!tab || !tab.url) return null;
-  const scrubbed = scrubUrl(tab.url, (await loadConfig(storage)).scrub);
-  if (!scrubbed) return null;
-  return { ...scrubbed, title: tab.title || null };
+/**
+ * chrome.idle.queryState as an always-settling, fail-closed promise.
+ *
+ * The callback form is used rather than the promise form because it is the one
+ * shape every Chrome version supports. Draining `runtime.lastError` is this
+ * layer's job — reading it is what stops chrome logging an unchecked-error
+ * warning on every failed probe.
+ */
+const queryIdleState = makeIdleProbe(
+  (seconds, cb) =>
+    chrome.idle.queryState(seconds, (state) => {
+      void chrome.runtime.lastError;
+      cb(state);
+    }),
+  IDLE_DETECTION_SEC,
+);
+
+/**
+ * The page that currently has attention, or null if nothing does.
+ *
+ * Pure chrome adaptation — the decision itself lives in attention.js, so the
+ * heartbeat, the tab events and the window events all inherit one answer.
+ */
+function activeAttention() {
+  return resolveAttention({
+    getIdleState: queryIdleState,
+    // lastFocusedWindow + active gives the one tab in the one focused window.
+    // If no chrome window is focused this comes back empty — which is exactly
+    // right: a background browser is not attention.
+    getFocusedWindow: () => chrome.windows.getLastFocused().catch(() => null),
+    getActiveTab: async (windowId) => {
+      const tabs = await chrome.tabs.query({ active: true, windowId }).catch(() => []);
+      return tabs[0] || null;
+    },
+    scrubPage: async (url) => scrubUrl(url, (await loadConfig(storage)).scrub),
+  });
 }
 
 /**
@@ -129,16 +154,7 @@ function reconcile(at = Date.now(), { staleClose = false } = {}) {
   return serial(async () => {
     const page = await activeAttention();
     await _withTracker(async (tracker, cfg) => {
-      if (!cfg.enabled) {
-        tracker.discard();
-        return;
-      }
-      if (!page) {
-        if (staleClose) tracker.blurStale();
-        else tracker.blur(at);
-        return;
-      }
-      tracker.focus({ ...page, at });
+      applyAttention(tracker, page, { at, staleClose, enabled: cfg.enabled });
     });
   });
 }
@@ -153,6 +169,11 @@ function reconcile(at = Date.now(), { staleClose = false } = {}) {
  *     macOS, where windows.onFocusChanged simply does not fire for it.
  * So its period is the worst-case error on any interval that ends by walking
  * away from the browser — and the error is an undercount, never an overcount.
+ *
+ * It re-asks activeAttention() every tick, which now includes the idle probe.
+ * That makes it a SECOND idle detector: if the worker was asleep when
+ * chrome.idle fired and the transition was missed, the next heartbeat still
+ * closes the interval at its last confirmed beat instead of letting it run.
  */
 const HEARTBEAT_MINUTES = 0.5;
 

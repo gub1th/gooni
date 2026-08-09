@@ -174,6 +174,37 @@ def main() -> int:
     # …and a non-secret param survives, or the log says nothing useful.
     check("next=" in stored.url, f"innocent param dropped: {stored.url}")
 
+    # ── the floor covers `path` too, not just `url` ──────────────────────────
+    # The extension only ever sends `u.pathname`, but this floor exists for the
+    # clients that AREN'T the extension. One that puts its query string in
+    # `path` must not get under it — the docstring promises a hand-rolled
+    # client can't park an OAuth code in the log, and that has to be true of
+    # every field that holds one.
+    bas.ingest_batch(
+        db,
+        [
+            _iv(
+                "path-oauth",
+                host="app.example.com",
+                path="/callback?code=abc123&next=/home#access_token=sekrit",
+                url="https://app.example.com/callback",
+            )
+        ],
+    )
+    pth = db.query(BrowserInterval).filter_by(client_id="path-oauth").one()
+    check("abc123" not in (pth.path or ""), f"oauth code stored in path: {pth.path}")
+    check("sekrit" not in (pth.path or ""), f"fragment token stored in path: {pth.path}")
+    check("code=REDACTED" in pth.path, f"path code not redacted: {pth.path}")
+    check("next=" in pth.path, f"innocent path param dropped: {pth.path}")
+
+    # …and an ordinary path is left exactly as it came in.
+    bas.ingest_batch(db, [_iv("plain-path", path="/problems/two-sum/")])
+    check(
+        db.query(BrowserInterval).filter_by(client_id="plain-path").one().path
+        == "/problems/two-sum/",
+        "a query-less path must round-trip untouched",
+    )
+
     # ── a YouTube video id is identity, not a secret ─────────────────────────
     bas.ingest_batch(
         db,

@@ -108,6 +108,19 @@ plausible:
   interval closes at `now − 60s`, not at `now`. Without idle handling a tab
   left open overnight reports a sixteen-hour focus session and every number
   downstream becomes a lie.
+- **Idle is part of "is anything focused", not a separate event path.** A
+  focused Chrome window is not an attending human: walking away does not
+  unfocus the window, so `getLastFocused().focused` stays true through a
+  two-hour lunch. Every reconcile therefore asks `chrome.idle.queryState`
+  first, and anything other than `active` means no attention — otherwise the
+  30s heartbeat re-opens an interval that `chrome.idle` had just correctly
+  closed and the idle stretch is credited as focus time. Because it lives in
+  the one decision every event path funnels through (`src/attention.js`), the
+  heartbeat doubles as a second idle detector: if the worker was asleep when
+  `chrome.idle` fired and the transition was missed, the next heartbeat still
+  closes the interval at its last confirmed beat. The probe fails **closed** —
+  if it throws or does not answer within 2s it reports `idle`, because this
+  sensor's errors are meant to be undercounts.
 - **A backgrounded window is not attention.** Losing focus ends the interval.
   On macOS, `chrome.windows.onFocusChanged` does **not** fire when another
   application takes the foreground (verified against Chrome 151 — the listener
@@ -194,12 +207,19 @@ cd extension && npm test      # node:test, no dependencies
 Covers interval closing (tab change, navigation, blur, lock), idle handling and
 its backdating, the poll-vs-event close distinction, orphan salvage, buffer
 persistence across a restart, which statuses retain vs drop a batch,
-`Retry-After` parsing, overflow accounting, URL scrubbing, and the write queue
+`Retry-After` parsing, overflow accounting, URL scrubbing, the write queue
 (each race test asserts the unserialized control case loses/duplicates first, so
-it fails if the queue is removed).
+it fails if the queue is removed), and the last-flush report's wording.
+
+The idle tests drive the real `resolveAttention` + `applyAttention` +
+`FocusTracker` composition with only chrome's probes faked — the same path
+`reconcile()` runs — so "an idle machine accrues no focus time" is asserted
+against the reconcile loop rather than against `FocusTracker` alone. A two-hour
+idle stretch with Chrome focused and the heartbeat ticking must emit nothing.
 
 The server side is `python tests/test_browser_intervals.py` (idempotency
-including a collision mid-batch, validation, the scrub backstop).
+including a collision mid-batch, validation, the scrub backstop over both `url`
+and `path`).
 
 ## Layout
 
@@ -210,6 +230,8 @@ src/background.js  the ONLY file that touches chrome APIs (event wiring)
 src/tracker.js     the interval state machine (pure, fake-clock testable)
 src/buffer.js      chrome.storage.local buffer + flush/retry rules
 src/scrub.js       URL scrubbing — the privacy model
+src/attention.js   "is the human here, and on what?" — the idle-aware decision
 src/serial.js      the one-writer queue every storage mutation goes through
+src/status.js      the options page's last-flush report (incl. rejected rows)
 src/config.js      stored settings
 ```
