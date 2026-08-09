@@ -26,7 +26,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(os.path.join(_ROOT, ".env"))
 
 from app.db.database import SessionLocal, engine  # noqa: E402
-from app.db.models import Base, Reminder  # noqa: E402
+from app.db.models import Base, Promise  # noqa: E402
 from app.services import focus_service as fs  # noqa: E402
 
 
@@ -85,7 +85,9 @@ def main() -> int:
     # ── hard-delete ──────────────────────────────────────────────────────────
     check(fs.delete_reminder(db, pid) is True, "delete existing → True")
     db.flush()
-    check(db.query(Reminder).filter(Reminder.id == pid).first() is None, "row is gone")
+    # The store is Promise now (the `reminders` table went with the contract
+    # half, `b8f3d1c07a45`) — so assert against the row the delete actually hits.
+    check(db.query(Promise).filter(Promise.id == pid).first() is None, "row is gone")
 
     db.commit()
     db.close()

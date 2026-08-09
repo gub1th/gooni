@@ -1,16 +1,22 @@
-"""Net for the focus→v2 convergence (`f4c81a92de70`).
+"""Net for the focus→v2 convergence (`f4c81a92de70` + `b8f3d1c07a45`).
 
-Two halves, both against a throwaway SQLite built by the REAL migration chain
+Three halves, all against a throwaway SQLite built by the REAL migration chain
 (no fixtures hand-rolled from models — a data migration has to be tested
 against the schema it actually runs on):
 
-  1. MIGRATION — seeds the situation prod was actually in on 2026-08-08:
+  1. EXPAND — seeds the situation prod was actually in on 2026-08-08:
      `d1a4c7f2b8e6` had already copied reminders into promises and left both
      tables live, so the rows drifted. Asserts the backfill adopts twins rather
-     than duplicating them, and repairs what that earlier copy had to drop
-     (`owed_to` folded into a summary prefix, defaulted dues nulled).
+     than duplicating them, repairs what that earlier copy had to drop
+     (`owed_to` folded into a summary prefix, defaulted dues nulled), and
+     leaves the source tables standing.
 
-  2. ADAPTER — focus_service now writes Notes and Promises. Asserts the batch
+  2. CONTRACT — the drop. Asserts the four tables are gone, that a provenance
+     edge was stamped for every source row first, and that `downgrade()` walks
+     those edges back to rebuild each row with its ORIGINAL id — the property
+     that makes dropping production tables reversible.
+
+  3. ADAPTER — focus_service now writes Notes and Promises. Asserts the batch
      rule, the `at` backdate, and that the dashboard payload keeps every key
      the kiosk and FocusDashboard read.
 
@@ -27,6 +33,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 
 PRE_REVISION = "d1a4c7f2b8e6"  # the reminders→promises copy, before convergence
+EXPAND_REVISION = "f4c81a92de70"  # backfill; source tables still standing
+CONTRACT_REVISION = "b8f3d1c07a45"  # the drop
+SOURCE_TABLES = ("thoughts", "thought_batches", "reminders", "mentions")
 
 FAILURES: list[str] = []
 
@@ -42,17 +51,17 @@ def check_true(label: str, got) -> None:
     check(label, bool(got), True)
 
 
-def _alembic(db_path: str, rev: str) -> None:
+def _alembic(db_path: str, rev: str, direction: str = "upgrade") -> None:
     env = {**os.environ, "DATABASE_URL": f"sqlite:///{db_path}"}
     proc = subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", rev],
+        [sys.executable, "-m", "alembic", direction, rev],
         cwd=REPO,
         env=env,
         capture_output=True,
         text=True,
     )
     if proc.returncode != 0:
-        raise SystemExit(f"alembic upgrade {rev} failed:\n{proc.stdout}\n{proc.stderr}")
+        raise SystemExit(f"alembic {direction} {rev} failed:\n{proc.stdout}\n{proc.stderr}")
 
 
 # ── seed: the shape prod was in before convergence ───────────────────────────
@@ -114,7 +123,7 @@ def test_migration(db_path: str) -> None:
     conn.commit()
     conn.close()
 
-    _alembic(db_path, "head")
+    _alembic(db_path, EXPAND_REVISION)
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -153,6 +162,78 @@ def test_migration(db_path: str) -> None:
     check("thought edges written", q("select count(*) n from edges where kind='derives_from' and dst_kind='note'")[0]["n"], 2)
     check("source reminders left intact", q("select count(*) n from reminders")[0]["n"], 3)
     check("source thoughts left intact", q("select count(*) n from thoughts")[0]["n"], 2)
+    conn.close()
+
+
+def test_contract(db_path: str) -> None:
+    """`b8f3d1c07a45` drops the four source tables — and can put them back.
+
+    Runs on the DB the expand half just produced, so the round trip is measured
+    against rows that actually went through the backfill.
+    """
+    import sqlite3
+
+    _alembic(db_path, CONTRACT_REVISION)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    q = lambda s: conn.execute(s).fetchall()  # noqa: E731
+    names = lambda: {  # noqa: E731
+        r["name"] for r in q("select name from sqlite_master where type='table'")
+    }
+
+    print("\n[contract] the four tables are gone")
+    for t in SOURCE_TABLES:
+        check(f"{t} dropped", t not in names(), True)
+    check("topics survive", "topics" in names(), True)
+    check("focus_people survive", "focus_people" in names(), True)
+
+    print("[contract] provenance stamped BEFORE the drop")
+    edge_n = lambda k: q(f"select count(*) n from edges where kind='{k}'")[0]["n"]  # noqa: E731
+    check("batch provenance edges", edge_n("migrated_from_thought_batch"), 2)
+    check("thought provenance edges", edge_n("migrated_from_thought"), 2)
+    # R1 already had one from the 2026-08-01 copy; the contract half fills in
+    # R2 (text-matched) and R3 (inserted fresh by the expand half).
+    check("reminder provenance edges", edge_n("migrated_from_reminder"), 3)
+    conn.close()
+
+    # ── the reason this migration is allowed to ship: it reverses ────────────
+    _alembic(db_path, EXPAND_REVISION, direction="downgrade")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    q = lambda s: conn.execute(s).fetchall()  # noqa: E731
+
+    print("[contract] downgrade rebuilds the rows, original ids intact")
+    check("batches back", q("select count(*) n from thought_batches")[0]["n"], 2)
+    check("thoughts back", q("select count(*) n from thoughts")[0]["n"], 2)
+    check("reminders back", q("select count(*) n from reminders")[0]["n"], 3)
+    check("mentions table back (0 rows, as it always was)", q("select count(*) n from mentions")[0]["n"], 0)
+
+    b2 = q("select * from thought_batches where id=2")[0]
+    check("batch id preserved", b2["id"], 2)
+    check("batch label from the note title", b2["label"], "Gooni pinned the whiteboard.")
+    check("image_url rebuilt from the attachment", b2["image_url"], "https://pub-abc.r2.dev/images/2026/08/01/xy.png")
+
+    t1 = q("select * from thoughts where id=1")[0]
+    check("thought content", t1["content"], "the store should stay dumb")
+    check("thought re-parented to its batch", t1["batch_id"], 1)
+
+    r1 = q("select * from reminders where id=1")[0]
+    check("owed_to survives the round trip", r1["owed_to"], 1)
+    check("type re-derived from owed_to", r1["type"], "promise")
+    check("defaulted due survives", r1["due_at"], "2026-08-09 06:59:00")
+    check("due_is_default survives", r1["due_is_default"], 1)
+    r3 = q("select * from reminders where id=3")[0]
+    check("thought_id restored via the derives_from edge", r3["thought_id"], 2)
+    conn.close()
+
+    # Back to head — the adapter half runs against the shipped schema.
+    _alembic(db_path, "head")
+    conn = sqlite3.connect(db_path)
+    gone = {
+        r[0] for r in conn.execute("select name from sqlite_master where type='table'")
+    }
+    check("re-upgrade drops them again", any(t in gone for t in SOURCE_TABLES), False)
     conn.close()
 
 
@@ -248,6 +329,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "convergence.db")
         test_migration(db_path)
+        test_contract(db_path)
         test_adapter(db_path)
 
     print()
