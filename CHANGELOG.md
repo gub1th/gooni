@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.226.0 — 2026-08-09 (minor)
+
+- feat(focus): converge focus primitives into v2 (expand half) (#458)
+
 ## 0.225.0 — 2026-08-08 (minor)
 
 - feat(whoop): surface data age and sleep window on whoop feed surfaces (#459)
