@@ -1693,12 +1693,15 @@ export async function fetchFocusDashboard(): Promise<FocusDashboard> {
 }
 
 // ── Focus reminder/promise CRUD (rail add / edit / delete) ──────────────────
-// The rail sections are backed by Reminder rows (type=reminder|promise). Create
-// = POST; edit fields / clear due|owed = PATCH; delete = DELETE. State toggles
-// (kept/broken) also ride PATCH but the dashboard rail doesn't drive them yet.
+// The rail sections are backed by Promise rows served through the focus adapter
+// (the `reminders` table was dropped in `b8f3d1c07a45`); the returned
+// `type=reminder|promise` is DERIVED from `owed_to`. Create = POST; edit fields
+// / clear due|owed = PATCH; delete = DELETE. State toggles (kept/broken) also
+// ride PATCH but the dashboard rail doesn't drive them yet.
 
 export async function createFocusReminder(input: {
   content: string;
+  // Accepted but INERT since the convergence — `owed_to` alone decides `type`.
   is_promise?: boolean;
   owed_to?: string | null;
   due_hint?: string | null;

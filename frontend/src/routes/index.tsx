@@ -13,7 +13,8 @@ import { fetchNote } from "../services/api";
 // timeline · finna-do · notes, reading v2 primitives (Promise/Trackable/Note).
 // The old waveform/capture home moved to /home (still a tap away via the
 // top-right button); the bare second-monitor kiosk lives on at /focus (still
-// the legacy FocusDashboard until the connector is repointed). Everything else
+// FocusDashboard, which reads the same v2 rows through `focus_service`'s
+// adapter now that the focus tables are gone). Everything else
 // (log, notes, nav) is hover-summoned glass on top.
 
 type View = "home" | "notes" | "log" | "eval";

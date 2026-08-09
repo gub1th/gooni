@@ -808,14 +808,16 @@ class Edge(Base):
 #   Mention       → dropped (0 rows, no writer, no tool)
 #
 # SURVIVING focus tables: Topic (identity + a decay curve nothing else models)
-# and Person (v2 has no person primitive at all).
+# and Person (v2 has no person primitive at all). They are all that's left of
+# the focus schema — `focus_service` reads Notes and Promises for everything
+# else.
 #
-# The four absorbed tables below are RETAINED, unread, for one release — this
-# was an expand/contract migration, so `f4c81a92de70` backfilled their rows
-# into Notes/Promises without deleting the originals. A follow-up migration
-# drops them once the backfill has been eyeballed in prod. Nothing in the app
-# queries them anymore; `scripts/verify_focus_convergence.py` still does, to
-# diff old against new.
+# The four absorbed tables are GONE (`b8f3d1c07a45`, the contract half). They
+# survived one release, unread, so the backfill could be diffed in prod; that
+# drop stamped a `converged_from_*` edge per source row first, which is what
+# lets its downgrade rebuild them from the v2 side with their original ids —
+# for every row whose stamped v2 destination is still there and still usable.
+# A rollback after one of those was deleted comes back partial, and says so.
 # ───────────────────────────────────────────────────────────────────────────
 
 
@@ -851,42 +853,6 @@ class Topic(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-class ThoughtBatch(Base):
-    """A run of related thinking on one topic. Thoughts seconds-to-hours apart
-    coalesce into a batch while the subject holds; a >30-min gap (or an
-    explicit new_batch / a clear subject turn) opens a fresh one. The batch
-    `label` is a short Claude-written summary — it's what the dashboard's
-    right-hand log renders, one line per batch.
-    """
-
-    __tablename__ = "thought_batches"
-
-    id = Column(Integer, primary_key=True, index=True)
-    topic_id = Column(Integer, ForeignKey("topics.id"), nullable=False, index=True)
-    label = Column(Text, nullable=True)  # short summary, written by Claude
-    # Public R2 URL of an image pinned to this card (nullable). Set via the
-    # /focus/cards/image ingest — a photo uploaded in a Claude conversation,
-    # POSTed out by the code-execution sandbox (the model can't forward bytes;
-    # the sandbox can). The arcs canvas renders <img src> above the label.
-    image_url = Column(Text, nullable=True)
-    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    # Bumped to now() every time a thought appends — drives the 30-min batch
-    # window and orders the log.
-    ended_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-
-
-class Thought(Base):
-    """A single logged thought. Topic is reached THROUGH the batch (one topic
-    per thought — a thought spanning two topics has to pick one)."""
-
-    __tablename__ = "thoughts"
-
-    id = Column(Integer, primary_key=True, index=True)
-    content = Column(Text, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
-    batch_id = Column(Integer, ForeignKey("thought_batches.id"), nullable=False, index=True)
-
-
 class Person(Base):
     """Someone Daniel mentions or owes something to. Scope discipline (plan):
     a table and a join, nothing more — no relationship graph, no contact sync,
@@ -899,85 +865,6 @@ class Person(Base):
     # How Daniel knows them — "CMU club tennis". Free text.
     context = Column(Text, nullable=True)
     first_seen = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
-class Mention(Base):
-    """Join: a Thought mentions a Person. Rolls up to batches/topics for free.
-    Schema-ready but UNWRITTEN in v1 — none of the six MCP tools populate it
-    yet (like Reminder.parent_id). Reserved for when thought-logging starts
-    tagging people."""
-
-    __tablename__ = "mentions"
-    __table_args__ = (
-        UniqueConstraint("thought_id", "person_id", name="uq_mention_thought_person"),
-    )
-
-    id = Column(Integer, primary_key=True, index=True)
-    thought_id = Column(Integer, ForeignKey("thoughts.id"), nullable=False, index=True)
-    person_id = Column(Integer, ForeignKey("focus_people.id"), nullable=False, index=True)
-
-
-class Reminder(Base):
-    """A thing to do (reminder) or a thing owed to someone (promise).
-
-      - type='reminder' — a dated todo; merged with Google Calendar events at
-        display time.
-      - type='promise'  — carries the active→kept|broken lifecycle. `owed_to`
-        names the Person it's owed to; null = owed to yourself (the common
-        case), and the display drops the "owed to" prefix.
-
-    DEADLINES (changed 2026-07-28, the ambient-dash rebuild). Every row now
-    carries a `due_at`: the dashboard splits SHORT-TERM (due ≤ 7d, bucketed
-    overdue/today/tomorrow/this week) from LONGER-TERM (further out), and a
-    row with no date can't land in either. `set_reminder` therefore defaults an
-    omitted due to today's local EOD and flags it `due_is_default`.
-
-    That flag is what keeps the change honest. A due Gooni invented must never
-    feed the broken-promise machinery — see `due_is_default` below and the
-    guard in `auto_break_overdue`. Age is still surfaced for promises owed to
-    other people ("owed to Yash · 6d"), where how long you've owed it is the
-    point; it's no longer the ordering mechanism.
-    """
-
-    __tablename__ = "reminders"
-
-    id = Column(Integer, primary_key=True, index=True)
-    # 'reminder' | 'promise'. A promise is just a reminder with owed_to set,
-    # but the type is explicit so the notch can section without inferring.
-    type = Column(String, nullable=False, default="reminder", index=True)
-    content = Column(String, nullable=False)
-    # Person this is owed to. Null = owed to yourself (the common case).
-    owed_to = Column(Integer, ForeignKey("focus_people.id"), nullable=True, index=True)
-    # Still nullable at the schema level (pre-rebuild rows have none, and the
-    # column is written by several paths), but every NEW row gets one — see the
-    # class docstring. Read it together with `due_is_default`.
-    due_at = Column(DateTime, nullable=True, index=True)
-    # True when NOBODY chose this deadline — the service defaulted it to today's
-    # local EOD because every promise now carries a due date (the dashboard
-    # splits short-term vs longer-term on due distance). The distinction is
-    # load-bearing, not bookkeeping: `auto_break_overdue` must NEVER break a
-    # defaulted due. Gooni inventing a deadline and then marking you broken for
-    # missing it is the system lying about a commitment you never made. A
-    # defaulted due that goes stale rolls forward to today instead.
-    due_is_default = Column(Boolean, nullable=False, default=False)
-    done = Column(Boolean, nullable=False, default=False, index=True)
-    # Promise lifecycle — the said-vs-done spine. 'active' = still standing;
-    # 'kept' = fulfilled; 'broken' = failed (he smoked, the deadline blew by).
-    # Reminders effectively only ever go active→kept (a check-off), but promises
-    # need the third state so the dashboard can render the GAP: a broken promise
-    # in warn colour with how long it lasted (created_at → resolved_at). `done`
-    # stays as the legacy check-off boolean and is kept in sync (done = state
-    # != 'active') so old callers don't break.
-    state = Column(String, nullable=False, default="active", index=True)
-    # Stamped when state leaves 'active' (kept/broken); cleared on revive. The
-    # broken card reads "lasted Nd" off (resolved_at - created_at).
-    resolved_at = Column(DateTime, nullable=True)
-    # Often a reminder falls out of a thought ("remind me to..."). Optional.
-    thought_id = Column(Integer, ForeignKey("thoughts.id"), nullable=True, index=True)
-    # UNUSED in v1 — reserved for on-screen checklists (multi-step tasks).
-    parent_id = Column(Integer, ForeignKey("reminders.id"), nullable=True, index=True)
-    attachment_path = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
 class Attachment(Base):
