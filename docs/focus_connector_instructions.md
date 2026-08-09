@@ -13,7 +13,7 @@ The MCP connector is **mounted into the main app** at `/mcp` (`app/focus_mcp.py`
 - No tunnel, no local server, works from your phone (this is what replaces WhatsApp on the go).
 - Auth: the `/mcp` endpoint is authless-by-design (exempt from the Bearer middleware; tools run in-process). Access = the endpoint's obscurity + (later) OAuth. DNS-rebinding protection is off by default there (deliberately public); pin hosts with the `FOCUS_MCP_ALLOWED_HOSTS` fly secret if you want it on.
 
-Then jump to §3 (auto-logging). §1–2 below are the LOCAL-DEV path (standalone `mcp/focus_server.py` + a tunnel) — only needed to iterate before a Fly deploy exists.
+Then jump to §3 (auto-logging). §1–2 below are the LOCAL-DEV path (standalone `mcp_servers/focus_server.py` + a tunnel) — only needed to iterate before a Fly deploy exists.
 
 ## 1. Local dev: run the standalone server + tunnel
 
@@ -25,7 +25,7 @@ GOONI_URL=http://localhost:8000 \
 GOONI_AUTH_PASSWORD="$AUTH_PASSWORD" \
 FOCUS_MCP_PORT=8001 \
 FOCUS_MCP_ALLOWED_HOSTS="*" \
-python mcp/focus_server.py            # → http://127.0.0.1:8001/mcp
+python mcp_servers/focus_server.py            # → http://127.0.0.1:8001/mcp
 
 # In another tab, expose it — use cloudflared, NOT ngrok (see below):
 cloudflared tunnel --url http://localhost:8001   # → prints https://<random>.trycloudflare.com

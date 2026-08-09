@@ -2,7 +2,7 @@
   "mcpServers": {
     "gooni": {
       "command": "/ABSOLUTE/PATH/TO/gooni/venv/bin/python",
-      "args": ["/ABSOLUTE/PATH/TO/gooni/mcp/server.py"],
+      "args": ["/ABSOLUTE/PATH/TO/gooni/mcp_servers/server.py"],
       "env": {
         "GOONI_URL": "https://gooni-bot.fly.dev",
         "GOONI_AUTH_PASSWORD": "<your-prod-AUTH_PASSWORD>"

@@ -4,16 +4,16 @@ Born from the v2-nuke fallout: two subsystems (proactive_nudge, the eval
 harness) sat broken in prod for a day because they imported models the nuke
 had deleted. Both hid behind lazy boundaries — a function-body import and a
 subprocess — so `python -c "from app.main import app"` never walked them.
-This walks EVERY module under app/ + evals/ + scripts/ so the next table
-drop can't strand an importer anywhere.
+This walks EVERY module under app/ + evals/ + scripts/ + mcp_servers/ so the
+next table drop can't strand an importer anywhere.
 
-(mcp/server.py is excluded from import: the repo dir shadows the pip `mcp`
-package under import machinery, so it's syntax-checked via ast instead.)
+(mcp_servers/ used to be `mcp/`, which shadowed the pip `mcp` SDK and had to be
+syntax-checked via ast instead of imported. Renamed — it's a real import now,
+which is also the regression test for that shadowing ever coming back.)
 
 Run: python tests/test_imports.py   (no LLM, no network; touches local DB
 only through the usual import-time alembic upgrade in app.main)
 """
-import ast
 import importlib
 import pkgutil
 import sys
@@ -39,11 +39,12 @@ def _walk(pkg) -> list[str]:
 def main() -> int:
     import app
     import evals
+    import mcp_servers
     import scripts
 
     failures: list[str] = []
     checked = 0
-    for pkg in (app, evals, scripts):
+    for pkg in (app, evals, mcp_servers, scripts):
         for name in _walk(pkg):
             checked += 1
             try:
@@ -51,12 +52,21 @@ def main() -> int:
             except Exception as e:  # noqa: BLE001 — we want the full report
                 failures.append(f"{name}: {type(e).__name__}: {e}")
 
-    # mcp/server.py — syntax check only (see module docstring).
+    # The pip `mcp` SDK must resolve to site-packages, not to anything in the
+    # repo. This is the shadowing regression guard: if a top-level `mcp/`
+    # package ever reappears, `mcp.server.fastmcp` stops existing and /mcp
+    # silently 404s in prod. Assert the real SDK, from outside the repo.
     checked += 1
     try:
-        ast.parse((REPO_ROOT / "mcp" / "server.py").read_text())
-    except SyntaxError as e:
-        failures.append(f"mcp/server.py: SyntaxError: {e}")
+        import mcp.server.fastmcp as _sdk
+
+        sdk_path = Path(_sdk.__file__).resolve()
+        if REPO_ROOT in sdk_path.parents:
+            failures.append(
+                f"pip `mcp` SDK is shadowed by a repo path: {sdk_path}"
+            )
+    except Exception as e:  # noqa: BLE001
+        failures.append(f"mcp.server.fastmcp: {type(e).__name__}: {e}")
 
     if failures:
         print(f"FAIL — {len(failures)}/{checked} modules broken:")
