@@ -44,27 +44,41 @@ test("the fragment is always dropped (implicit-flow tokens live there)", () => {
 });
 
 /**
- * The matching table. Segment matching replaced substring matching because
- * `auth` ate `author`/`authors` and `sig` ate `assignee`/`design`/`designer`/
- * `insight` — real params on GitHub issue filters and blog author filters,
- * whose values were destroyed before the interval was ever buffered.
+ * THE MATCHING TABLE. This is the regression net, not an illustration — the
+ * list has now broken in three different directions:
  *
- * Table-driven on purpose: a later edit to the credential set that
- * reintroduces over-redaction has to fail here by name.
+ *  - substring matching over-redacted (`auth`→`author`, `sig`→`assignee`)
+ *  - pure segment matching leaked every camelCase name (`accessToken`)
+ *  - whole-name-only would have dropped `api_key`
+ *
+ * so every name is pinned by literal, in the SAME ORDER as the identical table
+ * in tests/test_browser_intervals.py — the server floor must agree case for
+ * case, and the two lists are meant to be diffable by eye.
  */
-const KEPT = ["assignee", "author", "authors", "design", "designer", "insight",
-  "zipcode", "keyword", "real_estate", "v", "next", "t"];
+const KEPT = [
+  "assignee", "author", "authors", "design", "designer", "insight",
+  "zip_code", "country-code", "error_code", "promo_code",
+  "sort_key", "product_key", "us_state", "page_state",
+  // Extras beyond the pinned list, same spirit.
+  "zipcode", "keyword", "real_estate", "v", "next", "t",
+];
 
-const REDACTED_NAMES = ["auth", "sig", "token", "password", "secret",
-  "auth_token", "access_token", "id_token", "x-amz-signature", "api_key",
-  "code", "key", "state", "pwd", "otp", "passwd", "session", "apikey",
-  "authorization", "credential", "signature", "client_secret", "session_id",
-  "X-Amz-Security-Token", "refresh_token", "my_auth_token"];
+const REDACTED_NAMES = [
+  "auth", "sig", "token", "password", "secret", "code", "key", "state",
+  "auth_token", "access_token", "id_token", "api_key", "x-amz-signature",
+  "accessToken", "idToken", "authToken", "sessionId", "clientSecret",
+  "jsessionid", "phpsessid", "csrftoken",
+  // Extras beyond the pinned list, same spirit.
+  "pwd", "otp", "passwd", "session", "apikey", "authorization", "credential",
+  "signature", "client_secret", "session_id", "X-Amz-Security-Token",
+  "refresh_token", "my_auth_token",
+];
 
 test("innocent param names keep their values", () => {
   for (const name of KEPT) {
     assert.equal(isSecretParam(name), false, `${name} must NOT be redacted`);
-    // …and through the real entry point, not just the predicate.
+    // …and through the real entry point, so a refactor that bypasses the
+    // matcher is caught too.
     const r = scrubUrl(`https://example.com/x?${encodeURIComponent(name)}=dani`);
     assert.match(r.url, /=dani/, `${name} lost its value`);
   }
@@ -79,22 +93,51 @@ test("credential-bearing param names are redacted", () => {
   }
 });
 
-test("a novel compound is caught by its segments, not by an entry of its own", () => {
-  // This is what segment matching buys over whole-name matching: nobody has to
-  // have predicted `my_auth_token` for it to be caught.
+test("each of the three checks is load-bearing on its own", () => {
+  // 1. squashed whole-name — the only thing that can catch a name with no
+  //    boundary at all, and what keeps api_key covered now that `key` is not a
+  //    segment.
+  assert.equal(isSecretParam("jsessionid"), true);
+  assert.equal(isSecretParam("api_key"), true);
+  assert.equal(isSecretParam("apiKey"), true);
+  // 2. whole-name only — bare OAuth params go, their compounds stay.
+  assert.equal(isSecretParam("code"), true);
+  assert.equal(isSecretParam("zip_code"), false);
+  assert.equal(isSecretParam("key"), true);
+  assert.equal(isSecretParam("sort_key"), false);
+  assert.equal(isSecretParam("state"), true);
+  assert.equal(isSecretParam("us_state"), false);
+  // 3. segments, including camelCase and digit boundaries — nobody has to have
+  //    predicted the compound for it to be caught.
   assert.equal(isSecretParam("my_auth_token"), true);
   assert.equal(isSecretParam("gh-session-key"), true);
+  assert.equal(isSecretParam("clientSecret"), true);
+  assert.equal(isSecretParam("sha256Sig"), true);
   // …while the same rule leaves a compound of innocent words alone.
   assert.equal(isSecretParam("sort-by-author"), false);
   assert.equal(isSecretParam("design_system"), false);
 });
 
-test("the scrub list is overridable without a rebuild", () => {
+test("the segment list is overridable without a rebuild", () => {
   const config = { segments: ["nonce"] };
-  const r = scrubUrl("https://example.com/?nonce=abc&code=keepme", config);
+  const r = scrubUrl("https://example.com/?nonce=abc&topic=keepme", config);
   assert.match(r.url, /nonce=REDACTED/);
-  // A caller-supplied list REPLACES the defaults — otherwise it isn't editable.
-  assert.match(r.url, /code=keepme/);
+  // A caller-supplied list REPLACES the segment defaults — otherwise it isn't
+  // editable. `token` is gone from the set here, so a name reachable ONLY
+  // through the segment check keeps its value.
+  assert.match(r.url, /topic=keepme/);
+  assert.equal(isSecretParam("refresh_token", config), false);
+  // …but `access_token` squashes to `accesstoken`, which check 1 still catches.
+  assert.equal(isSecretParam("access_token", config), true);
+});
+
+test("trimming the editable list cannot switch off the structural checks", () => {
+  // Checks 1 and 2 are not editorial — a name with no boundary to split on and
+  // the three bare OAuth params. An empty segment list must not disable them.
+  const config = { segments: ["nonce"] };
+  const r = scrubUrl("https://example.com/cb?code=abc&jsessionid=xyz", config);
+  assert.match(r.url, /code=REDACTED/);
+  assert.match(r.url, /jsessionid=REDACTED/);
 });
 
 test("HTTP-basic credentials in the URL are never recorded", () => {

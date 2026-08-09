@@ -117,16 +117,27 @@ def _parse_dt(raw) -> datetime | None:
         return None
 
 
-# Credential-bearing NAME SEGMENTS. The param name is lowercased, split on `_`
-# and `-`, and redacted if ANY segment is in here — the SAME algorithm as
-# extension/src/scrub.js, over the same segments. A floor that matched
-# differently from the thing it backstops would not be a floor.
+# THE MATCHER IS THREE CHECKS, and a param name is redacted if ANY fires. This
+# is the SAME algorithm as extension/src/scrub.js over the same three sets — a
+# floor that matched differently from the thing it backstops would not be a
+# floor — and both sides are pinned by the same literal KEPT/REDACTED table
+# (tests/test_browser_intervals.py and extension/tests/scrub.test.js).
 #
-# Segments, not substrings: `auth` as a substring ate `author`/`authors` and
-# `sig` ate `assignee`/`design`/`designer`/`insight`, destroying the values of
-# ordinary params on real sites. Segments keep the family coverage that makes
-# the list short (`token` catches access_token, id_token, X-Amz-Security-Token,
-# and a novel compound like my_auth_token) without that collateral.
+# Each check exists because a simpler design failed in one direction or the
+# other, and both directions are unacceptable: over-redaction destroys the value
+# pre-buffer (unrecoverable), under-redaction stores a live credential.
+#
+#  1. SQUASHED whole-name — the only check that catches a run-together name with
+#     no boundary to split on (`jsessionid`), and what keeps `api_key` covered
+#     once `key` stops being a segment. It can't reach the innocent compounds:
+#     zip_code→zipcode, sort_key→sortkey, us_state→usstate are not in the set.
+#  2. WHOLE-NAME only (code, key, state) — the bare OAuth params. Deliberately
+#     absent from the segment set, where they redacted `zip_code`,
+#     `country-code`, `error_code`, `sort_key`, `us_state` and friends.
+#  3. SEGMENT — split on `_`, `-`, camelCase and digit boundaries. The camelCase
+#     split is load-bearing: without it `accessToken`/`sessionId`/`clientSecret`
+#     stored verbatim. Segments keep the list short without substring
+#     collateral (`auth` catches my_auth_token, not `author`/`authors`).
 #
 # NOT user-editable, deliberately: the extension's copy is the configurable one,
 # and a floor a broken or hostile client could turn off is decoration.
@@ -143,22 +154,59 @@ SCRUB_PARAM_SEGMENTS = frozenset(
         "passwd",
         "pwd",
         "session",
-        "key",
-        "apikey",
         "otp",
-        "code",
-        "state",
+    }
+)
+
+SCRUB_PARAM_WHOLE_NAMES = frozenset({"code", "key", "state"})
+
+SCRUB_PARAM_SQUASHED_NAMES = frozenset(
+    {
+        "jsessionid",
+        "phpsessid",
+        "sessionid",
+        "csrftoken",
+        "accesstoken",
+        "apikey",
     }
 )
 
 _REDACTED = "REDACTED"
 
-_SEGMENT_SPLIT = re.compile(r"[_-]+")
+_SEPARATORS = re.compile(r"[_-]+")
+_SEGMENT_SPLIT = re.compile(r"[\s_-]+")
+_CAMEL_TAIL = re.compile(r"([a-z0-9])([A-Z])")
+_CAMEL_RUN = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_ALPHA_DIGIT = re.compile(r"([a-zA-Z])([0-9])")
+_DIGIT_ALPHA = re.compile(r"([0-9])([a-zA-Z])")
+
+
+def _squash_name(name: str) -> str:
+    return _SEPARATORS.sub("", (name or "").lower())
+
+
+def _param_segments(name: str) -> list[str]:
+    """Lowercase segments split on `_`, `-`, camelCase and digit boundaries.
+
+    Mirrors extension/src/scrub.js::paramSegments substitution for substitution.
+    """
+    s = str(name or "")
+    s = _CAMEL_TAIL.sub(r"\1 \2", s)
+    s = _CAMEL_RUN.sub(r"\1 \2", s)
+    s = _ALPHA_DIGIT.sub(r"\1 \2", s)
+    s = _DIGIT_ALPHA.sub(r"\1 \2", s)
+    return [seg for seg in _SEGMENT_SPLIT.split(s.lower()) if seg]
 
 
 def _is_secret_param(name: str) -> bool:
-    segments = _SEGMENT_SPLIT.split((name or "").lower())
-    return any(seg in SCRUB_PARAM_SEGMENTS for seg in segments if seg)
+    lower = (name or "").lower()
+    if not lower:
+        return False
+    if _squash_name(lower) in SCRUB_PARAM_SQUASHED_NAMES:
+        return True
+    if lower in SCRUB_PARAM_WHOLE_NAMES:
+        return True
+    return any(seg in SCRUB_PARAM_SEGMENTS for seg in _param_segments(name))
 
 
 def scrub_url(raw: str | None) -> str | None:

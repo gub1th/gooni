@@ -338,24 +338,31 @@ def main() -> int:
         "a query-less path must round-trip untouched",
     )
 
-    # ── the credential-name table: SEGMENTS, not substrings ──────────────────
-    # Substring matching was the first cut and it silently destroyed data:
-    # `auth` matched `author`/`authors`, `sig` matched `assignee`/`design`/
-    # `designer`/`insight` — real params on GitHub issue filters and blog author
-    # filters. Table-driven so a later edit to the credential set that
-    # reintroduces over-redaction has to fail here by name. This floor must
-    # match the extension's copy (extension/tests/scrub.test.js runs the same
-    # table) — a floor that matched differently would not be one.
+    # ── THE CREDENTIAL-NAME TABLE ────────────────────────────────────────────
+    # The regression net, not an illustration. This list has broken in three
+    # different directions: substring matching over-redacted (`auth`→`author`,
+    # `sig`→`assignee`), pure segment matching leaked every camelCase name
+    # (`accessToken` stored a live bearer token verbatim), and whole-name-only
+    # would have dropped `api_key`. Hence three checks — squashed whole-name,
+    # whole-name, segment — and every name pinned by literal, in the SAME ORDER
+    # as the identical table in extension/tests/scrub.test.js. The two must
+    # agree case for case; a floor that matched differently would not be one.
     kept_names = [
         "assignee", "author", "authors", "design", "designer", "insight",
+        "zip_code", "country-code", "error_code", "promo_code",
+        "sort_key", "product_key", "us_state", "page_state",
+        # Extras beyond the pinned list, same spirit.
         "zipcode", "keyword", "real_estate", "v", "next", "t",
     ]
     secret_names = [
-        "auth", "sig", "token", "password", "secret", "auth_token",
-        "access_token", "id_token", "x-amz-signature", "api_key", "code",
-        "key", "state", "pwd", "otp", "passwd", "session", "apikey",
-        "authorization", "credential", "signature", "client_secret",
-        "session_id", "X-Amz-Security-Token", "refresh_token", "my_auth_token",
+        "auth", "sig", "token", "password", "secret", "code", "key", "state",
+        "auth_token", "access_token", "id_token", "api_key", "x-amz-signature",
+        "accessToken", "idToken", "authToken", "sessionId", "clientSecret",
+        "jsessionid", "phpsessid", "csrftoken",
+        # Extras beyond the pinned list, same spirit.
+        "pwd", "otp", "passwd", "session", "apikey", "authorization",
+        "credential", "signature", "client_secret", "session_id",
+        "X-Amz-Security-Token", "refresh_token", "my_auth_token",
     ]
     for name in kept_names:
         check(bas._is_secret_param(name) is False, f"{name} must NOT be a secret param")
@@ -367,8 +374,19 @@ def main() -> int:
         check("sekrit" not in out, f"{name} leaked its value: {out}")
         check("REDACTED" in out, f"{name} not marked redacted: {out}")
 
-    # Segment matching is what catches a compound nobody listed…
+    # Each of the three checks is load-bearing on its own.
+    # 1. squashed whole-name — the only thing that catches a name with no
+    #    boundary at all, and what keeps api_key covered now `key` isn't a segment.
+    check(bas._is_secret_param("jsessionid") is True, "squashed check dead")
+    check(bas._is_secret_param("apiKey") is True, "apiKey missed")
+    # 2. whole-name only — bare OAuth params go, their compounds stay.
+    check(bas._is_secret_param("code") is True, "bare code kept")
+    check(bas._is_secret_param("zip_code") is False, "zip_code over-redacted")
+    check(bas._is_secret_param("sort_key") is False, "sort_key over-redacted")
+    check(bas._is_secret_param("us_state") is False, "us_state over-redacted")
+    # 3. segments, incl. camelCase + digit boundaries — a compound nobody listed.
     check(bas._is_secret_param("gh-session-key") is True, "compound secret missed")
+    check(bas._is_secret_param("sha256Sig") is True, "digit-boundary secret missed")
     # …without touching a compound of innocent words.
     check(bas._is_secret_param("sort-by-author") is False, "innocent compound redacted")
 
@@ -376,12 +394,16 @@ def main() -> int:
     bas.ingest_batch(
         db,
         [_iv("gh-filter", host="github.com", path="/issues",
-             url="https://github.com/issues?assignee=dani&author=dani&code=abc123")],
+             url="https://github.com/issues?assignee=dani&author=dani&zip_code=94107"
+                 "&code=abc123&accessToken=sekrit&jsessionid=deadbeef")],
     )
     gh = db.query(BrowserInterval).filter_by(client_id="gh-filter").one()
     check("assignee=dani" in gh.url, f"assignee over-redacted on ingest: {gh.url}")
     check("author=dani" in gh.url, f"author over-redacted on ingest: {gh.url}")
+    check("zip_code=94107" in gh.url, f"zip_code over-redacted on ingest: {gh.url}")
     check("code=REDACTED" in gh.url, f"oauth code survived ingest: {gh.url}")
+    check("sekrit" not in gh.url, f"camelCase bearer token stored: {gh.url}")
+    check("deadbeef" not in gh.url, f"session id stored: {gh.url}")
 
     # ── HTTP-basic userinfo never lands in the log ───────────────────────────
     # A `user:password@` is a strictly stronger credential than an OAuth code,

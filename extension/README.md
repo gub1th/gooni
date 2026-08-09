@@ -69,29 +69,48 @@ web attention.
 
 ### Editing the scrub list (no rebuild)
 
-Options page ▸ **Privacy: scrubbed query parameters**. One list of
-**credential name segments**.
+A parameter's value is redacted if **any of three checks** fires on its name.
+Three, because the two simpler designs were each wrong in one direction, and
+both directions cost something real — over-redaction destroys the value before
+the interval is buffered (unrecoverable), under-redaction stores a live
+credential.
 
-Matching is by **segment**, not substring and not whole-name: the parameter
-name is lowercased, split on `_` and `-`, and the value is redacted if any
-resulting piece is on the list. So `token` covers `access_token`, `id_token`,
-`refresh_token` and `X-Amz-Security-Token`, and a compound nobody thought to
-list — `my_auth_token`, `gh-session-key` — is caught by its parts. What it does
-*not* do is eat ordinary params: `auth` leaves `author`/`authors` alone, `sig`
-leaves `assignee`/`design`/`designer`/`insight` alone, `code` leaves `zipcode`
-alone. (Substring matching was the first cut, and it redacted every one of
-those — a GitHub issue filter or a blog author filter lost its value before the
-interval was even buffered.)
+1. **Squashed whole-name.** Lowercase, delete every `_`/`-`, compare against
+   `jsessionid`, `phpsessid`, `sessionid`, `csrftoken`, `accesstoken`, `apikey`.
+   This is the only check that can catch a run-together name with no boundary
+   to split on, and it is also what keeps `api_key` covered once `key` stops
+   being a segment.
+2. **Whole name only:** `code`, `key`, `state`. Bare `?code=`/`?state=` are the
+   OAuth pair. They are deliberately *not* segments — as segments they ate
+   `zip_code`, `country-code`, `error_code`, `promo_code`, `sort_key`,
+   `product_key`, `us_state`, `page_state`.
+3. **Segments.** Lowercase, split on `_`, `-`, **camelCase** boundaries and
+   digit boundaries, redact if any piece is on the list. So `token` covers
+   `access_token`, `id_token`, `X-Amz-Security-Token` *and* `accessToken`,
+   `idToken`, `authToken`; `session` covers `sessionId`; `secret` covers
+   `clientSecret`; and a compound nobody thought to list — `my_auth_token`,
+   `gh-session-key` — is caught by its parts. What it does *not* do is eat
+   ordinary params: `auth` leaves `author`/`authors` alone, `sig` leaves
+   `assignee`/`design`/`designer`/`insight` alone.
 
-Saving the list **replaces** the default rather than extending it — a list you
-can only add to is not editable. **Reset scrub list to defaults** puts the
-defaults back in the form so the usual edit is "defaults plus mine".
+The **segment list (check 3) is the editable one** — it is the family list, the
+thing you extend when a site invents a new way to name a secret. Saving it
+**replaces** the default rather than extending it; a list you can only add to
+is not editable. **Reset scrub list to defaults** puts the defaults back in the
+form so the usual edit is "defaults plus mine". Checks 1 and 2 are structural
+rather than editorial (names with no boundary; the three bare OAuth params) and
+stay fixed, so emptying the textarea cannot switch them off.
 
-Defaults live in `src/scrub.js` (`SCRUB_SEGMENTS`). The server-side floor in
-`app/services/browser_activity_service.py` runs the **same algorithm over the
-same segments** and is **not user-editable** — trimming an entry here narrows
-what the extension redacts, but a broken or hand-rolled client still cannot get
-under the floor. That floor additionally strips HTTP-basic userinfo
+Defaults live in `src/scrub.js` (`SCRUB_SEGMENTS`, `SCRUB_WHOLE_NAMES`,
+`SCRUB_SQUASHED_NAMES`). The server-side floor in
+`app/services/browser_activity_service.py` runs the **same three checks over
+the same three sets** and is **not user-editable at all** — trimming an entry
+here narrows what the extension redacts, but a broken or hand-rolled client
+still cannot get under the floor. Both sides are pinned by the same literal
+KEPT/REDACTED table (`tests/scrub.test.js` and `tests/test_browser_intervals.py`)
+so they cannot drift apart.
+
+That floor additionally strips HTTP-basic userinfo
 (`https://alice:hunter2@host/…` → `https://REDACTED@host/…`); the extension
 never sends it in the first place, since it rebuilds the URL from `u.host`.
 

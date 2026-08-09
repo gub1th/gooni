@@ -62,12 +62,22 @@
 
     <label for="scrubSegments">Credential name segments (one per line)</label>
     <p class="hint">
-      The parameter name is lowercased and split on <code>_</code> and
-      <code>-</code>; if any piece is on this list, the value is redacted. So
-      <code>token</code> covers <code>access_token</code>, <code>id_token</code>
-      and <code>X-Amz-Security-Token</code>, while <code>sig</code> does
-      <em>not</em> touch <code>design</code> and <code>auth</code> does not touch
+      The parameter name is lowercased and split on <code>_</code>,
+      <code>-</code>, camelCase and digit boundaries; if any piece is on this
+      list, the value is redacted. So <code>token</code> covers
+      <code>access_token</code>, <code>X-Amz-Security-Token</code> and
+      <code>accessToken</code>, while <code>sig</code> does <em>not</em> touch
+      <code>design</code> and <code>auth</code> does not touch
       <code>author</code>.
+    </p>
+    <p class="hint">
+      Two fixed checks run alongside this list and cannot be edited away: the
+      bare OAuth names <code>code</code>, <code>key</code> and
+      <code>state</code> (whole name only, so <code>zip_code</code> survives),
+      and the run-together names <code>jsessionid</code>,
+      <code>phpsessid</code>, <code>sessionid</code>, <code>csrftoken</code>,
+      <code>accesstoken</code>, <code>apikey</code> (which also covers
+      <code>api_key</code>).
     </p>
     <textarea id="scrubSegments"></textarea>
 
