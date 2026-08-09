@@ -37,6 +37,7 @@ fixed floor.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -116,38 +117,48 @@ def _parse_dt(raw) -> datetime | None:
         return None
 
 
-# Query params whose VALUE is a credential. Matched case-insensitively against
-# the param name as a substring, so `access_token`, `id_token`, `refresh_token`
-# and `X-Amz-Security-Token` all fall out of one entry. Kept in sync by hand
-# with extension/src/scrub.js — that copy is the user-editable one; this is the
-# floor a bad client can't get under.
-SCRUB_PARAM_SUBSTRINGS = (
-    "token",
-    "secret",
-    "password",
-    "passwd",
-    "auth",
-    "session",
-    "sig",
-    "signature",
-    "credential",
-    "apikey",
-    "api_key",
+# Credential-bearing NAME SEGMENTS. The param name is lowercased, split on `_`
+# and `-`, and redacted if ANY segment is in here — the SAME algorithm as
+# extension/src/scrub.js, over the same segments. A floor that matched
+# differently from the thing it backstops would not be a floor.
+#
+# Segments, not substrings: `auth` as a substring ate `author`/`authors` and
+# `sig` ate `assignee`/`design`/`designer`/`insight`, destroying the values of
+# ordinary params on real sites. Segments keep the family coverage that makes
+# the list short (`token` catches access_token, id_token, X-Amz-Security-Token,
+# and a novel compound like my_auth_token) without that collateral.
+#
+# NOT user-editable, deliberately: the extension's copy is the configurable one,
+# and a floor a broken or hostile client could turn off is decoration.
+SCRUB_PARAM_SEGMENTS = frozenset(
+    {
+        "auth",
+        "authorization",
+        "credential",
+        "sig",
+        "signature",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "pwd",
+        "session",
+        "key",
+        "apikey",
+        "otp",
+        "code",
+        "state",
+    }
 )
-
-# Exact-match names. `code`, `key` and `state` are too short/common to match as
-# substrings ("zipcode", "keyword", "estate") but are the standard names for an
-# OAuth authorization code, an API key and a CSRF nonce.
-SCRUB_PARAM_EXACT = ("code", "key", "state", "id_token", "pwd", "otp")
 
 _REDACTED = "REDACTED"
 
+_SEGMENT_SPLIT = re.compile(r"[_-]+")
+
 
 def _is_secret_param(name: str) -> bool:
-    n = (name or "").lower()
-    if n in SCRUB_PARAM_EXACT:
-        return True
-    return any(frag in n for frag in SCRUB_PARAM_SUBSTRINGS)
+    segments = _SEGMENT_SPLIT.split((name or "").lower())
+    return any(seg in SCRUB_PARAM_SEGMENTS for seg in segments if seg)
 
 
 def scrub_url(raw: str | None) -> str | None:
@@ -166,6 +177,16 @@ def scrub_url(raw: str | None) -> str | None:
     bug in the strip pass silently, and this is the one path where a silent
     failure means storing a credential verbatim.
 
+    HTTP-basic userinfo (`https://alice:hunter2@host/…`) is stripped too. It is
+    a strictly stronger credential than an OAuth code, and it lived under this
+    floor for two reasons at once: the no-query/no-fragment early return handed
+    such a URL straight back, and `urlunsplit` re-emitted `netloc` verbatim when
+    it didn't. So the netloc rebuild happens FIRST and the early return is
+    conditioned on it being a no-op. Host and port are carried through exactly
+    as written (an IPv6 literal keeps its brackets, the host keeps its case);
+    only the credentials are replaced, and by `REDACTED@` rather than by
+    nothing, so the log still shows a credentialed URL was visited.
+
     Values are replaced with `REDACTED` rather than dropped, so the log still
     shows that a callback URL *had* a code without recording it. The fragment
     is dropped wholesale — implicit-flow OAuth returns `#access_token=…` there
@@ -177,13 +198,22 @@ def scrub_url(raw: str | None) -> str | None:
         parts = urlsplit(raw)
     except ValueError:
         return raw
-    if not parts.query and not parts.fragment:
+    netloc = _strip_userinfo(parts.netloc)
+    if netloc == parts.netloc and not parts.query and not parts.fragment:
         return raw
     pairs = parse_qsl(parts.query, keep_blank_values=True)
     cleaned = [(k, _REDACTED if _is_secret_param(k) else v) for k, v in pairs]
     return urlunsplit(
-        (parts.scheme, parts.netloc, parts.path, urlencode(cleaned), "")
+        (parts.scheme, netloc, parts.path, urlencode(cleaned), "")
     )
+
+
+def _strip_userinfo(netloc: str) -> str:
+    """`alice:hunter2@host:8443` → `REDACTED@host:8443`; untouched when absent."""
+    if "@" not in netloc:
+        return netloc
+    _, _, hostport = netloc.rpartition("@")
+    return f"{_REDACTED}@{hostport}"
 
 
 def _clean(raw, limit: int) -> str | None:

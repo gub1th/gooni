@@ -69,22 +69,31 @@ web attention.
 
 ### Editing the scrub list (no rebuild)
 
-Options page ▸ **Privacy: scrubbed query parameters**. Two lists:
+Options page ▸ **Privacy: scrubbed query parameters**. One list of
+**credential name segments**.
 
-- **Substring matches** — matched anywhere in the parameter name, so one entry
-  covers a family: `token` catches `access_token`, `id_token`, `refresh_token`,
-  `X-Amz-Security-Token`.
-- **Exact matches** — matched against the whole name, for names too common to
-  match as substrings (`code`, `key`, `state`; matching those as substrings
-  would eat `zipcode`, `keyword`, `estate`).
+Matching is by **segment**, not substring and not whole-name: the parameter
+name is lowercased, split on `_` and `-`, and the value is redacted if any
+resulting piece is on the list. So `token` covers `access_token`, `id_token`,
+`refresh_token` and `X-Amz-Security-Token`, and a compound nobody thought to
+list — `my_auth_token`, `gh-session-key` — is caught by its parts. What it does
+*not* do is eat ordinary params: `auth` leaves `author`/`authors` alone, `sig`
+leaves `assignee`/`design`/`designer`/`insight` alone, `code` leaves `zipcode`
+alone. (Substring matching was the first cut, and it redacted every one of
+those — a GitHub issue filter or a blog author filter lost its value before the
+interval was even buffered.)
 
-Saving a list **replaces** the corresponding default rather than extending it —
-a list you can only add to is not editable. **Reset scrub lists to defaults**
-puts the defaults back in the form so the usual edit is "defaults plus mine".
+Saving the list **replaces** the default rather than extending it — a list you
+can only add to is not editable. **Reset scrub list to defaults** puts the
+defaults back in the form so the usual edit is "defaults plus mine".
 
-Defaults live in `src/scrub.js` (`SCRUB_SUBSTRINGS`, `SCRUB_EXACT`) and are
-mirrored by the server-side floor in
-`app/services/browser_activity_service.py`.
+Defaults live in `src/scrub.js` (`SCRUB_SEGMENTS`). The server-side floor in
+`app/services/browser_activity_service.py` runs the **same algorithm over the
+same segments** and is **not user-editable** — trimming an entry here narrows
+what the extension redacts, but a broken or hand-rolled client still cannot get
+under the floor. That floor additionally strips HTTP-basic userinfo
+(`https://alice:hunter2@host/…` → `https://REDACTED@host/…`); the extension
+never sends it in the first place, since it rebuilds the URL from `u.host`.
 
 ## How an interval is measured
 

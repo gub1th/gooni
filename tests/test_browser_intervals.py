@@ -338,6 +338,91 @@ def main() -> int:
         "a query-less path must round-trip untouched",
     )
 
+    # ── the credential-name table: SEGMENTS, not substrings ──────────────────
+    # Substring matching was the first cut and it silently destroyed data:
+    # `auth` matched `author`/`authors`, `sig` matched `assignee`/`design`/
+    # `designer`/`insight` — real params on GitHub issue filters and blog author
+    # filters. Table-driven so a later edit to the credential set that
+    # reintroduces over-redaction has to fail here by name. This floor must
+    # match the extension's copy (extension/tests/scrub.test.js runs the same
+    # table) — a floor that matched differently would not be one.
+    kept_names = [
+        "assignee", "author", "authors", "design", "designer", "insight",
+        "zipcode", "keyword", "real_estate", "v", "next", "t",
+    ]
+    secret_names = [
+        "auth", "sig", "token", "password", "secret", "auth_token",
+        "access_token", "id_token", "x-amz-signature", "api_key", "code",
+        "key", "state", "pwd", "otp", "passwd", "session", "apikey",
+        "authorization", "credential", "signature", "client_secret",
+        "session_id", "X-Amz-Security-Token", "refresh_token", "my_auth_token",
+    ]
+    for name in kept_names:
+        check(bas._is_secret_param(name) is False, f"{name} must NOT be a secret param")
+        out = bas.scrub_url(f"https://example.com/x?{name}=dani")
+        check(out.endswith("=dani"), f"{name} lost its value: {out}")
+    for name in secret_names:
+        check(bas._is_secret_param(name) is True, f"{name} MUST be a secret param")
+        out = bas.scrub_url(f"https://example.com/x?{name}=sekrit")
+        check("sekrit" not in out, f"{name} leaked its value: {out}")
+        check("REDACTED" in out, f"{name} not marked redacted: {out}")
+
+    # Segment matching is what catches a compound nobody listed…
+    check(bas._is_secret_param("gh-session-key") is True, "compound secret missed")
+    # …without touching a compound of innocent words.
+    check(bas._is_secret_param("sort-by-author") is False, "innocent compound redacted")
+
+    # …and it holds through the ingest path, not just the helper.
+    bas.ingest_batch(
+        db,
+        [_iv("gh-filter", host="github.com", path="/issues",
+             url="https://github.com/issues?assignee=dani&author=dani&code=abc123")],
+    )
+    gh = db.query(BrowserInterval).filter_by(client_id="gh-filter").one()
+    check("assignee=dani" in gh.url, f"assignee over-redacted on ingest: {gh.url}")
+    check("author=dani" in gh.url, f"author over-redacted on ingest: {gh.url}")
+    check("code=REDACTED" in gh.url, f"oauth code survived ingest: {gh.url}")
+
+    # ── HTTP-basic userinfo never lands in the log ───────────────────────────
+    # A `user:password@` is a strictly stronger credential than an OAuth code,
+    # and it got under this floor twice over: the no-query/no-fragment early
+    # return handed the URL straight back, and urlunsplit re-emitted netloc
+    # verbatim when it didn't. Both cases are pinned below.
+    for raw in (
+        "https://alice:hunter2@intranet.example.com/dashboard",
+        "https://alice:hunter2@intranet.example.com/dashboard?tab=1",
+        "https://alice@intranet.example.com/dashboard",
+    ):
+        out = bas.scrub_url(raw)
+        check("hunter2" not in out, f"password stored verbatim: {out}")
+        check("alice" not in out, f"username stored verbatim: {out}")
+        check("intranet.example.com" in out, f"host lost with the credentials: {out}")
+        check("REDACTED@" in out, f"credentialed URL not marked: {out}")
+    # A non-secret param alongside the credentials still survives.
+    check("tab=1" in bas.scrub_url("https://alice:hunter2@x.com/d?tab=1"),
+          "innocent param dropped with the userinfo")
+    # Host and port carry through exactly — case, port, IPv6 brackets.
+    check(
+        bas.scrub_url("https://u:p@Host.Example.com:8443/x")
+        == "https://REDACTED@Host.Example.com:8443/x",
+        f"host/port mangled: {bas.scrub_url('https://u:p@Host.Example.com:8443/x')}",
+    )
+    check(
+        bas.scrub_url("https://u:p@[::1]:8443/x") == "https://REDACTED@[::1]:8443/x",
+        f"IPv6 literal mangled: {bas.scrub_url('https://u:p@[::1]:8443/x')}",
+    )
+    # A URL with no credentials is returned untouched, not rebuilt.
+    check(bas.scrub_url("https://example.com/a/b") == "https://example.com/a/b",
+          "a clean URL must round-trip byte-for-byte")
+
+    bas.ingest_batch(
+        db,
+        [_iv("basic-auth", host="intranet.example.com", path="/dashboard",
+             url="https://alice:hunter2@intranet.example.com/dashboard")],
+    )
+    ba = db.query(BrowserInterval).filter_by(client_id="basic-auth").one()
+    check("hunter2" not in (ba.url or ""), f"basic-auth password stored: {ba.url}")
+
     # ── a YouTube video id is identity, not a secret ─────────────────────────
     bas.ingest_batch(
         db,

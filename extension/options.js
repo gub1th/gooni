@@ -1,6 +1,6 @@
 /**
  * Options page. Two jobs: hold the Gooni connection, and expose the scrub
- * lists so the privacy model can change without a rebuild.
+ * list so the privacy model can change without a rebuild.
  *
  * The password is exchanged for a bearer token via POST /auth (the same
  * exchange the web app does) and only the token is stored — a stored password
@@ -8,7 +8,7 @@
  */
 
 import { CONFIG_KEYS, DEFAULT_BASE_URL, loadConfig } from "./src/config.js";
-import { SCRUB_SUBSTRINGS, SCRUB_EXACT } from "./src/scrub.js";
+import { SCRUB_SEGMENTS } from "./src/scrub.js";
 import { formatLastFlush } from "./src/status.js";
 
 const storage = {
@@ -28,8 +28,7 @@ async function render() {
   const cfg = await loadConfig(storage);
   $("baseUrl").value = cfg.baseUrl || DEFAULT_BASE_URL;
   $("enabled").checked = cfg.enabled;
-  $("scrubSubstrings").value = toLines(cfg.scrub.substrings);
-  $("scrubExact").value = toLines(cfg.scrub.exact);
+  $("scrubSegments").value = toLines(cfg.scrub.segments);
   await renderStatus();
 }
 
@@ -89,8 +88,7 @@ $("save").addEventListener("click", async () => {
   const patch = {
     [CONFIG_KEYS.baseUrl]: baseUrl,
     [CONFIG_KEYS.enabled]: $("enabled").checked,
-    [CONFIG_KEYS.scrubSubstrings]: fromLines($("scrubSubstrings").value),
-    [CONFIG_KEYS.scrubExact]: fromLines($("scrubExact").value),
+    [CONFIG_KEYS.scrubSegments]: fromLines($("scrubSegments").value),
   };
 
   if (password) {
@@ -109,8 +107,7 @@ $("save").addEventListener("click", async () => {
 });
 
 $("resetScrub").addEventListener("click", () => {
-  $("scrubSubstrings").value = toLines(SCRUB_SUBSTRINGS);
-  $("scrubExact").value = toLines(SCRUB_EXACT);
+  $("scrubSegments").value = toLines(SCRUB_SEGMENTS);
   $("saveMsg").textContent = "defaults restored in the form — press Save to apply";
 });
 

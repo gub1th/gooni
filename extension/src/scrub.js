@@ -14,54 +14,70 @@
  * (implicit-flow OAuth returns `#access_token=…` there and a fragment carries
  * no identity worth the risk).
  *
- * EDITING THE LIST: `SCRUB_SUBSTRINGS` / `SCRUB_EXACT` below are the defaults.
- * They can be overridden at runtime from the options page without a rebuild —
- * `loadConfig()` in config.js reads the saved lists, and a saved list REPLACES
- * the corresponding default rather than extending it (an editable list you can
- * only add to isn't editable). The options page seeds its textareas with these
- * defaults, so the normal edit is "defaults plus mine" — but a list saved
- * without them loses them. Gooni re-runs an equivalent strip server-side
- * (browser_activity_service.scrub_url) as a backstop; that copy is a fixed
- * floor, not user-editable, so trimming a default here narrows what the
- * extension redacts but never gets under that floor.
+ * MATCHING IS BY SEGMENT, not substring and not whole-name. The param name is
+ * lowercased, split on `_` and `-`, and redacted if ANY segment is in
+ * SCRUB_SEGMENTS. Substring matching was the first cut and it was wrong in a
+ * way that silently destroyed data: `auth` matched `author`/`authors`, and
+ * `sig` matched `assignee`/`design`/`designer`/`insight` — real params on real
+ * sites (GitHub issue filters, blog author filters), whose values were gone
+ * before the interval was ever buffered and therefore unrecoverable. Whole-name
+ * matching would fix that by giving up the family coverage that makes the list
+ * short; segments keep both, so a novel compound like `my_auth_token` is still
+ * caught while `assignee` is not.
+ *
+ * `app/services/browser_activity_service.py` implements the SAME algorithm over
+ * the same segments — that copy is the floor, and a floor that matched
+ * differently would not be one.
+ *
+ * EDITING THE LIST: `SCRUB_SEGMENTS` below is the default. It can be overridden
+ * at runtime from the options page without a rebuild — `loadConfig()` in
+ * config.js reads the saved list, and a saved list REPLACES the default rather
+ * than extending it (an editable list you can only add to isn't editable). The
+ * options page seeds its textarea with these defaults, so the normal edit is
+ * "defaults plus mine" — but a list saved without them loses them. The
+ * server-side floor is NOT user-editable, so trimming a default here narrows
+ * what the extension redacts but never gets under that floor.
  */
 
 /**
- * Matched as a case-insensitive SUBSTRING of the param name, so one entry
- * covers a family: "token" catches access_token, id_token, refresh_token,
- * X-Amz-Security-Token.
+ * Credential-bearing NAME SEGMENTS. One entry covers a family without eating
+ * innocent words: `token` catches access_token, id_token, refresh_token and
+ * X-Amz-Security-Token; `sig` catches `sig` itself but not `design`.
  */
-export const SCRUB_SUBSTRINGS = [
+export const SCRUB_SEGMENTS = [
+  "auth",
+  "authorization",
+  "credential",
+  "sig",
+  "signature",
   "token",
   "secret",
   "password",
   "passwd",
-  "auth",
+  "pwd",
   "session",
-  "sig",
-  "signature",
-  "credential",
+  "key",
   "apikey",
-  "api_key",
+  "otp",
+  "code",
+  "state",
 ];
-
-/**
- * Matched as the WHOLE param name. These are too short or too common to match
- * as substrings — "code" would eat `zipcode`, "key" would eat `keyword`,
- * "state" would eat `estate` — but each is the standard name for a real
- * credential (OAuth authorization code, API key, CSRF nonce).
- */
-export const SCRUB_EXACT = ["code", "key", "state", "id_token", "pwd", "otp"];
 
 export const REDACTED = "REDACTED";
 
+/** Lowercase a param name and split it into its `_`/`-` separated segments. */
+export function paramSegments(name) {
+  return String(name || "")
+    .toLowerCase()
+    .split(/[_-]+/)
+    .filter(Boolean);
+}
+
 /** True if a query param's value should be redacted. */
 export function isSecretParam(name, config = {}) {
-  const n = String(name || "").toLowerCase();
-  const exact = config.exact || SCRUB_EXACT;
-  const substrings = config.substrings || SCRUB_SUBSTRINGS;
-  if (exact.some((e) => String(e).toLowerCase() === n)) return true;
-  return substrings.some((frag) => n.includes(String(frag).toLowerCase()));
+  const segments = config.segments || SCRUB_SEGMENTS;
+  const set = new Set(segments.map((s) => String(s).trim().toLowerCase()));
+  return paramSegments(name).some((seg) => set.has(seg));
 }
 
 /**

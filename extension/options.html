@@ -52,7 +52,7 @@
       Full URLs are captured for every host — a hostname alone can't tell you
       what you were distracted by, and the LeetCode problem you're working on
       lives in the path. The exception is credentials: any query parameter
-      whose <em>name</em> matches one of these lists has its value replaced
+      whose <em>name</em> contains one of these segments has its value replaced
       with <code>REDACTED</code> before the URL is ever written to disk, so
       OAuth callbacks and password-reset links can't land in the log. The URL
       fragment (<code>#…</code>) is always dropped. Everything else survives —
@@ -60,16 +60,19 @@
       needs.
     </p>
 
-    <label for="scrubSubstrings">Substring matches (one per line)</label>
-    <p class="hint">Matched anywhere in the parameter name. <code>token</code> covers <code>access_token</code>, <code>id_token</code>, <code>refresh_token</code>.</p>
-    <textarea id="scrubSubstrings"></textarea>
-
-    <label for="scrubExact">Exact matches (one per line)</label>
-    <p class="hint">Matched against the whole name — for names too common to match as substrings (<code>code</code>, <code>key</code>, <code>state</code>).</p>
-    <textarea id="scrubExact"></textarea>
+    <label for="scrubSegments">Credential name segments (one per line)</label>
+    <p class="hint">
+      The parameter name is lowercased and split on <code>_</code> and
+      <code>-</code>; if any piece is on this list, the value is redacted. So
+      <code>token</code> covers <code>access_token</code>, <code>id_token</code>
+      and <code>X-Amz-Security-Token</code>, while <code>sig</code> does
+      <em>not</em> touch <code>design</code> and <code>auth</code> does not touch
+      <code>author</code>.
+    </p>
+    <textarea id="scrubSegments"></textarea>
 
     <button id="save">Save</button>
-    <button id="resetScrub" type="button">Reset scrub lists to defaults</button>
+    <button id="resetScrub" type="button">Reset scrub list to defaults</button>
     <div id="saveMsg"></div>
 
     <h2>Status</h2>

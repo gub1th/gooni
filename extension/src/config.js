@@ -2,20 +2,19 @@
  * Extension configuration, stored in chrome.storage.local and edited from the
  * options page — nothing here needs a rebuild to change.
  *
- * The scrub lists in particular are meant to be edited: they are the whole of
- * the privacy model (full URLs are captured for every host, minus params whose
+ * The scrub list in particular is meant to be edited: it is the whole of the
+ * privacy model (full URLs are captured for every host, minus params whose
  * value is a credential), so Daniel has to be able to add a param name the
  * moment some site invents a new way to put a secret in a query string.
  */
 
-import { SCRUB_SUBSTRINGS, SCRUB_EXACT } from "./scrub.js";
+import { SCRUB_SEGMENTS } from "./scrub.js";
 
 export const CONFIG_KEYS = {
   baseUrl: "gooni_base_url",
   token: "gooni_token",
   enabled: "gooni_enabled",
-  scrubSubstrings: "gooni_scrub_substrings",
-  scrubExact: "gooni_scrub_exact",
+  scrubSegments: "gooni_scrub_segments",
   lastFlush: "gooni_last_flush",
 };
 
@@ -33,8 +32,7 @@ export async function loadConfig(storage) {
     // than no sensor. The options page can pause it.
     enabled: got[CONFIG_KEYS.enabled] !== false,
     scrub: {
-      substrings: normalizeList(got[CONFIG_KEYS.scrubSubstrings], SCRUB_SUBSTRINGS),
-      exact: normalizeList(got[CONFIG_KEYS.scrubExact], SCRUB_EXACT),
+      segments: normalizeList(got[CONFIG_KEYS.scrubSegments], SCRUB_SEGMENTS),
     },
     lastFlush: got[CONFIG_KEYS.lastFlush] || null,
   };

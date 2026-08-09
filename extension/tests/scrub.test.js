@@ -43,31 +43,74 @@ test("the fragment is always dropped (implicit-flow tokens live there)", () => {
   assert.ok(!r.url.includes("sekrit"));
 });
 
-test("substring matching covers the token family without a list entry each", () => {
-  for (const name of ["access_token", "id_token", "refresh_token", "X-Amz-Security-Token"]) {
-    assert.equal(isSecretParam(name), true, name);
-  }
-  for (const name of ["api_key", "apiKey", "client_secret", "session_id", "signature", "auth"]) {
-    assert.equal(isSecretParam(name), true, name);
+/**
+ * The matching table. Segment matching replaced substring matching because
+ * `auth` ate `author`/`authors` and `sig` ate `assignee`/`design`/`designer`/
+ * `insight` — real params on GitHub issue filters and blog author filters,
+ * whose values were destroyed before the interval was ever buffered.
+ *
+ * Table-driven on purpose: a later edit to the credential set that
+ * reintroduces over-redaction has to fail here by name.
+ */
+const KEPT = ["assignee", "author", "authors", "design", "designer", "insight",
+  "zipcode", "keyword", "real_estate", "v", "next", "t"];
+
+const REDACTED_NAMES = ["auth", "sig", "token", "password", "secret",
+  "auth_token", "access_token", "id_token", "x-amz-signature", "api_key",
+  "code", "key", "state", "pwd", "otp", "passwd", "session", "apikey",
+  "authorization", "credential", "signature", "client_secret", "session_id",
+  "X-Amz-Security-Token", "refresh_token", "my_auth_token"];
+
+test("innocent param names keep their values", () => {
+  for (const name of KEPT) {
+    assert.equal(isSecretParam(name), false, `${name} must NOT be redacted`);
+    // …and through the real entry point, not just the predicate.
+    const r = scrubUrl(`https://example.com/x?${encodeURIComponent(name)}=dani`);
+    assert.match(r.url, /=dani/, `${name} lost its value`);
   }
 });
 
-test("short exact-match names do not eat innocent params", () => {
-  // "code"/"key"/"state" are secrets; the words that CONTAIN them are not.
-  assert.equal(isSecretParam("code"), true);
-  assert.equal(isSecretParam("zipcode"), false);
-  assert.equal(isSecretParam("key"), true);
-  assert.equal(isSecretParam("keyword"), false);
-  assert.equal(isSecretParam("state"), true);
-  assert.equal(isSecretParam("real_estate"), false);
+test("credential-bearing param names are redacted", () => {
+  for (const name of REDACTED_NAMES) {
+    assert.equal(isSecretParam(name), true, `${name} MUST be redacted`);
+    const r = scrubUrl(`https://example.com/x?${encodeURIComponent(name)}=sekrit`);
+    assert.ok(!r.url.includes("sekrit"), `${name} leaked its value: ${r.url}`);
+    assert.match(r.url, /=REDACTED/, `${name} not marked redacted`);
+  }
+});
+
+test("a novel compound is caught by its segments, not by an entry of its own", () => {
+  // This is what segment matching buys over whole-name matching: nobody has to
+  // have predicted `my_auth_token` for it to be caught.
+  assert.equal(isSecretParam("my_auth_token"), true);
+  assert.equal(isSecretParam("gh-session-key"), true);
+  // …while the same rule leaves a compound of innocent words alone.
+  assert.equal(isSecretParam("sort-by-author"), false);
+  assert.equal(isSecretParam("design_system"), false);
 });
 
 test("the scrub list is overridable without a rebuild", () => {
-  const config = { substrings: ["nonce"], exact: [] };
+  const config = { segments: ["nonce"] };
   const r = scrubUrl("https://example.com/?nonce=abc&code=keepme", config);
   assert.match(r.url, /nonce=REDACTED/);
   // A caller-supplied list REPLACES the defaults — otherwise it isn't editable.
   assert.match(r.url, /code=keepme/);
+});
+
+test("HTTP-basic credentials in the URL are never recorded", () => {
+  // The extension rebuilds from u.host, which excludes userinfo. Pinned because
+  // the server floor had exactly this hole and a rebuild from u.href would
+  // reintroduce it here.
+  for (const raw of [
+    "https://alice:hunter2@intranet.example.com/dashboard",
+    "https://alice:hunter2@intranet.example.com/dashboard?tab=1",
+    "https://alice@intranet.example.com/dashboard",
+  ]) {
+    const r = scrubUrl(raw);
+    assert.ok(!r.url.includes("hunter2"), `password stored: ${r.url}`);
+    assert.ok(!r.url.includes("alice"), `username stored: ${r.url}`);
+    assert.equal(r.host, "intranet.example.com");
+  }
 });
 
 test("browser-internal and non-web URLs are not recorded at all", () => {
