@@ -234,12 +234,17 @@ def set_reminder(
     about…". Thoughts are things Daniel HAS thought; reminders are things he still
     HAS TO DO.
 
-    Two flags decide PROMISE vs reminder — a promise is a COMMITMENT that carries
-    the said-vs-done lifecycle (active → kept | broken):
-      - `owed_to`: a person's name when owed to someone ("I owe Yash the deck").
-      - `is_promise=true`: mark a commitment owed to YOURSELF as a promise ("I
-        won't smoke till Tuesday"), so it lands in the said-vs-done section
-        instead of collapsing into an undated reminder.
+    Every row carries the said-vs-done lifecycle (active → kept | broken) — that
+    is not something you opt into. `owed_to` is the ONE input that changes the
+    returned `type`: pass a person's name when owed to someone ("I owe Yash the
+    deck") → typed 'promise'; leave it off for a commitment to yourself ("I won't
+    smoke till Tuesday") → typed 'reminder', with the same lifecycle.
+
+      - `is_promise`: ACCEPTED BUT INERT. Kept so existing callers don't break.
+        Since the 2026-08-08 convergence every row lives in `promises` and `type`
+        is derived from `owed_to`, so passing it changes nothing about what is
+        stored or returned.
+
     `due_at` is an ISO-8601 datetime; a dated promise auto-breaks when its
     deadline passes. `from_thought` links the reminder to the thought that
     spawned it.
