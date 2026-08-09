@@ -200,8 +200,9 @@ def _stamp_reminders(bind) -> None:
     rows = bind.execute(sa.text("SELECT id, content FROM reminders ORDER BY id")).fetchall()
     for r in rows:
         # A twin deleted since 2026-08-01 falls through to the text match.
-        twin_row = _first_live(bind, PROMISE_EXISTS_SQL, prior.get(r.id, ()))
-        promise_id = twin_row.id if twin_row else None
+        promise_id = _resolve(
+            bind, prior.get(r.id, ()), lambda p: _live_promise(bind, p)
+        )
         if promise_id is None:
             content = (r.content or "").strip()
             if not content:
@@ -229,9 +230,9 @@ def downgrade():
 
     if "edges" not in _tables(bind):
         return  # no provenance to walk — schema is back, rows can't be
-    batch_map = _restore_batches(bind)
-    thought_map = _restore_thoughts(bind, batch_map)
-    _restore_reminders(bind, thought_map)
+    note_to_batch = _restore_batches(bind)
+    note_to_thought = _restore_thoughts(bind, note_to_batch)
+    _restore_reminders(bind, note_to_thought)
 
 
 def _recreate_tables(tables: set[str]) -> None:
@@ -316,10 +317,11 @@ def _provenance(bind, kind: str, src_kind: str, dst_kind: str) -> dict:
 
     A source id can carry more than one edge: `_edge` dedups on the 5-tuple, so a
     down-then-up cycle that lands the source on a NEW v2 row adds a second edge
-    beside the first rather than replacing it — and the first now points at a row
-    that no longer exists. Callers walk the list and take the first destination
-    still present, so a dead stamp can't shadow the live one. Stamp order is the
-    tiebreak among live candidates, so repeated downgrades rebuild identically.
+    beside the first rather than replacing it — and the first may now point at a
+    row that is gone, or at one that survived but can no longer satisfy the old
+    schema. Callers walk the list through `_resolve`, so neither kind of dead
+    stamp shadows a usable one. Stamp order is the tiebreak among the candidates
+    that do work, so repeated downgrades rebuild identically.
     """
     rows = bind.execute(
         sa.text(
@@ -344,140 +346,176 @@ PROMISE_SQL = (
 PROMISE_EXISTS_SQL = "SELECT id FROM promises WHERE id = :i"
 
 
-def _first_live(bind, sql: str, candidates) -> object | None:
-    """The first candidate whose v2 row still exists — None when none do."""
+def _live_promise(bind, promise_id: int) -> int | None:
+    exists = bind.execute(sa.text(PROMISE_EXISTS_SQL), {"i": promise_id}).scalar()
+    return promise_id if exists else None
+
+
+def _resolve(bind, candidates, attempt):
+    """Walk the stamped candidates in order; the first the caller can actually
+    rebuild from wins.
+
+    The accept test is the caller's OWN validity guards, not bare row existence:
+    a destination that survived can still be unusable (a note that lost its topic
+    can't satisfy `thought_batches.topic_id NOT NULL`), and rejecting it must fall
+    through to the next stamp rather than strand the source row. `attempt` returns
+    None to reject. Quiet None when every candidate is rejected — that case is
+    genuinely unrecoverable, and this runs at boot.
+    """
     for dst_id in candidates:
-        row = bind.execute(sa.text(sql), {"i": dst_id}).fetchone()
-        if row is not None:
-            return row
+        got = attempt(dst_id)
+        if got is not None:
+            return got
     return None
 
 
 def _restore_batches(bind) -> dict:
-    """Rebuild thought_batches from their notes. Returns {batch id → note id}."""
-    resolved: dict[int, int] = {}
+    """Rebuild thought_batches from their notes. Returns {note id → batch id} for
+    EVERY note a batch was stamped at — a thought still parented to a supplanted
+    batch note has to be able to name its batch too."""
+    note_to_batch: dict[int, int] = {}
     for batch_id, candidates in _provenance(bind, BATCH_EDGE, "thought_batch", "note").items():
-        note = _first_live(bind, NOTE_SQL, candidates)
-        if note is None:
-            continue
-        resolved[batch_id] = note.id
+        for note_id in candidates:
+            note_to_batch.setdefault(note_id, batch_id)
         if bind.execute(
             sa.text("SELECT 1 FROM thought_batches WHERE id = :i"), {"i": batch_id}
         ).scalar():
             continue
-        # topic_id is NOT NULL on thought_batches; a note that lost its topic
-        # can't be expressed as one. The note itself is untouched either way.
-        if note.topic_id is None:
-            continue
-        image_url = bind.execute(
-            sa.text(
-                "SELECT public_url FROM attachments WHERE note_id = :n "
-                "AND public_url IS NOT NULL ORDER BY id LIMIT 1"
-            ),
-            {"n": note.id},
-        ).scalar()
-        bind.execute(
-            sa.text(
-                "INSERT INTO thought_batches "
-                "(id, topic_id, label, image_url, started_at, ended_at) "
-                "VALUES (:i, :t, :l, :u, :s, :e)"
-            ),
-            {
-                "i": batch_id,
-                "t": note.topic_id,
-                "l": note.title,
-                "u": image_url,
-                "s": note.created_at,
-                "e": note.updated_at or note.created_at,
-            },
-        )
-    return resolved
+        _resolve(bind, candidates, lambda n, b=batch_id: _rebuild_batch(bind, b, n))
+    return note_to_batch
 
 
-def _restore_thoughts(bind, batch_map: dict) -> dict:
-    """Rebuild thoughts from their notes. Returns {thought id → note id}."""
-    resolved: dict[int, int] = {}
-    note_to_batch = {note_id: batch_id for batch_id, note_id in batch_map.items()}
+def _rebuild_batch(bind, batch_id: int, note_id: int) -> int | None:
+    note = bind.execute(sa.text(NOTE_SQL), {"i": note_id}).fetchone()
+    # topic_id is NOT NULL on thought_batches; a note that lost its topic can't
+    # be expressed as one. The note itself is untouched either way.
+    if note is None or note.topic_id is None:
+        return None
+    image_url = bind.execute(
+        sa.text(
+            "SELECT public_url FROM attachments WHERE note_id = :n "
+            "AND public_url IS NOT NULL ORDER BY id LIMIT 1"
+        ),
+        {"n": note.id},
+    ).scalar()
+    bind.execute(
+        sa.text(
+            "INSERT INTO thought_batches "
+            "(id, topic_id, label, image_url, started_at, ended_at) "
+            "VALUES (:i, :t, :l, :u, :s, :e)"
+        ),
+        {
+            "i": batch_id,
+            "t": note.topic_id,
+            "l": note.title,
+            "u": image_url,
+            "s": note.created_at,
+            "e": note.updated_at or note.created_at,
+        },
+    )
+    return note_id
+
+
+def _restore_thoughts(bind, note_to_batch: dict) -> dict:
+    """Rebuild thoughts from their notes. Returns {note id → thought id}."""
+    note_to_thought: dict[int, int] = {}
     for thought_id, candidates in _provenance(bind, THOUGHT_EDGE, "thought", "note").items():
-        note = _first_live(bind, NOTE_SQL, candidates)
-        if note is None:
-            continue
-        resolved[thought_id] = note.id
+        for note_id in candidates:
+            note_to_thought.setdefault(note_id, thought_id)
         if bind.execute(
             sa.text("SELECT 1 FROM thoughts WHERE id = :i"), {"i": thought_id}
         ).scalar():
             continue
-        batch_id = note_to_batch.get(note.parent_note_id)
-        # batch_id is NOT NULL — a thought whose batch we can't name is one the
-        # old schema had no way to hold.
-        if batch_id is None or not bind.execute(
-            sa.text("SELECT 1 FROM thought_batches WHERE id = :i"), {"i": batch_id}
-        ).scalar():
-            continue
-        bind.execute(
-            sa.text(
-                "INSERT INTO thoughts (id, content, timestamp, batch_id) "
-                "VALUES (:i, :c, :t, :b)"
-            ),
-            {"i": thought_id, "c": note.content, "t": note.created_at, "b": batch_id},
+        _resolve(
+            bind,
+            candidates,
+            lambda n, t=thought_id: _rebuild_thought(bind, t, n, note_to_batch),
         )
-    return resolved
+    return note_to_thought
 
 
-def _restore_reminders(bind, thought_map: dict) -> None:
-    """Rebuild reminders from their promises.
+def _rebuild_thought(bind, thought_id: int, note_id: int, note_to_batch: dict) -> int | None:
+    note = bind.execute(sa.text(NOTE_SQL), {"i": note_id}).fetchone()
+    if note is None:
+        return None
+    batch_id = note_to_batch.get(note.parent_note_id)
+    # batch_id is NOT NULL — a thought whose batch we can't name is one the
+    # old schema had no way to hold.
+    if batch_id is None or not bind.execute(
+        sa.text("SELECT 1 FROM thought_batches WHERE id = :i"), {"i": batch_id}
+    ).scalar():
+        return None
+    bind.execute(
+        sa.text(
+            "INSERT INTO thoughts (id, content, timestamp, batch_id) "
+            "VALUES (:i, :c, :t, :b)"
+        ),
+        {"i": thought_id, "c": note.content, "t": note.created_at, "b": batch_id},
+    )
+    return note_id
 
-    `type` is re-derived from `owed_to` — the same rule `focus_service` applies
-    now that Promise is the store. An `is_promise=True` row owed to nobody comes
-    back as a plain reminder; that distinction stopped existing when the type
-    column stopped being read, and inventing it back would be a fiction.
-    """
-    note_to_thought = {note_id: tid for tid, note_id in thought_map.items()}
+
+def _restore_reminders(bind, note_to_thought: dict) -> None:
+    """Rebuild reminders from their promises."""
     for reminder_id, candidates in _provenance(bind, REMINDER_EDGE, "reminder", "promise").items():
         if bind.execute(
             sa.text("SELECT 1 FROM reminders WHERE id = :i"), {"i": reminder_id}
         ).scalar():
             continue
-        p = _first_live(bind, PROMISE_SQL, candidates)
-        if p is None:
-            continue  # every twin deleted since the drop — nothing to rebuild from
-
-        # reminders.thought_id came back as a `derives_from` promise → note edge.
-        thought_id = None
-        derived = bind.execute(
-            sa.text(
-                "SELECT dst_id FROM edges WHERE kind = 'derives_from' "
-                "AND src_kind = 'promise' AND src_id = :p AND dst_kind = 'note' "
-                "ORDER BY id LIMIT 1"
-            ),
-            {"p": p.id},
-        ).scalar()
-        if derived is not None:
-            candidate = note_to_thought.get(derived)
-            if candidate and bind.execute(
-                sa.text("SELECT 1 FROM thoughts WHERE id = :i"), {"i": candidate}
-            ).scalar():
-                thought_id = candidate
-
-        state = p.state or "active"
-        bind.execute(
-            sa.text(
-                "INSERT INTO reminders "
-                "(id, type, content, owed_to, due_at, due_is_default, done, state, "
-                " resolved_at, thought_id, parent_id, attachment_path, created_at) "
-                "VALUES (:i, :ty, :c, :o, :d, :dflt, :done, :st, :res, :th, NULL, NULL, :cr)"
-            ),
-            {
-                "i": reminder_id,
-                "ty": "promise" if p.owed_to is not None else "reminder",
-                "c": p.utterance,
-                "o": p.owed_to,
-                "d": p.inferred_due,
-                "dflt": 1 if p.due_is_default else 0,
-                "done": 0 if state == "active" else 1,
-                "st": state,
-                "res": p.resolved_at,
-                "th": thought_id,
-                "cr": p.created_at,
-            },
+        _resolve(
+            bind,
+            candidates,
+            lambda p, r=reminder_id: _rebuild_reminder(bind, r, p, note_to_thought),
         )
+
+
+def _rebuild_reminder(bind, reminder_id: int, promise_id: int, note_to_thought: dict) -> int | None:
+    """`type` is re-derived from `owed_to` — the same rule `focus_service` applies
+    now that Promise is the store. An `is_promise=True` row owed to nobody comes
+    back as a plain reminder; that distinction stopped existing when the type
+    column stopped being read, and inventing it back would be a fiction.
+    """
+    p = bind.execute(sa.text(PROMISE_SQL), {"i": promise_id}).fetchone()
+    if p is None:
+        return None  # twin deleted since the drop — try the next stamp
+
+    # reminders.thought_id came back as a `derives_from` promise → note edge.
+    thought_id = None
+    derived = bind.execute(
+        sa.text(
+            "SELECT dst_id FROM edges WHERE kind = 'derives_from' "
+            "AND src_kind = 'promise' AND src_id = :p AND dst_kind = 'note' "
+            "ORDER BY id LIMIT 1"
+        ),
+        {"p": p.id},
+    ).scalar()
+    if derived is not None:
+        candidate = note_to_thought.get(derived)
+        if candidate and bind.execute(
+            sa.text("SELECT 1 FROM thoughts WHERE id = :i"), {"i": candidate}
+        ).scalar():
+            thought_id = candidate
+
+    state = p.state or "active"
+    bind.execute(
+        sa.text(
+            "INSERT INTO reminders "
+            "(id, type, content, owed_to, due_at, due_is_default, done, state, "
+            " resolved_at, thought_id, parent_id, attachment_path, created_at) "
+            "VALUES (:i, :ty, :c, :o, :d, :dflt, :done, :st, :res, :th, NULL, NULL, :cr)"
+        ),
+        {
+            "i": reminder_id,
+            "ty": "promise" if p.owed_to is not None else "reminder",
+            "c": p.utterance,
+            "o": p.owed_to,
+            "d": p.inferred_due,
+            "dflt": 1 if p.due_is_default else 0,
+            "done": 0 if state == "active" else 1,
+            "st": state,
+            "res": p.resolved_at,
+            "th": thought_id,
+            "cr": p.created_at,
+        },
+    )
+    return promise_id

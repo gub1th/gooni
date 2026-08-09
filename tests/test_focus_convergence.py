@@ -320,10 +320,29 @@ def test_downgrade_prefers_live_provenance_edge(db_path: str) -> None:
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    rebuilt = conn.execute("select * from reminders where id=1").fetchall()
+    q = lambda s: conn.execute(s).fetchall()  # noqa: E731
+    rebuilt = q("select * from reminders where id=1")
     check("reminder rebuilt from the live stamp, not skipped", len(rebuilt), 1)
     if rebuilt:
         check("rebuilt from the promise the live stamp names", rebuilt[0]["content"], "Get plants for the new place")
+
+    # The same cycle re-stamps batches at a fresh note while the supplanted one
+    # survives with a NULL topic_id — existing, but unusable for a NOT NULL
+    # column. Every row type has to come back, not just reminders.
+    check("batches back", q("select count(*) n from thought_batches")[0]["n"], 2)
+    check("thoughts back", q("select count(*) n from thoughts")[0]["n"], 2)
+    batch = q("select topic_id from thought_batches where id=1")
+    check(
+        "batch rebuilt from the usable note, not the topicless one",
+        batch[0]["topic_id"] if batch else None,
+        1,
+    )
+    thought = q("select batch_id from thoughts where id=1")
+    check(
+        "thought re-parented to its batch",
+        thought[0]["batch_id"] if thought else None,
+        1,
+    )
     conn.close()
 
 
