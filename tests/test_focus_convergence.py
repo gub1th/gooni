@@ -346,6 +346,61 @@ def test_downgrade_prefers_live_provenance_edge(db_path: str) -> None:
     conn.close()
 
 
+def test_downgrade_is_partial_not_all_or_nothing(db_path: str) -> None:
+    """A stranded source row costs itself, and nothing else.
+
+    Deleting a `thought-batch` note is an ordinary UI action — those notes are not
+    hidden from the browser, and `delete_note` does no Edge cleanup — so its
+    `converged_from_thought_batch` stamp is left pointing at nothing. Partial
+    success is the contract: that batch stays gone, every other row still comes
+    back with its original id and fields, and the rollback does NOT abort.
+    """
+    import sqlite3
+
+    _seed_through_expand(db_path)
+    _alembic(db_path, CONTRACT_REVISION)
+
+    conn = sqlite3.connect(db_path)
+    stranded = conn.execute(
+        "select dst_id from edges where kind='converged_from_thought_batch' "
+        "and src_kind='thought_batch' and src_id=2"
+    ).fetchone()[0]
+    conn.execute("delete from notes where id=?", (stranded,))
+    conn.commit()
+    # Precondition: the stamp survives the note it names.
+    left = conn.execute(
+        "select count(*) from edges where kind='converged_from_thought_batch' and src_id=2"
+    ).fetchone()[0]
+    conn.close()
+
+    print("\n[contract] a stranded stamp costs its own row, not the rollback")
+    check("the stamp outlives the deleted note", left, 1)
+
+    _alembic(db_path, EXPAND_REVISION, direction="downgrade")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    q = lambda s: conn.execute(s).fetchall()  # noqa: E731
+    check("the stranded batch is absent", q("select count(*) n from thought_batches where id=2")[0]["n"], 0)
+
+    b1 = q("select * from thought_batches where id=1")
+    check("the other batch is rebuilt", len(b1), 1)
+    if b1:
+        check("with its original label", b1[0]["label"], "Gooni decided the store stays dumb.")
+        check("and its original topic", b1[0]["topic_id"], 1)
+
+    check("both thoughts under the live batch survive", q("select count(*) n from thoughts")[0]["n"], 2)
+    t1 = q("select * from thoughts where id=1")
+    check("thought content intact", t1[0]["content"] if t1 else None, "the store should stay dumb")
+    check("thought still parented to its batch", t1[0]["batch_id"] if t1 else None, 1)
+
+    check("every reminder still rebuilt", q("select count(*) n from reminders")[0]["n"], 3)
+    r1 = q("select * from reminders where id=1")
+    check("reminder fields intact", r1[0]["content"] if r1 else None, "Get plants for the new place")
+    check("owed_to intact", r1[0]["owed_to"] if r1 else None, 1)
+    conn.close()
+
+
 def test_adapter(db_path: str) -> None:
     """focus_service against the migrated DB — the seam the MCP tools call."""
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
@@ -442,6 +497,7 @@ def main() -> int:
         # Need a DB the happy path hasn't already contracted.
         test_downgrade_through_prior_copy_spares_adopted(os.path.join(tmp, "rollback.db"))
         test_downgrade_prefers_live_provenance_edge(os.path.join(tmp, "restamp.db"))
+        test_downgrade_is_partial_not_all_or_nothing(os.path.join(tmp, "partial.db"))
         test_adapter(db_path)
 
     print()

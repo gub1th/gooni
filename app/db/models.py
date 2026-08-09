@@ -815,7 +815,9 @@ class Edge(Base):
 # The four absorbed tables are GONE (`b8f3d1c07a45`, the contract half). They
 # survived one release, unread, so the backfill could be diffed in prod; that
 # drop stamped a `converged_from_*` edge per source row first, which is what
-# lets its downgrade rebuild them from the v2 side with their original ids.
+# lets its downgrade rebuild them from the v2 side with their original ids —
+# for every row whose stamped v2 destination is still there and still usable.
+# A rollback after one of those was deleted comes back partial, and says so.
 # ───────────────────────────────────────────────────────────────────────────
 
 

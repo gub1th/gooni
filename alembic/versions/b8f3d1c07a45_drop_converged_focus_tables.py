@@ -11,6 +11,16 @@ UNCONDITIONAL: `upgrade()` stamps provenance and then drops the four tables, wit
 no per-row check that would refuse. A source row the expand half never absorbed is
 destroyed, and `downgrade()` cannot bring it back — it has no edge to walk.
 
+A ROLLBACK CAN COME BACK PARTIAL, and not only in that no-edge-at-all case. An
+edge can survive while the v2 row it points at does not, or survives in a shape
+the old schema can't hold, and then that source row is skipped too. This is
+ordinary, not exotic: `thought-batch` notes are NOT hidden from the notes browser
+(`app/routers/notes.py`'s `_BROWSE_HIDDEN_TAG` LIKE pattern for `"thought"` does
+not match the `"thought-batch"` tag), and `delete_note` does no Edge cleanup, so
+deleting one batch note through the UI strands that batch's provenance — and with
+it every thought under the batch, since `thoughts.batch_id` is NOT NULL. Skipped
+rows are logged at WARNING, per row and as a closing per-table tally.
+
 There is no prompt between the deploy and the drop. `_alembic_upgrade()` runs at
 import time in `app/main.py`, so `alembic upgrade head` fires on uvicorn boot:
 shipping the revision IS running it. Verify first, on the database that will
@@ -42,9 +52,11 @@ first-choice matcher — that exact provenance from the 2026-08-01 copy is how a
 reminder is matched even when the text drifted on one side — but it only ever
 WRITES the new kind, for every reminder it resolves.
 
-`downgrade()` walks those edges backwards and rebuilds each row — original ids
-included, which is what lets `reminders.thought_id` and `thoughts.batch_id` be
-restored as real foreign keys rather than dangling integers.
+`downgrade()` walks those edges backwards and rebuilds each row FOR WHICH AN
+ACCEPTABLE CANDIDATE SURVIVES — original ids included, which is what lets
+`reminders.thought_id` and `thoughts.batch_id` be restored as real foreign keys
+rather than dangling integers. The rest are skipped and reported; see the partial
+-rollback note above.
 
 The rebuilt rows come from the v2 side, so a downgrade returns the CURRENT state
 of the data, not a snapshot of 2026-08-08. That is the correct direction: edits
@@ -69,6 +81,8 @@ Revises: f4c81a92de70
 Create Date: 2026-08-09
 """
 
+import logging
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -77,6 +91,9 @@ down_revision = "f4c81a92de70"
 branch_labels = None
 depends_on = None
 
+# `alembic` qualname → inherits the console handler alembic.ini already wires up,
+# so a skipped row surfaces wherever the migration runs, boot included.
+log = logging.getLogger(f"alembic.migration.{revision}")
 
 THOUGHT_TAG = '["thought"]'
 BATCH_TAG = '["thought-batch"]'
@@ -200,9 +217,7 @@ def _stamp_reminders(bind) -> None:
     rows = bind.execute(sa.text("SELECT id, content FROM reminders ORDER BY id")).fetchall()
     for r in rows:
         # A twin deleted since 2026-08-01 falls through to the text match.
-        promise_id = _resolve(
-            bind, prior.get(r.id, ()), lambda p: _live_promise(bind, p)
-        )
+        promise_id = _resolve(prior.get(r.id, ()), lambda p: _live_promise(bind, p))
         if promise_id is None:
             content = (r.content or "").strip()
             if not content:
@@ -230,9 +245,16 @@ def downgrade():
 
     if "edges" not in _tables(bind):
         return  # no provenance to walk — schema is back, rows can't be
-    note_to_batch = _restore_batches(bind)
-    note_to_thought = _restore_thoughts(bind, note_to_batch)
-    _restore_reminders(bind, note_to_thought)
+    tally: dict[str, list[int]] = {}
+    note_to_batch = _restore_batches(bind, tally)
+    note_to_thought = _restore_thoughts(bind, note_to_batch, tally)
+    _restore_reminders(bind, note_to_thought, tally)
+    if tally:
+        log.warning(
+            "downgrade restored what the surviving provenance allowed; these rows "
+            "could NOT be rebuilt and are missing from the restored tables — %s",
+            ", ".join(f"{t}: {len(ids)} ({ids})" for t, ids in sorted(tally.items())),
+        )
 
 
 def _recreate_tables(tables: set[str]) -> None:
@@ -351,7 +373,7 @@ def _live_promise(bind, promise_id: int) -> int | None:
     return promise_id if exists else None
 
 
-def _resolve(bind, candidates, attempt):
+def _resolve(candidates, attempt):
     """Walk the stamped candidates in order; the first the caller can actually
     rebuild from wins.
 
@@ -359,8 +381,9 @@ def _resolve(bind, candidates, attempt):
     a destination that survived can still be unusable (a note that lost its topic
     can't satisfy `thought_batches.topic_id NOT NULL`), and rejecting it must fall
     through to the next stamp rather than strand the source row. `attempt` returns
-    None to reject. Quiet None when every candidate is rejected — that case is
-    genuinely unrecoverable, and this runs at boot.
+    None to reject. None when every candidate is rejected — that case is genuinely
+    unrecoverable, so the caller reports it and moves on rather than raising; this
+    runs at boot and a rollback that stops halfway is worse than a partial one.
     """
     for dst_id in candidates:
         got = attempt(dst_id)
@@ -369,7 +392,18 @@ def _resolve(bind, candidates, attempt):
     return None
 
 
-def _restore_batches(bind) -> dict:
+def _skipped(tally: dict, table: str, src_id: int) -> None:
+    log.warning(
+        "%s id %s NOT rebuilt: every stamped provenance candidate was rejected — "
+        "its v2 destination is gone, or survives in a shape the old schema can't "
+        "hold. The row is absent from the restored table.",
+        table,
+        src_id,
+    )
+    tally.setdefault(table, []).append(src_id)
+
+
+def _restore_batches(bind, tally: dict) -> dict:
     """Rebuild thought_batches from their notes. Returns {note id → batch id} for
     EVERY note a batch was stamped at — a thought still parented to a supplanted
     batch note has to be able to name its batch too."""
@@ -381,7 +415,8 @@ def _restore_batches(bind) -> dict:
             sa.text("SELECT 1 FROM thought_batches WHERE id = :i"), {"i": batch_id}
         ).scalar():
             continue
-        _resolve(bind, candidates, lambda n, b=batch_id: _rebuild_batch(bind, b, n))
+        if _resolve(candidates, lambda n, b=batch_id: _rebuild_batch(bind, b, n)) is None:
+            _skipped(tally, "thought_batches", batch_id)
     return note_to_batch
 
 
@@ -416,7 +451,7 @@ def _rebuild_batch(bind, batch_id: int, note_id: int) -> int | None:
     return note_id
 
 
-def _restore_thoughts(bind, note_to_batch: dict) -> dict:
+def _restore_thoughts(bind, note_to_batch: dict, tally: dict) -> dict:
     """Rebuild thoughts from their notes. Returns {note id → thought id}."""
     note_to_thought: dict[int, int] = {}
     for thought_id, candidates in _provenance(bind, THOUGHT_EDGE, "thought", "note").items():
@@ -426,11 +461,12 @@ def _restore_thoughts(bind, note_to_batch: dict) -> dict:
             sa.text("SELECT 1 FROM thoughts WHERE id = :i"), {"i": thought_id}
         ).scalar():
             continue
-        _resolve(
-            bind,
+        rebuilt = _resolve(
             candidates,
             lambda n, t=thought_id: _rebuild_thought(bind, t, n, note_to_batch),
         )
+        if rebuilt is None:
+            _skipped(tally, "thoughts", thought_id)
     return note_to_thought
 
 
@@ -455,18 +491,19 @@ def _rebuild_thought(bind, thought_id: int, note_id: int, note_to_batch: dict) -
     return note_id
 
 
-def _restore_reminders(bind, note_to_thought: dict) -> None:
+def _restore_reminders(bind, note_to_thought: dict, tally: dict) -> None:
     """Rebuild reminders from their promises."""
     for reminder_id, candidates in _provenance(bind, REMINDER_EDGE, "reminder", "promise").items():
         if bind.execute(
             sa.text("SELECT 1 FROM reminders WHERE id = :i"), {"i": reminder_id}
         ).scalar():
             continue
-        _resolve(
-            bind,
+        rebuilt = _resolve(
             candidates,
             lambda p, r=reminder_id: _rebuild_reminder(bind, r, p, note_to_thought),
         )
+        if rebuilt is None:
+            _skipped(tally, "reminders", reminder_id)
 
 
 def _rebuild_reminder(bind, reminder_id: int, promise_id: int, note_to_thought: dict) -> int | None:
