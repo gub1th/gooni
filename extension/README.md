@@ -133,12 +133,29 @@ never one request per tab switch, and never a lost interval when the laptop is
 offline.
 
 - Flush runs on a 60-second alarm and immediately once 25 intervals are queued.
-- **Nothing leaves the buffer until the server confirms it.** Offline, a 5xx or
-  a 401 leave the buffer untouched for the next attempt. Only a 2xx (or a 4xx
-  that would fail identically forever) clears the sent ids.
+- **Nothing leaves the buffer until the server confirms it.** Keeping the data
+  is the default and dropping it is the exception: only a `2xx` (the server took
+  a position on every row) or one of `400`/`413`/`422` (a body that will be
+  refused identically forever, so retrying would wedge the buffer behind one
+  poison batch) clears the sent ids. Everything else — offline, `5xx`, `401`,
+  `404`, `408`, `429` — leaves the buffer untouched for the next attempt. `429`
+  and `404` are the two that matter in practice: Gooni's rate limiter answers a
+  burst with `429` having stored nothing, and a `404` is a `baseUrl` pointing at
+  the wrong host or dev port, which is a config mistake to fix in options rather
+  than a reason to lose the backlog. A `Retry-After` header is honoured (capped
+  at 15 minutes) before the next flush is attempted.
 - **Retries cannot double-count.** Each interval gets a `client_id` (UUID) when
   it closes, which never changes; the ingest endpoint upserts on it, so a batch
   the server stored but whose response we never saw dedups on the way back in.
+- **One writer at a time.** chrome dispatches listeners back-to-back without
+  awaiting them, and every storage mutation here is a read-modify-write, so all
+  of them are funnelled through a single promise-chain queue (`src/serial.js`).
+  Without it, the `onActivated` + `onUpdated` pair chrome delivers on one tab
+  switch closes the same span twice into two different `client_id`s — an
+  overcount the server cannot dedup, because the ids differ by construction. The
+  queue only orders work inside one service-worker generation; all real state is
+  in `chrome.storage.local`, so a worker torn down mid-queue restarts clean with
+  no lock to leak.
 - The buffer holds 5000 intervals. Past that the **oldest** are dropped and the
   count of dropped intervals is kept and shown in the options page — a gap is
   admitted rather than hidden.
@@ -176,11 +193,13 @@ cd extension && npm test      # node:test, no dependencies
 
 Covers interval closing (tab change, navigation, blur, lock), idle handling and
 its backdating, the poll-vs-event close distinction, orphan salvage, buffer
-persistence across a restart, delivery/retry semantics, overflow accounting,
-and URL scrubbing.
+persistence across a restart, which statuses retain vs drop a batch,
+`Retry-After` parsing, overflow accounting, URL scrubbing, and the write queue
+(each race test asserts the unserialized control case loses/duplicates first, so
+it fails if the queue is removed).
 
-The server side is `python tests/test_browser_intervals.py` (idempotency,
-validation, the scrub backstop).
+The server side is `python tests/test_browser_intervals.py` (idempotency
+including a collision mid-batch, validation, the scrub backstop).
 
 ## Layout
 
@@ -191,5 +210,6 @@ src/background.js  the ONLY file that touches chrome APIs (event wiring)
 src/tracker.js     the interval state machine (pure, fake-clock testable)
 src/buffer.js      chrome.storage.local buffer + flush/retry rules
 src/scrub.js       URL scrubbing — the privacy model
+src/serial.js      the one-writer queue every storage mutation goes through
 src/config.js      stored settings
 ```

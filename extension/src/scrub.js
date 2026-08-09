@@ -16,9 +16,14 @@
  *
  * EDITING THE LIST: `SCRUB_SUBSTRINGS` / `SCRUB_EXACT` below are the defaults.
  * They can be overridden at runtime from the options page without a rebuild —
- * `loadScrubConfig()` in config.js merges the user's list in. Gooni re-runs an
- * equivalent strip server-side (browser_activity_service.scrub_url) as a
- * backstop; that copy is a fixed floor, not user-editable.
+ * `loadConfig()` in config.js reads the saved lists, and a saved list REPLACES
+ * the corresponding default rather than extending it (an editable list you can
+ * only add to isn't editable). The options page seeds its textareas with these
+ * defaults, so the normal edit is "defaults plus mine" — but a list saved
+ * without them loses them. Gooni re-runs an equivalent strip server-side
+ * (browser_activity_service.scrub_url) as a backstop; that copy is a fixed
+ * floor, not user-editable, so trimming a default here narrows what the
+ * extension redacts but never gets under that floor.
  */
 
 /**

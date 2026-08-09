@@ -30,6 +30,48 @@ export const MAX_BUFFERED = 5000;
 export const FLUSH_THRESHOLD = 25;
 export const MAX_BATCH = 200;
 
+/**
+ * The ONLY statuses that justify throwing a batch away.
+ *
+ * Dropping is an irreversible admission that this data will never be
+ * deliverable, so the list is an allowlist of shapes that would fail
+ * identically forever: a malformed body (400), a body over the server's size
+ * cap (413), a body the server can parse but not accept (422). Retrying any of
+ * those verbatim wedges the buffer behind one poison batch.
+ *
+ * Everything else keeps the buffer, including the two that used to fall into
+ * the drop branch and cost real measurements:
+ *   - 429: Gooni's own rate limiter (300/min per IP, shared with the SPA's
+ *     polling surfaces) returns this during a burst. The server stored nothing;
+ *     dropping would destroy up to a full batch of intervals for a condition
+ *     that clears in seconds.
+ *   - 404: a baseUrl pointing at the wrong host or dev port. That is a config
+ *     mistake to be fixed in options, and the buffer is what makes the fix
+ *     recover the backlog instead of starting from empty.
+ * A permanently-wrong baseUrl still can't grow the buffer without bound —
+ * MAX_BUFFERED drops the oldest and COUNTS the loss, so the gap is admitted.
+ */
+export const DROP_BATCH_STATUSES = new Set([400, 413, 422]);
+
+/** Longest Retry-After we'll respect; a hostile or absurd value can't wedge us. */
+export const MAX_RETRY_AFTER_SEC = 15 * 60;
+
+/**
+ * Retry-After as seconds, from either header form (delta-seconds or HTTP-date).
+ * Null when absent/unparseable — the caller then uses its normal flush cadence.
+ */
+export function retryAfterSeconds(res, now = Date.now()) {
+  const raw = res?.headers?.get?.("Retry-After");
+  if (raw === null || raw === undefined || raw === "") return null;
+  const secs = Number(raw);
+  if (Number.isFinite(secs)) return Math.min(Math.max(secs, 0), MAX_RETRY_AFTER_SEC);
+  const when = Date.parse(String(raw));
+  if (Number.isFinite(when)) {
+    return Math.min(Math.max((when - now) / 1000, 0), MAX_RETRY_AFTER_SEC);
+  }
+  return null;
+}
+
 export class IntervalBuffer {
   /**
    * @param {object} opts
@@ -92,11 +134,12 @@ export class IntervalBuffer {
 }
 
 /**
- * Ship one batch. Returns { sent, delivered, remaining, ok, error? }.
+ * Ship one batch. Returns { sent, delivered, remaining, ok, error?, retryAfterSec? }.
  *
- * Only a 2xx acks. A 4xx that is NOT a rejection of the whole batch still acks
- * — the server took a position on those rows and retrying them forever would
- * wedge the buffer behind one poison interval.
+ * A 2xx acks: the server took a position on every row, whether it counted them
+ * accepted, duplicate, or rejected-with-a-reason. Otherwise the buffer is KEPT
+ * unless the status is in DROP_BATCH_STATUSES — see that constant for why the
+ * drop branch is an allowlist rather than a catch-all.
  */
 export async function flushOnce({ buffer, endpoint, token, fetchImpl = fetch }) {
   const batch = await buffer.peek();
@@ -125,14 +168,23 @@ export async function flushOnce({ buffer, endpoint, token, fetchImpl = fetch }) 
     // fixing the token in options recovers everything.
     return { sent: batch.length, delivered: 0, remaining: await buffer.size(), ok: false, error: "unauthorized" };
   }
-  if (!res.ok && res.status >= 500) {
-    return { sent: batch.length, delivered: 0, remaining: await buffer.size(), ok: false, error: `http_${res.status}` };
-  }
-  if (!res.ok) {
-    // 400/413: the server refused this batch shape. Retrying it verbatim will
-    // fail identically forever, so drop it and record the loss.
+  if (!res.ok && DROP_BATCH_STATUSES.has(res.status)) {
+    // The server refused this batch SHAPE. Retrying it verbatim will fail
+    // identically forever, so drop it and record the loss.
     const remaining = await buffer.ack(batch.map((i) => i.client_id));
     return { sent: batch.length, delivered: 0, remaining, ok: false, error: `http_${res.status}` };
+  }
+  if (!res.ok) {
+    // Everything else — 5xx, 429, 404, 408 — keeps the buffer. Retaining data
+    // the server never stored is the default; dropping is the exception.
+    return {
+      sent: batch.length,
+      delivered: 0,
+      remaining: await buffer.size(),
+      ok: false,
+      error: `http_${res.status}`,
+      retryAfterSec: retryAfterSeconds(res),
+    };
   }
 
   // 2xx: everything in the batch is now the server's problem, whether it

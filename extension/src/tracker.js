@@ -182,7 +182,7 @@ export class FocusTracker {
       title: open.title,
       started_at: new Date(open.startedAt).toISOString(),
       ended_at: new Date(endedAt).toISOString(),
-      end_reason: flagged && reason === "truncated" ? "truncated" : reason,
+      end_reason: reason,
       truncated: flagged,
     };
     this.onInterval(interval);

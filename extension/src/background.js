@@ -17,9 +17,11 @@
 import { FocusTracker } from "./tracker.js";
 import { IntervalBuffer, flushOnce, FLUSH_THRESHOLD } from "./buffer.js";
 import { scrubUrl } from "./scrub.js";
+import { createSerializer } from "./serial.js";
 import { loadConfig, ingestEndpoint, IDLE_DETECTION_SEC } from "./config.js";
 
 const OPEN_KEY = "gooni_open_interval";
+const RETRY_UNTIL_KEY = "gooni_retry_until";
 const HEARTBEAT_ALARM = "gooni_heartbeat";
 const FLUSH_ALARM = "gooni_flush";
 
@@ -31,11 +33,27 @@ const storage = {
 const buffer = new IntervalBuffer({ storage });
 
 /**
+ * EVERY storage mutation in this file goes through this one queue.
+ *
+ * chrome fires listeners without awaiting them — switching tabs delivers
+ * onActivated and onUpdated in the same tick — so two runs would otherwise
+ * interleave across their awaits, both read the same open interval, and both
+ * close it into two client_ids for one span. See serial.js.
+ *
+ * The `_`-prefixed functions below are the unserialized bodies: they may call
+ * each other freely because they are already inside the critical section.
+ * Their public wrappers are the only things chrome listeners may call, and a
+ * wrapper must never be called from inside one (that would wait on a queue
+ * slot this task is holding).
+ */
+const serial = createSerializer();
+
+/**
  * Build a tracker with the persisted open interval loaded. Constructed per
  * event rather than held in a module global: the worker may have been torn
  * down since the last event, so storage is the only source of truth.
  */
-async function withTracker(fn) {
+async function _withTracker(fn) {
   const cfg = await loadConfig(storage);
   const pending = [];
   const tracker = new FocusTracker({ onInterval: (i) => pending.push(i) });
@@ -49,13 +67,24 @@ async function withTracker(fn) {
     await buffer.append(interval);
   }
   if (pending.length && (await buffer.size()) >= FLUSH_THRESHOLD) {
-    await flush();
+    await _flush();
   }
   return pending;
 }
 
-async function flush() {
-  const cfg = await loadConfig(storage);
+async function _flush() {
+  const [cfg, got] = await Promise.all([
+    loadConfig(storage),
+    storage.get([RETRY_UNTIL_KEY]),
+  ]);
+  // The server asked for backpressure (Retry-After on a 429). Hammering it
+  // through the window would just earn more 429s; the buffer is holding the
+  // data and the next alarm will pick it up.
+  const until = Number(got[RETRY_UNTIL_KEY]) || 0;
+  if (until && Date.now() < until) {
+    return { sent: 0, delivered: 0, remaining: await buffer.size(), ok: false, error: "retry_after" };
+  }
+
   const res = await flushOnce({
     buffer,
     endpoint: ingestEndpoint(cfg.baseUrl),
@@ -63,9 +92,13 @@ async function flush() {
   });
   await storage.set({
     gooni_last_flush: { at: new Date().toISOString(), ...res },
+    [RETRY_UNTIL_KEY]: res.retryAfterSec ? Date.now() + res.retryAfterSec * 1000 : 0,
   });
   return res;
 }
+
+const withTracker = (fn) => serial(() => _withTracker(fn));
+const flush = () => serial(_flush);
 
 /** The page that currently has attention, or null if nothing does. */
 async function activeAttention() {
@@ -89,19 +122,24 @@ async function activeAttention() {
  * POLL only tells us it has already happened, so we close at the last
  * heartbeat that confirmed attention — see FocusTracker.blurStale.
  */
-async function reconcile(at = Date.now(), { staleClose = false } = {}) {
-  const page = await activeAttention();
-  await withTracker(async (tracker, cfg) => {
-    if (!cfg.enabled) {
-      tracker.discard();
-      return;
-    }
-    if (!page) {
-      if (staleClose) tracker.blurStale();
-      else tracker.blur(at);
-      return;
-    }
-    tracker.focus({ ...page, at });
+function reconcile(at = Date.now(), { staleClose = false } = {}) {
+  // activeAttention() is INSIDE the queue slot on purpose: reading what is
+  // focused and acting on it is one decision, and splitting them lets a
+  // reconcile apply a page snapshot that a later-queued one already superseded.
+  return serial(async () => {
+    const page = await activeAttention();
+    await _withTracker(async (tracker, cfg) => {
+      if (!cfg.enabled) {
+        tracker.discard();
+        return;
+      }
+      if (!page) {
+        if (staleClose) tracker.blurStale();
+        else tracker.blur(at);
+        return;
+      }
+      tracker.focus({ ...page, at });
+    });
   });
 }
 

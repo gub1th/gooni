@@ -13,8 +13,13 @@ Two things this module is strict about:
 1. **Idempotency.** `client_id` is minted once by the extension at interval
    close and survives every retry, so a redelivered batch must be a no-op. We
    pre-filter against the ids already stored (one IN query per batch) AND
-   catch IntegrityError per row, so two concurrent flushes of the same buffer
-   still can't double-count.
+   insert each row inside its own SAVEPOINT, so two concurrent flushes of the
+   same buffer still can't double-count — and the loser of that race unwinds
+   only its own row, never the rows already inserted alongside it.
+   `accepted`/`stored_ids` must therefore only ever name rows that really
+   committed: the extension deletes exactly those ids from its buffer, so an
+   over-reported accept is permanent data loss, while an under-reported one
+   just costs a redelivery that dedups.
 2. **Trusting clocks, not arithmetic.** `duration_sec` is recomputed from
    started/ended here; a client-supplied duration is ignored. Intervals that
    are backwards, absurdly long, or hostless are rejected with a reason rather
@@ -223,6 +228,24 @@ def normalize(item: dict) -> tuple[dict | None, str | None]:
     )
 
 
+def _existing_client_ids(db: Session, ids: list[str]) -> set[str]:
+    """Ids already stored, in one IN query.
+
+    This is only the FAST path for idempotency, never the guarantee: a batch
+    racing another flush can have a row committed between this read and its
+    own insert. The UNIQUE constraint plus the per-row savepoint below is what
+    actually makes a replay a no-op.
+    """
+    if not ids:
+        return set()
+    return {
+        cid
+        for (cid,) in db.query(BrowserInterval.client_id)
+        .filter(BrowserInterval.client_id.in_(ids))
+        .all()
+    }
+
+
 def ingest_batch(db: Session, intervals) -> dict:
     """Store a batch of focus intervals, skipping any client_id already seen.
 
@@ -258,28 +281,31 @@ def ingest_batch(db: Session, intervals) -> dict:
 
     duplicates = 0
     if rows:
-        ids = [r["client_id"] for r in rows]
-        existing = {
-            cid
-            for (cid,) in db.query(BrowserInterval.client_id)
-            .filter(BrowserInterval.client_id.in_(ids))
-            .all()
-        }
+        existing = _existing_client_ids(db, [r["client_id"] for r in rows])
         duplicates += len(existing)
         rows = [r for r in rows if r["client_id"] not in existing]
 
     stored: list[str] = []
     for r in rows:
-        db.add(BrowserInterval(**r))
         try:
-            # Flush per row so one loser in a concurrent-flush race is counted
-            # as a duplicate instead of failing the whole batch.
-            db.flush()
+            # One SAVEPOINT per row. A concurrent flush that won the race on
+            # this client_id makes the UNIQUE constraint fire here, and the
+            # savepoint unwinds ONLY this row — a plain db.rollback() would
+            # discard every row already inserted in this batch while `stored`
+            # went on reporting them as accepted, and the extension would drop
+            # them from its buffer on the strength of that.
+            with db.begin_nested():
+                db.add(BrowserInterval(**r))
             stored.append(r["client_id"])
         except IntegrityError:
-            db.rollback()
             duplicates += 1
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        # Nothing committed, so nothing may be claimed. Raising leaves the
+        # caller with a 5xx and the extension with its buffer intact.
+        db.rollback()
+        raise
 
     return {
         "accepted": len(stored),

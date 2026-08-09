@@ -9,7 +9,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { IntervalBuffer, flushOnce, BUFFER_KEY } from "../src/buffer.js";
+import {
+  IntervalBuffer,
+  flushOnce,
+  retryAfterSeconds,
+  BUFFER_KEY,
+  MAX_RETRY_AFTER_SEC,
+} from "../src/buffer.js";
 
 /** Stand-in for chrome.storage.local: survives across IntervalBuffer instances. */
 function fakeStorage(initial = {}) {
@@ -118,13 +124,80 @@ test("a 401 keeps the buffer so fixing the token recovers everything", async () 
   assert.equal(await buf.size(), 1);
 });
 
-test("a 400 drops the poison batch instead of wedging the buffer forever", async () => {
+test("only a permanently-broken batch shape is dropped", async () => {
+  // 400/413/422 all mean "this body will be refused identically forever", so
+  // retrying wedges the buffer behind one poison batch.
+  for (const status of [400, 413, 422]) {
+    const storage = fakeStorage();
+    const buf = new IntervalBuffer({ storage });
+    await buf.append(interval("a"));
+    const bad = async () => ({ ok: false, status, json: async () => ({}) });
+    await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: bad });
+    assert.equal(await buf.size(), 0, `status ${status} should drop the batch`);
+  }
+});
+
+test("a 429 keeps the buffer — the server stored nothing", async () => {
   const storage = fakeStorage();
   const buf = new IntervalBuffer({ storage });
   await buf.append(interval("a"));
-  const bad = async () => ({ ok: false, status: 400, json: async () => ({}) });
-  await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: bad });
+  await buf.append(interval("b"));
+
+  // Gooni's rate limiter (300/min per IP, shared with the SPA's polling
+  // surfaces) answers a burst this way. Dropping here destroys real
+  // measurements for a condition that clears in seconds.
+  const limited = async () => ({
+    ok: false,
+    status: 429,
+    headers: { get: (h) => (h === "Retry-After" ? "30" : null) },
+    json: async () => ({}),
+  });
+  const res = await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: limited });
+
+  assert.equal(res.ok, false);
+  assert.equal(res.delivered, 0);
+  assert.equal(await buf.size(), 2, "a rate-limited flush must not eat the buffer");
+  assert.equal(res.retryAfterSec, 30, "Retry-After is surfaced so the caller can back off");
+
+  // …and the same intervals go out again on the next flush, unchanged ids.
+  let sent = null;
+  const ok = async (_url, init) => {
+    sent = JSON.parse(init.body);
+    return { ok: true, status: 200, json: async () => ({ accepted: 2 }) };
+  };
+  await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: ok });
+  assert.deepEqual(sent.intervals.map((i) => i.client_id), ["a", "b"]);
   assert.equal(await buf.size(), 0);
+});
+
+test("a 404 keeps the buffer so fixing baseUrl recovers the backlog", async () => {
+  const storage = fakeStorage();
+  const buf = new IntervalBuffer({ storage });
+  await buf.append(interval("a"));
+
+  // A stale Fly host or the wrong dev port. That is a config mistake, and the
+  // buffer is the only reason fixing it doesn't start from empty.
+  const missing = async () => ({ ok: false, status: 404, json: async () => ({}) });
+  const res = await flushOnce({ buffer: buf, endpoint: "e", token: "t", fetchImpl: missing });
+  assert.equal(res.error, "http_404");
+  assert.equal(await buf.size(), 1);
+});
+
+test("Retry-After is read in both header forms and never wedges us", () => {
+  const now = Date.UTC(2026, 7, 8, 17, 0, 0);
+  const withHeader = (v) => ({ headers: { get: () => v } });
+
+  assert.equal(retryAfterSeconds(withHeader("30"), now), 30);
+  // HTTP-date form.
+  assert.equal(retryAfterSeconds(withHeader("Sat, 08 Aug 2026 17:00:45 GMT"), now), 45);
+  // A date already past means "go now", not a negative delay.
+  assert.equal(retryAfterSeconds(withHeader("Sat, 08 Aug 2026 16:00:00 GMT"), now), 0);
+  // An absurd or hostile value is capped rather than parking the sensor.
+  assert.equal(retryAfterSeconds(withHeader("999999"), now), MAX_RETRY_AFTER_SEC);
+  assert.equal(retryAfterSeconds(withHeader("soon"), now), null);
+  assert.equal(retryAfterSeconds(withHeader(null), now), null);
+  // Responses from a fetch impl that models no headers at all.
+  assert.equal(retryAfterSeconds({}, now), null);
 });
 
 test("an unconfigured extension keeps buffering rather than dropping", async () => {

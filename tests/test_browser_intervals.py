@@ -81,6 +81,56 @@ def main() -> int:
     check(r4["accepted"] == 1, f"intra-batch dupe: {r4}")
     check(db.query(BrowserInterval).filter_by(client_id="d").count() == 1, "intra-batch dupe row")
 
+    # ── a collision MID-BATCH must not discard the rows already inserted ─────
+    # The pre-filter is only a fast path: two concurrent flushes of the same
+    # buffer can have one commit a client_id between the other's IN query and
+    # its own insert, so the UNIQUE constraint is what actually fires. Hiding
+    # one id from the pre-filter reproduces exactly that ordering.
+    #
+    # The bug this pins: unwinding the loser with a plain db.rollback() throws
+    # away every row inserted earlier in the batch while `stored` goes on
+    # naming them — and the extension deletes exactly those ids from its
+    # buffer, so the intervals are gone and reported as delivered.
+    bas.ingest_batch(db, [_iv("racer")])
+    _real_existing = bas._existing_client_ids
+    bas._existing_client_ids = lambda s, ids: _real_existing(s, ids) - {"racer"}
+    try:
+        r5 = bas.ingest_batch(
+            db, [_iv("pre-collision"), _iv("racer"), _iv("post-collision")]
+        )
+    finally:
+        bas._existing_client_ids = _real_existing
+
+    check(r5["duplicates"] == 1, f"collision not counted as a duplicate: {r5}")
+    check(
+        sorted(r5["stored_ids"]) == ["post-collision", "pre-collision"],
+        f"stored_ids after mid-batch collision: {r5}",
+    )
+    # Read through a SECOND session: the ingesting session's identity map would
+    # happily hand back a row that was rolled back and never committed, which
+    # is the very thing being tested.
+    verify = SessionLocal()
+    try:
+        landed = {
+            cid
+            for (cid,) in verify.query(BrowserInterval.client_id).filter(
+                BrowserInterval.client_id.in_(
+                    ["pre-collision", "racer", "post-collision"]
+                )
+            )
+        }
+    finally:
+        verify.close()
+    check("pre-collision" in landed,
+          f"row inserted BEFORE the collision was discarded: {landed}")
+    check("post-collision" in landed,
+          f"row inserted AFTER the collision was discarded: {landed}")
+    check("racer" in landed, "the pre-existing row was lost by the collision")
+    check(
+        set(r5["stored_ids"]) <= landed,
+        f"reported accepted an id that never committed: {r5['stored_ids']} vs {landed}",
+    )
+
     # ── client-claimed duration is ignored; clocks are read, not arithmetic ──
     bas.ingest_batch(db, [_iv("e", seconds=30, duration_sec=99999)])
     check(db.query(BrowserInterval).filter_by(client_id="e").one().duration_sec == 30.0,
