@@ -5,14 +5,21 @@ and `reminders` into Notes/Promises and deliberately left all four source tables
 (those three plus `mentions`) in place, unread, so the backfill could be diffed
 in prod. This is the contract half — it drops them.
 
-**Deploying this destroys the source tables.** `scripts/verify_focus_convergence.py`
-is the belt-and-braces gate: it exits non-zero if any source row is unrepresented
-in v2. But `alembic upgrade head` runs at uvicorn boot, where nobody is around to
-invoke a script, so the guarantee lives HERE: after stamping, `upgrade()` re-counts
-and REFUSES TO DROP if a single row in `thought_batches`, `thoughts` or `reminders`
-came out without a provenance edge. It raises instead, the transaction rolls back,
-and the database is left exactly as it was found. A boot that fails loudly is
-recoverable; a row destroyed with no rebuild path is not.
+**RUN `scripts/verify_focus_convergence.py` AGAINST THE TARGET DATABASE AND GET A
+ZERO EXIT BEFORE DEPLOYING THIS REVISION. It is the only gate.** The drop here is
+UNCONDITIONAL: `upgrade()` stamps provenance and then drops the four tables, with
+no per-row check that would refuse. A source row the expand half never absorbed is
+destroyed, and `downgrade()` cannot bring it back — it has no edge to walk.
+
+There is no prompt between the deploy and the drop. `_alembic_upgrade()` runs at
+import time in `app/main.py`, so `alembic upgrade head` fires on uvicorn boot:
+shipping the revision IS running it. Verify first, on the database that will
+actually receive it — not a copy that has drifted from prod.
+
+(An in-migration guard was tried and removed on purpose. `promise_service.delete`
+wipes the promise AND every edge touching it, so a reminder deleted through the
+dashboard legitimately has neither twin nor provenance — a guard keying on that
+would refuse to boot forever over an action the user meant to take.)
 
 REVERSIBILITY. A migration that drops production tables has to be able to put
 them back, and "recreate four empty tables" is not a downgrade. So `upgrade()`
@@ -86,14 +93,6 @@ LEGACY_REMINDER_EDGE = "migrated_from_reminder"
 # keeps the migration honest on a backend that does.
 DROP_ORDER = ("mentions", "reminders", "thoughts", "thought_batches")
 
-# (source table, edge src_kind, edge kind) — every row of each must carry its
-# edge before the drop is allowed to proceed.
-STAMPED = (
-    ("thought_batches", "thought_batch", BATCH_EDGE),
-    ("thoughts", "thought", THOUGHT_EDGE),
-    ("reminders", "reminder", REMINDER_EDGE),
-)
-
 
 def _tables(bind) -> set[str]:
     return set(sa.inspect(bind).get_table_names())
@@ -126,55 +125,9 @@ def upgrade():
         if "reminders" in tables and "promises" in tables:
             _stamp_reminders(bind)
 
-    # Nothing is destroyed that downgrade() couldn't rebuild.
-    _assert_every_row_accounted(bind, tables)
-
     for table in DROP_ORDER:
         if table in tables:
             op.drop_table(table)
-
-
-def _assert_every_row_accounted(bind, tables: set[str]) -> None:
-    """Refuse the drop unless every source row carries a provenance edge.
-
-    A row without one is a row `downgrade()` cannot bring back, so dropping it
-    is unrecoverable. The reachable way to get here: a reminder deleted through
-    the dashboard between the expand deploy and this one — `promise_service.delete`
-    wipes the promise AND every edge touching it, leaving the `reminders` row with
-    neither twin nor provenance.
-    """
-    for table, src_kind, kind in STAMPED:
-        if table not in tables:
-            continue
-        if "edges" in tables:
-            unaccounted = [
-                r[0]
-                for r in bind.execute(
-                    sa.text(
-                        f"SELECT s.id FROM {table} s WHERE NOT EXISTS ("  # noqa: S608 — fixed table names
-                        "  SELECT 1 FROM edges e WHERE e.kind = :k "
-                        "   AND e.src_kind = :sk AND e.src_id = s.id) ORDER BY s.id"
-                    ),
-                    {"k": kind, "sk": src_kind},
-                ).fetchall()
-            ]
-        else:
-            unaccounted = [
-                r[0]
-                for r in bind.execute(sa.text(f"SELECT id FROM {table} ORDER BY id")).fetchall()  # noqa: S608
-            ]
-        if not unaccounted:
-            continue
-        shown = ", ".join(str(i) for i in unaccounted[:10])
-        more = "" if len(unaccounted) <= 10 else f" (+{len(unaccounted) - 10} more)"
-        raise RuntimeError(
-            f"`{table}` has {len(unaccounted)} row(s) with no `{kind}` provenance "
-            f"edge: id {shown}{more}. They were never absorbed into v2, so dropping "
-            "the table would destroy them and downgrade() could not rebuild them. "
-            "Refusing to drop — nothing was changed. Run "
-            "`python scripts/verify_focus_convergence.py --verbose` against this "
-            "database to see what the expand half missed."
-        )
 
 
 def _edge(bind, src_kind: str, src_id: int, dst_kind: str, dst_id: int, kind: str) -> None:

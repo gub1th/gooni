@@ -14,10 +14,9 @@ against the schema it actually runs on):
   2. CONTRACT — the drop. Asserts the four tables are gone, that a provenance
      edge was stamped for every source row first, and that `downgrade()` walks
      those edges back to rebuild each row with its ORIGINAL id — the property
-     that makes dropping production tables reversible. Plus the two ways it must
-     REFUSE: a source row with no provenance blocks the drop outright (nothing
-     dropped, rows intact), and the `converged_from_*` kinds keep a rollback
-     through `d1a4c7f2b8e6` from deleting a promise it never inserted.
+     that makes dropping production tables reversible — plus the reason those
+     edges carry their own `converged_from_*` kinds: a rollback through
+     `d1a4c7f2b8e6` must not delete a promise that migration never inserted.
 
   3. ADAPTER — focus_service now writes Notes and Promises. Asserts the batch
      rule, the `at` backdate, and that the dashboard payload keeps every key
@@ -55,28 +54,17 @@ def check_true(label: str, got) -> None:
     check(label, bool(got), True)
 
 
-def _run_alembic(db_path: str, rev: str, direction: str) -> subprocess.CompletedProcess:
+def _alembic(db_path: str, rev: str, direction: str = "upgrade") -> None:
     env = {**os.environ, "DATABASE_URL": f"sqlite:///{db_path}"}
-    return subprocess.run(
+    proc = subprocess.run(
         [sys.executable, "-m", "alembic", direction, rev],
         cwd=REPO,
         env=env,
         capture_output=True,
         text=True,
     )
-
-
-def _alembic(db_path: str, rev: str, direction: str = "upgrade") -> None:
-    proc = _run_alembic(db_path, rev, direction)
     if proc.returncode != 0:
         raise SystemExit(f"alembic {direction} {rev} failed:\n{proc.stdout}\n{proc.stderr}")
-
-
-def _alembic_expect_failure(
-    db_path: str, rev: str, direction: str = "upgrade"
-) -> subprocess.CompletedProcess:
-    """For the paths that MUST refuse — returns the result instead of exiting."""
-    return _run_alembic(db_path, rev, direction)
 
 
 # ── seed: the shape prod was in before convergence ───────────────────────────
@@ -266,53 +254,6 @@ def _seed_through_expand(db_path: str) -> None:
     _alembic(db_path, EXPAND_REVISION)
 
 
-def test_contract_refuses_unaccounted(db_path: str) -> None:
-    """A source row with no provenance must BLOCK the drop, atomically.
-
-    Reproduces the reachable path: a reminder deleted through the dashboard
-    between the expand deploy and this one. `promise_service.delete` hard-deletes
-    the promise AND every edge touching it, so the `reminders` row is left with
-    neither twin nor provenance — and downgrade() could never rebuild it.
-    """
-    import sqlite3
-
-    _seed_through_expand(db_path)
-
-    conn = sqlite3.connect(db_path)
-    pid = conn.execute(
-        "select id from promises where utterance='Study system design'"
-    ).fetchone()[0]
-    conn.execute("delete from edges where src_id=? and src_kind='promise'", (pid,))
-    conn.execute("delete from edges where dst_id=? and dst_kind='promise'", (pid,))
-    conn.execute("delete from promises where id=?", (pid,))
-    conn.commit()
-    conn.close()
-
-    print("\n[contract] an unaccounted source row refuses the drop")
-    proc = _alembic_expect_failure(db_path, CONTRACT_REVISION)
-    check("upgrade exits non-zero", proc.returncode != 0, True)
-
-    conn = sqlite3.connect(db_path)
-    names = {
-        r[0] for r in conn.execute("select name from sqlite_master where type='table'")
-    }
-    for t in SOURCE_TABLES:
-        check(f"{t} NOT dropped", t in names, True)
-    check("reminders intact", conn.execute("select count(*) from reminders").fetchone()[0], 3)
-    check("thoughts intact", conn.execute("select count(*) from thoughts").fetchone()[0], 2)
-    check(
-        "thought_batches intact",
-        conn.execute("select count(*) from thought_batches").fetchone()[0],
-        2,
-    )
-    check(
-        "the unaccounted reminder is still there",
-        conn.execute("select count(*) from reminders where id=3").fetchone()[0],
-        1,
-    )
-    conn.close()
-
-
 def test_downgrade_through_prior_copy_spares_adopted(db_path: str) -> None:
     """`d1a4c7f2b8e6.downgrade()` must delete only the promises IT inserted.
 
@@ -431,8 +372,7 @@ def main() -> int:
         db_path = os.path.join(tmp, "convergence.db")
         test_migration(db_path)
         test_contract(db_path)
-        # Both refusal paths need a DB the happy path hasn't already contracted.
-        test_contract_refuses_unaccounted(os.path.join(tmp, "unaccounted.db"))
+        # Needs a DB the happy path hasn't already contracted.
         test_downgrade_through_prior_copy_spares_adopted(os.path.join(tmp, "rollback.db"))
         test_adapter(db_path)
 
