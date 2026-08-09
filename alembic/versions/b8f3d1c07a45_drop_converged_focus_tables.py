@@ -9,7 +9,11 @@ in prod. This is the contract half — it drops them.
 ZERO EXIT BEFORE DEPLOYING THIS REVISION. It is the only gate.** The drop here is
 UNCONDITIONAL: `upgrade()` stamps provenance and then drops the four tables, with
 no per-row check that would refuse. A source row the expand half never absorbed is
-destroyed, and `downgrade()` cannot bring it back — it has no edge to walk.
+destroyed, and `downgrade()` cannot bring it back — it has no edge to walk. Every
+such row is logged at WARNING as `upgrade()` passes over it, with a closing
+per-table tally before the drops run. That log is reporting, never a refusal —
+but once the table is gone it is the only record of what was lost, which is
+exactly the state an operator who skipped the verifier ends up in.
 
 A ROLLBACK CAN COME BACK PARTIAL, and not only in that no-edge-at-all case. An
 edge can survive while the v2 row it points at does not, or survives in a shape
@@ -55,7 +59,12 @@ WRITES the new kind, for every reminder it resolves.
 `downgrade()` walks those edges backwards and rebuilds each row FOR WHICH AN
 ACCEPTABLE CANDIDATE SURVIVES — original ids included, which is what lets
 `reminders.thought_id` and `thoughts.batch_id` be restored as real foreign keys
-rather than dangling integers. The rest are skipped and reported; see the partial
+rather than dangling integers. Acceptable means the restore could actually build
+a row the OLD schema accepts: each rebuild assembles its full row and checks it
+against that table's NOT NULL columns (`NOT_NULL_COLUMNS`, mirrored from
+`_recreate_tables`) before inserting, so a destination that survived but drifted
+— a note that lost its topic, or whose content was emptied — rejects and falls
+through to the next stamp. The rest are skipped and reported; see the partial
 -rollback note above.
 
 The rebuilt rows come from the v2 side, so a downgrade returns the CURRENT state
@@ -134,17 +143,61 @@ def upgrade():
 
     # Provenance first — everything downgrade() needs has to be written while
     # the source rows are still readable.
+    unstamped: dict[str, list[int]] = {}
     if "edges" in tables:
         if "thought_batches" in tables:
-            _stamp_batches(bind)
+            _stamp_batches(bind, unstamped)
         if "thoughts" in tables:
-            _stamp_thoughts(bind)
-        if "reminders" in tables and "promises" in tables:
-            _stamp_reminders(bind)
+            _stamp_thoughts(bind, unstamped)
+        if "reminders" in tables:
+            if "promises" in tables:
+                _stamp_reminders(bind, unstamped)
+            else:
+                _unstampable(bind, unstamped, "reminders", "`promises` is absent, so no reminder can be matched to a twin")
+    else:
+        for table in ("thought_batches", "thoughts", "reminders"):
+            if table in tables:
+                _unstampable(bind, unstamped, table, "`edges` is absent, so no provenance can be recorded at all")
+
+    if unstamped:
+        log.warning(
+            "the drop below DESTROYS these source rows: no v2 destination could be "
+            "resolved for them, so no provenance edge was stamped and downgrade() "
+            "has nothing to walk back — %s",
+            ", ".join(f"{t}: {len(ids)} ({ids})" for t, ids in sorted(unstamped.items())),
+        )
 
     for table in DROP_ORDER:
         if table in tables:
             op.drop_table(table)
+
+
+def _unstamped(tally: dict, table: str, src_id: int, reason: str) -> None:
+    """Report one source row the drop is about to destroy unrecoverably.
+
+    Reporting only — the drop stays unconditional by design, because the
+    discriminator a refusal would need cannot work uniformly (a reminder deleted
+    through the dashboard legitimately has neither twin nor provenance, and a
+    guard keying on that would refuse to boot forever). `verify_focus_convergence.py`
+    is the gate; this is the forensic trail for the deploy that skipped it.
+    """
+    log.warning(
+        "%s id %s has NO v2 destination (%s). The drop is unconditional, so this "
+        "row is destroyed here and downgrade() cannot rebuild it — there is no "
+        "provenance edge to walk. scripts/verify_focus_convergence.py catches this "
+        "while the row still exists; run it against the target DB before deploying.",
+        table,
+        src_id,
+        reason,
+    )
+    tally.setdefault(table, []).append(src_id)
+
+
+def _unstampable(bind, tally: dict, table: str, reason: str) -> None:
+    """Whole-table variant: the matcher can't run, so every row is unstamped."""
+    rows = bind.execute(sa.text(f"SELECT id FROM {table} ORDER BY id")).fetchall()
+    for r in rows:
+        _unstamped(tally, table, r.id, reason)
 
 
 def _edge(bind, src_kind: str, src_id: int, dst_kind: str, dst_id: int, kind: str) -> None:
@@ -167,7 +220,7 @@ def _edge(bind, src_kind: str, src_id: int, dst_kind: str, dst_id: int, kind: st
     )
 
 
-def _stamp_batches(bind) -> None:
+def _stamp_batches(bind, tally: dict) -> None:
     """thought_batch id → the note it became, matched exactly as the expand
     half created it: (tag, topic, started_at)."""
     rows = bind.execute(
@@ -183,9 +236,16 @@ def _stamp_batches(bind) -> None:
         ).scalar()
         if note_id:
             _edge(bind, "thought_batch", r.id, "note", note_id, BATCH_EDGE)
+        else:
+            _unstamped(
+                tally,
+                "thought_batches",
+                r.id,
+                "no `thought-batch` note carries its (topic_id, started_at)",
+            )
 
 
-def _stamp_thoughts(bind) -> None:
+def _stamp_thoughts(bind, tally: dict) -> None:
     """thought id → its note, matched on (tag, timestamp, content)."""
     rows = bind.execute(
         sa.text("SELECT id, content, timestamp FROM thoughts ORDER BY id")
@@ -200,9 +260,16 @@ def _stamp_thoughts(bind) -> None:
         ).scalar()
         if note_id:
             _edge(bind, "thought", r.id, "note", note_id, THOUGHT_EDGE)
+        else:
+            _unstamped(
+                tally,
+                "thoughts",
+                r.id,
+                "no `thought` note carries its (timestamp, content)",
+            )
 
 
-def _stamp_reminders(bind) -> None:
+def _stamp_reminders(bind, tally: dict) -> None:
     """reminder id → its promise. Same two-step matcher the expand half used:
     the 2026-08-01 copy's edge first (exact provenance survives text edits),
     then a text match for rows the connector wrote after it.
@@ -221,6 +288,13 @@ def _stamp_reminders(bind) -> None:
         if promise_id is None:
             content = (r.content or "").strip()
             if not content:
+                _unstamped(
+                    tally,
+                    "reminders",
+                    r.id,
+                    "its content is empty, so the text matcher has nothing to match "
+                    "on, and no live `migrated_from_reminder` twin names it",
+                )
                 continue
             twin = bind.execute(
                 sa.text(
@@ -232,6 +306,14 @@ def _stamp_reminders(bind) -> None:
             promise_id = twin.id if twin else None
         if promise_id is not None:
             _edge(bind, "reminder", r.id, "promise", promise_id, REMINDER_EDGE)
+        else:
+            _unstamped(
+                tally,
+                "reminders",
+                r.id,
+                "no promise carries its content as an utterance, and no live "
+                "`migrated_from_reminder` twin names it",
+            )
 
 
 # ── downgrade ───────────────────────────────────────────────────────────────
@@ -334,6 +416,43 @@ def _recreate_tables(tables: set[str]) -> None:
             op.create_index(f"ix_reminders_{col}", "reminders", [col], if_not_exists=True)
 
 
+# Every NOT NULL column of each restored table, mirrored from the
+# `create_table` calls above — the columns without `nullable=True` and without a
+# `server_default` the INSERT relies on. Restores name every column they write,
+# so a column added to `_recreate_tables` is checked here by NAME rather than by
+# whoever remembers to hand-write a guard for it. Nullable and therefore absent:
+# thought_batches.label/image_url, reminders.owed_to/due_at/resolved_at/
+# thought_id/parent_id/attachment_path.
+NOT_NULL_COLUMNS = {
+    "thought_batches": ("id", "topic_id", "started_at", "ended_at"),
+    "thoughts": ("id", "content", "timestamp", "batch_id"),
+    "reminders": ("id", "type", "content", "due_is_default", "done", "state", "created_at"),
+}
+
+
+def _rebuildable(table: str, row: dict) -> bool:
+    """Can this candidate's rebuilt row actually satisfy the old schema?
+
+    The v2 side is looser than the focus side was — `notes.content`,
+    `notes.created_at` and `notes.topic_id` are all nullable, and the first two
+    are reachable through the ordinary notes API — so a destination that survived
+    the drop can still be unexpressible as the row it came from. Checking the
+    assembled row against the destination's NOT NULL columns is what makes the
+    candidate walk reject it and try the next stamp, instead of the INSERT
+    raising and taking the whole rollback down with it.
+    """
+    missing = [c for c in NOT_NULL_COLUMNS[table] if row.get(c) is None]
+    if missing:
+        log.info(
+            "%s id %s: candidate rejected — %s would be NULL on a NOT NULL column",
+            table,
+            row.get("id"),
+            ", ".join(missing),
+        )
+        return False
+    return True
+
+
 def _provenance(bind, kind: str, src_kind: str, dst_kind: str) -> dict:
     """{source id → [v2 id, …]} from the edges upgrade() stamped, oldest first.
 
@@ -392,15 +511,40 @@ def _resolve(candidates, attempt):
     return None
 
 
-def _skipped(tally: dict, table: str, src_id: int) -> None:
+def _skipped(tally: dict, table: str, src_id: int, reason: str = "") -> None:
     log.warning(
-        "%s id %s NOT rebuilt: every stamped provenance candidate was rejected — "
-        "its v2 destination is gone, or survives in a shape the old schema can't "
-        "hold. The row is absent from the restored table.",
+        "%s id %s NOT rebuilt: %s. The row is absent from the restored table.",
         table,
         src_id,
+        reason
+        or (
+            "every stamped provenance candidate was rejected — its v2 destination "
+            "is gone, or survives in a shape the old schema can't hold"
+        ),
     )
     tally.setdefault(table, []).append(src_id)
+
+
+def _restore_row(tally: dict, table: str, src_id: int, candidates, attempt):
+    """Rebuild one source row, containing every failure to that row.
+
+    Partial is the contract: a row that can't come back is skipped and reported,
+    never raised on. That has to hold for the unforeseen failure too — an
+    exception escaping here would abort the rollback mid-pass, leaving some
+    tables rebuilt, the rest not, and the version stamp unmoved, which is strictly
+    worse than coming back short. So one bad row costs itself and nothing else,
+    with the exception detail on the same WARNING channel as an ordinary skip so
+    it stays diagnosable. The containment is per row, not around the pass, so a
+    systemic failure still shows up once per row rather than being swallowed once.
+    """
+    try:
+        rebuilt = _resolve(candidates, attempt)
+    except Exception as exc:
+        _skipped(tally, table, src_id, f"rebuilding it raised {type(exc).__name__}: {exc}")
+        return None
+    if rebuilt is None:
+        _skipped(tally, table, src_id)
+    return rebuilt
 
 
 def _restore_batches(bind, tally: dict) -> dict:
@@ -415,16 +559,19 @@ def _restore_batches(bind, tally: dict) -> dict:
             sa.text("SELECT 1 FROM thought_batches WHERE id = :i"), {"i": batch_id}
         ).scalar():
             continue
-        if _resolve(candidates, lambda n, b=batch_id: _rebuild_batch(bind, b, n)) is None:
-            _skipped(tally, "thought_batches", batch_id)
+        _restore_row(
+            tally,
+            "thought_batches",
+            batch_id,
+            candidates,
+            lambda n, b=batch_id: _rebuild_batch(bind, b, n),
+        )
     return note_to_batch
 
 
 def _rebuild_batch(bind, batch_id: int, note_id: int) -> int | None:
     note = bind.execute(sa.text(NOTE_SQL), {"i": note_id}).fetchone()
-    # topic_id is NOT NULL on thought_batches; a note that lost its topic can't
-    # be expressed as one. The note itself is untouched either way.
-    if note is None or note.topic_id is None:
+    if note is None:
         return None
     image_url = bind.execute(
         sa.text(
@@ -433,20 +580,23 @@ def _rebuild_batch(bind, batch_id: int, note_id: int) -> int | None:
         ),
         {"n": note.id},
     ).scalar()
+    row = {
+        "id": batch_id,
+        "topic_id": note.topic_id,
+        "label": note.title,
+        "image_url": image_url,
+        "started_at": note.created_at,
+        "ended_at": note.updated_at or note.created_at,
+    }
+    if not _rebuildable("thought_batches", row):
+        return None
     bind.execute(
         sa.text(
             "INSERT INTO thought_batches "
             "(id, topic_id, label, image_url, started_at, ended_at) "
-            "VALUES (:i, :t, :l, :u, :s, :e)"
+            "VALUES (:id, :topic_id, :label, :image_url, :started_at, :ended_at)"
         ),
-        {
-            "i": batch_id,
-            "t": note.topic_id,
-            "l": note.title,
-            "u": image_url,
-            "s": note.created_at,
-            "e": note.updated_at or note.created_at,
-        },
+        row,
     )
     return note_id
 
@@ -461,12 +611,13 @@ def _restore_thoughts(bind, note_to_batch: dict, tally: dict) -> dict:
             sa.text("SELECT 1 FROM thoughts WHERE id = :i"), {"i": thought_id}
         ).scalar():
             continue
-        rebuilt = _resolve(
+        _restore_row(
+            tally,
+            "thoughts",
+            thought_id,
             candidates,
             lambda n, t=thought_id: _rebuild_thought(bind, t, n, note_to_batch),
         )
-        if rebuilt is None:
-            _skipped(tally, "thoughts", thought_id)
     return note_to_thought
 
 
@@ -475,18 +626,26 @@ def _rebuild_thought(bind, thought_id: int, note_id: int, note_to_batch: dict) -
     if note is None:
         return None
     batch_id = note_to_batch.get(note.parent_note_id)
-    # batch_id is NOT NULL — a thought whose batch we can't name is one the
-    # old schema had no way to hold.
-    if batch_id is None or not bind.execute(
+    # A named batch that isn't in the rebuilt table is as unusable as no batch at
+    # all — the NOT NULL check can't see that, so it stays a separate guard.
+    if batch_id is not None and not bind.execute(
         sa.text("SELECT 1 FROM thought_batches WHERE id = :i"), {"i": batch_id}
     ).scalar():
+        batch_id = None
+    row = {
+        "id": thought_id,
+        "content": note.content,
+        "timestamp": note.created_at,
+        "batch_id": batch_id,
+    }
+    if not _rebuildable("thoughts", row):
         return None
     bind.execute(
         sa.text(
             "INSERT INTO thoughts (id, content, timestamp, batch_id) "
-            "VALUES (:i, :c, :t, :b)"
+            "VALUES (:id, :content, :timestamp, :batch_id)"
         ),
-        {"i": thought_id, "c": note.content, "t": note.created_at, "b": batch_id},
+        row,
     )
     return note_id
 
@@ -498,12 +657,13 @@ def _restore_reminders(bind, note_to_thought: dict, tally: dict) -> None:
             sa.text("SELECT 1 FROM reminders WHERE id = :i"), {"i": reminder_id}
         ).scalar():
             continue
-        rebuilt = _resolve(
+        _restore_row(
+            tally,
+            "reminders",
+            reminder_id,
             candidates,
             lambda p, r=reminder_id: _rebuild_reminder(bind, r, p, note_to_thought),
         )
-        if rebuilt is None:
-            _skipped(tally, "reminders", reminder_id)
 
 
 def _rebuild_reminder(bind, reminder_id: int, promise_id: int, note_to_thought: dict) -> int | None:
@@ -534,25 +694,29 @@ def _rebuild_reminder(bind, reminder_id: int, promise_id: int, note_to_thought: 
             thought_id = candidate
 
     state = p.state or "active"
+    row = {
+        "id": reminder_id,
+        "type": "promise" if p.owed_to is not None else "reminder",
+        "content": p.utterance,
+        "owed_to": p.owed_to,
+        "due_at": p.inferred_due,
+        "due_is_default": 1 if p.due_is_default else 0,
+        "done": 0 if state == "active" else 1,
+        "state": state,
+        "resolved_at": p.resolved_at,
+        "thought_id": thought_id,
+        "created_at": p.created_at,
+    }
+    if not _rebuildable("reminders", row):
+        return None
     bind.execute(
         sa.text(
             "INSERT INTO reminders "
             "(id, type, content, owed_to, due_at, due_is_default, done, state, "
             " resolved_at, thought_id, parent_id, attachment_path, created_at) "
-            "VALUES (:i, :ty, :c, :o, :d, :dflt, :done, :st, :res, :th, NULL, NULL, :cr)"
+            "VALUES (:id, :type, :content, :owed_to, :due_at, :due_is_default, "
+            " :done, :state, :resolved_at, :thought_id, NULL, NULL, :created_at)"
         ),
-        {
-            "i": reminder_id,
-            "ty": "promise" if p.owed_to is not None else "reminder",
-            "c": p.utterance,
-            "o": p.owed_to,
-            "d": p.inferred_due,
-            "dflt": 1 if p.due_is_default else 0,
-            "done": 0 if state == "active" else 1,
-            "st": state,
-            "res": p.resolved_at,
-            "th": thought_id,
-            "cr": p.created_at,
-        },
+        row,
     )
     return promise_id

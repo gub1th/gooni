@@ -17,6 +17,10 @@ against the schema it actually runs on):
      that makes dropping production tables reversible — plus the reason those
      edges carry their own `converged_from_*` kinds: a rollback through
      `d1a4c7f2b8e6` must not delete a promise that migration never inserted.
+     Both directions are also asserted to REPORT rather than refuse: a v2 row
+     that drifted out of the old schema's reach costs its own row and not the
+     rollback, and a source row the drop destroys unrecoverably is named in the
+     log before the table is gone.
 
   3. ADAPTER — focus_service now writes Notes and Promises. Asserts the batch
      rule, the `at` backdate, and that the dashboard payload keeps every key
@@ -25,6 +29,7 @@ against the schema it actually runs on):
 Run: python tests/test_focus_convergence.py   (no LLM, no network)
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -401,6 +406,190 @@ def test_downgrade_is_partial_not_all_or_nothing(db_path: str) -> None:
     conn.close()
 
 
+def test_downgrade_skips_a_note_the_old_schema_cant_hold(db_path: str) -> None:
+    """A v2 row that drifted out of the old schema's reach costs its own row only.
+
+    `thoughts.content` is NOT NULL, but the note it became is not: `PUT /notes/{id}`
+    with `{"content": null, "force": true}` nulls it. Before the fix the rebuild
+    walked straight into `NOT NULL constraint failed: thoughts.content`, the
+    exception escaped `downgrade()`, and the rollback aborted mid-pass with the
+    version stamp unmoved — every row after the bad one lost, not just the bad one.
+    """
+    import sqlite3
+
+    _seed_through_expand(db_path)
+    _alembic(db_path, CONTRACT_REVISION)
+
+    conn = sqlite3.connect(db_path)
+    drifted = conn.execute(
+        "select dst_id from edges where kind='converged_from_thought' "
+        "and src_kind='thought' and src_id=2"
+    ).fetchone()[0]
+    conn.execute("update notes set content=null where id=?", (drifted,))
+    conn.commit()
+    # Precondition: the note is still there and still stamped — only its content went.
+    left = conn.execute(
+        "select count(*) from notes where id=? and content is null", (drifted,)
+    ).fetchone()[0]
+    conn.close()
+
+    print("\n[contract] a note the old schema can't hold doesn't abort the rollback")
+    check("the stamped note survives with NULL content", left, 1)
+
+    _alembic(db_path, EXPAND_REVISION, direction="downgrade")
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    q = lambda s: conn.execute(s).fetchall()  # noqa: E731
+
+    check("the unholdable thought is absent", q("select count(*) n from thoughts where id=2")[0]["n"], 0)
+
+    t1 = q("select * from thoughts where id=1")
+    check("the other thought is rebuilt", len(t1), 1)
+    if t1:
+        check("with its original content", t1[0]["content"], "the store should stay dumb")
+        check("and its original batch", t1[0]["batch_id"], 1)
+
+    check("both batches still rebuilt", q("select count(*) n from thought_batches")[0]["n"], 2)
+    b1 = q("select * from thought_batches where id=1")
+    check("batch label intact", b1[0]["label"] if b1 else None, "Gooni decided the store stays dumb.")
+
+    check("every reminder still rebuilt", q("select count(*) n from reminders")[0]["n"], 3)
+    r1 = q("select * from reminders where id=1")
+    check("reminder content intact", r1[0]["content"] if r1 else None, "Get plants for the new place")
+    check("owed_to intact", r1[0]["owed_to"] if r1 else None, 1)
+    check("type re-derived", r1[0]["type"] if r1 else None, "promise")
+    r3 = q("select * from reminders where id=3")
+    # It pointed at thought 2, which couldn't come back — the FK drops rather
+    # than dangling, and the reminder itself still does.
+    check("the reminder that pointed at it still rebuilds", len(r3), 1)
+    check("with a NULL thought_id, not a dangling one", r3[0]["thought_id"] if r3 else "unset", None)
+    conn.close()
+
+
+# Runs the migration IN-PROCESS with a logging.Handler on the root logger, so the
+# assertions read real LogRecords rather than migration source. A bare `Config()`
+# (no ini path) is what makes that work: `alembic/env.py` only calls `fileConfig`
+# when `config_file_name` is set, and `fileConfig` would rip the handler back out.
+_CAPTURE_UPGRADE = r"""
+import json, logging, os, sys
+
+db_path, rev, repo = sys.argv[1], sys.argv[2], sys.argv[3]
+os.environ["DATABASE_URL"] = "sqlite:///" + db_path
+sys.path.insert(0, repo)
+
+captured = []
+
+
+class Capture(logging.Handler):
+    def emit(self, record):
+        captured.append(
+            {"logger": record.name, "level": record.levelname, "message": record.getMessage()}
+        )
+
+
+logging.getLogger().addHandler(Capture())
+
+from alembic import command
+from alembic.config import Config
+
+cfg = Config()
+cfg.set_main_option("script_location", os.path.join(repo, "alembic"))
+command.upgrade(cfg, rev)
+
+sys.stdout.write("@@RECORDS@@" + json.dumps(captured))
+"""
+
+
+def _upgrade_capturing_logs(db_path: str, rev: str) -> list:
+    proc = subprocess.run(
+        [sys.executable, "-c", _CAPTURE_UPGRADE, db_path, rev, REPO],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0 or "@@RECORDS@@" not in proc.stdout:
+        raise SystemExit(f"capturing upgrade to {rev} failed:\n{proc.stdout}\n{proc.stderr}")
+    return json.loads(proc.stdout.split("@@RECORDS@@", 1)[1])
+
+
+UNRESOLVABLE = """
+-- Never backfilled: no `thought` note carries this (timestamp, content).
+INSERT INTO thoughts (id,content,timestamp,batch_id)
+  VALUES (99,'the expand half never saw this','2026-08-06 09:00:00',1);
+-- Empty content: the text matcher has nothing to match on.
+INSERT INTO reminders (id,type,content,owed_to,due_at,due_is_default,done,state,
+                       resolved_at,thought_id,created_at)
+  VALUES (98,'reminder','',NULL,NULL,0,0,'active',NULL,NULL,'2026-08-06 09:00:00'),
+-- No promise carries this utterance, and no legacy edge names it.
+         (99,'reminder','no promise ever carried this',NULL,NULL,0,0,'active',NULL,NULL,
+          '2026-08-06 09:00:00');
+"""
+
+
+def test_upgrade_reports_the_rows_it_destroys(db_path: str) -> None:
+    """The drop stays unconditional — but says what it took with it.
+
+    An unresolvable source row is destroyed and unrecoverable (there is no
+    provenance edge for `downgrade()` to walk). That is the accepted design;
+    `verify_focus_convergence.py` is the sole gate. What was missing was the
+    forensic trail for the deploy that skipped it: once the table is gone, this
+    log is the only record that the row ever existed.
+    """
+    import sqlite3
+
+    _seed_through_expand(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.executescript(UNRESOLVABLE)
+    conn.commit()
+    conn.close()
+
+    records = _upgrade_capturing_logs(db_path, CONTRACT_REVISION)
+    warnings = [r["message"] for r in records if r["level"] == "WARNING"]
+
+    print("\n[contract] upgrade reports every row the drop destroys")
+    conn = sqlite3.connect(db_path)
+    names = {r[0] for r in conn.execute("select name from sqlite_master where type='table'")}
+    # The destructive behaviour is intentional and must stay: it warned, it did
+    # not refuse.
+    check("it still dropped the tables", any(t in names for t in SOURCE_TABLES), False)
+    check(
+        "the unresolvable reminder left no provenance to walk back",
+        conn.execute(
+            "select count(*) from edges where kind='converged_from_reminder' and src_id=99"
+        ).fetchone()[0],
+        0,
+    )
+    check(
+        "the resolvable ones were still stamped",
+        conn.execute(
+            "select count(*) from edges where kind='converged_from_reminder'"
+        ).fetchone()[0],
+        3,
+    )
+    conn.close()
+
+    named = lambda needle: any(needle in m for m in warnings)  # noqa: E731
+    check("warned about the unbackfilled thought", named("thoughts id 99"), True)
+    check("warned about the unmatched reminder", named("reminders id 99"), True)
+    check("warned about the empty-content reminder", named("reminders id 98"), True)
+    check(
+        "said the row is destroyed and unrecoverable",
+        any("thoughts id 99" in m and "destroyed" in m and "downgrade" in m for m in warnings),
+        True,
+    )
+    tally = [m for m in warnings if "DESTROYS these source rows" in m]
+    check("emitted a closing tally", len(tally), 1)
+    if tally:
+        check("tally counts the thought", "thoughts: 1 ([99])" in tally[0], True)
+        check("tally counts both reminders", "reminders: 2 ([98, 99])" in tally[0], True)
+    check(
+        "a backfilled row is not reported as lost",
+        named("thoughts id 1"),
+        False,
+    )
+
+
 def test_adapter(db_path: str) -> None:
     """focus_service against the migrated DB — the seam the MCP tools call."""
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
@@ -498,6 +687,8 @@ def main() -> int:
         test_downgrade_through_prior_copy_spares_adopted(os.path.join(tmp, "rollback.db"))
         test_downgrade_prefers_live_provenance_edge(os.path.join(tmp, "restamp.db"))
         test_downgrade_is_partial_not_all_or_nothing(os.path.join(tmp, "partial.db"))
+        test_downgrade_skips_a_note_the_old_schema_cant_hold(os.path.join(tmp, "drifted.db"))
+        test_upgrade_reports_the_rows_it_destroys(os.path.join(tmp, "unstamped.db"))
         test_adapter(db_path)
 
     print()
