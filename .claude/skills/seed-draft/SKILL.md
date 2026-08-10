@@ -43,24 +43,21 @@ Drops a stub note into Daniel's Drafts sidebar so an unfinished thought has a vi
    - `<h3>What I'd write publicly</h3>` — when the goal is a portfolio piece
    - `<h3>Loose ends</h3>` — when the thought isn't done yet
 
-3. Create via `mcp__gooni__add_note` with `space_name="General"`. Drafts live in General by default; the sidebar surfaces them globally.
+3. Create via `mcp__gooni__log_note` — `kind="note"` (the default), a `title`,
+   the TipTap HTML `content`, and `is_draft=True`.
 
-4. Mark `is_draft: true` via `PATCH /notes/{id}`. The MCP `add_note` tool does not yet support a draft flag — backlog #216 (extend MCP add_note for is_draft) tracks this.
+   `is_draft` defaults to True, so a plain `log_note` already lands in Drafts —
+   pass it explicitly anyway, because the draft flag is the whole point of this
+   skill and a future default change shouldn't silently break it. There is no
+   second step and no space to pick: tags own organization since the v2 nuke,
+   and the Drafts sidebar surfaces drafts globally.
 
-   ```bash
-   curl -s -X PATCH http://localhost:8000/notes/<id> \
-     -H "Content-Type: application/json" \
-     -d '{"is_draft": true}'
-   ```
-
-5. If the PATCH fails (backend HTTP down), the note exists as a regular note. Note the deferred draft flip in the final report. Don't retry in a loop.
-
-6. One-line confirmation: `seeded draft #<id> — your turn to finish`. No fanfare.
+4. One-line confirmation: `seeded draft #<id> — your turn to finish`. No fanfare.
 
 ## Anti-patterns
 
 - Writing the takeaway yourself. Daniel has to reach. Anything you put in the body should be scaffolding — context he forgot, not the conclusion.
 - Multi-paragraph "summary" sections. Three sentences max. The longer the summary, the lower his odds of writing more.
 - Skipping the draft flag. Without it, the stub gets buried in All Notes and dies. The Drafts sidebar is the load-bearing surface for "this is unfinished — finish it."
-- Seeding the same thread twice. Use `mcp__gooni__find_note` or search first; if a draft for this topic exists, edit it rather than spawn a duplicate.
+- Seeding the same thread twice. Search first with `mcp__gooni__search_notes` (pass `match="substring"` when you remember a specific phrase); if a draft for this topic exists, edit it rather than spawn a duplicate.
 - Generic titles like "Notes from today". Pick the angle — specific titles re-engage future-Daniel; generic ones don't.
