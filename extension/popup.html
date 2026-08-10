@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Gooni Usage</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --ink: #14181a;
+        --dim: #6b7378;
+        --line: rgba(0, 0, 0, 0.1);
+        --bar: #2f7d5b;
+        --bar-soft: rgba(47, 125, 91, 0.18);
+        --warn: #a06a1b;
+        --surface: #fbfbfa;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #eceeed;
+          --dim: #9aa3a7;
+          --line: rgba(255, 255, 255, 0.12);
+          --bar: #4fbf8b;
+          --bar-soft: rgba(79, 191, 139, 0.2);
+          --warn: #d9a44a;
+          --surface: #14181a;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        width: 380px;
+        margin: 0;
+        padding: 14px 14px 10px;
+        font: 13px/1.45 ui-sans-serif, -apple-system, system-ui, sans-serif;
+        color: var(--ink);
+        background: var(--surface);
+      }
+      .head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+      .total { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+      .total .label { font-size: 11px; font-weight: 500; color: var(--dim); display: block; }
+      .periods { display: flex; gap: 4px; }
+      .periods button {
+        font: inherit; font-size: 11px; padding: 3px 8px;
+        border: 1px solid var(--line); background: transparent; color: var(--dim);
+        border-radius: 999px; cursor: pointer;
+      }
+      .periods button[aria-pressed="true"] { color: var(--ink); border-color: currentColor; font-weight: 600; }
+
+      .notes { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+      .note { font-size: 11px; color: var(--dim); }
+      .note.warn { color: var(--warn); }
+
+      .chart { margin: 12px 0 6px; }
+      .bars { display: flex; align-items: flex-end; gap: 6px; height: 64px; }
+      .bars .col { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; min-width: 0; }
+      .bars .stack { width: 100%; border-radius: 3px 3px 0 0; overflow: hidden; background: var(--bar-soft); }
+      .bars .solid { background: var(--bar); }
+      .bars .salvaged {
+        background: repeating-linear-gradient(
+          -45deg, var(--bar), var(--bar) 2px, transparent 2px, transparent 5px
+        );
+      }
+      .bars .empty { height: 2px; background: var(--line); border-radius: 2px; }
+      .axis { display: flex; gap: 6px; margin-top: 4px; }
+      .axis span { flex: 1 1 0; text-align: center; font-size: 10px; color: var(--dim); min-width: 0; overflow: hidden; }
+
+      table { width: 100%; border-collapse: collapse; }
+      tr { border-top: 1px solid var(--line); }
+      td { padding: 7px 0; vertical-align: middle; }
+      td.icon { width: 20px; }
+      td.icon img { width: 16px; height: 16px; display: block; border-radius: 3px; }
+      td.icon .letter {
+        width: 16px; height: 16px; border-radius: 3px; background: var(--bar-soft);
+        font-size: 10px; line-height: 16px; text-align: center; color: var(--dim); font-weight: 600;
+      }
+      td.name { padding-left: 8px; min-width: 0; }
+      .host { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .meta { font-size: 10px; color: var(--dim); }
+      .track { height: 3px; background: var(--line); border-radius: 2px; margin-top: 4px; }
+      .track > i { display: block; height: 100%; background: var(--bar); border-radius: 2px; }
+      td.time { text-align: right; white-space: nowrap; padding-left: 10px; }
+      .time .dur { font-variant-numeric: tabular-nums; }
+      .time .pct { font-size: 10px; color: var(--dim); }
+      .flag { color: var(--warn); cursor: help; }
+
+      .state { padding: 22px 4px; text-align: center; color: var(--dim); }
+      .state strong { display: block; color: var(--ink); font-size: 14px; margin-bottom: 3px; }
+
+      footer { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line);
+               display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); }
+      footer button { font: inherit; background: none; border: 0; color: inherit;
+                      cursor: pointer; padding: 0; text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <div class="total">
+        <span class="label">Usage Time</span>
+        <span id="headline">…</span>
+      </div>
+      <div class="periods" id="periods">
+        <button type="button" data-days="1" aria-pressed="true">Today</button>
+        <button type="button" data-days="7" aria-pressed="false">Last 7 days</button>
+      </div>
+    </div>
+
+    <div class="notes" id="notes"></div>
+
+    <div class="chart" id="chart" hidden>
+      <div class="bars" id="bars"></div>
+      <div class="axis" id="axis"></div>
+    </div>
+
+    <div id="body"><div class="state">loading…</div></div>
+
+    <footer>
+      <span id="range"></span>
+      <button id="openOptions" type="button">settings</button>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

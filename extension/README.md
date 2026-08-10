@@ -246,6 +246,50 @@ Durations are recomputed server-side from the timestamps — a client-supplied
 Rows land in the `browser_intervals` table and nowhere else. Read them back
 with `GET /browser/intervals?day=YYYY-MM-DD&limit=100`.
 
+## The popup (what you actually looked at)
+
+Clicking the toolbar icon opens `popup.html`: a headline total for the selected
+period (today / last 7 days), a 7-day trend chart, and the ranked per-host list
+— favicon, domain, `1:13:10`, a proportional bar, share of the period, and the
+session count.
+
+It reads ONE endpoint, `GET {base}/browser/intervals/summary?days=N` (or
+`?start=&end=`), which folds everything in SQL — `GROUP BY host` and a
+`GROUP BY` over per-day CASE buckets built from LOCAL midnights. The popup
+never downloads a raw interval: a tab-focus sensor writes thousands of rows a
+week, and a popup that summed them in JavaScript would be visibly slow within a
+month and would keep getting slower. Days are LOCAL days; the buckets are
+computed per-day as tz-aware midnights, so a DST switch inside the window lands
+on the right side of midnight. An interval that crosses midnight is attributed
+wholly to the day it STARTED on.
+
+Three honesty rules, all of them load-bearing:
+
+- **Salvaged intervals are counted and marked.** A `truncated` row was closed at
+  its last heartbeat because the browser died mid-span, so its duration is a
+  floor rather than a measurement. It stays in the total (dropping real
+  attention understates the day), the trend bar shows that share hatched, the
+  host row carries a `⚑`, and a line under the headline says how much of the
+  period it is.
+- **Unsent intervals are named.** If anything is still buffered, the popup says
+  so and says the totals exclude it — otherwise a number that looks low because
+  a flush has not landed is indistinguishable from a genuinely quiet day.
+- **Empty reads as empty.** No rows for the period gives "No data yet" and an
+  em-dash headline, never `0s`. A fetch that FAILS says so too, rather than
+  falling back to rendering zeros — "0s" is a claim about the day, and an
+  unreachable server is not evidence for it.
+
+The popup is read-only. It touches nothing in the sensing path beyond asking the
+service worker for its buffered count (the existing `gooni:status` message).
+Attribution to a Topic or Promise, focus scoring and productivity judgements are
+all deliberately absent — `browser_intervals` is a raw substrate and the popup
+reports it, nothing more.
+
+The `favicon` permission is chrome's own favicon cache. No third-party favicon
+service: that would ship every host you visit to someone else, which is what
+this extension's privacy model exists to prevent. A host chrome has no icon for
+falls back to a letter chip.
+
 ## Tests
 
 ```bash
@@ -265,15 +309,24 @@ The idle tests drive the real `resolveAttention` + `applyAttention` +
 against the reconcile loop rather than against `FocusTracker` alone. A two-hour
 idle stretch with Chrome focused and the heartbeat ticking must emit nothing.
 
+Popup formatting is `tests/format.test.js` — the clock and headline forms
+(including a multi-hour total and a span crossing midnight), the floor-not-round
+rule, `<1%` for a host that holds real time, local-time day labels, and the
+wording of the salvaged/unsent notices.
+
 The server side is `python tests/test_browser_intervals.py` (idempotency
 including a collision mid-batch, validation, the scrub backstop over both `url`
-and `path`).
+and `path`) and `python tests/test_browser_summary.py` (the aggregation: local
+day buckets vs UTC, a midnight-crossing span, truncated counted inside the total
+AND separately, a multi-hour total, and an empty period that stays empty).
 
 ## Layout
 
 ```
-manifest.json      MV3 manifest — permissions: tabs, idle, storage, alarms
+manifest.json      MV3 manifest — permissions: tabs, idle, storage, alarms,
+                   favicon; action → popup.html, options_page → options.html
 options.html/.js   connection + the editable scrub lists + status
+popup.html/.js     the toolbar glance: period total, trend, ranked hosts
 src/background.js  the ONLY file that touches chrome APIs (event wiring)
 src/tracker.js     the interval state machine (pure, fake-clock testable)
 src/buffer.js      chrome.storage.local buffer + flush/retry rules
@@ -281,5 +334,6 @@ src/scrub.js       URL scrubbing — the privacy model
 src/attention.js   "is the human here, and on what?" — the idle-aware decision
 src/serial.js      the one-writer queue every storage mutation goes through
 src/status.js      the options page's last-flush report (incl. rejected rows)
+src/format.js      popup display formatting (durations, shares, honesty notes)
 src/config.js      stored settings
 ```

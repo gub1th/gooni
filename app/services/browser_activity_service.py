@@ -41,6 +41,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from sqlalchemy import and_, case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -477,4 +478,184 @@ def serialize(r: BrowserInterval) -> dict:
         "end_reason": r.end_reason,
         "truncated": bool(r.truncated),
         "source": r.source,
+    }
+
+
+# ── aggregation (the popup's read) ───────────────────────────────────────────
+#
+# Every number the extension popup shows is folded in SQL — GROUP BY host and
+# GROUP BY local day, two queries for a whole period regardless of how many
+# intervals it covers. The popup never sees a raw interval. That is not a
+# micro-optimisation: a tab-switch sensor writes thousands of rows a week, and
+# a popup that pulled them all and summed in JavaScript would be visibly slow
+# within a month and would keep getting slower forever.
+#
+# LOCAL-day bucketing, exactly. Rows are stored naive UTC, so the buckets are
+# built in Python as tz-aware local midnights and converted back to UTC, then
+# handed to SQL as a CASE ladder over `started_at`. The obvious cheaper trick —
+# shifting the column by one fixed UTC offset and taking its date — is wrong
+# across a DST switch, which is a real event inside any 7-day window twice a
+# year. A period is at most 31 days, so the ladder is at most 31 branches.
+#
+# An interval is attributed WHOLLY to the local day it STARTED on. Splitting a
+# midnight-crossing span across two days would be more precise, but intervals
+# close on every tab switch, blur and idle, so a span that survives midnight is
+# both rare and short — and a split total can't be reconciled against the
+# session count that sits next to it. The rule is stated here, tested, and
+# reported as-is rather than fudged.
+
+# Longest period the popup may ask for in one go. Bounds the CASE ladder.
+MAX_SUMMARY_DAYS = 31
+
+
+def _day_bounds(tz, day) -> tuple[datetime, datetime]:
+    """One local calendar day → its [start, end) in naive UTC."""
+    start_local = datetime(day.year, day.month, day.day, tzinfo=tz)
+    end_local = start_local + timedelta(days=1)
+    return (
+        start_local.astimezone(timezone.utc).replace(tzinfo=None),
+        end_local.astimezone(timezone.utc).replace(tzinfo=None),
+    )
+
+
+def _sum(col):
+    """SUM that reads 0 rather than None on an empty group."""
+    return func.coalesce(func.sum(col), 0.0)
+
+
+def _truncated_only(col):
+    """`col` for salvaged rows, 0 for clean ones — so one GROUP BY yields both
+    the honest total and the part of it that is only a floor."""
+    return case((BrowserInterval.truncated == True, col), else_=0)  # noqa: E712
+
+
+def summarize(db: Session, *, start=None, end=None) -> dict:
+    """Attention totals for a LOCAL date range, folded in SQL.
+
+    `start`/`end` are dates, inclusive, defaulting to today. Returns::
+
+        {start, end, days: [...], hosts: [...], totals: {...}}
+
+    Each of `days`, `hosts` and `totals` carries `total_sec`, `sessions`,
+    `truncated_sec` and `truncated_sessions`. The truncated figures are a
+    SUBSET of the totals, never a separate pile: a salvaged interval is real
+    attention whose duration is a floor (the browser died mid-span and it was
+    closed at its last heartbeat), so dropping it would understate focus and
+    showing it silently would overstate it. The caller marks it; both numbers
+    are here so it can.
+
+    `days` always covers every day in the range, including empty ones — a
+    trend chart with a hole in it is a lie about a quiet day.
+    """
+    now_local = local_now(db)
+    tz = now_local.tzinfo
+    end = end or now_local.date()
+    start = start or end
+    if start > end:
+        start, end = end, start
+    span = (end - start).days + 1
+    if span > MAX_SUMMARY_DAYS:
+        start = end - timedelta(days=MAX_SUMMARY_DAYS - 1)
+
+    days = []
+    d = start
+    while d <= end:
+        days.append(d)
+        d += timedelta(days=1)
+
+    window_start = _day_bounds(tz, days[0])[0]
+    window_end = _day_bounds(tz, days[-1])[1]
+    in_window = and_(
+        BrowserInterval.started_at >= window_start,
+        BrowserInterval.started_at < window_end,
+    )
+
+    duration = BrowserInterval.duration_sec
+    aggregates = (
+        _sum(duration),
+        func.count(BrowserInterval.id),
+        _sum(_truncated_only(duration)),
+        func.coalesce(func.sum(_truncated_only(1)), 0),
+    )
+
+    host_rows = (
+        db.query(BrowserInterval.host, *aggregates)
+        .filter(in_window)
+        .group_by(BrowserInterval.host)
+        .order_by(_sum(duration).desc())
+        .all()
+    )
+    hosts = [
+        {
+            "host": r[0],
+            "total_sec": float(r[1] or 0),
+            "sessions": int(r[2] or 0),
+            "truncated_sec": float(r[3] or 0),
+            "truncated_sessions": int(r[4] or 0),
+        }
+        for r in host_rows
+    ]
+
+    # One CASE branch per local day, boundaries computed per-day so a DST
+    # switch inside the window lands on the right side of midnight.
+    day_expr = case(
+        *[
+            (
+                and_(
+                    BrowserInterval.started_at >= lo,
+                    BrowserInterval.started_at < hi,
+                ),
+                day.isoformat(),
+            )
+            for day, (lo, hi) in ((day, _day_bounds(tz, day)) for day in days)
+        ],
+        else_=None,
+    )
+    day_rows = (
+        db.query(day_expr.label("day"), *aggregates)
+        .filter(in_window)
+        .group_by(day_expr)
+        .all()
+    )
+    by_day = {
+        r[0]: {
+            "total_sec": float(r[1] or 0),
+            "sessions": int(r[2] or 0),
+            "truncated_sec": float(r[3] or 0),
+            "truncated_sessions": int(r[4] or 0),
+        }
+        for r in day_rows
+        if r[0]
+    }
+
+    day_series = [
+        {
+            "date": day.isoformat(),
+            **by_day.get(
+                day.isoformat(),
+                {"total_sec": 0.0, "sessions": 0, "truncated_sec": 0.0,
+                 "truncated_sessions": 0},
+            ),
+        }
+        for day in days
+    ]
+
+    # Totals fold the host rows (one per distinct host — tens, not thousands),
+    # not the intervals. Deriving them from an already-grouped result keeps the
+    # headline arithmetically identical to the list under it; a third SUM query
+    # could disagree with the rows if a write landed between the two.
+    totals = {
+        "total_sec": sum(h["total_sec"] for h in hosts),
+        "sessions": sum(h["sessions"] for h in hosts),
+        "truncated_sec": sum(h["truncated_sec"] for h in hosts),
+        "truncated_sessions": sum(h["truncated_sessions"] for h in hosts),
+        "hosts": len(hosts),
+    }
+
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "days": day_series,
+        "hosts": hosts,
+        "totals": totals,
     }
