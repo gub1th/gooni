@@ -1,4 +1,9 @@
 
+import inspect
+import json as _json
+import logging
+from pathlib import Path as _Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -16,82 +21,98 @@ from ..common import (
 )
 
 
+log = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+#: Repo root. This file is `app/routers/public.py`, so the root is THREE
+#: `.parent`s up. It was two, which resolved to `<repo>/app` — a directory that
+#: has never contained `.mcp.json` or `mcp_servers/`, so both reads missed and
+#: both misses were swallowed by `except Exception: pass`.
+_REPO_ROOT = _Path(__file__).resolve().parent.parent.parent
+
+
+def _mcp_servers_snapshot() -> list[dict]:
+    """Servers from the MCP client config, with every secret-bearing field
+    reduced: absolute paths → basenames, env values dropped (keys only).
+
+    `.mcp.json` is per-machine and gitignored, so it is absent from the image;
+    `.mcp.json.example` is the committed template and is what prod actually has.
+    Falling back to it keeps the public showcase truthful on Fly — the example
+    describes the same server wiring, and being a committed template it holds
+    placeholders rather than secrets.
+    """
+    for candidate in (_REPO_ROOT / ".mcp.json", _REPO_ROOT / ".mcp.json.example"):
+        if not candidate.exists():
+            continue
+        # A malformed config is worth a log line: this route renders a public
+        # page, so it must not 500, but the previous silent `pass` is how an
+        # empty showcase went unnoticed for months.
+        try:
+            raw = _json.loads(candidate.read_text())
+        except (OSError, ValueError):
+            log.exception("public/mcp: could not read %s", candidate)
+            continue
+        out: list[dict] = []
+        for name, scfg in (raw.get("mcpServers") or {}).items():
+            command = scfg.get("command", "")
+            args = scfg.get("args") or []
+            env = scfg.get("env") or {}
+            out.append({
+                "name": name,
+                "command": _Path(command).name if command else "",
+                "script": _Path(args[0]).name if args else None,
+                "env_keys": list(env.keys()),
+            })
+        return out
+    log.error(
+        "public/mcp: neither .mcp.json nor .mcp.json.example under %s — "
+        "the public MCP showcase will render with no servers",
+        _REPO_ROOT,
+    )
+    return []
+
+
+def _mcp_tools_snapshot() -> list[dict]:
+    """Tools read from the live registry, not parsed out of a file.
+
+    This used to AST-walk `mcp_servers/server.py` for `@mcp.tool()` functions.
+    That file defined 25 of them until the MCP convergence (#465) moved every
+    tool into `app.mcp_surface.tools` and left the server as 48 lines of
+    transport wiring with zero decorators — so the walk would now find nothing
+    even from the correct path. Reading `ALL_TOOLS` is the same source the three
+    transports register from, so the showcase cannot drift from the surface it
+    describes.
+    """
+    from ..mcp_surface.tools import ALL_TOOLS, STDIO_TOOLS
+
+    out: list[dict] = []
+    for name in STDIO_TOOLS:
+        fn = ALL_TOOLS[name]
+        params = []
+        for param in inspect.signature(fn).parameters.values():
+            if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+                continue
+            params.append({
+                "name": param.name,
+                "required": param.default is inspect.Parameter.empty,
+            })
+        doc = inspect.getdoc(fn) or ""
+        # First paragraph only — keeps the public surface tidy.
+        short = doc.split("\n\n", 1)[0].strip().replace("\n", " ")
+        out.append({"name": name, "params": params, "description": short})
+    return out
 
 
 @router.get("/public/mcp")
 def get_public_mcp_config():
-    """Sanitized snapshot of the project's MCP setup — servers (from .mcp.json) + tools
-    (parsed from mcp_servers/server.py via AST). Dynamic: edit the config or add a @mcp.tool() and
-    this endpoint reflects the change on next request. No secrets returned — absolute paths
-    are reduced to basenames, env values stripped (keys only)."""
-    import ast
-    import json as _json
-    from pathlib import Path as _Path
-
-    repo_root = _Path(__file__).resolve().parent.parent
-
-    # 1) Parse .mcp.json — redact paths and env values
-    servers: list[dict] = []
-    mcp_json = repo_root / ".mcp.json"
-    if mcp_json.exists():
-        try:
-            raw = _json.loads(mcp_json.read_text())
-            for name, scfg in (raw.get("mcpServers") or {}).items():
-                command = scfg.get("command", "")
-                args = scfg.get("args") or []
-                env = scfg.get("env") or {}
-                servers.append({
-                    "name": name,
-                    "command": _Path(command).name if command else "",
-                    "script": _Path(args[0]).name if args else None,
-                    "env_keys": list(env.keys()),
-                })
-        except Exception:
-            pass
-
-    # 2) AST-walk mcp_servers/server.py for @mcp.tool() decorated functions
-    def _dec_name(dec) -> str:
-        if isinstance(dec, ast.Name):
-            return dec.id
-        if isinstance(dec, ast.Attribute):
-            base = _dec_name(dec.value)
-            return f"{base}.{dec.attr}" if base else dec.attr
-        if isinstance(dec, ast.Call):
-            return _dec_name(dec.func)
-        return ""
-
-    tools: list[dict] = []
-    server_py = repo_root / "mcp_servers" / "server.py"
-    if server_py.exists():
-        try:
-            tree = ast.parse(server_py.read_text())
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    is_tool = any(_dec_name(d) == "mcp.tool" for d in node.decorator_list)
-                    if not is_tool:
-                        continue
-                    params = []
-                    defaults = node.args.defaults or []
-                    default_start = len(node.args.args) - len(defaults)
-                    for i, arg in enumerate(node.args.args):
-                        has_default = i >= default_start
-                        params.append({
-                            "name": arg.arg,
-                            "required": not has_default,
-                        })
-                    doc = ast.get_docstring(node) or ""
-                    # Keep only the first paragraph — keeps the surface tidy
-                    short = doc.split("\n\n", 1)[0].strip().replace("\n", " ")
-                    tools.append({
-                        "name": node.name,
-                        "params": params,
-                        "description": short,
-                    })
-        except Exception:
-            pass
-
-    return {"servers": servers, "tools": tools}
+    """Sanitized snapshot of the project's MCP setup — servers (from the MCP
+    client config) + tools (from the live `app.mcp_surface.tools` registry).
+    Dynamic: add a tool to the registry and this endpoint reflects it on the
+    next request. No secrets returned — absolute paths are reduced to
+    basenames, env values stripped (keys only)."""
+    return {"servers": _mcp_servers_snapshot(), "tools": _mcp_tools_snapshot()}
 
 
 def _strip_html(html: str) -> str:

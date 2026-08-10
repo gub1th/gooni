@@ -279,11 +279,16 @@ def eval_dispatch_to_cc(segment_id: int, db: Session = Depends(get_db)):
 
 @router.get("/eval/tools-legend")
 def eval_tools_legend():
-    """Static legend of tools / steps the orchestrator can take. Used by the
-    eval UI's ⓘ popup so the reviewer knows what each step means."""
+    """Legend of the pipeline steps and tools the orchestrator can take. Used
+    by the eval UI's ⓘ popup so the reviewer knows what each step means.
+
+    Derived, not static: the tool half reads the live chat registry. This read
+    `eval_service.TOOL_LEGEND`, a name that does not exist, and 500'd on every
+    call for as long as the route has been deployed.
+    """
     from ..services import eval_service
 
-    return {"tools": eval_service.TOOL_LEGEND}
+    return {"tools": eval_service.tool_legend()}
 
 
 import json as _json
@@ -292,10 +297,38 @@ import json as _json
 from pathlib import Path as _Path
 
 
-_EVAL_REPORTS_DIR = _Path(__file__).parent.parent / "evals" / "reports"
+# Repo root, NOT the `app` package. This file is `app/routers/eval.py`, so the
+# root is three `.parent`s up — it was two for a long time, which silently
+# pointed both readers at `app/evals/`, a directory nothing has ever written to.
+# The writer is `evals/run_orchestrator.py` (`Path(__file__).parent / …`), so
+# the two must agree on `<repo>/evals`; `_assert_reader_matches_writer` below
+# is the assertion that they still do.
+_REPO_ROOT = _Path(__file__).resolve().parent.parent.parent
 
 
-_EVAL_BASELINES_DIR = _Path(__file__).parent.parent / "evals" / "baselines"
+_EVAL_REPORTS_DIR = _REPO_ROOT / "evals" / "reports"
+
+
+_EVAL_BASELINES_DIR = _REPO_ROOT / "evals" / "baselines"
+
+
+def _assert_eval_dir(path: _Path, what: str) -> None:
+    """Raise 500 when a directory that MUST exist does not.
+
+    Only for committed content (`evals/baselines`). `evals/reports` is
+    gitignored and legitimately absent on prod, so it is never asserted.
+    The point is that a resolution bug must not be able to masquerade as an
+    empty result set: this exact route returned `{"baselines": []}` while
+    eight committed baselines sat on disk, and nothing anywhere said so.
+    """
+    if not path.is_dir():
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"eval {what} directory missing: {path} — this is committed content, "
+                "so its absence is a path/deploy bug, not an empty result"
+            ),
+        )
 
 
 def _safe_eval_filename(filename: str, prefix: str, suffix: str) -> bool:
@@ -336,26 +369,26 @@ def list_eval_runs():
     # overwrite per pipeline_version+model; reports keep history) — best we
     # can do is summarize the most recent baseline per (version, model).
     baselines_by_key: dict[str, dict] = {}
-    if _EVAL_BASELINES_DIR.exists():
-        for b in _EVAL_BASELINES_DIR.glob("baseline_*.json"):
-            try:
-                data = _json.loads(b.read_text())
-            except (_json.JSONDecodeError, OSError):
-                continue
-            key = f"v{data.get('pipeline_version','?')}_{data.get('pipeline_model','?')}"
-            baselines_by_key[key] = {
-                "filename": b.name,
-                "composite_score": data.get("composite_score"),
-                "passed": data.get("passed"),
-                "n_cases": data.get("n_cases"),
-                "means": data.get("means"),
-                "pipeline_model": data.get("pipeline_model"),
-                "pipeline_version": data.get("pipeline_version"),
-                "pipeline_source_hash": data.get("pipeline_source_hash"),
-                "timestamp": data.get("timestamp"),
-                "total_cost_usd": data.get("total_cost_usd"),
-                "cost_per_case_usd": data.get("cost_per_case_usd"),
-            }
+    _assert_eval_dir(_EVAL_BASELINES_DIR, "baselines")
+    for b in _EVAL_BASELINES_DIR.glob("baseline_*.json"):
+        try:
+            data = _json.loads(b.read_text())
+        except (_json.JSONDecodeError, OSError):
+            continue
+        key = f"v{data.get('pipeline_version','?')}_{data.get('pipeline_model','?')}"
+        baselines_by_key[key] = {
+            "filename": b.name,
+            "composite_score": data.get("composite_score"),
+            "passed": data.get("passed"),
+            "n_cases": data.get("n_cases"),
+            "means": data.get("means"),
+            "pipeline_model": data.get("pipeline_model"),
+            "pipeline_version": data.get("pipeline_version"),
+            "pipeline_source_hash": data.get("pipeline_source_hash"),
+            "timestamp": data.get("timestamp"),
+            "total_cost_usd": data.get("total_cost_usd"),
+            "cost_per_case_usd": data.get("cost_per_case_usd"),
+        }
     return {"runs": runs, "baselines_by_key": baselines_by_key}
 
 
@@ -488,9 +521,15 @@ def run_eval_against_live_snapshot():
 @router.get("/eval/baselines")
 def list_eval_baselines():
     """List committed baseline JSONs (ground-truth snapshots). These survive
-    deploys; reports/ does not."""
-    if not _EVAL_BASELINES_DIR.exists():
-        return {"baselines": []}
+    deploys; reports/ does not.
+
+    A missing directory is a 500, not an empty list. Baselines are COMMITTED,
+    so on any checkout and in any image the directory exists — its absence
+    means the path is wrong or the deploy dropped `evals/`, and answering
+    `{"baselines": []}` to that made a path bug indistinguishable from "no
+    baselines yet". It stayed that way for months.
+    """
+    _assert_eval_dir(_EVAL_BASELINES_DIR, "baselines")
     out = []
     for f in sorted(_EVAL_BASELINES_DIR.glob("baseline_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:

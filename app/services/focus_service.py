@@ -696,9 +696,17 @@ def update_reminder(
     (None = "leave alone"); pass `clear_due` / `clear_owed` to explicitly reset
     a field — distinct from omitting it. `clear_due` resets to the today-EOD
     default rather than NULL (every row carries a date; a NULL falls out of both
-    dashboard panels). Naming a person promotes the display type to promise;
-    clearing the owner does NOT demote. State is untouched here — that rides
-    set_reminder_state / set_reminder_done."""
+    dashboard panels).
+
+    Naming a person makes the display type read `promise`, and clearing the
+    owner makes it read `reminder` again. This used to say "clearing the owner
+    does NOT demote", which stopped being true at the convergence: `type` is
+    DERIVED from `owed_to` in `_serialize_reminder` and nothing stores "was
+    promoted once", so there is no state for a non-demotion to live in. It is
+    cosmetic either way — `type` drives no surviving surface.
+
+    State is untouched here — that rides set_reminder_state / set_reminder_done.
+    """
     p = db.query(Promise).filter(Promise.id == reminder_id).first()
     if p is None:
         return None

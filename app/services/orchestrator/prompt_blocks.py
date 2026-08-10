@@ -552,13 +552,18 @@ def _build_just_extracted_block(routed: "RouterResult") -> str:
         lines.append(f"- {len(tone_rules)} tone rule(s) logged")
     for f in captured_features[:3]:
         title = (f.get("title") or "").strip()
-        ticket_id = f.get("ticket_id")
-        if ticket_id is not None:
+        # `Note`, not `BacklogTicket`. BacklogTicket has not existed since the
+        # v2 nuke and is absent from OBJECT_KINDS in this same prompt — so the
+        # block whose whole job is to license write-claims was licensing a
+        # claim about a primitive the adjacent block forbids. Feature requests
+        # are `feature-request`-tagged Notes (intent_handlers/features.py).
+        note_id = f.get("note_id")
+        if note_id is not None:
             lines.append(
-                f"- BacklogTicket #{ticket_id} created: \"{title}\""
+                f"- Note #{note_id} created (feature request): \"{title}\""
             )
         else:
-            lines.append(f"- BacklogTicket created (id unknown): \"{title}\"")
+            lines.append(f"- Note created (feature request, id unknown): \"{title}\"")
     for p in captured_promises[:3]:
         summary = p.get("summary") or p.get("utterance") or ""
         if len(summary) > 60:

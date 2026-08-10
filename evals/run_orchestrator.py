@@ -244,16 +244,14 @@ def _seed_world(db, conv_id: int, case: dict) -> Callable[[], None]:
     Seed schema:
       seed_prefs:    [{rule: str, [confidence: float]}]  → type='preference', feedback__ key
       seed_memories: [{type: str, content: str, [key: str], [confidence: float]}]
-      seed_focuses:  [{text: str, [endgoal: str], [is_primary: bool], [status: str], [scale: str]}]
-                     → ListItem rows in the focuses list. Always committed=True
-                       (uncommitted-but-still-actionable focuses use status='someday').
-                       Mirrors prod data path for "what's my current focus?"-shape questions
-                       — orchestrator pulls these via item_service.get_active_context, NOT cosine.
-      seed_todos:    [{text: str, [subtitle: str], [done: bool], [state: str]}]
-                     → Todo rows with embeddings generated on insert. Required for
-                       G1.1 destructive-action dispatch tests — router cosine-matches
-                       the extractor's `match` field against open todos at extract
-                       time. state ∈ {not_yet, doing, done} (default not_yet).
+      seed_focuses:  IGNORED — described ListItem rows in a "focuses" list.
+                     ListItem and Focus both died in the v2 nuke; the key is
+                     kept only so old fixtures still parse. See the note at the
+                     seeding site below.
+      seed_todos:    IGNORED — described Todo rows seeded for the G1.1
+                     destructive-action dispatch tests. Todo died in the same
+                     nuke. Seeding the Promise-based equivalents is future
+                     harness work.
       history:       [{role: 'user'|'assistant', content: str}]
 
     Embeddings generated on insert for memories so cosine retrieval picks them

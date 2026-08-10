@@ -1,10 +1,10 @@
 ---
-description: Wrap up the current session — push the active branch, open a PR, squash-merge if the work is basically finished, update the backlog, drop a draft takeaway note. Trigger on "/wrap-session", "/wrap", "/ship", "let's wrap up", "merge what we have", "i need to dip — close this out", or similar end-of-session asks.
+description: Wrap up the current session — push the active branch, open a PR, squash-merge if the work is basically finished, close the tracking Promises, drop a draft takeaway note. Trigger on "/wrap-session", "/wrap", "/ship", "let's wrap up", "merge what we have", "i need to dip — close this out", or similar end-of-session asks.
 ---
 
 # Wrap-session skill
 
-End-of-session shut-down. Daniel needs to dip; you need to leave the branch, the backlog, and the takeaway in a state he can resume from cold next session without piecing things back together.
+End-of-session shut-down. Daniel needs to dip; you need to leave the branch, the tracking Promises, and the takeaway in a state he can resume from cold next session without piecing things back together.
 
 ## When to fire
 
@@ -84,19 +84,30 @@ If `--delete-branch` fails because main is checked out in another worktree, retr
 
 If CI is configured and gate-failing, use `--auto` to merge once green; otherwise direct squash.
 
-### 6. Update backlog
+### 6. Close the tracking Promises
 
-For each backlog ticket the PR closes:
+There is no backlog board. `ListItem` and `/list-items` died in the v2 nuke
+(`e8b3c6d9f2a7`); per CLAUDE.md, non-trivial dev work now lives as **Promises**.
+This step used to `curl -X PATCH http://localhost:8000/list-items/<id>` — a route
+that has 404'd since the nuke, under a "don't block the wrap if HTTP is down"
+instruction that made the 404 read as a transient outage forever.
 
-```bash
-curl -s -X PATCH http://localhost:8000/list-items/<id> \
-  -H "Content-Type: application/json" \
-  -d '{"board_status": "done", "pr_url": "https://github.com/<org>/<repo>/pull/<num>"}'
+For each Promise the PR closes, use the MCP tool:
+
+```
+mcp__gooni__set_promise_state(promise_id=<id>, state="kept")
 ```
 
-Multiple tickets in one PR: N sequential PATCHes, same `pr_url` on each.
+Find the ids first with `mcp__gooni__list_promises(state="active")` if you don't
+already have them from the session. Multiple Promises in one PR: N calls.
 
-If backend HTTP is down: don't block the wrap. Note the deferred ticket updates in the final report so Daniel can flip them next session.
+The PR URL has nowhere to live on a Promise — it goes in the step-7 takeaway
+note, which is where PR provenance belongs now.
+
+If the MCP connector is unavailable, the same edit over REST is
+`PATCH /promises/{id}` with `{"state": "kept"}` (Bearer-authed like every route).
+**A 404 from either is a bug to report, not an outage to wait out** — say so in
+the final report rather than deferring it silently.
 
 ### 7. Draft takeaway note
 
@@ -111,7 +122,7 @@ Skip for trivial PRs or wraps that produced nothing worth finishing.
 
 One terse block:
 - PR URL + merged status
-- Backlog updates landed / deferred
+- Promises closed / left open (and why)
 - Takeaway note id
 - Anything left dirty in the worktree (untracked files, stashes worth knowing)
 - Branch local cleanup hint if the remote branch was auto-deleted
