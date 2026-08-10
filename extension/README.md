@@ -182,6 +182,10 @@ never one request per tab switch, and never a lost interval when the laptop is
 offline.
 
 - Flush runs on a 60-second alarm and immediately once 25 intervals are queued.
+  A flush that hangs is aborted after 20 seconds and retried like an offline
+  one: every flush shares the one-writer queue with the tab events, so a server
+  that accepts the connection and then goes quiet would otherwise hold that slot
+  and stall the sensor with nothing erroring.
 - **Nothing leaves the buffer until the server confirms it.** Keeping the data
   is the default and dropping it is the exception: only a `2xx` (the server took
   a position on every row) or one of `400`/`413`/`422` (a body that will be
@@ -192,7 +196,10 @@ offline.
   burst with `429` having stored nothing, and a `404` is a `baseUrl` pointing at
   the wrong host or dev port, which is a config mistake to fix in options rather
   than a reason to lose the backlog. A `Retry-After` header is honoured (capped
-  at 15 minutes) before the next flush is attempted.
+  at 15 minutes) before the next flush is attempted. A dropped batch is data
+  **destroyed** — the server stored none of it and it can never be redelivered —
+  so it is counted rather than reported as a bare `error http_400`, which reads
+  like something to retry.
 - **Retries cannot double-count.** Each interval gets a `client_id` (UUID) when
   it closes, which never changes; the ingest endpoint upserts on it, so a batch
   the server stored but whose response we never saw dedups on the way back in.
@@ -206,8 +213,13 @@ offline.
   in `chrome.storage.local`, so a worker torn down mid-queue restarts clean with
   no lock to leak.
 - The buffer holds 5000 intervals. Past that the **oldest** are dropped and the
-  count of dropped intervals is kept and shown in the options page — a gap is
-  admitted rather than hidden.
+  count is kept — a gap is admitted rather than hidden. The options page keeps
+  the two losses apart, because the fix differs: `dropped:` is buffer overflow
+  (only after a very long outage), `refused:` is intervals destroyed because the
+  server refused the batch. Both counters are durable. A single *row* the server
+  rejected mid-batch was acked and deleted like an accepted one, so it shows up
+  only in the last-flush line — which is why an empty flush leaves the previous
+  line standing instead of overwriting it a minute later.
 - Everything survives a browser restart, including the open interval, because
   the MV3 service worker is killed after ~30s idle and cannot hold state in
   memory.
