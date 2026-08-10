@@ -30,6 +30,7 @@ through common.local_today so it honors Settings.nudge_tz.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from datetime import date as _date, datetime, timedelta, timezone
 
@@ -43,6 +44,8 @@ from ..db.models import (
     Promise,
     Topic,
 )
+
+log = logging.getLogger(__name__)
 
 # ── Tuning constants ─────────────────────────────────────────────────────────
 
@@ -226,15 +229,29 @@ def _embed_note_async(note_id: int) -> None:
     Deliberately NOT `classify_note`: that runs the LLM signal extractor, which
     would mine Claude's own thought-logging for memories and feature requests.
     Thoughts are already curated by the thing writing them.
+
+    NOTE: import the INSTANCE, not the module. `update_embedding` is a method
+    on `NoteService`; `from . import note_service` binds the MODULE, whose
+    attribute lookup raises AttributeError. That's exactly what happened here
+    for the whole life of this function, and the handler below swallowed it
+    into a `print` nobody read — so no logged thought was ever embedded and
+    semantic search never returned one. Hence `log.exception`: this stays
+    best-effort (a failed embed must not break a write) but it must be
+    findable in the logs when it fails.
     """
 
     def _run():
         try:
-            from . import note_service
+            from .note_service import note_service
 
             note_service.update_embedding(note_id)
         except Exception as e:  # noqa: BLE001 — best-effort, never break a write
-            print(f"[focus] thought embed failed for note {note_id}: {e}")
+            log.exception(
+                "thought embed failed for note %s: %s: %s",
+                note_id,
+                type(e).__name__,
+                e,
+            )
 
     threading.Thread(target=_run, daemon=True).start()
 
