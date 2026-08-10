@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.227.0 — 2026-08-10 (minor)
+
+- feat(extension): browser attention sensor with buffered ingest to /browser/intervals (#463)
+
 ## 0.226.2 — 2026-08-10 (patch)
 
 - fix(deps): pin mcp[cli] to <2 — SDK 2.0 dropped mcp.server.fastmcp (#462)
