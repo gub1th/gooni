@@ -1,0 +1,480 @@
+"""Browser-attention ingest — lands focus intervals from the Chrome extension.
+
+The extension (`extension/`) watches which tab actually has focus and, when an
+interval closes (tab switch, window blur, machine idle), buffers a record in
+chrome.storage.local. It flushes batches here.
+
+Deterministic, no LLM, no Trackable writes. Raw intervals land in their own
+table and stop there — attribution to a Topic/Promise is a deliberately
+separate later task (see BrowserInterval's docstring).
+
+Two things this module is strict about:
+
+1. **Idempotency.** `client_id` is minted once by the extension at interval
+   close and survives every retry, so a redelivered batch must be a no-op. We
+   pre-filter against the ids already stored (one IN query per batch) AND
+   insert each row inside its own SAVEPOINT, so two concurrent flushes of the
+   same buffer still can't double-count — and the loser of that race unwinds
+   only its own row, never the rows already inserted alongside it.
+   `accepted`/`stored_ids` must therefore only ever name rows that really
+   committed: the extension deletes exactly those ids from its buffer, so an
+   over-reported accept is permanent data loss, while an under-reported one
+   just costs a redelivery that dedups.
+2. **Trusting clocks, not arithmetic.** `duration_sec` is recomputed from
+   started/ended here; a client-supplied duration is ignored. Intervals that
+   are backwards, absurdly long, or hostless are rejected with a reason rather
+   than silently clamped — a sensor that reports a 16-hour "focus session" is
+   broken, and quietly trimming it hides the breakage.
+
+Privacy: full URLs are captured for every host (see BrowserInterval). The
+extension scrubs credential-bearing query params before buffering; `scrub_url`
+below re-runs the same strip as a server-side backstop over BOTH `url` and
+`path`, so an old extension build or a hand-rolled client still can't park an
+OAuth `code` in the log — including one that puts its query string in `path`.
+The extension's list is the editable one (its options page); this one is a
+fixed floor.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from ..common import local_now
+from ..db.models import BrowserInterval
+
+SOURCE = "chrome_extension"
+
+# Batch ceiling. The extension flushes on a 60s timer + a size threshold well
+# under this; anything bigger is a bug or an abusive caller.
+MAX_BATCH = 500
+
+# Longest interval we accept as real. chrome.idle closes intervals after a
+# minute of no input, so nothing legitimate comes close. A span past this means
+# the sensor lied (or the machine's clock jumped) and the row would poison
+# every number computed over it.
+MAX_INTERVAL_SEC = 6 * 60 * 60
+
+# Sub-second intervals are tab-switch noise, not attention. Dropped as
+# "too_short" rather than stored — they'd triple the row count and mean nothing.
+MIN_INTERVAL_SEC = 1.0
+
+# Guards a clock-skewed client from writing the future into the log. Checked
+# against BOTH ends of the interval: an NTP correction or a laptop resume
+# mid-interval stamps started_at on the old clock and ended_at on the new one,
+# and MAX_INTERVAL_SEC is far too loose to catch a jump of an hour or three —
+# such a row stores as a real multi-hour focus block ending in the future.
+MAX_FUTURE_SKEW = timedelta(minutes=5)
+
+_END_REASONS = {
+    "tab_change",
+    "url_change",
+    "window_blur",
+    "idle",
+    "locked",
+    "shutdown",
+    "truncated",
+}
+
+
+def _parse_dt(raw) -> datetime | None:
+    """ISO-8601 (offset or trailing Z) or epoch seconds → naive UTC datetime.
+
+    Naive UTC is the storage convention everywhere else in this codebase, so a
+    naive input is taken at face value and an aware one is converted. None on
+    anything unparseable — the caller turns that into a per-row rejection, not
+    a fallback-to-now (a made-up timestamp is worse than a dropped interval).
+
+    EVERY parse path sits under one guard, deliberately. `fromtimestamp` raises
+    OverflowError on an out-of-range epoch (a plain JSON integer like 1e20) and
+    ValueError on NaN (which `json.loads` accepts as a bare literal), and
+    `astimezone` raises OverflowError near datetime.min — none of them
+    ValueError-only. An escape here is not a local bug: it leaves `normalize`
+    and 500s the WHOLE batch, which the extension RETAINS and retries forever,
+    or 400s it, which makes the extension drop every valid row alongside the
+    bad one. The contract is that a malformed row costs that row and nothing
+    else, so unparseable is unparseable regardless of which exception says so.
+    """
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, bool):
+        return None
+    try:
+        if isinstance(raw, (int, float)):
+            return datetime.fromtimestamp(float(raw), tz=timezone.utc).replace(tzinfo=None)
+        s = str(raw).strip()
+        if s.replace(".", "", 1).isdigit():
+            return datetime.fromtimestamp(float(s), tz=timezone.utc).replace(tzinfo=None)
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except (ValueError, OverflowError, OSError, TypeError, AttributeError):
+        return None
+
+
+# THE MATCHER IS THREE CHECKS, and a param name is redacted if ANY fires. This
+# is the SAME algorithm as extension/src/scrub.js over the same three sets — a
+# floor that matched differently from the thing it backstops would not be a
+# floor — and both sides are pinned by the same literal KEPT/REDACTED table
+# (tests/test_browser_intervals.py and extension/tests/scrub.test.js).
+#
+# Each check exists because a simpler design failed in one direction or the
+# other, and both directions are unacceptable: over-redaction destroys the value
+# pre-buffer (unrecoverable), under-redaction stores a live credential.
+#
+#  1. SQUASHED whole-name — the only check that catches a run-together name with
+#     no boundary to split on (`jsessionid`), and what keeps `api_key` covered
+#     once `key` stops being a segment. It can't reach the innocent compounds:
+#     zip_code→zipcode, sort_key→sortkey, us_state→usstate are not in the set.
+#  2. WHOLE-NAME only (code, key, state) — the bare OAuth params. Deliberately
+#     absent from the segment set, where they redacted `zip_code`,
+#     `country-code`, `error_code`, `sort_key`, `us_state` and friends.
+#  3. SEGMENT — split on `_`, `-`, camelCase and digit boundaries. The camelCase
+#     split is load-bearing: without it `accessToken`/`sessionId`/`clientSecret`
+#     stored verbatim. Segments keep the list short without substring
+#     collateral (`auth` catches my_auth_token, not `author`/`authors`).
+#
+# NOT user-editable, deliberately: the extension's copy is the configurable one,
+# and a floor a broken or hostile client could turn off is decoration.
+SCRUB_PARAM_SEGMENTS = frozenset(
+    {
+        "auth",
+        "authorization",
+        "credential",
+        "sig",
+        "signature",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "pwd",
+        "session",
+        "otp",
+    }
+)
+
+SCRUB_PARAM_WHOLE_NAMES = frozenset({"code", "key", "state"})
+
+SCRUB_PARAM_SQUASHED_NAMES = frozenset(
+    {
+        "jsessionid",
+        "phpsessid",
+        "sessionid",
+        "csrftoken",
+        "accesstoken",
+        "apikey",
+        # The `x-`-prefixed API-key family walks past all three checks
+        # otherwise: `key` is whole-name-only (check 2, which is what keeps
+        # `sort_key`), so `x-api-key` has no matching segment and its squashed
+        # form is `xapikey`, not `apikey`. Entries here MUST be pre-squashed —
+        # a literal `x-api-key` would never match.
+        "xapikey",
+        "xfunctionskey",
+        "subscriptionkey",
+    }
+)
+
+_REDACTED = "REDACTED"
+
+_SEPARATORS = re.compile(r"[_-]+")
+_SEGMENT_SPLIT = re.compile(r"[\s_-]+")
+_CAMEL_TAIL = re.compile(r"([a-z0-9])([A-Z])")
+_CAMEL_RUN = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_ALPHA_DIGIT = re.compile(r"([a-zA-Z])([0-9])")
+_DIGIT_ALPHA = re.compile(r"([0-9])([a-zA-Z])")
+
+
+def _squash_name(name: str) -> str:
+    return _SEPARATORS.sub("", (name or "").lower())
+
+
+def _param_segments(name: str) -> list[str]:
+    """Lowercase segments split on `_`, `-`, camelCase and digit boundaries.
+
+    Mirrors extension/src/scrub.js::paramSegments substitution for substitution.
+    """
+    s = str(name or "")
+    s = _CAMEL_TAIL.sub(r"\1 \2", s)
+    s = _CAMEL_RUN.sub(r"\1 \2", s)
+    s = _ALPHA_DIGIT.sub(r"\1 \2", s)
+    s = _DIGIT_ALPHA.sub(r"\1 \2", s)
+    return [seg for seg in _SEGMENT_SPLIT.split(s.lower()) if seg]
+
+
+def _is_secret_param(name: str) -> bool:
+    lower = (name or "").lower()
+    if not lower:
+        return False
+    if _squash_name(lower) in SCRUB_PARAM_SQUASHED_NAMES:
+        return True
+    if lower in SCRUB_PARAM_WHOLE_NAMES:
+        return True
+    return any(seg in SCRUB_PARAM_SEGMENTS for seg in _param_segments(name))
+
+
+def scrub_url(raw: str | None) -> str | None:
+    """Strip credential-bearing query params, keep everything else.
+
+    Takes a full URL *or* a bare path — `urlsplit` parses both, and the two
+    must go through this one function rather than a second path-shaped copy
+    that drifts out of sync with it. The extension only ever sends `pathname`
+    in `path`, but the floor exists precisely for clients that are not the
+    extension, and one that puts `/callback?code=…` in `path` would otherwise
+    park a live OAuth code in the log.
+
+    Assumes a string (or None): `normalize` rejects any other type up front, so
+    the only exception this needs to survive is `urlsplit` choking on a genuinely
+    malformed *string*. Widening the guard past `ValueError` would let a real
+    bug in the strip pass silently, and this is the one path where a silent
+    failure means storing a credential verbatim.
+
+    HTTP-basic userinfo (`https://alice:hunter2@host/…`) is stripped too. It is
+    a strictly stronger credential than an OAuth code, and it lived under this
+    floor for two reasons at once: the no-query/no-fragment early return handed
+    such a URL straight back, and `urlunsplit` re-emitted `netloc` verbatim when
+    it didn't. So the netloc rebuild happens FIRST and the early return is
+    conditioned on it being a no-op. Host and port are carried through exactly
+    as written (an IPv6 literal keeps its brackets, the host keeps its case);
+    only the credentials are replaced, and by `REDACTED@` rather than by
+    nothing, so the log still shows a credentialed URL was visited.
+
+    Values are replaced with `REDACTED` rather than dropped, so the log still
+    shows that a callback URL *had* a code without recording it. The fragment
+    is dropped wholesale — implicit-flow OAuth returns `#access_token=…` there
+    and a fragment carries no identity worth the risk.
+    """
+    if not raw:
+        return raw
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return raw
+    netloc = _strip_userinfo(parts.netloc)
+    if netloc == parts.netloc and not parts.query and not parts.fragment:
+        return raw
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    cleaned = [(k, _REDACTED if _is_secret_param(k) else v) for k, v in pairs]
+    return urlunsplit(
+        (parts.scheme, netloc, parts.path, urlencode(cleaned), "")
+    )
+
+
+def _strip_userinfo(netloc: str) -> str:
+    """`alice:hunter2@host:8443` → `REDACTED@host:8443`; untouched when absent."""
+    if "@" not in netloc:
+        return netloc
+    _, _, hostport = netloc.rpartition("@")
+    return f"{_REDACTED}@{hostport}"
+
+
+def _clean(raw, limit: int) -> str | None:
+    """Trim a free-text field to a sane length; empty → None."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    return s[:limit]
+
+
+def normalize(item: dict) -> tuple[dict | None, str | None]:
+    """Validate one raw interval. Returns (row_kwargs, None) or (None, reason).
+
+    Reasons are stable strings so the extension can log them and a human can
+    grep them: missing_client_id, missing_host, bad_path, bad_url,
+    bad_started_at, bad_ended_at, negative_duration, too_short, too_long,
+    future.
+    """
+    if not isinstance(item, dict):
+        return None, "not_an_object"
+
+    client_id = _clean(item.get("client_id") or item.get("id"), 128)
+    if not client_id:
+        return None, "missing_client_id"
+
+    # Type-check the two fields that reach `scrub_url` unconverted. Every other
+    # field is coerced by `_clean`/`_parse_dt`, but these must stay raw until
+    # they are scrubbed, and `urlsplit` on a non-string raises AttributeError
+    # or TypeError — neither of which the route's `except ValueError` catches,
+    # so one such row would 500 the WHOLE batch. Validating here keeps the rule
+    # where every other field's rule lives, and keeps the cost of a malformed
+    # row at exactly that row.
+    for field in ("path", "url"):
+        value = item.get(field)
+        if value is not None and not isinstance(value, str):
+            return None, f"bad_{field}"
+
+    host = _clean(item.get("host"), 255)
+    if not host:
+        return None, "missing_host"
+    host = host.lower()
+
+    started = _parse_dt(item.get("started_at"))
+    if started is None:
+        return None, "bad_started_at"
+    ended = _parse_dt(item.get("ended_at"))
+    if ended is None:
+        return None, "bad_ended_at"
+
+    duration = (ended - started).total_seconds()
+    if duration < 0:
+        return None, "negative_duration"
+    if duration < MIN_INTERVAL_SEC:
+        return None, "too_short"
+    if duration > MAX_INTERVAL_SEC:
+        return None, "too_long"
+    horizon = datetime.utcnow() + MAX_FUTURE_SKEW
+    if started > horizon or ended > horizon:
+        return None, "future"
+
+    end_reason = _clean(item.get("end_reason"), 32)
+    if end_reason not in _END_REASONS:
+        end_reason = None
+
+    return (
+        {
+            "client_id": client_id,
+            "host": host,
+            # Full URL for every host; the extension scrubbed credentials
+            # already, scrub_url is the backstop for anything that didn't.
+            # BOTH fields go through it — a client that puts a query string in
+            # `path` must not get under the floor that `url` sits behind.
+            "path": _clean(scrub_url(item.get("path")), 2048),
+            "url": _clean(scrub_url(item.get("url")), 2048),
+            "title": _clean(item.get("title"), 512),
+            "started_at": started,
+            "ended_at": ended,
+            "duration_sec": duration,
+            "end_reason": end_reason,
+            "truncated": bool(item.get("truncated")),
+            "source": SOURCE,
+        },
+        None,
+    )
+
+
+def _existing_client_ids(db: Session, ids: list[str]) -> set[str]:
+    """Ids already stored, in one IN query.
+
+    This is only the FAST path for idempotency, never the guarantee: a batch
+    racing another flush can have a row committed between this read and its
+    own insert. The UNIQUE constraint plus the per-row savepoint below is what
+    actually makes a replay a no-op.
+    """
+    if not ids:
+        return set()
+    return {
+        cid
+        for (cid,) in db.query(BrowserInterval.client_id)
+        .filter(BrowserInterval.client_id.in_(ids))
+        .all()
+    }
+
+
+def ingest_batch(db: Session, intervals) -> dict:
+    """Store a batch of focus intervals, skipping any client_id already seen.
+
+    Returns {accepted, duplicates, rejected: [{client_id, reason}], stored_ids}
+    — the extension only needs the counts to decide the batch is safely
+    delivered, but the rejection reasons make a misbehaving sensor debuggable
+    without server-side log spelunking.
+    """
+    if intervals is None:
+        raise ValueError("intervals required")
+    if not isinstance(intervals, list):
+        raise ValueError("intervals must be a list")
+    if len(intervals) > MAX_BATCH:
+        raise ValueError(f"batch too large: {len(intervals)} (max {MAX_BATCH})")
+
+    rejected: list[dict] = []
+    rows: list[dict] = []
+    seen_in_batch: set[str] = set()
+    for item in intervals:
+        row, reason = normalize(item)
+        if row is None:
+            rejected.append(
+                {"client_id": (item or {}).get("client_id") if isinstance(item, dict) else None,
+                 "reason": reason}
+            )
+            continue
+        # A batch that repeats an id inside itself is the same double-count bug
+        # as a redelivered batch, one layer in.
+        if row["client_id"] in seen_in_batch:
+            continue
+        seen_in_batch.add(row["client_id"])
+        rows.append(row)
+
+    duplicates = 0
+    if rows:
+        existing = _existing_client_ids(db, [r["client_id"] for r in rows])
+        duplicates += len(existing)
+        rows = [r for r in rows if r["client_id"] not in existing]
+
+    stored: list[str] = []
+    for r in rows:
+        try:
+            # One SAVEPOINT per row. A concurrent flush that won the race on
+            # this client_id makes the UNIQUE constraint fire here, and the
+            # savepoint unwinds ONLY this row — a plain db.rollback() would
+            # discard every row already inserted in this batch while `stored`
+            # went on reporting them as accepted, and the extension would drop
+            # them from its buffer on the strength of that.
+            with db.begin_nested():
+                db.add(BrowserInterval(**r))
+            stored.append(r["client_id"])
+        except IntegrityError:
+            duplicates += 1
+    try:
+        db.commit()
+    except Exception:
+        # Nothing committed, so nothing may be claimed. Raising leaves the
+        # caller with a 5xx and the extension with its buffer intact.
+        db.rollback()
+        raise
+
+    return {
+        "accepted": len(stored),
+        "duplicates": duplicates,
+        "rejected": rejected,
+        "stored_ids": stored,
+    }
+
+
+def list_intervals(db: Session, *, day=None, limit: int = 100) -> list[dict]:
+    """Recent intervals, newest-first. `day` (a date) filters to that LOCAL
+    calendar day. The verification read — there is no UI for this yet, on
+    purpose (dashboards are out of scope for the base sensor)."""
+    limit = max(1, min(int(limit or 100), 1000))
+    q = db.query(BrowserInterval)
+    if day is not None:
+        tz = local_now(db).tzinfo
+        start_local = datetime(day.year, day.month, day.day, tzinfo=tz)
+        end_local = start_local + timedelta(days=1)
+        q = q.filter(
+            BrowserInterval.started_at >= start_local.astimezone(timezone.utc).replace(tzinfo=None),
+            BrowserInterval.started_at < end_local.astimezone(timezone.utc).replace(tzinfo=None),
+        )
+    rows = q.order_by(BrowserInterval.started_at.desc()).limit(limit).all()
+    return [serialize(r) for r in rows]
+
+
+def serialize(r: BrowserInterval) -> dict:
+    return {
+        "id": r.id,
+        "client_id": r.client_id,
+        "host": r.host,
+        "path": r.path,
+        "url": r.url,
+        "title": r.title,
+        "started_at": r.started_at.isoformat() if r.started_at else None,
+        "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+        "duration_sec": r.duration_sec,
+        "end_reason": r.end_reason,
+        "truncated": bool(r.truncated),
+        "source": r.source,
+    }

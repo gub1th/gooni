@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Gooni Browser Sensor",
+  "version": "0.1.0",
+  "description": "Records which tab actually has focus, buffers locally, and ships intervals to Gooni.",
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": ["tabs", "idle", "storage", "alarms"],
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "https://gooni-bot.fly.dev/*"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "options_page": "options.html"
+}

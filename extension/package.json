@@ -1,0 +1,10 @@
+{
+  "name": "gooni-browser-sensor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Unpacked MV3 extension: senses browser focus intervals and ships them to Gooni. No build step and no dependencies — the tests run on node:test.",
+  "scripts": {
+    "test": "node --test 'tests/*.test.js'"
+  }
+}

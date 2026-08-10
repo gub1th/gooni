@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Gooni Browser Sensor</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font: 14px/1.5 ui-sans-serif, -apple-system, system-ui, sans-serif;
+        max-width: 640px;
+        margin: 32px auto;
+        padding: 0 20px;
+      }
+      h1 { font-size: 18px; margin-bottom: 4px; }
+      h2 { font-size: 14px; margin: 28px 0 6px; }
+      p.hint { opacity: 0.7; margin: 4px 0 10px; }
+      label { display: block; margin-top: 12px; font-weight: 600; }
+      input[type="text"], input[type="password"], textarea {
+        width: 100%; padding: 7px 9px; margin-top: 4px;
+        font: inherit; box-sizing: border-box;
+      }
+      textarea { min-height: 96px; font-family: ui-monospace, monospace; font-size: 12px; }
+      button { margin-top: 14px; padding: 7px 14px; font: inherit; }
+      #status, #saveMsg { margin-top: 12px; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
+      .row { display: flex; gap: 10px; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <h1>Gooni Browser Sensor</h1>
+    <p class="hint">
+      Records the active tab's URL and how long it held focus. Idle time and
+      backgrounded windows count as nothing.
+    </p>
+
+    <label for="baseUrl">Gooni base URL</label>
+    <input id="baseUrl" type="text" placeholder="http://localhost:8000" />
+
+    <label for="password">Gooni password</label>
+    <input id="password" type="password" placeholder="exchanged for a token, never stored" />
+    <p class="hint">
+      Exchanged once at <code>POST /auth</code> for the bearer token. The
+      password itself is not stored.
+    </p>
+
+    <div class="row">
+      <input id="enabled" type="checkbox" />
+      <label for="enabled" style="margin: 0">Sensing enabled</label>
+    </div>
+
+    <h2>Privacy: scrubbed query parameters</h2>
+    <p class="hint">
+      Full URLs are captured for every host — a hostname alone can't tell you
+      what you were distracted by, and the LeetCode problem you're working on
+      lives in the path. The exception is credentials: any query parameter
+      whose <em>name</em> contains one of these segments has its value replaced
+      with <code>REDACTED</code> before the URL is ever written to disk, so
+      OAuth callbacks and password-reset links can't land in the log. The URL
+      fragment (<code>#…</code>) is always dropped. Everything else survives —
+      a YouTube video id in <code>?v=</code> is exactly the identity the log
+      needs.
+    </p>
+
+    <label for="scrubSegments">Credential name segments (one per line)</label>
+    <p class="hint">
+      The parameter name is lowercased and split on <code>_</code>,
+      <code>-</code>, camelCase and digit boundaries; if any piece is on this
+      list, the value is redacted. So <code>token</code> covers
+      <code>access_token</code>, <code>X-Amz-Security-Token</code> and
+      <code>accessToken</code>, while <code>sig</code> does <em>not</em> touch
+      <code>design</code> and <code>auth</code> does not touch
+      <code>author</code>.
+    </p>
+    <p class="hint">
+      Two fixed checks run alongside this list and cannot be edited away: the
+      bare OAuth names <code>code</code>, <code>key</code> and
+      <code>state</code> (whole name only, so <code>zip_code</code> survives),
+      and the run-together names <code>jsessionid</code>,
+      <code>phpsessid</code>, <code>sessionid</code>, <code>csrftoken</code>,
+      <code>accesstoken</code>, <code>apikey</code>, <code>xapikey</code>,
+      <code>xfunctionskey</code>, <code>subscriptionkey</code> — compared after
+      underscores and hyphens are removed, so those last four also cover
+      <code>api_key</code>, <code>x-api-key</code>, <code>x-functions-key</code>
+      and <code>subscription-key</code>.
+    </p>
+    <textarea id="scrubSegments"></textarea>
+
+    <button id="save">Save</button>
+    <button id="resetScrub" type="button">Reset scrub list to defaults</button>
+    <div id="saveMsg"></div>
+
+    <h2>Status</h2>
+    <button id="refresh" type="button">Refresh</button>
+    <button id="flush" type="button">Flush now</button>
+    <div id="status"></div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -124,7 +124,9 @@ scripts/
 mcp_servers/
   server.py                  # legacy 30-tool MCP server → Claude Code via stdio
   focus_server.py            # 6-tool "focus system" MCP → claude.ai connector (remote streamable-HTTP)
-tests/                       # plain-script tests: signal routing, overlay ranker, import smoke, focus decay + convergence
+extension/                   # Chrome browser-attention sensor (MV3, unpacked; no build step)
+                             # → POST /browser/intervals. Install + privacy model: extension/README.md
+tests/                       # plain-script tests: signal routing, overlay ranker, import smoke, focus decay + convergence, browser ingest
 ```
 
 ## Environment variables
