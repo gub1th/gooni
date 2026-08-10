@@ -24,7 +24,10 @@ ROUTER_MODULES = [
     "activity",
     "health",
     "tool_calls",
-    "mcp",
+    # "mcp" is GONE (2026-08-10): every route it declared sat under the `/mcp`
+    # prefix that main.py mounts the Focus MCP connector on, so a Starlette
+    # Mount shadowed all of them and they 404'd. Its live endpoints were
+    # re-homed onto `/memories/*` (see routers/memories.py) and `/notes/search`.
     "memories",
     "eval",
     "whoop",

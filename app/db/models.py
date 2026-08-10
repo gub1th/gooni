@@ -105,6 +105,12 @@ class ToolCall(Base):
         Integer, ForeignKey("messages.id"), nullable=True, index=True
     )
     tool_name = Column(String, nullable=False, index=True)
+    # Which surface invoked the tool: NULL/'chat' = the orchestrator's own
+    # tool loop, 'mcp-stdio' = Claude Code, 'mcp-http' = the claude.ai remote
+    # connector. Indexed because the question this column exists to answer —
+    # "is this tool actually used, and by whom?" — is a group-by over it.
+    # Nullable so every pre-existing chat row stays valid without a backfill.
+    source = Column(String, nullable=True, index=True)
     args_json = Column(Text, nullable=True)
     # 'running' | 'done' | 'failed'. No 'pending' for v1 because we don't
     # have async tools yet — every call goes running → done|failed in the

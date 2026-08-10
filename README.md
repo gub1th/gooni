@@ -149,7 +149,7 @@ tests/                       # plain-script tests: signal routing, overlay ranke
 | `WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`, `WHOOP_REDIRECT_URI` | Whoop feed | OAuth app; recovery/HRV/sleep land as Trackable entries |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_REDIRECT_URI` | GitHub integration | OAuth app at github.com/settings/developers (Settings → Integrations) |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY`, `R2_SECRET`, `R2_BUCKET`, `R2_PUBLIC_HOST` | Image uploads | Cloudflare R2 (S3-compatible). When unset, `POST /uploads/image` returns 503 and the editor falls back to inline base64 data URLs |
-| `GOONI_FRONTEND_URL` | MCP only | Public host of the SPA, used by `mcp__gooni__add_note` to surface deep-link URLs (default `http://localhost:5173`) |
+| `GOONI_FRONTEND_URL` | MCP only | Public host of the SPA, used by the MCP `log_note` tool to surface deep-link URLs (default `http://localhost:5173`) |
 | `GOONI_URL`, `GOONI_AUTH_PASSWORD` | MCP only | Focus/legacy MCP → backend base URL + password (→ sha256 → Bearer). Set `GOONI_AUTH_PASSWORD` = `AUTH_PASSWORD` so the connector can reach the gated backend |
 | `FOCUS_MCP_HOST`, `FOCUS_MCP_PORT` | Focus MCP | Bind for `mcp_servers/focus_server.py` streamable-HTTP transport (default `127.0.0.1:8001`) |
 | `FOCUS_MCP_ALLOWED_HOSTS` | Focus MCP | Comma-separated Host allowlist for the transport's DNS-rebinding protection; `*` disables it. Required (or `*`) when serving behind a tunnel — the public Host is 421-rejected otherwise |

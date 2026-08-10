@@ -97,6 +97,47 @@ def _attach_sources(serialized: list[dict], rows: list, db: Session) -> None:
         row["source"] = msg_map.get(m.source_message_id) or note_map.get(m.source_note_id)
 
 
+# ── Re-homed off the dead `/mcp/*` prefix ────────────────────────────────────
+# `app/main.py` mounts the Focus MCP connector at `/mcp`, and a Starlette Mount
+# beats a same-prefix APIRoute regardless of which is declared first. So every
+# route the old `app/routers/mcp.py` published — /mcp/context, /mcp/memories,
+# /mcp/memories/search — was unreachable, 404, for as long as the mount has
+# existed. That module is deleted; these are its three live replacements under a
+# prefix nothing shadows. `edit` and `forget` already had homes here
+# (PATCH/DELETE /memories/{id}), so they are not re-declared.
+
+
+@router.post("/memories")
+def add_memory(body: dict, db: Session = Depends(get_db)):
+    """Direct memory write, bypassing extraction. Replaces POST /mcp/memories."""
+    content = (body.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content is required")
+    m = memory_service.add_memory(content, db=db)
+    if m is None:
+        raise HTTPException(status_code=500, detail="memory write failed")
+    return {"ok": True, "id": m.id}
+
+
+@router.get("/memories/context")
+def memory_context(q: str = "", db: Session = Depends(get_db)):
+    """The formatted memory block for a query — always-injected preferences
+    plus similarity-ranked facts/episodes. Replaces GET /mcp/context."""
+    if not q.strip():
+        return {"context": ""}
+    return {"context": memory_service.build_memory_context(q, db=db)}
+
+
+@router.get("/memories/search")
+def search_memories(q: str, limit: int = 8, db: Session = Depends(get_db)):
+    """SEMANTIC (cosine) memory search. Distinct from `GET /memories?q=`, which
+    is an ilike substring filter for the dashboard list — different question,
+    so it gets its own route rather than a mode flag.
+    Replaces GET /mcp/memories/search."""
+    hits = memory_service.search(q, limit=limit, db=db)
+    return [{"id": m.get("id"), "memory": m.get("memory")} for m in hits]
+
+
 @router.get("/memories/stats")
 def memory_stats(db: Session = Depends(get_db)):
     """Counts per type for the dashboard header tabs."""

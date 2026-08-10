@@ -224,7 +224,20 @@ def set_reminder(body: dict, db: Session = Depends(get_db)):
 
 
 @router.get("/focus/reminders")
-def list_reminders(day: str | None = None, include_done: bool = False, db: Session = Depends(get_db)):
+def list_reminders(
+    day: str | None = None,
+    include_done: bool = False,
+    state: str | None = None,
+    limit: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """Open commitments, or any lifecycle state via `state`.
+
+    `state`/`limit` back the converged MCP surface's single `list_promises`
+    reader, so the HTTP gateway and the in-process gateway return a
+    byte-identical shape from the same code path instead of two serializers
+    that can drift.
+    """
     day_dt = None
     if day == "today":
         day_dt = datetime.combine(local_today(db), datetime.min.time())
@@ -233,11 +246,23 @@ def list_reminders(day: str | None = None, include_done: bool = False, db: Sessi
         if d is None:
             raise HTTPException(status_code=400, detail=f"bad day: {day!r}")
         day_dt = datetime(d.year, d.month, d.day)
-    return focus_service.list_reminders(db, day=day_dt, include_done=include_done)
+    if state and state not in (*focus_service.VALID_STATES, "all"):
+        raise HTTPException(status_code=400, detail=f"bad state: {state!r}")
+    return focus_service.list_reminders(
+        db, day=day_dt, include_done=include_done, state=state, limit=limit
+    )
 
 
 # Body keys that mean "edit these fields" (vs the state/done lifecycle branch).
-_EDIT_KEYS = {"content", "due_at", "due_hint", "owed_to", "clear_due", "clear_owed"}
+# cadence/cadence_target/is_important joined the set with the MCP convergence:
+# `set_promise` merged the old set_reminder (owed_to, thought links) with the old
+# add_promise (recurrence, importance), and routing recurrence through this one
+# endpoint is what lets the in-process and over-HTTP gateways share a code path
+# instead of each assembling the response themselves.
+_EDIT_KEYS = {
+    "content", "due_at", "due_hint", "owed_to", "clear_due", "clear_owed",
+    "cadence", "cadence_target", "is_important",
+}
 
 
 @router.patch("/focus/reminders/{reminder_id}")
@@ -266,6 +291,9 @@ def toggle_reminder(reminder_id: int, body: dict, db: Session = Depends(get_db))
                 clear_due=clear_due,
                 owed_to=body.get("owed_to"),
                 clear_owed=bool(body.get("clear_owed")),
+                cadence=body.get("cadence"),
+                cadence_target=body.get("cadence_target"),
+                is_important=body.get("is_important"),
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
