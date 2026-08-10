@@ -585,13 +585,29 @@ def _open_promises(db: Session):
 
 
 def list_reminders(
-    db: Session, day: datetime | None = None, include_done: bool = False
+    db: Session,
+    day: datetime | None = None,
+    include_done: bool = False,
+    state: str | None = None,
+    limit: int | None = None,
 ) -> list[dict]:
     """Open commitments. If `day` is given, restrict dated rows to that
     calendar day (undated rows always pass through — they surface by age).
-    Ordered: dated by due time, then undated by age (oldest first)."""
+    Ordered: dated by due time, then undated by age (oldest first).
+
+    `state` ("active" | "kept" | "broken" | "all") is the converged MCP
+    surface's reader filter — it exists so ONE function answers both "what's
+    open" and "what did I keep/break", which the old surface split across
+    `list_reminders` (open only, rich shape) and `read_promises` (any state,
+    a different shape). Two shapes for one table is how the schemas drifted in
+    the first place. Omitted/None keeps the historical behaviour exactly:
+    `include_done` decides, and every existing caller is untouched.
+    """
     q = db.query(Promise)
-    if not include_done:
+    if state:
+        if state != "all":
+            q = q.filter(Promise.state == state)
+    elif not include_done:
         q = q.filter(Promise.state == "active")
     if day is not None:
         start = datetime(day.year, day.month, day.day)
@@ -607,6 +623,8 @@ def list_reminders(
         return (0, p.inferred_due) if p.inferred_due is not None else (1, p.created_at)
 
     rows.sort(key=_sort_key)
+    if limit is not None:
+        rows = rows[: max(1, int(limit))]
     return _reminder_dicts(db, rows)
 
 
@@ -653,6 +671,9 @@ def update_reminder(
     clear_due: bool = False,
     owed_to: str | None = None,
     clear_owed: bool = False,
+    cadence: str | None = None,
+    cadence_target: int | None = None,
+    is_important: bool | None = None,
 ) -> dict | None:
     """Edit a commitment's content / due / owed-to. Only provided fields change
     (None = "leave alone"); pass `clear_due` / `clear_owed` to explicitly reset
@@ -684,6 +705,30 @@ def update_reminder(
         p.owed_to = None
     elif owed_to is not None and owed_to.strip():
         p.owed_to = resolve_person(db, owed_to).id
+    if cadence is not None:
+        from . import promise_service
+
+        if cadence not in promise_service.VALID_CADENCES:
+            raise ValueError(f"bad cadence {cadence!r}")
+        p.cadence = cadence
+        # cadence_target only means anything for n_per_week; anything else
+        # clears it rather than leaving a stale N behind a changed shape.
+        p.cadence_target = (
+            int(cadence_target)
+            if cadence == "n_per_week" and cadence_target is not None
+            else None
+        )
+        if cadence != "once" and due_at is None and not clear_due and p.due_is_default:
+            # A recurring commitment carries no single deadline: a due on a
+            # daily promise is a parse artifact (promise_service.create drops it
+            # for the same reason). Only the DEFAULTED one is dropped — a
+            # deadline someone actually named survives a cadence change.
+            p.inferred_due = None
+            p.due_is_default = False
+    elif cadence_target is not None and p.cadence == "n_per_week":
+        p.cadence_target = int(cadence_target)
+    if is_important is not None:
+        p.is_important = bool(is_important)
     db.flush()
     return _reminder_dict(db, p)
 
@@ -780,6 +825,16 @@ def _serialize_reminder(
         "lasted_days": lasted_days,
         "thought_id": thoughts.get(p.id),
         "due_is_default": bool(p.due_is_default),
+        # Recurrence + importance live on the row and always have; they were
+        # simply absent from this serializer because the focus system had no
+        # concept of them. The converged MCP surface's `set_promise` writes
+        # them, so ONE serializer has to be able to describe a whole commitment
+        # — otherwise the in-process and over-HTTP gateways return different
+        # keys for the same promise, which is the drift the convergence exists
+        # to remove. Additive: existing consumers ignore unknown keys.
+        "cadence": p.cadence,
+        "cadence_target": p.cadence_target,
+        "is_important": bool(p.is_important),
     }
 
 

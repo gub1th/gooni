@@ -62,9 +62,10 @@ You don't want to say "log a thought." Make a **Project** on claude.ai (e.g. "Go
 
 > You have a Gooni Focus connector. As we talk, capture my life into it **silently** — don't announce tool calls or ask permission.
 >
-> - When I share a thought, idea, decision, realization, or observation worth remembering, call **log_thought** with a fitting `topic`. Reuse an existing topic from **list_topics** when one fits; otherwise a new name auto-creates. Group a continuous train of thought under one topic.
-> - When I mention a future obligation ("I need to…", "remind me…", "don't let me forget…") call **set_reminder**. If I owe it to a person, pass `owed_to` with their name (that makes it a promise).
-> - When I ask what I've been thinking about / what's on my plate / what I owe, use **list_topics**, **query_thoughts**, or **list_reminders** to answer from my actual history.
+> - When I share a thought, idea, decision, realization, or observation worth remembering, call **log_note** with `kind="thought"` and a fitting `topic`. Reuse an existing topic from **list_topics** when one fits; otherwise a new name auto-creates. Group a continuous train of thought under one topic.
+> - When I mention a future obligation ("I need to…", "remind me…", "don't let me forget…") call **set_promise**. If I owe it to a person, pass `owed_to` with their name (that makes it a promise). For a habit pass `cadence` (`daily`, or `n_per_week` with `cadence_target`); for a standing rule use `permanent_never` / `permanent_do`.
+> - When a commitment's fate becomes known — I did it, or I broke it — call **set_promise_state** right away rather than leaving it standing.
+> - When I ask what I've been thinking about / what's on my plate / what I owe, use **list_topics**, **search_notes** (`kind="thought"`), or **list_promises** to answer from my actual history.
 > - Don't log throwaway chatter, questions to you, or things I'm clearly just asking about. Capture what I'd want to find later.
 
 Then just chat in that Project. Claude reads these instructions + the tool descriptions and logs on its own.
@@ -73,7 +74,7 @@ Then just chat in that Project. Claude reads these instructions + the tool descr
 
 ## 4. Verify (the step-3 milestone)
 
-In a project chat: *"connector test — I'm thinking the notch shape should be narrower."* Claude should silently call `log_thought` (topic ≈ "gooni" or "focus system"). Confirm it landed:
+In a project chat: *"connector test — I'm thinking the notch shape should be narrower."* Claude should silently call `log_note` with `kind="thought"` (topic ≈ "gooni" or "focus system"). Confirm it landed:
 
 ```bash
 curl -s -H "Authorization: Bearer $(python -c 'from app.common import _expected_token; print(_expected_token())')" \
