@@ -39,37 +39,62 @@ def main() -> int:
         if not cond:
             fails.append(msg)
 
-    # ── create a self-owed promise (no due) ──────────────────────────────────
+    # ── create a self-owed commitment (no due) ───────────────────────────────
+    # `is_promise` is INERT. It is passed here on purpose: the old test asserted
+    # it drove `type`, and asserting its inertness is what stops that belief
+    # coming back. In v2 every row in `promises` IS a promise, so the display
+    # `type` is DERIVED from `owed_to` — a commitment owed to another person is
+    # the one that reads differently. The MCP surface dropped the parameter
+    # entirely in the convergence (see tests/test_mcp_surface.py).
     p = fs.set_reminder(db, content="no smoking until the onsite", is_promise=True)
     pid = p["id"]
-    check(p["type"] == "promise", "is_promise → type promise")
+    check(p["type"] == "reminder", "is_promise is inert — type derives from owed_to")
     check(p["owed_to"] is None, "self-owed promise has null owner")
-    check(p["due_at"] is None, "no due set")
+    # Every row carries a deadline since 2026-07-29: an omitted due defaults to
+    # today's local EOD, flagged so it can never auto-break (breaking a deadline
+    # Gooni invented would mark Daniel broken at midnight every night).
+    check(p["due_at"] is not None, "omitted due defaults to today EOD, not NULL")
+    check(p["due_is_default"] is True, "defaulted due is flagged due_is_default")
 
     # ── edit content (rename) ────────────────────────────────────────────────
+    before_type, before_owner = p["type"], p["owed_to"]
     r = fs.update_reminder(db, pid, content="no smoking, period")
     check(r is not None and r["content"] == "no smoking, period", "content edit persists")
-    # untouched fields survive
-    check(r["type"] == "promise" and r["owed_to"] is None, "rename doesn't demote/reassign")
+    # Untouched fields survive. The point of this check is INVARIANCE across a
+    # rename, not the literal value — so compare against what it was.
+    check(r["type"] == before_type and r["owed_to"] == before_owner,
+          "rename doesn't demote/reassign")
 
     # ── set a due via explicit datetime ──────────────────────────────────────
     due = datetime(2026, 8, 1, 23, 0, 0)
     r = fs.update_reminder(db, pid, due_at=due)
     check(r["due_at"] is not None, "due_at set")
+    check(r["due_is_default"] is False, "a named deadline clears due_is_default")
     # ── clear the due ────────────────────────────────────────────────────────
+    # `clear_due` resets to the today-EOD DEFAULT, not to NULL. A NULL due falls
+    # out of both dashboard panels (short-term splits on due distance), so a
+    # cleared row would silently vanish from the board.
     r = fs.update_reminder(db, pid, clear_due=True)
-    check(r["due_at"] is None, "clear_due nulls due_at")
+    check(r["due_at"] is not None, "clear_due resets to the default due, not NULL")
+    check(r["due_is_default"] is True, "cleared due is flagged default again")
 
     # ── naming an owner promotes + records the person ────────────────────────
     plain = fs.set_reminder(db, content="text yash back")  # plain reminder
-    check(plain["type"] == "reminder", "no owner/flag → reminder")
+    check(plain["type"] == "reminder", "no owner → reminder")
     r = fs.update_reminder(db, plain["id"], owed_to="Yash")
     check(r["type"] == "promise", "naming owner promotes reminder → promise")
     check(r["owed_to"] == "Yash", "owner name resolved back")
-    # ── clear the owner (does NOT demote) ────────────────────────────────────
+    # ── clear the owner ──────────────────────────────────────────────────────
+    # This DOES flip the display type back, because `type` is derived from
+    # `owed_to` and nothing stores "was promoted once". The pre-convergence
+    # test asserted the opposite ("clearing owner leaves it a promise") and
+    # `update_reminder`'s docstring still claimed it until this pass. Reported
+    # as a finding rather than silently reversed: if "once a promise, always a
+    # promise" is still wanted, it needs a stored flag — v2 deliberately has
+    # none, and `type` drives no surviving surface.
     r = fs.update_reminder(db, plain["id"], clear_owed=True)
     check(r["owed_to"] is None, "clear_owed nulls owner")
-    check(r["type"] == "promise", "clearing owner leaves it a promise (self-owed)")
+    check(r["type"] == "reminder", "clearing owner re-derives type from owed_to")
 
     # ── empty content rejected ───────────────────────────────────────────────
     try:

@@ -880,3 +880,78 @@ def _escape(text: str) -> str:
         .replace(">", "&gt;")
     )
 
+
+
+# ── Tool / step legend for the eval UI's ⓘ popup ─────────────────────────────
+#
+# `GET /eval/tools-legend` read `eval_service.TOOL_LEGEND` — a name that has
+# never existed in this module. Every call raised AttributeError (a hard 500),
+# and `SegmentDetail.tsx` turned that back into a lie with `.catch(() =>
+# setLegend([]))`: an empty popup that looked like a legend with nothing to say.
+# `trace_builder.tool_call`'s docstring records where it used to live ("a static
+# dict in main.py") — it was lost when main.py was slimmed.
+#
+# It is NOT restored as a static dict. That is what rotted: a hand-maintained
+# copy of a list the code already owns. The tool half is derived from the live
+# chat registry (`app.tools.registry`), so a tool added or removed there shows
+# up here with no second edit. Only the pipeline STEPS are spelled out, because
+# a step key is not self-describing and there is no registry to read them from —
+# `_STEP_LEGEND` is checked against `TraceBuilder` by `tests/test_rot_fixes.py`,
+# so a new step key fails a test instead of quietly going undocumented.
+
+#: Pipeline step keys emitted by `services.trace_builder.TraceBuilder`.
+_STEP_LEGEND: list[tuple[str, str, str]] = [
+    ("pipeline_version", "Pipeline version",
+     "Which prompt/pipeline revision produced this turn. Baselines are keyed on "
+     "it, so a score is only comparable within one version."),
+    ("fast_path", "Greeting fast-path",
+     "The turn was answered by the deterministic greeting shortcut — no "
+     "extraction, no recall, no model call for the body of the reply."),
+    ("extracted_signals", "Extract signals",
+     "One gpt-5.4-mini call over the user's message emitting promises, feature "
+     "requests, tone corrections, reply intent and memory candidates. Promise "
+     "CREATES are annotated onto the message as a glow, never auto-inserted."),
+    ("memory_recall", "Recall memories",
+     "Always-injected preferences plus the top cosine matches for this turn. "
+     "The label splits the two because preferences are on for every turn and "
+     "only the cosine hits earned their slot."),
+    ("master_prompt", "Build master prompt",
+     "Assembly of the system prompt actually sent: persona, object kinds, the "
+     "just-extracted block, deterministic state, and recent history."),
+    ("memories_applied", "Memories applied",
+     "Reconcile outcome for this turn's memory candidates. Reconcile runs "
+     "off-thread, so this step is frequently absent even on turns that wrote "
+     "memories."),
+    ("tool_call", "Tool call",
+     "A tool the orchestrator invoked, with arguments and result. Write tools "
+     "are what license the reply to claim something landed."),
+    ("verify", "Verify rail",
+     "Deterministic post-draft gate. OK passes the draft through; REVISE "
+     "carries a critique and can trigger one regeneration."),
+    ("reply", "Reply",
+     "The assistant text that was sent, with latency and token usage."),
+]
+
+
+def tool_legend() -> list[dict]:
+    """Legend entries for the eval UI, newest source of truth first.
+
+    Shape is `{key, name, description}` — what `EvalToolLegendEntry` in
+    `frontend/src/services/api.ts` declares. Steps first (they are the spine of
+    a trace), then one entry per registered chat tool.
+    """
+    entries = [
+        {"key": key, "name": name, "description": description}
+        for key, name, description in _STEP_LEGEND
+    ]
+    # Imported lazily: `app.tools` pulls in the whole tool surface, and this
+    # module is imported by the eval routes at request time.
+    from ..tools import registry as _tool_registry
+
+    for tool in _tool_registry:
+        entries.append({
+            "key": tool.name,
+            "name": tool.name.replace("_", " "),
+            "description": (tool.description or "").strip(),
+        })
+    return entries

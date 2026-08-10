@@ -36,6 +36,11 @@ export function EvalDetailView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [legend, setLegend] = useState<EvalToolLegendEntry[]>([]);
+  // A failed legend fetch used to be swallowed into an empty list, which
+  // rendered as a legend that had nothing to explain — indistinguishable from
+  // a working one. The route 500'd on every call for months behind exactly
+  // that. Keep the reason and show it in the popup instead.
+  const [legendError, setLegendError] = useState<string | null>(null);
   const [legendOpen, setLegendOpen] = useState(false);
   const [dispatching, setDispatching] = useState(false);
   // Dispatch modal: 'confirm' opens before send, 'success' after, with the
@@ -64,8 +69,15 @@ export function EvalDetailView({
   useEffect(() => {
     reload();
     fetchEvalToolsLegend()
-      .then((r) => setLegend(r.tools))
-      .catch(() => setLegend([]));
+      .then((r) => {
+        setLegend(r.tools);
+        setLegendError(null);
+      })
+      .catch((err) => {
+        setLegend([]);
+        setLegendError(err instanceof Error ? err.message : "Failed to load legend");
+        console.error("[eval] tool legend fetch failed", err);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segmentId]);
 
@@ -287,7 +299,9 @@ export function EvalDetailView({
        </div>
       </div>
 
-      {legendOpen && <ToolLegendPopup entries={legend} onClose={() => setLegendOpen(false)} />}
+      {legendOpen && (
+        <ToolLegendPopup entries={legend} error={legendError} onClose={() => setLegendOpen(false)} />
+      )}
 
       {dispatchModal.state !== "closed" && (
         <DispatchModal
@@ -512,9 +526,11 @@ function SummaryEditor({
 
 function ToolLegendPopup({
   entries,
+  error,
   onClose,
 }: {
   entries: EvalToolLegendEntry[];
+  error: string | null;
   onClose: () => void;
 }) {
   return (
@@ -553,6 +569,16 @@ function ToolLegendPopup({
           </button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {error && (
+            <div style={{ fontSize: 12, color: ctok.danger, lineHeight: 1.5 }}>
+              Legend unavailable — <code>GET /eval/tools-legend</code> failed: {error}
+            </div>
+          )}
+          {!error && entries.length === 0 && (
+            <div style={{ fontSize: 12, color: ctok.muted }}>
+              The server returned an empty legend.
+            </div>
+          )}
           {entries.map((e) => (
             <div key={e.key}>
               <div style={{ fontSize: 13, fontWeight: 600, color: ctok.text }}>

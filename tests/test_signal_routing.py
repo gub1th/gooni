@@ -224,6 +224,36 @@ def main() -> int:
         fails.append(f"log tool miss: expected 'no trackable', got {miss!r}")
     print(f"[log tool] numeric={res!r} boolean={exres!r} miss_ok={'no trackable' in miss.lower()}")
 
+    # ── feature_requests: the one signal type this net never exercised, which
+    #    is how the handler stayed dead. `intent_handlers/features.handle`
+    #    imported a name its target module does not export, so it raised
+    #    ImportError on EVERY call and `intent_router` caught it into a print.
+    #    Every feature request from chat was silently dropped. Assert both
+    #    halves: a Note lands, and the router reports a real note id (the id is
+    #    what licenses the LLM to confirm the write). ──
+    from app.db.models import Note as _Note
+    sig = _empty_signals()
+    sig["feature_requests"] = [
+        {"title": "Outbound time-based reminders", "why": "asked, not built"},
+    ]
+    routed = intent_router.dispatch(
+        {**sig, "memories": []},
+        intent_router.RouterContext(db=db),
+    )
+    if not routed.captured_features:
+        fails.append("feature request: routed.captured_features empty — handler dead?")
+    else:
+        note_id = routed.captured_features[0].get("note_id")
+        if not isinstance(note_id, int):
+            fails.append(f"feature request: note_id not an int, got {note_id!r}")
+        else:
+            fr_note = db.query(_Note).filter(_Note.id == note_id).first()
+            if fr_note is None:
+                fails.append(f"feature request: note_id {note_id} does not exist")
+            elif "feature-request" not in (fr_note.tags or ""):
+                fails.append(f"feature request: note {note_id} not tagged, tags={fr_note.tags!r}")
+    print(f"[feature request] captured={routed.captured_features}")
+
     db.close()
     os.unlink(_tmp.name)
 

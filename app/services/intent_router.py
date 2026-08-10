@@ -49,9 +49,11 @@ class RouterResult:
     nothing to route."""
 
     memories_written: list[Any] = field(default_factory=list)
-    # Each entry: {"title": str, "ticket_id": int | None}. Used by ack +
-    # just_extracted blocks to surface real BacklogTicket ids — anti-
-    # hallucination layer for the "tracked without id" failure mode.
+    # Each entry: {"title": str, "note_id": int}. Used by ack + just_extracted
+    # blocks to surface real Note ids — anti-hallucination layer for the
+    # "tracked without id" failure mode. Was `ticket_id`, naming a
+    # BacklogTicket that has not existed since the v2 nuke; feature requests
+    # are `feature-request`-tagged Notes.
     captured_features: list[dict] = field(default_factory=list)
     tone_rules: list[str] = field(default_factory=list)
     # Serialized Promise rows created this turn. Slice 3: chat-side

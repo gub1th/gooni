@@ -229,13 +229,14 @@ def classify_note(note_id: int) -> None:
         routed = intent_router.dispatch(signals, ctx)
         memories_written = routed.memories_written
 
-        # Map router's captured_features (title + ticket_id) into the
-        # note's signals_summary shape. list_item_id stays as the
-        # historical key name so the FE disclosure renders unchanged.
+        # Map router's captured_features (title + note_id) into the note's
+        # signals_summary shape. `list_item_id` stays as the historical key
+        # name so the FE disclosure renders unchanged — it is a Note id and
+        # has been since the v2 nuke.
         feature_summaries = [
-            {"title": f["title"], "list_item_id": f["ticket_id"]}
+            {"title": f["title"], "list_item_id": f["note_id"]}
             for f in routed.captured_features
-            if f.get("ticket_id") is not None
+            if f.get("note_id") is not None
         ]
 
         # Persist the signals snapshot so the editor can render a "Routed:"

@@ -52,18 +52,30 @@ def main() -> int:
             except Exception as e:  # noqa: BLE001 — we want the full report
                 failures.append(f"{name}: {type(e).__name__}: {e}")
 
-    # The pip `mcp` SDK must resolve to site-packages, not to anything in the
-    # repo. This is the shadowing regression guard: if a top-level `mcp/`
+    # The pip `mcp` SDK must resolve to an installed package, not to repo
+    # SOURCE. This is the shadowing regression guard: if a top-level `mcp/`
     # package ever reappears, `mcp.server.fastmcp` stops existing and /mcp
-    # silently 404s in prod. Assert the real SDK, from outside the repo.
+    # silently 404s in prod.
+    #
+    # The rule is "not repo source", NOT "not under the repo root". The
+    # documented dev layout puts the venv AT the repo root (`source
+    # venv/bin/activate`, which `dev.sh` looks for first, and which
+    # `.gitignore` ignores) — so a correctly configured machine resolves the
+    # SDK to `<repo>/venv/lib/pythonX/site-packages/mcp/...` and the old check
+    # called that a shadow. This guard was therefore permanently red, which
+    # means a REAL shadow would have been indistinguishable from the machine's
+    # normal state. A check nobody can act on protects nothing.
     checked += 1
     try:
         import mcp.server.fastmcp as _sdk
 
         sdk_path = Path(_sdk.__file__).resolve()
-        if REPO_ROOT in sdk_path.parents:
+        installed = any(
+            part in ("site-packages", "dist-packages") for part in sdk_path.parts
+        )
+        if REPO_ROOT in sdk_path.parents and not installed:
             failures.append(
-                f"pip `mcp` SDK is shadowed by a repo path: {sdk_path}"
+                f"pip `mcp` SDK is shadowed by repo source: {sdk_path}"
             )
     except Exception as e:  # noqa: BLE001
         failures.append(f"mcp.server.fastmcp: {type(e).__name__}: {e}")

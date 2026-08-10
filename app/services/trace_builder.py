@@ -225,7 +225,10 @@ class TraceBuilder:
                   result: Any = None) -> None:
         """A tool/router action the orchestrator took (tone capture, feature
         request log, undo feedback, etc.). The legend popup in the eval UI
-        sources its descriptions from a static dict in main.py.
+        sources its descriptions from `eval_service.tool_legend()`, which reads
+        the live chat registry — it used to say "a static dict in main.py",
+        which had been gone since main.py was slimmed, leaving
+        `GET /eval/tools-legend` raising AttributeError on every call.
         """
         self.step(
             "tool_call",

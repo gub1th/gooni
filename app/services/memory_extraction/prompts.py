@@ -172,7 +172,7 @@ feature_requests:
   Capture-shaped content lands as a Note (tags replace lists). Emit []
   for feature_requests on these. The classifier loses calibration when
   it confuses user content with platform asks (see Cluster A bug:
-  "Add to date spots list" wrongly created a BacklogTicket).
+  "Add to date spots list" wrongly logged a feature request).
   Examples that → []:
     "add this to my date spots list"
     "add Horsefeather to date spots"
@@ -180,14 +180,14 @@ feature_requests:
     "put bread on the groceries list"
     "remind me to add the new spot to date ideas"
 
-  *** CONSOLIDATION — 1 CAPABILITY = 1 TICKET ***
+  *** CONSOLIDATION — 1 CAPABILITY = 1 FEATURE REQUEST ***
   When a single turn mentions multiple sub-asks that all describe ONE
   underlying capability (e.g. "track my sleep", "handle nights I don't
   log a sleep time", and "use claude usage as awake-signal" all describe
   ONE capability: sleep tracking), emit ONE entry. Put the sub-asks in
   `why`. Only emit N entries when there are N GENUINELY DISTINCT
   capabilities (e.g. "add timers AND a streak tracker" → 2 entries).
-  Cluster A bug: a single sleep ask fragmented into 3 tickets — the
+  Cluster A bug: a single sleep ask fragmented into 3 entries — the
   ack then leaked "backlog: X (+2)" with no user-readable context.
   Examples:
     "i want sleep tracking — also handle nights w/o a logged time,
