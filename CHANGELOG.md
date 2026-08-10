@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.226.1 — 2026-08-10 (patch)
+
+- fix(mcp): rename mcp/ → mcp_servers/, fail loudly if /mcp can't mount (#461)
+
 ## 0.226.0 — 2026-08-09 (minor)
 
 - feat(focus): converge focus primitives into v2 (expand half) (#458)
