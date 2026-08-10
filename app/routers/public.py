@@ -22,7 +22,7 @@ router = APIRouter()
 @router.get("/public/mcp")
 def get_public_mcp_config():
     """Sanitized snapshot of the project's MCP setup — servers (from .mcp.json) + tools
-    (parsed from mcp/server.py via AST). Dynamic: edit the config or add a @mcp.tool() and
+    (parsed from mcp_servers/server.py via AST). Dynamic: edit the config or add a @mcp.tool() and
     this endpoint reflects the change on next request. No secrets returned — absolute paths
     are reduced to basenames, env values stripped (keys only)."""
     import ast
@@ -50,7 +50,7 @@ def get_public_mcp_config():
         except Exception:
             pass
 
-    # 2) AST-walk mcp/server.py for @mcp.tool() decorated functions
+    # 2) AST-walk mcp_servers/server.py for @mcp.tool() decorated functions
     def _dec_name(dec) -> str:
         if isinstance(dec, ast.Name):
             return dec.id
@@ -62,7 +62,7 @@ def get_public_mcp_config():
         return ""
 
     tools: list[dict] = []
-    server_py = repo_root / "mcp" / "server.py"
+    server_py = repo_root / "mcp_servers" / "server.py"
     if server_py.exists():
         try:
             tree = ast.parse(server_py.read_text())

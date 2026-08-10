@@ -5,16 +5,15 @@ Claude conversation as a REMOTE (streamable-HTTP) custom connector.
 This is deliberately small: six tools, not thirty. It wraps the already-live
 `/focus/*` backend contract (see app/routers/focus.py) so a Claude chat can log
 thoughts under decaying topics, retrieve them, and set reminders/promises. The
-legacy 30-tool local stdio server (mcp/server.py) is untouched and unrelated.
+legacy 30-tool local stdio server (mcp_servers/server.py) is untouched and unrelated.
 
 Run locally (streamable HTTP on :8001 by default):
 
-    # from the repo root — run as a script so the installed `mcp` package
-    # wins over this local `mcp/` directory:
+    # from the repo root:
     GOONI_URL=http://localhost:8000 \
     GOONI_AUTH_PASSWORD=... \
     FOCUS_MCP_PORT=8001 \
-    python mcp/focus_server.py
+    python mcp_servers/focus_server.py
 
 Config comes from the SAME env vars the legacy server uses:
   - GOONI_URL            backend base URL (default http://localhost:8000)
@@ -38,7 +37,7 @@ from mcp.server.fastmcp import FastMCP
 BASE_URL = os.getenv("GOONI_URL", "http://localhost:8000")
 
 # Prod has password-gated auth (see app/main.py auth_middleware). Derive the
-# stable bearer token from the password locally — same scheme as mcp/server.py —
+# stable bearer token from the password locally — same scheme as mcp_servers/server.py —
 # and attach it to every outgoing request via a default-header httpx.Client.
 # Unset GOONI_AUTH_PASSWORD (unauthenticated dev) → header omitted, backend lets
 # the request through.

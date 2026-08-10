@@ -3,7 +3,7 @@
 deploying the main app to Fly ships a stable `https://gooni-bot.fly.dev/mcp`
 endpoint, always-on, no tunnel.
 
-Distinct from the standalone `mcp/focus_server.py`, which is the LOCAL-dev path
+Distinct from the standalone `mcp_servers/focus_server.py`, which is the LOCAL-dev path
 (run as a script + cloudflared tunnel). Same six tools, same descriptions — but
 here the tools call `focus_service` DIRECTLY against a DB session (no httpx, no
 Bearer round-trip), because we're already inside the backend process.
@@ -22,38 +22,17 @@ is deliberately public. Set FOCUS_MCP_ALLOWED_HOSTS to pin specific hosts.
 from __future__ import annotations
 
 import os
-import sys
 from datetime import datetime, timezone
 
+# The pip `mcp` SDK, imported plainly. This used to need sys.path surgery: the
+# repo had a top-level `mcp/` package directory that shadowed the SDK whenever
+# the repo root was on sys.path (always, under `uvicorn app.main:app`). That
+# directory is now `mcp_servers/`, so there is nothing left to shadow it.
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
-def _import_real_mcp():
-    """The repo's `mcp/` dir has an (empty) __init__.py, making it a regular
-    package that SHADOWS the pip `mcp` package whenever the repo root is on
-    sys.path — which it is under `uvicorn app.main:app` from the repo root. So
-    `from mcp.server.fastmcp import FastMCP` resolves to the repo dir and fails.
-
-    Fix: drop the repo root from sys.path + purge the shadow modules, import the
-    REAL site-packages mcp, then restore sys.path (leaving the real mcp cached in
-    sys.modules for the rest of the process)."""
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    saved_path = list(sys.path)
-    sys.path[:] = [p for p in sys.path if os.path.abspath(p or os.getcwd()) != repo_root]
-    for k in [m for m in list(sys.modules) if m == "mcp" or m.startswith("mcp.")]:
-        del sys.modules[k]
-    try:
-        from mcp.server.fastmcp import FastMCP as _FastMCP
-        from mcp.server.transport_security import (
-            TransportSecuritySettings as _TSS,
-        )
-        return _FastMCP, _TSS
-    finally:
-        sys.path[:] = saved_path
-
-
-FastMCP, TransportSecuritySettings = _import_real_mcp()
-
-from .db.database import SessionLocal  # noqa: E402
-from .services import focus_service  # noqa: E402
+from .db.database import SessionLocal
+from .services import focus_service
 
 _allowed_hosts = [h.strip() for h in os.getenv("FOCUS_MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
 if _allowed_hosts and _allowed_hosts != ["*"]:

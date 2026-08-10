@@ -16,17 +16,12 @@ from .db.models import (
     Visit,
 )
 
-# Focus MCP connector, mounted at /mcp (see app/focus_mcp.py). Import is guarded
-# so a failure to build the MCP app can NEVER stop the main app (and all its
-# surfaces — web, WhatsApp, Telegram) from booting.
-try:
-    from . import focus_mcp
-
-    _FOCUS_MCP_OK = True
-except Exception as _focus_mcp_err:  # pragma: no cover - defensive
-    focus_mcp = None
-    _FOCUS_MCP_OK = False
-    print(f"[focus-mcp] mount disabled at import: {_focus_mcp_err}", flush=True)
+# Focus MCP connector, mounted at /mcp (see app/focus_mcp.py). Deliberately
+# UNGUARDED: this import used to sit in a bare try/except that printed and
+# continued, and it spent weeks failing on Fly — the app booted fine, the
+# claude.ai connector 404'd, and nothing said so. A connector that vanishes
+# without failing the boot is invisible; a boot that crashes is not.
+from . import focus_mcp
 
 
 def _alembic_upgrade(engine):
@@ -148,13 +143,10 @@ async def _lifespan(app: FastAPI):
 
     async with AsyncExitStack() as _stack:
         # The mounted /mcp connector's session manager task group backs every
-        # MCP request; it must run for the app's lifetime. Guarded so a mount
-        # failure can never keep the app from booting.
-        if _FOCUS_MCP_OK:
-            try:
-                await _stack.enter_async_context(focus_mcp.session_manager.run())
-            except Exception as _e:  # pragma: no cover - defensive
-                print(f"[focus-mcp] session manager start failed: {_e}", flush=True)
+        # MCP request; it must run for the app's lifetime. Unguarded on purpose
+        # (same reasoning as the import above) — if it can't start, /mcp is dead
+        # and the app should fail loudly rather than serve a hollow mount.
+        await _stack.enter_async_context(focus_mcp.session_manager.run())
         try:
             yield
         finally:
@@ -172,9 +164,8 @@ app = FastAPI(lifespan=_lifespan)
 # Mount the Focus MCP connector at /mcp (streamable-HTTP). The sub-app serves at
 # its own root, so /mcp is the external endpoint claude.ai / Claude Code connect
 # to. Exempted from the Bearer middleware below (authless by design — tools run
-# in-process). Guarded: no mount if the import failed.
-if _FOCUS_MCP_OK:
-    app.mount("/mcp", focus_mcp.http_app)
+# in-process).
+app.mount("/mcp", focus_mcp.http_app)
 
 _origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
 

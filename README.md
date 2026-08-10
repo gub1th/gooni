@@ -48,7 +48,7 @@ datasette db/gooni.db -p 8002   # pip install datasette first (not in requiremen
 # Serves the 6-tool "focus system" over remote streamable-HTTP at http://127.0.0.1:8001/mcp
 GOONI_URL=http://localhost:8000 GOONI_AUTH_PASSWORD="$AUTH_PASSWORD" \
   FOCUS_MCP_PORT=8001 FOCUS_MCP_ALLOWED_HOSTS="*" \
-  python mcp/focus_server.py        # run as a script — mcp/ shadows the pip package
+  python mcp_servers/focus_server.py
 
 # Expose it publicly (cloudflared, NOT ngrok — ngrok's interstitial breaks the
 # OAuth discovery probes), then add the printed URL + /mcp at claude.ai:
@@ -121,7 +121,7 @@ frontend/
 evals/                       # offline regression harness (replays prod snapshot, LLM judge)
 scripts/
   telegram_bot.py            # Telegram bot (long-polling) → messaging/dispatch_inbound
-mcp/
+mcp_servers/
   server.py                  # legacy 30-tool MCP server → Claude Code via stdio
   focus_server.py            # 6-tool "focus system" MCP → claude.ai connector (remote streamable-HTTP)
 tests/                       # plain-script tests: signal routing, overlay ranker, import smoke, focus decay + convergence
@@ -149,5 +149,5 @@ tests/                       # plain-script tests: signal routing, overlay ranke
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY`, `R2_SECRET`, `R2_BUCKET`, `R2_PUBLIC_HOST` | Image uploads | Cloudflare R2 (S3-compatible). When unset, `POST /uploads/image` returns 503 and the editor falls back to inline base64 data URLs |
 | `GOONI_FRONTEND_URL` | MCP only | Public host of the SPA, used by `mcp__gooni__add_note` to surface deep-link URLs (default `http://localhost:5173`) |
 | `GOONI_URL`, `GOONI_AUTH_PASSWORD` | MCP only | Focus/legacy MCP → backend base URL + password (→ sha256 → Bearer). Set `GOONI_AUTH_PASSWORD` = `AUTH_PASSWORD` so the connector can reach the gated backend |
-| `FOCUS_MCP_HOST`, `FOCUS_MCP_PORT` | Focus MCP | Bind for `mcp/focus_server.py` streamable-HTTP transport (default `127.0.0.1:8001`) |
+| `FOCUS_MCP_HOST`, `FOCUS_MCP_PORT` | Focus MCP | Bind for `mcp_servers/focus_server.py` streamable-HTTP transport (default `127.0.0.1:8001`) |
 | `FOCUS_MCP_ALLOWED_HOSTS` | Focus MCP | Comma-separated Host allowlist for the transport's DNS-rebinding protection; `*` disables it. Required (or `*`) when serving behind a tunnel — the public Host is 421-rejected otherwise |
