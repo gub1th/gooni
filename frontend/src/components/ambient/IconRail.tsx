@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  Radio, FileText, Brain, LayoutGrid,
+  Radio, FileText, Brain, LayoutGrid, CalendarDays,
   SearchCheck, Settings as SettingsIcon, type LucideIcon,
 } from "lucide-react";
 import { FONT, frost, z } from "../../ui";
@@ -31,11 +31,12 @@ export function IconRail() {
   const [hovered, setHovered] = useState<string | null>(null);
 
   const nav = (search: Record<string, unknown>) =>
-    navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined, ...search } });
+    navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined, calendar: undefined, ...search } });
 
   const items: NavItem[] = [
     { label: "Home", Icon: Radio, go: () => nav({}) },
     { label: "Trackables", Icon: LayoutGrid, go: () => nav({ trackables: true }) },
+    { label: "Calendar", Icon: CalendarDays, go: () => nav({ calendar: true }) },
     { label: "Notes", Icon: FileText, go: () => nav({ view: "notes" }) },
     { label: "Memories", Icon: Brain, go: () => navigate({ to: "/memories", search: { focus: undefined } }) },
     { label: "Audit", Icon: SearchCheck, go: () => nav({ audit: true }) },

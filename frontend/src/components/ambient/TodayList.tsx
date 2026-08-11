@@ -277,14 +277,19 @@ function TaskRow({
         )
       )}
 
-      {/* focus has exactly ONE door and it is a task */}
+      {/* Focus has exactly ONE door and it is a task.
+          INLINE, not absolutely positioned. It used to hang at right:-32px,
+          outside the row box — which worked only while rows were centred with
+          slack either side. Left-aligning the list put the row's right edge at
+          the container edge, so the button was clipped and focus became
+          unreachable from the home. */}
       <button
         onClick={onFocus}
         aria-label={`Focus on ${item.content}`}
         title="focus"
         style={{
-          position: "absolute",
-          right: -32,
+          flex: "none",
+          marginLeft: 2,
           width: 26,
           height: 26,
           borderRadius: 999,

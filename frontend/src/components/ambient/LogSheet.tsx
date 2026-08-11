@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CalendarDays, SearchCheck, X } from "lucide-react";
+import { SearchCheck, X } from "lucide-react";
 import { FONT, frost, frostInk, z } from "../../ui";
 import { ink } from "./ambientInk";
 import { TurnTracePanel } from "./TurnTracePanel";
@@ -271,21 +271,19 @@ export function LogSheet({
               {f}
             </button>
           ))}
-          {/* the calendar glyph moved OFF the corner trigger and onto this tab */}
+          {/* a plain tab, inline with the rest — it is one of the sheet's
+              views, not a special affordance parked at the far edge */}
           <button
             onClick={() => setTab("timeline")}
             aria-selected={tab === "timeline"}
-            aria-label="Day timeline"
             role="tab"
             style={{
-              marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5,
               border: "none", background: "transparent", padding: 0, cursor: "pointer",
               fontFamily: FONT, fontSize: 11.5,
               color: tab === "timeline" ? ink(0.9) : ink(0.38),
               transition: "color 140ms ease",
             }}
           >
-            <CalendarDays size={12} strokeWidth={1.9} />
             timeline
           </button>
         </div>

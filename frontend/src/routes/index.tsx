@@ -32,6 +32,8 @@ interface HomeSearch {
   view?: "notes" | "log";
   /** the log matrix over the home */
   trackables?: true;
+  /** the week-grid calendar over the home */
+  calendar?: true;
 }
 
 export const Route = createFileRoute("/")({
@@ -52,6 +54,8 @@ export const Route = createFileRoute("/")({
     // used to carry this kind of cross-surface summon is gone).
     trackables:
       search.trackables === true || search.trackables === "true" || search.trackables === "1" || undefined,
+    calendar:
+      search.calendar === true || search.calendar === "true" || search.calendar === "1" || undefined,
   }),
   component: LogPage,
 });
@@ -144,6 +148,13 @@ function LogPage() {
       {view === "home" ? (
         <AmbientHome
           trackablesOpen={!!search.trackables}
+          calendarOpen={!!search.calendar}
+          onOpenCalendar={() =>
+            navigate({ search: { ...search, calendar: true }, replace: true })
+          }
+          onCloseCalendar={() =>
+            navigate({ search: { ...search, calendar: undefined }, replace: true })
+          }
           onOpenTrackables={() =>
             navigate({ search: { ...search, trackables: true }, replace: true })
           }
