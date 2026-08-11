@@ -7,10 +7,12 @@ import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import {
   elapsedMs,
+  sessionStartedAt,
   useFocusSessionStore,
   type FocusMode,
 } from "../../stores/useFocusSessionStore";
 import { fmtMinutes, fetchRecentBrowserIntervals, writeFocusSession } from "../../services/focusTime";
+import { parseServerDate } from "../../utils/date";
 import {
   FEED_REFRESH_MS,
   fetchFocusCamToday,
@@ -59,8 +61,15 @@ interface Sensors {
  * the existing feed cadence, not a realtime "what am I looking at right now"
  * endpoint. The timer already bounds the window, so a periodic read of what the
  * sensors last said is the entire answer, and it costs no new backend surface.
+ *
+ * All three legs describe the SAME period. Camera (`/focus/cam/today`) and phone
+ * (the dashboard rollups) are local-day scoped by the backend; the browser read
+ * is newest-first and otherwise unbounded, so it is bounded here against the
+ * session's own start. Without that bound an extension that is uninstalled,
+ * disabled, or has stopped flushing renders a days-old host identically to a
+ * live one — the one leg that could imply currency it doesn't have.
  */
-function useSensors(active: boolean): Sensors {
+function useSensors(active: boolean, sinceMs: number | null): Sensors {
   const [s, setS] = useState<Sensors>({ browser: null, camera: null, cameraOn: false, phone: null });
 
   const load = useCallback(async () => {
@@ -70,8 +79,14 @@ function useSensors(active: boolean): Sensors {
       fetchFocusDashboard(),
     ]);
 
-    const host =
-      browser.status === "fulfilled" && browser.value.length > 0 ? browser.value[0].host : null;
+    // Newest-first, so one row settles it: if the latest interval ended before
+    // the session began, nothing has been recorded inside the window.
+    let host: string | null = null;
+    if (browser.status === "fulfilled" && browser.value.length > 0) {
+      const latest = browser.value[0];
+      const endedAt = parseServerDate(latest.ended_at)?.getTime() ?? null;
+      if (sinceMs != null && endedAt != null && endedAt >= sinceMs) host = latest.host;
+    }
 
     let camera: string | null = null;
     let cameraOn = false;
@@ -91,7 +106,7 @@ function useSensors(active: boolean): Sensors {
     }
 
     setS({ browser: host, camera, cameraOn, phone });
-  }, []);
+  }, [sinceMs]);
 
   useEffect(() => {
     if (!active) return;
@@ -110,12 +125,16 @@ export function FocusSession() {
 
   const session = useFocusSessionStore((s) => s.session);
   const [now, setNow] = useState(() => Date.now());
-  const [kept, setKept] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [stirring, setStirring] = useState(false);
   const stopping = useRef(false);
 
+  // Kept lives in the SESSION store, not here: `/` has to keep showing this row
+  // struck through and running, and it may be a reload away from this click.
+  const kept = session?.kept ?? false;
   const running = !!session?.running;
-  const sensors = useSensors(!!session);
+  const startedAt = sessionStartedAt(session);
+  const sensors = useSensors(!!session, startedAt);
 
   useEffect(() => {
     if (!running) return;
@@ -151,29 +170,35 @@ export function FocusSession() {
   const elapsed = useMemo(() => elapsedMs(session, mode, now), [session, mode, now]);
   const frac = Math.min(1, elapsed / TARGET_MS[mode]);
 
+  // WRITE, then clear. The entry is the only durable artifact a session
+  // produces, so the session outlives a failed write: `seal` closes the open run
+  // and pauses, and the store is dropped only once the write has landed. On the
+  // happy path that is indistinguishable from clearing first; on a flaky
+  // connection it is the difference between a retry and fifty lost minutes.
   async function stop() {
     if (stopping.current) return;
     stopping.current = true;
+    setSaveError(false);
     const s = useFocusSessionStore.getState().session;
-    const segments = useFocusSessionStore.getState().stop();
     try {
+      const segments = useFocusSessionStore.getState().seal();
       if (s) await writeFocusSession(segments, s.promiseId, s.title);
+      useFocusSessionStore.getState().stop();
+      navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined } });
     } catch {
-      /* the entry is the only durable artifact — but a failed write must not
-         strand the user on a dead dial */
+      setSaveError(true);
     } finally {
       stopping.current = false;
-      navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined } });
     }
   }
 
   async function markKept() {
     if (!session || kept) return;
-    setKept(true);
+    useFocusSessionStore.getState().setKept(true);
     try {
       await updateFocusReminder(session.promiseId, { state: "kept" });
     } catch {
-      setKept(false);
+      useFocusSessionStore.getState().setKept(false);
     }
   }
 
@@ -274,6 +299,14 @@ export function FocusSession() {
       >
         {running ? <Pause size={16} fill="currentColor" strokeWidth={0} /> : <Play size={16} fill="currentColor" strokeWidth={0} />}
       </button>
+
+      {/* the write failed, so the session is still here and still holds its
+          minutes — say so rather than letting them look saved */}
+      {saveError && (
+        <div role="alert" style={{ marginTop: 14, fontSize: 11.5, color: pal.warn, textAlign: "center" }}>
+          couldn't save this session — it's still here, try ending it again
+        </div>
+      )}
 
       {/* one quiet sensor line — browser · camera · phone */}
       <div

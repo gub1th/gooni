@@ -11,6 +11,10 @@
  *     `+ add` defaults everything to today and without a visible later bucket
  *     TODAY quietly becomes a dumping ground.
  *
+ * Plus what decides WHICH rows the list gets (`todayRows.mergeTodayRows`): the
+ * dashboard serves ACTIVE commitments only, so retention is the only reason a
+ * ticked row — or the task a session is running on — is still on screen.
+ *
  * Not a pixel suite.
  */
 import "@testing-library/jest-dom/vitest";
@@ -18,6 +22,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { FocusReminder } from "../../services/api";
 import { TodayList, type TodayRow } from "./TodayList";
+import { emptyRetained, mergeTodayRows } from "./todayRows";
 
 afterEach(cleanup);
 
@@ -116,6 +121,60 @@ test("the later bucket is visible and expands in place", () => {
   fireEvent.click(later);
   expect(screen.getByText("book the flights")).toBeInTheDocument();
   expect(screen.getByText("call mum")).toBeInTheDocument();
+});
+
+test("a kept row with a running session shows BOTH the strike and the clock", () => {
+  const props = renderList({ rows: [{ item: reminder(3, "snakes and ladders", "kept"), minutes: 0 }], runningId: 3, runningLabel: "07:12" });
+
+  expect(screen.getByText("snakes and ladders")).toHaveStyle({ textDecoration: "line-through" });
+  const back = screen.getByTitle("back to the session");
+  expect(back).toHaveTextContent("07:12");
+  fireEvent.click(back);
+  expect(props.onResume).toHaveBeenCalled();
+});
+
+test("a row ticked in this sitting stays at its own index once the server drops it", () => {
+  const state = emptyRetained();
+  const served = [reminder(1, "leetcode"), reminder(2, "ship it"), reminder(3, "call mum")];
+  mergeTodayRows(served, state, null);
+
+  const ticked: FocusReminder = { ...served[1], state: "kept", done: true };
+  state.kept.set(2, ticked);
+
+  // the dashboard now serves the two ACTIVE rows only
+  const merged = mergeTodayRows([served[0], served[2]], state, null);
+
+  expect(merged.map((r) => r.id)).toEqual([1, 2, 3]);
+  expect(merged[1].state).toBe("kept");
+});
+
+test("the running task survives being marked kept from the session page", () => {
+  const state = emptyRetained();
+  const served = [reminder(1, "leetcode"), reminder(2, "ship it")];
+  mergeTodayRows(served, state, null);
+
+  // `/focus` marked it kept — this surface never saw the click, so nothing is
+  // in `kept`, and the dashboard has stopped serving the row.
+  const merged = mergeTodayRows([served[0]], state, { promiseId: 2, title: "ship it", kept: true });
+
+  expect(merged.map((r) => r.id)).toEqual([1, 2]);
+  expect(merged[1]).toMatchObject({ state: "kept", done: true, content: "ship it" });
+});
+
+test("after a reload the running task is rebuilt from the session alone", () => {
+  // nothing retained (in-memory by design), nothing active on the server
+  const merged = mergeTodayRows([], emptyRetained(), { promiseId: 9, title: "write it up", kept: true });
+
+  expect(merged).toHaveLength(1);
+  expect(merged[0]).toMatchObject({ id: 9, content: "write it up", state: "kept", done: true });
+});
+
+test("a running task the server still serves is not duplicated", () => {
+  const state = emptyRetained();
+  const merged = mergeTodayRows([reminder(4, "gym")], state, { promiseId: 4, title: "gym", kept: false });
+
+  expect(merged).toHaveLength(1);
+  expect(merged[0].state).toBe("active");
 });
 
 test("+ add creates from a title alone", async () => {

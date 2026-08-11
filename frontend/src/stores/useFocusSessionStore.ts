@@ -23,6 +23,8 @@ export interface FocusSegment {
   start: number; // epoch ms
   end: number; // epoch ms
   mode: FocusMode;
+  /** the run was CAPPED rather than closed by a human — a floor, not a measurement */
+  truncated?: boolean;
 }
 
 export interface FocusSession {
@@ -34,9 +36,32 @@ export interface FocusSession {
   /** closed runs so far */
   segments: FocusSegment[];
   running: boolean;
+  /**
+   * The task has been marked kept while this session runs. It lives HERE, not
+   * in either surface's local state, because both surfaces need it and one of
+   * them may be a reload away: `/focus` marks it kept, `/` has to keep showing
+   * that row struck through AND running, and a plain reload of `/` has nothing
+   * else left to learn it from — the dashboard serves ACTIVE commitments only.
+   */
+  kept: boolean;
 }
 
 const KEY = "gooni_focus_session";
+
+/**
+ * The longest a single open run may claim.
+ *
+ * The whole point of the timer is that attribution is trustworthy BY
+ * CONSTRUCTION, and the feature's most common failure is the least dramatic
+ * one: a session left running overnight would otherwise credit ~9h of sleep as
+ * focus against a Promise, which makes the primary output wrong. So the run is
+ * capped and the capped segment is FLAGGED, exactly as the browser sensor does
+ * it (`extension/src/tracker.js` closes a salvaged interval at its last
+ * heartbeat, marks it `truncated`, and hard-clamps at the same 6h its ingest
+ * rejects past — `browser_activity_service.MAX_INTERVAL_SEC`). A focus session
+ * has no heartbeat to fall back to, so the clamp is all there is.
+ */
+export const MAX_RUN_MS = 6 * 60 * 60 * 1000;
 
 interface FocusSessionState {
   session: FocusSession | null;
@@ -44,10 +69,19 @@ interface FocusSessionState {
   pause: () => void;
   resume: () => void;
   setMode: (mode: FocusMode) => void;
-  /** Close the session and hand back its segments for the entry write. */
-  stop: () => FocusSegment[];
+  /**
+   * Close the open run and hand back the segments, WITHOUT ending the session.
+   * The caller writes the entry first and calls `stop` only once that
+   * succeeded — a failed write must leave the session recoverable rather than
+   * destroying the only durable artifact it produces.
+   */
+  seal: () => FocusSegment[];
+  /** Drop the session. Call AFTER its entry is safely written. */
+  stop: () => void;
   /** Rename in place — ticking a task from the session page shouldn't drop it. */
   rename: (title: string) => void;
+  /** Mark (or unmark) the task kept while the session runs. */
+  setKept: (kept: boolean) => void;
   /** Adopt whatever another tab wrote. */
   hydrate: (session: FocusSession | null) => void;
 }
@@ -58,7 +92,11 @@ function read(): FocusSession | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as FocusSession;
     if (typeof parsed?.promiseId !== "number") return null;
-    return { ...parsed, segments: Array.isArray(parsed.segments) ? parsed.segments : [] };
+    return {
+      ...parsed,
+      segments: Array.isArray(parsed.segments) ? parsed.segments : [],
+      kept: parsed.kept === true,
+    };
   } catch {
     return null;
   }
@@ -73,12 +111,33 @@ function write(session: FocusSession | null) {
   }
 }
 
-/** Close the open run (if any) at `now`, returning the full segment list. */
-function sealed(s: FocusSession, now: number): FocusSegment[] {
+/**
+ * Close the open run (if any) at `now`, returning the full segment list.
+ *
+ * Pure, and exported: `/` folds the live session through this to work out how
+ * much of it landed on TODAY, and the number it shows has to be the number that
+ * would be written if the session ended right now.
+ */
+export function sealedSegments(s: FocusSession, now: number): FocusSegment[] {
   if (!s.running) return s.segments;
   // Sub-second runs are noise, not work.
   if (now - s.startedAt < 1000) return s.segments;
+  if (now - s.startedAt > MAX_RUN_MS) {
+    // Nobody closed this. Credit the cap, and say so on the segment.
+    return [
+      ...s.segments,
+      { start: s.startedAt, end: s.startedAt + MAX_RUN_MS, mode: s.mode, truncated: true },
+    ];
+  }
   return [...s.segments, { start: s.startedAt, end: now, mode: s.mode }];
+}
+
+/** Epoch ms the session as a whole began — the window the sensors describe. */
+export function sessionStartedAt(s: FocusSession | null): number | null {
+  if (!s) return null;
+  const starts = s.segments.map((g) => g.start);
+  if (s.running) starts.push(s.startedAt);
+  return starts.length > 0 ? Math.min(...starts) : s.startedAt;
 }
 
 export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
@@ -92,6 +151,7 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
       startedAt: Date.now(),
       segments: [],
       running: true,
+      kept: false,
     };
     write(session);
     set({ session });
@@ -100,7 +160,7 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
   pause: () => {
     const s = get().session;
     if (!s || !s.running) return;
-    const next: FocusSession = { ...s, running: false, segments: sealed(s, Date.now()) };
+    const next: FocusSession = { ...s, running: false, segments: sealedSegments(s, Date.now()) };
     write(next);
     set({ session: next });
   },
@@ -122,26 +182,42 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
     const next: FocusSession = {
       ...s,
       mode,
-      segments: sealed(s, now),
+      segments: sealedSegments(s, now),
       startedAt: now,
     };
     write(next);
     set({ session: next });
   },
 
-  stop: () => {
+  seal: () => {
     const s = get().session;
     if (!s) return [];
-    const segments = sealed(s, Date.now());
+    const segments = sealedSegments(s, Date.now());
+    // Paused, not gone: the clock stops growing while the write is in flight,
+    // and a retry seals the same segments rather than a longer set.
+    const next: FocusSession = { ...s, running: false, segments };
+    write(next);
+    set({ session: next });
+    return segments;
+  },
+
+  stop: () => {
     write(null);
     set({ session: null });
-    return segments;
   },
 
   rename: (title) => {
     const s = get().session;
     if (!s) return;
     const next = { ...s, title };
+    write(next);
+    set({ session: next });
+  },
+
+  setKept: (kept) => {
+    const s = get().session;
+    if (!s || s.kept === kept) return;
+    const next = { ...s, kept };
     write(next);
     set({ session: next });
   },

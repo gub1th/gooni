@@ -14,7 +14,12 @@
  * to focused-minutes, and `parent_promise_id` must stay absent.
  */
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { FocusSegment } from "../stores/useFocusSessionStore";
+import {
+  MAX_RUN_MS,
+  sealedSegments,
+  type FocusSegment,
+  type FocusSession,
+} from "../stores/useFocusSessionStore";
 
 const created: Record<string, unknown>[] = [];
 const logged: { id: number; body: Record<string, unknown> }[] = [];
@@ -71,6 +76,33 @@ test("one session inside a day writes exactly one entry, no replace", async () =
   expect(body).not.toHaveProperty("replace");
   // attribution rides on the entry
   expect(body.value_json).toMatchObject({ promise_id: 42, title: "leetcode" });
+  // a genuine session carries no truncation flag at all
+  expect(body.value_json).not.toHaveProperty("truncated");
+});
+
+test("a session nobody closed is capped, and the entry says the total is a floor", async () => {
+  // started last night, the tab was left open, stopped nine hours later
+  const started = at(2026, 8, 10, 22, 0);
+  const session: FocusSession = {
+    promiseId: 3,
+    title: "read the paper",
+    mode: "focus",
+    startedAt: started,
+    segments: [],
+    running: true,
+    kept: false,
+  };
+
+  const segments = sealedSegments(session, started + 9 * 60 * 60_000);
+  await writeFocusSession(segments, 3, "read the paper");
+
+  // nine hours of sleep must not read as focus against the promise
+  const total = logged.reduce((n, l) => n + (l.body.value_numeric as number), 0);
+  expect(total).toBe(MAX_RUN_MS / 60_000);
+  // and the cap is DISTINGUISHABLE from a real six-hour sitting
+  expect(logged.every((l) => (l.body.value_json as { truncated?: boolean }).truncated === true)).toBe(true);
+  // the cap still splits at midnight like any other run
+  expect(logged.map((l) => l.body.date)).toEqual(["2026-08-10", "2026-08-11"]);
 });
 
 test("the definition is one shared sum-agg trackable with no parent promise", async () => {

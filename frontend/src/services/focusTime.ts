@@ -39,9 +39,18 @@ export interface FocusEntryDraft {
   minutes: number;
   startedAt: string; // ISO
   endedAt: string; // ISO
+  /**
+   * Some of these minutes came from a CAPPED run (a session nobody closed), so
+   * the number is a floor rather than a measurement. It rides on the entry for
+   * the same reason the promise id does: `value_json` is unindexed free-form
+   * Text, so a capped session stays distinguishable from a genuine one with no
+   * migration and no new column.
+   */
+  truncated: boolean;
 }
 
-function localDayKey(ms: number): string {
+/** local YYYY-MM-DD for an epoch ms. THE day key both folds share. */
+export function localDayKey(ms: number): string {
   const d = new Date(ms);
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -63,7 +72,7 @@ function nextLocalMidnight(ms: number): number {
  * it produces two entries rather than one fat one filed under the start day.
  */
 export function splitSegmentsByDay(segments: FocusSegment[]): FocusEntryDraft[] {
-  const byDay = new Map<string, { ms: number; start: number; end: number }>();
+  const byDay = new Map<string, { ms: number; start: number; end: number; truncated: boolean }>();
 
   for (const seg of segments) {
     if (seg.mode !== "focus") continue;
@@ -76,8 +85,14 @@ export function splitSegmentsByDay(segments: FocusSegment[]): FocusEntryDraft[] 
         prev.ms += boundary - cursor;
         prev.start = Math.min(prev.start, cursor);
         prev.end = Math.max(prev.end, boundary);
+        prev.truncated = prev.truncated || seg.truncated === true;
       } else {
-        byDay.set(key, { ms: boundary - cursor, start: cursor, end: boundary });
+        byDay.set(key, {
+          ms: boundary - cursor,
+          start: cursor,
+          end: boundary,
+          truncated: seg.truncated === true,
+        });
       }
       cursor = boundary;
     }
@@ -89,6 +104,7 @@ export function splitSegmentsByDay(segments: FocusSegment[]): FocusEntryDraft[] 
       minutes: Math.round((v.ms / 60_000) * 100) / 100,
       startedAt: new Date(v.start).toISOString(),
       endedAt: new Date(v.end).toISOString(),
+      truncated: v.truncated,
     }))
     // A sub-second sliver either side of midnight isn't an entry.
     .filter((e) => e.minutes > 0)
@@ -157,6 +173,8 @@ export async function writeFocusSession(
         title,
         started_at: d.startedAt,
         ended_at: d.endedAt,
+        // only on the rows it's true of — an absent flag is the normal case
+        ...(d.truncated ? { truncated: true } : {}),
       },
       source: "focus",
       // NO replace — see trap 1.

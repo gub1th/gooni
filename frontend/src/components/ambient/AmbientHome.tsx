@@ -14,8 +14,14 @@ import { StreakRow } from "./StreakRow";
 import { HomeCorner, HomeDate } from "./HomeCorners";
 import { LogSheet } from "./LogSheet";
 import { ink } from "./ambientInk";
-import { fetchFocusTotals, type FocusTotals } from "../../services/focusTime";
-import { useFocusSessionStore, elapsedMs } from "../../stores/useFocusSessionStore";
+import { emptyRetained, mergeTodayRows } from "./todayRows";
+import {
+  fetchFocusTotals,
+  localDayKey,
+  splitSegmentsByDay,
+  type FocusTotals,
+} from "../../services/focusTime";
+import { useFocusSessionStore, elapsedMs, sealedSegments } from "../../stores/useFocusSessionStore";
 import {
   createConversation,
   createFocusReminder,
@@ -179,29 +185,19 @@ export function AmbientHome({
     return () => window.clearInterval(t);
   }, [reload]);
 
-  // Ticking has to leave the row WHERE IT IS, struck through — but the
-  // dashboard only serves ACTIVE commitments, so the moment a tick lands the
-  // server stops returning that row and it would simply vanish out from under
-  // the pointer. These two refs are what keep it on screen: `keptRef` holds the
-  // rows ticked in this sitting, and `orderRef` remembers the order rows were
-  // first seen in so a retained row re-enters at its own index rather than at
-  // the end. Both are in-memory only, so a reload (or a new day) starts clean —
-  // "stays put" is a promise about this sitting, not a second store of truth.
-  const keptRef = useRef<Map<number, FocusReminder>>(new Map());
-  const orderRef = useRef<number[]>([]);
+  // What the server serves is not on its own the list: a row ticked in this
+  // sitting and a row with a running session on it both have to survive the
+  // dashboard dropping them from its ACTIVE set. The rule (and why) lives in
+  // `todayRows.ts`; this ref is the sitting's memory of it.
+  const retained = useRef(emptyRetained());
 
   const mergeShortTerm = useCallback((serverRows: FocusReminder[]): FocusReminder[] => {
-    for (const r of serverRows) {
-      if (!orderRef.current.includes(r.id)) orderRef.current.push(r.id);
-    }
-    const byId = new Map(serverRows.map((r) => [r.id, r]));
-    // a row the server dropped because we just kept it
-    for (const [id, row] of keptRef.current) if (!byId.has(id)) byId.set(id, row);
-    const rank = (id: number) => {
-      const i = orderRef.current.indexOf(id);
-      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
-    };
-    return [...byId.values()].sort((a, b) => rank(a.id) - rank(b.id));
+    const live = useFocusSessionStore.getState().session;
+    return mergeTodayRows(
+      serverRows,
+      retained.current,
+      live ? { promiseId: live.promiseId, title: live.title, kept: live.kept } : null,
+    );
   }, []);
 
   // The short-term/longer-term split is the BACKEND's (focus_service's due
@@ -251,8 +247,18 @@ export function AmbientHome({
 
   const runningLabel = session ? mmss(elapsedMs(session, session.mode, nowTick)) : "";
   // The corner stat counts the running session too — a timer you're watching
-  // tick that doesn't move the number it feeds reads as broken.
-  const focusedToday = totals.today + (session ? elapsedMs(session, "focus", nowTick) / 60_000 : 0);
+  // tick that doesn't move the number it feeds reads as broken. It is folded
+  // through the SAME day-splitter the write path uses, so a session that began
+  // yesterday contributes only the part that landed on today: the number on
+  // screen is the number that would be written if the session ended now.
+  const liveFocusToday = useMemo(() => {
+    if (!session) return 0;
+    const today = localDayKey(nowTick);
+    return splitSegmentsByDay(sealedSegments(session, nowTick))
+      .filter((d) => d.date === today)
+      .reduce((n, d) => n + d.minutes, 0);
+  }, [session, nowTick]);
+  const focusedToday = totals.today + liveFocusToday;
 
   // ── Voice engine ──────────────────────────────────────────────────────────
   const [voiceMode, setVoiceModeState] = useState(isVoiceMode);
@@ -586,14 +592,22 @@ export function AmbientHome({
   async function onTick(item: FocusReminder) {
     const next = item.state === "kept" ? "active" : "kept";
     const updated: FocusReminder = { ...item, state: next, done: next === "kept" };
-    if (next === "kept") keptRef.current.set(item.id, updated);
-    else keptRef.current.delete(item.id);
+    if (next === "kept") retained.current.kept.set(item.id, updated);
+    else retained.current.kept.delete(item.id);
     setShortTerm((prev) => prev.map((r) => (r.id === item.id ? updated : r)));
+    // If a session is running on this task, both surfaces have to agree about
+    // it — the session store is where they meet.
+    if (useFocusSessionStore.getState().session?.promiseId === item.id) {
+      useFocusSessionStore.getState().setKept(next === "kept");
+    }
     try {
       await updateFocusReminder(item.id, { state: next });
     } catch {
       // the write failed, so the row is still active — don't keep pretending
-      keptRef.current.delete(item.id);
+      retained.current.kept.delete(item.id);
+      if (useFocusSessionStore.getState().session?.promiseId === item.id) {
+        useFocusSessionStore.getState().setKept(item.state === "kept");
+      }
     } finally {
       void loadCommitments();
     }
@@ -606,6 +620,10 @@ export function AmbientHome({
   async function onAdd(title: string) {
     try {
       await createFocusReminder({ content: title });
+    } catch {
+      // The field closes either way, so silence would read as "added" — and the
+      // rejection would escape the list's `void submit()` unhandled.
+      flash("couldn't add that");
     } finally {
       void loadCommitments();
     }

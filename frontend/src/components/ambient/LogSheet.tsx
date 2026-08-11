@@ -24,6 +24,8 @@ import {
 const POLL_MS = 20_000;
 const PAGE = 40;
 const OLDER_PAGE = 30;
+/** Rows a filter needs to show before the scroller can carry the paging. */
+const MIN_VISIBLE = 12;
 
 const FILTERS = ["all", "chat", "notes"] as const;
 export type LogFilter = (typeof FILTERS)[number];
@@ -164,6 +166,19 @@ export function LogSheet({
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 220) void loadOlder();
   }
 
+  const visible = items.filter((it) => passes(it, filter));
+
+  // Scroll can only page what the scroller can reach. A filter matching few of
+  // the loaded rows never overflows the container, so `onScroll` never fires and
+  // older matches are unreachable — a chat-heavy first page reads as "nothing
+  // yet" under `notes` forever. Page on the POST-filter count instead, until
+  // there is enough to scroll or the stream runs out.
+  useEffect(() => {
+    if (!open || !hasMore) return;
+    if (visible.length >= MIN_VISIBLE) return;
+    void loadOlder();
+  }, [open, hasMore, visible.length, loadOlder]);
+
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -175,8 +190,6 @@ export function LogSheet({
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
-
-  const visible = items.filter((it) => passes(it, filter));
 
   return (
     <>
