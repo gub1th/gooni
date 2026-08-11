@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Mic, StickyNote } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
 import { FONT, frostInk } from "../../ui";
 import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "../../services/speech";
 import { MorphLine, type MorphRect } from "./MorphLine";
@@ -14,6 +13,7 @@ import { HomeCorner, HomeDate } from "./HomeCorners";
 import { LogSheet } from "./LogSheet";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
+import { useFocusOverlayStore } from "../../stores/useFocusOverlayStore";
 import {
   fetchFocusTotals,
   switchFocusSession,
@@ -122,7 +122,6 @@ export function AmbientHome({
   onCloseTrackables?: () => void;
   onOpenTrackables?: () => void;
 } = {}) {
-  const navigate = useNavigate();
   const energyRef = useRef(0);
   const activeRef = useRef(0);
 
@@ -654,7 +653,11 @@ export function AmbientHome({
     // this instant recorded and stays wrong until the 30s poll. The store went
     // A → B in one batch, so the null-transition effect never sees it.
     void loadTotals();
-    navigate({ to: "/focus" });
+    // Deliberately NO navigate. Focus is a STATE, not a place: starting it must
+    // leave you exactly where you were working, with the banner picking the
+    // session up. Sending you to /focus is what the last cut did, and being
+    // moved to a page you then had to navigate back from is the whole reason
+    // this was reworked.
   }
 
   const needsWake = voiceMode && !armed; // show the tap-to-wake veil
@@ -801,7 +804,7 @@ export function AmbientHome({
             onTick={(item) => void onTick(item)}
             onAdd={onAdd}
             onFocus={(item) => void startFocus(item)}
-            onResume={() => navigate({ to: "/focus" })}
+            onResume={() => useFocusOverlayStore.getState().setOpen(true)}
           />
         </div>
       </div>

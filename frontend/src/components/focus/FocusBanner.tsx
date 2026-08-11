@@ -9,6 +9,7 @@ import {
   type FocusMode,
 } from "../../stores/useFocusSessionStore";
 import { endFocusSession, fetchFocusTotals, fmtMinutes } from "../../services/focusTime";
+import { useFocusOverlayStore } from "../../stores/useFocusOverlayStore";
 import { FocusExpanded } from "./FocusExpanded";
 
 // THE focus banner — one slot, two states, on every surface.
@@ -82,7 +83,8 @@ function StripButton({
 
 export function FocusBanner() {
   const session = useFocusSessionStore((s) => s.session);
-  const [expanded, setExpanded] = useState(false);
+  const expanded = useFocusOverlayStore((s) => s.open);
+  const setExpanded = useFocusOverlayStore((s) => s.setOpen);
   const [now, setNow] = useState(() => Date.now());
   const [today, setToday] = useState(0);
   const ending = useRef(false);
@@ -219,12 +221,14 @@ export function FocusBanner() {
       {expanded &&
         createPortal(
           <div
-            role="presentation"
-            onMouseDown={(e) => { if (e.target === e.currentTarget) setExpanded(false); }}
             style={{
               position: "fixed", inset: 0, zIndex: z.modalScrim,
-              // DIMMED, not opaque — the captain chose this: the page stays
-              // legible behind it and a task can still be ticked off back there.
+              // DIMMED, and the dim is VISUAL ONLY — pointerEvents none, so the
+              // page behind stays live and a task can still be ticked off back
+              // there. That is the explicit ask, and it is why this is not a
+              // real modal: blocking the page would make the overlay a place
+              // again, which is the whole thing being undone. Esc collapses.
+              pointerEvents: "none",
               background: "rgba(0,0,0,0.45)",
               backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)",
               display: "grid", placeItems: "center",
@@ -234,10 +238,10 @@ export function FocusBanner() {
             <style>{`@keyframes gooni-focus-overlay-in{from{opacity:0}to{opacity:1}}`}</style>
             <div
               role="dialog"
-              aria-modal="true"
               aria-label="Focus session"
-              onMouseDown={(e) => e.stopPropagation()}
               style={{
+                // the card is the only live part of this layer
+                pointerEvents: "auto",
                 width: "min(560px, 92vw)", height: "min(620px, 88vh)",
                 background: "rgb(var(--gooni-surf, 11 15 13))",
                 border: `1px solid ${ink(0.12)}`,
