@@ -22,7 +22,12 @@ import {
   switchFocusSession,
   type FocusTotals,
 } from "../../services/focusTime";
-import { useFocusSessionStore, elapsedMs, sealedSegments } from "../../stores/useFocusSessionStore";
+import {
+  useFocusSessionStore,
+  elapsedMs,
+  isAccruingFocus,
+  sealedSegments,
+} from "../../stores/useFocusSessionStore";
 import {
   createConversation,
   createFocusReminder,
@@ -152,18 +157,20 @@ export function AmbientHome({
 
   const session = useFocusSessionStore((s) => s.session);
   const hasSession = session != null;
-  const sessionRunning = !!session?.running;
+  const accruing = isAccruingFocus(session);
   const [nowTick, setNowTick] = useState(() => Date.now());
-  // A PAUSED session still needs a live clock, just a lazy one: the corner stat
-  // asks which local day it is, and a tick frozen at the moment of the pause
-  // keeps answering "yesterday" past midnight — crediting today with minutes
-  // earned yesterday, the exact error the day-split exists to prevent.
+  // The per-second cadence belongs to the ONE state that moves a number on this
+  // screen: live focus. On a break or a pause nothing here advances (the row
+  // stops claiming a clock, and the day-fold drops break segments), but the tick
+  // must stay alive at a lazy rate — the corner stat asks which local day it is,
+  // and a frozen tick keeps answering "yesterday" past midnight, crediting today
+  // with minutes earned yesterday.
   useEffect(() => {
     if (!hasSession) return;
     setNowTick(Date.now());
-    const iv = window.setInterval(() => setNowTick(Date.now()), sessionRunning ? 1000 : 60_000);
+    const iv = window.setInterval(() => setNowTick(Date.now()), accruing ? 1000 : 60_000);
     return () => window.clearInterval(iv);
-  }, [hasSession, sessionRunning]);
+  }, [hasSession, accruing]);
 
   useEffect(() => {
     function onResize() { setVp({ w: window.innerWidth, h: window.innerHeight }); }
@@ -261,7 +268,7 @@ export function AmbientHome({
     if (!session) return null;
     return {
       promiseId: session.promiseId,
-      state: !session.running ? "paused" : session.mode === "break" ? "break" : "focus",
+      state: isAccruingFocus(session) ? "focus" : !session.running ? "paused" : "break",
       label: mmss(elapsedMs(session, session.mode, nowTick)),
     };
   }, [session, nowTick]);

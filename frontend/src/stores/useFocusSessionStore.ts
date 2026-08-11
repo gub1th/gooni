@@ -147,6 +147,21 @@ export function sealedSegments(s: FocusSession, now: number): FocusSegment[] {
   return [...s.segments, { start: s.startedAt, end: now, mode: s.mode }];
 }
 
+/**
+ * Is focus ACCRUING right now? The one three-state fact, in one place.
+ *
+ * A session is live-focus, on a break, or paused, and only the first accrues:
+ * `splitSegmentsByDay` drops break segments, so break minutes never reach
+ * `focused today` and no entry is ever written for them, and a paused session
+ * accrues nothing at all. Every consumer that starts or stops something on the
+ * session's liveness reads this rather than `running` alone — `running` stays
+ * true through a break, which is how the camera kept sensing and the row kept
+ * claiming to tick.
+ */
+export function isAccruingFocus(s: FocusSession | null): boolean {
+  return !!s && s.running && s.mode === "focus";
+}
+
 /** Epoch ms the session as a whole began — the window the sensors describe. */
 export function sessionStartedAt(s: FocusSession | null): number | null {
   if (!s) return null;

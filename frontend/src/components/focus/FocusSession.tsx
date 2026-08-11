@@ -7,6 +7,7 @@ import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import {
   elapsedMs,
+  isAccruingFocus,
   sealedSegments,
   sessionStartedAt,
   useFocusSessionStore,
@@ -138,9 +139,12 @@ export function FocusSession() {
   // struck through and running, and it may be a reload away from this click.
   const kept = session?.kept ?? false;
   const running = !!session?.running;
+  const accruing = isAccruingFocus(session);
   const startedAt = sessionStartedAt(session);
   const sensors = useSensors(!!session, startedAt);
 
+  // The ring's clock ticks in BOTH modes — it is the mode's own stopwatch, so a
+  // break counting up is what it should show. `running` is the right gate here.
   useEffect(() => {
     if (!running) return;
     const iv = window.setInterval(() => setNow(Date.now()), 1000);
@@ -148,18 +152,20 @@ export function FocusSession() {
   }, [running]);
 
   // The sidecar is a RECONCILE-POLL target: we declare desired control, it
-  // catches up on its own ~2s poll. PAUSE has to reach it — otherwise the camera
-  // keeps capturing and logging for a window that will never be written, for as
-  // long as a paused tab sits open, which is a stronger promise broken than the
-  // closed tab the unmount clear below guards. Keyed on the promise AND the
-  // running flag, which move on start/pause/resume only — not on the per-second
-  // tick, which updates `now` and not the store object.
+  // catches up on its own ~2s poll. It senses during LIVE FOCUS ONLY — never on
+  // a break, never while paused — because nothing should be sensed for a window
+  // that will never be written, and break segments are exactly such a window.
+  // Keyed on the promise AND that derivation, which move on start/pause/resume/
+  // mode-flip only — not on the per-second tick, which updates `now` and not the
+  // store object.
   useEffect(() => {
     if (!session) return;
-    const desired = running ? "running" : "idle";
-    void setFocusCamControl(desired, running ? session.promiseId : null).catch(() => {});
+    void setFocusCamControl(
+      accruing ? "running" : "idle",
+      accruing ? session.promiseId : null,
+    ).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.promiseId, running]);
+  }, [session?.promiseId, accruing]);
 
   // Unmount ALWAYS clears control, so a closed tab can never leave the camera
   // sensing. Deliberately its own effect: folded into the one above, a resume
