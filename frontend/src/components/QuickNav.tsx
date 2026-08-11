@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Search, Radio, FileText, FileSearch, Brain, Globe, Plug } from "lucide-react";
-import { FONT } from "../ui";
+import { FONT, z} from "../ui";
 
 
 interface NavTarget {
@@ -129,7 +129,7 @@ export function QuickNav() {
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 200,
+        zIndex: z.modalScrim, // ladder tier — a literal here sat under the ambient chrome
         background: "rgba(15,15,18,0.42)",
         backdropFilter: "blur(2px)",
         WebkitBackdropFilter: "blur(2px)",

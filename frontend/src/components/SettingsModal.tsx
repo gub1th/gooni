@@ -6,7 +6,7 @@ import { uploadAvatarImage, updatePublicAvatar } from "../services/api";
 import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
 import { CommentAvatar } from "./notes/CommentAvatar";
-import { color as ctok, FONT } from "../ui";
+import { color as ctok, FONT, z} from "../ui";
 
 interface SettingsModalProps {
   open: boolean;
@@ -52,7 +52,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 200,
+        // THE MODAL TIER, from the z ladder — not a literal. At the old hardcoded
+        // 200 this scrim sat UNDER every piece of ambient chrome (IconRail 952,
+        // the home corner cluster 950, QuickFind 940), so the rail floated over
+        // the scrim and stayed clickable while the modal itself read recessed.
+        zIndex: z.modalScrim,
         fontFamily: FONT,
       }}
     >
