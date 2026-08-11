@@ -43,11 +43,10 @@ import {
 //
 // The treatment rule that governs everything here: the screen reads as spacious
 // because everything that is not the wave is dim, bare, at an edge, or
-// summoned. `ActivityRail` was the reference — plain text on the void, no
-// frost, brightens on hover. Nothing at the CENTRE of the screen gets a frosted
-// pill, a filled container, or a card; chrome at centre reads as a second
-// anchor and competes with the wave. No drop shadows anywhere (the deliberate
-// 2026-08-02 pass).
+// summoned — plain text on the void, no frost, brightening on hover. Nothing at
+// the CENTRE of the screen gets a frosted pill, a filled container, or a card;
+// chrome at centre reads as a second anchor and competes with the wave. No drop
+// shadows anywhere (the deliberate 2026-08-02 pass).
 //
 // VOICE-FIRST (default): the wave is always listening. Tap once to wake (a
 // browser gesture is unavoidable — it unlocks the mic + audio autoplay), then

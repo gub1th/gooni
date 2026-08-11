@@ -12,9 +12,9 @@ import {
 // ONE faint row of streak dots under the list. The full matrix stays where it
 // is (the log surface, reachable from the rail) — this is the glance, so it's a
 // single row of trailing days per trackable and nothing else. Bare text and
-// dots on the void, dim at rest, brightens on hover: the ActivityRail
-// treatment, which is the reference for everything on this screen that isn't
-// the wave.
+// dots on the void, dim at rest, brightens on hover — the treatment every
+// non-wave thing on this screen follows (inherited from the ActivityRail block
+// this replaced).
 
 const TRAIL = 5; // trailing days per trackable
 

@@ -11,10 +11,10 @@ import {
 
 // The log — a right-side frosted sheet behind the corner button.
 //
-// This is a RE-PRESENTATION of the ActivityRail's stream, not a new pipeline:
-// same `fetchActivity` fetcher, same `before` cursor paging, same poll. What
-// changed is where it lives (a summoned edge sheet instead of a block under the
-// wave) and that it filters — all · chat · notes.
+// This is a RE-PRESENTATION of the home's old activity-rail stream, not a new
+// pipeline: same `fetchActivity` fetcher, same `before` cursor paging, same
+// poll. What changed is where it lives (a summoned edge sheet instead of a
+// block under the wave) and that it filters — all · chat · notes.
 //
 // Today's calendar events ride in at the top. That is the ENTIRE remaining
 // calendar surface: the corner button wears an accent dot when the day has an
