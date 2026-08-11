@@ -10,7 +10,6 @@ import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import { QuickFind } from "./QuickFind";
 import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
-import { StreakRow } from "./StreakRow";
 import { HomeCorner, HomeDate } from "./HomeCorners";
 import { LogSheet } from "./LogSheet";
 import { ink } from "./ambientInk";
@@ -678,11 +677,10 @@ export function AmbientHome({
 
   // Any full-screen surface owns the void; the stage stands down under it.
   const covered = trackablesOpen || !!peekNote || needsWake;
-  // The stage only yields to the capture box once the box has actually GROWN
-  // past its resting bounds — at rest the box and the line never overlap, and
-  // fading the whole screen on a stray hover would be the jumpiest thing here.
-  const boxGrew = boxMode && boxH > PEEK_H + 8;
-  const stageHidden = covered || boxGrew;
+  // The stage yields to the capture box the moment it opens. It used to wait
+  // for the box to GROW past its resting bounds, which read as the box and the
+  // line briefly sharing the screen.
+  const stageHidden = covered || boxMode;
 
   function onRootDoubleClick(e: React.MouseEvent) {
     if (boxMode || covered || logSheet) return;
@@ -782,7 +780,11 @@ export function AmbientHome({
       {/* ── the stage: line · TODAY · streaks, each pinned to its own % ─────── */}
       <div
         style={{
-          position: "absolute", inset: 0, zIndex: 3, pointerEvents: stageHidden ? "none" : "auto",
+          // pointerEvents NONE on the full-bleed layer, auto on the children
+          // that need it. The stage spans inset:0 ABOVE the hero zone, so a
+          // hit-testable stage swallowed the mouseenter that summons the
+          // capture box — hovering the wave did nothing at all.
+          position: "absolute", inset: 0, zIndex: 3, pointerEvents: "none",
           opacity: stageHidden ? 0 : 1, transition: "opacity 220ms ease",
         }}
       >
@@ -804,6 +806,7 @@ export function AmbientHome({
           style={{
             position: "absolute", top: `${TODAY_Y * 100}%`, left: "50%", transform: "translateX(-50%)",
             width: "min(560px, 84vw)",
+            pointerEvents: stageHidden ? "none" : "auto",
           }}
         >
           <TodayList
@@ -817,18 +820,6 @@ export function AmbientHome({
             onFocus={(item) => void startFocus(item)}
             onResume={() => navigate({ to: "/focus" })}
           />
-        </div>
-
-        {/* the streak row lives at the BOTTOM EDGE, not in flow under the list:
-            in flow it is the thing a long list pushes off the screen, and it is
-            the one element here that is pure glance. */}
-        <div
-          style={{
-            position: "absolute", bottom: 42, left: "50%", transform: "translateX(-50%)",
-            width: "min(1000px, 94vw)", display: "flex", justifyContent: "center",
-          }}
-        >
-          <StreakRow onOpen={() => onOpenTrackables?.()} />
         </div>
       </div>
 
@@ -875,7 +866,7 @@ export function AmbientHome({
           position: "fixed", bottom: 20, left: 0, right: 0, textAlign: "center",
           zIndex: 1, pointerEvents: "none", fontSize: 11, letterSpacing: 0.4,
           color: ink(0.38),
-          opacity: needsWake || boxGrew || covered || thinking || replyText || liveTranscript ? 0 : 1,
+          opacity: needsWake || boxMode || covered || thinking || replyText || liveTranscript ? 0 : 1,
           transition: "opacity 300ms ease",
         }}
       >

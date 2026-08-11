@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { CalendarDays, Mic, MicOff } from "lucide-react";
+import { Mic, MicOff, Moon, ScrollText, Sun } from "lucide-react";
 import { FONT, frostInk, z } from "../../ui";
+import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { ink } from "./ambientInk";
 import { fmtMinutes } from "../../services/focusTime";
 
@@ -8,9 +9,14 @@ import { fmtMinutes } from "../../services/focusTime";
 // no frosted pill, no card. Chrome only earns a surface when it's summoned.
 //
 // Top-left is the date. Top-right is value-over-label (`focused today`), the
-// mic as a bare icon that reads accent-green while it's listening, and the log
-// button, which wears a small accent dot when the day has a calendar event.
-// That dot is the whole remaining calendar surface.
+// mic as a bare icon that reads accent-green while it's listening, the log
+// button, and the light/dark toggle. The log button wears a small accent dot
+// when the day has a calendar event — the calendar itself is a TAB inside the
+// log sheet, so the dot is a reason to open the log rather than a surface.
+//
+// The theme toggle lives HERE rather than in the shared `TopRightControls`:
+// the home owns its own corner, and two separate top-right clusters read as a
+// mistake.
 
 export function HomeDate() {
   const now = new Date();
@@ -112,13 +118,29 @@ export function HomeCorner({
         {voiceOn ? <Mic size={15} strokeWidth={1.7} /> : <MicOff size={15} strokeWidth={1.7} />}
       </CornerButton>
 
+      {/* its own LOG glyph — the calendar icon moved inside the timeline tab */}
       <CornerButton
         label={hasEventToday ? "log — the day has a calendar event" : "log"}
         dot={hasEventToday}
         onClick={onOpenLog}
       >
-        <CalendarDays size={16} strokeWidth={1.7} />
+        <ScrollText size={16} strokeWidth={1.7} />
       </CornerButton>
+
+      <ThemeToggle />
     </div>
+  );
+}
+
+function ThemeToggle() {
+  const theme = useGooniThemeStore((s) => s.theme);
+  const setTheme = useGooniThemeStore((s) => s.setTheme);
+  return (
+    <CornerButton
+      label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+    >
+      {theme === "dark" ? <Sun size={15} strokeWidth={1.7} /> : <Moon size={15} strokeWidth={1.7} />}
+    </CornerButton>
   );
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SearchCheck, X } from "lucide-react";
+import { CalendarDays, SearchCheck, X } from "lucide-react";
 import { FONT, frost, frostInk, z } from "../../ui";
 import { ink } from "./ambientInk";
 import { TurnTracePanel } from "./TurnTracePanel";
+import { DayTimeline } from "./DayTimeline";
 import {
   fetchActivity,
   type ActivityItem,
@@ -31,6 +32,11 @@ const MAX_AUTO_PAGES = 4;
 
 const FILTERS = ["all", "chat", "notes"] as const;
 export type LogFilter = (typeof FILTERS)[number];
+
+// The sheet has two modes: the activity stream (filtered) and the day TIMELINE.
+// The timeline used to be a permanent column on the B4 dashboard; it lives here
+// now because it is something you summon and read, not a third of the home.
+type Tab = LogFilter | "timeline";
 
 const SOURCE_BADGE: Record<string, string> = { whatsapp: "wa", telegram: "tg", imessage: "im" };
 
@@ -107,7 +113,8 @@ export function LogSheet({
 }) {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [hasMore, setHasMore] = useState(true);
-  const [filter, setFilter] = useState<LogFilter>("all");
+  const [tab, setTab] = useState<Tab>("all");
+  const filter: LogFilter = tab === "timeline" ? "all" : tab;
   const [traceId, setTraceId] = useState<number | null>(null);
   const loadingOlder = useRef(false);
   const seen = useRef<Set<string>>(new Set());
@@ -115,7 +122,7 @@ export function LogSheet({
   // Poll only while the sheet is open — a closed sheet is not a reason to keep
   // hitting the activity endpoint every 20s.
   useEffect(() => {
-    if (!open) return;
+    if (!open || tab === "timeline") return;
     let cancelled = false;
     async function loadNewest() {
       try {
@@ -141,7 +148,7 @@ export function LogSheet({
       cancelled = true;
       window.clearInterval(iv);
     };
-  }, [open]);
+  }, [open, tab]);
 
   /** Resolves true only when a request actually went out. */
   const loadOlder = useCallback(async (): Promise<boolean> => {
@@ -247,25 +254,47 @@ export function LogSheet({
           </button>
         </div>
 
-        <div style={{ display: "flex", gap: 14, marginBottom: 12 }}>
+        <div role="tablist" style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
           {FILTERS.map((f) => (
             <button
               key={f}
-              onClick={() => setFilter(f)}
-              aria-selected={filter === f}
+              onClick={() => setTab(f)}
+              aria-selected={tab === f}
               role="tab"
               style={{
                 border: "none", background: "transparent", padding: 0, cursor: "pointer",
                 fontFamily: FONT, fontSize: 11.5,
-                color: filter === f ? ink(0.9) : ink(0.38),
+                color: tab === f ? ink(0.9) : ink(0.38),
                 transition: "color 140ms ease",
               }}
             >
               {f}
             </button>
           ))}
+          {/* the calendar glyph moved OFF the corner trigger and onto this tab */}
+          <button
+            onClick={() => setTab("timeline")}
+            aria-selected={tab === "timeline"}
+            aria-label="Day timeline"
+            role="tab"
+            style={{
+              marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 5,
+              border: "none", background: "transparent", padding: 0, cursor: "pointer",
+              fontFamily: FONT, fontSize: 11.5,
+              color: tab === "timeline" ? ink(0.9) : ink(0.38),
+              transition: "color 140ms ease",
+            }}
+          >
+            <CalendarDays size={12} strokeWidth={1.9} />
+            timeline
+          </button>
         </div>
 
+        {tab === "timeline" ? (
+          <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "0 2px 20px", display: "flex" }}>
+            <DayTimeline />
+          </div>
+        ) : (
         <div onScroll={onScroll} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", margin: "0 -4px", padding: "0 4px 20px" }}>
           {/* today's calendar — the dot's referent */}
           {filter === "all" && events.map((ev) => (
@@ -315,6 +344,7 @@ export function LogSheet({
             <div style={{ fontSize: 10.5, color: ink(0.22), textAlign: "center", paddingTop: 10 }}>— beginning —</div>
           )}
         </div>
+        )}
       </aside>
       {traceId != null && <TurnTracePanel messageId={traceId} onClose={() => setTraceId(null)} />}
     </>
