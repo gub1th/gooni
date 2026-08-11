@@ -123,21 +123,28 @@ export function FocusSession() {
     return () => window.clearInterval(iv);
   }, [running]);
 
-  // A session starting stirs him awake before the dial takes over.
+  // A session starting stirs him awake before the dial takes over. Keyed on the
+  // PROMISE, not the session object: the object changes on every pause, resume
+  // and mode flip, and re-stirring him mid-session would be a shrug.
   useEffect(() => {
     if (!session) { setStirring(false); return; }
     setStirring(true);
     const t = window.setTimeout(() => setStirring(false), 1100);
     return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.promiseId]);
 
   // The sidecar is a RECONCILE-POLL target: we declare desired control, it
   // catches up on its own ~2s poll. Unmount always clears it, so a closed tab
   // can never leave the camera sensing.
+  // Keyed on the promise for the same reason, and here it MATTERS: on the full
+  // session object this would fire idle→running against the sidecar on every
+  // tick of the pause button.
   useEffect(() => {
     if (!session) return;
     void setFocusCamControl("running", session.promiseId).catch(() => {});
     return () => { void setFocusCamControl("idle", null).catch(() => {}); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.promiseId]);
 
   const mode: FocusMode = session?.mode ?? "focus";
