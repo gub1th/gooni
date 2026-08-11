@@ -152,16 +152,33 @@ export async function ensureFocusTrackable(): Promise<Trackable> {
   return cached;
 }
 
+export interface FocusWriteOptions {
+  /**
+   * Local day keys already written for THIS session. A partial success followed
+   * by a retry must not add the day that landed a second time — and `replace`
+   * cannot be the answer, since it would collapse the (trackable, day) and
+   * destroy every other session logged that day (trap 1).
+   */
+  writtenDates?: readonly string[];
+  /** Called as each day lands, so the caller can persist the record. */
+  onWritten?: (date: string) => void;
+}
+
 /**
  * Write a finished session. One entry per calendar day, each carrying the
- * promise id. Returns the drafts actually written.
+ * promise id. Returns the drafts actually written (skipped days excluded).
+ *
+ * Safe to call again with the SAME segments after a failed attempt, as long as
+ * the caller feeds back what landed.
  */
 export async function writeFocusSession(
   segments: FocusSegment[],
   promiseId: number,
   title: string,
+  { writtenDates = [], onWritten }: FocusWriteOptions = {},
 ): Promise<FocusEntryDraft[]> {
-  const drafts = splitSegmentsByDay(segments);
+  const already = new Set(writtenDates);
+  const drafts = splitSegmentsByDay(segments).filter((d) => !already.has(d.date));
   if (drafts.length === 0) return [];
   const t = await ensureFocusTrackable();
   for (const d of drafts) {
@@ -179,6 +196,7 @@ export async function writeFocusSession(
       source: "focus",
       // NO replace — see trap 1.
     });
+    onWritten?.(d.date);
   }
   return drafts;
 }

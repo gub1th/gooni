@@ -22,7 +22,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { FocusReminder } from "../../services/api";
 import { TodayList, type TodayRow } from "./TodayList";
-import { emptyRetained, mergeTodayRows } from "./todayRows";
+import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 
 afterEach(cleanup);
 
@@ -167,6 +167,38 @@ test("after a reload the running task is rebuilt from the session alone", () => 
 
   expect(merged).toHaveLength(1);
   expect(merged[0]).toMatchObject({ id: 9, content: "write it up", state: "kept", done: true });
+});
+
+test("a failed un-tick restores the retention that was keeping the row on screen", () => {
+  const state = emptyRetained();
+  const served = [reminder(1, "leetcode"), reminder(2, "ship it")];
+  mergeTodayRows(served, state, null);
+
+  // tick — the server drops the row from its ACTIVE set, retention holds it
+  const kept: FocusReminder = { ...served[1], state: "kept", done: true };
+  retainTicked(state, kept);
+  expect(mergeTodayRows([served[0]], state, null).map((r) => r.id)).toEqual([1, 2]);
+
+  // un-tick, and the PATCH fails — the row was on screen ONLY because of that
+  // retention entry, and the server still holds the promise as kept
+  const undo = retainTicked(state, { ...kept, state: "active", done: false });
+  undo();
+
+  const merged = mergeTodayRows([served[0]], state, null);
+  expect(merged.map((r) => r.id)).toEqual([1, 2]);
+  expect(merged[1]).toMatchObject({ state: "kept", done: true });
+});
+
+test("a failed tick leaves no retention behind", () => {
+  const state = emptyRetained();
+  const served = [reminder(1, "leetcode"), reminder(2, "ship it")];
+  mergeTodayRows(served, state, null);
+
+  const undo = retainTicked(state, { ...served[1], state: "kept", done: true });
+  undo();
+
+  // the promise is still active, so the server's list is the whole truth
+  expect(mergeTodayRows([served[0]], state, null).map((r) => r.id)).toEqual([1]);
 });
 
 test("a running task the server still serves is not duplicated", () => {

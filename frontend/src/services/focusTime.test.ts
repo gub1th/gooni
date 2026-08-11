@@ -23,6 +23,8 @@ import {
 
 const created: Record<string, unknown>[] = [];
 const logged: { id: number; body: Record<string, unknown> }[] = [];
+/** Dates the fake backend refuses — how a partial write is reproduced. */
+const failDates = new Set<string>();
 
 vi.mock("./api", () => ({
   BASE: "",
@@ -32,6 +34,7 @@ vi.mock("./api", () => ({
     return { id: 77, name: "focus", kind: "numeric", agg: "sum" };
   }),
   logTrackable: vi.fn(async (id: number, body: Record<string, unknown>) => {
+    if (failDates.has(String(body.date))) throw new Error("500");
     logged.push({ id, body });
     return { cleared: false };
   }),
@@ -45,6 +48,7 @@ let minutesByPromise: typeof import("./focusTime").minutesByPromise;
 beforeEach(async () => {
   created.length = 0;
   logged.length = 0;
+  failDates.clear();
   vi.resetModules();
   const mod = await import("./focusTime");
   splitSegmentsByDay = mod.splitSegmentsByDay;
@@ -91,6 +95,7 @@ test("a session nobody closed is capped, and the entry says the total is a floor
     segments: [],
     running: true,
     kept: false,
+    writtenDates: [],
   };
 
   const segments = sealedSegments(session, started + 9 * 60 * 60_000);
@@ -133,6 +138,50 @@ test("a session spanning midnight writes one entry per local day", async () => {
   expect(logged.map((l) => l.body.date)).toEqual(["2026-08-10", "2026-08-11"]);
   // both halves stay attributed to the same promise
   expect(logged.every((l) => (l.body.value_json as { promise_id: number }).promise_id === 7)).toBe(true);
+});
+
+test("a retry after a PARTIAL write sends only the day that never landed", async () => {
+  // one session across midnight → two entries; the second one fails
+  const segments: FocusSegment[] = [
+    { start: at(2026, 8, 10, 23, 40), end: at(2026, 8, 11, 0, 20), mode: "focus" },
+  ];
+  const written: string[] = [];
+  failDates.add("2026-08-11");
+
+  await expect(
+    writeFocusSession(segments, 7, "ship it", { onWritten: (d) => written.push(d) }),
+  ).rejects.toThrow();
+
+  expect(logged.map((l) => l.body.date)).toEqual(["2026-08-10"]);
+  expect(written).toEqual(["2026-08-10"]);
+
+  // the session survived the failure, so ending it again re-seals the SAME
+  // segments — the day that landed must not be added twice
+  failDates.clear();
+  await writeFocusSession(segments, 7, "ship it", {
+    writtenDates: written,
+    onWritten: (d) => written.push(d),
+  });
+
+  expect(logged.map((l) => l.body.date)).toEqual(["2026-08-10", "2026-08-11"]);
+  expect(written).toEqual(["2026-08-10", "2026-08-11"]);
+  // and the day's real total is 20 minutes, not 40
+  const aug10 = logged.filter((l) => l.body.date === "2026-08-10");
+  expect(aug10).toHaveLength(1);
+  expect(aug10[0].body.value_numeric).toBe(20);
+});
+
+test("a retry with nothing outstanding writes nothing at all", async () => {
+  const segments: FocusSegment[] = [
+    { start: at(2026, 8, 10, 9, 0), end: at(2026, 8, 10, 9, 25), mode: "focus" },
+  ];
+
+  const drafts = await writeFocusSession(segments, 4, "leetcode", {
+    writtenDates: ["2026-08-10"],
+  });
+
+  expect(drafts).toEqual([]);
+  expect(logged).toHaveLength(0);
 });
 
 test("break time is elapsed time but it is not focus, so it is never written", async () => {

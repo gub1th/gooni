@@ -26,6 +26,8 @@ const PAGE = 40;
 const OLDER_PAGE = 30;
 /** Rows a filter needs to show before the scroller can carry the paging. */
 const MIN_VISIBLE = 12;
+/** Pages the sheet will pull on its own per filter selection, at most. */
+const MAX_AUTO_PAGES = 4;
 
 const FILTERS = ["all", "chat", "notes"] as const;
 export type LogFilter = (typeof FILTERS)[number];
@@ -171,13 +173,27 @@ export function LogSheet({
   // Scroll can only page what the scroller can reach. A filter matching few of
   // the loaded rows never overflows the container, so `onScroll` never fires and
   // older matches are unreachable — a chat-heavy first page reads as "nothing
-  // yet" under `notes` forever. Page on the POST-filter count instead, until
-  // there is enough to scroll or the stream runs out.
+  // yet" under `notes` forever. So page on the POST-filter count too, BOUNDED:
+  // a sparse filter must not walk the whole activity stream back to the
+  // beginning of time on one open. After the cap, scrolling asks for more.
+  const autoPages = useRef(0);
+  const loadOlderRef = useRef(loadOlder);
+  loadOlderRef.current = loadOlder;
+
+  useEffect(() => {
+    autoPages.current = 0;
+  }, [filter, open]);
+
   useEffect(() => {
     if (!open || !hasMore) return;
     if (visible.length >= MIN_VISIBLE) return;
-    void loadOlder();
-  }, [open, hasMore, visible.length, loadOlder]);
+    if (autoPages.current >= MAX_AUTO_PAGES) return;
+    autoPages.current += 1;
+    // Driven by `items.length`, not by `loadOlder`'s identity: a page that
+    // matches nothing leaves `visible` untouched, so the filtered count alone
+    // would stall before the cap is reached.
+    void loadOlderRef.current();
+  }, [open, hasMore, items.length, visible.length]);
 
   useEffect(() => {
     if (!open) return;

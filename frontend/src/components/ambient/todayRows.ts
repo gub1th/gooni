@@ -35,6 +35,25 @@ export function emptyRetained(): RetainedRows {
   return { kept: new Map(), seen: new Map(), order: [] };
 }
 
+/**
+ * Record a tick's retention change and hand back its exact undo.
+ *
+ * Both directions matter and they are not symmetric. Ticking ADDS the entry that
+ * keeps the row on screen after the server drops it; un-ticking removes it — so
+ * a failed un-tick that merely deleted the entry would take the row with it,
+ * permanently, since the server still holds the promise as kept and retention is
+ * in-memory. The undo restores exactly the entry that was there before.
+ */
+export function retainTicked(state: RetainedRows, next: FocusReminder): () => void {
+  const prior = state.kept.get(next.id);
+  if (next.state === "kept") state.kept.set(next.id, next);
+  else state.kept.delete(next.id);
+  return () => {
+    if (prior) state.kept.set(next.id, prior);
+    else state.kept.delete(next.id);
+  };
+}
+
 /** The slice of a running focus session this merge needs. */
 export interface RunningTask {
   promiseId: number;

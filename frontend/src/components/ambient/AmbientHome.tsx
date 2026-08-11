@@ -14,7 +14,7 @@ import { StreakRow } from "./StreakRow";
 import { HomeCorner, HomeDate } from "./HomeCorners";
 import { LogSheet } from "./LogSheet";
 import { ink } from "./ambientInk";
-import { emptyRetained, mergeTodayRows } from "./todayRows";
+import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 import {
   fetchFocusTotals,
   localDayKey,
@@ -150,12 +150,19 @@ export function AmbientHome({
   const [events, setEvents] = useState<CalendarEvent[]>([]);
 
   const session = useFocusSessionStore((s) => s.session);
+  const hasSession = session != null;
+  const sessionRunning = !!session?.running;
   const [nowTick, setNowTick] = useState(() => Date.now());
+  // A PAUSED session still needs a live clock, just a lazy one: the corner stat
+  // asks which local day it is, and a tick frozen at the moment of the pause
+  // keeps answering "yesterday" past midnight — crediting today with minutes
+  // earned yesterday, the exact error the day-split exists to prevent.
   useEffect(() => {
-    if (!session?.running) return;
-    const iv = window.setInterval(() => setNowTick(Date.now()), 1000);
+    if (!hasSession) return;
+    setNowTick(Date.now());
+    const iv = window.setInterval(() => setNowTick(Date.now()), sessionRunning ? 1000 : 60_000);
     return () => window.clearInterval(iv);
-  }, [session?.running]);
+  }, [hasSession, sessionRunning]);
 
   useEffect(() => {
     function onResize() { setVp({ w: window.innerWidth, h: window.innerHeight }); }
@@ -592,22 +599,21 @@ export function AmbientHome({
   async function onTick(item: FocusReminder) {
     const next = item.state === "kept" ? "active" : "kept";
     const updated: FocusReminder = { ...item, state: next, done: next === "kept" };
-    if (next === "kept") retained.current.kept.set(item.id, updated);
-    else retained.current.kept.delete(item.id);
+    const undoRetention = retainTicked(retained.current, updated);
     setShortTerm((prev) => prev.map((r) => (r.id === item.id ? updated : r)));
     // If a session is running on this task, both surfaces have to agree about
     // it — the session store is where they meet.
-    if (useFocusSessionStore.getState().session?.promiseId === item.id) {
-      useFocusSessionStore.getState().setKept(next === "kept");
-    }
+    const onRunningTask = useFocusSessionStore.getState().session?.promiseId === item.id;
+    if (onRunningTask) useFocusSessionStore.getState().setKept(next === "kept");
     try {
       await updateFocusReminder(item.id, { state: next });
     } catch {
-      // the write failed, so the row is still active — don't keep pretending
-      retained.current.kept.delete(item.id);
-      if (useFocusSessionStore.getState().session?.promiseId === item.id) {
-        useFocusSessionStore.getState().setKept(item.state === "kept");
-      }
+      // The write never landed, so roll back to exactly the pre-click state —
+      // both directions. A failed UN-tick that dropped the retention entry
+      // would take the row off TODAY for good.
+      undoRetention();
+      setShortTerm((prev) => prev.map((r) => (r.id === item.id ? item : r)));
+      if (onRunningTask) useFocusSessionStore.getState().setKept(item.state === "kept");
     } finally {
       void loadCommitments();
     }

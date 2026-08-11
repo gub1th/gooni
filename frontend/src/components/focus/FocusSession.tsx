@@ -7,11 +7,17 @@ import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import {
   elapsedMs,
+  sealedSegments,
   sessionStartedAt,
   useFocusSessionStore,
   type FocusMode,
 } from "../../stores/useFocusSessionStore";
-import { fmtMinutes, fetchRecentBrowserIntervals, writeFocusSession } from "../../services/focusTime";
+import {
+  fmtMinutes,
+  fetchRecentBrowserIntervals,
+  splitSegmentsByDay,
+  writeFocusSession,
+} from "../../services/focusTime";
 import { parseServerDate } from "../../utils/date";
 import {
   FEED_REFRESH_MS,
@@ -170,6 +176,15 @@ export function FocusSession() {
   const elapsed = useMemo(() => elapsedMs(session, mode, now), [session, mode, now]);
   const frac = Math.min(1, elapsed / TARGET_MS[mode]);
 
+  // The header total is a claim about what gets STORED, so it goes through the
+  // same closer and day-fold the write path does — an uncapped 9h here against a
+  // stored 6h would break the one invariant `sealedSegments` promises. The big
+  // mm:ss on the ring stays a plain stopwatch.
+  const storedMinutes = useMemo(() => {
+    if (!session) return 0;
+    return splitSegmentsByDay(sealedSegments(session, now)).reduce((n, d) => n + d.minutes, 0);
+  }, [session, now]);
+
   // WRITE, then clear. The entry is the only durable artifact a session
   // produces, so the session outlives a failed write: `seal` closes the open run
   // and pauses, and the store is dropped only once the write has landed. On the
@@ -182,7 +197,14 @@ export function FocusSession() {
     const s = useFocusSessionStore.getState().session;
     try {
       const segments = useFocusSessionStore.getState().seal();
-      if (s) await writeFocusSession(segments, s.promiseId, s.title);
+      if (s) {
+        // A retry after a partial write must send only the days that never
+        // landed — each one is recorded on the session as it lands.
+        await writeFocusSession(segments, s.promiseId, s.title, {
+          writtenDates: useFocusSessionStore.getState().session?.writtenDates ?? [],
+          onWritten: (date) => useFocusSessionStore.getState().markWritten(date),
+        });
+      }
       useFocusSessionStore.getState().stop();
       navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined } });
     } catch {
@@ -228,7 +250,7 @@ export function FocusSession() {
     >
       <div style={{ position: "absolute", top: 22, right: 26, display: "flex", alignItems: "center", gap: 16, fontSize: 12, color: pal.ink3 }}>
         <span style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtMinutes(elapsedMs(session, "focus", now) / 60_000)}
+          {fmtMinutes(storedMinutes)}
         </span>
         <button
           onClick={() => void stop()}

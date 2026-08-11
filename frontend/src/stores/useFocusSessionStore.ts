@@ -44,6 +44,18 @@ export interface FocusSession {
    * else left to learn it from — the dashboard serves ACTIVE commitments only.
    */
   kept: boolean;
+  /**
+   * Local day keys whose entry has already LANDED for this session.
+   *
+   * The session outliving a failed write makes a retry reachable, and the write
+   * is one `logTrackable` per calendar day on a `agg=sum` trackable — so a retry
+   * after a PARTIAL success would add the first day's minutes a second time.
+   * `replace` is not the answer (it would collapse the day and destroy every
+   * other session logged on it). Recording the days that landed, here where the
+   * session already lives, means a retry sends only what is missing and a
+   * reload can't lose the record either.
+   */
+  writtenDates: string[];
 }
 
 const KEY = "gooni_focus_session";
@@ -82,6 +94,8 @@ interface FocusSessionState {
   rename: (title: string) => void;
   /** Mark (or unmark) the task kept while the session runs. */
   setKept: (kept: boolean) => void;
+  /** Record that this local day's entry has landed, so a retry skips it. */
+  markWritten: (date: string) => void;
   /** Adopt whatever another tab wrote. */
   hydrate: (session: FocusSession | null) => void;
 }
@@ -96,6 +110,7 @@ function read(): FocusSession | null {
       ...parsed,
       segments: Array.isArray(parsed.segments) ? parsed.segments : [],
       kept: parsed.kept === true,
+      writtenDates: Array.isArray(parsed.writtenDates) ? parsed.writtenDates : [],
     };
   } catch {
     return null;
@@ -152,6 +167,7 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
       segments: [],
       running: true,
       kept: false,
+      writtenDates: [],
     };
     write(session);
     set({ session });
@@ -218,6 +234,14 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
     const s = get().session;
     if (!s || s.kept === kept) return;
     const next = { ...s, kept };
+    write(next);
+    set({ session: next });
+  },
+
+  markWritten: (date) => {
+    const s = get().session;
+    if (!s || s.writtenDates.includes(date)) return;
+    const next = { ...s, writtenDates: [...s.writtenDates, date] };
     write(next);
     set({ session: next });
   },
