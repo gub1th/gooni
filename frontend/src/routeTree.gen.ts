@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as WalkRouteImport } from './routes/walk'
 import { Route as PublicRouteImport } from './routes/public'
 import { Route as MemoriesRouteImport } from './routes/memories'
-import { Route as HomeRouteImport } from './routes/home'
 import { Route as FocusRouteImport } from './routes/focus'
 import { Route as CreativeRouteImport } from './routes/creative'
 import { Route as IndexRouteImport } from './routes/index'
@@ -35,11 +34,6 @@ const PublicRoute = PublicRouteImport.update({
 const MemoriesRoute = MemoriesRouteImport.update({
   id: '/memories',
   path: '/memories',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const HomeRoute = HomeRouteImport.update({
-  id: '/home',
-  path: '/home',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FocusRoute = FocusRouteImport.update({
@@ -87,7 +81,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/creative': typeof CreativeRoute
   '/focus': typeof FocusRoute
-  '/home': typeof HomeRoute
   '/memories': typeof MemoriesRoute
   '/public': typeof PublicRouteWithChildren
   '/walk': typeof WalkRoute
@@ -101,7 +94,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/creative': typeof CreativeRoute
   '/focus': typeof FocusRoute
-  '/home': typeof HomeRoute
   '/memories': typeof MemoriesRoute
   '/walk': typeof WalkRoute
   '/public/$noteId': typeof PublicNoteIdRoute
@@ -115,7 +107,6 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/creative': typeof CreativeRoute
   '/focus': typeof FocusRoute
-  '/home': typeof HomeRoute
   '/memories': typeof MemoriesRoute
   '/public': typeof PublicRouteWithChildren
   '/walk': typeof WalkRoute
@@ -131,7 +122,6 @@ export interface FileRouteTypes {
     | '/'
     | '/creative'
     | '/focus'
-    | '/home'
     | '/memories'
     | '/public'
     | '/walk'
@@ -145,7 +135,6 @@ export interface FileRouteTypes {
     | '/'
     | '/creative'
     | '/focus'
-    | '/home'
     | '/memories'
     | '/walk'
     | '/public/$noteId'
@@ -158,7 +147,6 @@ export interface FileRouteTypes {
     | '/'
     | '/creative'
     | '/focus'
-    | '/home'
     | '/memories'
     | '/public'
     | '/walk'
@@ -173,7 +161,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CreativeRoute: typeof CreativeRoute
   FocusRoute: typeof FocusRoute
-  HomeRoute: typeof HomeRoute
   MemoriesRoute: typeof MemoriesRoute
   PublicRoute: typeof PublicRouteWithChildren
   WalkRoute: typeof WalkRoute
@@ -200,13 +187,6 @@ declare module '@tanstack/react-router' {
       path: '/memories'
       fullPath: '/memories'
       preLoaderRoute: typeof MemoriesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/home': {
-      id: '/home'
-      path: '/home'
-      fullPath: '/home'
-      preLoaderRoute: typeof HomeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/focus': {
@@ -291,7 +271,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CreativeRoute: CreativeRoute,
   FocusRoute: FocusRoute,
-  HomeRoute: HomeRoute,
   MemoriesRoute: MemoriesRoute,
   PublicRoute: PublicRouteWithChildren,
   WalkRoute: WalkRoute,

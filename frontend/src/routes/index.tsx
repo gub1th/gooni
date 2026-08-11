@@ -5,22 +5,37 @@ import { EvalView } from "../components/eval/EvalView";
 import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
-import { HomeDashboard } from "../components/focus/HomeDashboard";
+import { AmbientHome } from "../components/ambient/AmbientHome";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { fetchNote } from "../services/api";
 
-// The B4 HomeDashboard is the app's home now — the adaptive banner over
-// timeline · finna-do · notes, reading v2 primitives (Promise/Trackable/Note).
-// The old waveform/capture home moved to /home (still a tap away via the
-// top-right button); the bare second-monitor kiosk lives on at /focus (still
-// FocusDashboard, which reads the same v2 rows through `focus_service`'s
-// adapter now that the focus tables are gone). Everything else
-// (log, notes, nav) is hover-summoned glass on top.
+// `/` is THE home: the ambient wave in a Momentum-like layout — wave at true
+// centre, one big line under it, TODAY and the task list below that. It ended
+// the three-competing-homes era (ambient home → "Focus is home" → the B4
+// dashboard); `/home` and both dashboards are deleted, not parked.
+//
+// Everything else on this route (notes, log, audit) is a summoned sheet over
+// the same void, derived from the URL.
 
 type View = "home" | "notes" | "log" | "eval";
 
+// Every key is OPTIONAL on purpose. TanStack replaces the whole search object
+// on an object-form navigate, so optionality changes nothing at runtime — but
+// required keys would mean every one of the ~15 call sites across the app has
+// to spell out `trackables: undefined` the day a param is added, and one missed
+// site is a type error in a file that has nothing to do with the feature.
+interface HomeSearch {
+  note?: number;
+  conv?: number;
+  audit?: true;
+  segment?: number;
+  view?: "notes" | "log";
+  /** the log matrix over the home */
+  trackables?: true;
+}
+
 export const Route = createFileRoute("/")({
-  validateSearch: (search: Record<string, unknown>) => ({
+  validateSearch: (search: Record<string, unknown>): HomeSearch => ({
     note: typeof search.note === "number" ? search.note : typeof search.note === "string" ? Number(search.note) : undefined,
     conv: typeof search.conv === "number" ? search.conv : typeof search.conv === "string" ? Number(search.conv) : undefined,
     // ?audit=1 → land on the Audit (eval) view.
@@ -32,6 +47,11 @@ export const Route = createFileRoute("/")({
       search.view === "notes" || search.view === "log"
         ? (search.view as "notes" | "log")
         : undefined,
+    // ?trackables=1 → the log matrix over the home. URL-driven so the rail can
+    // open it from outside the home's own state (the widget-overlay store that
+    // used to carry this kind of cross-surface summon is gone).
+    trackables:
+      search.trackables === true || search.trackables === "true" || search.trackables === "1" || undefined,
   }),
   component: LogPage,
 });
@@ -72,7 +92,7 @@ function LogPage() {
       });
       loadNotes("general");
     }).catch(() => {
-      navigate({ search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined }, replace: true });
+      navigate({ search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined }, replace: true });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.note]);
@@ -103,7 +123,7 @@ function LogPage() {
     // ?view=notes parks us in the notes shell while the optimistic
     // negative-id createNote resolves; the activeNoteId effect below
     // replaces it with ?note=<id> once the real id lands.
-    navigate({ search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "notes" }, replace: true });
+    navigate({ search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "notes", trackables: undefined }, replace: true });
   }
 
   // Store-driven URL sync. When createNote (or any other path) sets a
@@ -111,7 +131,7 @@ function LogPage() {
   // back-button work.
   useEffect(() => {
     if (view === "notes" && activeNoteId && activeNoteId > 0 && search.note !== activeNoteId) {
-      navigate({ search: { note: activeNoteId, conv: undefined, audit: undefined, segment: undefined, view: undefined }, replace: true });
+      navigate({ search: { note: activeNoteId, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined }, replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeNoteId, view]);
@@ -122,13 +142,21 @@ function LogPage() {
   return (
     <>
       {view === "home" ? (
-        <HomeDashboard />
+        <AmbientHome
+          trackablesOpen={!!search.trackables}
+          onOpenTrackables={() =>
+            navigate({ search: { ...search, trackables: true }, replace: true })
+          }
+          onCloseTrackables={() =>
+            navigate({ search: { ...search, trackables: undefined }, replace: true })
+          }
+        />
       ) : view === "log" ? (
         <ChatLogView />
       ) : view === "eval" ? (
         <EvalView
           onOpenNote={(noteId: number) =>
-            navigate({ search: { note: noteId, conv: undefined, audit: undefined, segment: undefined, view: undefined }, replace: true })
+            navigate({ search: { note: noteId, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined }, replace: true })
           }
           initialSegmentId={search.segment ?? null}
         />

@@ -1,48 +1,81 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, MicOff } from "lucide-react";
-import { FONT } from "../../ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Mic, StickyNote } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { FONT, frostInk } from "../../ui";
 import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "../../services/speech";
 import { MorphLine, type MorphRect } from "./MorphLine";
 import { LimboCards } from "./LimboCards";
 import { LogDots } from "./LogDots";
 import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
-import { WidgetHost } from "../widgets/WidgetHost";
-import { ActivityRail } from "./ActivityRail";
 import { QuickFind } from "./QuickFind";
+import { TodayList, type TodayRow } from "./TodayList";
+import { StreakRow } from "./StreakRow";
+import { HomeCorner, HomeDate } from "./HomeCorners";
+import { LogSheet } from "./LogSheet";
+import { ink } from "./ambientInk";
+import { fetchFocusTotals, type FocusTotals } from "../../services/focusTime";
+import { useFocusSessionStore, elapsedMs } from "../../stores/useFocusSessionStore";
 import {
   createConversation,
+  createFocusReminder,
+  createNote,
   dismissMessageGlow,
+  fetchCalendarEvents,
+  fetchFocusDashboard,
   fetchMessageLog,
   promoteMessage,
   sendConversationMessage,
+  updateFocusReminder,
+  SHORT_BUCKETS,
   type ApiNote,
+  type CalendarEvent,
+  type FocusReminder,
   type LogMessage,
 } from "../../services/api";
 
-// Line-art "presence" home. ONE stroke (MorphLine) is the only resident thing:
-// a tall breathing waveform at rest that BENDS into the capture input's outline
-// when summoned (the line becomes the box), then back.
+// THE home. One surface, Momentum's layout, in Gooni's palette on the void.
+//
+// Every group is pinned to its own vertical PERCENTAGE rather than stacked in
+// flow: that is what keeps the wave at true centre no matter how long the line
+// runs or how many tasks are on today. Stacking would drift the wave down as
+// the list grows, and the wave is the anchor.
+//
+// The treatment rule that governs everything here: the screen reads as spacious
+// because everything that is not the wave is dim, bare, at an edge, or
+// summoned. `ActivityRail` was the reference — plain text on the void, no
+// frost, brightens on hover. Nothing at the CENTRE of the screen gets a frosted
+// pill, a filled container, or a card; chrome at centre reads as a second
+// anchor and competes with the wave. No drop shadows anywhere (the deliberate
+// 2026-08-02 pass).
 //
 // VOICE-FIRST (default): the wave is always listening. Tap once to wake (a
 // browser gesture is unavoidable — it unlocks the mic + audio autoplay), then
-// it's hands-free: you talk → it auto-sends on your pause → Gooni speaks the
-// reply back, then resumes listening. No button, no textbox, no Enter. The mic
-// pauses while Gooni talks (no echo) and while you type. Toggle voice off (pill,
-// persisted) to fall back to the typed capture box.
+// it's hands-free. The mic toggle is a bare corner glyph now, not a pill.
 //
-// SEARCH LIVES ELSEWHERE. The capture box used to double as an omnibox — every
-// keystroke ran a note search and a suggestion dropdown hung under it. That's
-// gone: the box only captures now, and recall moved to `QuickFind` (the bar at
-// the top), which searches notes AND promises/reminders/memories/trackables.
+// SEARCH LIVES ELSEWHERE — `QuickFind` (⌘K, invisible at rest). The capture box
+// only captures.
 
 const POLL_MS = 15_000;
+const DASH_POLL_MS = 30_000;
 const WAVE_WIDTH = 440;
 const PEEK_H = 104; // rest box height ≈ the wave's full amplitude span (+margin)
 const FOCUS_MIN_H = 104; // never shrink below the resting bounds when focused
 const MAX_H = 340;
 const IDLE_LISTEN_AMP = 0.4; // gentle live wave while listening at rest
 const MIN_UTTERANCE = 2; // ignore stray one-char finals / noise
+
+// Momentum's vertical rhythm, as fractions of the viewport.
+const WAVE_Y = 0.47;
+const QUIP_Y = 0.57;
+const TODAY_Y = 0.73;
+
+// Deliberately a fixed string and deliberately a SLOT: this is the one thing on
+// the screen that could know something Daniel doesn't (what he kept, what's
+// slipping, what the sensors saw), and Gooni will write it later. No generator
+// and no quotes file in the meantime — a random quote would occupy the slot
+// while teaching nobody anything.
+const QUIP = "Another day of keeping the nose to the grindstone.";
 
 function isGlowing(m: LogMessage): boolean {
   return Boolean(m.has_actionable_signal) && (m.signal_preview?.status ?? "pending") === "pending";
@@ -52,20 +85,44 @@ function energyFor(count: number): number {
   return Math.min(1, 0.14 + count * 0.28);
 }
 
-export function AmbientHome() {
+function mmss(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function todayWindowISO(): { startISO: string; endISO: string } {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  return { startISO: start.toISOString(), endISO: new Date(start.getTime() + 86_400_000).toISOString() };
+}
+
+export function AmbientHome({
+  trackablesOpen = false,
+  onCloseTrackables,
+  onOpenTrackables,
+}: {
+  /** the log matrix, opened from the rail (URL-driven) or the streak row */
+  trackablesOpen?: boolean;
+  onCloseTrackables?: () => void;
+  onOpenTrackables?: () => void;
+} = {}) {
+  const navigate = useNavigate();
   const energyRef = useRef(0);
   const activeRef = useRef(0);
 
   const [vp, setVp] = useState({ w: 1200, h: 800 });
   const [limbo, setLimbo] = useState<LogMessage[]>([]);
   const [boxMode, setBoxMode] = useState(false);
-  const [logMode, setLogMode] = useState(false);
+  const [logSheet, setLogSheet] = useState(false);
   const [value, setValue] = useState("");
   const [boxH, setBoxH] = useState(PEEK_H);
   const [thinking, setThinking] = useState(false);
   const [replyText, setReplyText] = useState<string | null>(null);
   const [replyShown, setReplyShown] = useState(false);
   const [peekNote, setPeekNote] = useState<ApiNote | null>(null);
+  const [savedFlash, setSavedFlash] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickyRef = useRef<StickyHandle>(null);
   const focusedRef = useRef(false);
@@ -74,21 +131,19 @@ export function AmbientHome() {
   const replyTimer = useRef<number | null>(null);
   const replyHideTimer = useRef<number | null>(null);
 
-  // ── Voice engine ──────────────────────────────────────────────────────────
-  // voiceMode = master switch (persisted, default on). armed = user has tapped
-  // to wake this session (mic running + audio unlocked). listening = mic hot.
-  // Refs mirror the flags for use inside SpeechRecognition callbacks (which see
-  // stale closures otherwise). busyRef gates overlaps while a turn runs/speaks.
-  const [voiceMode, setVoiceModeState] = useState(isVoiceMode);
-  const [armed, setArmed] = useState(false);
-  const [listening, setListening] = useState(false);
-  const [liveTranscript, setLiveTranscript] = useState("");
-  const recognitionRef = useRef<any>(null); // SpeechRecognition — not in lib.dom
-  const shouldListenRef = useRef(false); // do we WANT the mic hot right now
-  const busyRef = useRef(false); // a turn is thinking/speaking → don't listen/overlap
-  const convIdRef = useRef<number | null>(null); // one conversation for the session
-  const voiceModeRef = useRef(voiceMode);
-  const armedRef = useRef(false);
+  // ── today's commitments + accrued focus ────────────────────────────────────
+  const [shortTerm, setShortTerm] = useState<FocusReminder[]>([]);
+  const [longTerm, setLongTerm] = useState<FocusReminder[]>([]);
+  const [totals, setTotals] = useState<FocusTotals>({ today: 0, byPromise: {} });
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+
+  const session = useFocusSessionStore((s) => s.session);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!session?.running) return;
+    const iv = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(iv);
+  }, [session?.running]);
 
   useEffect(() => {
     function onResize() { setVp({ w: window.innerWidth, h: window.innerHeight }); }
@@ -98,7 +153,7 @@ export function AmbientHome() {
   }, []);
 
   const boxW = Math.min(WAVE_WIDTH + 40, vp.w * 0.9);
-  const rect: MorphRect = { cx: vp.w / 2, cy: vp.h * 0.44, w: boxW, h: boxH, r: 20 };
+  const rect: MorphRect = { cx: vp.w / 2, cy: vp.h * WAVE_Y, w: boxW, h: boxH, r: 20 };
   const waveW = Math.min(WAVE_WIDTH, boxW - 40); // wave sits just inside the box
 
   const reload = useCallback(async () => {
@@ -117,6 +172,68 @@ export function AmbientHome() {
     const t = window.setInterval(() => void reload(), POLL_MS);
     return () => window.clearInterval(t);
   }, [reload]);
+
+  // The short-term/longer-term split is the BACKEND's (focus_service's due
+  // distance), not a client guess — `+ add` defaults everything to today's EOD,
+  // so "later" has to mean what the server says it means or TODAY silently
+  // becomes a dumping ground.
+  const loadCommitments = useCallback(async () => {
+    try {
+      const d = await fetchFocusDashboard();
+      setShortTerm(SHORT_BUCKETS.flatMap((b) => d.short_term[b] ?? []));
+      setLongTerm(d.long_term ?? []);
+    } catch {
+      /* ambient */
+    }
+  }, []);
+
+  const loadTotals = useCallback(async () => {
+    try {
+      setTotals(await fetchFocusTotals());
+    } catch {
+      /* the focus trackable may not exist yet — zero is honest here */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCommitments();
+    void loadTotals();
+    const iv = window.setInterval(() => { void loadCommitments(); void loadTotals(); }, DASH_POLL_MS);
+    return () => window.clearInterval(iv);
+  }, [loadCommitments, loadTotals]);
+
+  // A finished session writes its entry and then bumps `focused today` — reload
+  // whenever the store drops back to null.
+  useEffect(() => {
+    if (session == null) void loadTotals();
+  }, [session, loadTotals]);
+
+  useEffect(() => {
+    const { startISO, endISO } = todayWindowISO();
+    fetchCalendarEvents(startISO, endISO).then(setEvents).catch(() => setEvents([]));
+  }, []);
+
+  const rows: TodayRow[] = useMemo(
+    () => shortTerm.map((item) => ({ item, minutes: totals.byPromise[item.id] ?? 0 })),
+    [shortTerm, totals],
+  );
+
+  const runningLabel = session ? mmss(elapsedMs(session, session.mode, nowTick)) : "";
+  // The corner stat counts the running session too — a timer you're watching
+  // tick that doesn't move the number it feeds reads as broken.
+  const focusedToday = totals.today + (session ? elapsedMs(session, "focus", nowTick) / 60_000 : 0);
+
+  // ── Voice engine ──────────────────────────────────────────────────────────
+  const [voiceMode, setVoiceModeState] = useState(isVoiceMode);
+  const [armed, setArmed] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState("");
+  const recognitionRef = useRef<any>(null); // SpeechRecognition — not in lib.dom
+  const shouldListenRef = useRef(false); // do we WANT the mic hot right now
+  const busyRef = useRef(false); // a turn is thinking/speaking → don't listen/overlap
+  const convIdRef = useRef<number | null>(null); // one conversation for the session
+  const voiceModeRef = useRef(voiceMode);
+  const armedRef = useRef(false);
 
   // resting wave energy: a gentle live shimmer while listening, flat otherwise.
   const idleActive = useCallback(() => {
@@ -209,9 +326,6 @@ export function AmbientHome() {
     return (assistant?.content || "").trim();
   }
 
-  // One turn: pause the mic, think, show + (if spoken) SPEAK the reply, then
-  // resume listening. `spoken` = came by voice → Gooni voices it back; typed
-  // turns stay silent-subtitle only.
   async function runTurn(text: string, spoken: boolean) {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -228,6 +342,7 @@ export function AmbientHome() {
     }
     setThinking(false);
     void reload(); // surface any glow card the turn produced
+    void loadCommitments(); // a promoted/kept promise should land on TODAY
     if (reply && spoken) {
       // hold the subtitle for the WHOLE utterance — the audio, not a timer,
       // decides when it fades.
@@ -245,8 +360,6 @@ export function AmbientHome() {
   }
 
   // ── Wake / toggle ───────────────────────────────────────────────────────────
-  // Tap-to-wake: the one required gesture. Unlocks audio autoplay + starts the
-  // mic. After this it's hands-free for the session.
   const arm = useCallback(() => {
     if (armedRef.current) return;
     primeAudio(); // unlock autoplay inside the gesture
@@ -297,8 +410,6 @@ export function AmbientHome() {
     setBoxH(h);
   }, []);
 
-  // A QuickFind hit that resolves to a note opens it inline (same NotePeek the
-  // old capture-box dropdown used) — the rest navigate or flip home-local state.
   const openNote = useCallback((n: ApiNote) => {
     setPeekNote(n);
     inputRef.current?.blur();
@@ -310,9 +421,6 @@ export function AmbientHome() {
       const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
       if (e.key === "/" && !typing) {
         e.preventDefault();
-        // "/" = intent to type. If voice is armed but idle, that's fine — just
-        // open the box (mic pauses on focus). If voice hasn't been woken yet,
-        // pressing "/" means "I'd rather type" → drop out of voice mode.
         if (voiceModeRef.current && !armedRef.current) disableVoice();
         openBox();
       }
@@ -360,10 +468,6 @@ export function AmbientHome() {
     if (replyHideTimer.current) { window.clearTimeout(replyHideTimer.current); replyHideTimer.current = null; }
   }
 
-  // Gooni's reply as a subtitle under the wave. `hold` = keep it up until the
-  // caller hides it (spoken path syncs the hide to when the AUDIO ends, so the
-  // text never fades mid-sentence). Silent (typed) path uses a length-based
-  // timer since there's no audio to track.
   function showSubtitle(text: string, hold = false) {
     clearReplyTimers();
     setReplyText(text);
@@ -381,19 +485,48 @@ export function AmbientHome() {
     replyHideTimer.current = window.setTimeout(() => setReplyText(null), 420);
   }
 
-  // Typed capture (voice off, or optional typing while voice on) — silent reply.
-  function capture() {
-    const text = value.trim();
-    if (!text) return;
+  function closeBox() {
     setValue("");
     focusedRef.current = false;
     setBoxMode(false);
     setBoxH(PEEK_H);
     inputRef.current?.blur();
+  }
+
+  // Typed capture (voice off, or optional typing while voice on) — silent reply.
+  function capture() {
+    const text = value.trim();
+    if (!text) return;
+    closeBox();
     void runTurn(text, false);
   }
 
+  // ⌘/Ctrl+Enter — the same box, the other exit. First line becomes the title,
+  // the rest the body: the shape a quick capture takes everywhere else in Gooni.
+  async function captureAsNote() {
+    const text = value.trim();
+    if (!text) return;
+    closeBox();
+    const [first, ...restLines] = text.split("\n");
+    try {
+      await createNote("general", { title: first.slice(0, 120), content: restLines.join("\n") });
+      flash("saved as a note");
+    } catch {
+      flash("couldn't save that note");
+    }
+  }
+
+  function flash(msg: string) {
+    setSavedFlash(msg);
+    window.setTimeout(() => setSavedFlash((m) => (m === msg ? null : m)), 2400);
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void captureAsNote();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       capture();
@@ -408,22 +541,58 @@ export function AmbientHome() {
 
   async function onPromote(m: LogMessage) {
     setLimbo((prev) => prev.filter((x) => x.id !== m.id));
-    try { await promoteMessage(m.id); } finally { void reload(); }
+    try { await promoteMessage(m.id); } finally { void reload(); void loadCommitments(); }
   }
   async function onDismiss(m: LogMessage) {
     setLimbo((prev) => prev.filter((x) => x.id !== m.id));
     try { await dismissMessageGlow(m.id); } finally { void reload(); }
   }
 
+  // ── the list's three writes ────────────────────────────────────────────────
+
+  // Ticking is OPTIMISTIC and in place: the row must not jump out from under
+  // the pointer, and it must not wait on a round trip to show it registered.
+  async function onTick(item: FocusReminder) {
+    const next = item.state === "kept" ? "active" : "kept";
+    setShortTerm((prev) => prev.map((r) => (r.id === item.id ? { ...r, state: next, done: next === "kept" } : r)));
+    try {
+      await updateFocusReminder(item.id, { state: next });
+    } finally {
+      void loadCommitments();
+    }
+  }
+
+  // A title alone. `cadence=once` and a due defaulted to today's local EOD with
+  // `due_is_default` set — the shape `set_reminder` uses, so `auto_mark_overdue`
+  // never breaks a deadline Gooni invented. Omitting `due_hint` is what asks the
+  // backend for that default.
+  async function onAdd(title: string) {
+    try {
+      await createFocusReminder({ content: title });
+    } finally {
+      void loadCommitments();
+    }
+  }
+
+  // Focus has exactly ONE door and it is a task.
+  function startFocus(item: FocusReminder) {
+    useFocusSessionStore.getState().start(item.id, item.content);
+    navigate({ to: "/focus" });
+  }
+
   const needsWake = voiceMode && !armed; // show the tap-to-wake veil
 
-  // Double-click an empty patch of the void → spawn a sticky there. Skip while
-  // another surface owns the screen, and skip clicks on interactive chrome
-  // (pills, glow cards, the capture box, existing stickies) — StickyLayer's
-  // createAt also refuses the forbidden centre/nav zones.
+  // Any full-screen surface owns the void; the stage stands down under it.
+  const covered = trackablesOpen || !!peekNote || needsWake;
+  // The stage only yields to the capture box once the box has actually GROWN
+  // past its resting bounds — at rest the box and the line never overlap, and
+  // fading the whole screen on a stray hover would be the jumpiest thing here.
+  const boxGrew = boxMode && boxH > PEEK_H + 8;
+  const stageHidden = covered || boxGrew;
+
   function onRootDoubleClick(e: React.MouseEvent) {
-    if (boxMode || logMode || needsWake || peekNote) return;
-    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-widget], [data-chat-ribbon], [data-activity-rail], [data-quickfind]")) return;
+    if (boxMode || covered || logSheet) return;
+    if ((e.target as HTMLElement).closest("button, textarea, input, a, [data-sticky], [data-chat-ribbon], [data-quickfind], [data-log-sheet]")) return;
     stickyRef.current?.createAt(e.clientX, e.clientY);
   }
 
@@ -432,14 +601,22 @@ export function AmbientHome() {
       onDoubleClick={onRootDoubleClick}
       style={{ position: "fixed", inset: 0, background: "var(--gooni-void, #000000)", overflow: "hidden", fontFamily: FONT }}
     >
-      <MorphLine boxMode={boxMode} rect={rect} thinking={thinking} dimmed={logMode} waveWidth={waveW} energyRef={energyRef} activeRef={activeRef} />
-      <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={logMode || !!peekNote || needsWake} />
+      <MorphLine boxMode={boxMode} rect={rect} thinking={thinking} dimmed={trackablesOpen} waveWidth={waveW} energyRef={energyRef} activeRef={activeRef} />
+      <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={covered || logSheet} />
 
       <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
 
-      {/* draggable home widgets (calendar, …) — enabled set lives in the
-          widget layout store; toggle in Settings ▸ Widgets */}
-      {!logMode && !needsWake && !peekNote && <WidgetHost />}
+      {!covered && <HomeDate />}
+      {!covered && (
+        <HomeCorner
+          focusedMinutes={focusedToday}
+          voiceOn={voiceMode}
+          listening={listening}
+          onToggleVoice={toggleVoiceMode}
+          onOpenLog={() => setLogSheet((o) => !o)}
+          hasEventToday={events.length > 0}
+        />
+      )}
 
       {/* hero zone = the wave's bounding rectangle. Box the wave morphs into +
           the hover target. Focusing it PAUSES the mic (so voice doesn't hear you
@@ -474,7 +651,7 @@ export function AmbientHome() {
             position: "absolute", inset: 0, width: "100%", height: "100%", boxSizing: "border-box",
             resize: "none", outline: "none", border: "none", overflow: "hidden",
             fontFamily: FONT, fontSize: 16, lineHeight: 1.5, padding: "16px 22px",
-            borderRadius: rect.r, color: "rgb(var(--gooni-ink, 244 245 244))", caretColor: "#4ADE80",
+            borderRadius: rect.r, color: "rgb(var(--gooni-ink, 244 245 244))", caretColor: frostInk.accent,
             background: boxMode ? "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 52%, transparent)" : "transparent",
             backdropFilter: boxMode ? "blur(16px)" : "none",
             WebkitBackdropFilter: boxMode ? "blur(16px)" : "none",
@@ -483,78 +660,86 @@ export function AmbientHome() {
             transition: "opacity 200ms ease, background 220ms ease",
           }}
         />
+        {/* the note exit, discoverable but quiet — the box's other door */}
+        {boxMode && (
+          <button
+            onClick={() => void captureAsNote()}
+            title="⌘↵ — save as a note instead"
+            aria-label="Save as a note"
+            style={{
+              position: "absolute", right: 12, bottom: 10, zIndex: 1,
+              display: "inline-flex", alignItems: "center", gap: 5,
+              border: "none", background: "transparent", padding: "2px 4px", cursor: "pointer",
+              fontFamily: FONT, fontSize: 10.5, color: ink(0.34),
+            }}
+          >
+            <StickyNote size={11} strokeWidth={1.8} />
+            ⌘↵ note
+          </button>
+        )}
       </div>
 
-      {/* quickfind — THE search surface. Top bar, its own thing, searches every
-          primitive (not just notes). Hidden only under full-screen surfaces. */}
       <QuickFind
-        hidden={logMode || !!peekNote || needsWake}
+        hidden={covered || logSheet}
         onOpenNote={openNote}
-        onOpenTrackables={() => setLogMode(true)}
+        onOpenTrackables={() => onOpenTrackables?.()}
       />
 
-      {/* trackables + voice pills — always visible row below the wave (Daniel:
-          fewer hidden hover controls). The activity log sits below this row (the
-          `ActivityRail` block); this pill opens the trackables matrix. */}
-      {!boxMode && !logMode && (
+      {/* ── the stage: line · TODAY · streaks, each pinned to its own % ─────── */}
+      <div
+        style={{
+          position: "absolute", inset: 0, zIndex: 3, pointerEvents: stageHidden ? "none" : "auto",
+          opacity: stageHidden ? 0 : 1, transition: "opacity 220ms ease",
+        }}
+      >
         <div
           style={{
-            position: "absolute", left: rect.cx - rect.w / 2, top: rect.cy + PEEK_H / 2 + 18,
-            width: rect.w, paddingTop: 16, zIndex: 3,
-            display: "flex", justifyContent: "center", gap: 8,
+            position: "absolute", top: `${QUIP_Y * 100}%`, left: "50%", transform: "translateX(-50%)",
+            width: "min(19ch, 86vw)", textAlign: "center",
+            fontSize: 33, fontWeight: 600, letterSpacing: "-0.022em", lineHeight: 1.18,
+            color: ink(0.92), pointerEvents: "none",
           }}
         >
-          <button
-            onClick={() => setLogMode(true)}
-            style={{
-              padding: "5px 16px", borderRadius: 999, cursor: "pointer", fontFamily: FONT, fontSize: 12,
-              border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.2)", background: "rgb(var(--gooni-surf, 11 15 13) / 0.5)",
-              color: "rgb(var(--gooni-ink, 244 245 244) / 0.6)",
-            }}
-          >
-            trackables ▾
-          </button>
-          {/* voice mode switch — default on, persisted. Off = typed-only home. */}
-          <button
-            onClick={toggleVoiceMode}
-            aria-label={voiceMode ? "Turn voice off" : "Turn voice on"}
-            title={voiceMode ? "Voice on — Gooni listens + speaks. Click to go silent." : "Voice off — click to talk to Gooni."}
-            style={{
-              display: "flex", alignItems: "center", gap: 6,
-              padding: "5px 14px", borderRadius: 999, cursor: "pointer", fontFamily: FONT, fontSize: 12,
-              border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.2)",
-              background: voiceMode ? "rgba(74,222,128,0.12)" : "rgb(var(--gooni-surf, 11 15 13) / 0.5)",
-              color: voiceMode ? "rgba(74,222,128,0.9)" : "rgb(var(--gooni-ink, 244 245 244) / 0.5)",
-            }}
-          >
-            {voiceMode ? <Mic size={13} /> : <MicOff size={13} />}
-            {voiceMode ? "voice" : "silent"}
-          </button>
+          {QUIP}
         </div>
-      )}
 
-      {logMode && <LogDots onClose={() => setLogMode(false)} />}
+        <div
+          style={{
+            position: "absolute", top: `${TODAY_Y * 100}%`, left: "50%", transform: "translateX(-50%)",
+            width: "min(560px, 84vw)",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 18,
+          }}
+        >
+          <TodayList
+            rows={rows}
+            laterCount={longTerm.length}
+            laterRows={longTerm}
+            runningId={session?.promiseId ?? null}
+            runningLabel={runningLabel}
+            onTick={(item) => void onTick(item)}
+            onAdd={onAdd}
+            onFocus={startFocus}
+            onResume={() => navigate({ to: "/focus" })}
+          />
+          <StreakRow onOpen={() => onOpenTrackables?.()} />
+        </div>
+      </div>
+
+      {trackablesOpen && <LogDots onClose={() => onCloseTrackables?.()} />}
 
       {peekNote && <NotePeek note={peekNote} onClose={() => setPeekNote(null)} />}
 
-      {/* activity log — the always-on unified stream (chats + notes + promise
-          events + trackables), a compact DIMMED block under the wave + pills that
-          brightens on hover and scrolls back into history. Hidden only under
-          full-screen surfaces. */}
-      <ActivityRail
-        hidden={needsWake || !!peekNote || logMode}
-        anchor={{ cx: rect.cx, top: rect.cy + PEEK_H / 2 + 96, width: rect.w }}
-      />
+      <LogSheet open={logSheet && !covered} onClose={() => setLogSheet(false)} events={events} />
 
       {/* live transcript — what the mic is hearing right now (ephemeral) */}
       {liveTranscript && (
         <div
           style={{
             position: "absolute",
-            left: "50%", top: rect.cy + PEEK_H / 2 + 44, transform: "translateX(-50%)",
+            left: "50%", top: rect.cy + PEEK_H / 2 + 20, transform: "translateX(-50%)",
             width: "min(600px, 86vw)", textAlign: "center", zIndex: 5, pointerEvents: "none",
             fontFamily: FONT, fontSize: 15.5, lineHeight: 1.55, fontStyle: "italic",
-            color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)", textShadow: "0 1px 14px rgba(0,0,0,0.7)",
+            color: ink(0.5),
           }}
         >
           {liveTranscript}
@@ -566,10 +751,10 @@ export function AmbientHome() {
         <div
           style={{
             position: "absolute",
-            left: "50%", top: rect.cy + PEEK_H / 2 + 44, transform: "translateX(-50%)",
+            left: "50%", top: rect.cy + PEEK_H / 2 + 20, transform: "translateX(-50%)",
             width: "min(600px, 86vw)", textAlign: "center", zIndex: 5,
             pointerEvents: "none", fontFamily: FONT, fontSize: 15.5, lineHeight: 1.55,
-            color: "rgb(var(--gooni-ink, 244 245 244) / 0.86)", textShadow: "0 1px 14px rgba(0,0,0,0.7)",
+            color: ink(0.86),
             opacity: replyShown ? 1 : 0, transition: "opacity 420ms ease",
           }}
         >
@@ -580,56 +765,57 @@ export function AmbientHome() {
       {/* bottom affordance — reflects the current mode */}
       <div
         style={{
-          position: "fixed", bottom: 22, left: 0, right: 0, textAlign: "center",
-          zIndex: 1, pointerEvents: "none", fontSize: 11.5, letterSpacing: 0.4,
-          color: "rgb(var(--gooni-ink, 244 245 244) / 0.28)",
-          opacity: needsWake || boxMode || logMode || thinking || replyText || liveTranscript ? 0 : 1,
+          position: "fixed", bottom: 20, left: 0, right: 0, textAlign: "center",
+          zIndex: 1, pointerEvents: "none", fontSize: 11, letterSpacing: 0.4,
+          color: ink(0.38),
+          opacity: needsWake || boxGrew || covered || thinking || replyText || liveTranscript ? 0 : 1,
           transition: "opacity 300ms ease",
         }}
       >
-        {voiceMode && armed
+        {savedFlash
+          ? savedFlash
+          : voiceMode && armed
           ? (listening ? "listening — just talk" : "…")
           : (
             <>
               press <kbd style={{
-                fontFamily: FONT, fontWeight: 700, color: "rgb(var(--gooni-ink, 244 245 244) / 0.5)",
-                padding: "1px 6px", borderRadius: 5, border: "1px solid rgba(255,255,255,0.12)",
+                fontFamily: FONT, fontWeight: 700, color: ink(0.5),
+                padding: "1px 6px", borderRadius: 5, border: `1px solid ${ink(0.14)}`,
               }}>/</kbd> or hover to capture a thought
             </>
           )}
       </div>
 
-      {/* tap-to-wake veil — the one required gesture (unlocks mic + audio). One
-          tap, then hands-free. "type instead" bails to the silent typed home. */}
+      {/* tap-to-wake veil — the one required gesture (unlocks mic + audio). */}
       {needsWake && (
         <div
           onClick={arm}
           style={{
             position: "fixed", inset: 0, zIndex: 30, cursor: "pointer",
             display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            gap: 14, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(2px)",
+            gap: 14, background: "rgb(var(--gooni-surf, 11 15 13) / 0.62)", backdropFilter: "blur(2px)",
           }}
         >
           <div style={{
             width: 64, height: 64, borderRadius: "50%",
             display: "flex", alignItems: "center", justifyContent: "center",
-            border: "1px solid rgba(74,222,128,0.4)", background: "rgba(74,222,128,0.08)",
-            color: "rgba(74,222,128,0.9)", boxShadow: "0 0 40px rgba(74,222,128,0.18)",
+            border: `1px solid ${frostInk.accent}`, background: frostInk.accentDim,
+            color: frostInk.accent,
           }}>
             <Mic size={26} />
           </div>
-          <div style={{ fontFamily: FONT, fontSize: 16, color: "rgb(var(--gooni-ink, 244 245 244))", letterSpacing: 0.3 }}>
+          <div style={{ fontFamily: FONT, fontSize: 16, color: ink(1), letterSpacing: 0.3 }}>
             tap to wake
           </div>
-          <div style={{ fontFamily: FONT, fontSize: 12.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.45)" }}>
+          <div style={{ fontFamily: FONT, fontSize: 12.5, color: ink(0.45) }}>
             then just talk — Gooni listens + speaks back
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); disableVoice(); }}
             style={{
               marginTop: 6, padding: "4px 12px", borderRadius: 999, cursor: "pointer",
-              fontFamily: FONT, fontSize: 11.5, color: "rgb(var(--gooni-ink, 244 245 244) / 0.4)",
-              background: "transparent", border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.14)",
+              fontFamily: FONT, fontSize: 11.5, color: ink(0.4),
+              background: "transparent", border: `1px solid ${ink(0.14)}`,
             }}
           >
             type instead

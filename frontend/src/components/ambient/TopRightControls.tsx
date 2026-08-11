@@ -1,15 +1,14 @@
-import { useNavigate } from "@tanstack/react-router";
-import { Radio, Sun, Moon, Target, type LucideIcon } from "lucide-react";
+import { Sun, Moon, type LucideIcon } from "lucide-react";
 import { FONT, z } from "../../ui";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 
-// Always-visible top-right chrome: the two controls Daniel wanted OUT of the
-// hover nav — a home jump and the light/dark toggle. Focus is no longer a
-// sidebar item; this button is the visible way to it. On the Focus home the
-// jump instead points at the waveform capture surface (/home), so the pair is
-// never a dead "you're already here" button.
+// Top-right chrome for the SHEET surfaces: the light/dark toggle, and nothing
+// else. The home-jump button it used to sit beside pointed at `/home`, which no
+// longer exists — `/` IS the ambient home now — and the focus button is gone
+// because focus has exactly one door and it is a task row.
 //
-// Mounted once in AppShell for every non-immersive, non-kiosk surface.
+// Mounted in AppShell for every non-immersive, non-kiosk surface EXCEPT the
+// home, which owns its own top-right cluster.
 
 function IconButton({
   Icon,
@@ -55,8 +54,7 @@ function IconButton({
   );
 }
 
-export function TopRightControls({ isFocusHome }: { isFocusHome: boolean }) {
-  const navigate = useNavigate();
+export function TopRightControls() {
   const theme = useGooniThemeStore((s) => s.theme);
   const setTheme = useGooniThemeStore((s) => s.setTheme);
 
@@ -72,24 +70,6 @@ export function TopRightControls({ isFocusHome }: { isFocusHome: boolean }) {
         fontFamily: FONT,
       }}
     >
-      {isFocusHome ? (
-        <IconButton
-          Icon={Radio}
-          label="Capture (waveform home)"
-          onClick={() => navigate({ to: "/home" })}
-        />
-      ) : (
-        <IconButton
-          Icon={Target}
-          label="Focus"
-          onClick={() =>
-            navigate({
-              to: "/",
-              search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined },
-            })
-          }
-        />
-      )}
       <IconButton
         Icon={theme === "dark" ? Sun : Moon}
         label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}

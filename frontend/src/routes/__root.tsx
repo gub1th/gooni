@@ -18,11 +18,10 @@ import { QuickComposer } from "../components/QuickComposer";
 import { ErrorView, NotFoundView } from "../components/ErrorView";
 import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
-// Nav prototype swap: IconRail (persistent pill) replaced the hover-summoned
-// SummonedNav. To revert: import SummonedNav and render it at the mount below.
+// ONE app nav: the persistent IconRail pill. The hover-summoned SummonedNav it
+// replaced was deleted with the widget system it hosted.
 import { IconRail } from "../components/ambient/IconRail";
 import { TopRightControls } from "../components/ambient/TopRightControls";
-import { WidgetOverlays } from "../components/widgets/WidgetOverlays";
 import { sheetFrame } from "../ui";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -108,9 +107,9 @@ function isChromelessPath(pathname: string): boolean {
   );
 }
 
-// Immersive paths hide the ambient chrome (SummonedNav + widget overlays).
-// /creative is an immersive 3D world — the summoned nav + floating widgets
-// pop over the plaza and break the scene. Sidebar still mounts there.
+// Immersive paths hide the ambient chrome (the icon rail + corner controls).
+// /creative is an immersive 3D world — floating app nav pops over the plaza and
+// breaks the scene. Sidebar still mounts there.
 function isImmersivePath(pathname: string): boolean {
   return pathname === "/creative" || pathname.startsWith("/creative/");
 }
@@ -159,9 +158,9 @@ function AppShell() {
   const isNotes = onIndex && (hasNote || viewParam === "notes");
   const isEval = onIndex && auditFlag;
   const isLog = onIndex && viewParam === "log";
-  // Ambient waveform home is the index default — active when nothing else
-  // claims the URL. It renders its OWN summoned chrome (frosted nav, capture
-  // input), so the docked sidebar + chat orb stand down here.
+  // The ambient home is the index default — active when nothing else claims the
+  // URL. It paints its own void and owns its own corners, so the docked sidebar
+  // and the shared top-right cluster stand down here.
   const isHome = onIndex && !isNotes && !isEval && !isLog;
 
   // Compose / new-chat callbacks. The store actions live in Zustand
@@ -184,6 +183,7 @@ function AppShell() {
         audit: undefined,
         segment: undefined,
         view: undefined,
+        trackables: undefined,
       },
       replace: true,
     });
@@ -198,6 +198,7 @@ function AppShell() {
         audit: undefined,
         segment: undefined,
         view: undefined,
+        trackables: undefined,
       },
     });
   }
@@ -214,6 +215,7 @@ function AppShell() {
         audit: undefined,
         segment: undefined,
         view: "notes",
+        trackables: undefined,
       },
       replace: true,
     });
@@ -228,17 +230,17 @@ function AppShell() {
         audit: undefined,
         segment: undefined,
         view: undefined,
+        trackables: undefined,
       },
     });
   }
 
   // /creative is its own immersive world — exempt from the sheet frame.
   const isImmersive = isImmersivePath(location.pathname);
-  // /home is the waveform capture surface — full-bleed like the Focus home at
-  // "/", not a summoned sheet (it paints its own void ground).
-  const isAmbient = location.pathname === "/home";
   // Every non-home authed surface renders as a summoned layer over the void.
-  const isSheet = !isHome && !isAmbient && !isImmersive && !isChromelessPath(location.pathname);
+  // `/` (the ambient home) paints its own void ground full-bleed, so it is the
+  // one authed surface that is NOT a sheet.
+  const isSheet = !isHome && !isImmersive && !isChromelessPath(location.pathname);
 
   // Esc = drop the summoned layer, back to presence. Skips text inputs and
   // open dialogs (the canonical Modal stopPropagation()s Escape at the
@@ -256,7 +258,7 @@ function AppShell() {
       if (!isSheet || isChromelessPath(location.pathname)) return;
       navigate({
         to: "/",
-        search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined },
+        search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined },
       });
     }
     window.addEventListener("keydown", onKey);
@@ -391,6 +393,7 @@ function AppShell() {
                   audit: true,
                   segment: undefined,
                   view: undefined,
+                  trackables: undefined,
                 },
               })
             }
@@ -409,10 +412,10 @@ function AppShell() {
         </div>
         </div>
         {!isImmersive && <IconRail />}
-        {/* Visible top-right chrome (focus/home jump + theme toggle) — the two
-            controls Daniel pulled out of the hover nav. */}
-        {!isImmersive && <TopRightControls isFocusHome={isHome} />}
-        {!isImmersive && <WidgetOverlays />}
+        {/* Corner theme toggle. NOT on the home: `/` owns its own top-right
+            cluster (focused-today · mic · log) and a second thing up there
+            would crowd it. Appearance in Settings is the home's route to it. */}
+        {!isImmersive && !isHome && <TopRightControls />}
       </div>
     </PasswordGate>
   );

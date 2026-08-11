@@ -1,22 +1,22 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PasswordGate } from "../components/PasswordGate";
-import { AmbientShell } from "../components/focus/AmbientShell";
+import { FocusSession } from "../components/focus/FocusSession";
 
-// The focus-system kiosk (`gooni-focus-system-plan.md`). A standalone,
-// chrome-LESS route — __root.tsx's isChromelessPath() keeps the SummonedNav /
-// sidebar / widget overlays off this surface, so a browser parked here on a
-// second monitor shows nothing but the glanceable display. PasswordGate stays
-// (the payload is authed, owner-only data), but once the kiosk browser has a
-// token it never shows again.
+// The focus SESSION page. Reached only by the focus control on a task row —
+// focus has exactly one door and it is a task, which is what makes sensor
+// attribution work without a classifier.
 //
-// This route renders the ambient STATE MACHINE (AmbientShell), not the
-// dashboard directly: the monitor stays on 24/7, so at rest it shows Gooni
-// asleep and only surfaces data when summoned. `/` mounts FocusDashboard bare —
-// opening a tab is already a deliberate act.
+// Still a chrome-LESS route (see __root.tsx's isChromelessPath): a session is
+// one task and a clock, and the app nav on top of that is the opposite of the
+// point. PasswordGate stays — the payload is authed, owner-only data.
+//
+// With no session running this renders Gooni asleep rather than redirecting.
+// It used to host the kiosk dashboard (AmbientShell → FocusDashboard); both are
+// gone, the home absorbed what they showed.
 export const Route = createFileRoute("/focus")({
   component: () => (
     <PasswordGate>
-      <AmbientShell />
+      <FocusSession />
     </PasswordGate>
   ),
 });
