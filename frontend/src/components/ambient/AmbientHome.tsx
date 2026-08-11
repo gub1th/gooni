@@ -643,7 +643,9 @@ export function AmbientHome({
     try {
       await switchFocusSession(item.id, item.content);
     } catch {
-      flash("couldn't save the running session — still on it");
+      // `endFocusSession` sealed before it wrote, so the old session is PAUSED
+      // and unswitched — saying "still on it" would claim a clock that stopped.
+      flash("couldn't save that session — it's paused, not switched");
       return;
     }
     navigate({ to: "/focus" });
@@ -787,6 +789,7 @@ export function AmbientHome({
             laterCount={longTerm.length}
             laterRows={longTerm}
             runningId={session?.promiseId ?? null}
+            runningLive={sessionRunning}
             runningLabel={runningLabel}
             onTick={(item) => void onTick(item)}
             onAdd={onAdd}

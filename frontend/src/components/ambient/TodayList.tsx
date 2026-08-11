@@ -27,6 +27,7 @@ export function TodayList({
   laterCount,
   laterRows,
   runningId,
+  runningLive,
   runningLabel,
   onTick,
   onAdd,
@@ -37,8 +38,10 @@ export function TodayList({
   rows: TodayRow[];
   laterCount: number;
   laterRows: FocusReminder[];
-  /** promise id of the session running right now, if any */
+  /** promise id of the session on screen, running or paused */
   runningId: number | null;
+  /** is that session actually ACCRUING right now, or paused */
+  runningLive: boolean;
   /** live mm:ss for that session */
   runningLabel: string;
   onTick: (item: FocusReminder) => void;
@@ -97,6 +100,7 @@ export function TodayList({
             item={item}
             minutes={minutes}
             running={runningId === item.id}
+            live={runningLive}
             runningLabel={runningLabel}
             onTick={() => onTick(item)}
             onFocus={() => onFocus(item)}
@@ -156,6 +160,7 @@ function TaskRow({
   item,
   minutes,
   running,
+  live,
   runningLabel,
   onTick,
   onFocus,
@@ -164,6 +169,7 @@ function TaskRow({
   item: FocusReminder;
   minutes: number;
   running: boolean;
+  live: boolean;
   runningLabel: string;
   onTick: () => void;
   onFocus: () => void;
@@ -224,7 +230,9 @@ function TaskRow({
         {item.content}
       </span>
 
-      {/* accrued focus time, and the live clock while a session is on it */}
+      {/* accrued focus time, and the live clock while a session is on it. A
+          PAUSED session must not borrow that presentation: the pulse and the
+          ticking clock both say "accruing right now", and it isn't. */}
       {running ? (
         <button
           onClick={onResume}
@@ -239,12 +247,12 @@ function TaskRow({
             cursor: "pointer",
             fontFamily: FONT,
             fontSize: 14,
-            color: accent,
+            color: live ? accent : ink(0.42),
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          <RunningDot color={accent} />
-          {runningLabel}
+          <RunningDot color={live ? accent : ink(0.42)} pulse={live} />
+          {live ? runningLabel : "paused"}
         </button>
       ) : (
         minutes > 0 && (
@@ -290,7 +298,7 @@ function TaskRow({
 // reading the label both get.
 const RUN_PULSE_CSS = `@keyframes gooni-run-pulse{0%,100%{opacity:1}50%{opacity:0.35}}`;
 
-function RunningDot({ color }: { color: string }) {
+function RunningDot({ color, pulse }: { color: string; pulse: boolean }) {
   return (
     <span
       aria-hidden
@@ -299,7 +307,7 @@ function RunningDot({ color }: { color: string }) {
         height: 7,
         borderRadius: 999,
         background: color,
-        animation: "gooni-run-pulse 1.8s ease-in-out infinite",
+        animation: pulse ? "gooni-run-pulse 1.8s ease-in-out infinite" : "none",
       }}
     />
   );

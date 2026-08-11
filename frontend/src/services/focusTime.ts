@@ -220,6 +220,18 @@ export async function writeFocusSession(
 }
 
 /**
+ * The end that is currently in flight, if any.
+ *
+ * `seal()` pauses the session but does NOT clear it, so between the seal and the
+ * write resolving a second call would find the same session, seal the identical
+ * segments, and post the same day again — on a sum-agg trackable that
+ * permanently doubles it. Nothing on screen changes until the write lands, so a
+ * double-click is the ordinary way to reach that. A concurrent caller therefore
+ * JOINS this promise instead of starting a second write.
+ */
+let ending: Promise<void> | null = null;
+
+/**
  * End the running session: seal it, write its entry, and only THEN drop it.
  *
  * The one write-then-clear path, shared by the session page's stop control and
@@ -229,14 +241,22 @@ export async function writeFocusSession(
  * A no-op when nothing is running.
  */
 export async function endFocusSession(): Promise<void> {
+  if (ending) return ending;
   const s = useFocusSessionStore.getState().session;
   if (!s) return;
-  const segments = useFocusSessionStore.getState().seal();
-  await writeFocusSession(segments, s.promiseId, s.title, {
-    writtenDates: useFocusSessionStore.getState().session?.writtenDates ?? [],
-    onWritten: (date) => useFocusSessionStore.getState().markWritten(date),
-  });
-  useFocusSessionStore.getState().stop();
+  ending = (async () => {
+    const segments = useFocusSessionStore.getState().seal();
+    await writeFocusSession(segments, s.promiseId, s.title, {
+      writtenDates: useFocusSessionStore.getState().session?.writtenDates ?? [],
+      onWritten: (date) => useFocusSessionStore.getState().markWritten(date),
+    });
+    useFocusSessionStore.getState().stop();
+  })();
+  try {
+    await ending;
+  } finally {
+    ending = null;
+  }
 }
 
 /**

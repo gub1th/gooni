@@ -55,6 +55,7 @@ function renderList(over: Partial<Parameters<typeof TodayList>[0]> = {}) {
     laterCount: 2,
     laterRows: [reminder(8, "book the flights"), reminder(9, "call mum")],
     runningId: null as number | null,
+    runningLive: true,
     runningLabel: "",
     onTick: vi.fn(),
     onAdd: vi.fn(),
@@ -121,6 +122,26 @@ test("the later bucket is visible and expands in place", () => {
   fireEvent.click(later);
   expect(screen.getByText("book the flights")).toBeInTheDocument();
   expect(screen.getByText("call mum")).toBeInTheDocument();
+});
+
+test("a PAUSED session does not show a live clock, but still routes back", () => {
+  const props = renderList({ runningId: 2, runningLive: false, runningLabel: "12:34" });
+
+  // a ticking clock claims time is accruing right now; a paused session accrues
+  // nothing, so it must not borrow that presentation
+  expect(screen.queryByText("12:34")).not.toBeInTheDocument();
+  const back = screen.getByTitle("back to the session");
+  expect(back).toHaveTextContent("paused");
+
+  fireEvent.click(back);
+  expect(props.onResume).toHaveBeenCalled();
+});
+
+test("a LIVE session shows its ticking clock", () => {
+  renderList({ runningId: 2, runningLive: true, runningLabel: "12:34" });
+
+  expect(screen.getByTitle("back to the session")).toHaveTextContent("12:34");
+  expect(screen.queryByText("paused")).not.toBeInTheDocument();
 });
 
 test("a kept row with a running session shows BOTH the strike and the clock", () => {

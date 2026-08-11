@@ -251,6 +251,25 @@ test("a failed write aborts the switch and leaves the running session intact", a
   expect(store.getState().session?.promiseId).toBe(2);
 });
 
+test("a second switch while the first write is in flight does not write twice", async () => {
+  store.getState().hydrate(fortyMinutesOn(1, "leetcode"));
+
+  // nothing on screen changes until the write resolves, so this is what a
+  // double-click on the focus target actually does
+  const first = switchFocusSession(2, "ship it");
+  const second = switchFocusSession(3, "gym");
+  await Promise.all([first, second]);
+
+  // ONE entry for the outgoing session — a sum-agg trackable would otherwise
+  // report 80 minutes for 40 minutes of work, permanently
+  expect(logged).toHaveLength(1);
+  expect(logged[0].body.value_numeric).toBe(40);
+  expect(logged[0].body.value_json).toMatchObject({ promise_id: 1 });
+
+  // and a session is running on one of the clicked tasks, not on the old one
+  expect([2, 3]).toContain(store.getState().session?.promiseId);
+});
+
 test("starting focus with nothing running writes nothing", async () => {
   await switchFocusSession(3, "gym");
 

@@ -49,7 +49,7 @@ const GLASS: React.CSSProperties = {
 // glance and bury the OG trackables (they still live in the expanded matrix +
 // the activity rail's "device" events, so nothing is lost). The matrix's own
 // isDaily (LogTable) deliberately keeps them — the glance is priority-only.
-function isDaily(t: Trackable): boolean {
+export function isDaily(t: Trackable): boolean {
   if (t.kind === "json") return false;
   if (t.source === "whoop" || t.source === "leetcode") return false;
   if (t.source === "shortcuts") return false;

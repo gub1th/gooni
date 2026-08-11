@@ -298,11 +298,11 @@ export function FocusSession() {
         {running ? <Pause size={16} fill="currentColor" strokeWidth={0} /> : <Play size={16} fill="currentColor" strokeWidth={0} />}
       </button>
 
-      {/* the write failed, so the session is still here and still holds its
-          minutes — say so rather than letting them look saved */}
+      {/* the write failed, so the session still holds its minutes — but `seal`
+          already paused it, so say paused rather than implying it still runs */}
       {saveError && (
         <div role="alert" style={{ marginTop: 14, fontSize: 11.5, color: pal.warn, textAlign: "center" }}>
-          couldn't save this session — it's still here, try ending it again
+          couldn't save this session — it's paused, not lost. try ending it again
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FONT, frostInk } from "../../ui";
 import { ink } from "./ambientInk";
+import { isDaily } from "./LogDots";
 import {
   FEED_REFRESH_MS,
   fetchTrackableDays,
@@ -18,18 +19,6 @@ import {
 
 const TRAIL = 5; // trailing days per trackable
 
-// The daily-glance set — lifted verbatim from the kiosk dashboard before it was
-// deleted, and still mirroring `LogDots.isDaily`: boolean habits + key numbers,
-// minus the json feeds (whoop/leetcode), device telemetry (shortcuts), the
-// walled-off focus-cam, and the freeform "note".
-export function isStreak(t: Trackable): boolean {
-  if (t.kind === "json") return false;
-  if (t.source === "whoop" || t.source === "leetcode") return false;
-  if (t.source === "shortcuts" || t.source === "focus_cam") return false;
-  if (t.name === "note") return false;
-  return true;
-}
-
 interface Col {
   t: Trackable;
   days: TrackableDay[]; // newest-first, gap-filled; days[0] = today
@@ -43,7 +32,7 @@ export function StreakRow({ onOpen }: { onOpen: () => void }) {
   const load = useCallback(async () => {
     try {
       if (!defsRef.current) {
-        const all = (await fetchTrackables()).filter(isStreak);
+        const all = (await fetchTrackables()).filter(isDaily);
         all.sort((a, b) => {
           if (a.kind !== b.kind) return a.kind === "boolean" ? -1 : 1;
           if (a.is_important !== b.is_important) return a.is_important ? -1 : 1;
