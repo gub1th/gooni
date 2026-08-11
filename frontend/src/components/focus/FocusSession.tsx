@@ -148,17 +148,26 @@ export function FocusSession() {
   }, [running]);
 
   // The sidecar is a RECONCILE-POLL target: we declare desired control, it
-  // catches up on its own ~2s poll. Unmount always clears it, so a closed tab
-  // can never leave the camera sensing.
-  // Keyed on the promise for the same reason, and here it MATTERS: on the full
-  // session object this would fire idle→running against the sidecar on every
-  // tick of the pause button.
+  // catches up on its own ~2s poll. PAUSE has to reach it — otherwise the camera
+  // keeps capturing and logging for a window that will never be written, for as
+  // long as a paused tab sits open, which is a stronger promise broken than the
+  // closed tab the unmount clear below guards. Keyed on the promise AND the
+  // running flag, which move on start/pause/resume only — not on the per-second
+  // tick, which updates `now` and not the store object.
   useEffect(() => {
     if (!session) return;
-    void setFocusCamControl("running", session.promiseId).catch(() => {});
-    return () => { void setFocusCamControl("idle", null).catch(() => {}); };
+    const desired = running ? "running" : "idle";
+    void setFocusCamControl(desired, running ? session.promiseId : null).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.promiseId]);
+  }, [session?.promiseId, running]);
+
+  // Unmount ALWAYS clears control, so a closed tab can never leave the camera
+  // sensing. Deliberately its own effect: folded into the one above, a resume
+  // would fire cleanup(idle) and setup(running) as two racing posts, and an idle
+  // landing last would leave the sidecar asleep for the rest of the session.
+  useEffect(() => {
+    return () => { void setFocusCamControl("idle", null).catch(() => {}); };
+  }, []);
 
   const mode: FocusMode = session?.mode ?? "focus";
   const elapsed = useMemo(() => elapsedMs(session, mode, now), [session, mode, now]);

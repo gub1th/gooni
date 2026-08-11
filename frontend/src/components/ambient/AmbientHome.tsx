@@ -9,7 +9,7 @@ import { LogDots } from "./LogDots";
 import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import { QuickFind } from "./QuickFind";
-import { TodayList, type TodayRow } from "./TodayList";
+import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
 import { StreakRow } from "./StreakRow";
 import { HomeCorner, HomeDate } from "./HomeCorners";
 import { LogSheet } from "./LogSheet";
@@ -253,7 +253,18 @@ export function AmbientHome({
     [shortTerm, totals],
   );
 
-  const runningLabel = session ? mmss(elapsedMs(session, session.mode, nowTick)) : "";
+  // The row indicator, derived ONCE from the state that already exists. Three
+  // cases, not two: only live FOCUS is accruing — break segments are dropped by
+  // `splitSegmentsByDay` (so `focused today` never moves and no entry is ever
+  // written for them) and a paused session accrues nothing at all.
+  const sessionRow: SessionRow | null = useMemo(() => {
+    if (!session) return null;
+    return {
+      promiseId: session.promiseId,
+      state: !session.running ? "paused" : session.mode === "break" ? "break" : "focus",
+      label: mmss(elapsedMs(session, session.mode, nowTick)),
+    };
+  }, [session, nowTick]);
   // The corner stat counts the running session too — a timer you're watching
   // tick that doesn't move the number it feeds reads as broken. It is folded
   // through the SAME day-splitter the write path uses, so a session that began
@@ -648,6 +659,11 @@ export function AmbientHome({
       flash("couldn't save that session — it's paused, not switched");
       return;
     }
+    // The outgoing session's entry just landed, and the new session's live
+    // contribution is zero — without this the corner drops the minutes it has
+    // this instant recorded and stays wrong until the 30s poll. The store went
+    // A → B in one batch, so the null-transition effect never sees it.
+    void loadTotals();
     navigate({ to: "/focus" });
   }
 
@@ -788,9 +804,7 @@ export function AmbientHome({
             rows={rows}
             laterCount={longTerm.length}
             laterRows={longTerm}
-            runningId={session?.promiseId ?? null}
-            runningLive={sessionRunning}
-            runningLabel={runningLabel}
+            sessionRow={sessionRow}
             onTick={(item) => void onTick(item)}
             onAdd={onAdd}
             onFocus={(item) => void startFocus(item)}

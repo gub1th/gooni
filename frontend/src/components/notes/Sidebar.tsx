@@ -47,7 +47,7 @@ const sidebarFooterBtn: React.CSSProperties = {
 };
 
 // Sidebar = the NOTES BROWSER (pinned/drafts/recents/tags). App-level nav
-// lives in SummonedNav (one rail, every surface) since the unification pass.
+// lives in IconRail (one rail, every surface) since the unification pass.
 interface SidebarProps {
   isNotes: boolean;
   showCompose: boolean;

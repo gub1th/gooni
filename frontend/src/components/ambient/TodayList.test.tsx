@@ -21,7 +21,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { FocusReminder } from "../../services/api";
-import { TodayList, type TodayRow } from "./TodayList";
+import { TodayList, type SessionRow, type SessionRowState, type TodayRow } from "./TodayList";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 
 afterEach(cleanup);
@@ -54,9 +54,7 @@ function renderList(over: Partial<Parameters<typeof TodayList>[0]> = {}) {
     rows,
     laterCount: 2,
     laterRows: [reminder(8, "book the flights"), reminder(9, "call mum")],
-    runningId: null as number | null,
-    runningLive: true,
-    runningLabel: "",
+    sessionRow: null as SessionRow | null,
     onTick: vi.fn(),
     onAdd: vi.fn(),
     onFocus: vi.fn(),
@@ -94,8 +92,12 @@ test("ticking reports the row, and the checkbox states the direction", () => {
   expect(screen.getByLabelText("Reopen snakes and ladders")).toBeInTheDocument();
 });
 
+function onRow(state: SessionRowState, label = "12:34"): SessionRow {
+  return { promiseId: 2, state, label };
+}
+
 test("a running session shows its clock on ITS task and routes back to it", () => {
-  const props = renderList({ runningId: 2, runningLabel: "12:34" });
+  const props = renderList({ sessionRow: onRow("focus") });
 
   const back = screen.getByTitle("back to the session");
   expect(back).toHaveTextContent("12:34");
@@ -124,28 +126,35 @@ test("the later bucket is visible and expands in place", () => {
   expect(screen.getByText("call mum")).toBeInTheDocument();
 });
 
-test("a PAUSED session does not show a live clock, but still routes back", () => {
-  const props = renderList({ runningId: 2, runningLive: false, runningLabel: "12:34" });
+// Only live FOCUS is accruing. Break minutes are dropped by splitSegmentsByDay
+// and a paused session accrues nothing, so neither may borrow the ticking clock.
+test.each([
+  ["break" as SessionRowState, "break"],
+  ["paused" as SessionRowState, "paused"],
+])("a %s session names itself instead of ticking, and still routes back", (state, label) => {
+  const props = renderList({ sessionRow: onRow(state) });
 
-  // a ticking clock claims time is accruing right now; a paused session accrues
-  // nothing, so it must not borrow that presentation
   expect(screen.queryByText("12:34")).not.toBeInTheDocument();
   const back = screen.getByTitle("back to the session");
-  expect(back).toHaveTextContent("paused");
+  expect(back).toHaveTextContent(label);
 
   fireEvent.click(back);
   expect(props.onResume).toHaveBeenCalled();
 });
 
-test("a LIVE session shows its ticking clock", () => {
-  renderList({ runningId: 2, runningLive: true, runningLabel: "12:34" });
+test("a LIVE focus session shows its ticking clock and nothing else", () => {
+  renderList({ sessionRow: onRow("focus") });
 
   expect(screen.getByTitle("back to the session")).toHaveTextContent("12:34");
   expect(screen.queryByText("paused")).not.toBeInTheDocument();
+  expect(screen.queryByText("break")).not.toBeInTheDocument();
 });
 
 test("a kept row with a running session shows BOTH the strike and the clock", () => {
-  const props = renderList({ rows: [{ item: reminder(3, "snakes and ladders", "kept"), minutes: 0 }], runningId: 3, runningLabel: "07:12" });
+  const props = renderList({
+    rows: [{ item: reminder(3, "snakes and ladders", "kept"), minutes: 0 }],
+    sessionRow: { promiseId: 3, state: "focus", label: "07:12" },
+  });
 
   expect(screen.getByText("snakes and ladders")).toHaveStyle({ textDecoration: "line-through" });
   const back = screen.getByTitle("back to the session");

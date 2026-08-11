@@ -22,13 +22,28 @@ export interface TodayRow {
   minutes: number;
 }
 
+/**
+ * What the session on this row is DOING — the whole indicator, derived once.
+ *
+ * Only `focus` is accruing: `splitSegmentsByDay` drops break segments, so break
+ * minutes never reach `focused today` and no entry is ever written for them, and
+ * a paused session accrues nothing at all. A pulsing dot and a ticking clock
+ * both claim "accruing right now", so only `focus` may render them.
+ */
+export type SessionRowState = "focus" | "break" | "paused";
+
+export interface SessionRow {
+  promiseId: number;
+  state: SessionRowState;
+  /** live mm:ss — shown for `focus` only */
+  label: string;
+}
+
 export function TodayList({
   rows,
   laterCount,
   laterRows,
-  runningId,
-  runningLive,
-  runningLabel,
+  sessionRow,
   onTick,
   onAdd,
   onFocus,
@@ -38,12 +53,8 @@ export function TodayList({
   rows: TodayRow[];
   laterCount: number;
   laterRows: FocusReminder[];
-  /** promise id of the session on screen, running or paused */
-  runningId: number | null;
-  /** is that session actually ACCRUING right now, or paused */
-  runningLive: boolean;
-  /** live mm:ss for that session */
-  runningLabel: string;
+  /** the session on screen — focus, break or paused — or null */
+  sessionRow: SessionRow | null;
   onTick: (item: FocusReminder) => void;
   onAdd: (title: string) => Promise<void> | void;
   onFocus: (item: FocusReminder) => void;
@@ -99,9 +110,7 @@ export function TodayList({
             key={item.id}
             item={item}
             minutes={minutes}
-            running={runningId === item.id}
-            live={runningLive}
-            runningLabel={runningLabel}
+            session={sessionRow?.promiseId === item.id ? sessionRow : null}
             onTick={() => onTick(item)}
             onFocus={() => onFocus(item)}
             onResume={onResume}
@@ -159,18 +168,15 @@ export function TodayList({
 function TaskRow({
   item,
   minutes,
-  running,
-  live,
-  runningLabel,
+  session,
   onTick,
   onFocus,
   onResume,
 }: {
   item: FocusReminder;
   minutes: number;
-  running: boolean;
-  live: boolean;
-  runningLabel: string;
+  /** the session on THIS row, if any */
+  session: SessionRow | null;
   onTick: () => void;
   onFocus: () => void;
   onResume: () => void;
@@ -230,10 +236,11 @@ function TaskRow({
         {item.content}
       </span>
 
-      {/* accrued focus time, and the live clock while a session is on it. A
-          PAUSED session must not borrow that presentation: the pulse and the
-          ticking clock both say "accruing right now", and it isn't. */}
-      {running ? (
+      {/* accrued focus time, and the session indicator while one is on this
+          row. Only live FOCUS gets the accruing presentation (pulse + ticking
+          clock) — break and paused each accrue nothing toward focus, so they
+          name themselves instead and still route back. */}
+      {session ? (
         <button
           onClick={onResume}
           title="back to the session"
@@ -247,12 +254,15 @@ function TaskRow({
             cursor: "pointer",
             fontFamily: FONT,
             fontSize: 14,
-            color: live ? accent : ink(0.42),
+            color: session.state === "focus" ? accent : ink(0.42),
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          <RunningDot color={live ? accent : ink(0.42)} pulse={live} />
-          {live ? runningLabel : "paused"}
+          <RunningDot
+            color={session.state === "focus" ? accent : ink(0.42)}
+            pulse={session.state === "focus"}
+          />
+          {session.state === "focus" ? session.label : session.state}
         </button>
       ) : (
         minutes > 0 && (
