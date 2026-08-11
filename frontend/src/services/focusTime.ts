@@ -269,6 +269,13 @@ export async function endFocusSession(): Promise<void> {
  * rather than swapping it away with its minutes unwritten.
  */
 export async function switchFocusSession(promiseId: number, title: string): Promise<void> {
+  // Switching to the task ALREADY running is not a switch. Without this it
+  // ends-and-writes the live session and starts a fresh one on the same task,
+  // which splits one sitting into two entries and resets the clock to zero —
+  // the row looks like it restarted because it did. Guarded here as well as at
+  // the call site, because this is the function that does the damage.
+  const live = useFocusSessionStore.getState().session;
+  if (live && live.promiseId === promiseId) return;
   await endFocusSession();
   useFocusSessionStore.getState().start(promiseId, title);
 }

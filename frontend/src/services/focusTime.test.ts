@@ -305,6 +305,30 @@ test("starting focus with nothing running writes nothing", async () => {
   expect(store.getState().session).toMatchObject({ promiseId: 3, running: true });
 });
 
+test("focusing the task already running is a no-op, not a split session", async () => {
+  const store = (await import("../stores/useFocusSessionStore")).useFocusSessionStore;
+  store.getState().start(42, "leetcode");
+  const before = store.getState().session!;
+
+  // the footgun: the row's focus control used to route here even when THIS task
+  // was the one running, which ended-and-wrote the live session and started a
+  // fresh one on the same task — two entries for one sitting, clock reset
+  await switchFocusSession(42, "leetcode");
+
+  expect(store.getState().session).toBe(before); // same object: untouched
+  expect(logged).toHaveLength(0); // nothing was written
+});
+
+test("start() refuses to replace a live session on the same task", async () => {
+  const store = (await import("../stores/useFocusSessionStore")).useFocusSessionStore;
+  store.getState().start(7, "ship it");
+  const before = store.getState().session!;
+
+  store.getState().start(7, "ship it");
+
+  expect(store.getState().session).toBe(before);
+});
+
 test("per-task totals sum the entries, several per day included", () => {
   const rows = [
     { id: 1, trackable_id: 77, date: "2026-08-10", value_boolean: null, value_numeric: 25, value_json: { promise_id: 42 }, source: "focus", created_at: null },

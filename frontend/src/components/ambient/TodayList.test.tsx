@@ -59,6 +59,8 @@ function renderList(over: Partial<Parameters<typeof TodayList>[0]> = {}) {
     onAdd: vi.fn(),
     onFocus: vi.fn(),
     onResume: vi.fn(),
+    onTogglePause: vi.fn(),
+    onStop: vi.fn(),
     ...over,
   };
   render(<TodayList {...props} />);
@@ -114,6 +116,32 @@ test("focus is reachable per row — the one door", () => {
   const props = renderList();
   fireEvent.click(screen.getByLabelText("Focus on ship the home rebuild"));
   expect(props.onFocus).toHaveBeenCalledWith(rows[1].item);
+});
+
+// The running row owns its own controls. The focus target there used to route
+// into the SWITCH path, which ends-and-writes the live session and starts a new
+// one on the same task — one sitting split into two entries, clock back to zero.
+test("the running row swaps the focus target for pause and stop", () => {
+  const props = renderList({ sessionRow: onRow("focus") });
+
+  expect(screen.queryByLabelText("Focus on ship the home rebuild")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByLabelText("Pause ship the home rebuild"));
+  expect(props.onTogglePause).toHaveBeenCalled();
+
+  fireEvent.click(screen.getByLabelText("Stop the session on ship the home rebuild"));
+  expect(props.onStop).toHaveBeenCalled();
+
+  // every OTHER row still offers focus — the one door is unchanged for them
+  expect(screen.getByLabelText("Focus on leetcode")).toBeInTheDocument();
+});
+
+test("a paused running row offers resume rather than pause", () => {
+  const props = renderList({ sessionRow: onRow("paused") });
+
+  expect(screen.queryByLabelText("Pause ship the home rebuild")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("Resume ship the home rebuild"));
+  expect(props.onTogglePause).toHaveBeenCalled();
 });
 
 test("the later bucket is visible and expands in place", () => {

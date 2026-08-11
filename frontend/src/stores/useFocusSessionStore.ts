@@ -206,6 +206,12 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
   session: read(),
 
   start: (promiseId, title) => {
+    // Re-starting the task that is already running would throw away its
+    // segments and zero the clock. Nothing legitimately wants that: a genuine
+    // switch goes through `switchFocusSession`, which writes the outgoing
+    // session's entry first. Belt-and-braces with the guard there.
+    const live = get().session;
+    if (live && live.promiseId === promiseId) return;
     const session: FocusSession = {
       promiseId,
       title,

@@ -17,6 +17,7 @@ import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 import { useFocusOverlayStore } from "../../stores/useFocusOverlayStore";
 import {
+  endFocusSession,
   fetchFocusTotals,
   switchFocusSession,
   type FocusTotals,
@@ -696,6 +697,20 @@ export function AmbientHome({
   // Focus has exactly ONE door and it is a task. Starting one ENDS whatever was
   // running — silently, but only once that session's entry has landed: a switch
   // that swapped the store would delete minutes nothing had recorded yet.
+  // The row's stop is the same write-then-clear path the bar and the overlay
+  // use — there is one place that decides a session may only be dropped once
+  // its entry has landed, and this is not a second one.
+  async function stopSession() {
+    try {
+      await endFocusSession();
+    } catch {
+      flash("couldn't save that session — it's paused, not lost");
+      return;
+    }
+    void loadTotals();
+    void loadCommitments();
+  }
+
   async function startFocus(item: FocusReminder) {
     try {
       await switchFocusSession(item.id, item.content);
@@ -870,6 +885,12 @@ export function AmbientHome({
             onAdd={onAdd}
             onFocus={(item) => void startFocus(item)}
             onResume={() => useFocusOverlayStore.getState().setOpen(true)}
+            onTogglePause={() => {
+              const st = useFocusSessionStore.getState();
+              if (st.session?.running) st.pause();
+              else st.resume();
+            }}
+            onStop={() => void stopSession()}
           />
         </div>
       </div>

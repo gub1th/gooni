@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Target } from "lucide-react";
+import { Check, Pause, Play, Square, Target } from "lucide-react";
 import { FONT, frostInk } from "../../ui";
 import { ink } from "./ambientInk";
 import { fmtMinutes } from "../../services/focusTime";
@@ -53,6 +53,8 @@ export function TodayList({
   onAdd,
   onFocus,
   onResume,
+  onTogglePause,
+  onStop,
   rowsMaxHeight,
 }: {
   rows: TodayRow[];
@@ -64,6 +66,10 @@ export function TodayList({
   onAdd: (title: string) => Promise<void> | void;
   onFocus: (item: FocusReminder) => void;
   onResume: () => void;
+  /** pause or resume the session on the running row */
+  onTogglePause: () => void;
+  /** end the session on the running row (writes its entry) */
+  onStop: () => void;
   /** cap for the ROWS region before it scrolls (the controls below never do) */
   rowsMaxHeight?: number | string;
 }) {
@@ -119,6 +125,8 @@ export function TodayList({
             onTick={() => onTick(item)}
             onFocus={() => onFocus(item)}
             onResume={onResume}
+            onTogglePause={onTogglePause}
+            onStop={onStop}
           />
         ))}
 
@@ -177,6 +185,8 @@ function TaskRow({
   onTick,
   onFocus,
   onResume,
+  onTogglePause,
+  onStop,
 }: {
   item: FocusReminder;
   minutes: number;
@@ -185,6 +195,8 @@ function TaskRow({
   onTick: () => void;
   onFocus: () => void;
   onResume: () => void;
+  onTogglePause: () => void;
+  onStop: () => void;
 }) {
   const [hover, setHover] = useState(false);
   const [cbHover, setCbHover] = useState(false);
@@ -277,37 +289,56 @@ function TaskRow({
         )
       )}
 
-      {/* Focus has exactly ONE door and it is a task.
-          INLINE, not absolutely positioned. It used to hang at right:-32px,
-          outside the row box — which worked only while rows were centred with
-          slack either side. Left-aligning the list put the row's right edge at
-          the container edge, so the button was clipped and focus became
-          unreachable from the home. */}
-      <button
-        onClick={onFocus}
-        aria-label={`Focus on ${item.content}`}
-        title="focus"
-        style={{
-          flex: "none",
-          marginLeft: 2,
-          width: 26,
-          height: 26,
-          borderRadius: 999,
-          border: "none",
-          background: "transparent",
-          padding: 0,
-          display: "grid",
-          placeItems: "center",
-          cursor: "pointer",
-          color: ink(0.38),
-          opacity: hover ? 1 : 0,
-          transition: "opacity 140ms ease",
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = accent)}
-        onMouseLeave={(e) => (e.currentTarget.style.color = ink(0.38))}
-      >
-        <Target size={15} strokeWidth={1.8} />
-      </button>
+      {/* The RUNNING row owns its own controls. It already shows the running
+          state, so the controls belong to it — and this removes a real
+          footgun: the focus target on a row that is already running went
+          through the switch path, which ends-and-writes the live session and
+          starts a fresh one on the SAME task, splitting one sitting into two
+          entries and zeroing the clock. Non-running rows keep the target;
+          focus still has exactly one door, it just is not this row's door
+          while this row is the one running. */}
+      {session ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 2, flex: "none", marginLeft: 2, opacity: hover ? 1 : 0, transition: "opacity 140ms ease" }}>
+          <RowButton
+            label={session.state === "focus" ? `Pause ${item.content}` : `Resume ${item.content}`}
+            accent={session.state !== "focus"}
+            onClick={onTogglePause}
+          >
+            {session.state === "focus"
+              ? <Pause size={13} fill="currentColor" strokeWidth={0} />
+              : <Play size={13} fill="currentColor" strokeWidth={0} />}
+          </RowButton>
+          <RowButton label={`Stop the session on ${item.content}`} onClick={onStop}>
+            <Square size={11} fill="currentColor" strokeWidth={0} />
+          </RowButton>
+        </div>
+      ) : (
+        <button
+          onClick={onFocus}
+          aria-label={`Focus on ${item.content}`}
+          title="focus"
+          style={{
+            flex: "none",
+            marginLeft: 2,
+            width: 26,
+            height: 26,
+            borderRadius: 999,
+            border: "none",
+            background: "transparent",
+            padding: 0,
+            display: "grid",
+            placeItems: "center",
+            cursor: "pointer",
+            color: ink(0.38),
+            opacity: hover ? 1 : 0,
+            transition: "opacity 140ms ease",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = accent)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = ink(0.38))}
+        >
+          <Target size={15} strokeWidth={1.8} />
+        </button>
+      )}
     </div>
   );
 }
@@ -317,6 +348,38 @@ function TaskRow({
 // becomes the CSS plus the clock — which is what a screen reader and any test
 // reading the label both get.
 const RUN_PULSE_CSS = `@keyframes gooni-run-pulse{0%,100%{opacity:1}50%{opacity:0.35}}`;
+
+function RowButton({
+  label,
+  onClick,
+  accent: isAccent,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  accent?: boolean;
+  children: React.ReactNode;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 24, height: 24, padding: 0, borderRadius: 999, cursor: "pointer",
+        border: "none", background: "transparent",
+        display: "grid", placeItems: "center",
+        color: isAccent ? frostInk.accent : hover ? ink(0.9) : ink(0.38),
+        transition: "color 140ms ease",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 function RunningDot({ color, pulse }: { color: string; pulse: boolean }) {
   return (
