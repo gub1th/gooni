@@ -5,7 +5,7 @@ import { useNowTick } from "../../hooks/useNowTick";
 import { GREEN } from "./wavePath";
 import { LogTable } from "./LogTable";
 import { agePhrase, freshness, sleepClock } from "./whoopFreshness";
-import { isReadOnlyRollup } from "../../services/focusTime";
+import { fmtMinutes, isReadOnlyRollup } from "../../services/focusTime";
 import {
   createTrackable,
   fetchDailyNotes,
@@ -476,7 +476,7 @@ function Column({
             color: "rgb(var(--gooni-ink, 244 245 244) / 0.7)", fontSize: 13, fontWeight: 600, fontFamily: FONT,
           }}
         >
-          {typeof today === "number" ? today : "–"}
+          {typeof today === "number" ? fmtMinutes(today) : "–"}
         </span>
       ) : editing ? (
         <input

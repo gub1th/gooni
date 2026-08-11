@@ -19,6 +19,7 @@ import {
   fetchFocusTotals,
   localDayKey,
   splitSegmentsByDay,
+  switchFocusSession,
   type FocusTotals,
 } from "../../services/focusTime";
 import { useFocusSessionStore, elapsedMs, sealedSegments } from "../../stores/useFocusSessionStore";
@@ -635,9 +636,16 @@ export function AmbientHome({
     }
   }
 
-  // Focus has exactly ONE door and it is a task.
-  function startFocus(item: FocusReminder) {
-    useFocusSessionStore.getState().start(item.id, item.content);
+  // Focus has exactly ONE door and it is a task. Starting one ENDS whatever was
+  // running — silently, but only once that session's entry has landed: a switch
+  // that swapped the store would delete minutes nothing had recorded yet.
+  async function startFocus(item: FocusReminder) {
+    try {
+      await switchFocusSession(item.id, item.content);
+    } catch {
+      flash("couldn't save the running session — still on it");
+      return;
+    }
     navigate({ to: "/focus" });
   }
 
@@ -782,7 +790,7 @@ export function AmbientHome({
             runningLabel={runningLabel}
             onTick={(item) => void onTick(item)}
             onAdd={onAdd}
-            onFocus={startFocus}
+            onFocus={(item) => void startFocus(item)}
             onResume={() => navigate({ to: "/focus" })}
           />
         </div>

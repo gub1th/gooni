@@ -140,8 +140,10 @@ describe("the focus rollup in the log", () => {
   beforeEach(() => {
     fetchWhoopToday.mockResolvedValue(whoopAged(60_000));
     fetchTrackables.mockResolvedValue([FOCUS, CALORIES]);
+    // 24.98 is what a real 25-minute pomodoro stores — the stopwatch is stopped
+    // by a click, not on a whole minute.
     fetchTrackableDays.mockImplementation(async (id: number) => ({
-      days: [day("2026-07-14", id === FOCUS.id ? 50 : 1800)],
+      days: [day("2026-07-14", id === FOCUS.id ? 24.98 : 1800)],
     }));
   });
 
@@ -150,14 +152,25 @@ describe("the focus rollup in the log", () => {
 
     // visible — 'focused today' is the one rollup that crosses into the log
     await waitFor(() => expect(screen.getByText("focus")).toBeInTheDocument());
-    const cell = await screen.findByText("50");
+    const cell = await screen.findByText("25m");
 
     fireEvent.click(cell);
 
     // no editor, and above all no write: a replace on this column would delete
     // the day's session rows outright
-    expect(screen.queryByDisplayValue("50")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/24.98|25m/)).not.toBeInTheDocument();
     expect(logTrackable).not.toHaveBeenCalled();
+  });
+
+  it("reads the same as every other focus surface, not as raw stored minutes", async () => {
+    render(<LogDots onClose={() => {}} />);
+
+    // the corner stat and the TODAY row both say 25m for this session
+    expect(await screen.findByText("25m")).toBeInTheDocument();
+    expect(screen.queryByText("24.98")).not.toBeInTheDocument();
+
+    // ordinary numeric columns keep rendering their raw value
+    expect(screen.getByText("1800")).toBeInTheDocument();
   });
 
   it("leaves ordinary columns editable", async () => {

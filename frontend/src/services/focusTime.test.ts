@@ -44,16 +44,24 @@ vi.mock("./api", () => ({
 let splitSegmentsByDay: typeof import("./focusTime").splitSegmentsByDay;
 let writeFocusSession: typeof import("./focusTime").writeFocusSession;
 let minutesByPromise: typeof import("./focusTime").minutesByPromise;
+let switchFocusSession: typeof import("./focusTime").switchFocusSession;
+let store: typeof import("../stores/useFocusSessionStore").useFocusSessionStore;
 
 beforeEach(async () => {
   created.length = 0;
   logged.length = 0;
   failDates.clear();
+  localStorage.clear();
   vi.resetModules();
+  // The store is imported FIRST so `focusTime` binds to this same fresh
+  // instance — after `resetModules` a stale top-level import would be a
+  // different store than the one under test.
+  store = (await import("../stores/useFocusSessionStore")).useFocusSessionStore;
   const mod = await import("./focusTime");
   splitSegmentsByDay = mod.splitSegmentsByDay;
   writeFocusSession = mod.writeFocusSession;
   minutesByPromise = mod.minutesByPromise;
+  switchFocusSession = mod.switchFocusSession;
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -192,6 +200,62 @@ test("break time is elapsed time but it is not focus, so it is never written", a
 
   expect(drafts).toHaveLength(1);
   expect(drafts[0].minutes).toBe(25);
+});
+
+/** A paused session with 40 recorded minutes on one task. */
+function fortyMinutesOn(promiseId: number, title: string): FocusSession {
+  return {
+    promiseId,
+    title,
+    mode: "focus",
+    startedAt: at(2026, 8, 10, 9, 0),
+    segments: [{ start: at(2026, 8, 10, 9, 0), end: at(2026, 8, 10, 9, 40), mode: "focus" }],
+    running: false,
+    kept: false,
+    writtenDates: [],
+  };
+}
+
+test("switching tasks writes the running session's entry before the new one starts", async () => {
+  store.getState().hydrate(fortyMinutesOn(1, "leetcode"));
+
+  await switchFocusSession(2, "ship it");
+
+  // the outgoing session's minutes landed, attributed to ITS promise
+  expect(logged).toHaveLength(1);
+  expect(logged[0].body.value_numeric).toBe(40);
+  expect(logged[0].body.value_json).toMatchObject({ promise_id: 1, title: "leetcode" });
+
+  // and only then did the new one start, from zero
+  const next = store.getState().session;
+  expect(next).toMatchObject({ promiseId: 2, title: "ship it", running: true });
+  expect(next?.segments).toEqual([]);
+});
+
+test("a failed write aborts the switch and leaves the running session intact", async () => {
+  store.getState().hydrate(fortyMinutesOn(1, "leetcode"));
+  failDates.add("2026-08-10");
+
+  await expect(switchFocusSession(2, "ship it")).rejects.toThrow();
+
+  // the 40 minutes are still recoverable, on the task they belong to
+  const held = store.getState().session;
+  expect(held).toMatchObject({ promiseId: 1, title: "leetcode" });
+  expect(held?.segments).toHaveLength(1);
+  expect(logged).toHaveLength(0);
+
+  // the write is retryable, and the retry completes the switch
+  failDates.clear();
+  await switchFocusSession(2, "ship it");
+  expect(logged.map((l) => (l.body.value_json as { promise_id: number }).promise_id)).toEqual([1]);
+  expect(store.getState().session?.promiseId).toBe(2);
+});
+
+test("starting focus with nothing running writes nothing", async () => {
+  await switchFocusSession(3, "gym");
+
+  expect(logged).toHaveLength(0);
+  expect(store.getState().session).toMatchObject({ promiseId: 3, running: true });
 });
 
 test("per-task totals sum the entries, several per day included", () => {

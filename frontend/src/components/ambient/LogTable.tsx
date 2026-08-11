@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FONT } from "../../ui";
 import { GREEN } from "./wavePath";
-import { isReadOnlyRollup } from "../../services/focusTime";
+import { fmtMinutes, isReadOnlyRollup } from "../../services/focusTime";
 import {
   fetchDailyNotes,
   fetchTrackableDays,
@@ -411,7 +411,7 @@ export function LogTable() {
                             color: v == null ? "rgb(var(--gooni-ink, 244 245 244) / 0.25)" : "rgb(var(--gooni-ink, 244 245 244) / 0.7)", fontSize: 12.5, fontWeight: 600, fontFamily: FONT,
                           }}
                         >
-                          {typeof v === "number" ? v : "–"}
+                          {typeof v === "number" ? fmtMinutes(v) : "–"}
                         </span>
                       ) : (
                         <button

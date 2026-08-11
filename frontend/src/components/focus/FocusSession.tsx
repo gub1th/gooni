@@ -13,10 +13,10 @@ import {
   type FocusMode,
 } from "../../stores/useFocusSessionStore";
 import {
+  endFocusSession,
   fmtMinutes,
   fetchRecentBrowserIntervals,
   splitSegmentsByDay,
-  writeFocusSession,
 } from "../../services/focusTime";
 import { parseServerDate } from "../../utils/date";
 import {
@@ -173,27 +173,15 @@ export function FocusSession() {
     return splitSegmentsByDay(sealedSegments(session, now)).reduce((n, d) => n + d.minutes, 0);
   }, [session, now]);
 
-  // WRITE, then clear. The entry is the only durable artifact a session
-  // produces, so the session outlives a failed write: `seal` closes the open run
-  // and pauses, and the store is dropped only once the write has landed. On the
-  // happy path that is indistinguishable from clearing first; on a flaky
-  // connection it is the difference between a retry and fifty lost minutes.
+  // Write-then-clear lives in `endFocusSession` — the SAME path starting focus
+  // on another task goes through, so there is one place that decides a session
+  // may only be dropped once its entry has landed.
   async function stop() {
     if (stopping.current) return;
     stopping.current = true;
     setSaveError(false);
-    const s = useFocusSessionStore.getState().session;
     try {
-      const segments = useFocusSessionStore.getState().seal();
-      if (s) {
-        // A retry after a partial write must send only the days that never
-        // landed — each one is recorded on the session as it lands.
-        await writeFocusSession(segments, s.promiseId, s.title, {
-          writtenDates: useFocusSessionStore.getState().session?.writtenDates ?? [],
-          onWritten: (date) => useFocusSessionStore.getState().markWritten(date),
-        });
-      }
-      useFocusSessionStore.getState().stop();
+      await endFocusSession();
       navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined } });
     } catch {
       setSaveError(true);

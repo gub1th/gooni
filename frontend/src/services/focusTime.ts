@@ -7,7 +7,7 @@ import {
   type Trackable,
   type TrackableEntryRow,
 } from "./api";
-import type { FocusSegment } from "../stores/useFocusSessionStore";
+import { useFocusSessionStore, type FocusSegment } from "../stores/useFocusSessionStore";
 
 // Focus time — ONE trackable, attribution on the ENTRY.
 //
@@ -217,6 +217,40 @@ export async function writeFocusSession(
     onWritten?.(d.date);
   }
   return drafts;
+}
+
+/**
+ * End the running session: seal it, write its entry, and only THEN drop it.
+ *
+ * The one write-then-clear path, shared by the session page's stop control and
+ * by starting focus on another task. It THROWS when the write failed, leaving
+ * the session paused with its segments intact — the entry is the only durable
+ * artifact a session produces, so clearing before it lands would destroy it.
+ * A no-op when nothing is running.
+ */
+export async function endFocusSession(): Promise<void> {
+  const s = useFocusSessionStore.getState().session;
+  if (!s) return;
+  const segments = useFocusSessionStore.getState().seal();
+  await writeFocusSession(segments, s.promiseId, s.title, {
+    writtenDates: useFocusSessionStore.getState().session?.writtenDates ?? [],
+    onWritten: (date) => useFocusSessionStore.getState().markWritten(date),
+  });
+  useFocusSessionStore.getState().stop();
+}
+
+/**
+ * Start focus on a task, ending whatever was running first.
+ *
+ * Switching tasks mid-day is normal, and the focus control is live on every row,
+ * so the switch has to be silent AND lossless. Starting is CONDITIONAL on the
+ * outgoing session having been durably written: `endFocusSession` throws on a
+ * failed write, which aborts the switch and leaves the old session recoverable
+ * rather than swapping it away with its minutes unwritten.
+ */
+export async function switchFocusSession(promiseId: number, title: string): Promise<void> {
+  await endFocusSession();
+  useFocusSessionStore.getState().start(promiseId, title);
 }
 
 export interface FocusTotals {
