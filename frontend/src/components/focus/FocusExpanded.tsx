@@ -8,7 +8,7 @@ import {
   sealedSegments,
   sessionStartedAt,
   useFocusSessionStore,
-  type FocusMode,
+  type FocusStyle,
 } from "../../stores/useFocusSessionStore";
 import {
   endFocusSession,
@@ -39,12 +39,6 @@ import {
 // lifecycle: start/seal/write live in the store and `endFocusSession`, and this
 // is a control surface over them. The banner outlives this component, which is
 // what makes it safe for this to be a modal.
-
-/** Ring targets. A session is not capped by them — the ring just laps. */
-const TARGET_MS: Record<FocusMode, number> = {
-  focus: 25 * 60_000,
-  break: 5 * 60_000,
-};
 
 const R = 160;
 const CIRC = 2 * Math.PI * R;
@@ -172,9 +166,14 @@ export function FocusExpanded({
   // the SESSION, and this view comes and goes (collapse, kiosk) while the
   // session keeps running. See that hook for the full reasoning.
 
-  const mode: FocusMode = session?.mode ?? "focus";
-  const elapsed = useMemo(() => elapsedMs(session, mode, now), [session, mode, now]);
-  const frac = Math.min(1, elapsed / TARGET_MS[mode]);
+  const style: FocusStyle = session?.style ?? "stopwatch";
+  const targetMs = session?.targetMs ?? 0;
+  const elapsed = useMemo(() => elapsedMs(session, "focus", now), [session, now]);
+  // A stopwatch has nothing to fill, so it has no ring — the elapsed time IS
+  // the display. Only a timer has a target to run against.
+  const remaining = Math.max(0, targetMs - elapsed);
+  const frac = style === "timer" && targetMs > 0 ? Math.min(1, elapsed / targetMs) : 0;
+  const shown = style === "timer" ? remaining : elapsed;
 
   // A claim about what gets STORED, so it goes through the same closer and
   // day-fold the write path does. The big mm:ss stays a plain stopwatch.
@@ -232,16 +231,16 @@ export function FocusExpanded({
       </div>
 
       <div role="tablist" style={{ display: "flex", gap: 26, marginBottom: 8 }}>
-        {(["focus", "break"] as FocusMode[]).map((m) => (
+        {(["stopwatch", "timer"] as FocusStyle[]).map((m) => (
           <button
             key={m}
             role="tab"
-            aria-selected={mode === m}
-            onClick={() => useFocusSessionStore.getState().setMode(m)}
+            aria-selected={style === m}
+            onClick={() => useFocusSessionStore.getState().setStyle(m)}
             style={{
               border: "none", background: "transparent", padding: 0, cursor: "pointer",
               fontFamily: FONT, fontSize: 12, fontWeight: 700, letterSpacing: "0.13em",
-              color: mode === m ? pal.ink : pal.ink3,
+              color: style === m ? pal.ink : pal.ink3,
               transition: "color 150ms ease",
             }}
           >
@@ -251,19 +250,23 @@ export function FocusExpanded({
       </div>
 
       <div style={{ position: "relative", width: 340, height: 340, display: "grid", placeItems: "center" }}>
-        <svg viewBox="0 0 340 340" style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)" }} aria-hidden>
-          <circle cx="170" cy="170" r={R} fill="none" stroke={pal.rule} strokeWidth={2} />
-          <circle
-            cx="170" cy="170" r={R} fill="none"
-            stroke={pal.accent} strokeWidth={2} strokeLinecap="round"
-            strokeDasharray={CIRC}
-            strokeDashoffset={CIRC * (1 - frac)}
-            style={{ transition: "stroke-dashoffset 600ms linear" }}
-          />
-        </svg>
+        {/* ring ONLY in timer mode — a stopwatch has nothing to fill, so a ring
+            there would draw progress against a target that does not exist */}
+        {style === "timer" && (
+          <svg viewBox="0 0 340 340" style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)" }} aria-hidden>
+            <circle cx="170" cy="170" r={R} fill="none" stroke={pal.rule} strokeWidth={2} />
+            <circle
+              cx="170" cy="170" r={R} fill="none"
+              stroke={pal.accent} strokeWidth={2} strokeLinecap="round"
+              strokeDasharray={CIRC}
+              strokeDashoffset={CIRC * (1 - frac)}
+              style={{ transition: "stroke-dashoffset 600ms linear" }}
+            />
+          </svg>
+        )}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, zIndex: 1 }}>
-          <div style={{ fontSize: 62, fontWeight: 500, letterSpacing: "-0.035em", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-            {mmss(elapsed)}
+          <div style={{ fontSize: style === "timer" ? 62 : 74, fontWeight: 500, letterSpacing: "-0.035em", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+            {mmss(shown)}
           </div>
           <div
             style={{

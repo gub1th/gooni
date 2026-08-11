@@ -329,7 +329,7 @@ export function QuickFind({
     <div
       data-quickfind
       style={{
-        position: "fixed", top: 14, left: "50%", transform: "translateX(-50%)",
+        position: "fixed", top: "calc(var(--gooni-bar-h, 0px) + 14px)", left: "50%", transform: "translateX(-50%)",
         width: BAR_W, zIndex: z.overlay - 10, fontFamily: FONT,
         opacity: hidden ? 0 : 1,
         pointerEvents: hidden ? "none" : "auto",

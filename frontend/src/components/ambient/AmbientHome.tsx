@@ -11,6 +11,7 @@ import { QuickFind } from "./QuickFind";
 import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
 import { HomeCorner, HomeDate } from "./HomeCorners";
 import { LogSheet } from "./LogSheet";
+import { SESSION_BAR_H } from "../focus/FocusSessionBar";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 import { useFocusOverlayStore } from "../../stores/useFocusOverlayStore";
@@ -91,6 +92,33 @@ const ROWS_MAX = `calc(${(1 - TODAY_Y) * 100}vh - 152px)`;
 // while teaching nobody anything.
 const QUIP = "Another day of keeping the nose to the grindstone.";
 
+// It is a MOMENT, not furniture (pass 3). As a permanent fixture it was the
+// largest thing on the screen and never changed, which is the definition of
+// loud and saying nothing. It shows on the first load of the day and after
+// finishing something, then goes.
+//
+// The slot is absolutely positioned, so its absence collapses nothing — the
+// wave simply keeps the space, which is what was asked for.
+const QUIP_SEEN_KEY = "gooni_quip_day";
+const QUIP_MS = 12_000;
+
+function firstLoadToday(): boolean {
+  try {
+    const today = new Date().toDateString();
+    if (localStorage.getItem(QUIP_SEEN_KEY) === today) return false;
+    localStorage.setItem(QUIP_SEEN_KEY, today);
+    return true;
+  } catch {
+    return false; // private mode — better silent than shouting every load
+  }
+}
+
+// Evaluated at MODULE scope, once per page load. It cannot go in a useState
+// initializer: this check consumes the day's one showing as a side effect, and
+// StrictMode double-invokes initializers in dev — the second call would find
+// the key already written and answer false, so the phrase never appeared.
+const FIRST_LOAD_TODAY = firstLoadToday();
+
 function isGlowing(m: LogMessage): boolean {
   return Boolean(m.has_actionable_signal) && (m.signal_preview?.status ?? "pending") === "pending";
 }
@@ -136,6 +164,22 @@ export function AmbientHome({
   const [replyShown, setReplyShown] = useState(false);
   const [peekNote, setPeekNote] = useState<ApiNote | null>(null);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
+  const [quipShown, setQuipShown] = useState(FIRST_LOAD_TODAY);
+  const quipTimer = useRef<number | null>(null);
+
+  const showQuip = useCallback(() => {
+    setQuipShown(true);
+    if (quipTimer.current) window.clearTimeout(quipTimer.current);
+    quipTimer.current = window.setTimeout(() => setQuipShown(false), QUIP_MS);
+  }, []);
+
+  useEffect(() => {
+    if (!quipShown) return;
+    if (quipTimer.current) window.clearTimeout(quipTimer.current);
+    quipTimer.current = window.setTimeout(() => setQuipShown(false), QUIP_MS);
+    return () => { if (quipTimer.current) window.clearTimeout(quipTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickyRef = useRef<StickyHandle>(null);
   const focusedRef = useRef(false);
@@ -261,10 +305,15 @@ export function AmbientHome({
   // written for them) and a paused session accrues nothing at all.
   const sessionRow: SessionRow | null = useMemo(() => {
     if (!session) return null;
+    // Two states now, not three — break is gone. Still ONE derivation
+    // (`isAccruingFocus`) rather than a per-state test at this call site.
+    const elapsed = elapsedMs(session, "focus", nowTick);
     return {
       promiseId: session.promiseId,
-      state: isAccruingFocus(session) ? "focus" : !session.running ? "paused" : "break",
-      label: mmss(elapsedMs(session, session.mode, nowTick)),
+      state: isAccruingFocus(session) ? "focus" : "paused",
+      // mirrors the session bar exactly: a timer counts DOWN, so the row must
+      // not sit next to it counting up and disagreeing about the same session
+      label: mmss(session.style === "timer" ? Math.max(0, session.targetMs - elapsed) : elapsed),
     };
   }, [session, nowTick]);
 
@@ -601,6 +650,7 @@ export function AmbientHome({
     const next = item.state === "kept" ? "active" : "kept";
     const updated: FocusReminder = { ...item, state: next, done: next === "kept" };
     const undoRetention = retainTicked(retained.current, updated);
+    if (next === "kept") showQuip(); // finishing something is the other moment
     setShortTerm((prev) => prev.map((r) => (r.id === item.id ? updated : r)));
     // If a session is running on this task, both surfaces have to agree about
     // it — the session store is where they meet.
@@ -678,7 +728,13 @@ export function AmbientHome({
   return (
     <div
       onDoubleClick={onRootDoubleClick}
-      style={{ position: "fixed", inset: 0, background: "var(--gooni-void, #000000)", overflow: "hidden", fontFamily: FONT }}
+      // The home paints its own full-bleed void, so AppShell's reserved band
+      // height does not apply to it — it has to clear the bar itself.
+      style={{
+        position: "fixed", left: 0, right: 0, bottom: 0,
+        top: hasSession ? SESSION_BAR_H : 0,
+        background: "var(--gooni-void, #000000)", overflow: "hidden", fontFamily: FONT,
+      }}
     >
       <MorphLine boxMode={boxMode} rect={rect} thinking={thinking} dimmed={trackablesOpen} waveWidth={waveW} energyRef={energyRef} activeRef={activeRef} />
       <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={covered || logSheet} />
@@ -783,6 +839,8 @@ export function AmbientHome({
             width: "min(19ch, 86vw)", textAlign: "center",
             fontSize: 33, fontWeight: 600, letterSpacing: "-0.022em", lineHeight: 1.18,
             color: ink(0.92), pointerEvents: "none",
+            opacity: quipShown ? 1 : 0,
+            transition: "opacity 600ms ease",
           }}
         >
           {QUIP}
@@ -846,29 +904,21 @@ export function AmbientHome({
         </div>
       )}
 
-      {/* bottom affordance — reflects the current mode */}
-      <div
-        style={{
-          position: "fixed", bottom: 20, left: 0, right: 0, textAlign: "center",
-          zIndex: 1, pointerEvents: "none", fontSize: 11, letterSpacing: 0.4,
-          color: ink(0.38),
-          opacity: needsWake || boxMode || covered || thinking || replyText || liveTranscript ? 0 : 1,
-          transition: "opacity 300ms ease",
-        }}
-      >
-        {savedFlash
-          ? savedFlash
-          : voiceMode && armed
-          ? (listening ? "listening — just talk" : "…")
-          : (
-            <>
-              press <kbd style={{
-                fontFamily: FONT, fontWeight: 700, color: ink(0.5),
-                padding: "1px 6px", borderRadius: 5, border: `1px solid ${ink(0.14)}`,
-              }}>/</kbd> or hover to capture a thought
-            </>
-          )}
-      </div>
+      {/* The capture hint is GONE (pass 3). `/` and hover both still work —
+          only the line advertising them was removed. `savedFlash` keeps the
+          slot for the one thing that genuinely needs saying: whether a ⌘↵ note
+          landed. */}
+      {savedFlash && (
+        <div
+          style={{
+            position: "fixed", bottom: 20, left: 0, right: 0, textAlign: "center",
+            zIndex: 1, pointerEvents: "none", fontSize: 11, letterSpacing: 0.4,
+            color: ink(0.38),
+          }}
+        >
+          {savedFlash}
+        </div>
+      )}
 
       {/* tap-to-wake veil — the one required gesture (unlocks mic + audio). */}
       {needsWake && (

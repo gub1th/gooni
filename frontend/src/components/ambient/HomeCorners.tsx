@@ -3,7 +3,7 @@ import { Mic, MicOff, Moon, ScrollText, Sun } from "lucide-react";
 import { FONT, frostInk, z } from "../../ui";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { ink } from "./ambientInk";
-import { FocusBanner } from "../focus/FocusBanner";
+import { FocusDayStat } from "../focus/FocusDayStat";
 
 // The two corners, Momentum's shape. Bare glyphs and bare text on the void —
 // no frosted pill, no card. Chrome only earns a surface when it's summoned.
@@ -27,7 +27,7 @@ export function HomeDate() {
   return (
     <div
       style={{
-        position: "fixed", top: 22, left: 26, zIndex: z.overlay,
+        position: "fixed", top: "calc(var(--gooni-bar-h, 0px) + 22px)", left: 26, zIndex: z.overlay,
         fontFamily: FONT, fontSize: 11.5, color: ink(0.38), pointerEvents: "none",
       }}
     >
@@ -98,11 +98,11 @@ export function HomeCorner({
   return (
     <div
       style={{
-        position: "fixed", top: 20, right: 26, zIndex: z.overlay,
+        position: "fixed", top: "calc(var(--gooni-bar-h, 0px) + 20px)", right: 26, zIndex: z.overlay,
         display: "flex", alignItems: "center", gap: 20, fontFamily: FONT,
       }}
     >
-      <FocusBanner />
+      <FocusDayStat />
 
       <CornerButton
         label={voiceOn ? (listening ? "listening — click to go silent" : "voice on — click to go silent") : "voice off — click to talk"}

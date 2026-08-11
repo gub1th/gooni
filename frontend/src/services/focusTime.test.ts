@@ -99,6 +99,8 @@ test("a session nobody closed is capped, and the entry says the total is a floor
     promiseId: 3,
     title: "read the paper",
     mode: "focus",
+    style: "stopwatch",
+    targetMs: 25 * 60_000,
     startedAt: started,
     segments: [],
     running: true,
@@ -192,14 +194,38 @@ test("a retry with nothing outstanding writes nothing at all", async () => {
   expect(logged).toHaveLength(0);
 });
 
-test("break time is elapsed time but it is not focus, so it is never written", async () => {
-  const drafts = splitSegmentsByDay([
-    { start: at(2026, 8, 10, 9, 0), end: at(2026, 8, 10, 9, 25), mode: "focus" },
-    { start: at(2026, 8, 10, 9, 25), end: at(2026, 8, 10, 9, 30), mode: "break" },
-  ]);
+test("a session persisted before break was dropped loses its break segments", async () => {
+  // Pass 3 removed break. A session already in localStorage can still hold
+  // break segments, and they must be DISCARDED rather than adopted: the build
+  // that recorded them had already promised never to write them, so promoting
+  // them to focus would credit the promise with minutes it was told it would
+  // not get.
+  localStorage.setItem(
+    "gooni_focus_session",
+    JSON.stringify({
+      promiseId: 5,
+      title: "legacy",
+      mode: "focus",
+      startedAt: at(2026, 8, 10, 9, 0),
+      segments: [
+        { start: at(2026, 8, 10, 9, 0), end: at(2026, 8, 10, 9, 25), mode: "focus" },
+        { start: at(2026, 8, 10, 9, 25), end: at(2026, 8, 10, 9, 30), mode: "break" },
+      ],
+      running: false,
+      kept: false,
+      writtenDates: [],
+    }),
+  );
 
-  expect(drafts).toHaveLength(1);
-  expect(drafts[0].minutes).toBe(25);
+  // the store reads localStorage at MODULE LOAD, so it has to be imported
+  // after the legacy blob is in place — that read is the behaviour under test
+  vi.resetModules();
+  const fresh = (await import("../stores/useFocusSessionStore")).useFocusSessionStore;
+  const revived = fresh.getState().session!;
+  expect(revived.segments).toHaveLength(1);
+  expect(splitSegmentsByDay(revived.segments)[0].minutes).toBe(25);
+  // and it comes back as a stopwatch, the new default
+  expect(revived.style).toBe("stopwatch");
 });
 
 /** A paused session with 40 recorded minutes on one task. */
@@ -208,6 +234,8 @@ function fortyMinutesOn(promiseId: number, title: string): FocusSession {
     promiseId,
     title,
     mode: "focus",
+    style: "stopwatch",
+    targetMs: 25 * 60_000,
     startedAt: at(2026, 8, 10, 9, 0),
     segments: [{ start: at(2026, 8, 10, 9, 0), end: at(2026, 8, 10, 9, 40), mode: "focus" }],
     running: false,

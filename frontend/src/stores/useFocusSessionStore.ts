@@ -17,7 +17,27 @@ import { create } from "zustand";
 // from them. Each segment carries its mode: BREAK time is real elapsed time but
 // it is not focus, and only focus segments are ever written.
 
-export type FocusMode = "focus" | "break";
+// Every segment is focus time. BREAK was removed in pass 3, and with it the
+// only mode a segment could carry that was NOT written — so this union is a
+// single member on purpose rather than being deleted: `FocusSegment.mode` and
+// the `mode === "focus"` filter in `splitSegmentsByDay` stay exactly as they
+// are, which keeps the persisted shape and the write path untouched.
+export type FocusMode = "focus";
+
+/**
+ * How the session is being TIMED. A display concern, not an accounting one —
+ * both styles accrue focus identically and produce identical segments.
+ *
+ *   stopwatch → counts up, no target, the DEFAULT
+ *   timer     → counts down from `targetMs`
+ *
+ * This is why it is separate from `mode` rather than replacing it: break was a
+ * kind of time, stopwatch/timer is a way of watching the same time.
+ */
+export type FocusStyle = "stopwatch" | "timer";
+
+/** Timer default when you switch to it: a pomodoro, adjustable per session. */
+export const DEFAULT_TIMER_MS = 25 * 60_000;
 
 export interface FocusSegment {
   start: number; // epoch ms
@@ -31,6 +51,10 @@ export interface FocusSession {
   promiseId: number;
   title: string;
   mode: FocusMode;
+  /** stopwatch (default) or timer — see FocusStyle */
+  style: FocusStyle;
+  /** timer target; ignored in stopwatch style */
+  targetMs: number;
   /** epoch ms the CURRENT run began; meaningless while paused */
   startedAt: number;
   /** closed runs so far */
@@ -80,7 +104,8 @@ interface FocusSessionState {
   start: (promiseId: number, title: string) => void;
   pause: () => void;
   resume: () => void;
-  setMode: (mode: FocusMode) => void;
+  setStyle: (style: FocusStyle) => void;
+  setTargetMs: (ms: number) => void;
   /**
    * Close the open run and hand back the segments, WITHOUT ending the session.
    * The caller writes the entry first and calls `stop` only once that
@@ -106,9 +131,17 @@ function read(): FocusSession | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as FocusSession;
     if (typeof parsed?.promiseId !== "number") return null;
+    const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
     return {
       ...parsed,
-      segments: Array.isArray(parsed.segments) ? parsed.segments : [],
+      mode: "focus",
+      // A session persisted BEFORE break was dropped can still hold break
+      // segments. They are discarded rather than adopted: they were never
+      // going to be written, and silently promoting them to focus would credit
+      // a Promise with minutes the old build had already promised not to.
+      segments: segments.filter((g) => (g as { mode?: string }).mode !== "break"),
+      style: parsed.style === "timer" ? "timer" : "stopwatch",
+      targetMs: typeof parsed.targetMs === "number" && parsed.targetMs > 0 ? parsed.targetMs : DEFAULT_TIMER_MS,
       kept: parsed.kept === true,
       writtenDates: Array.isArray(parsed.writtenDates) ? parsed.writtenDates : [],
     };
@@ -148,18 +181,17 @@ export function sealedSegments(s: FocusSession, now: number): FocusSegment[] {
 }
 
 /**
- * Is focus ACCRUING right now? The one three-state fact, in one place.
+ * Is focus ACCRUING right now? The one liveness fact, in one place.
  *
- * A session is live-focus, on a break, or paused, and only the first accrues:
- * `splitSegmentsByDay` drops break segments, so break minutes never reach
- * `focused today` and no entry is ever written for them, and a paused session
- * accrues nothing at all. Every consumer that starts or stops something on the
- * session's liveness reads this rather than `running` alone — `running` stays
- * true through a break, which is how the camera kept sensing and the row kept
- * claiming to tick.
+ * It used to derive over three states (live focus / break / paused); dropping
+ * break narrowed it to two. The DERIVATION stays single on purpose — every
+ * consumer that starts or stops something on the session's liveness (the
+ * focus-cam control, the row indicator, the home's tick cadence) reads this
+ * rather than re-deriving. Patching those call sites per-state one at a time is
+ * exactly what produced two rounds of review findings.
  */
 export function isAccruingFocus(s: FocusSession | null): boolean {
-  return !!s && s.running && s.mode === "focus";
+  return !!s && s.running;
 }
 
 /** Epoch ms the session as a whole began — the window the sensors describe. */
@@ -178,6 +210,8 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
       promiseId,
       title,
       mode: "focus",
+      style: "stopwatch",
+      targetMs: DEFAULT_TIMER_MS,
       startedAt: Date.now(),
       segments: [],
       running: true,
@@ -204,18 +238,22 @@ export const useFocusSessionStore = create<FocusSessionState>((set, get) => ({
     set({ session: next });
   },
 
-  setMode: (mode) => {
+  // Switching STYLE does not touch the segments: stopwatch and timer accrue
+  // identically and only differ in how the same elapsed time is displayed.
+  // (The old `setMode` sealed the run on every switch, because focus↔break put
+  // the minutes either side into different buckets. Nothing does that now.)
+  setStyle: (style) => {
     const s = get().session;
-    if (!s || s.mode === mode) return;
-    // Switching mode closes the current run — the minutes on either side of the
-    // switch belong to different buckets.
-    const now = Date.now();
-    const next: FocusSession = {
-      ...s,
-      mode,
-      segments: sealedSegments(s, now),
-      startedAt: now,
-    };
+    if (!s || s.style === style) return;
+    const next: FocusSession = { ...s, style };
+    write(next);
+    set({ session: next });
+  },
+
+  setTargetMs: (ms) => {
+    const s = get().session;
+    if (!s || ms <= 0) return;
+    const next: FocusSession = { ...s, targetMs: ms };
     write(next);
     set({ session: next });
   },

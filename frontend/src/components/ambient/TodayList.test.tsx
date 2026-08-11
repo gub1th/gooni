@@ -126,10 +126,9 @@ test("the later bucket is visible and expands in place", () => {
   expect(screen.getByText("call mum")).toBeInTheDocument();
 });
 
-// Only live FOCUS is accruing. Break minutes are dropped by splitSegmentsByDay
-// and a paused session accrues nothing, so neither may borrow the ticking clock.
+// Only a live session is accruing. Break was removed in pass 3, so `paused` is
+// the one non-accruing state left — and it still must not borrow the clock.
 test.each([
-  ["break" as SessionRowState, "break"],
   ["paused" as SessionRowState, "paused"],
 ])("a %s session names itself instead of ticking, and still routes back", (state, label) => {
   const props = renderList({ sessionRow: onRow(state) });
@@ -147,7 +146,6 @@ test("a LIVE focus session shows its ticking clock and nothing else", () => {
 
   expect(screen.getByTitle("back to the session")).toHaveTextContent("12:34");
   expect(screen.queryByText("paused")).not.toBeInTheDocument();
-  expect(screen.queryByText("break")).not.toBeInTheDocument();
 });
 
 test("a kept row with a running session shows BOTH the strike and the clock", () => {

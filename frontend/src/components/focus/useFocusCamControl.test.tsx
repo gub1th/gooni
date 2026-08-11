@@ -1,11 +1,12 @@
 /**
- * Focus-cam control seam test. One rule, three states: the sidecar senses during
- * LIVE FOCUS ONLY.
+ * Focus-cam control seam test. One rule: the sidecar senses while focus is
+ * actually accruing, and not otherwise.
  *
- * Nothing should be sensed for a window that will never be written — break
- * segments are dropped by `splitSegmentsByDay` and a paused session accrues
- * nothing, so in both the camera must be idle. And the load-bearing case stays:
- * a closed tab always clears control.
+ * Nothing should be sensed for a window that will never be written. That used
+ * to be three states (live / break / paused); pass 3 removed break, so it is
+ * two — but the derivation is still SINGLE (`isAccruingFocus`), which is what
+ * these assertions really protect. And the load-bearing case stays: a closed
+ * tab always clears control.
  *
  * The rule outlived its original host. It used to live on the focus PAGE; since
  * focus became a state rather than a place (pass 2) it belongs to
@@ -61,21 +62,34 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("focus-cam control follows live focus only", () => {
-  it("senses on focus, stops on break, resumes on focus, stops on pause", async () => {
+  it("senses while running, stops on pause, resumes on resume", async () => {
     render(<ControlHost />);
 
     act(() => useFocusSessionStore.getState().start(7, "leetcode"));
     await waitFor(() => expect(latest()).toEqual(["running", 7]));
 
-    // BREAK accrues nothing toward focus, so the camera must not keep capturing
-    act(() => useFocusSessionStore.getState().setMode("break"));
-    await waitFor(() => expect(latest()).toEqual(["idle", null]));
-
-    act(() => useFocusSessionStore.getState().setMode("focus"));
-    await waitFor(() => expect(latest()).toEqual(["running", 7]));
-
+    // a paused session accrues nothing, so the camera must not keep capturing
     act(() => useFocusSessionStore.getState().pause());
     await waitFor(() => expect(latest()).toEqual(["idle", null]));
+
+    act(() => useFocusSessionStore.getState().resume());
+    await waitFor(() => expect(latest()).toEqual(["running", 7]));
+  });
+
+  it("switching stopwatch↔timer does not disturb sensing", async () => {
+    render(<ControlHost />);
+
+    act(() => useFocusSessionStore.getState().start(3, "write it up"));
+    await waitFor(() => expect(latest()).toEqual(["running", 3]));
+    const before = controls.length;
+
+    // The two styles are the same accruing time watched two ways, so flipping
+    // between them must not stop and restart the sidecar.
+    act(() => useFocusSessionStore.getState().setStyle("timer"));
+    act(() => useFocusSessionStore.getState().setStyle("stopwatch"));
+
+    expect(latest()).toEqual(["running", 3]);
+    expect(controls.length).toBe(before);
   });
 
   it("clears control when the tab goes away", async () => {

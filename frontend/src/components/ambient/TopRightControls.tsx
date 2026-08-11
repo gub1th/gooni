@@ -1,7 +1,7 @@
 import { Sun, Moon, type LucideIcon } from "lucide-react";
 import { FONT, z } from "../../ui";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
-import { FocusBanner } from "../focus/FocusBanner";
+import { FocusDayStat } from "../focus/FocusDayStat";
 
 // Top-right chrome for the SHEET surfaces: the light/dark toggle, and nothing
 // else. The home-jump button it used to sit beside pointed at `/home`, which no
@@ -67,7 +67,7 @@ export function TopRightControls() {
     <div
       style={{
         position: "fixed",
-        top: 14,
+        top: "calc(var(--gooni-bar-h, 0px) + 14px)",
         right: 14,
         zIndex: z.overlay + 3,
         display: "flex",
@@ -76,7 +76,7 @@ export function TopRightControls() {
         fontFamily: FONT,
       }}
     >
-      <FocusBanner />
+      <FocusDayStat />
       <IconButton
         Icon={theme === "dark" ? Sun : Moon}
         label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}

@@ -15,6 +15,10 @@ import type { FocusReminder } from "../../services/api";
 // Ticking strikes the row through IN PLACE. It does not move to a completed
 // section: the list is short enough that reordering on tick is just the row
 // you were looking at jumping out from under the pointer.
+//
+// LEFT-ALIGNED, and smaller (pass 3). Momentum centres because it shows exactly
+// ONE task; centring a LIST breaks scanning, because the eye needs a fixed left
+// edge to run down. We show several, so it left-aligns on a shared edge.
 
 export interface TodayRow {
   item: FocusReminder;
@@ -30,7 +34,8 @@ export interface TodayRow {
  * a paused session accrues nothing at all. A pulsing dot and a ticking clock
  * both claim "accruing right now", so only `focus` may render them.
  */
-export type SessionRowState = "focus" | "break" | "paused";
+// break was removed in pass 3; the row derives over two states now
+export type SessionRowState = "focus" | "paused";
 
 export interface SessionRow {
   promiseId: number;
@@ -73,8 +78,8 @@ export function TodayList({
       style={{
         display: "flex",
         flexDirection: "column",
-        alignItems: "center",
-        textAlign: "center",
+        alignItems: "flex-start",
+        textAlign: "left",
         fontFamily: FONT,
       }}
     >
@@ -85,7 +90,7 @@ export function TodayList({
           fontWeight: 700,
           letterSpacing: "0.14em",
           color: ink(0.38),
-          marginBottom: 14,
+          marginBottom: 12,
         }}
       >
         TODAY
@@ -102,7 +107,7 @@ export function TodayList({
           overflowX: "hidden",
           // full width so the scrollbar gutter can't shift the centred rows
           alignSelf: "stretch",
-          display: "flex", flexDirection: "column", alignItems: "center",
+          display: "flex", flexDirection: "column", alignItems: "stretch",
         }}
       >
         {rows.map(({ item, minutes }) => (
@@ -118,7 +123,7 @@ export function TodayList({
         ))}
 
         {rows.length === 0 && !adding && (
-          <span style={{ fontSize: 17, color: ink(0.3), padding: "6px 0" }}>nothing today</span>
+          <span style={{ fontSize: 14, color: ink(0.3), padding: "5px 0" }}>nothing today</span>
         )}
       </div>
 
@@ -194,9 +199,9 @@ function TaskRow({
         position: "relative",
         display: "flex",
         alignItems: "center",
-        justifyContent: "center",
-        gap: 14,
-        padding: "6px 0",
+        justifyContent: "flex-start",
+        gap: 12,
+        padding: "5px 0",
       }}
     >
       <button
@@ -204,10 +209,10 @@ function TaskRow({
         aria-label={done ? `Reopen ${item.content}` : `Complete ${item.content}`}
         aria-pressed={done}
         style={{
-          width: 22,
-          height: 22,
+          width: 18,
+          height: 18,
           flex: "none",
-          borderRadius: 5,
+          borderRadius: 4,
           padding: 0,
           cursor: "pointer",
           display: "grid",
@@ -219,15 +224,15 @@ function TaskRow({
         onMouseEnter={() => setCbHover(true)}
         onMouseLeave={() => setCbHover(false)}
       >
-        {done && <Check size={12} strokeWidth={3.4} color="var(--gooni-void, #000)" />}
+        {done && <Check size={11} strokeWidth={3.4} color="var(--gooni-void, #000)" />}
       </button>
 
       <span
         style={{
-          fontSize: 25,
+          fontSize: 19,
           fontWeight: 450,
           letterSpacing: "-0.012em",
-          lineHeight: 1.25,
+          lineHeight: 1.3,
           color: done ? ink(0.5) : ink(0.92),
           textDecoration: done ? "line-through" : "none",
           textDecorationThickness: done ? 1.5 : undefined,
@@ -279,9 +284,9 @@ function TaskRow({
         title="focus"
         style={{
           position: "absolute",
-          right: -34,
-          width: 30,
-          height: 30,
+          right: -32,
+          width: 26,
+          height: 26,
           borderRadius: 999,
           border: "none",
           background: "transparent",

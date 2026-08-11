@@ -23,6 +23,8 @@ import { Sidebar } from "../components/notes/Sidebar";
 import { IconRail } from "../components/ambient/IconRail";
 import { TopRightControls } from "../components/ambient/TopRightControls";
 import { useFocusCamControl } from "../components/focus/useFocusCamControl";
+import { FocusSessionBar, SESSION_BAR_H } from "../components/focus/FocusSessionBar";
+import { useFocusSessionStore } from "../stores/useFocusSessionStore";
 import { sheetFrame } from "../ui";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -124,6 +126,16 @@ function AppShell() {
   // ONE owner of the focus-cam reconcile target, mounted here because AppShell
   // survives every route change — see the hook for why no view may own it.
   useFocusCamControl();
+  // The session band owns its own row at the very top. Its height is reserved
+  // ONLY while a session runs, so the page returns to full height otherwise.
+  const hasSession = useFocusSessionStore((s) => s.session != null);
+  // Published as a CSS var because the elements that must clear the band are
+  // `position: fixed` with their own top offsets (QuickFind, the home corner
+  // cluster, the date, the theme toggle) — they do not inherit the shell's
+  // reserved padding, and prop-drilling a number into each is how they drift.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--gooni-bar-h", hasSession ? `${SESSION_BAR_H}px` : "0px");
+  }, [hasSession]);
   const location = useLocation();
   const navigate = useNavigate();
   const routerState = useRouterState();
@@ -344,6 +356,7 @@ function AppShell() {
           // underlaps it. STATIC (not hover-driven) → no reflow jank. Immersive
           // surfaces hide the rail, so no lane.
           paddingLeft: isImmersive ? 0 : 68,
+          paddingTop: hasSession && !isImmersive ? SESSION_BAR_H : 0,
         }}
       >
         <div
@@ -415,6 +428,7 @@ function AppShell() {
           <Outlet />
         </div>
         </div>
+        {!isImmersive && <FocusSessionBar />}
         {!isImmersive && <IconRail />}
         {/* Corner theme toggle. NOT on the home: `/` owns its own top-right
             cluster (focused-today · mic · log) and a second thing up there
