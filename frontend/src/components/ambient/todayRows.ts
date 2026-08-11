@@ -1,3 +1,4 @@
+import { localDayKey } from "../../services/focusTime";
 import type { FocusReminder } from "../../services/api";
 
 // What TODAY shows, given what the server serves.
@@ -18,6 +19,14 @@ import type { FocusReminder } from "../../services/api";
 // truth: retention is in memory, and the session's own persisted store is what
 // carries case 2 across a reload.
 //
+// Retention is bounded to the LOCAL DAY, and that bound is load-bearing on an
+// always-on surface: the home polls the dashboard every 30s and is never
+// reloaded, so without it a row ticked at 21:00 gets spliced back in at 00:01 —
+// ranked FIRST, because its first-seen index is the oldest — and TODAY leads
+// with yesterday's finished work until someone reloads the tab. A running
+// session is deliberately NOT day-bounded: case 2 rebuilds its row from the
+// session store, which is exactly what a session across midnight needs.
+//
 // This is a pure function over explicit state on purpose. The rule was
 // previously inline in the home component, which is exactly why case 2 went
 // unnoticed — there was nowhere to state it and nothing to test it against.
@@ -29,10 +38,22 @@ export interface RetainedRows {
   seen: Map<number, FocusReminder>;
   /** ids in first-seen order — a retained row re-enters at its OWN index */
   order: number[];
+  /** the local day this retention describes; a new day starts clean */
+  day: string;
 }
 
-export function emptyRetained(): RetainedRows {
-  return { kept: new Map(), seen: new Map(), order: [] };
+export function emptyRetained(now: number = Date.now()): RetainedRows {
+  return { kept: new Map(), seen: new Map(), order: [], day: localDayKey(now) };
+}
+
+/** Drop everything retained for a day that is over. TODAY has to mean today. */
+function rollDay(state: RetainedRows, now: number) {
+  const today = localDayKey(now);
+  if (state.day === today) return;
+  state.kept.clear();
+  state.seen.clear();
+  state.order.length = 0;
+  state.day = today;
 }
 
 /**
@@ -44,7 +65,12 @@ export function emptyRetained(): RetainedRows {
  * permanently, since the server still holds the promise as kept and retention is
  * in-memory. The undo restores exactly the entry that was there before.
  */
-export function retainTicked(state: RetainedRows, next: FocusReminder): () => void {
+export function retainTicked(
+  state: RetainedRows,
+  next: FocusReminder,
+  now: number = Date.now(),
+): () => void {
+  rollDay(state, now);
   const prior = state.kept.get(next.id);
   if (next.state === "kept") state.kept.set(next.id, next);
   else state.kept.delete(next.id);
@@ -88,7 +114,10 @@ export function mergeTodayRows(
   serverRows: FocusReminder[],
   state: RetainedRows,
   running: RunningTask | null,
+  now: number = Date.now(),
 ): FocusReminder[] {
+  rollDay(state, now);
+
   for (const r of serverRows) {
     if (!state.order.includes(r.id)) state.order.push(r.id);
     state.seen.set(r.id, r);

@@ -201,6 +201,35 @@ test("a failed tick leaves no retention behind", () => {
   expect(mergeTodayRows([served[0]], state, null).map((r) => r.id)).toEqual([1]);
 });
 
+test("retention stops applying once its local day is over", () => {
+  const lastNight = new Date(2026, 7, 10, 21, 0).getTime();
+  const afterMidnight = new Date(2026, 7, 11, 0, 1).getTime();
+
+  const state = emptyRetained(lastNight);
+  const served = [reminder(1, "leetcode"), reminder(2, "ship it")];
+  mergeTodayRows(served, state, null, lastNight);
+  retainTicked(state, { ...served[0], state: "kept", done: true }, lastNight);
+
+  // still last night: the ticked row stays put even though the server dropped it
+  expect(mergeTodayRows([served[1]], state, null, lastNight).map((r) => r.id)).toEqual([1, 2]);
+
+  // 00:01 — the home is always-on and never reloaded, and the server now serves
+  // a fresh (empty) short_term. TODAY must not lead with yesterday's finished work.
+  expect(mergeTodayRows([], state, null, afterMidnight)).toEqual([]);
+});
+
+test("a session running across midnight keeps its row on the new day", () => {
+  const lastNight = new Date(2026, 7, 10, 23, 50).getTime();
+  const afterMidnight = new Date(2026, 7, 11, 0, 10).getTime();
+
+  const state = emptyRetained(lastNight);
+  mergeTodayRows([reminder(5, "ship it")], state, null, lastNight);
+
+  const merged = mergeTodayRows([], state, { promiseId: 5, title: "ship it", kept: true }, afterMidnight);
+  expect(merged.map((r) => r.id)).toEqual([5]);
+  expect(merged[0]).toMatchObject({ content: "ship it", state: "kept" });
+});
+
 test("a running task the server still serves is not duplicated", () => {
   const state = emptyRetained();
   const merged = mergeTodayRows([reminder(4, "gym")], state, { promiseId: 4, title: "gym", kept: false });

@@ -33,6 +33,24 @@ export const FOCUS_TRACKABLE = "focus";
 /** How far back per-task totals look. One read, grouped in code. */
 export const FOCUS_LOOKBACK_DAYS = 60;
 
+/**
+ * Trackables the log matrix may show but must never WRITE.
+ *
+ * Right now that is exactly one: `focus`. Every matrix verb — numeric edit, cell
+ * clear, boolean toggle, boolean tag — arrives with `replace: true`, and
+ * `trackable_service.log_entry` under `replace` DELETEs the whole (trackable,
+ * day) before inserting. On this column that destroys each session row's
+ * `value_json` (promise id, window, `truncated`), which no cell edit could
+ * reconstruct: the sessions are the source of truth and the cell is only their
+ * sum. Hand-editing a rollup was never meaningful.
+ *
+ * Deliberately NOT every `source="derived"` trackable — the whoop and leetcode
+ * numeric mirrors share that source and stay editable exactly as before.
+ */
+export function isReadOnlyRollup(t: { name: string; source?: string | null }): boolean {
+  return t.source === "derived" && t.name === FOCUS_TRACKABLE;
+}
+
 export interface FocusEntryDraft {
   /** local YYYY-MM-DD — the calendar day the minutes landed on */
   date: string;

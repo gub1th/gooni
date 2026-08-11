@@ -5,6 +5,7 @@ import { useNowTick } from "../../hooks/useNowTick";
 import { GREEN } from "./wavePath";
 import { LogTable } from "./LogTable";
 import { agePhrase, freshness, sleepClock } from "./whoopFreshness";
+import { isReadOnlyRollup } from "../../services/focusTime";
 import {
   createTrackable,
   fetchDailyNotes,
@@ -142,6 +143,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   }
 
   async function toggleBool(row: Row) {
+    if (isReadOnlyRollup(row.t)) return;
     const cur = row.days[0]?.value === true;
     // optimistic
     setRows((prev) => prev.map((r) => (
@@ -153,6 +155,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   }
 
   function openNumber(row: Row) {
+    if (isReadOnlyRollup(row.t)) return;
     const v = row.days[0]?.value;
     setEditId(row.t.id);
     setDraft(typeof v === "number" ? String(v) : "");
@@ -162,6 +165,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   async function commitNumber(row: Row) {
     const raw = draft.trim();
     setEditId(null);
+    if (isReadOnlyRollup(row.t)) return;
     // Empty field clears today's cell (valueless replace deletes the row).
     if (raw === "") {
       setRows((prev) => prev.map((r) => (
@@ -183,6 +187,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   }
 
   function openLabel(row: Row) {
+    if (isReadOnlyRollup(row.t)) return;
     setLabelEditId(row.t.id);
     setLabelDraft(row.days[0]?.label ?? "");
     requestAnimationFrame(() => labelRef.current?.focus());
@@ -193,6 +198,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   async function commitLabel(row: Row) {
     const text = labelDraft.trim();
     setLabelEditId(null);
+    if (isReadOnlyRollup(row.t)) return;
     // optimistic
     setRows((prev) => prev.map((r) => (
       r.t.id === row.t.id
@@ -284,6 +290,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
                   <Column
                     key={row.t.id}
                     row={row}
+                    readOnly={isReadOnlyRollup(row.t)}
                     editing={editId === row.t.id}
                     draft={draft}
                     editRef={editRef}
@@ -397,9 +404,12 @@ export function LogDots({ onClose }: { onClose: () => void }) {
 function Column({
   row, editing, draft, editRef, onToggle, onOpenNumber, onDraft, onCommit, onCancel,
   labelEditing, labelDraft, labelRef, onOpenLabel, onLabelDraft, onLabelCommit, onLabelCancel,
+  readOnly = false,
 }: {
   row: Row;
   editing: boolean;
+  /** a derived rollup: still shown, never written from here */
+  readOnly?: boolean;
   draft: string;
   editRef: React.RefObject<HTMLInputElement>;
   onToggle: () => void;
@@ -457,6 +467,17 @@ function Column({
             boxShadow: today === true ? `0 0 10px 1px rgba(74,222,128,0.6)` : "none",
           }}
         />
+      ) : readOnly ? (
+        <span
+          title={`${t.name} is a rollup of its own entries — read only here`}
+          style={{
+            minWidth: 40, padding: "4px 12px", borderRadius: 999, textAlign: "center",
+            border: "1px solid transparent",
+            color: "rgb(var(--gooni-ink, 244 245 244) / 0.7)", fontSize: 13, fontWeight: 600, fontFamily: FONT,
+          }}
+        >
+          {typeof today === "number" ? today : "–"}
+        </span>
       ) : editing ? (
         <input
           ref={editRef}

@@ -143,8 +143,9 @@ export function LogSheet({
     };
   }, [open]);
 
-  const loadOlder = useCallback(async () => {
-    if (loadingOlder.current || !hasMore || items.length === 0) return;
+  /** Resolves true only when a request actually went out. */
+  const loadOlder = useCallback(async (): Promise<boolean> => {
+    if (loadingOlder.current || !hasMore || items.length === 0) return false;
     loadingOlder.current = true;
     try {
       const before = items[items.length - 1].at;
@@ -152,7 +153,7 @@ export function LogSheet({
       const fresh = older.filter((r) => !seen.current.has(r.key));
       if (fresh.length === 0) {
         setHasMore(false);
-        return;
+        return true;
       }
       fresh.forEach((r) => seen.current.add(r.key));
       setItems((prev) => [...prev, ...fresh]);
@@ -161,6 +162,7 @@ export function LogSheet({
     } finally {
       loadingOlder.current = false;
     }
+    return true;
   }, [hasMore, items]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
@@ -175,7 +177,10 @@ export function LogSheet({
   // older matches are unreachable — a chat-heavy first page reads as "nothing
   // yet" under `notes` forever. So page on the POST-filter count too, BOUNDED:
   // a sparse filter must not walk the whole activity stream back to the
-  // beginning of time on one open. After the cap, scrolling asks for more.
+  // beginning of time on one open. The cap is a HARD stop for this filter
+  // selection (with too few rows to scroll, `onScroll` can't hand off) and
+  // resets when the filter changes or the sheet is reopened — so only pages that
+  // actually issued a request may spend it.
   const autoPages = useRef(0);
   const loadOlderRef = useRef(loadOlder);
   loadOlderRef.current = loadOlder;
@@ -188,11 +193,12 @@ export function LogSheet({
     if (!open || !hasMore) return;
     if (visible.length >= MIN_VISIBLE) return;
     if (autoPages.current >= MAX_AUTO_PAGES) return;
-    autoPages.current += 1;
     // Driven by `items.length`, not by `loadOlder`'s identity: a page that
     // matches nothing leaves `visible` untouched, so the filtered count alone
     // would stall before the cap is reached.
-    void loadOlderRef.current();
+    void loadOlderRef.current().then((issued) => {
+      if (issued) autoPages.current += 1;
+    });
   }, [open, hasMore, items.length, visible.length]);
 
   useEffect(() => {

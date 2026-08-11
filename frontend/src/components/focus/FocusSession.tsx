@@ -132,7 +132,6 @@ export function FocusSession() {
   const session = useFocusSessionStore((s) => s.session);
   const [now, setNow] = useState(() => Date.now());
   const [saveError, setSaveError] = useState(false);
-  const [stirring, setStirring] = useState(false);
   const stopping = useRef(false);
 
   // Kept lives in the SESSION store, not here: `/` has to keep showing this row
@@ -147,17 +146,6 @@ export function FocusSession() {
     const iv = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(iv);
   }, [running]);
-
-  // A session starting stirs him awake before the dial takes over. Keyed on the
-  // PROMISE, not the session object: the object changes on every pause, resume
-  // and mode flip, and re-stirring him mid-session would be a shrug.
-  useEffect(() => {
-    if (!session) { setStirring(false); return; }
-    setStirring(true);
-    const t = window.setTimeout(() => setStirring(false), 1100);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.promiseId]);
 
   // The sidecar is a RECONCILE-POLL target: we declare desired control, it
   // catches up on its own ~2s poll. Unmount always clears it, so a closed tab
@@ -227,7 +215,7 @@ export function FocusSession() {
   if (!session) {
     return (
       <div style={{ position: "fixed", inset: 0, background: pal.paper, fontFamily: FONT, overflow: "hidden" }}>
-        <GooniAsleep pal={pal} stirring={stirring} />
+        <GooniAsleep pal={pal} />
         <div
           style={{
             position: "absolute", bottom: 44, left: 0, right: 0, textAlign: "center",
