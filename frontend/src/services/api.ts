@@ -902,6 +902,34 @@ export async function updateStickyNote(
   return res.json();
 }
 
+// One raw entry row (GET .../entries?raw=true). Distinct from the per-day
+// pivot: several rows can share a (trackable, date), which is exactly what
+// carries per-session focus attribution in `value_json`.
+export interface TrackableEntryRow {
+  id: number;
+  trackable_id: number;
+  date: string;
+  value_boolean: boolean | null;
+  value_numeric: number | null;
+  value_json: unknown;
+  source: string;
+  created_at: string | null;
+}
+
+// Raw entries (NOT folded per day) for the last `days` days.
+export async function fetchTrackableEntries(
+  id: number,
+  days = 30,
+  end?: string,
+): Promise<TrackableEntryRow[]> {
+  const q = new URLSearchParams({ days: String(days), raw: "true" });
+  if (end) q.set("end", end);
+  const res = await apiFetch(`${BASE}/trackables/${id}/entries?${q.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch trackable entries");
+  const data = (await res.json()) as { entries: TrackableEntryRow[] };
+  return data.entries ?? [];
+}
+
 // Log one entry. replace=true = cell-edit (collapse the day to this value).
 export async function logTrackable(
   id: number,
@@ -913,12 +941,15 @@ export async function logTrackable(
     value_json?: Record<string, unknown>;
     replace?: boolean;
     date?: string;
+    // Who wrote it. Defaults to a hand edit; the focus timer stamps "focus"
+    // so its rows are separable from Daniel typing in the matrix.
+    source?: string;
   },
 ): Promise<{ cleared: boolean }> {
   const res = await apiFetch(`${BASE}/trackables/${id}/entries`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...body, source: "manual" }),
+    body: JSON.stringify({ source: "manual", ...body }),
   });
   if (!res.ok) throw new Error("Failed to log trackable");
   return res.json();
@@ -929,6 +960,10 @@ export async function createTrackable(body: {
   kind?: TrackableKind;
   unit?: string;
   target?: number;
+  // Per-day fold rule. Omitting it means "last wins" server-side; anything
+  // that accumulates across a day (focus minutes, calories) must say `sum`.
+  agg?: "sum" | "last";
+  source?: string;
 }): Promise<Trackable> {
   const res = await apiFetch(`${BASE}/trackables`, {
     method: "POST",
