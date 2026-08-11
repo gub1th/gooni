@@ -1,14 +1,19 @@
 import { Sun, Moon, type LucideIcon } from "lucide-react";
 import { FONT, z } from "../../ui";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
+import { FocusBanner } from "../focus/FocusBanner";
 
 // Top-right chrome for the SHEET surfaces: the light/dark toggle, and nothing
 // else. The home-jump button it used to sit beside pointed at `/home`, which no
 // longer exists — `/` IS the ambient home now — and the focus button is gone
 // because focus has exactly one door and it is a task row.
 //
+// It also carries the FOCUS BANNER, so a running session and its pause/resume
+// follow you onto every non-home surface. That is the whole point of pass 2:
+// focus is a state, not a place, so its controls cannot live on one route.
+//
 // Mounted in AppShell for every non-immersive, non-kiosk surface EXCEPT the
-// home, which owns its own top-right cluster.
+// home, which owns its own top-right cluster (and mounts the banner there).
 
 function IconButton({
   Icon,
@@ -66,10 +71,12 @@ export function TopRightControls() {
         right: 14,
         zIndex: z.overlay + 3,
         display: "flex",
-        gap: 8,
+        alignItems: "center",
+        gap: 12,
         fontFamily: FONT,
       }}
     >
+      <FocusBanner />
       <IconButton
         Icon={theme === "dark" ? Sun : Moon}
         label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}

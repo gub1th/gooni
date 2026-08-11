@@ -3,12 +3,13 @@ import { Mic, MicOff, Moon, ScrollText, Sun } from "lucide-react";
 import { FONT, frostInk, z } from "../../ui";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { ink } from "./ambientInk";
-import { fmtMinutes } from "../../services/focusTime";
+import { FocusBanner } from "../focus/FocusBanner";
 
 // The two corners, Momentum's shape. Bare glyphs and bare text on the void —
 // no frosted pill, no card. Chrome only earns a surface when it's summoned.
 //
-// Top-left is the date. Top-right is value-over-label (`focused today`), the
+// Top-left is the date. Top-right is the FOCUS BANNER (the day summary at rest,
+// the running session when there is one — see FocusBanner), the
 // mic as a bare icon that reads accent-green while it's listening, the log
 // button, and the light/dark toggle. The log button wears a small accent dot
 // when the day has a calendar event — the calendar itself is a TAB inside the
@@ -81,14 +82,12 @@ function CornerButton({
 }
 
 export function HomeCorner({
-  focusedMinutes,
   voiceOn,
   listening,
   onToggleVoice,
   onOpenLog,
   hasEventToday,
 }: {
-  focusedMinutes: number;
   voiceOn: boolean;
   /** mic actually hot right now — the only thing that turns the glyph green */
   listening: boolean;
@@ -103,12 +102,7 @@ export function HomeCorner({
         display: "flex", alignItems: "center", gap: 20, fontFamily: FONT,
       }}
     >
-      <div style={{ textAlign: "right", lineHeight: 1.15 }}>
-        <div style={{ fontSize: 19, fontWeight: 500, letterSpacing: "-0.01em", color: ink(0.92), fontVariantNumeric: "tabular-nums" }}>
-          {fmtMinutes(focusedMinutes)}
-        </div>
-        <div style={{ fontSize: 10, letterSpacing: "0.02em", color: ink(0.38), marginTop: 2 }}>focused today</div>
-      </div>
+      <FocusBanner />
 
       <CornerButton
         label={voiceOn ? (listening ? "listening — click to go silent" : "voice on — click to go silent") : "voice off — click to talk"}

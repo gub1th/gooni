@@ -6,6 +6,12 @@
  * segments are dropped by `splitSegmentsByDay` and a paused session accrues
  * nothing, so in both the camera must be idle. And the load-bearing case stays:
  * a closed tab always clears control.
+ *
+ * The rule outlived its original host. It used to live on the focus PAGE; since
+ * focus became a state rather than a place (pass 2) it belongs to
+ * `useFocusCamControl`, mounted once in AppShell — no view may own it, because
+ * the overlay unmounts on every collapse while the session keeps running. The
+ * assertions are unchanged; only the host they are driven through moved.
  */
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
@@ -32,8 +38,14 @@ vi.mock("../../services/api", async (importOriginal) => {
   };
 });
 
-const { FocusSession } = await import("./FocusSession");
+const { useFocusCamControl } = await import("./useFocusCamControl");
 const { useFocusSessionStore } = await import("../../stores/useFocusSessionStore");
+
+/** Stands in for AppShell — the one place the hook is really mounted. */
+function ControlHost() {
+  useFocusCamControl();
+  return null;
+}
 
 /** What the sidecar was last told to do. */
 function latest(): ControlCall | undefined {
@@ -50,7 +62,7 @@ afterEach(cleanup);
 
 describe("focus-cam control follows live focus only", () => {
   it("senses on focus, stops on break, resumes on focus, stops on pause", async () => {
-    render(<FocusSession />);
+    render(<ControlHost />);
 
     act(() => useFocusSessionStore.getState().start(7, "leetcode"));
     await waitFor(() => expect(latest()).toEqual(["running", 7]));
@@ -67,7 +79,7 @@ describe("focus-cam control follows live focus only", () => {
   });
 
   it("clears control when the tab goes away", async () => {
-    const { unmount } = render(<FocusSession />);
+    const { unmount } = render(<ControlHost />);
     act(() => useFocusSessionStore.getState().start(9, "gym"));
     await waitFor(() => expect(latest()).toEqual(["running", 9]));
 

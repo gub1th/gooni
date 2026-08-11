@@ -22,6 +22,7 @@ import { Sidebar } from "../components/notes/Sidebar";
 // replaced was deleted with the widget system it hosted.
 import { IconRail } from "../components/ambient/IconRail";
 import { TopRightControls } from "../components/ambient/TopRightControls";
+import { useFocusCamControl } from "../components/focus/useFocusCamControl";
 import { sheetFrame } from "../ui";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -120,6 +121,9 @@ function isImmersivePath(pathname: string): boolean {
 // inline edit drafts) every time you clicked Memories / New chat.
 // Routes render only their right-column content into <Outlet />.
 function AppShell() {
+  // ONE owner of the focus-cam reconcile target, mounted here because AppShell
+  // survives every route change — see the hook for why no view may own it.
+  useFocusCamControl();
   const location = useLocation();
   const navigate = useNavigate();
   const routerState = useRouterState();

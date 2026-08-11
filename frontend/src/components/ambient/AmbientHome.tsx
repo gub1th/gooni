@@ -16,8 +16,6 @@ import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 import {
   fetchFocusTotals,
-  localDayKey,
-  splitSegmentsByDay,
   switchFocusSession,
   type FocusTotals,
 } from "../../services/focusTime";
@@ -25,7 +23,6 @@ import {
   useFocusSessionStore,
   elapsedMs,
   isAccruingFocus,
-  sealedSegments,
 } from "../../stores/useFocusSessionStore";
 import {
   createConversation,
@@ -271,19 +268,6 @@ export function AmbientHome({
       label: mmss(elapsedMs(session, session.mode, nowTick)),
     };
   }, [session, nowTick]);
-  // The corner stat counts the running session too — a timer you're watching
-  // tick that doesn't move the number it feeds reads as broken. It is folded
-  // through the SAME day-splitter the write path uses, so a session that began
-  // yesterday contributes only the part that landed on today: the number on
-  // screen is the number that would be written if the session ended now.
-  const liveFocusToday = useMemo(() => {
-    if (!session) return 0;
-    const today = localDayKey(nowTick);
-    return splitSegmentsByDay(sealedSegments(session, nowTick))
-      .filter((d) => d.date === today)
-      .reduce((n, d) => n + d.minutes, 0);
-  }, [session, nowTick]);
-  const focusedToday = totals.today + liveFocusToday;
 
   // ── Voice engine ──────────────────────────────────────────────────────────
   const [voiceMode, setVoiceModeState] = useState(isVoiceMode);
@@ -701,7 +685,6 @@ export function AmbientHome({
       {!covered && <HomeDate />}
       {!covered && (
         <HomeCorner
-          focusedMinutes={focusedToday}
           voiceOn={voiceMode}
           listening={listening}
           onToggleVoice={toggleVoiceMode}

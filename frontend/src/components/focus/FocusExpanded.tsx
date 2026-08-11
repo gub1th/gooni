@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import { Pause, Play, X } from "lucide-react";
 import { FONT } from "../../ui";
-import { GooniAsleep } from "./GooniAsleep";
-import { FOCUS_PALETTES, type FocusPalette } from "./focusPalette";
+import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import {
   elapsedMs,
-  isAccruingFocus,
   sealedSegments,
   sessionStartedAt,
   useFocusSessionStore,
@@ -24,21 +21,24 @@ import {
   FEED_REFRESH_MS,
   fetchFocusCamToday,
   fetchFocusDashboard,
-  setFocusCamControl,
   updateFocusReminder,
 } from "../../services/api";
 
-// The focus session — reached only from a task row, which is the whole point.
+// The expanded focus surface — the ring, FOCUS/BREAK, the sensor line, mark
+// kept. ONE component, two hosts:
 //
-// A named task plus a running timer is the attribution mechanism: everything
-// inside the window belongs to that Promise, by construction, with no
-// classifier and no guessing. That is why there is no "start a session" door
-// anywhere else, and why the rail carries no focus entry.
+//   overlay → summoned by `FocusBanner` as a dimmed layer over whatever page
+//             you are on. Deliberately NOT full-screen: the home stays visible
+//             behind it and a task can still be ticked off back there.
+//   kiosk   → the `/focus` route, chromeless, for a second monitor. A WINDOW
+//             onto the session rather than the place focus happens.
 //
-// IDLE is a real state, not a redirect. With no session running this route
-// shows Gooni asleep rather than bouncing you away: it was written for an
-// always-on second monitor (2D SVG, slow drift, low contrast — burn-in, not
-// nostalgia), and a screen that flings you elsewhere is not a resting state.
+// Focus is a STATE, not a PLACE (prototype pass 2). Making it a page conflated
+// BEING in focus with LOOKING AT focus, and the controls ended up stranded on a
+// route you had navigated away from — you could not pause. Nothing here owns
+// lifecycle: start/seal/write live in the store and `endFocusSession`, and this
+// is a control surface over them. The banner outlives this component, which is
+// what makes it safe for this to be a modal.
 
 /** Ring targets. A session is not capped by them — the ring just laps. */
 const TARGET_MS: Record<FocusMode, number> = {
@@ -125,8 +125,14 @@ function useSensors(active: boolean, sinceMs: number | null): Sensors {
   return s;
 }
 
-export function FocusSession() {
-  const navigate = useNavigate();
+export function FocusExpanded({
+  variant,
+  onCollapse,
+}: {
+  variant: "overlay" | "kiosk";
+  /** overlay only — the strip is still there behind this, so this just closes */
+  onCollapse?: () => void;
+}) {
   const theme = useGooniThemeStore((s) => s.theme);
   const pal = FOCUS_PALETTES[theme];
 
@@ -135,69 +141,55 @@ export function FocusSession() {
   const [saveError, setSaveError] = useState(false);
   const stopping = useRef(false);
 
-  // Kept lives in the SESSION store, not here: `/` has to keep showing this row
-  // struck through and running, and it may be a reload away from this click.
   const kept = session?.kept ?? false;
   const running = !!session?.running;
-  const accruing = isAccruingFocus(session);
   const startedAt = sessionStartedAt(session);
   const sensors = useSensors(!!session, startedAt);
 
   // The ring's clock ticks in BOTH modes — it is the mode's own stopwatch, so a
-  // break counting up is what it should show. `running` is the right gate here.
+  // break counting up is what it should show.
   useEffect(() => {
     if (!running) return;
     const iv = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(iv);
   }, [running]);
 
-  // The sidecar is a RECONCILE-POLL target: we declare desired control, it
-  // catches up on its own ~2s poll. It senses during LIVE FOCUS ONLY — never on
-  // a break, never while paused — because nothing should be sensed for a window
-  // that will never be written, and break segments are exactly such a window.
-  // Keyed on the promise AND that derivation, which move on start/pause/resume/
-  // mode-flip only — not on the per-second tick, which updates `now` and not the
-  // store object.
+  // Esc collapses the overlay back to the strip. The kiosk has nothing to
+  // collapse to, so it does not listen.
   useEffect(() => {
-    if (!session) return;
-    void setFocusCamControl(
-      accruing ? "running" : "idle",
-      accruing ? session.promiseId : null,
-    ).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.promiseId, accruing]);
+    if (variant !== "overlay" || !onCollapse) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      onCollapse!();
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [variant, onCollapse]);
 
-  // Unmount ALWAYS clears control, so a closed tab can never leave the camera
-  // sensing. Deliberately its own effect: folded into the one above, a resume
-  // would fire cleanup(idle) and setup(running) as two racing posts, and an idle
-  // landing last would leave the sidecar asleep for the rest of the session.
-  useEffect(() => {
-    return () => { void setFocusCamControl("idle", null).catch(() => {}); };
-  }, []);
+  // NOTE: this component does NOT drive the focus-cam reconcile target. That
+  // moved to `useFocusCamControl`, mounted once in AppShell — control follows
+  // the SESSION, and this view comes and goes (collapse, kiosk) while the
+  // session keeps running. See that hook for the full reasoning.
 
   const mode: FocusMode = session?.mode ?? "focus";
   const elapsed = useMemo(() => elapsedMs(session, mode, now), [session, mode, now]);
   const frac = Math.min(1, elapsed / TARGET_MS[mode]);
 
-  // The header total is a claim about what gets STORED, so it goes through the
-  // same closer and day-fold the write path does — an uncapped 9h here against a
-  // stored 6h would break the one invariant `sealedSegments` promises. The big
-  // mm:ss on the ring stays a plain stopwatch.
+  // A claim about what gets STORED, so it goes through the same closer and
+  // day-fold the write path does. The big mm:ss stays a plain stopwatch.
   const storedMinutes = useMemo(() => {
     if (!session) return 0;
     return splitSegmentsByDay(sealedSegments(session, now)).reduce((n, d) => n + d.minutes, 0);
   }, [session, now]);
 
-  // Write-then-clear lives in `endFocusSession` — the SAME path starting focus
-  // on another task goes through, so there is one place that decides a session
-  // may only be dropped once its entry has landed.
   async function stop() {
     if (stopping.current) return;
     stopping.current = true;
     setSaveError(false);
     try {
       await endFocusSession();
-      navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined } });
+      onCollapse?.();
     } catch {
       setSaveError(true);
     } finally {
@@ -215,42 +207,28 @@ export function FocusSession() {
     }
   }
 
-  if (!session) {
-    return (
-      <div style={{ position: "fixed", inset: 0, background: pal.paper, fontFamily: FONT, overflow: "hidden" }}>
-        <GooniAsleep pal={pal} />
-        <div
-          style={{
-            position: "absolute", bottom: 44, left: 0, right: 0, textAlign: "center",
-            fontSize: 12, color: pal.ink3,
-          }}
-        >
-          focus starts from a task
-        </div>
-      </div>
-    );
-  }
+  if (!session) return null;
 
   return (
     <div
       style={{
-        position: "fixed", inset: 0, background: pal.paper, fontFamily: FONT, color: pal.ink,
+        position: "relative", width: "100%", height: "100%",
+        fontFamily: FONT, color: pal.ink,
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        overflow: "hidden",
       }}
     >
       <div style={{ position: "absolute", top: 22, right: 26, display: "flex", alignItems: "center", gap: 16, fontSize: 12, color: pal.ink3 }}>
-        <span style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtMinutes(storedMinutes)}
-        </span>
-        <button
-          onClick={() => void stop()}
-          aria-label="End the session"
-          title="end the session"
-          style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: pal.ink3, display: "grid", placeItems: "center" }}
-        >
-          <X size={15} strokeWidth={1.8} />
-        </button>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtMinutes(storedMinutes)}</span>
+        {variant === "overlay" && (
+          <button
+            onClick={onCollapse}
+            aria-label="Collapse to the strip"
+            title="collapse (esc)"
+            style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: pal.ink3, display: "grid", placeItems: "center" }}
+          >
+            <X size={15} strokeWidth={1.8} />
+          </button>
+        )}
       </div>
 
       <div role="tablist" style={{ display: "flex", gap: 26, marginBottom: 8 }}>
@@ -302,26 +280,35 @@ export function FocusSession() {
         </div>
       </div>
 
-      <button
-        onClick={() => (running ? useFocusSessionStore.getState().pause() : useFocusSessionStore.getState().resume())}
-        aria-label={running ? "Pause" : "Resume"}
-        style={{
-          marginTop: 16, width: 46, height: 46, borderRadius: 999, border: "none", cursor: "pointer",
-          background: pal.accent, color: pal.paper, display: "grid", placeItems: "center", padding: 0,
-        }}
-      >
-        {running ? <Pause size={16} fill="currentColor" strokeWidth={0} /> : <Play size={16} fill="currentColor" strokeWidth={0} />}
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 16 }}>
+        <button
+          onClick={() => (running ? useFocusSessionStore.getState().pause() : useFocusSessionStore.getState().resume())}
+          aria-label={running ? "Pause" : "Resume"}
+          style={{
+            width: 46, height: 46, borderRadius: 999, border: "none", cursor: "pointer",
+            background: pal.accent, color: pal.paper, display: "grid", placeItems: "center", padding: 0,
+          }}
+        >
+          {running ? <Pause size={16} fill="currentColor" strokeWidth={0} /> : <Play size={16} fill="currentColor" strokeWidth={0} />}
+        </button>
+        <button
+          onClick={() => void stop()}
+          aria-label="End the session"
+          style={{
+            border: `1px solid ${pal.rule}`, background: "transparent", cursor: "pointer",
+            borderRadius: 999, padding: "7px 14px", fontFamily: FONT, fontSize: 11.5, color: pal.ink2,
+          }}
+        >
+          end
+        </button>
+      </div>
 
-      {/* the write failed, so the session still holds its minutes — but `seal`
-          already paused it, so say paused rather than implying it still runs */}
       {saveError && (
         <div role="alert" style={{ marginTop: 14, fontSize: 11.5, color: pal.warn, textAlign: "center" }}>
           couldn't save this session — it's paused, not lost. try ending it again
         </div>
       )}
 
-      {/* one quiet sensor line — browser · camera · phone */}
       <div
         style={{
           position: "absolute", bottom: 74, left: "50%", transform: "translateX(-50%)",
@@ -348,5 +335,3 @@ export function FocusSession() {
     </div>
   );
 }
-
-export type { FocusPalette };
