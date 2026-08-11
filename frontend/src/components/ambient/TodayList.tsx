@@ -64,6 +64,7 @@ export function TodayList({
         fontFamily: FONT,
       }}
     >
+      <style>{RUN_PULSE_CSS}</style>
       <span
         style={{
           fontSize: 11,
@@ -283,20 +284,24 @@ function TaskRow({
   );
 }
 
+// The keyframes live at module scope, NOT inside the dot. A <style> rendered
+// as a sibling of the dot sits INSIDE the button, so the button's textContent
+// becomes the CSS plus the clock — which is what a screen reader and any test
+// reading the label both get.
+const RUN_PULSE_CSS = `@keyframes gooni-run-pulse{0%,100%{opacity:1}50%{opacity:0.35}}`;
+
 function RunningDot({ color }: { color: string }) {
   return (
-    <>
-      <span
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: 999,
-          background: color,
-          animation: "gooni-run-pulse 1.8s ease-in-out infinite",
-        }}
-      />
-      <style>{`@keyframes gooni-run-pulse{0%,100%{opacity:1}50%{opacity:0.35}}`}</style>
-    </>
+    <span
+      aria-hidden
+      style={{
+        width: 7,
+        height: 7,
+        borderRadius: 999,
+        background: color,
+        animation: "gooni-run-pulse 1.8s ease-in-out infinite",
+      }}
+    />
   );
 }
 
