@@ -32,6 +32,7 @@ export function TodayList({
   onAdd,
   onFocus,
   onResume,
+  rowsMaxHeight,
 }: {
   rows: TodayRow[];
   laterCount: number;
@@ -44,6 +45,8 @@ export function TodayList({
   onAdd: (title: string) => Promise<void> | void;
   onFocus: (item: FocusReminder) => void;
   onResume: () => void;
+  /** cap for the ROWS region before it scrolls (the controls below never do) */
+  rowsMaxHeight?: number | string;
 }) {
   const [hovered, setHovered] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -73,22 +76,37 @@ export function TodayList({
         TODAY
       </span>
 
-      {rows.map(({ item, minutes }) => (
-        <TaskRow
-          key={item.id}
-          item={item}
-          minutes={minutes}
-          running={runningId === item.id}
-          runningLabel={runningLabel}
-          onTick={() => onTick(item)}
-          onFocus={() => onFocus(item)}
-          onResume={onResume}
-        />
-      ))}
+      {/* ONLY the rows scroll. `+ add` and `N later` are the two controls that
+          must survive a long day — putting them inside the scroller is how a
+          ten-task list quietly hides the way to add an eleventh, and hides the
+          "later" bucket that stops TODAY becoming a dumping ground. */}
+      <div
+        style={{
+          maxHeight: rowsMaxHeight,
+          overflowY: "auto",
+          overflowX: "hidden",
+          // full width so the scrollbar gutter can't shift the centred rows
+          alignSelf: "stretch",
+          display: "flex", flexDirection: "column", alignItems: "center",
+        }}
+      >
+        {rows.map(({ item, minutes }) => (
+          <TaskRow
+            key={item.id}
+            item={item}
+            minutes={minutes}
+            running={runningId === item.id}
+            runningLabel={runningLabel}
+            onTick={() => onTick(item)}
+            onFocus={() => onFocus(item)}
+            onResume={onResume}
+          />
+        ))}
 
-      {rows.length === 0 && !adding && (
-        <span style={{ fontSize: 17, color: ink(0.3), padding: "6px 0" }}>nothing today</span>
-      )}
+        {rows.length === 0 && !adding && (
+          <span style={{ fontSize: 17, color: ink(0.3), padding: "6px 0" }}>nothing today</span>
+        )}
+      </div>
 
       <div
         style={{

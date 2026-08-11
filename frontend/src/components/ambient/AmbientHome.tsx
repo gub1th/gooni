@@ -65,10 +65,17 @@ const MAX_H = 340;
 const IDLE_LISTEN_AMP = 0.4; // gentle live wave while listening at rest
 const MIN_UTTERANCE = 2; // ignore stray one-char finals / noise
 
-// Momentum's vertical rhythm, as fractions of the viewport.
+// Momentum's vertical rhythm, as fractions of the viewport. Pinning each group
+// to its own fraction (rather than stacking them in flow under the wave) is
+// what keeps the wave at true centre however long the line or the list runs.
 const WAVE_Y = 0.47;
 const QUIP_Y = 0.57;
-const TODAY_Y = 0.73;
+const TODAY_Y = 0.66;
+// What the ROWS may claim before they scroll instead of growing. Without a cap
+// a ten-task day walks off the bottom and takes `+ add`, `N later` and the
+// capture hint with it. Reserve is: `+ add` + `N later` + the streak row + the
+// hint, all of which have to stay on screen at any list length.
+const ROWS_MAX = `calc(${(1 - TODAY_Y) * 100}vh - 152px)`;
 
 // Deliberately a fixed string and deliberately a SLOT: this is the one thing on
 // the screen that could know something Daniel doesn't (what he kept, what's
@@ -173,6 +180,31 @@ export function AmbientHome({
     return () => window.clearInterval(t);
   }, [reload]);
 
+  // Ticking has to leave the row WHERE IT IS, struck through — but the
+  // dashboard only serves ACTIVE commitments, so the moment a tick lands the
+  // server stops returning that row and it would simply vanish out from under
+  // the pointer. These two refs are what keep it on screen: `keptRef` holds the
+  // rows ticked in this sitting, and `orderRef` remembers the order rows were
+  // first seen in so a retained row re-enters at its own index rather than at
+  // the end. Both are in-memory only, so a reload (or a new day) starts clean —
+  // "stays put" is a promise about this sitting, not a second store of truth.
+  const keptRef = useRef<Map<number, FocusReminder>>(new Map());
+  const orderRef = useRef<number[]>([]);
+
+  const mergeShortTerm = useCallback((serverRows: FocusReminder[]): FocusReminder[] => {
+    for (const r of serverRows) {
+      if (!orderRef.current.includes(r.id)) orderRef.current.push(r.id);
+    }
+    const byId = new Map(serverRows.map((r) => [r.id, r]));
+    // a row the server dropped because we just kept it
+    for (const [id, row] of keptRef.current) if (!byId.has(id)) byId.set(id, row);
+    const rank = (id: number) => {
+      const i = orderRef.current.indexOf(id);
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    return [...byId.values()].sort((a, b) => rank(a.id) - rank(b.id));
+  }, []);
+
   // The short-term/longer-term split is the BACKEND's (focus_service's due
   // distance), not a client guess — `+ add` defaults everything to today's EOD,
   // so "later" has to mean what the server says it means or TODAY silently
@@ -180,12 +212,12 @@ export function AmbientHome({
   const loadCommitments = useCallback(async () => {
     try {
       const d = await fetchFocusDashboard();
-      setShortTerm(SHORT_BUCKETS.flatMap((b) => d.short_term[b] ?? []));
+      setShortTerm(mergeShortTerm(SHORT_BUCKETS.flatMap((b) => d.short_term[b] ?? [])));
       setLongTerm(d.long_term ?? []);
     } catch {
       /* ambient */
     }
-  }, []);
+  }, [mergeShortTerm]);
 
   const loadTotals = useCallback(async () => {
     try {
@@ -554,9 +586,15 @@ export function AmbientHome({
   // the pointer, and it must not wait on a round trip to show it registered.
   async function onTick(item: FocusReminder) {
     const next = item.state === "kept" ? "active" : "kept";
-    setShortTerm((prev) => prev.map((r) => (r.id === item.id ? { ...r, state: next, done: next === "kept" } : r)));
+    const updated: FocusReminder = { ...item, state: next, done: next === "kept" };
+    if (next === "kept") keptRef.current.set(item.id, updated);
+    else keptRef.current.delete(item.id);
+    setShortTerm((prev) => prev.map((r) => (r.id === item.id ? updated : r)));
     try {
       await updateFocusReminder(item.id, { state: next });
+    } catch {
+      // the write failed, so the row is still active — don't keep pretending
+      keptRef.current.delete(item.id);
     } finally {
       void loadCommitments();
     }
@@ -694,7 +732,10 @@ export function AmbientHome({
       >
         <div
           style={{
-            position: "absolute", top: `${QUIP_Y * 100}%`, left: "50%", transform: "translateX(-50%)",
+            // CENTRE-anchored on its fraction, not top-anchored: the line is a
+            // slot Gooni will write into, so it has to grow both ways from its
+            // mark rather than only downward into the list.
+            position: "absolute", top: `${QUIP_Y * 100}%`, left: "50%", transform: "translate(-50%, -50%)",
             width: "min(19ch, 86vw)", textAlign: "center",
             fontSize: 33, fontWeight: 600, letterSpacing: "-0.022em", lineHeight: 1.18,
             color: ink(0.92), pointerEvents: "none",
@@ -707,10 +748,10 @@ export function AmbientHome({
           style={{
             position: "absolute", top: `${TODAY_Y * 100}%`, left: "50%", transform: "translateX(-50%)",
             width: "min(560px, 84vw)",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 18,
           }}
         >
           <TodayList
+            rowsMaxHeight={ROWS_MAX}
             rows={rows}
             laterCount={longTerm.length}
             laterRows={longTerm}
@@ -721,6 +762,17 @@ export function AmbientHome({
             onFocus={startFocus}
             onResume={() => navigate({ to: "/focus" })}
           />
+        </div>
+
+        {/* the streak row lives at the BOTTOM EDGE, not in flow under the list:
+            in flow it is the thing a long list pushes off the screen, and it is
+            the one element here that is pure glance. */}
+        <div
+          style={{
+            position: "absolute", bottom: 42, left: "50%", transform: "translateX(-50%)",
+            width: "min(1000px, 94vw)", display: "flex", justifyContent: "center",
+          }}
+        >
           <StreakRow onOpen={() => onOpenTrackables?.()} />
         </div>
       </div>

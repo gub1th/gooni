@@ -83,9 +83,14 @@ export function StreakRow({ onOpen }: { onOpen: () => void }) {
         cursor: "pointer",
         fontFamily: FONT,
         display: "flex",
-        flexWrap: "wrap",
+        // ONE row, by contract — the full matrix is a click away and is where
+        // wrapped rows of dots belong. Overflow clips rather than wraps so the
+        // glance can never become a second block competing with the list.
+        flexWrap: "nowrap",
+        maxWidth: "100%",
+        overflow: "hidden",
         justifyContent: "center",
-        gap: "10px 22px",
+        gap: 18,
         opacity: hover ? 1 : 0.45,
         transition: "opacity 200ms ease",
       }}
@@ -104,7 +109,7 @@ function StreakItem({ col }: { col: Col }) {
   const n = trail.length;
 
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flex: "none" }}>
       <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
         {trail.map((d, i) => {
           const recency = n <= 1 ? 1 : i / (n - 1);
