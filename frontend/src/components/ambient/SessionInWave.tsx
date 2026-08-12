@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { Pause, Play, Square } from "lucide-react";
+import { Minimize2, Pause, Play, Square } from "lucide-react";
 import { FONT, frostInk } from "../../ui";
 import { ink } from "./ambientInk";
 import { elapsedMs, useFocusSessionStore, type FocusStyle } from "../../stores/useFocusSessionStore";
@@ -76,6 +76,7 @@ export function SessionInWave({
   hidden,
   energyRef,
   onStop,
+  onDetach,
 }: {
   cx: number;
   cy: number;
@@ -85,6 +86,8 @@ export function SessionInWave({
   energyRef: MutableRefObject<number>;
   /** the host owns the stop, because it also refreshes the day totals */
   onStop: () => void;
+  /** collapse into the band and give the wave its slot back */
+  onDetach: () => void;
 }) {
   const session = useFocusSessionStore((s) => s.session);
   const [now, setNow] = useState(() => Date.now());
@@ -134,12 +137,17 @@ export function SessionInWave({
       style={{
         position: "absolute",
         left: cx, top: cy,
-        transform: "translate(-50%, -50%)",
         display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
         fontFamily: FONT, zIndex: 2,
+        // Displaced rather than merely faded: the capture box grows out of
+        // this exact rect, so the session sliding up and shrinking gives the
+        // box a visible ORIGIN instead of one surface blinking into another.
         opacity: hidden ? 0 : 1,
+        transform: hidden
+          ? "translate(-50%, -50%) translateY(-46px) scale(0.78)"
+          : "translate(-50%, -50%)",
         pointerEvents: hidden ? "none" : "auto",
-        transition: "opacity 240ms ease",
+        transition: "opacity 240ms ease, transform 260ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
       <div style={{ position: "relative", display: "grid", placeItems: "center", width: 200, height: 200 }}>
@@ -210,6 +218,10 @@ export function SessionInWave({
         </CtlButton>
         <CtlButton label="Stop the session" onClick={onStop}>
           <Square size={12} fill="currentColor" strokeWidth={0} />
+        </CtlButton>
+        {/* the way OUT of the slot that is not stopping — see the attach store */}
+        <CtlButton label="Detach the session (esc)" onClick={onDetach}>
+          <Minimize2 size={13} strokeWidth={1.9} />
         </CtlButton>
       </div>
 

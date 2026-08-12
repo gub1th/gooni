@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { Pause, Play, X } from "lucide-react";
 import { FONT, frostInk, z } from "../../ui";
 import { ink } from "../ambient/ambientInk";
 import { elapsedMs, useFocusSessionStore } from "../../stores/useFocusSessionStore";
 import { endFocusSession } from "../../services/focusTime";
 import { MarkKeptOffer } from "./MarkKeptOffer";
+import { useSessionAttachStore } from "../../stores/useSessionAttachStore";
 
 // THE session bar — a slim full-width band at the very top, its own row.
 //
@@ -67,7 +69,20 @@ function BarButton({
 }
 
 export function FocusSessionBar() {
+  const navigate = useNavigate();
   const session = useFocusSessionStore((s) => s.session);
+  const setAttached = useSessionAttachStore((s) => s.setAttached);
+
+  // Clicking the band RE-ATTACHES: the session goes back into the wave's slot.
+  // Off the home there is no slot to return to, so it also takes you there.
+  function onReattach() {
+    setAttached(true);
+    navigate({
+      to: "/",
+      search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined, calendar: undefined },
+    });
+  }
+
   const [now, setNow] = useState(() => Date.now());
   const ending = useRef(false);
 
@@ -147,9 +162,12 @@ export function FocusSessionBar() {
         )}
         <style>{`@keyframes gooni-bar-pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
 
-        <div
+        <button
+          onClick={onReattach}
+          title="put the session back in the wave"
           style={{
             display: "flex", alignItems: "baseline", gap: 10, minWidth: 0, flex: 1,
+            border: "none", background: "transparent", padding: 0, cursor: "pointer",
             fontFamily: FONT, textAlign: "left",
           }}
         >
@@ -175,7 +193,7 @@ export function FocusSessionBar() {
           {session.style === "timer" && (
             <span style={{ fontSize: 10, letterSpacing: "0.06em", color: ink(0.32), flex: "none" }}>timer</span>
           )}
-        </div>
+        </button>
 
         <div style={{ display: "flex", alignItems: "center", gap: 2, flex: "none" }}>
           <BarButton

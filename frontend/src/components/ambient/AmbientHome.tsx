@@ -13,6 +13,7 @@ import { HomeCorner, HomeDate } from "./HomeCorners";
 import { LogSheet } from "./LogSheet";
 import { CalendarPanel } from "./CalendarPanel";
 import { SessionInWave } from "./SessionInWave";
+import { useSessionAttachStore } from "../../stores/useSessionAttachStore";
 import { MarkKeptOffer } from "../focus/MarkKeptOffer";
 import { SESSION_BAR_H } from "../focus/FocusSessionBar";
 import { ink } from "./ambientInk";
@@ -192,6 +193,8 @@ export function AmbientHome({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickyRef = useRef<StickyHandle>(null);
   const focusedRef = useRef(false);
+  const sessionInSlotRef = useRef(false);
+  const boxModeRef = useRef(false);
   const hideTimer = useRef<number | null>(null);
   const enterTimer = useRef<number | null>(null);
   const replyTimer = useRef<number | null>(null);
@@ -205,6 +208,11 @@ export function AmbientHome({
 
   const session = useFocusSessionStore((s) => s.session);
   const hasSession = session != null;
+  const attached = useSessionAttachStore((s) => s.attached);
+  const setAttached = useSessionAttachStore((s) => s.setAttached);
+  // ATTACHED means the session is holding the wave's slot. Detached, it lives
+  // in the band and the wave comes back — the session runs either way.
+  const sessionInSlot = hasSession && attached;
   const accruing = isAccruingFocus(session);
   const [nowTick, setNowTick] = useState(() => Date.now());
   // The per-second cadence belongs to the ONE state that moves a number on this
@@ -226,6 +234,9 @@ export function AmbientHome({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  sessionInSlotRef.current = sessionInSlot;
+  boxModeRef.current = boxMode;
 
   const boxW = Math.min(WAVE_WIDTH + 40, vp.w * 0.9);
   const rect: MorphRect = { cx: vp.w / 2, cy: vp.h * WAVE_Y, w: boxW, h: boxH, r: 20 };
@@ -522,6 +533,14 @@ export function AmbientHome({
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement;
       const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      // Esc is the keyboard way out of the slot — it detaches rather than
+      // stopping, because wanting your wave back is not wanting to end the
+      // session. It only fires when the session is actually in the slot and
+      // the box is closed, so it never steals Esc from the capture box.
+      if (e.key === "Escape" && sessionInSlotRef.current && !typing && !boxModeRef.current) {
+        setAttached(false);
+        return;
+      }
       if (e.key === "/" && !typing) {
         e.preventDefault();
         if (voiceModeRef.current && !armedRef.current) disableVoice();
@@ -549,6 +568,12 @@ export function AmbientHome({
   }
 
   function onHeroEnter() {
+    // While the session holds this slot, hover does NOT summon the box. The
+    // wave was the only cue that hovering here would do anything, and the
+    // session replaced it — so hovering became an ambush that swept the
+    // session away with nothing having advertised it. `/` still works, and it
+    // visibly displaces the session so the box has an origin.
+    if (sessionInSlotRef.current) return;
     clearHideTimer();
     clearEnterTimer();
     enterTimer.current = window.setTimeout(() => {
@@ -767,19 +792,20 @@ export function AmbientHome({
         boxMode={boxMode}
         rect={rect}
         thinking={thinking}
-        dimmed={trackablesOpen || (hasSession && !boxMode)}
+        dimmed={trackablesOpen || (sessionInSlot && !boxMode)}
         waveWidth={waveW}
         energyRef={energyRef}
         activeRef={activeRef}
       />
 
-      {hasSession && !covered && (
+      {sessionInSlot && !covered && (
         <SessionInWave
           cx={rect.cx}
           cy={rect.cy}
           hidden={boxMode}
           energyRef={energyRef}
           onStop={() => void stopSession()}
+          onDetach={() => setAttached(false)}
         />
       )}
       <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={covered || logSheet} />

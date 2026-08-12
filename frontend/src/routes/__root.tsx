@@ -25,6 +25,7 @@ import { TopRightControls } from "../components/ambient/TopRightControls";
 import { useFocusCamControl } from "../components/focus/useFocusCamControl";
 import { FocusSessionBar, SESSION_BAR_H } from "../components/focus/FocusSessionBar";
 import { useFocusSessionStore } from "../stores/useFocusSessionStore";
+import { useSessionAttachStore } from "../stores/useSessionAttachStore";
 import { sheetFrame } from "../ui";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -129,6 +130,7 @@ function AppShell() {
   // The session band owns its own row at the very top. Its height is reserved
   // ONLY while a session runs, so the page returns to full height otherwise.
   const hasSession = useFocusSessionStore((s) => s.session != null);
+  const attached = useSessionAttachStore((s) => s.attached);
   const location = useLocation();
   const navigate = useNavigate();
   const routerState = useRouterState();
@@ -177,9 +179,11 @@ function AppShell() {
   // cluster, the date, the theme toggle) — they do not inherit the shell's
   // reserved padding, and prop-drilling a number into each is how they drift.
   useEffect(() => {
-    const shows = hasSession && !isHome;
+    // On the home the band shows only when the session is DETACHED — attached,
+    // it is in the wave's slot and a band would say the same thing twice.
+    const shows = hasSession && (!isHome || !attached);
     document.documentElement.style.setProperty("--gooni-bar-h", shows ? `${SESSION_BAR_H}px` : "0px");
-  }, [hasSession, isHome]);
+  }, [hasSession, isHome, attached]);
 
   // Compose / new-chat callbacks. The store actions live in Zustand
   // already; we just call them then navigate. routes/index.tsx's
@@ -358,7 +362,7 @@ function AppShell() {
           // underlaps it. STATIC (not hover-driven) → no reflow jank. Immersive
           // surfaces hide the rail, so no lane.
           paddingLeft: isImmersive ? 0 : 68,
-          paddingTop: hasSession && !isImmersive && !isHome ? SESSION_BAR_H : 0,
+          paddingTop: hasSession && !isImmersive && (!isHome || !attached) ? SESSION_BAR_H : 0,
         }}
       >
         <div
@@ -430,10 +434,10 @@ function AppShell() {
           <Outlet />
         </div>
         </div>
-        {/* The band is for surfaces with NO wave to take over. On the home the
-            session occupies the wave's slot, so a band there would be the same
-            session said twice. */}
-        {!isImmersive && !isHome && <FocusSessionBar />}
+        {/* The band is for surfaces with no wave to take over — and for the
+            home too once the session is DETACHED from the slot. Attached, the
+            band would be the same session said twice. */}
+        {!isImmersive && (!isHome || !attached) && <FocusSessionBar />}
         {!isImmersive && <IconRail />}
         {/* Corner theme toggle. NOT on the home: `/` owns its own top-right
             cluster (focused-today · mic · log) and a second thing up there
