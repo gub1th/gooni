@@ -8,10 +8,10 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { useState } from "react";
-import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { GooniLogo } from "../GooniLogo";
 import { SettingsModal } from "../SettingsModal";
 import { FONT } from "../../ui";
+import { ink } from "../ambient/ambientInk";
 
 /**
  * Claude-style icon rail. Renders when sidebarOpen=false in AppShell.
@@ -92,8 +92,6 @@ export function CollapsedSidebar({
   onOpenEval,
 }: CollapsedSidebarProps) {
   const navigate = useNavigate();
-  const theme = useGooniThemeStore((s) => s.theme);
-  const palette = THEME_PALETTES[theme];
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   function fireQuickNav() {
@@ -109,9 +107,13 @@ export function CollapsedSidebar({
       style={{
         width: 56,
         minWidth: 56,
-        height: "100vh",
-        background: palette.sidebar,
-        borderRight: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)",
+        // Same two fixes as the expanded Sidebar: transparent rather than the
+        // app-card `sidebar` palette, which read as a lit slab against the
+        // void; and `100%` rather than `100vh`, which overflowed the panel by
+        // the height of the session band.
+        height: "100%",
+        background: "transparent",
+        borderRight: `1px solid ${ink(0.08)}`,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
