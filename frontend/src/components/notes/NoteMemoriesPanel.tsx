@@ -58,7 +58,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
       style={{
         marginTop: 24,
         paddingTop: 16,
-        borderTop: "1px solid rgba(0,0,0,0.06)",
+        borderTop: `1px solid ${ctok.hairline}`,
         fontFamily: FONT,
         position: "relative",
       }}
@@ -69,7 +69,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
           fontWeight: 500,
           letterSpacing: "0.06em",
           textTransform: "uppercase",
-          color: "var(--gooni-faint, #94A3B8)",
+          color: ctok.faint,
           marginBottom: 8,
         }}
       >
@@ -121,7 +121,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
               <span
                 style={{
                   fontSize: 13,
-                  color: "var(--gooni-text, #1E293B)",
+                  color: ctok.text,
                   flex: 1,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
@@ -136,7 +136,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
         })}
       </div>
 
-      <div style={{ marginTop: 8, padding: "0 4px", fontSize: 12, color: "var(--gooni-faint, #94A3B8)" }}>
+      <div style={{ marginTop: 8, padding: "0 4px", fontSize: 12, color: ctok.faint }}>
         Click a row to peek.{" "}
         <button
           onClick={() => navigate({ to: "/", search: { view: "memories" } })}
@@ -144,7 +144,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
             background: "none",
             border: "none",
             padding: 0,
-            color: "#2563EB",
+            color: ctok.accent,
             cursor: "pointer",
             fontFamily: FONT,
             fontSize: 12,
@@ -176,10 +176,10 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
               right: 0,
               top: "100%",
               marginTop: 6,
-              background: "var(--gooni-card, #fff)",
+              background: ctok.card,
               borderRadius: 12,
-              border: "1px solid rgba(0,0,0,0.10)",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.06)",
+              border: `1px solid ${ctok.hairline}`,
+              boxShadow: "none",
               padding: "12px 14px",
               zIndex: 5,
             }}
@@ -197,7 +197,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
               >
                 {selected.type}
               </span>
-              <span style={{ fontSize: 11, color: "var(--gooni-faint, #94A3B8)" }}>
+              <span style={{ fontSize: 11, color: ctok.faint }}>
                 conf {Math.round(selected.confidence * 100)}%
               </span>
               <button

@@ -125,7 +125,7 @@ export function FigureNodeView({ node, updateAttributes, selected, editor }: Nod
             width: "100%",
             height: "auto",
             borderRadius: 8,
-            outline: selected ? "2px solid #007AFF" : "none",
+            outline: selected ? `2px solid ${ctok.accent}` : "none",
             outlineOffset: 1,
           }}
           draggable={false}
@@ -146,8 +146,8 @@ export function FigureNodeView({ node, updateAttributes, selected, editor }: Nod
               right: -6, bottom: -6,
               width: 14, height: 14,
               borderRadius: 3,
-              background: "#007AFF",
-              border: "2px solid #fff",
+              background: ctok.accent,
+              border: `2px solid ${ctok.sheet}`,
               boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
               cursor: "nwse-resize",
               touchAction: "none",
