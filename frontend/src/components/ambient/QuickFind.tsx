@@ -3,6 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { Activity, Bell, Brain, CircleCheck, FileText, Pause, Play, Search, Square } from "lucide-react";
 import { elapsedMs, useFocusSessionStore } from "../../stores/useFocusSessionStore";
 import { endFocusSession } from "../../services/focusTime";
+import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
+import { pickUpNext } from "./upNext";
 import type { LucideIcon } from "lucide-react";
 import { FONT, frost, frostInk, z } from "../../ui";
 import {
@@ -380,15 +382,33 @@ export function QuickFind({
   const endingRef = useRef(false);
 
   const sessionRunning = !!session?.running;
+  // A running session needs a 1s clock; UP NEXT only has to be right to the
+  // minute, and a 1s tick for a countdown that changes every 60s is 59 wasted
+  // renders a minute. No session and no events → no timer at all.
+  const hasEvents = useHomeChromeStore((s) => s.events.length > 0);
+  const tickMs = sessionRunning ? 1000 : 30_000;
+  const wantsTick = sessionRunning || hasEvents;
   useEffect(() => {
-    if (!sessionRunning) return;
-    const iv = window.setInterval(() => setNowMs(Date.now()), 1000);
+    if (!wantsTick) return;
+    const iv = window.setInterval(() => setNowMs(Date.now()), tickMs);
     return () => window.clearInterval(iv);
-  }, [sessionRunning]);
+  }, [wantsTick, tickMs]);
+
+  // ── UP NEXT, the notch's third payload ───────────────────────────────────
+  // Ranked by what matters at this moment: a running session, then an imminent
+  // event, then search. Same grammar as the session payload — one element,
+  // contextual content — rather than a second mechanism.
+  //
+  // The events come from the store the home publishes them into, which is the
+  // SAME fetch the log button's dot already uses. A second calendar request for
+  // the same day would be two sources that can disagree.
+  const events = useHomeChromeStore((s) => s.events);
+  const upNext = useMemo(() => pickUpNext(events, nowMs), [events, nowMs]);
 
   // Searching always wins: focus or a typed query swaps the payload back.
   const searching = open || q.trim().length > 0;
   const showSession = !!session && !searching;
+  const showUpNext = !showSession && !searching && upNext != null;
 
   // Focus the input the moment the search payload appears — the click that
   // asked for it landed on the bar, not on an input that existed yet.
@@ -434,7 +454,10 @@ export function QuickFind({
           // it is not rendered — so the click has to flip the payload first and
           // let the effect below focus it once it exists. Without this the notch
           // was a one-way door: a running session meant no search.
-          if (showSession) { setOpen(true); void loadCaches(); return; }
+          // Same for UP NEXT as for the session: neither renders the input, so
+          // the click flips the payload and the effect below focuses it. Without
+          // this, an imminent event would trap you out of search for 90 minutes.
+          if (showSession || showUpNext) { setOpen(true); void loadCaches(); return; }
           inputRef.current?.focus();
         }}
         style={{
@@ -448,7 +471,45 @@ export function QuickFind({
           transition: "border-color 180ms ease",
         }}
       >
-        {showSession && session ? (
+        {showUpNext && upNext ? (
+          <>
+            {/* UP NEXT. No border colour of its own: the accent border means "a
+                session is running", and an event is not one. The label carries
+                the meaning instead. */}
+            <span
+              style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: "0.13em", flex: "none",
+                color: frostInk.faint,
+              }}
+            >
+              UP NEXT
+            </span>
+            <span
+              style={{
+                fontSize: 12.5, color: frostInk.text, minWidth: 0,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}
+            >
+              {upNext.title}
+            </span>
+            <span
+              style={{
+                fontSize: 12.5, flex: "none", marginLeft: "auto", paddingLeft: 8,
+                color: frostInk.muted, fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {upNext.at}
+            </span>
+            <span
+              style={{
+                fontSize: 12.5, flex: "none", color: frostInk.text,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {upNext.inLabel}
+            </span>
+          </>
+        ) : showSession && session ? (
           <>
             {sessionRunning ? (
               <span

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ApiNote } from "../services/api";
+import type { ApiNote, CalendarEvent } from "../services/api";
 
 // The bridge between the sticky header and the home.
 //
@@ -26,6 +26,9 @@ interface HomeChromeState {
   listening: boolean;
   /** today has a calendar event — the log button wears a dot */
   hasEventToday: boolean;
+  /** today's events, from the ONE fetch the home already makes for the dot.
+      The notch reads them for UP NEXT rather than fetching a second time. */
+  events: CalendarEvent[];
   /** the log sheet is open — the header button reads as active */
   logOpen: boolean;
   /** null until the home has mounted and registered; the header hides the control */
@@ -40,6 +43,7 @@ export const useHomeChromeStore = create<HomeChromeState>((set) => ({
   voiceOn: false,
   listening: false,
   hasEventToday: false,
+  events: [],
   logOpen: false,
   toggleVoice: null,
   toggleLog: null,

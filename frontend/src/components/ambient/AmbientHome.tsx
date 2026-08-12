@@ -487,12 +487,13 @@ export function AmbientHome({
       voiceOn: voiceMode,
       listening,
       hasEventToday: events.length > 0,
+      events,
       logOpen: logSheet,
       toggleVoice: toggleVoiceMode,
       toggleLog: () => setLogSheet((o) => !o),
       openNote,
     });
-  }, [publishChrome, voiceMode, listening, events.length, logSheet, toggleVoiceMode, openNote]);
+  }, [publishChrome, voiceMode, listening, events, logSheet, toggleVoiceMode, openNote]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
