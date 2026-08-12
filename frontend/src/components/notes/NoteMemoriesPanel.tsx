@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import type { ApiMemory } from "../../services/api";
-import { color as ctok, FONT } from "../../ui";
+import { frostInk as ctok, FONT } from "../../ui";
 
 
 // Per-note memories panel. Designed to match the redesign mockup

@@ -6,7 +6,7 @@ import { uploadAvatarImage, updatePublicAvatar } from "../services/api";
 import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
 import { CommentAvatar } from "./notes/CommentAvatar";
-import { color as ctok, FONT, z} from "../ui";
+import { frostInk as ctok, FONT, z} from "../ui";
 
 interface SettingsModalProps {
   open: boolean;
@@ -63,7 +63,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: "var(--gooni-card, #fff)",
+          background: ctok.card,
           border: "0.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.1)",
           borderRadius: 14,
           width: 720,
@@ -539,7 +539,7 @@ function DeploymentsBlock() {
         meta={flyMeta(flyInfo)}
       />
       {editingVercel ? (
-        <div style={{ border: "1px solid rgba(0,0,0,0.1)", borderRadius: 10, padding: 12, background: "var(--gooni-card, #FDFCFA)" }}>
+        <div style={{ border: `1px solid ${ctok.hairline}`, borderRadius: 10, padding: 12, background: ctok.card }}>
           <div style={{ fontSize: 12, color: ctok.muted, marginBottom: 6 }}>Vercel deployment URL</div>
           <input
             value={vercelDraft}
@@ -592,7 +592,7 @@ function DeploymentCard({ name, url, dashboardUrl, state, onRecheck, onEditUrl, 
   return (
     <div style={{
       border: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)", borderRadius: 10,
-      padding: "12px 14px", background: "var(--gooni-card, #FDFCFA)",
+      padding: "12px 14px", background: ctok.card,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <StatusDot status={state.status} />
@@ -681,7 +681,7 @@ function vercelMeta(): { label: string; value: string; href?: string }[] {
 
 const btn: React.CSSProperties = {
   fontSize: 11.5, padding: "4px 9px", borderRadius: 6,
-  border: "1px solid rgba(0,0,0,0.1)", background: "var(--gooni-card, #fff)",
+  border: `1px solid ${ctok.hairline}`, background: ctok.card,
   cursor: "pointer", color: ctok.text, fontWeight: 500,
   fontFamily: FONT,
 };

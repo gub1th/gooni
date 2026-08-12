@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, RotateCcw, X } from "lucide-react";
-import { FONT, color as ctok } from "../ui";
+import { FONT, frostInk as ctok } from "../ui";
 import { AmbientOverlay } from "./AmbientOverlay";
 import {
   dismissMessageGlow,

@@ -2,7 +2,7 @@ import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import React, { useState } from "react";
 import { AttachmentModal } from "./AttachmentModal";
 import { formatBytes, iconLabelForMime, shortMime } from "./AttachmentExtension";
-import { color as ctok } from "../../ui";
+import { frostInk as ctok } from "../../ui";
 
 // Card surface for an Attachment node. Click → opens AttachmentModal
 // (image lightbox / PDF iframe / generic download fallback). Same DOM

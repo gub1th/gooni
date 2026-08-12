@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { color as ctok } from "../ui";
+import { frostInk as ctok } from "../ui";
 import {
   fetchCalendarStatus, startCalendarOAuth, disconnectCalendar,
   fetchGithubStatus, startGithubOAuth, disconnectGithub,
@@ -40,7 +40,7 @@ const PROVIDERS: Record<Provider, ProviderApi> = {
 
 const btn: React.CSSProperties = {
   fontSize: 11.5, padding: "4px 9px", borderRadius: 6,
-  border: "1px solid rgba(0,0,0,0.1)", background: "var(--gooni-card, #fff)",
+  border: `1px solid ${ctok.hairline}`, background: ctok.cardRaised,
   cursor: "pointer", color: ctok.text, fontWeight: 500,
   fontFamily: "'Inter', -apple-system, sans-serif",
 };
@@ -115,7 +115,7 @@ export function IntegrationSection({
   return (
     <div style={{
       border: "1px solid rgba(0,0,0,0.08)", borderRadius: 10,
-      padding: "12px 14px", background: "var(--gooni-card, #FDFCFA)",
+      padding: "12px 14px", background: ctok.cardRaised,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
         {icon ? (
@@ -138,7 +138,7 @@ export function IntegrationSection({
             : "not connected"}
         </span>
       </div>
-      <div style={{ fontSize: 11.5, color: "var(--gooni-muted, #6B6B70)", marginBottom: 10, lineHeight: 1.55 }}>
+      <div style={{ fontSize: 11.5, color: ctok.muted, marginBottom: 10, lineHeight: 1.55 }}>
         {status?.configured ? blurbConfigured : blurbNotConfigured}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -150,8 +150,12 @@ export function IntegrationSection({
             disabled={loading || !status?.configured}
             style={{
               ...btn,
-              background: status?.configured ? ctok.text : "#F2F2F2",
-              color: status?.configured ? "#fff" : ctok.faint,
+              // Was `ctok.text` behind a hardcoded `#fff`, which is the inverted
+              // primary button a light page wants — in dark it resolved to white
+              // on white and the label vanished. Takes the accent instead, same
+              // as every other primary action out here.
+              background: status?.configured ? ctok.accentDim : "transparent",
+              color: status?.configured ? ctok.accent : ctok.faint,
               border: status?.configured ? "none" : btn.border,
               cursor: status?.configured ? "pointer" : "default",
             }}
@@ -159,7 +163,7 @@ export function IntegrationSection({
             {loading ? "opening…" : "connect"}
           </button>
         )}
-        {err && <span style={{ fontSize: 11, color: "#C44" }}>{err}</span>}
+        {err && <span style={{ fontSize: 11, color: ctok.bad }}>{err}</span>}
       </div>
       {status?.connected && extras ? (
         <div style={{ marginTop: 12 }}>{extras}</div>

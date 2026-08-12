@@ -2,7 +2,7 @@ import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlignCenter, AlignLeft, AlignRight } from "lucide-react";
 import type { FigureAlign } from "./FigureExtension";
-import { color as ctok } from "../../ui";
+import { frostInk as ctok } from "../../ui";
 
 // One image-with-caption block. Renders a <figure> wrapper for both
 // alignment + width, plus selection chrome (resize handle, alignment

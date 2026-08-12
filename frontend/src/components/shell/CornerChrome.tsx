@@ -22,6 +22,15 @@ import { ink } from "../ambient/ambientInk";
 // Those are home functions, not chrome, so they don't travel; the frame they
 // sit in does.
 
+// How much of the top-right a surface must leave alone, published by AppShell as
+// `--gooni-corner-w`. The cluster is `position: fixed` and floats ABOVE the
+// panel, so a surface that puts its own controls up there stacks them underneath
+// it — which is what the note editor's Publish button did, sitting directly on
+// top of `focused today`. Kept in this file with the anchor so the reserve and
+// the thing being reserved for can only be changed together. Generous on
+// purpose: `focused today` is as wide as its longest reading.
+export const CORNER_RESERVE = 180;
+
 /** Anchor every corner cluster identically — under the session band, same inset. */
 export const CORNER_ANCHOR: React.CSSProperties = {
   position: "fixed",

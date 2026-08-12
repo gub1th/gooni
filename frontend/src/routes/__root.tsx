@@ -27,6 +27,7 @@ import { FocusSessionBar, SESSION_BAR_H } from "../components/focus/FocusSession
 import { useFocusSessionStore } from "../stores/useFocusSessionStore";
 import { useSessionAttachStore } from "../stores/useSessionAttachStore";
 import { SurfacePanel } from "../components/shell/SurfacePanel";
+import { CORNER_RESERVE } from "../components/shell/CornerChrome";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -193,6 +194,13 @@ function AppShell() {
     const shows = hasSession && (!isHome || !attached);
     document.documentElement.style.setProperty("--gooni-bar-h", shows ? `${SESSION_BAR_H}px` : "0px");
   }, [hasSession, isHome, attached]);
+
+  // Same reasoning on the other axis: the corner cluster floats above the panel,
+  // so a surface that draws its own top-right controls has to leave room or they
+  // stack underneath it. Published once rather than hardcoded per surface.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--gooni-corner-w", `${CORNER_RESERVE}px`);
+  }, []);
 
   // Compose / new-chat callbacks. The store actions live in Zustand
   // already; we just call them then navigate. routes/index.tsx's

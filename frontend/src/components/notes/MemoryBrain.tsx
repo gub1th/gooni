@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { ApiMemory } from "../../services/api";
 import { NeuralBrain } from "../animations/NeuralBrain";
-import { color as ctok, FONT } from "../../ui";
+import { frostInk as ctok, FONT } from "../../ui";
 
 
 interface MemoryBrainProps {
@@ -22,14 +22,24 @@ interface BubblePos {
   driftPhase: number;  // seconds offset so bubbles don't all bob in sync
 }
 
+// Per-type identity hues. The type is meaning, so the colour stays — what
+// changed is the FORM: these were pastel PLATES (`#FAF5FF` fills with dark ink
+// on them), drawn for a white page, and on the void every bubble read as a small
+// white pill. Now it is the bright hue as text over a 14% tint of itself, which
+// is the same shape `frostInk.accent`/`accentDim` uses and the only one that
+// works unchanged in both themes.
+//
+// The hues are deliberately the SAME as `MemoriesView`'s `TYPE_COLORS`: the
+// bubbles and the table rows they mirror sit on one surface, and they used to
+// disagree about what colour a `goal` is.
 const PALETTE: Record<string, { bg: string; fg: string; border: string; accent: string }> = {
-  preference: { bg: "#FFF7ED", fg: "#9A3412", border: "rgba(154,52,18,0.30)",  accent: "#EA580C" },
-  goal:       { bg: "#EEF2FF", fg: "#3730A3", border: "rgba(55,48,163,0.30)",  accent: "#4F46E5" },
-  fact:       { bg: "#F1F5F9", fg: "#334155", border: "rgba(51,65,85,0.28)",   accent: "#475569" },
-  routine:    { bg: "#ECFDF5", fg: "#065F46", border: "rgba(6,95,70,0.30)",    accent: "#10B981" },
-  constraint: { bg: "#FEF2F2", fg: "#991B1B", border: "rgba(153,27,27,0.30)",  accent: "#DC2626" },
-  episode:    { bg: "#FAF5FF", fg: "#6B21A8", border: "rgba(107,33,168,0.30)", accent: "#9333EA" },
-  default:    { bg: "#F4F4F5", fg: "#52525B", border: "rgba(82,82,91,0.28)",   accent: "#71717A" },
+  preference: { bg: "rgba(74,222,128,0.14)",  fg: "#4ADE80", border: "rgba(74,222,128,0.30)",  accent: "#4ADE80" },
+  goal:       { bg: "rgba(167,139,250,0.16)", fg: "#A78BFA", border: "rgba(167,139,250,0.32)", accent: "#A78BFA" },
+  fact:       { bg: "rgba(96,165,250,0.16)",  fg: "#60A5FA", border: "rgba(96,165,250,0.32)",  accent: "#60A5FA" },
+  routine:    { bg: "rgba(251,146,60,0.15)",  fg: "#FB923C", border: "rgba(251,146,60,0.32)",  accent: "#FB923C" },
+  constraint: { bg: "rgba(248,113,113,0.15)", fg: "#F87171", border: "rgba(248,113,113,0.32)", accent: "#F87171" },
+  episode:    { bg: "rgba(156,163,175,0.16)", fg: "#9CA3AF", border: "rgba(156,163,175,0.32)", accent: "#9CA3AF" },
+  default:    { bg: "rgba(156,163,175,0.14)", fg: "#9CA3AF", border: "rgba(156,163,175,0.28)", accent: "#9CA3AF" },
 };
 
 function paletteFor(type: string) {
@@ -203,7 +213,7 @@ export function MemoryBrain({
                 background: palette.bg,
                 color: palette.fg,
                 border: `1px solid ${isSelected ? palette.accent : palette.border}`,
-                boxShadow: isSelected ? `0 0 0 3px ${palette.accent}33` : "0 1px 3px rgba(0,0,0,0.06)",
+                boxShadow: isSelected ? `0 0 0 3px ${palette.accent}33` : "none",
                 fontFamily: FONT, fontSize: 11.5, fontWeight: 500,
                 cursor: "pointer",
                 maxWidth: 220,
@@ -232,10 +242,10 @@ export function MemoryBrain({
               bottom: BRAIN_SIZE + 24,
               transform: "translateX(-50%)",
               width: 320, maxWidth: "90%",
-              background: "var(--gooni-card, #fff)",
+              background: ctok.card,
               borderRadius: 12,
-              border: "1px solid rgba(0,0,0,0.10)",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.06)",
+              border: `1px solid ${ctok.hairline}`,
+              boxShadow: "none",
               padding: "12px 14px",
               fontFamily: FONT,
               zIndex: 5,

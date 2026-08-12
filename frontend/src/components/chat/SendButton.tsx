@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { color as ctok } from "../../ui";
+import { frostInk as ctok } from "../../ui";
 
 interface SendButtonProps {
   onClick: () => void;

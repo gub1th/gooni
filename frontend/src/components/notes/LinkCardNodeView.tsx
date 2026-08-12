@@ -1,6 +1,6 @@
 import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { hostnameFromUrl } from "./LinkCardExtension";
-import { color as ctok } from "../../ui";
+import { frostInk as ctok } from "../../ui";
 
 // Editor-side React rendering for LinkCard. Mirrors the static
 // renderHTML output so editor + public look identical, but uses
