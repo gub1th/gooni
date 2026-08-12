@@ -140,14 +140,36 @@ test("a paused running row offers resume rather than pause", () => {
   expect(props.onTogglePause).toHaveBeenCalled();
 });
 
-test("the later bucket is visible and expands in place", () => {
+// The bucket's LABEL is derived from the rows, not hardcoded. Pass 8 asked for
+// `undated` on the premise that these rows carry no due date; that is true of
+// some data and false of others (the dev DB's three are explicit deadlines three
+// weeks out), so either hardcoded word is a lie half the time — the exact
+// failure the rename set out to fix. Both branches are pinned here.
+test("the later bucket says `undated` only when the rows really are", () => {
   renderList();
 
-  const later = screen.getByText("2 later");
+  const later = screen.getByText("2 undated");
   expect(screen.queryByText("book the flights")).not.toBeInTheDocument();
   fireEvent.click(later);
   expect(screen.getByText("book the flights")).toBeInTheDocument();
   expect(screen.getByText("call mum")).toBeInTheDocument();
+});
+
+test("dated longer-term rows read as `later`, and each shows its own date", () => {
+  const due = "2026-09-01T05:17:29+00:00";
+  const dated = { ...reminder(8, "book the flights"), due_at: due, due_is_default: false };
+  renderList({ laterCount: 1, laterRows: [dated] });
+
+  fireEvent.click(screen.getByText("1 later"));
+  expect(screen.getByText("book the flights")).toBeInTheDocument();
+
+  // The date is what makes "later" mean something rather than "someday". It is
+  // computed the same way here rather than written out, because the row renders
+  // the LOCAL day: 05:17 UTC on Sep 1 is Aug 31 in America/Los_Angeles, so a
+  // literal "Sep 1" would pass in UTC and fail on the machine this was written
+  // on — the same local-vs-UTC trap `test_focus_due_bucket` exists for.
+  const local = new Date(due).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  expect(screen.getByText(local)).toBeInTheDocument();
 });
 
 // Only a live session is accruing. Break was removed in pass 3, so `paused` is

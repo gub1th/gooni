@@ -44,6 +44,13 @@ export interface SessionRow {
   label: string;
 }
 
+/** `Sep 1` for a dated longer-term row; empty when the stamp will not parse. */
+function laterDueLabel(dueAt: string): string {
+  const d = new Date(dueAt);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export function TodayList({
   rows,
   laterCount,
@@ -71,14 +78,11 @@ export function TodayList({
   /** cap for the ROWS region before it scrolls (the controls below never do) */
   rowsMaxHeight?: number | string;
 }) {
-  const [hovered, setHovered] = useState(false);
   const [adding, setAdding] = useState(false);
   const [laterOpen, setLaterOpen] = useState(false);
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={{
         display: "flex",
         flexDirection: "column",
@@ -132,13 +136,11 @@ export function TodayList({
         )}
       </div>
 
-      <div
-        style={{
-          marginTop: 10,
-          opacity: hovered || adding ? 1 : 0,
-          transition: "opacity 180ms ease",
-        }}
-      >
+      {/* ALWAYS VISIBLE. It was revealed on hover, which is wrong for the one
+          primary action on the surface — and worse on a list you are meant to
+          add to daily, where a control you have to discover by sweeping the
+          mouse is a control most days do not get used. */}
+      <div style={{ marginTop: 10 }}>
         {adding ? (
           <AddField
             onCancel={() => setAdding(false)}
@@ -152,19 +154,31 @@ export function TodayList({
         )}
       </div>
 
-      {/* `N later` is load-bearing, not decoration: `+ add` defaults every new
+      {/* This bucket is load-bearing, not decoration: `+ add` defaults every new
           task to today, so without a visible longer-term bucket TODAY quietly
-          becomes a dumping ground and stops meaning today. */}
+          becomes a dumping ground and stops meaning today.
+          The LABEL IS DERIVED, not hardcoded. Pass 8 asked for `undated` on the
+          grounds that these rows carry no due date — true of some data, but not
+          of this database, where all three are explicit deadlines about three
+          weeks out (`due_is_default: false`). Hardcoding either word makes the
+          label a lie half the time, which is the exact failure the rename was
+          meant to fix, so it reads the rows instead. Each row shows its own due
+          date when it has one, so the bucket explains itself either way. */}
       {laterCount > 0 && (
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
           <BareButton onClick={() => setLaterOpen((o) => !o)}>
-            {laterCount} later
+            {laterCount} {laterRows.every((r) => !r.due_at) ? "undated" : "later"}
           </BareButton>
           {laterOpen && (
             <div style={{ display: "flex", flexDirection: "column", gap: 5, paddingTop: 2 }}>
               {laterRows.map((r) => (
                 <span key={r.id} style={{ fontSize: 14.5, color: ink(0.5), lineHeight: 1.35 }}>
                   {r.content}
+                  {r.due_at && (
+                    <span style={{ fontSize: 12, color: ink(0.32), marginLeft: 8 }}>
+                      {laterDueLabel(r.due_at)}
+                    </span>
+                  )}
                 </span>
               ))}
             </div>
