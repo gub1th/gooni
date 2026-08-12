@@ -25,17 +25,21 @@ import { ink } from "../ambient/ambientInk";
 // control at an edge inverts the rule that chrome only earns a surface when it
 // is summoned.
 
+// The `dot` badge is GONE. Its only consumer was the log button's calendar dot,
+// and that dot was the least useful form of a notification: it said something
+// existed without saying what, and decoding it meant opening the log and finding
+// the event buried in a list. The notch names the event outright now. The prop
+// is deleted rather than left exported for the same reason `sheetFrame` was —
+// an unused affordance is an invitation to reach for it again.
+
 export function CornerButton({
   label,
   active,
-  dot,
   onClick,
   children,
 }: {
   label: string;
   active?: boolean;
-  /** small accent badge — a reason to open this, not a state of it */
-  dot?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -48,7 +52,7 @@ export function CornerButton({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        position: "relative", width: 26, height: 26, padding: 0,
+        width: 26, height: 26, padding: 0,
         border: "none", background: "transparent", cursor: "pointer",
         display: "grid", placeItems: "center",
         color: active ? frostInk.accent : hover ? ink(0.9) : ink(0.38),
@@ -56,17 +60,6 @@ export function CornerButton({
       }}
     >
       {children}
-      {dot && (
-        <span
-          aria-hidden
-          style={{
-            position: "absolute", top: 1, right: 1, width: 6, height: 6, borderRadius: 999,
-            background: frostInk.accent,
-            // ring in the void colour so the dot reads as a badge, not a smudge
-            boxShadow: "0 0 0 2px var(--gooni-void, #000)",
-          }}
-        />
-      )}
     </button>
   );
 }

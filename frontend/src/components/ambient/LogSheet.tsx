@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SearchCheck, X } from "lucide-react";
 import { FONT, frost, frostInk, z } from "../../ui";
+import { useNowTick } from "../../hooks/useNowTick";
 import { ink } from "./ambientInk";
 import { TurnTracePanel } from "./TurnTracePanel";
 import { DayTimeline } from "./DayTimeline";
@@ -17,10 +18,11 @@ import {
 // poll. What changed is where it lives (a summoned edge sheet instead of a
 // block under the wave) and that it filters — all · chat · notes.
 //
-// Today's calendar events ride in at the top. That is the ENTIRE remaining
-// calendar surface: the corner button wears an accent dot when the day has an
-// event, so the calendar is a reason to open the log rather than a panel of its
-// own.
+// Today's calendar events ride in at the top — the ones that have ALREADY
+// STARTED, which is what makes this a record rather than a preview. The corner
+// button's accent dot is gone (it said "something exists" without saying what),
+// and the upcoming event is the notch's UP NEXT, which names it. See
+// `loggedEvents` for the split and why all-day events are exempt from it.
 
 const POLL_MS = 20_000;
 const PAGE = 40;
@@ -52,6 +54,38 @@ function ago(iso: string): string {
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days}d`;
   return `${Math.floor(days / 7)}w`;
+}
+
+/**
+ * The events the LOG should carry — the ones that have already happened.
+ *
+ * The captain flagged seeing today's events in `all` as not feeling right, at
+ * the same time as the notch's UP NEXT. Both complaints have one cause: a
+ * future event was being reported in two places, and the log's copy was the
+ * useless one — buried in a stream you had to open and scan.
+ *
+ * The log is NOT deleted as a calendar surface, because it is the record of the
+ * day and an event that happened is part of what happened. What it stops doing
+ * is PREVIEWING. The split is by start time:
+ *
+ *   already started → the log. It is history now, which is the log's job.
+ *   still upcoming  → the notch, which names it outright and counts down to it.
+ *
+ * ALL-DAY events are always kept: `pickUpNext` excludes them on purpose (there
+ * is no start to count down to), so the log is the only surface they have and
+ * dropping them here would take them off the app entirely.
+ *
+ * An unparseable start is kept for the same reason — a row we cannot place is
+ * still a row, and silently discarding it would hide a real event behind a bad
+ * timestamp.
+ */
+export function loggedEvents(events: CalendarEvent[], now: number): CalendarEvent[] {
+  return events.filter((ev) => {
+    if (ev.all_day || !ev.start) return true;
+    const startsAt = new Date(ev.start).getTime();
+    if (Number.isNaN(startsAt)) return true;
+    return startsAt <= now;
+  });
 }
 
 /** `3:00p` for a timed event; all-day events say so. */
@@ -108,9 +142,16 @@ export function LogSheet({
 }: {
   open: boolean;
   onClose: () => void;
-  /** today's calendar events — fetched by the corner (it needs the count anyway) */
+  /** today's calendar events — fetched ONCE by the home, shared with the notch */
   events: CalendarEvent[];
 }) {
+  // A LIVE clock, not `Date.now()` stamped at mount: an event crosses its start
+  // time while the sheet sits open, and a frozen `now` would keep it filed as
+  // upcoming — the same trap the whoop tile's age had. A minute is plenty for a
+  // boundary measured in calendar-event granularity.
+  const now = useNowTick(60_000);
+  const pastEvents = useMemo(() => loggedEvents(events, now), [events, now]);
+
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [tab, setTab] = useState<Tab>("all");
@@ -311,8 +352,9 @@ export function LogSheet({
           </div>
         ) : (
         <div onScroll={onScroll} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", margin: "0 -4px", padding: "0 4px 20px" }}>
-          {/* today's calendar — the dot's referent */}
-          {filter === "all" && events.map((ev) => (
+          {/* today's calendar, PAST events only — see `loggedEvents`. The
+              upcoming one is the notch's, and it says what it is there. */}
+          {filter === "all" && pastEvents.map((ev) => (
             <div key={ev.id} style={{ padding: "7px 0", borderBottom: `1px solid ${ink(0.05)}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, letterSpacing: "0.11em", textTransform: "uppercase", color: frostInk.accent }}>
                 <span>calendar</span>

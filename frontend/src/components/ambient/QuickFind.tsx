@@ -199,17 +199,26 @@ export function QuickFind({
   }, [loadCaches]);
 
   // ⌘K / ctrl+K anywhere on the home → jump into the bar.
+  //
+  // It has to OPEN, not just focus: whenever the notch is carrying a session or
+  // an UP NEXT there is no input rendered to focus, so a bare `focus()` was a
+  // no-op. That was survivable while up-next only appeared for 90 minutes a day;
+  // now that it is present all day it would mean ⌘K silently did nothing all
+  // day. `setOpen` flips the payload, and the effect further down focuses the
+  // input once it exists — the same route the click on the bar takes.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        setOpen(true);
+        void loadCaches();
         inputRef.current?.focus();
         inputRef.current?.select();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [loadCaches]);
 
   // Two-speed search: title-substring fires per keystroke (no embedding call),
   // semantic + memory ride a short pause so typing doesn't spray requests.
@@ -395,15 +404,22 @@ export function QuickFind({
   }, [wantsTick, tickMs]);
 
   // ── UP NEXT, the notch's third payload ───────────────────────────────────
-  // Ranked by what matters at this moment: a running session, then an imminent
+  // Ranked by what matters at this moment: a running session, then the next
   // event, then search. Same grammar as the session payload — one element,
   // contextual content — rather than a second mechanism.
   //
+  // It is present ALL DAY now, GRADED by the horizon rather than gated on it:
+  // `far` is a calm fact, `near` is the loud one. It replaced the accent dot the
+  // log button used to wear, which said "something exists" without saying what —
+  // the least useful form of a notification, since decoding it meant opening the
+  // log and finding the event buried in a list.
+  //
   // The events come from the store the home publishes them into, which is the
-  // SAME fetch the log button's dot already uses. A second calendar request for
-  // the same day would be two sources that can disagree.
+  // SAME fetch the log sheet reads. A second calendar request for the same day
+  // would be two sources that can disagree.
   const events = useHomeChromeStore((s) => s.events);
   const upNext = useMemo(() => pickUpNext(events, nowMs), [events, nowMs]);
+  const far = upNext?.emphasis === "far";
 
   // Searching always wins: focus or a typed query swaps the payload back.
   const searching = open || q.trim().length > 0;
@@ -475,10 +491,21 @@ export function QuickFind({
           <>
             {/* UP NEXT. No border colour of its own: the accent border means "a
                 session is running", and an event is not one. The label carries
-                the meaning instead. */}
+                the meaning instead.
+
+                EMPHASIS, not visibility, is what the horizon grades — so the
+                layout is byte-identical between the two states and only the ink
+                moves. A `far` event is a calm fact you can read without being
+                asked to act on it; a `near` one is the loud version, unchanged
+                from how it has always rendered. Two layouts would be two
+                elements wearing one name, which is the thing this pass exists to
+                stop doing. */}
             <span
               style={{
                 fontSize: 9, fontWeight: 700, letterSpacing: "0.13em", flex: "none",
+                // already at text-3, the token file's explicit floor — a micro
+                // label has nowhere quieter to go, so the grading is carried by
+                // the three fields that DO have a tier in hand.
                 color: frostInk.faint,
               }}
             >
@@ -486,8 +513,9 @@ export function QuickFind({
             </span>
             <span
               style={{
-                fontSize: 12.5, color: frostInk.text, minWidth: 0,
+                fontSize: 12.5, color: far ? frostInk.muted : frostInk.text, minWidth: 0,
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                transition: "color 300ms ease",
               }}
             >
               {upNext.title}
@@ -495,15 +523,18 @@ export function QuickFind({
             <span
               style={{
                 fontSize: 12.5, flex: "none", marginLeft: "auto", paddingLeft: 8,
-                color: frostInk.muted, fontVariantNumeric: "tabular-nums",
+                color: far ? frostInk.faint : frostInk.muted,
+                fontVariantNumeric: "tabular-nums",
+                transition: "color 300ms ease",
               }}
             >
               {upNext.at}
             </span>
             <span
               style={{
-                fontSize: 12.5, flex: "none", color: frostInk.text,
+                fontSize: 12.5, flex: "none", color: far ? frostInk.faint : frostInk.text,
                 fontVariantNumeric: "tabular-nums",
+                transition: "color 300ms ease",
               }}
             >
               {upNext.inLabel}
