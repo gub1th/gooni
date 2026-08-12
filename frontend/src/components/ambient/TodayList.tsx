@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronRight, Pause, Play, Square, Target } from "lucide-react";
+import { Check, ChevronRight, ListChecks, Pause, Play, Square, Target, X } from "lucide-react";
 import { FONT, frostInk } from "../../ui";
 import { ink } from "./ambientInk";
 import { fmtMinutes } from "../../services/focusTime";
@@ -62,6 +62,7 @@ export function TodayList({
   onTogglePause,
   onStop,
   rowsMaxHeight,
+  fill,
 }: {
   rows: TodayRow[];
   laterCount: number;
@@ -77,6 +78,8 @@ export function TodayList({
   onStop: () => void;
   /** cap for the ROWS region before it scrolls (the controls below never do) */
   rowsMaxHeight?: number | string;
+  /** the daily trackable fill, offered as a task row until it is put away */
+  fill?: { onOpen: () => void; onDismiss: () => void } | null;
 }) {
   const [adding, setAdding] = useState(false);
   const [laterOpen, setLaterOpen] = useState(false);
@@ -127,6 +130,8 @@ export function TodayList({
           display: "flex", flexDirection: "column", alignItems: "stretch",
         }}
       >
+        {fill && <DailyFillRow onOpen={fill.onOpen} onDismiss={fill.onDismiss} />}
+
         {active.map(({ item, minutes }) => (
           <TaskRow
             key={item.id}
@@ -140,7 +145,7 @@ export function TodayList({
           />
         ))}
 
-        {active.length === 0 && !adding && (
+        {active.length === 0 && !fill && !adding && (
           <span style={{ fontSize: 14, color: ink(0.3), padding: "5px 0" }}>nothing today</span>
         )}
       </div>
@@ -280,6 +285,65 @@ function ListSection({
           {children}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The daily fill, wearing a task row's clothes.
+ *
+ * It is NOT a promise and writes nothing to the record — it is an offer to do
+ * the day's logging, which is why it carries a dismiss rather than a checkbox.
+ * Ticking a task claims the work is done; putting this away only says you are
+ * finished logging, and those are different claims (see `dailyFill.ts`).
+ */
+function DailyFillRow({ onOpen, onDismiss }: { onOpen: () => void; onDismiss: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: "5px 0" }}
+    >
+      <button
+        onClick={onOpen}
+        aria-label="Log today's trackables"
+        style={{
+          width: 19, height: 19, flex: "none", padding: 0, borderRadius: 5, cursor: "pointer",
+          background: "transparent",
+          // DASHED, so it does not read as a task you can tick — the same shape
+          // as the matrix's own "add a trackable" affordance.
+          border: `1.5px dashed ${hover ? frostInk.accent : ink(0.32)}`,
+          display: "grid", placeItems: "center",
+          transition: "border-color 140ms ease",
+        }}
+      >
+        <ListChecks size={11} strokeWidth={2} color={hover ? frostInk.accent : ink(0.42)} />
+      </button>
+      <button
+        onClick={onOpen}
+        style={{
+          border: "none", background: "transparent", padding: 0, cursor: "pointer",
+          fontFamily: FONT, fontSize: 19, letterSpacing: "-0.01em", textAlign: "left",
+          color: hover ? ink(0.8) : ink(0.55),
+          transition: "color 140ms ease",
+        }}
+      >
+        log today
+      </button>
+      <button
+        onClick={onDismiss}
+        aria-label="Put the daily log away for today"
+        title="Put it away for today"
+        style={{
+          marginLeft: 2, width: 20, height: 20, padding: 0, borderRadius: 999,
+          border: "none", background: "transparent", cursor: "pointer",
+          display: "grid", placeItems: "center",
+          color: ink(0.38), opacity: hover ? 1 : 0, transition: "opacity 140ms ease",
+        }}
+      >
+        <X size={12} strokeWidth={2} />
+      </button>
     </div>
   );
 }

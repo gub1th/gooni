@@ -5,6 +5,7 @@ import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "
 import { MorphLine, type MorphRect } from "./MorphLine";
 import { LimboCards } from "./LimboCards";
 import { LogDots } from "./LogDots";
+import { dismissFill, isFillDismissed } from "./dailyFill";
 import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
@@ -128,6 +129,12 @@ export function AmbientHome({
   const [limbo, setLimbo] = useState<LogMessage[]>([]);
   const [boxMode, setBoxMode] = useState(false);
   const [logSheet, setLogSheet] = useState(false);
+  // The daily fill, offered in TODAY until it is put away for the day. The
+  // matrix (the RECORD) is a different door — the rail's — and the two share one
+  // component, so the fill writes entries and the matrix reads them with no
+  // second copy of the day's state.
+  const [fillOpen, setFillOpen] = useState(false);
+  const [fillDismissed, setFillDismissed] = useState(isFillDismissed);
   const [value, setValue] = useState("");
   const [boxH, setBoxH] = useState(PEEK_H);
   const [thinking, setThinking] = useState(false);
@@ -724,7 +731,7 @@ export function AmbientHome({
   const needsWake = voiceMode && !armed; // show the tap-to-wake veil
 
   // Any full-screen surface owns the void; the stage stands down under it.
-  const covered = coveredBySurface || trackablesOpen || !!peekNote || needsWake;
+  const covered = coveredBySurface || trackablesOpen || fillOpen || !!peekNote || needsWake;
   // The stage yields to the capture box the moment it opens. It used to wait
   // for the box to GROW past its resting bounds, which read as the box and the
   // line briefly sharing the screen.
@@ -755,7 +762,7 @@ export function AmbientHome({
         boxMode={boxMode}
         rect={rect}
         thinking={thinking}
-        dimmed={trackablesOpen}
+        dimmed={trackablesOpen || fillOpen}
         waveWidth={waveW}
         // THE WAVE STAYS A WAVE (pass 9). It used to be REPLACED by the running
         // session, which meant the notch, the task row and the wave were three
@@ -865,11 +872,22 @@ export function AmbientHome({
               else st.resume();
             }}
             onStop={() => void stopSession()}
+            fill={
+              fillDismissed
+                ? null
+                : {
+                    onOpen: () => setFillOpen(true),
+                    onDismiss: () => { dismissFill(); setFillDismissed(true); },
+                  }
+            }
           />
         </div>
       </div>
 
-      {trackablesOpen && <LogDots onClose={() => onCloseTrackables?.()} />}
+      {/* the RECORD — opened from the rail when you want history */}
+      {trackablesOpen && <LogDots mode="matrix" onClose={() => onCloseTrackables?.()} />}
+      {/* the daily FILL — opened from its row in TODAY */}
+      {fillOpen && !trackablesOpen && <LogDots mode="fill" onClose={() => setFillOpen(false)} />}
 
 
       {peekNote && <NotePeek note={peekNote} onClose={() => setPeekNote(null)} />}

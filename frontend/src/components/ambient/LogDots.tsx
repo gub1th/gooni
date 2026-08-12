@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
-import { FONT, frostInk } from "../../ui";
+import { FONT, frost, frostInk } from "../../ui";
 import { useNowTick } from "../../hooks/useNowTick";
 import { GREEN } from "./wavePath";
 import { LogTable } from "./LogTable";
@@ -33,13 +33,15 @@ import {
 
 const TRAIL_DAYS = 6;
 
-// shared dark frosted-glass recipe (home is black, so NOT the light overlay card)
+// The sanctioned frost level plus a hairline — NOT a hand-rolled recipe, and
+// NOT a drop shadow. This surface carried `0 18px 60px rgba(0,0,0,0.55)`, which
+// violated the rule the 2026-08-02 pass set on the ambient home: frost and a
+// hairline carry a layer, and a bloom under every floating thing is what made
+// the void read heavy. It was worst in light mode, where a 55%-black bloom sat
+// under a near-white card.
 const GLASS: React.CSSProperties = {
-  background: "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 55%, transparent)",
-  backdropFilter: "blur(20px)",
-  WebkitBackdropFilter: "blur(20px)",
-  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.10)",
-  boxShadow: "0 18px 60px rgba(0,0,0,0.55)",
+  ...frost.panel,
+  border: `1px solid ${frostInk.hairline}`,
 };
 
 // Which trackables belong on the COMPACT daily-dots glance: skip json feeds
@@ -65,7 +67,22 @@ interface Row {
   days: TrackableDay[]; // newest-first, gap-filled; today = days[0]
 }
 
-export function LogDots({ onClose }: { onClose: () => void }) {
+/**
+ * ONE surface, two jobs, opened in two places (pass 9 addendum).
+ *
+ * `fill` is the daily ritual — today's dots, tick and type. It is reached from a
+ * task row in TODAY, so logging is part of the day rather than a destination you
+ * have to remember to visit.
+ *
+ * `matrix` is the RECORD — history and trends, opened deliberately from the rail
+ * when you want to look back rather than to log.
+ *
+ * They are the same component on purpose: the fill WRITES entries and the matrix
+ * READS them, so there is no second copy of the day's state to keep in step.
+ * `mode` only decides which one you land on; the expand control still crosses
+ * between them.
+ */
+export function LogDots({ onClose, mode = "fill" }: { onClose: () => void; mode?: "fill" | "matrix" }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [editId, setEditId] = useState<number | null>(null);
@@ -74,7 +91,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   const [addName, setAddName] = useState("");
   const [addKind, setAddKind] = useState<"boolean" | "numeric">("boolean");
   const [shown, setShown] = useState(false); // drives the Y expand/contract
-  const [expanded, setExpanded] = useState(false); // full editable matrix
+  const [expanded, setExpanded] = useState(mode === "matrix"); // full editable matrix
   const [noteDraft, setNoteDraft] = useState(""); // today's daily-log note
   const [labelEditId, setLabelEditId] = useState<number | null>(null); // boolean tag editor
   const [labelDraft, setLabelDraft] = useState("");
@@ -128,12 +145,20 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    // Escape closes the log surface — but not while the table is expanded
-    // (there, Escape belongs to cell-editing / the toggle button owns collapse)
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape" && !expanded) requestClose(); }
+    // Escape closes the log surface — but in FILL mode not while the table is
+    // expanded, where Escape belongs to cell-editing and the toggle owns
+    // collapse. In MATRIX mode the expanded table IS the surface, so that guard
+    // would swallow Escape forever and the record could only be closed by
+    // collapsing it first — which left it open underneath when the daily fill
+    // was then summoned, two copies of the same component at once.
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (mode === "fill" && expanded) return;
+      requestClose();
+    }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [requestClose, expanded]);
+  }, [requestClose, expanded, mode]);
 
   async function refreshRow(id: number) {
     try {
