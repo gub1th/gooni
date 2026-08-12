@@ -22,6 +22,18 @@ import { ink } from "../ambient/ambientInk";
 
 const SLIDE_MS = 260;
 
+// THE PANEL IS MOUNTED FOR THE WHOLE SESSION, open or shut. That is what makes
+// the motion real: a node that mounts already at `translateX(0)` has no
+// starting frame to animate FROM, so the first version of this — mounted by the
+// route switch, on demand — snapped into place and snapped out, which is the
+// same no-origin arrival `sheetFrame` gave us. Living permanently in AppShell,
+// it sits parked off the right edge and every open is a transition from a
+// position it is already in.
+//
+// The one deliberate exception is a COLD LOAD straight onto a surface URL:
+// there the first paint has `open` already true, so nothing slides. Arriving at
+// a URL is not a navigation within the app, and animating it would be a lie
+// about where you came from.
 export function SurfacePanel({
   open,
   onDismiss,
@@ -31,8 +43,9 @@ export function SurfacePanel({
   onDismiss: () => void;
   children: React.ReactNode;
 }) {
-  // Kept mounted for the length of the slide-out so the exit has an origin
-  // too — unmounting on `open=false` would make dismissal a disappearance.
+  // Trails `open` by the length of the slide so the exit gets to play. It
+  // drives VISIBILITY only — a parked panel must be out of the a11y tree and
+  // untabbable, which `translateX(100%)` alone does not do.
   const [present, setPresent] = useState(open);
   useEffect(() => {
     if (open) { setPresent(true); return; }
@@ -40,11 +53,10 @@ export function SurfacePanel({
     return () => window.clearTimeout(t);
   }, [open]);
 
-  if (!present && !open) return null;
-
   return (
     <div
       data-surface-panel
+      data-open={open ? "" : undefined}
       style={{
         position: "fixed",
         // clears the rail lane and the session band, both of which stay put
@@ -61,6 +73,11 @@ export function SurfacePanel({
         transform: open ? "translateX(0)" : "translateX(100%)",
         transition: `transform ${SLIDE_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`,
         willChange: "transform",
+        // Parked, it must not be findable: hidden takes it out of the a11y
+        // tree and out of the tab order, and the missing pointer events stop
+        // an off-screen panel from eating clicks meant for the home.
+        visibility: present || open ? "visible" : "hidden",
+        pointerEvents: open ? "auto" : "none",
       }}
       onKeyDown={(e) => {
         if (e.key === "Escape") {

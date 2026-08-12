@@ -1,23 +1,22 @@
-import { useState } from "react";
-import { Mic, MicOff, Moon, ScrollText, Sun } from "lucide-react";
-import { FONT, frostInk, z } from "../../ui";
-import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
+import { Mic, MicOff, ScrollText } from "lucide-react";
+import { FONT, z } from "../../ui";
 import { ink } from "./ambientInk";
+import { CORNER_ANCHOR, CornerButton, CornerThemeToggle } from "../shell/CornerChrome";
 import { FocusDayStat } from "../focus/FocusDayStat";
 
 // The two corners, Momentum's shape. Bare glyphs and bare text on the void —
 // no frosted pill, no card. Chrome only earns a surface when it's summoned.
 //
-// Top-left is the date. Top-right is the FOCUS BANNER (the day summary at rest,
-// the running session when there is one — see FocusBanner), the
-// mic as a bare icon that reads accent-green while it's listening, the log
-// button, and the light/dark toggle. The log button wears a small accent dot
-// when the day has a calendar event — the calendar itself is a TAB inside the
-// log sheet, so the dot is a reason to open the log rather than a surface.
+// Top-left is the date. Top-right is the SHARED corner cluster (`focused today`
+// + the light/dark toggle, both from components/shell/CornerChrome) with two
+// home-only glyphs slotted in: the mic, which reads accent-green while it is
+// actually listening, and the log button. The log button wears a small accent
+// dot when the day has a calendar event — the calendar is its own summoned
+// surface, so the dot is a reason to open the log rather than a surface.
 //
-// The theme toggle lives HERE rather than in the shared `TopRightControls`:
-// the home owns its own corner, and two separate top-right clusters read as a
-// mistake.
+// The mic and the log do NOT travel to the other surfaces: they are home
+// functions, not chrome. The frame around them is what has to be identical
+// everywhere, and that now lives in one file rather than being written twice.
 
 export function HomeDate() {
   const now = new Date();
@@ -36,51 +35,6 @@ export function HomeDate() {
   );
 }
 
-function CornerButton({
-  label,
-  active,
-  dot,
-  onClick,
-  children,
-}: {
-  label: string;
-  active?: boolean;
-  dot?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  const [hover, setHover] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        position: "relative", width: 26, height: 26, padding: 0,
-        border: "none", background: "transparent", cursor: "pointer",
-        display: "grid", placeItems: "center",
-        color: active ? frostInk.accent : hover ? ink(0.9) : ink(0.38),
-        transition: "color 150ms ease",
-      }}
-    >
-      {children}
-      {dot && (
-        <span
-          aria-hidden
-          style={{
-            position: "absolute", top: 1, right: 1, width: 6, height: 6, borderRadius: 999,
-            background: frostInk.accent,
-            // ring in the void colour so the dot reads as a badge, not a smudge
-            boxShadow: "0 0 0 2px var(--gooni-void, #000)",
-          }}
-        />
-      )}
-    </button>
-  );
-}
-
 export function HomeCorner({
   voiceOn,
   listening,
@@ -96,12 +50,7 @@ export function HomeCorner({
   hasEventToday: boolean;
 }) {
   return (
-    <div
-      style={{
-        position: "fixed", top: "calc(var(--gooni-bar-h, 0px) + 20px)", right: 26, zIndex: z.overlay,
-        display: "flex", alignItems: "center", gap: 20, fontFamily: FONT,
-      }}
-    >
+    <div style={CORNER_ANCHOR}>
       <FocusDayStat />
 
       <CornerButton
@@ -121,20 +70,7 @@ export function HomeCorner({
         <ScrollText size={16} strokeWidth={1.7} />
       </CornerButton>
 
-      <ThemeToggle />
+      <CornerThemeToggle />
     </div>
-  );
-}
-
-function ThemeToggle() {
-  const theme = useGooniThemeStore((s) => s.theme);
-  const setTheme = useGooniThemeStore((s) => s.setTheme);
-  return (
-    <CornerButton
-      label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-    >
-      {theme === "dark" ? <Sun size={15} strokeWidth={1.7} /> : <Moon size={15} strokeWidth={1.7} />}
-    </CornerButton>
   );
 }

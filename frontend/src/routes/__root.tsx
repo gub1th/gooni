@@ -435,10 +435,14 @@ function AppShell() {
 }
 
 /**
- * One host, two modes. On the home the surface IS the page, so it lays out
- * plainly; everywhere else it is a panel sliding in over that home. Keeping
- * both in one place is what makes the rail and the corner behave identically
- * on every surface — the thing that used to differ per route.
+ * One host for every surface. The panel is ALWAYS the container — on the home
+ * it is simply parked off the right edge with nothing in it, because the home
+ * renders through a body portal rather than through this tree.
+ *
+ * It used to swap between a plain div and the panel per route, which mounted
+ * the panel already open and unmounted it on dismissal — so neither the
+ * entrance nor the exit could animate, and a surface still arrived from
+ * nowhere. Keeping one instance is what gives the motion an origin.
  */
 function SurfaceHost({
   isSheet,
@@ -449,11 +453,8 @@ function SurfaceHost({
   onDismiss: () => void;
   children: React.ReactNode;
 }) {
-  if (!isSheet) {
-    return <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0 }}>{children}</div>;
-  }
   return (
-    <SurfacePanel open onDismiss={onDismiss}>
+    <SurfacePanel open={isSheet} onDismiss={onDismiss}>
       {children}
     </SurfacePanel>
   );
