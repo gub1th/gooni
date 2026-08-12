@@ -168,6 +168,7 @@ function AppShell() {
   // named here for the same reason every other view is: without it `isHome`
   // stays true and the home paints its void straight over the panel.
   const isMemories = onIndex && viewParam === "memories";
+  const isSettings = onIndex && viewParam === "settings";
   // The week grid is a surface too, not an overlay the home draws on itself.
   const isCalendar =
     onIndex &&
@@ -175,7 +176,7 @@ function AppShell() {
   // The ambient home is the index default — active when nothing else claims the
   // URL. It paints its own void and owns its own corners, so the docked sidebar
   // and the shared top-right cluster stand down here.
-  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar;
+  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar && !isSettings;
 
   // The header's height, for the same reason the band publishes its own: the
   // things that must clear it are `position: fixed` with their own offsets and
@@ -431,6 +432,10 @@ function AppShell() {
             onOpenNote={(n) => useHomeChromeStore.getState().openNote?.(n)}
             onOpenTrackables={() => navigate({ to: "/", search: { trackables: true } })}
             onHome={isHome}
+            onOpenSettings={() =>
+              navigate({ to: "/", search: isSettings ? {} : { view: "settings" } })
+            }
+            settingsActive={isSettings}
           />
         )}
       </div>

@@ -1,17 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import pkg from "../../package.json";
-import { GOONI_THEMES, GOONI_THEME_LABELS, THEME_PALETTES, useGooniThemeStore, type GooniTheme } from "../stores/useGooniThemeStore";
-import { useProfileStore } from "../stores/useProfileStore";
-import { uploadAvatarImage, updatePublicAvatar } from "../services/api";
-import { SettingsPanel } from "./SettingsPanel";
-import { IntegrationSection } from "./IntegrationSection";
-import { CommentAvatar } from "./notes/CommentAvatar";
-import { frostInk as ctok, FONT, z} from "../ui";
-
-interface SettingsModalProps {
-  open: boolean;
-  onClose: () => void;
-}
+import pkg from "../../../package.json";
+import { GOONI_THEMES, GOONI_THEME_LABELS, THEME_PALETTES, useGooniThemeStore, type GooniTheme } from "../../stores/useGooniThemeStore";
+import { useProfileStore } from "../../stores/useProfileStore";
+import { uploadAvatarImage, updatePublicAvatar } from "../../services/api";
+import { SettingsPanel } from "../SettingsPanel";
+import { IntegrationSection } from "../IntegrationSection";
+import { CommentAvatar } from "../notes/CommentAvatar";
+import { frostInk as ctok, FONT } from "../../ui";
 
 type Tab = "profile" | "appearance" | "general" | "integrations" | "deployments";
 
@@ -24,57 +19,23 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "deployments", label: "Deployments" },
 ];
 
-// Single Settings modal for everything Daniel can configure. Replaces the
-// old DevToolsModal — its content moved into the Integrations + Deployments
-// tabs. Version sits in the header on every tab so Daniel never has to dig
-// for "what version of Gooni am I running."
-export function SettingsModal({ open, onClose }: SettingsModalProps) {
+// Everything Daniel can configure, as a SURFACE rather than a modal.
+//
+// It was the last thing reached from the left rail that opened a floating,
+// scrimmed dialog while every other destination slid in as a panel — and that
+// inconsistency is most of why it felt odd. It is a view on the index route now
+// (`?view=settings`), rendered inside the shell's `SurfacePanel` like notes,
+// audit, memories and calendar, and its entry moved out of the rail into the
+// sticky header: the rail is navigation between surfaces, settings is a tool.
+//
+// Nothing inside it changed. No scrim, no fixed positioning, no Escape handler
+// and no close button of its own — the shell owns all four, and a per-surface
+// close is the duplication the calendar's ✕ was removed for in pass 7.
+export function SettingsView() {
   const [tab, setTab] = useState<Tab>("profile");
 
-  useEffect(() => {
-    if (!open) return;
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.3)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        // THE MODAL TIER, from the z ladder — not a literal. At the old hardcoded
-        // 200 this scrim sat UNDER every piece of ambient chrome (IconRail 952,
-        // the home corner cluster 950, QuickFind 940), so the rail floated over
-        // the scrim and stayed clickable while the modal itself read recessed.
-        zIndex: z.modalScrim,
-        fontFamily: FONT,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: ctok.card,
-          border: "0.5px solid rgb(var(--gooni-tint, 0 0 0) / 0.1)",
-          borderRadius: 14,
-          width: 720,
-          maxWidth: "calc(100vw - 32px)",
-          height: 560,
-          maxHeight: "calc(100vh - 80px)",
-          display: "flex",
-          overflow: "hidden",
-          position: "relative",
-        }}
-      >
+    <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0, overflow: "hidden", fontFamily: FONT }}>
         {/* Tab sidebar */}
         <aside style={{
           width: 180, flexShrink: 0,
@@ -133,28 +94,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           overflowY: "auto",
           position: "relative",
         }}>
-          <button
-            onClick={onClose}
-            aria-label="Close settings"
-            style={{
-              position: "absolute",
-              top: 10, right: 10,
-              width: 26, height: 26,
-              borderRadius: 6, border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              color: "var(--gooni-muted, #8E8E93)",
-              fontSize: 16, lineHeight: 1,
-            }}
-          >×</button>
-
           {tab === "profile" && <ProfileTab />}
           {tab === "appearance" && <AppearanceTab />}
           {tab === "general" && <SettingsPanel />}
           {tab === "integrations" && <IntegrationsTab />}
           {tab === "deployments" && <DeploymentsTab />}
         </div>
-      </div>
     </div>
   );
 }

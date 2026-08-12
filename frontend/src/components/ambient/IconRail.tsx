@@ -2,10 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Radio, FileText, Brain, LayoutGrid, CalendarDays,
-  SearchCheck, Settings as SettingsIcon, type LucideIcon,
+  SearchCheck, type LucideIcon,
 } from "lucide-react";
 import { FONT, frost, z } from "../../ui";
-import { SettingsModal } from "../SettingsModal";
 
 // THE app nav — a persistent centered pill of icons at the left edge (NOT a
 // full-height strip): always visible so nav is discoverable, but light enough
@@ -27,7 +26,6 @@ interface NavItem {
 
 export function IconRail() {
   const navigate = useNavigate();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
 
   const nav = (search: Record<string, unknown>) =>
@@ -40,7 +38,6 @@ export function IconRail() {
     { label: "Notes", Icon: FileText, go: () => nav({ view: "notes" }) },
     { label: "Memories", Icon: Brain, go: () => nav({ view: "memories" }) },
     { label: "Audit", Icon: SearchCheck, go: () => nav({ audit: true }) },
-    { label: "Settings", Icon: SettingsIcon, go: () => setSettingsOpen(true) },
   ];
 
   return (
@@ -93,7 +90,6 @@ export function IconRail() {
         ))}
       </nav>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

@@ -4,12 +4,9 @@ import {
   FileText,
   Brain,
   ClipboardList,
-  Settings as SettingsIcon,
   PanelLeftOpen,
 } from "lucide-react";
-import { useState } from "react";
 import { GooniLogo } from "../GooniLogo";
-import { SettingsModal } from "../SettingsModal";
 import { FONT } from "../../ui";
 import { ink } from "../ambient/ambientInk";
 
@@ -18,7 +15,7 @@ import { ink } from "../ambient/ambientInk";
  * 56px wide column with icon-only shortcuts to every top-level
  * destination. Tooltips on hover (native `title` for now).
  *
- * Compose / search / All Notes / Memories / Audit / Settings — same
+ * Compose / search / All Notes / Memories / Audit — same
  * set the full sidebar surfaces, just collapsed to icons.
  */
 
@@ -36,7 +33,6 @@ const ICON_TINT = {
   allNotes: "#6366F1",
   memories: "#0EA5E9",
   audit: "#0891B2",
-  settings: "#64748B",
   search: "#475569",
 } as const;
 
@@ -92,7 +88,6 @@ export function CollapsedSidebar({
   onOpenEval,
 }: CollapsedSidebarProps) {
   const navigate = useNavigate();
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   function fireQuickNav() {
     // QuickNav listens for Cmd+K / Ctrl+K globally. Synthesize one so the
@@ -193,17 +188,7 @@ export function CollapsedSidebar({
         color={ICON_TINT.audit}
       />
 
-      {/* Spacer — push Settings to the bottom */}
       <div style={{ flex: 1 }} />
-
-      <RailButton
-        Icon={SettingsIcon}
-        title="Settings"
-        onClick={() => setSettingsOpen(true)}
-        color={ICON_TINT.settings}
-      />
-
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
