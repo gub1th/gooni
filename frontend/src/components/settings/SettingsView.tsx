@@ -19,18 +19,18 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "deployments", label: "Deployments" },
 ];
 
-// Everything Daniel can configure, as a SURFACE rather than a modal.
+// Everything Daniel can configure.
 //
-// It was the last thing reached from the left rail that opened a floating,
-// scrimmed dialog while every other destination slid in as a panel — and that
-// inconsistency is most of why it felt odd. It is a view on the index route now
-// (`?view=settings`), rendered inside the shell's `SurfacePanel` like notes,
-// audit, memories and calendar, and its entry moved out of the rail into the
-// sticky header: the rail is navigation between surfaces, settings is a tool.
+// A MODAL again (pass 9, reverting pass 8's item 5). Pass 8 made it a slide-in
+// surface for consistency with notes/audit/memories/calendar, and that was the
+// wrong axis of consistency: settings is not a PLACE you navigate to, it is a
+// panel you open over wherever you already are — which is exactly why it was
+// kept out of the left-hand nav in the first place. As a surface it also had to
+// replace whatever you were looking at to be configured, which is backwards for
+// something like the theme switch.
 //
-// Nothing inside it changed. No scrim, no fixed positioning, no Escape handler
-// and no close button of its own — the shell owns all four, and a per-surface
-// close is the duplication the calendar's ✕ was removed for in pass 7.
+// Its entry stays in the sticky header. `SettingsView` is the CONTENT; the shell
+// around it is `SettingsModal` in this same folder.
 export function SettingsView() {
   const [tab, setTab] = useState<Tab>("profile");
 

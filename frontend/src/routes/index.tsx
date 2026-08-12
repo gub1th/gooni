@@ -9,7 +9,6 @@ import { NotesList } from "../components/notes/NotesList";
 import { AmbientHome } from "../components/ambient/AmbientHome";
 import { MemoriesView } from "../components/memories/MemoriesView";
 import { CalendarPanel } from "../components/ambient/CalendarPanel";
-import { SettingsView } from "../components/settings/SettingsView";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { fetchNote } from "../services/api";
 
@@ -21,7 +20,7 @@ import { fetchNote } from "../services/api";
 // Everything else on this route (notes, log, audit) is a summoned sheet over
 // the same void, derived from the URL.
 
-type View = "home" | "notes" | "log" | "eval" | "memories" | "calendar" | "settings";
+type View = "home" | "notes" | "log" | "eval" | "memories" | "calendar";
 
 // Every key is OPTIONAL on purpose. TanStack replaces the whole search object
 // on an object-form navigate, so optionality changes nothing at runtime — but
@@ -33,7 +32,7 @@ interface HomeSearch {
   conv?: number;
   audit?: true;
   segment?: number;
-  view?: "notes" | "log" | "memories" | "settings";
+  view?: "notes" | "log" | "memories";
   /** deep-link a single memory row — scroll + flash it (?view=memories only) */
   focus?: number;
   /** the log matrix over the home */
@@ -50,11 +49,12 @@ export const Route = createFileRoute("/")({
     audit: search.audit === true || search.audit === "true" || search.audit === "1" || undefined,
     // ?segment=<id> → auto-open that segment's drilldown in the audit view.
     segment: typeof search.segment === "number" ? search.segment : typeof search.segment === "string" ? Number(search.segment) : undefined,
-    // ?view=notes|log|memories|settings → force a view with no other URL signal.
+    // ?view=notes|log|memories → force a view that has no other URL signal.
+    // Settings is NOT here: it is a modal over whatever page you are on, so it
+    // has no URL of its own by design (pass 9).
     view:
-      search.view === "notes" || search.view === "log" ||
-      search.view === "memories" || search.view === "settings"
-        ? (search.view as "notes" | "log" | "memories" | "settings")
+      search.view === "notes" || search.view === "log" || search.view === "memories"
+        ? (search.view as "notes" | "log" | "memories")
         : undefined,
     // ?focus=<id> → the memories view scrolls that row into view and flashes it.
     focus: typeof search.focus === "number"
@@ -88,7 +88,6 @@ function LogPage() {
     search.view === "notes" ? "notes" :
     search.view === "log" ? "log" :
     search.view === "memories" ? "memories" :
-    search.view === "settings" ? "settings" :
     search.calendar ? "calendar" :
     "home";
 
@@ -190,8 +189,6 @@ function LogPage() {
         <ChatLogView />
       ) : view === "memories" ? (
         <MemoriesView focusId={search.focus} />
-      ) : view === "settings" ? (
-        <SettingsView />
       ) : view === "calendar" ? (
         <CalendarPanel />
       ) : view === "eval" ? (

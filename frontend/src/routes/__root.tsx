@@ -25,6 +25,7 @@ import { IconRail } from "../components/ambient/IconRail";
 import { useFocusCamControl } from "../components/focus/useFocusCamControl";
 import { SurfacePanel } from "../components/shell/SurfacePanel";
 import { AppHeader, HEADER_H } from "../components/shell/AppHeader";
+import { SettingsModal } from "../components/settings/SettingsModal";
 import { useHomeChromeStore } from "../stores/useHomeChromeStore";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
@@ -136,6 +137,9 @@ function AppShell() {
   const windowWidth = useWindowWidth();
   const isWide = windowWidth >= SIDEBAR_BREAKPOINT;
   const [sidebarOpen, setSidebarOpen] = useState(isWide);
+  // Settings is a MODAL over whatever page you are on (pass 9), so its open
+  // state lives here rather than in the URL — it is not a destination.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     setSidebarOpen(isWide);
   }, [isWide]);
@@ -173,7 +177,6 @@ function AppShell() {
   // named here for the same reason every other view is: without it `isHome`
   // stays true and the home paints its void straight over the panel.
   const isMemories = onIndex && viewParam === "memories";
-  const isSettings = onIndex && viewParam === "settings";
   // The week grid is a surface too, not an overlay the home draws on itself.
   const isCalendar =
     onIndex &&
@@ -181,7 +184,7 @@ function AppShell() {
   // The ambient home is the index default — active when nothing else claims the
   // URL. It paints its own void and owns its own corners, so the docked sidebar
   // and the shared top-right cluster stand down here.
-  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar && !isSettings;
+  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar;
 
   // The header's height, for the same reason the band publishes its own: the
   // things that must clear it are `position: fixed` with their own offsets and
@@ -428,6 +431,7 @@ function AppShell() {
         </div>
         </SurfaceHost>
         {!isImmersive && <IconRail />}
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         {/* ONE sticky header, on every non-immersive surface — date, quickfind,
             mic, log, theme. It replaces four separately-positioned fixed
             elements plus the two rival corner clusters. Settings joins it when
@@ -436,10 +440,8 @@ function AppShell() {
           <AppHeader
             onOpenNote={(n) => useHomeChromeStore.getState().openNote?.(n)}
             onOpenTrackables={() => navigate({ to: "/", search: { trackables: true } })}
-            onOpenSettings={() =>
-              navigate({ to: "/", search: isSettings ? {} : { view: "settings" } })
-            }
-            settingsActive={isSettings}
+            onOpenSettings={() => setSettingsOpen((o) => !o)}
+            settingsActive={settingsOpen}
           />
         )}
       </div>

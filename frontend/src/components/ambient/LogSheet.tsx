@@ -227,7 +227,10 @@ export function LogSheet({
         aria-hidden={!open}
         style={{
           position: "fixed",
-          top: 0,
+          // FLUSH with the toolbar, not under it. At `top: 0` the sheet slid up
+          // behind the sticky header and its own LOG label collided with the
+          // header's controls; it starts where the toolbar ends.
+          top: "var(--gooni-header-h, 0px)",
           right: 0,
           bottom: 0,
           width: "min(360px, 88vw)",
