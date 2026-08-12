@@ -11,18 +11,22 @@ import { frostInk as ctok, FONT } from "../../ui";
 // to the full brain on /memories. The animated brain rendering still
 // lives in MemoryBrain — used by the /memories page itself.
 //
-// Pill palette is per memory type; colours mirror the soft pastel tokens
-// from the mockup (preference / context / decision) and extend them to
-// the rest of the type set so existing memory kinds keep their semantic
-// colour without losing the visual shape.
+// Per-type pills. Same correction MemoryBrain's bubbles got: these were soft
+// PASTEL PLATES from the original mockup — a light fill with dark ink on it —
+// which is a small white pill once the surface underneath is the void. Bright
+// hue as text over a 14% tint of itself instead, the `accent`/`accentDim` shape,
+// which is the only form that works unchanged in both themes.
+//
+// Hues match `MemoriesView`'s `TYPE_COLORS` and `MemoryBrain`'s, so a `goal` is
+// one colour everywhere it is shown rather than three.
 const PALETTE: Record<string, { bg: string; fg: string }> = {
-  preference: { bg: "#EEEDFE", fg: "#3C3489" }, // violet
-  goal:       { bg: "#E1F5EE", fg: "#085041" }, // green   — "decision"-ish
-  fact:       { bg: "#E6F1FB", fg: "#0C447C" }, // blue    — "context"
-  routine:    { bg: "#E6F4F1", fg: "#0F5750" }, // teal
-  constraint: { bg: "#FDE9F0", fg: "#9C2A5B" }, // rose
-  episode:    { bg: "#F1ECFB", fg: "#4A2A8A" }, // lavender
-  default:    { bg: "#F1F1F4", fg: "#3F3F46" }, // neutral
+  preference: { bg: "rgba(74,222,128,0.14)",  fg: "#4ADE80" },
+  goal:       { bg: "rgba(167,139,250,0.16)", fg: "#A78BFA" },
+  fact:       { bg: "rgba(96,165,250,0.16)",  fg: "#60A5FA" },
+  routine:    { bg: "rgba(251,146,60,0.15)",  fg: "#FB923C" },
+  constraint: { bg: "rgba(248,113,113,0.15)", fg: "#F87171" },
+  episode:    { bg: "rgba(156,163,175,0.16)", fg: "#9CA3AF" },
+  default:    { bg: "rgba(156,163,175,0.14)", fg: "#9CA3AF" },
 };
 
 function paletteFor(type: string) {

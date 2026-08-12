@@ -25,7 +25,7 @@ export function AttachmentNodeView({ node, selected }: NodeViewProps) {
       data-size={String(size)}
       className="gooni-attachment-card"
       style={{
-        border: selected ? "1.5px solid #2D7DFF" : "1px solid rgba(0,0,0,0.12)",
+        border: selected ? `1.5px solid ${ctok.accent}` : `1px solid ${ctok.hairline}`,
         borderRadius: 10,
         padding: 10,
         margin: "10px 0",
@@ -59,8 +59,8 @@ export function AttachmentNodeView({ node, selected }: NodeViewProps) {
             width: 38,
             height: 38,
             borderRadius: 8,
-            background: "rgba(45,125,255,0.10)",
-            color: "#2D7DFF",
+            background: ctok.accentDim,
+            color: ctok.accent,
             fontSize: 11,
             fontWeight: 600,
             letterSpacing: 0.3,

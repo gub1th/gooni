@@ -28,8 +28,11 @@ export const SendButton = forwardRef<HTMLButtonElement, SendButtonProps>(
           height: 32,
           borderRadius: "50%",
           border: "none",
-          background: disabled ? "rgba(0,0,0,0.06)" : ctok.text,
-          color: disabled ? ctok.disabled : "#fff",
+          // `ctok.text` behind a hardcoded `#fff` is the inverted primary a light
+          // page wants; in dark it resolves to white on white and the arrow
+          // disappears. Same bug the integrations connect button had.
+          background: disabled ? ctok.disabled : ctok.accentDim,
+          color: disabled ? ctok.faint : ctok.accent,
           cursor: disabled ? "default" : "pointer",
           display: "flex",
           alignItems: "center",
@@ -40,19 +43,19 @@ export const SendButton = forwardRef<HTMLButtonElement, SendButtonProps>(
           transform: disabled ? "scale(0.92)" : "scale(1)",
           boxShadow: disabled
             ? "none"
-            : "0 2px 8px rgba(28,28,30,0.28), 0 0 0 1px rgba(74,222,128,0.35)",
+            : "0 0 0 1px rgba(74,222,128,0.35)",
         }}
         onMouseEnter={(e) => {
           if (disabled) return;
           const el = e.currentTarget as HTMLButtonElement;
           el.style.transform = "scale(1.08)";
-          el.style.boxShadow = "0 3px 14px rgba(74,222,128,0.35), 0 0 0 1px rgba(74,222,128,0.55)";
+          el.style.boxShadow = "0 0 0 1px rgba(74,222,128,0.55)";
         }}
         onMouseLeave={(e) => {
           if (disabled) return;
           const el = e.currentTarget as HTMLButtonElement;
           el.style.transform = "scale(1)";
-          el.style.boxShadow = "0 2px 8px rgba(28,28,30,0.28), 0 0 0 1px rgba(74,222,128,0.35)";
+          el.style.boxShadow = "0 0 0 1px rgba(74,222,128,0.35)";
         }}
       >
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
