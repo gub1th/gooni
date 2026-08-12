@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Pause, Play, Square, Target } from "lucide-react";
+import { Check, ChevronRight, Pause, Play, Square, Target } from "lucide-react";
 import { FONT, frostInk } from "../../ui";
 import { ink } from "./ambientInk";
 import { fmtMinutes } from "../../services/focusTime";
@@ -80,6 +80,15 @@ export function TodayList({
 }) {
   const [adding, setAdding] = useState(false);
   const [laterOpen, setLaterOpen] = useState(false);
+  const [completedOpen, setCompletedOpen] = useState(false);
+
+  // Completed tasks LEAVE the active list and collect in their own section
+  // (pass 9). They used to stay struck through in place, which was the right
+  // answer only while there was nowhere else to put them. Retention still does
+  // its job — `/focus/dashboard` serves ACTIVE rows only, so without it a ticked
+  // row would vanish from the day entirely rather than move down here.
+  const active = rows.filter((r) => r.item.state !== "kept");
+  const completed = rows.filter((r) => r.item.state === "kept");
 
   return (
     <div
@@ -118,7 +127,7 @@ export function TodayList({
           display: "flex", flexDirection: "column", alignItems: "stretch",
         }}
       >
-        {rows.map(({ item, minutes }) => (
+        {active.map(({ item, minutes }) => (
           <TaskRow
             key={item.id}
             item={item}
@@ -131,7 +140,7 @@ export function TodayList({
           />
         ))}
 
-        {rows.length === 0 && !adding && (
+        {active.length === 0 && !adding && (
           <span style={{ fontSize: 14, color: ink(0.3), padding: "5px 0" }}>nothing today</span>
         )}
       </div>
@@ -165,24 +174,110 @@ export function TodayList({
           meant to fix, so it reads the rows instead. Each row shows its own due
           date when it has one, so the bucket explains itself either way. */}
       {laterCount > 0 && (
-        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-          <BareButton onClick={() => setLaterOpen((o) => !o)}>
-            {laterCount} {laterRows.every((r) => !r.due_at) ? "undated" : "later"}
-          </BareButton>
-          {laterOpen && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 5, paddingTop: 2 }}>
-              {laterRows.map((r) => (
-                <span key={r.id} style={{ fontSize: 14.5, color: ink(0.5), lineHeight: 1.35 }}>
-                  {r.content}
-                  {r.due_at && (
-                    <span style={{ fontSize: 12, color: ink(0.32), marginLeft: 8 }}>
-                      {laterDueLabel(r.due_at)}
-                    </span>
-                  )}
+        <ListSection
+          label={laterRows.every((r) => !r.due_at) ? "Undated" : "Later"}
+          count={laterCount}
+          open={laterOpen}
+          onToggle={() => setLaterOpen((o) => !o)}
+        >
+          {laterRows.map((r) => (
+            <span key={r.id} style={{ fontSize: 14.5, color: ink(0.5), lineHeight: 1.35 }}>
+              {r.content}
+              {r.due_at && (
+                <span style={{ fontSize: 12, color: ink(0.32), marginLeft: 8 }}>
+                  {laterDueLabel(r.due_at)}
                 </span>
-              ))}
-            </div>
-          )}
+              )}
+            </span>
+          ))}
+        </ListSection>
+      )}
+
+      {completed.length > 0 && (
+        <ListSection
+          label="Completed"
+          count={completed.length}
+          open={completedOpen}
+          onToggle={() => setCompletedOpen((o) => !o)}
+        >
+          {completed.map(({ item, minutes }) => (
+            <button
+              key={item.id}
+              onClick={() => onTick(item)}
+              title="Move back to today"
+              style={{
+                display: "flex", alignItems: "baseline", gap: 8,
+                border: "none", background: "transparent", padding: 0, cursor: "pointer",
+                fontFamily: FONT, fontSize: 14.5, lineHeight: 1.35, textAlign: "left",
+                color: ink(0.42), textDecoration: "line-through",
+              }}
+            >
+              {item.content}
+              {minutes > 0 && (
+                <span style={{ fontSize: 12, color: ink(0.3), textDecoration: "none" }}>
+                  {fmtMinutes(minutes)}
+                </span>
+              )}
+            </button>
+          ))}
+        </ListSection>
+      )}
+    </div>
+  );
+}
+
+/**
+ * `Later` and `Completed` are the SAME KIND OF THING — a collapsible group with
+ * a count, below the day's list. Before pass 9 `3 later` floated as a lone grey
+ * line and read as debris, and completed tasks had no home at all. One component
+ * for both is what makes today / later / completed read as one language rather
+ * than a list plus two stray labels.
+ */
+function ListSection({
+  label,
+  count,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div style={{ alignSelf: "stretch", marginTop: 14 }}>
+      <button
+        onClick={onToggle}
+        aria-expanded={open}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          display: "flex", alignItems: "center", gap: 6,
+          border: "none", background: "transparent", padding: 0, cursor: "pointer",
+          fontFamily: FONT, fontSize: 11, fontWeight: 700, letterSpacing: "0.14em",
+          textTransform: "uppercase",
+          color: hover ? ink(0.7) : ink(0.38),
+          transition: "color 140ms ease",
+        }}
+      >
+        <ChevronRight
+          size={12}
+          strokeWidth={2.2}
+          style={{
+            transform: open ? "rotate(90deg)" : "none",
+            transition: "transform 160ms ease",
+            flex: "none",
+          }}
+        />
+        {label}
+        <span style={{ fontVariantNumeric: "tabular-nums", opacity: 0.75 }}>({count})</span>
+      </button>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5, padding: "8px 0 0 18px" }}>
+          {children}
         </div>
       )}
     </div>

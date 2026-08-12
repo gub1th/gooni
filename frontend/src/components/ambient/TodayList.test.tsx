@@ -66,31 +66,36 @@ function renderList(over: Partial<Parameters<typeof TodayList>[0]> = {}) {
   return props;
 }
 
-test("a kept row stays in place and reads struck through", () => {
+// Pass 9 reversed pass 7's rule here, deliberately. A ticked row used to stay
+// struck through IN PLACE, which was right only while there was nowhere else to
+// put it; there is a Completed section now. Retention still does its real job —
+// `/focus/dashboard` serves ACTIVE rows only, so without it a ticked row would
+// leave the day entirely instead of moving down.
+test("a kept row leaves the active list for Completed, still struck through", () => {
   renderList();
 
-  const titles = screen.getAllByText(/leetcode|ship the home rebuild|snakes and ladders/);
-  // order is the order it was given — the kept row did NOT sink to a section
-  expect(titles.map((t) => t.textContent)).toEqual([
-    "leetcode",
-    "ship the home rebuild",
-    "snakes and ladders",
-  ]);
+  // the active list is the two open rows, in the order it was given
+  const open = screen.getAllByText(/leetcode|ship the home rebuild/);
+  expect(open.map((t) => t.textContent)).toEqual(["leetcode", "ship the home rebuild"]);
 
-  const done = screen.getByText("snakes and ladders");
+  // the kept one is behind the collapsed section, not inline
+  expect(screen.queryByText("snakes and ladders")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Completed"));
+  const done = screen.getByText(/snakes and ladders/);
   expect(done).toHaveStyle({ textDecoration: "line-through" });
-  const open = screen.getByText("leetcode");
-  expect(open).toHaveStyle({ textDecoration: "none" });
 });
 
-test("ticking reports the row, and the checkbox states the direction", () => {
+test("ticking reports the row, and a completed row reopens by clicking it", () => {
   const props = renderList();
 
   fireEvent.click(screen.getByLabelText("Complete leetcode"));
   expect(props.onTick).toHaveBeenCalledWith(rows[0].item);
 
-  // the already-kept one offers the reverse, not a second complete
-  expect(screen.getByLabelText("Reopen snakes and ladders")).toBeInTheDocument();
+  // A completed row has no checkbox of its own — it is already done, so the
+  // only thing left to offer is putting it back, which is the row itself.
+  fireEvent.click(screen.getByText("Completed"));
+  fireEvent.click(screen.getByText(/snakes and ladders/));
+  expect(props.onTick).toHaveBeenCalledWith(rows[2].item);
 });
 
 function onRow(state: SessionRowState, label = "12:34"): SessionRow {
@@ -148,7 +153,7 @@ test("a paused running row offers resume rather than pause", () => {
 test("the later bucket says `undated` only when the rows really are", () => {
   renderList();
 
-  const later = screen.getByText("2 undated");
+  const later = screen.getByText("Undated");
   expect(screen.queryByText("book the flights")).not.toBeInTheDocument();
   fireEvent.click(later);
   expect(screen.getByText("book the flights")).toBeInTheDocument();
@@ -160,7 +165,7 @@ test("dated longer-term rows read as `later`, and each shows its own date", () =
   const dated = { ...reminder(8, "book the flights"), due_at: due, due_is_default: false };
   renderList({ laterCount: 1, laterRows: [dated] });
 
-  fireEvent.click(screen.getByText("1 later"));
+  fireEvent.click(screen.getByText("Later"));
   expect(screen.getByText("book the flights")).toBeInTheDocument();
 
   // The date is what makes "later" mean something rather than "someday". It is
@@ -190,14 +195,19 @@ test("a LIVE focus session shows its ticking clock and nothing else", () => {
   expect(screen.queryByText("paused")).not.toBeInTheDocument();
 });
 
-test("a kept row with a running session shows BOTH the strike and the clock", () => {
+// Kept-AND-running used to be reachable: `/focus` could mark a task kept while
+// its session ran. Pass 9 made ticking END the session, and `/focus` is gone, so
+// the pair is transient at most — a completed row sits in the section with no
+// clock, because by then there is no session to clock.
+test("a completed row carries its written total, not a running clock", () => {
   renderList({
-    rows: [{ item: reminder(3, "snakes and ladders", "kept"), minutes: 0 }],
-    sessionRow: { promiseId: 3, state: "focus", label: "07:12" },
+    rows: [{ item: reminder(3, "snakes and ladders", "kept"), minutes: 43 }],
+    sessionRow: null,
   });
 
-  expect(screen.getByText("snakes and ladders")).toHaveStyle({ textDecoration: "line-through" });
-  expect(screen.getByText("07:12")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Completed"));
+  expect(screen.getByText(/snakes and ladders/)).toHaveStyle({ textDecoration: "line-through" });
+  expect(screen.getByText("43m")).toBeInTheDocument();
 });
 
 test("a row ticked in this sitting stays at its own index once the server drops it", () => {
