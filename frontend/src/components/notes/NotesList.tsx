@@ -8,7 +8,9 @@ import {
 } from "../../services/api";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
-import { color as ctok, z } from "../../ui";
+// see AllNotesDiscovery: `frostInk` mirrors `color`, so this is the whole
+// migration for a legacy light surface.
+import { frostInk as ctok, z } from "../../ui";
 import { parseServerDate } from "../../utils/date";
 
 // Tag-filter channel from the Sidebar. The event can fire BEFORE this

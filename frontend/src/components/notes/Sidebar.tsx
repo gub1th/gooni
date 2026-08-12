@@ -5,7 +5,6 @@ import { fetchPinnedNotes, fetchDraftNotes, fetchRecentNotes, fetchSpaceNotes, p
 import { displayTitle } from "../../utils/notePreview";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
-import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { useOrderingStore, applyOrder } from "../../stores/useOrderingStore";
 import {
   PenLine, FileText,
@@ -13,6 +12,8 @@ import {
   Pin as PinIcon, Tag as TagIcon,
 } from "lucide-react";
 import { GooniLogo } from "../GooniLogo";
+import { frostInk } from "../../ui";
+import { ink } from "../ambient/ambientInk";
 
 const ICON_TINT = {
   allNotes: "#6366F1",   // indigo
@@ -47,7 +48,7 @@ const sidebarFooterBtn: React.CSSProperties = {
 };
 
 // Sidebar = the NOTES BROWSER (pinned/drafts/recents/tags). App-level nav
-// lives in SummonedNav (one rail, every surface) since the unification pass.
+// lives in IconRail (one rail, every surface) since the unification pass.
 interface SidebarProps {
   isNotes: boolean;
   showCompose: boolean;
@@ -84,7 +85,7 @@ function SidebarSection({
         style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "7px 14px",
-          background: active ? "rgba(10,132,255,0.08)" : "transparent",
+          background: active ? frostInk.accentDim : "transparent",
           transition: "background 0.12s",
         }}
         onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLDivElement).style.background = "rgb(var(--gooni-tint, 0 0 0) / 0.03)"; }}
@@ -96,12 +97,12 @@ function SidebarSection({
             display: "flex", alignItems: "center", gap: 8,
             flex: 1, background: "none", border: "none", cursor: "pointer",
             padding: 0, textAlign: "left",
-            color: active ? "#0A66D6" : "var(--gooni-text, #1C1C1E)",
+            color: active ? frostInk.accent : "var(--gooni-text, #1C1C1E)",
             fontSize: 13, fontWeight: active ? 600 : 500,
             fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
           }}
         >
-          <Icon size={15} strokeWidth={1.8} color={active ? "#0A66D6" : (iconColor ?? "#475569")} style={{ flexShrink: 0 }} />
+          <Icon size={15} strokeWidth={1.8} color={active ? frostInk.accent : (iconColor ?? "rgb(var(--gooni-ink, 244 245 244) / 0.55)")} style={{ flexShrink: 0 }} />
           {label}
         </button>
         {trailingLabel && (
@@ -221,8 +222,6 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
   // Distinct tag set across the whole corpus — derived from the flat
   // GET /notes list (notes carry `tags: string[]`).
   const [allTags, setAllTags] = useState<string[]>([]);
-  const theme = useGooniThemeStore((s) => s.theme);
-  const palette = THEME_PALETTES[theme];
 
   const pinnedVersion = usePinnedVersionStore((s) => s.version);
   const draftVersion = useDraftVersionStore((s) => s.version);
@@ -313,10 +312,19 @@ export function Sidebar({ isNotes, showCompose, onLogoClick, onAllNotes, onSelec
     <>
       <div
         style={{
-          width: 240, minWidth: 240, height: "100vh",
-          background: palette.sidebar, display: "flex", flexDirection: "column",
-          borderRight: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)", boxSizing: "border-box",
+          width: 240, minWidth: 240, height: "100%",
+          // TRANSPARENT, not `palette.sidebar`. That palette is the app-card
+          // world — near-white on light, #181818 on dark — and against the void
+          // the panel paints it read as a lit slab pasted into the surface,
+          // which is the "brightest thing on screen / looks unaffected by
+          // anything around it" complaint exactly. The hairline is the only
+          // thing that has to say where the column ends.
+          background: "transparent", display: "flex", flexDirection: "column",
+          borderRight: `1px solid ${ink(0.08)}`, boxSizing: "border-box",
           position: "relative",
+          // `100%`, not `100vh`: the panel starts below the session band, so a
+          // viewport-height column overflowed it by the band's height and
+          // pushed the footer off the bottom whenever a session was running.
         }}
       >
         {/* Header — logo + compose. No bottom divider (Daniel's minimal

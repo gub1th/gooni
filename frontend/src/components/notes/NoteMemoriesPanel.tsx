@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import type { ApiMemory } from "../../services/api";
-import { color as ctok, FONT } from "../../ui";
+import { frostInk as ctok, FONT } from "../../ui";
 
 
 // Per-note memories panel. Designed to match the redesign mockup
@@ -11,18 +11,22 @@ import { color as ctok, FONT } from "../../ui";
 // to the full brain on /memories. The animated brain rendering still
 // lives in MemoryBrain — used by the /memories page itself.
 //
-// Pill palette is per memory type; colours mirror the soft pastel tokens
-// from the mockup (preference / context / decision) and extend them to
-// the rest of the type set so existing memory kinds keep their semantic
-// colour without losing the visual shape.
+// Per-type pills. Same correction MemoryBrain's bubbles got: these were soft
+// PASTEL PLATES from the original mockup — a light fill with dark ink on it —
+// which is a small white pill once the surface underneath is the void. Bright
+// hue as text over a 14% tint of itself instead, the `accent`/`accentDim` shape,
+// which is the only form that works unchanged in both themes.
+//
+// Hues match `MemoriesView`'s `TYPE_COLORS` and `MemoryBrain`'s, so a `goal` is
+// one colour everywhere it is shown rather than three.
 const PALETTE: Record<string, { bg: string; fg: string }> = {
-  preference: { bg: "#EEEDFE", fg: "#3C3489" }, // violet
-  goal:       { bg: "#E1F5EE", fg: "#085041" }, // green   — "decision"-ish
-  fact:       { bg: "#E6F1FB", fg: "#0C447C" }, // blue    — "context"
-  routine:    { bg: "#E6F4F1", fg: "#0F5750" }, // teal
-  constraint: { bg: "#FDE9F0", fg: "#9C2A5B" }, // rose
-  episode:    { bg: "#F1ECFB", fg: "#4A2A8A" }, // lavender
-  default:    { bg: "#F1F1F4", fg: "#3F3F46" }, // neutral
+  preference: { bg: "rgba(74,222,128,0.14)",  fg: "#4ADE80" },
+  goal:       { bg: "rgba(167,139,250,0.16)", fg: "#A78BFA" },
+  fact:       { bg: "rgba(96,165,250,0.16)",  fg: "#60A5FA" },
+  routine:    { bg: "rgba(251,146,60,0.15)",  fg: "#FB923C" },
+  constraint: { bg: "rgba(248,113,113,0.15)", fg: "#F87171" },
+  episode:    { bg: "rgba(156,163,175,0.16)", fg: "#9CA3AF" },
+  default:    { bg: "rgba(156,163,175,0.14)", fg: "#9CA3AF" },
 };
 
 function paletteFor(type: string) {
@@ -54,7 +58,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
       style={{
         marginTop: 24,
         paddingTop: 16,
-        borderTop: "1px solid rgba(0,0,0,0.06)",
+        borderTop: `1px solid ${ctok.hairline}`,
         fontFamily: FONT,
         position: "relative",
       }}
@@ -65,7 +69,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
           fontWeight: 500,
           letterSpacing: "0.06em",
           textTransform: "uppercase",
-          color: "var(--gooni-faint, #94A3B8)",
+          color: ctok.faint,
           marginBottom: 8,
         }}
       >
@@ -117,7 +121,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
               <span
                 style={{
                   fontSize: 13,
-                  color: "var(--gooni-text, #1E293B)",
+                  color: ctok.text,
                   flex: 1,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
@@ -132,15 +136,15 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
         })}
       </div>
 
-      <div style={{ marginTop: 8, padding: "0 4px", fontSize: 12, color: "var(--gooni-faint, #94A3B8)" }}>
+      <div style={{ marginTop: 8, padding: "0 4px", fontSize: 12, color: ctok.faint }}>
         Click a row to peek.{" "}
         <button
-          onClick={() => navigate({ to: "/memories", search: { focus: undefined } })}
+          onClick={() => navigate({ to: "/", search: { view: "memories" } })}
           style={{
             background: "none",
             border: "none",
             padding: 0,
-            color: "#2563EB",
+            color: ctok.accent,
             cursor: "pointer",
             fontFamily: FONT,
             fontSize: 12,
@@ -172,10 +176,10 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
               right: 0,
               top: "100%",
               marginTop: 6,
-              background: "var(--gooni-card, #fff)",
+              background: ctok.card,
               borderRadius: 12,
-              border: "1px solid rgba(0,0,0,0.10)",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.06)",
+              border: `1px solid ${ctok.hairline}`,
+              boxShadow: "none",
               padding: "12px 14px",
               zIndex: 5,
             }}
@@ -193,7 +197,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
               >
                 {selected.type}
               </span>
-              <span style={{ fontSize: 11, color: "var(--gooni-faint, #94A3B8)" }}>
+              <span style={{ fontSize: 11, color: ctok.faint }}>
                 conf {Math.round(selected.confidence * 100)}%
               </span>
               <button
@@ -221,7 +225,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
                 onClick={() => {
                   const id = selected.id;
                   setSelected(null);
-                  navigate({ to: "/memories", search: { focus: id } });
+                  navigate({ to: "/", search: { view: "memories", focus: id } });
                 }}
                 style={{
                   fontSize: 12,

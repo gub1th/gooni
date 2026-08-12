@@ -1,6 +1,6 @@
 import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { hostnameFromUrl } from "./LinkCardExtension";
-import { color as ctok } from "../../ui";
+import { frostInk as ctok } from "../../ui";
 
 // Editor-side React rendering for LinkCard. Mirrors the static
 // renderHTML output so editor + public look identical, but uses
@@ -29,7 +29,7 @@ export function LinkCardNodeView({ node, selected }: NodeViewProps) {
         display: "flex",
         alignItems: "stretch",
         gap: 0,
-        border: selected ? "1.5px solid #2D7DFF" : "1px solid rgba(0,0,0,0.12)",
+        border: selected ? `1.5px solid ${ctok.accent}` : `1px solid ${ctok.hairline}`,
         borderRadius: 8,
         margin: "12px 0",
         background: ctok.bg,
@@ -40,7 +40,7 @@ export function LinkCardNodeView({ node, selected }: NodeViewProps) {
         transition: "background 120ms",
       }}
       onMouseEnter={(e: React.MouseEvent<HTMLAnchorElement>) => {
-        e.currentTarget.style.background = "#F2F2F4";
+        e.currentTarget.style.background = ctok.hover;
       }}
       onMouseLeave={(e: React.MouseEvent<HTMLAnchorElement>) => {
         e.currentTarget.style.background = ctok.bg;

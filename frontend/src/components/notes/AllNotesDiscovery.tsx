@@ -8,7 +8,10 @@ import {
 } from "../../services/api";
 import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { displayTitle, extractFirstImage } from "../../utils/notePreview";
-import { color as ctok, FONT } from "../../ui";
+// frostInk mirrors `color`'s key shape, so a legacy light surface migrates
+// onto the theme-aware palette by swapping this import — the path ui/tokens.ts
+// documents. Without it this rendered near-black text on the dark void.
+import { frostInk as ctok, FONT } from "../../ui";
 
 
 interface AllNotesDiscoveryProps {

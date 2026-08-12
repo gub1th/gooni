@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Anchor, Pin, X } from "lucide-react";
-import { FONT, z } from "../ui";
+import { FONT, frostInk, z } from "../ui";
 import {
   fetchOverlay,
   searchNoteTitles,
@@ -92,9 +92,9 @@ export function AmbientOverlay() {
         style={{
           position: "fixed", top: 14, right: 16, zIndex: z.overlay + 1,
           width: 26, height: 26, borderRadius: 999, padding: 0,
-          border: "1px solid var(--gooni-border, rgba(0,0,0,0.10))",
-          background: "var(--gooni-card, rgba(255,255,255,0.7))",
-          color: "var(--gooni-muted, #8E8E93)",
+          border: `1px solid ${frostInk.hairline}`,
+          background: frostInk.card,
+          color: frostInk.muted,
           display: "inline-flex", alignItems: "center", justifyContent: "center",
           cursor: "pointer", opacity: 0.65,
         }}

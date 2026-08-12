@@ -384,11 +384,10 @@ export async function disconnectWhoop(): Promise<void> {
   if (!res.ok) throw new Error("Failed to disconnect Whoop");
 }
 
-// How often the whoop/leetcode-rendering surfaces re-pull. Shared by the
-// ambient log tiles and (as its whole-board poll) the kiosk dashboard: an age
-// label is only honest if the payload under it is current, so the two surfaces
-// that render data age refresh on one clock instead of drifting apart. Other
-// pollers (FocusStream, HomeDashboard) still carry their own literals.
+// How often the after-the-fact sensor surfaces re-pull. Shared by the ambient
+// log's feed tiles and the focus session page's sensor line: a data-age label is
+// only honest if the payload under it is current, so the surfaces that render
+// age refresh on one clock instead of drifting apart.
 export const FEED_REFRESH_MS = 25_000;
 
 export interface WhoopToday {
@@ -823,6 +822,8 @@ export interface Trackable {
   schema_hint: unknown;
   source: string;
   parent_promise_id: number | null;
+  /** today's folded value — present only when fetched with `?today=1` */
+  today?: number | boolean | unknown | null;
 }
 
 export interface TrackableDay {
@@ -834,8 +835,11 @@ export interface TrackableDay {
   entry_count: number;
 }
 
-export async function fetchTrackables(): Promise<Trackable[]> {
-  const res = await apiFetch(`${BASE}/trackables`);
+export async function fetchTrackables(withToday = false): Promise<Trackable[]> {
+  // `?today=1` attaches each definition's value for today. The ambient home
+  // uses it to mark the daily-fill row done at a glance without making the N+1
+  // entry requests the fill itself makes.
+  const res = await apiFetch(`${BASE}/trackables${withToday ? "?today=1" : ""}`);
   if (!res.ok) throw new Error("Failed to fetch trackables");
   return res.json();
 }
@@ -918,6 +922,34 @@ export async function updateStickyNote(
   return res.json();
 }
 
+// One raw entry row (GET .../entries?raw=true). Distinct from the per-day
+// pivot: several rows can share a (trackable, date), which is exactly what
+// carries per-session focus attribution in `value_json`.
+export interface TrackableEntryRow {
+  id: number;
+  trackable_id: number;
+  date: string;
+  value_boolean: boolean | null;
+  value_numeric: number | null;
+  value_json: unknown;
+  source: string;
+  created_at: string | null;
+}
+
+// Raw entries (NOT folded per day) for the last `days` days.
+export async function fetchTrackableEntries(
+  id: number,
+  days = 30,
+  end?: string,
+): Promise<TrackableEntryRow[]> {
+  const q = new URLSearchParams({ days: String(days), raw: "true" });
+  if (end) q.set("end", end);
+  const res = await apiFetch(`${BASE}/trackables/${id}/entries?${q.toString()}`);
+  if (!res.ok) throw new Error("Failed to fetch trackable entries");
+  const data = (await res.json()) as { entries: TrackableEntryRow[] };
+  return data.entries ?? [];
+}
+
 // Log one entry. replace=true = cell-edit (collapse the day to this value).
 export async function logTrackable(
   id: number,
@@ -929,12 +961,15 @@ export async function logTrackable(
     value_json?: Record<string, unknown>;
     replace?: boolean;
     date?: string;
+    // Who wrote it. Defaults to a hand edit; the focus timer stamps "focus"
+    // so its rows are separable from Daniel typing in the matrix.
+    source?: string;
   },
 ): Promise<{ cleared: boolean }> {
   const res = await apiFetch(`${BASE}/trackables/${id}/entries`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...body, source: "manual" }),
+    body: JSON.stringify({ source: "manual", ...body }),
   });
   if (!res.ok) throw new Error("Failed to log trackable");
   return res.json();
@@ -945,6 +980,10 @@ export async function createTrackable(body: {
   kind?: TrackableKind;
   unit?: string;
   target?: number;
+  // Per-day fold rule. Omitting it means "last wins" server-side; anything
+  // that accumulates across a day (focus minutes, calories) must say `sum`.
+  agg?: "sum" | "last";
+  source?: string;
 }): Promise<Trackable> {
   const res = await apiFetch(`${BASE}/trackables`, {
     method: "POST",

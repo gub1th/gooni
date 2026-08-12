@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FONT } from "../../ui";
 import { GREEN } from "./wavePath";
+import { fmtMinutes, isReadOnlyRollup } from "../../services/focusTime";
 import {
   fetchDailyNotes,
   fetchTrackableDays,
@@ -203,7 +204,15 @@ export function LogTable() {
     setCells((prev) => ({ ...prev, [tid]: { ...prev[tid], [date]: v } }));
   }
 
+  // Derived rollups are shown but never written from here: every verb below
+  // carries replace:true, which deletes the day's rows outright.
+  function readOnlyCol(tid: number): boolean {
+    const t = cols.find((c) => c.id === tid);
+    return !!t && isReadOnlyRollup(t);
+  }
+
   function toggleBool(tid: number, date: string) {
+    if (readOnlyCol(tid)) return;
     const cur = cells[tid]?.[date] === true;
     setCell(tid, date, !cur);
     // replace=true collapses the day → any existing tag is dropped; mirror that.
@@ -220,6 +229,7 @@ export function LogTable() {
   }
 
   function openLabel(tid: number, date: string) {
+    if (readOnlyCol(tid)) return;
     setEdit(null);
     setNoteEdit(null);
     setLabelEdit({ tid, date });
@@ -234,6 +244,7 @@ export function LogTable() {
     const { tid, date } = labelEdit;
     const text = labelDraft.trim();
     setLabelEdit(null);
+    if (readOnlyCol(tid)) return;
     setLabelCell(tid, date, text);
     const body = text
       ? { value_boolean: true, value_json: { label: text }, replace: true, date }
@@ -242,6 +253,7 @@ export function LogTable() {
   }
 
   function openNum(tid: number, date: string) {
+    if (readOnlyCol(tid)) return;
     const v = cells[tid]?.[date];
     setNoteEdit(null);
     setEdit({ tid, date });
@@ -254,6 +266,7 @@ export function LogTable() {
     const { tid, date } = edit;
     const raw = draft.trim();
     setEdit(null);
+    if (readOnlyCol(tid)) return;
     // Empty field = clear the cell: a valueless replace deletes the day's rows
     // server-side and the cell falls back to "–". (The old code did
     // parseFloat("") = NaN → return, so clearing silently no-op'd and a stuck
@@ -389,6 +402,17 @@ export function LogTable() {
                             border: `1px solid ${GREEN}`, background: "rgb(var(--gooni-surf, 11 15 13) / 0.8)", color: "rgb(var(--gooni-ink, 244 245 244))", outline: "none", fontFamily: FONT,
                           }}
                         />
+                      ) : isReadOnlyRollup(t) ? (
+                        <span
+                          title={`${t.name} is a rollup of its own entries — read only here`}
+                          style={{
+                            display: "inline-block", minWidth: 40, padding: "3px 8px", borderRadius: 7,
+                            border: "1px solid transparent",
+                            color: v == null ? "rgb(var(--gooni-ink, 244 245 244) / 0.25)" : "rgb(var(--gooni-ink, 244 245 244) / 0.7)", fontSize: 12.5, fontWeight: 600, fontFamily: FONT,
+                          }}
+                        >
+                          {typeof v === "number" ? fmtMinutes(v) : "–"}
+                        </span>
                       ) : (
                         <button
                           onClick={() => openNum(t.id, date)}

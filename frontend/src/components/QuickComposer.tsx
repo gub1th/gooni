@@ -4,7 +4,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Image } from "@tiptap/extension-image";
 import { createNote as apiCreateNote } from "../services/api";
 import { SendButton } from "./chat/SendButton";
-import { FONT } from "../ui";
+import { FONT, z} from "../ui";
 
 
 // Cmd+E quick-capture composer. Mounted at root (next to QuickNav) so it
@@ -125,7 +125,7 @@ export function QuickComposer() {
         style={{
           position: "fixed",
           inset: 0,
-          zIndex: 220,
+          zIndex: z.modalScrim, // ladder tier — a literal here sat under the ambient chrome
           background: "rgba(15,15,18,0.42)",
           backdropFilter: "blur(2px)",
           WebkitBackdropFilter: "blur(2px)",

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import tippy, { type Instance } from "tippy.js";
-import { color as ctok } from "../ui";
+import { frostInk as ctok } from "../ui";
 
 interface TooltipProps {
   label: string;

@@ -1,22 +1,19 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  Radio, FileText, Brain,
-  SearchCheck, Settings as SettingsIcon, type LucideIcon,
+  Radio, FileText, Brain, LayoutGrid, CalendarDays,
+  SearchCheck, type LucideIcon,
 } from "lucide-react";
 import { FONT, frost, z } from "../../ui";
-import { SettingsModal } from "../SettingsModal";
-import { WIDGETS } from "../widgets/registry";
-import { useWidgetOverlayStore } from "../../stores/useWidgetOverlayStore";
 
-// PROTOTYPE — persistent slim icon rail, an alternative to SummonedNav's
-// hover-summoned panel. A floating centered pill (NOT a full-height strip):
-// always visible so nav is discoverable on the dashboard, but light enough it
-// doesn't wall off the ambient wave void. Icons at rest; each icon flies out
-// its label on hover (an OVERLAY to the right — no content reflow, unlike a
-// persistent labeled rail that pushes columns).
+// THE app nav — a persistent centered pill of icons at the left edge (NOT a
+// full-height strip): always visible so nav is discoverable, but light enough
+// it doesn't wall off the ambient void. Icons at rest; each flies out its label
+// on hover (an OVERLAY to the right — no reflow).
 //
-// Same item set + wiring as SummonedNav so it's a true drop-in.
+// It carries NO focus entry, deliberately: focus has exactly one door and it is
+// a task row on the home. The widget entries it used to auto-list are gone with
+// the widget system; `Trackables` (the log matrix) replaced the calendar one.
 
 const INK = "rgb(var(--gooni-ink, 244 245 244)";
 const ACCENT = "rgba(74,222,128,0.9)";
@@ -29,26 +26,18 @@ interface NavItem {
 
 export function IconRail() {
   const navigate = useNavigate();
-  const openWidget = useWidgetOverlayStore((s) => s.open);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
 
   const nav = (search: Record<string, unknown>) =>
-    navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, ...search } });
-
-  const widgetItems: NavItem[] = WIDGETS.filter((w) => w.Panel).map((w) => ({
-    label: w.title,
-    Icon: w.Icon,
-    go: () => openWidget(w.id, "week"),
-  }));
+    navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined, calendar: undefined, ...search } });
 
   const items: NavItem[] = [
-    { label: "Capture", Icon: Radio, go: () => navigate({ to: "/home" }) },
-    ...widgetItems,
+    { label: "Home", Icon: Radio, go: () => nav({}) },
+    { label: "Trackables", Icon: LayoutGrid, go: () => nav({ trackables: true }) },
+    { label: "Calendar", Icon: CalendarDays, go: () => nav({ calendar: true }) },
     { label: "Notes", Icon: FileText, go: () => nav({ view: "notes" }) },
-    { label: "Memories", Icon: Brain, go: () => navigate({ to: "/memories", search: { focus: undefined } }) },
+    { label: "Memories", Icon: Brain, go: () => nav({ view: "memories" }) },
     { label: "Audit", Icon: SearchCheck, go: () => nav({ audit: true }) },
-    { label: "Settings", Icon: SettingsIcon, go: () => setSettingsOpen(true) },
   ];
 
   return (
@@ -101,7 +90,6 @@ export function IconRail() {
         ))}
       </nav>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

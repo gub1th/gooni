@@ -54,7 +54,7 @@ GOONI_URL=http://localhost:8000 GOONI_AUTH_PASSWORD="$AUTH_PASSWORD" \
 # OAuth discovery probes), then add the printed URL + /mcp at claude.ai:
 cloudflared tunnel --url http://localhost:8001
 ```
-See `docs/focus_connector_instructions.md` for the full connect + auto-logging setup. The kiosk dashboard lives at http://localhost:5173/focus.
+See `docs/focus_connector_instructions.md` for the full connect + auto-logging setup. What Claude writes shows up on the home at http://localhost:5173/ (the kiosk dashboard that used to live at `/focus` was deleted 2026-08-10 — that route is the focus SESSION page now).
 
 ### Desktop shell (menu-bar app + capture hotkey + focus-cam supervisor)
 ```bash
@@ -117,13 +117,14 @@ app/
 
 frontend/
   src/
-    routes/index.tsx         # app shell: home (ambient waveform) | notes | chat | log | eval
-    routes/focus.tsx         # standalone chromeless "focus system" kiosk dashboard (/focus)
+    routes/index.tsx         # app shell: home (THE ambient home) | notes | log | eval
+    routes/focus.tsx         # chromeless focus SESSION page (/focus) — reached only from a task row
     routes/public.*.tsx      # public portfolio pages (no auth)
-    components/ambient/      # presence home: MorphLine waveform, omnibox recall, log surface
+    components/ambient/      # THE home: MorphLine wave · the line · TODAY list · streaks · corner log sheet
     components/ChatLogView.tsx  # append-only thought log w/ glow → promote/dismiss
     components/notes/        # Sidebar, NotesList, NoteEditor (TipTap, auto-save)
     components/eval/         # EvalView (?audit=1)
+    components/focus/        # FocusSession (the /focus timer) + GooniAsleep (its idle state)
     stores/                  # Zustand stores (persist with versioned keys)
     services/api.ts          # every fetch call, typed
     ui/                      # design tokens — single styling source of truth

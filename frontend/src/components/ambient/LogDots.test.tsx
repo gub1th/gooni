@@ -1,17 +1,42 @@
 /**
- * Feed-tile freshness seam test. One flow: the whoop tile's data age must
- * describe a payload that is actually current, so a strap that resumed syncing
- * clears the stale warning WITHOUT the panel being closed and reopened — and a
- * transient refetch failure must not throw away a good reading.
+ * Log-surface seam tests. Two flows:
+ *
+ *   • the whoop tile's data age must describe a payload that is actually
+ *     current, so a strap that resumed syncing clears the stale warning WITHOUT
+ *     the panel being closed and reopened — and a transient refetch failure must
+ *     not throw away a good reading;
+ *   • the `focus` rollup is VISIBLE in the log but must never be written from
+ *     it. Every matrix verb carries `replace: true`, which deletes the whole
+ *     (trackable, day) — taking each session row's promise id and window with
+ *     it. Ordinary columns stay editable.
  */
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WhoopToday } from "../../services/api";
+import type { Trackable, TrackableDay, WhoopToday } from "../../services/api";
 import { FEED_REFRESH_MS } from "../../services/api";
 import { STALE_MS } from "./whoopFreshness";
 
 const NOW = Date.UTC(2026, 6, 14, 12, 0, 0);
+
+function trackable(over: Partial<Trackable> & { id: number; name: string }): Trackable {
+  return {
+    kind: "numeric",
+    unit: null,
+    cadence: null,
+    target: null,
+    is_important: false,
+    agg: "sum",
+    schema_hint: null,
+    source: "manual",
+    parent_promise_id: null,
+    ...over,
+  };
+}
+
+function day(date: string, value: number): TrackableDay {
+  return { date, value, label: null, entry_count: 1 };
+}
 
 function whoopAged(ageMs: number): WhoopToday {
   return {
@@ -30,13 +55,17 @@ function whoopAged(ageMs: number): WhoopToday {
 }
 
 const fetchWhoopToday = vi.fn();
+const fetchTrackables = vi.fn();
+const fetchTrackableDays = vi.fn();
+const logTrackable = vi.fn();
 
 vi.mock("../../services/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../services/api")>();
   return {
     ...actual,
-    fetchTrackables: vi.fn(async () => []),
-    fetchTrackableDays: vi.fn(async () => ({ days: [] })),
+    fetchTrackables: (...args: unknown[]) => fetchTrackables(...args),
+    fetchTrackableDays: (...args: unknown[]) => fetchTrackableDays(...args),
+    logTrackable: (...args: unknown[]) => logTrackable(...args),
     fetchDailyNotes: vi.fn(async () => []),
     fetchLeetcodeToday: vi.fn(async () => ({ available: false })),
     fetchWhoopToday: (...args: unknown[]) => fetchWhoopToday(...args),
@@ -49,6 +78,9 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(NOW);
   fetchWhoopToday.mockReset();
+  fetchTrackables.mockReset().mockResolvedValue([]);
+  fetchTrackableDays.mockReset().mockResolvedValue({ days: [] });
+  logTrackable.mockReset().mockResolvedValue({ cleared: false });
 });
 
 afterEach(() => {
@@ -98,5 +130,62 @@ describe("whoop feed tile freshness", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(3 * FEED_REFRESH_MS); });
 
     expect(fetchWhoopToday.mock.calls.length).toBe(afterUnmount);
+  });
+});
+
+describe("the focus rollup in the log", () => {
+  const FOCUS = trackable({ id: 77, name: "focus", unit: "minutes", source: "derived" });
+  const CALORIES = trackable({ id: 5, name: "calories", source: "manual" });
+
+  beforeEach(() => {
+    fetchWhoopToday.mockResolvedValue(whoopAged(60_000));
+    fetchTrackables.mockResolvedValue([FOCUS, CALORIES]);
+    // 24.98 is what a real 25-minute pomodoro stores — the stopwatch is stopped
+    // by a click, not on a whole minute.
+    fetchTrackableDays.mockImplementation(async (id: number) => ({
+      days: [day("2026-07-14", id === FOCUS.id ? 24.98 : 1800)],
+    }));
+  });
+
+  it("shows the rollup's value but refuses to open an editor or write it", async () => {
+    render(<LogDots onClose={() => {}} />);
+
+    // visible — 'focused today' is the one rollup that crosses into the log
+    await waitFor(() => expect(screen.getByText("focus")).toBeInTheDocument());
+    const cell = await screen.findByText("25m");
+
+    fireEvent.click(cell);
+
+    // no editor, and above all no write: a replace on this column would delete
+    // the day's session rows outright
+    expect(screen.queryByDisplayValue(/24.98|25m/)).not.toBeInTheDocument();
+    expect(logTrackable).not.toHaveBeenCalled();
+  });
+
+  it("reads the same as every other focus surface, not as raw stored minutes", async () => {
+    render(<LogDots onClose={() => {}} />);
+
+    // the corner stat and the TODAY row both say 25m for this session
+    expect(await screen.findByText("25m")).toBeInTheDocument();
+    expect(screen.queryByText("24.98")).not.toBeInTheDocument();
+
+    // ordinary numeric columns keep rendering their raw value
+    expect(screen.getByText("1800")).toBeInTheDocument();
+  });
+
+  it("leaves ordinary columns editable", async () => {
+    render(<LogDots onClose={() => {}} />);
+
+    const cell = await screen.findByText("1800");
+    fireEvent.click(cell);
+
+    const field = await screen.findByDisplayValue("1800");
+    fireEvent.change(field, { target: { value: "2100" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+
+    await waitFor(() => expect(logTrackable).toHaveBeenCalledWith(
+      CALORIES.id,
+      expect.objectContaining({ value_numeric: 2100, replace: true }),
+    ));
   });
 });

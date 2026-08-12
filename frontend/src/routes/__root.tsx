@@ -9,6 +9,7 @@ import {
 import {
   THEME_PALETTES,
   AMBIENT_PALETTES,
+  FOCUS_GLOW,
   FROST_INK_PALETTES,
   FROST_SURFACE_PALETTES,
   useGooniThemeStore,
@@ -18,12 +19,14 @@ import { QuickComposer } from "../components/QuickComposer";
 import { ErrorView, NotFoundView } from "../components/ErrorView";
 import { PasswordGate } from "../components/PasswordGate";
 import { Sidebar } from "../components/notes/Sidebar";
-// Nav prototype swap: IconRail (persistent pill) replaced the hover-summoned
-// SummonedNav. To revert: import SummonedNav and render it at the mount below.
+// ONE app nav: the persistent IconRail pill. The hover-summoned SummonedNav it
+// replaced was deleted with the widget system it hosted.
 import { IconRail } from "../components/ambient/IconRail";
-import { TopRightControls } from "../components/ambient/TopRightControls";
-import { WidgetOverlays } from "../components/widgets/WidgetOverlays";
-import { sheetFrame } from "../ui";
+import { useFocusCamControl } from "../components/focus/useFocusCamControl";
+import { SurfacePanel } from "../components/shell/SurfacePanel";
+import { AppHeader, HEADER_H } from "../components/shell/AppHeader";
+import { SettingsModal } from "../components/settings/SettingsModal";
+import { useHomeChromeStore } from "../stores/useHomeChromeStore";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -68,6 +71,10 @@ function ThemeVarSync() {
       // --gooni-tint) / α)` hairline is visible in BOTH themes (the historical
       // hardcoded rgba(0,0,0,…) vanished on dark). NOT for shadows/scrims.
       "--gooni-tint":      theme === "dark" ? "255 255 255" : "0 0 0",
+      // The focus hue, as a real token rather than a literal — the wave reads it
+      // in JS, but anything else that ever needs "a session is running" should
+      // read the var rather than repeat the hex.
+      "--gooni-focus":     FOCUS_GLOW[theme],
     };
     // Frost-ink palette (audit/eval/memories chrome) → --gooni-fi-<key>.
     for (const [k, v] of Object.entries(FROST_INK_PALETTES[theme])) {
@@ -108,9 +115,9 @@ function isChromelessPath(pathname: string): boolean {
   );
 }
 
-// Immersive paths hide the ambient chrome (SummonedNav + widget overlays).
-// /creative is an immersive 3D world — the summoned nav + floating widgets
-// pop over the plaza and break the scene. Sidebar still mounts there.
+// Immersive paths hide the ambient chrome (the icon rail + corner controls).
+// /creative is an immersive 3D world — floating app nav pops over the plaza and
+// breaks the scene. Sidebar still mounts there.
 function isImmersivePath(pathname: string): boolean {
   return pathname === "/creative" || pathname.startsWith("/creative/");
 }
@@ -121,12 +128,18 @@ function isImmersivePath(pathname: string): boolean {
 // inline edit drafts) every time you clicked Memories / New chat.
 // Routes render only their right-column content into <Outlet />.
 function AppShell() {
+  // ONE owner of the focus-cam reconcile target, mounted here because AppShell
+  // survives every route change — see the hook for why no view may own it.
+  useFocusCamControl();
   const location = useLocation();
   const navigate = useNavigate();
   const routerState = useRouterState();
   const windowWidth = useWindowWidth();
   const isWide = windowWidth >= SIDEBAR_BREAKPOINT;
   const [sidebarOpen, setSidebarOpen] = useState(isWide);
+  // Settings is a MODAL over whatever page you are on (pass 9), so its open
+  // state lives here rather than in the URL — it is not a destination.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => {
     setSidebarOpen(isWide);
   }, [isWide]);
@@ -159,10 +172,28 @@ function AppShell() {
   const isNotes = onIndex && (hasNote || viewParam === "notes");
   const isEval = onIndex && auditFlag;
   const isLog = onIndex && viewParam === "log";
-  // Ambient waveform home is the index default — active when nothing else
-  // claims the URL. It renders its OWN summoned chrome (frosted nav, capture
-  // input), so the docked sidebar + chat orb stand down here.
-  const isHome = onIndex && !isNotes && !isEval && !isLog;
+  // Memories moved off its own `/memories` route onto the index route, so that
+  // the home is mounted behind it for the panel to slide over. It has to be
+  // named here for the same reason every other view is: without it `isHome`
+  // stays true and the home paints its void straight over the panel.
+  const isMemories = onIndex && viewParam === "memories";
+  // The week grid is a surface too, not an overlay the home draws on itself.
+  const isCalendar =
+    onIndex &&
+    (rawSearch.calendar === true || rawSearch.calendar === "true" || rawSearch.calendar === "1");
+  // The ambient home is the index default — active when nothing else claims the
+  // URL. It paints its own void and owns its own corners, so the docked sidebar
+  // and the shared top-right cluster stand down here.
+  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar;
+
+  // The header's height, for the same reason the band publishes its own: the
+  // things that must clear it are `position: fixed` with their own offsets and
+  // never see the shell's padding. It replaces `--gooni-corner-w`, which existed
+  // only because a floating corner cluster could collide with a surface's own
+  // top-right controls — a header in its own row cannot.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--gooni-header-h", `${HEADER_H}px`);
+  }, []);
 
   // Compose / new-chat callbacks. The store actions live in Zustand
   // already; we just call them then navigate. routes/index.tsx's
@@ -184,6 +215,7 @@ function AppShell() {
         audit: undefined,
         segment: undefined,
         view: undefined,
+        trackables: undefined,
       },
       replace: true,
     });
@@ -198,6 +230,7 @@ function AppShell() {
         audit: undefined,
         segment: undefined,
         view: undefined,
+        trackables: undefined,
       },
     });
   }
@@ -214,6 +247,7 @@ function AppShell() {
         audit: undefined,
         segment: undefined,
         view: "notes",
+        trackables: undefined,
       },
       replace: true,
     });
@@ -228,17 +262,17 @@ function AppShell() {
         audit: undefined,
         segment: undefined,
         view: undefined,
+        trackables: undefined,
       },
     });
   }
 
   // /creative is its own immersive world — exempt from the sheet frame.
   const isImmersive = isImmersivePath(location.pathname);
-  // /home is the waveform capture surface — full-bleed like the Focus home at
-  // "/", not a summoned sheet (it paints its own void ground).
-  const isAmbient = location.pathname === "/home";
   // Every non-home authed surface renders as a summoned layer over the void.
-  const isSheet = !isHome && !isAmbient && !isImmersive && !isChromelessPath(location.pathname);
+  // `/` (the ambient home) paints its own void ground full-bleed, so it is the
+  // one authed surface that is NOT a sheet.
+  const isSheet = !isHome && !isImmersive && !isChromelessPath(location.pathname);
 
   // Esc = drop the summoned layer, back to presence. Skips text inputs and
   // open dialogs (the canonical Modal stopPropagation()s Escape at the
@@ -256,7 +290,7 @@ function AppShell() {
       if (!isSheet || isChromelessPath(location.pathname)) return;
       navigate({
         to: "/",
-        search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined },
+        search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined },
       });
     }
     window.addEventListener("keydown", onKey);
@@ -338,27 +372,14 @@ function AppShell() {
           // underlaps it. STATIC (not hover-driven) → no reflow jank. Immersive
           // surfaces hide the rail, so no lane.
           paddingLeft: isImmersive ? 0 : 68,
+          paddingTop: isImmersive ? 0 : HEADER_H,
         }}
       >
-        <div
-          style={
-            isSheet
-              ? {
-                  flex: 1, display: "flex", minWidth: 0, minHeight: 0,
-                  margin: sheetFrame.margin,
-                  borderRadius: sheetFrame.borderRadius,
-                  border: sheetFrame.border,
-                  boxShadow: sheetFrame.boxShadow,
-                  overflow: "hidden",
-                  // Transparent so the black canvas (not a theme-white) shows
-                  // at the rounded corners — each route paints its own bg
-                  // (dark audit/memories, light notes). White here bled through
-                  // the corners on the dark surfaces.
-                  background: "transparent",
-                }
-              : { flex: 1, display: "flex", minWidth: 0, minHeight: 0 }
-          }
-        >
+        {/* Non-home surfaces SLIDE IN as one panel over a home that stays
+            put; the home renders plainly underneath. `sheetFrame` is retired
+            as the page treatment — it framed every surface as a floating
+            window, which is what made them read as pasted on. */}
+        <SurfaceHost isSheet={isSheet} onDismiss={gotoBlank}>
         {isNotes && sidebarOpen && (
           <Sidebar
             isNotes={isNotes}
@@ -391,6 +412,7 @@ function AppShell() {
                   audit: true,
                   segment: undefined,
                   view: undefined,
+                  trackables: undefined,
                 },
               })
             }
@@ -407,14 +429,49 @@ function AppShell() {
         >
           <Outlet />
         </div>
-        </div>
+        </SurfaceHost>
         {!isImmersive && <IconRail />}
-        {/* Visible top-right chrome (focus/home jump + theme toggle) — the two
-            controls Daniel pulled out of the hover nav. */}
-        {!isImmersive && <TopRightControls isFocusHome={isHome} />}
-        {!isImmersive && <WidgetOverlays />}
+        <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        {/* ONE sticky header, on every non-immersive surface — date, quickfind,
+            mic, log, theme. It replaces four separately-positioned fixed
+            elements plus the two rival corner clusters. Settings joins it when
+            it becomes a surface; the rail still owns it. */}
+        {!isImmersive && (
+          <AppHeader
+            onOpenNote={(n) => useHomeChromeStore.getState().openNote?.(n)}
+            onOpenTrackables={() => navigate({ to: "/", search: { trackables: true } })}
+            onOpenSettings={() => setSettingsOpen((o) => !o)}
+            settingsActive={settingsOpen}
+          />
+        )}
       </div>
     </PasswordGate>
+  );
+}
+
+/**
+ * One host for every surface. The panel is ALWAYS the container — on the home
+ * it is simply parked off the right edge with nothing in it, because the home
+ * renders through a body portal rather than through this tree.
+ *
+ * It used to swap between a plain div and the panel per route, which mounted
+ * the panel already open and unmounted it on dismissal — so neither the
+ * entrance nor the exit could animate, and a surface still arrived from
+ * nowhere. Keeping one instance is what gives the motion an origin.
+ */
+function SurfaceHost({
+  isSheet,
+  onDismiss,
+  children,
+}: {
+  isSheet: boolean;
+  onDismiss: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <SurfacePanel open={isSheet} onDismiss={onDismiss}>
+      {children}
+    </SurfacePanel>
   );
 }
 

@@ -4,21 +4,18 @@ import {
   FileText,
   Brain,
   ClipboardList,
-  Settings as SettingsIcon,
   PanelLeftOpen,
 } from "lucide-react";
-import { useState } from "react";
-import { useGooniThemeStore, THEME_PALETTES } from "../../stores/useGooniThemeStore";
 import { GooniLogo } from "../GooniLogo";
-import { SettingsModal } from "../SettingsModal";
 import { FONT } from "../../ui";
+import { ink } from "../ambient/ambientInk";
 
 /**
  * Claude-style icon rail. Renders when sidebarOpen=false in AppShell.
  * 56px wide column with icon-only shortcuts to every top-level
  * destination. Tooltips on hover (native `title` for now).
  *
- * Compose / search / All Notes / Memories / Audit / Settings — same
+ * Compose / search / All Notes / Memories / Audit — same
  * set the full sidebar surfaces, just collapsed to icons.
  */
 
@@ -36,7 +33,6 @@ const ICON_TINT = {
   allNotes: "#6366F1",
   memories: "#0EA5E9",
   audit: "#0891B2",
-  settings: "#64748B",
   search: "#475569",
 } as const;
 
@@ -92,9 +88,6 @@ export function CollapsedSidebar({
   onOpenEval,
 }: CollapsedSidebarProps) {
   const navigate = useNavigate();
-  const theme = useGooniThemeStore((s) => s.theme);
-  const palette = THEME_PALETTES[theme];
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   function fireQuickNav() {
     // QuickNav listens for Cmd+K / Ctrl+K globally. Synthesize one so the
@@ -109,9 +102,13 @@ export function CollapsedSidebar({
       style={{
         width: 56,
         minWidth: 56,
-        height: "100vh",
-        background: palette.sidebar,
-        borderRight: "1px solid rgb(var(--gooni-tint, 0 0 0) / 0.08)",
+        // Same two fixes as the expanded Sidebar: transparent rather than the
+        // app-card `sidebar` palette, which read as a lit slab against the
+        // void; and `100%` rather than `100vh`, which overflowed the panel by
+        // the height of the session band.
+        height: "100%",
+        background: "transparent",
+        borderRight: `1px solid ${ink(0.08)}`,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -167,7 +164,7 @@ export function CollapsedSidebar({
       <RailButton
         Icon={Brain}
         title="Memories"
-        onClick={() => navigate({ to: "/memories", search: { focus: undefined } })}
+        onClick={() => navigate({ to: "/", search: { view: "memories" } })}
         color={ICON_TINT.memories}
       />
       <RailButton
@@ -191,17 +188,7 @@ export function CollapsedSidebar({
         color={ICON_TINT.audit}
       />
 
-      {/* Spacer — push Settings to the bottom */}
       <div style={{ flex: 1 }} />
-
-      <RailButton
-        Icon={SettingsIcon}
-        title="Settings"
-        onClick={() => setSettingsOpen(true)}
-        color={ICON_TINT.settings}
-      />
-
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Activity, Bell, Brain, CircleCheck, FileText, Search } from "lucide-react";
+import { Activity, Bell, Brain, CircleCheck, FileText, Pause, Play, Search, Square } from "lucide-react";
+import { elapsedMs, useFocusSessionStore } from "../../stores/useFocusSessionStore";
+import { endFocusSession } from "../../services/focusTime";
+import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
+import { pickUpNext } from "./upNext";
 import type { LucideIcon } from "lucide-react";
 import { FONT, frost, frostInk, z } from "../../ui";
 import {
@@ -98,6 +102,44 @@ function reminderSub(r: FocusReminder): string {
   }
   if (r.state !== "active") bits.push(r.state);
   return bits.join(" · ");
+}
+
+function mmss(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** A control inside the notch — same bare treatment as the header glyphs. */
+function NotchButton({
+  label,
+  accent,
+  onClick,
+  children,
+}: {
+  label: string;
+  accent?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 22, height: 22, padding: 0, borderRadius: 999, cursor: "pointer",
+        border: "none", background: "transparent",
+        display: "grid", placeItems: "center",
+        color: accent ? frostInk.accent : hover ? frostInk.text : frostInk.faint,
+        transition: "color 140ms ease",
+      }}
+    >
+      {children}
+    </button>
+  );
 }
 
 export function QuickFind({
@@ -271,7 +313,7 @@ export function QuickFind({
         title: clean(m.content),
         sub: m.type ?? null,
         group: GROUP.memory,
-        open: () => void navigate({ to: "/memories", search: { focus: undefined } }),
+        open: () => void navigate({ to: "/", search: { view: "memories", focus: m.id } }),
       });
     }
 
@@ -323,14 +365,81 @@ export function QuickFind({
     }
   }
 
+  // ── THE NOTCH ────────────────────────────────────────────────────────────
+  // One physical element, two payloads. The search bar is the only chrome that
+  // is present on every surface at all times, which makes it the one place a
+  // running session can live without adding a second thing to the top of the
+  // screen. While a session runs and you are not searching, the bar IS the
+  // session; click into it and it is a search bar again.
+  //
+  // This also kills a real dead end. `FocusSessionBar` owned the only
+  // `setAttached(true)`, and that band is deliberately not rendered on the home
+  // — so detaching on the home left no way back short of stopping the session.
+  // The re-attach control now lives in an element that is always present, so
+  // the dead end cannot exist by construction.
+  const session = useFocusSessionStore((s) => s.session);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const endingRef = useRef(false);
+
+  const sessionRunning = !!session?.running;
+  // A running session needs a 1s clock; UP NEXT only has to be right to the
+  // minute, and a 1s tick for a countdown that changes every 60s is 59 wasted
+  // renders a minute. No session and no events → no timer at all.
+  const hasEvents = useHomeChromeStore((s) => s.events.length > 0);
+  const tickMs = sessionRunning ? 1000 : 30_000;
+  const wantsTick = sessionRunning || hasEvents;
+  useEffect(() => {
+    if (!wantsTick) return;
+    const iv = window.setInterval(() => setNowMs(Date.now()), tickMs);
+    return () => window.clearInterval(iv);
+  }, [wantsTick, tickMs]);
+
+  // ── UP NEXT, the notch's third payload ───────────────────────────────────
+  // Ranked by what matters at this moment: a running session, then an imminent
+  // event, then search. Same grammar as the session payload — one element,
+  // contextual content — rather than a second mechanism.
+  //
+  // The events come from the store the home publishes them into, which is the
+  // SAME fetch the log button's dot already uses. A second calendar request for
+  // the same day would be two sources that can disagree.
+  const events = useHomeChromeStore((s) => s.events);
+  const upNext = useMemo(() => pickUpNext(events, nowMs), [events, nowMs]);
+
+  // Searching always wins: focus or a typed query swaps the payload back.
+  const searching = open || q.trim().length > 0;
+  const showSession = !!session && !searching;
+  const showUpNext = !showSession && !searching && upNext != null;
+
+  // Focus the input the moment the search payload appears — the click that
+  // asked for it landed on the bar, not on an input that existed yet.
+  useEffect(() => {
+    if (!searching) return;
+    inputRef.current?.focus();
+  }, [searching]);
+
+  async function endSession() {
+    if (endingRef.current) return;
+    endingRef.current = true;
+    try {
+      await endFocusSession();
+    } catch {
+      /* the session survives a failed write by design — /focus explains it */
+    } finally {
+      endingRef.current = false;
+    }
+  }
+
   const showPanel = open && q.trim().length > 0;
 
   return (
     <div
       data-quickfind
       style={{
-        position: "fixed", top: 14, left: "50%", transform: "translateX(-50%)",
-        width: BAR_W, zIndex: z.overlay - 10, fontFamily: FONT,
+        // NOT self-positioned any more — it is a child of the sticky header, so
+        // the header owns where it sits. It used to be a fixed element floating
+        // at the top-centre, one of four separate fixed things along the top.
+        position: "relative",
+        width: BAR_W, maxWidth: "100%", fontFamily: FONT,
         opacity: hidden ? 0 : 1,
         pointerEvents: hidden ? "none" : "auto",
         transition: "opacity 220ms ease",
@@ -340,40 +449,160 @@ export function QuickFind({
           ⌘K hint, no shadow: at rest this should read as a seam in the void,
           not a control asking to be used. */}
       <div
-        onClick={() => inputRef.current?.focus()}
+        onClick={() => {
+          // While the session payload is showing there IS no input to focus —
+          // it is not rendered — so the click has to flip the payload first and
+          // let the effect below focus it once it exists. Without this the notch
+          // was a one-way door: a running session meant no search.
+          // Same for UP NEXT as for the session: neither renders the input, so
+          // the click flips the payload and the effect below focuses it. Without
+          // this, an imminent event would trap you out of search for 90 minutes.
+          if (showSession || showUpNext) { setOpen(true); void loadCaches(); return; }
+          inputRef.current?.focus();
+        }}
         style={{
           display: "flex", alignItems: "center", gap: 7,
-          height: 34, padding: "0 13px", borderRadius: 999, cursor: "text",
+          height: 34, padding: showSession ? "0 6px 0 13px" : "0 13px",
+          borderRadius: 999, cursor: "text",
           ...frost.chrome,
-          border: `1px solid ${frostInk.border}`,
+          // the accent border is the whole signal that this is a session, not a
+          // search field — the shape is deliberately identical
+          border: `1px solid ${showSession ? "rgb(74 222 128 / 0.45)" : frostInk.border}`,
+          transition: "border-color 180ms ease",
         }}
       >
-        <Search size={12} color={frostInk.faint} strokeWidth={1.8} />
-        <input
-          ref={inputRef}
-          value={q}
-          aria-label="quickfind"
-          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-          onFocus={() => { setOpen(true); void loadCaches(); }}
-          onBlur={() => {
-            // let a row's click land first (rows also preventDefault on mousedown)
-            if (blurRef.current) window.clearTimeout(blurRef.current);
-            blurRef.current = window.setTimeout(close, 140);
-          }}
-          onKeyDown={onKeyDown}
-          spellCheck={false}
-          style={{
-            flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none",
-            fontFamily: FONT, fontSize: 12.5, color: frostInk.text, caretColor: "#4ADE80",
-          }}
-        />
+        {showUpNext && upNext ? (
+          <>
+            {/* UP NEXT. No border colour of its own: the accent border means "a
+                session is running", and an event is not one. The label carries
+                the meaning instead. */}
+            <span
+              style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: "0.13em", flex: "none",
+                color: frostInk.faint,
+              }}
+            >
+              UP NEXT
+            </span>
+            <span
+              style={{
+                fontSize: 12.5, color: frostInk.text, minWidth: 0,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}
+            >
+              {upNext.title}
+            </span>
+            <span
+              style={{
+                fontSize: 12.5, flex: "none", marginLeft: "auto", paddingLeft: 8,
+                color: frostInk.muted, fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {upNext.at}
+            </span>
+            <span
+              style={{
+                fontSize: 12.5, flex: "none", color: frostInk.text,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {upNext.inLabel}
+            </span>
+          </>
+        ) : showSession && session ? (
+          <>
+            {sessionRunning ? (
+              <span
+                aria-hidden
+                style={{
+                  width: 6, height: 6, borderRadius: 999, flex: "none",
+                  background: frostInk.accent,
+                  animation: "gooni-notch-pulse 1.8s ease-in-out infinite",
+                }}
+              />
+            ) : (
+              <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, flex: "none", border: `1px solid ${frostInk.faint}` }} />
+            )}
+            <style>{`@keyframes gooni-notch-pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
+            <span
+              style={{
+                fontSize: 12.5, color: frostInk.text, minWidth: 0,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                textDecoration: session.kept ? "line-through" : "none",
+              }}
+            >
+              {session.title}
+            </span>
+            <span
+              style={{
+                fontSize: 12.5, flex: "none", marginLeft: "auto", paddingLeft: 8,
+                fontVariantNumeric: "tabular-nums",
+                color: sessionRunning ? frostInk.accent : frostInk.faint,
+              }}
+            >
+              {mmss(
+                session.style === "timer"
+                  ? Math.max(0, session.targetMs - elapsedMs(session, "focus", nowMs))
+                  : elapsedMs(session, "focus", nowMs),
+              )}
+            </span>
+            {/* Controls stopPropagation: the bar itself is the way back to
+                search, so without it every click on pause would also open the
+                search field underneath. */}
+            <span style={{ display: "flex", alignItems: "center", gap: 1, flex: "none" }} onClick={(e) => e.stopPropagation()}>
+              <NotchButton
+                label={sessionRunning ? "Pause the session" : "Resume the session"}
+                accent={!sessionRunning}
+                onClick={() =>
+                  sessionRunning
+                    ? useFocusSessionStore.getState().pause()
+                    : useFocusSessionStore.getState().resume()
+                }
+              >
+                {sessionRunning ? <Pause size={12} fill="currentColor" strokeWidth={0} /> : <Play size={12} fill="currentColor" strokeWidth={0} />}
+              </NotchButton>
+              {/* A SQUARE, not an ✕ — an ✕ reads as dismiss, and this stops a
+                  session and writes its entry. */}
+              <NotchButton label="Stop the session" onClick={() => void endSession()}>
+                <Square size={10} fill="currentColor" strokeWidth={0} />
+              </NotchButton>
+            </span>
+          </>
+        ) : (
+          <>
+            <Search size={12} color={frostInk.faint} strokeWidth={1.8} />
+            <input
+              ref={inputRef}
+              value={q}
+              aria-label="quickfind"
+              onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+              onFocus={() => { setOpen(true); void loadCaches(); }}
+              onBlur={() => {
+                // let a row's click land first (rows also preventDefault on mousedown)
+                if (blurRef.current) window.clearTimeout(blurRef.current);
+                blurRef.current = window.setTimeout(close, 140);
+              }}
+              onKeyDown={onKeyDown}
+              spellCheck={false}
+              style={{
+                flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none",
+                fontFamily: FONT, fontSize: 12.5, color: frostInk.text, caretColor: "#4ADE80",
+              }}
+            />
+          </>
+        )}
       </div>
+
 
       {/* results */}
       {showPanel && (
         <div
           style={{
+            // ABSOLUTE, so a long result list cannot grow the header row it now
+            // lives in. In its own fixed wrapper this was plain flow.
+            position: "absolute", top: "100%", left: 0, right: 0,
             marginTop: 6, padding: 6, borderRadius: 20,
+            zIndex: z.overlay - 10,
             display: "flex", flexDirection: "column", gap: 2,
             ...frost.panel,
             border: `1px solid ${frostInk.border}`,

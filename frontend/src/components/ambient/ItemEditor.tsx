@@ -9,7 +9,7 @@ import {
   patchPromise,
   deletePromise,
 } from "../../services/api";
-import { FONT } from "../../ui";
+import { FONT, z } from "../../ui";
 import { localToIso } from "./calendarDates";
 
 // The ONE create/edit modal, generalized over the time-anchored primitives that
@@ -232,13 +232,20 @@ const editorScrim: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  zIndex: 4000,
+  // Above the log sheet it is summoned from (z.overlay + 1) via the shared
+  // modal tier, rather than the ad-hoc 4000 it carried on the old dashboard —
+  // which also put it above toasts for no reason.
+  zIndex: z.modalScrim,
 };
 
 const editorCard: React.CSSProperties = {
   width: 360,
   maxWidth: "calc(100% - 40px)",
-  background: "#121715",
+  // Theme surface, NOT a hardcoded dark. Every piece of text in this card reads
+  // `--gooni-ink` (near-white on dark, dark ink on light), so a literal dark
+  // background rendered dark-on-dark and unreadable the moment this editor left
+  // the focus board's always-dark context for the app's themed one.
+  background: "rgb(var(--gooni-surf, 11 15 13))",
   border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.14)",
   borderRadius: 14,
   padding: "18px 18px 16px",

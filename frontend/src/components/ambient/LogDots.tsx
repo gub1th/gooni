@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
-import { FONT, frostInk } from "../../ui";
+import { FONT, frost, frostInk } from "../../ui";
 import { useNowTick } from "../../hooks/useNowTick";
 import { GREEN } from "./wavePath";
 import { LogTable } from "./LogTable";
 import { agePhrase, freshness, sleepClock } from "./whoopFreshness";
+import { fmtMinutes, isReadOnlyRollup } from "../../services/focusTime";
 import {
   createTrackable,
   fetchDailyNotes,
@@ -32,13 +33,15 @@ import {
 
 const TRAIL_DAYS = 6;
 
-// shared dark frosted-glass recipe (home is black, so NOT the light overlay card)
+// The sanctioned frost level plus a hairline — NOT a hand-rolled recipe, and
+// NOT a drop shadow. This surface carried `0 18px 60px rgba(0,0,0,0.55)`, which
+// violated the rule the 2026-08-02 pass set on the ambient home: frost and a
+// hairline carry a layer, and a bloom under every floating thing is what made
+// the void read heavy. It was worst in light mode, where a 55%-black bloom sat
+// under a near-white card.
 const GLASS: React.CSSProperties = {
-  background: "color-mix(in srgb, rgb(var(--gooni-surf, 11 15 13)) 55%, transparent)",
-  backdropFilter: "blur(20px)",
-  WebkitBackdropFilter: "blur(20px)",
-  border: "1px solid rgb(var(--gooni-ink, 244 245 244) / 0.10)",
-  boxShadow: "0 18px 60px rgba(0,0,0,0.55)",
+  ...frost.panel,
+  border: `1px solid ${frostInk.hairline}`,
 };
 
 // Which trackables belong on the COMPACT daily-dots glance: skip json feeds
@@ -48,7 +51,7 @@ const GLASS: React.CSSProperties = {
 // glance and bury the OG trackables (they still live in the expanded matrix +
 // the activity rail's "device" events, so nothing is lost). The matrix's own
 // isDaily (LogTable) deliberately keeps them — the glance is priority-only.
-function isDaily(t: Trackable): boolean {
+export function isDaily(t: Trackable): boolean {
   if (t.kind === "json") return false;
   if (t.source === "whoop" || t.source === "leetcode") return false;
   if (t.source === "shortcuts") return false;
@@ -59,12 +62,39 @@ function isDaily(t: Trackable): boolean {
   return true;
 }
 
+/**
+ * Has anything been logged today?
+ *
+ * Deliberately scoped to what the FILL actually offers (`isDaily`) minus the
+ * read-only rollups: `focus` is a trackable too, and it writes itself whenever a
+ * session ends — counting it would turn the daily-fill row green just for having
+ * focused, which is precisely the thing it is not claiming.
+ */
+export function hasLoggedToday(all: Trackable[]): boolean {
+  return all.some((t) => isDaily(t) && !isReadOnlyRollup(t) && t.today != null);
+}
+
 interface Row {
   t: Trackable;
   days: TrackableDay[]; // newest-first, gap-filled; today = days[0]
 }
 
-export function LogDots({ onClose }: { onClose: () => void }) {
+/**
+ * ONE surface, two jobs, opened in two places (pass 9 addendum).
+ *
+ * `fill` is the daily ritual — today's dots, tick and type. It is reached from a
+ * task row in TODAY, so logging is part of the day rather than a destination you
+ * have to remember to visit.
+ *
+ * `matrix` is the RECORD — history and trends, opened deliberately from the rail
+ * when you want to look back rather than to log.
+ *
+ * They are the same component on purpose: the fill WRITES entries and the matrix
+ * READS them, so there is no second copy of the day's state to keep in step.
+ * `mode` only decides which one you land on; the expand control still crosses
+ * between them.
+ */
+export function LogDots({ onClose, mode = "fill" }: { onClose: () => void; mode?: "fill" | "matrix" }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [editId, setEditId] = useState<number | null>(null);
@@ -73,7 +103,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   const [addName, setAddName] = useState("");
   const [addKind, setAddKind] = useState<"boolean" | "numeric">("boolean");
   const [shown, setShown] = useState(false); // drives the Y expand/contract
-  const [expanded, setExpanded] = useState(false); // full editable matrix
+  const [expanded, setExpanded] = useState(mode === "matrix"); // full editable matrix
   const [noteDraft, setNoteDraft] = useState(""); // today's daily-log note
   const [labelEditId, setLabelEditId] = useState<number | null>(null); // boolean tag editor
   const [labelDraft, setLabelDraft] = useState("");
@@ -127,12 +157,20 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    // Escape closes the log surface — but not while the table is expanded
-    // (there, Escape belongs to cell-editing / the toggle button owns collapse)
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape" && !expanded) requestClose(); }
+    // Escape closes the log surface — but in FILL mode not while the table is
+    // expanded, where Escape belongs to cell-editing and the toggle owns
+    // collapse. In MATRIX mode the expanded table IS the surface, so that guard
+    // would swallow Escape forever and the record could only be closed by
+    // collapsing it first — which left it open underneath when the daily fill
+    // was then summoned, two copies of the same component at once.
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (mode === "fill" && expanded) return;
+      requestClose();
+    }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [requestClose, expanded]);
+  }, [requestClose, expanded, mode]);
 
   async function refreshRow(id: number) {
     try {
@@ -142,6 +180,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   }
 
   async function toggleBool(row: Row) {
+    if (isReadOnlyRollup(row.t)) return;
     const cur = row.days[0]?.value === true;
     // optimistic
     setRows((prev) => prev.map((r) => (
@@ -153,6 +192,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   }
 
   function openNumber(row: Row) {
+    if (isReadOnlyRollup(row.t)) return;
     const v = row.days[0]?.value;
     setEditId(row.t.id);
     setDraft(typeof v === "number" ? String(v) : "");
@@ -162,6 +202,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   async function commitNumber(row: Row) {
     const raw = draft.trim();
     setEditId(null);
+    if (isReadOnlyRollup(row.t)) return;
     // Empty field clears today's cell (valueless replace deletes the row).
     if (raw === "") {
       setRows((prev) => prev.map((r) => (
@@ -183,6 +224,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   }
 
   function openLabel(row: Row) {
+    if (isReadOnlyRollup(row.t)) return;
     setLabelEditId(row.t.id);
     setLabelDraft(row.days[0]?.label ?? "");
     requestAnimationFrame(() => labelRef.current?.focus());
@@ -193,6 +235,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
   async function commitLabel(row: Row) {
     const text = labelDraft.trim();
     setLabelEditId(null);
+    if (isReadOnlyRollup(row.t)) return;
     // optimistic
     setRows((prev) => prev.map((r) => (
       r.t.id === row.t.id
@@ -284,6 +327,7 @@ export function LogDots({ onClose }: { onClose: () => void }) {
                   <Column
                     key={row.t.id}
                     row={row}
+                    readOnly={isReadOnlyRollup(row.t)}
                     editing={editId === row.t.id}
                     draft={draft}
                     editRef={editRef}
@@ -397,9 +441,12 @@ export function LogDots({ onClose }: { onClose: () => void }) {
 function Column({
   row, editing, draft, editRef, onToggle, onOpenNumber, onDraft, onCommit, onCancel,
   labelEditing, labelDraft, labelRef, onOpenLabel, onLabelDraft, onLabelCommit, onLabelCancel,
+  readOnly = false,
 }: {
   row: Row;
   editing: boolean;
+  /** a derived rollup: still shown, never written from here */
+  readOnly?: boolean;
   draft: string;
   editRef: React.RefObject<HTMLInputElement>;
   onToggle: () => void;
@@ -457,6 +504,17 @@ function Column({
             boxShadow: today === true ? `0 0 10px 1px rgba(74,222,128,0.6)` : "none",
           }}
         />
+      ) : readOnly ? (
+        <span
+          title={`${t.name} is a rollup of its own entries — read only here`}
+          style={{
+            minWidth: 40, padding: "4px 12px", borderRadius: 999, textAlign: "center",
+            border: "1px solid transparent",
+            color: "rgb(var(--gooni-ink, 244 245 244) / 0.7)", fontSize: 13, fontWeight: 600, fontFamily: FONT,
+          }}
+        >
+          {typeof today === "number" ? fmtMinutes(today) : "–"}
+        </span>
       ) : editing ? (
         <input
           ref={editRef}

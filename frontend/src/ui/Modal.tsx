@@ -1,6 +1,13 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import { FONT, color, radius, z } from "./tokens";
+import { FONT, frostInk as color, radius, z } from "./tokens";
+
+// Reads the FROST-INK palette, not the app-card one. Every surviving consumer —
+// settings, eval, the note attachment viewer, the icon rail — is summoned over
+// the void, where the card palette's #2A2A2C put a mid-grey slab on near-black:
+// the same light/dark mixing the sidebar had. `frostInk` mirrors `color`'s key
+// shape, which is why this is an import swap rather than a rewrite. Aliased so
+// the call sites below read unchanged.
 
 // Canonical modal primitive. Wraps the overlay+card chrome that ~30 one-off
 // modals (FocusModal, SettingsModal, ItemModal, ExploreModal, …) each
@@ -133,7 +140,7 @@ export function Modal({
               transition: "background 0.12s, color 0.12s",
             }}
             onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background = "rgba(0,0,0,0.06)";
+              (e.currentTarget as HTMLButtonElement).style.background = color.hover;
               (e.currentTarget as HTMLButtonElement).style.color = color.text;
             }}
             onMouseLeave={(e) => {

@@ -86,6 +86,23 @@ export const WAVE_REST_COLOR: Record<GooniTheme, string> = {
   light: "#1C1C1E",
 };
 
+// FOCUS GLOW — the wave's halo colour while a session runs, and the ONLY focus
+// indication in that slot (pass 9; before it the session replaced the wave).
+//
+// It has to be its own hue because the two signals share one element. GREEN is
+// already the pending accept/deny signal, blended into the LINE by `energyRef`,
+// so reusing it would make one colour mean two things. Amber is `warn`/stale in
+// the frost tokens, so a session would read as a problem. This is a pale yellow
+// — the captain's suggestion — kept clearly desaturated and lighter than the
+// amber warn (#E0A83E) so the two do not read as the same state.
+//
+// The two signals also live in different CHANNELS, which is what actually keeps
+// them apart: pending tints the crisp LINE, focus lights the HALO behind it.
+export const FOCUS_GLOW: Record<GooniTheme, string> = {
+  dark: "#F0E68C",
+  light: "#C9A227",
+};
+
 // ── Frost-ink palette ────────────────────────────────────────────────────────
 // The text/surface tokens for chrome floating on the void (audit, eval,
 // memories, TurnTracePanel). `ui/frostInk` reads these via `--gooni-fi-*`, so

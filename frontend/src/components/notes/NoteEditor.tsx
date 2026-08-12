@@ -40,7 +40,7 @@ import { useNotesContentStore } from "../../stores/useNotesContentStore";
 import { usePinnedVersionStore } from "../../stores/usePinnedVersionStore";
 import { useDraftVersionStore } from "../../stores/useDraftVersionStore";
 import { Tooltip } from "../Tooltip";
-import { color as ctok } from "../../ui";
+import { frostInk as ctok } from "../../ui";
 
 type Variant = "full" | "embedded";
 
@@ -294,8 +294,17 @@ function useEditorStyles() {
          chrome). Stays in the text line so the parent reads as normal
          prose with a single colored hyperlink, not "look here's a UI
          widget". Same color family as the public-prose anchor. */
+      /* Plain links in prose. Without this they take the BROWSER DEFAULT,
+         which is #0000EE on a near-black page — the one piece of the editor
+         that was never styled at all, and invisible in dark. */
+      .gooni-note-editor a:not(.gooni-note-link):not([data-link-card]) {
+        color: var(--gooni-fi-accent, #4ADE80);
+        text-decoration: underline;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 2px;
+      }
       .gooni-note-editor a.gooni-note-link {
-        color: #2563EB;
+        color: var(--gooni-fi-accent, #4ADE80);
         text-decoration: underline;
         text-decoration-thickness: 1px;
         text-underline-offset: 2px;
@@ -304,14 +313,14 @@ function useEditorStyles() {
         font-weight: inherit;
       }
       .gooni-note-editor a.gooni-note-link:hover {
-        color: #1D4ED8;
+        color: var(--gooni-fi-text, rgba(255,255,255,0.92));
       }
       .gooni-note-editor a.gooni-note-link.ProseMirror-selectednode {
-        background: rgba(37,99,235,0.10);
+        background: var(--gooni-fi-accentDim, rgba(74,222,128,0.12));
         border-radius: 2px;
       }
       .gooni-note-editor img.ProseMirror-selectednode {
-        outline: 2px solid #007AFF;
+        outline: 2px solid var(--gooni-fi-accent, #4ADE80);
       }
       /* Figure (Image + caption + alignment + width). Floats clear so a
          non-figure block following a row of side-by-side figures lands
