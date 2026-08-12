@@ -174,10 +174,14 @@ function AppShell() {
   // named here for the same reason every other view is: without it `isHome`
   // stays true and the home paints its void straight over the panel.
   const isMemories = onIndex && viewParam === "memories";
+  // The week grid is a surface too, not an overlay the home draws on itself.
+  const isCalendar =
+    onIndex &&
+    (rawSearch.calendar === true || rawSearch.calendar === "true" || rawSearch.calendar === "1");
   // The ambient home is the index default — active when nothing else claims the
   // URL. It paints its own void and owns its own corners, so the docked sidebar
   // and the shared top-right cluster stand down here.
-  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories;
+  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar;
 
   // Published as a CSS var because the elements that must clear the band are
   // `position: fixed` with their own top offsets (QuickFind, the home corner

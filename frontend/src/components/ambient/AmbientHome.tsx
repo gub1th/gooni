@@ -11,7 +11,6 @@ import { QuickFind } from "./QuickFind";
 import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
 import { HomeCorner, HomeDate } from "./HomeCorners";
 import { LogSheet } from "./LogSheet";
-import { CalendarPanel } from "./CalendarPanel";
 import { SessionInWave } from "./SessionInWave";
 import { useSessionAttachStore } from "../../stores/useSessionAttachStore";
 import { MarkKeptOffer } from "../focus/MarkKeptOffer";
@@ -148,18 +147,12 @@ export function AmbientHome({
   trackablesOpen = false,
   onCloseTrackables,
   onOpenTrackables,
-  calendarOpen = false,
-  onCloseCalendar,
   covered: coveredBySurface = false,
 }: {
   /** the log matrix, opened from the rail (URL-driven) or the streak row */
   trackablesOpen?: boolean;
   onCloseTrackables?: () => void;
   onOpenTrackables?: () => void;
-  /** the week-grid calendar, opened from the rail (URL-driven) */
-  calendarOpen?: boolean;
-  onOpenCalendar?: () => void;
-  onCloseCalendar?: () => void;
   /** a surface panel is sliding over the home — stand every affordance down */
   covered?: boolean;
 } = {}) {
@@ -764,7 +757,7 @@ export function AmbientHome({
   const needsWake = voiceMode && !armed; // show the tap-to-wake veil
 
   // Any full-screen surface owns the void; the stage stands down under it.
-  const covered = coveredBySurface || trackablesOpen || calendarOpen || !!peekNote || needsWake;
+  const covered = coveredBySurface || trackablesOpen || !!peekNote || needsWake;
   // The stage yields to the capture box the moment it opens. It used to wait
   // for the box to GROW past its resting bounds, which read as the box and the
   // line briefly sharing the screen.
@@ -980,7 +973,6 @@ export function AmbientHome({
 
       {trackablesOpen && <LogDots onClose={() => onCloseTrackables?.()} />}
 
-      {calendarOpen && <CalendarPanel onClose={() => onCloseCalendar?.()} />}
 
       {peekNote && <NotePeek note={peekNote} onClose={() => setPeekNote(null)} />}
 

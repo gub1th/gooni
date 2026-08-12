@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import {
   fetchCalendarEvents,
   CalendarNotConnectedError,
@@ -28,11 +28,19 @@ const GREEN = "rgba(74,222,128,0.9)";
 // (The agenda view was dropped earlier — the week grid is the whole surface.)
 //
 // RESTORED 2026-08-11 from before the widget purge, rehomed out of
-// `components/widgets/` into the ambient surfaces it now lives among. It is
-// summoned as a full overlay from the rail (`?calendar=1`) rather than hosted
-// by the deleted widget registry — a week grid needs real width, which is also
-// why it is not a tab in the 360px log sheet beside the day timeline.
-export function CalendarPanel({ onClose }: { onClose: () => void }) {
+// `components/widgets/` into the ambient surfaces it now lives among — a week
+// grid needs real width, which is also why it is not a tab in the 360px log
+// sheet beside the day timeline.
+//
+// It is a SURFACE (`?calendar=1` on the index route), rendered through the same
+// shell panel as notes, audit and memories. It used to be an overlay the home
+// drew on itself, which is why it was the one surface that ran full-bleed under
+// the rail, arrived without sliding, and left the corner cluster behind.
+// It carries NO close control of its own. Dismissal belongs to the shell — Esc,
+// or picking somewhere else on the rail — and it is the same gesture on every
+// surface; the ✕ this used to draw both duplicated that and sat underneath the
+// shared corner cluster.
+export function CalendarPanel() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [state, setState] = useState<LoadState>("loading");
@@ -120,7 +128,17 @@ export function CalendarPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: FONT }}>
+    <div
+      style={{
+        display: "flex", flexDirection: "column", flex: 1, minWidth: 0, minHeight: 0,
+        fontFamily: FONT,
+        // Every other string in here paints its own ink; the title inherited,
+        // and what it inherited was the browser default black — invisible on
+        // the void. Setting it once here is also what the panel's own children
+        // (the empty/error centres) were already assuming.
+        color: "rgb(var(--gooni-ink, 244 245 244) / 0.9)",
+      }}
+    >
       {/* header */}
       <div
         style={{
@@ -159,9 +177,6 @@ export function CalendarPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         <div style={{ flex: 1 }} />
-        <NavBtn label="Close" onClick={onClose}>
-          <X size={17} />
-        </NavBtn>
       </div>
 
       {/* body */}

@@ -8,6 +8,7 @@ import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { AmbientHome } from "../components/ambient/AmbientHome";
 import { MemoriesView } from "../components/memories/MemoriesView";
+import { CalendarPanel } from "../components/ambient/CalendarPanel";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { fetchNote } from "../services/api";
 
@@ -19,7 +20,7 @@ import { fetchNote } from "../services/api";
 // Everything else on this route (notes, log, audit) is a summoned sheet over
 // the same void, derived from the URL.
 
-type View = "home" | "notes" | "log" | "eval" | "memories";
+type View = "home" | "notes" | "log" | "eval" | "memories" | "calendar";
 
 // Every key is OPTIONAL on purpose. TanStack replaces the whole search object
 // on an object-form navigate, so optionality changes nothing at runtime — but
@@ -36,7 +37,7 @@ interface HomeSearch {
   focus?: number;
   /** the log matrix over the home */
   trackables?: true;
-  /** the week-grid calendar over the home */
+  /** the week-grid calendar — a surface of its own, not an overlay on the home */
   calendar?: true;
 }
 
@@ -85,6 +86,7 @@ function LogPage() {
     search.view === "notes" ? "notes" :
     search.view === "log" ? "log" :
     search.view === "memories" ? "memories" :
+    search.calendar ? "calendar" :
     "home";
 
   // ?note=<id> → fetch + seed the note into the store. View derives to
@@ -167,13 +169,6 @@ function LogPage() {
         >
           <AmbientHome
           trackablesOpen={!!search.trackables}
-          calendarOpen={!!search.calendar}
-          onOpenCalendar={() =>
-            navigate({ search: { ...search, calendar: true }, replace: true })
-          }
-          onCloseCalendar={() =>
-            navigate({ search: { ...search, calendar: undefined }, replace: true })
-          }
           onOpenTrackables={() =>
             navigate({ search: { ...search, trackables: true }, replace: true })
           }
@@ -195,6 +190,8 @@ function LogPage() {
         <ChatLogView />
       ) : view === "memories" ? (
         <MemoriesView focusId={search.focus} />
+      ) : view === "calendar" ? (
+        <CalendarPanel />
       ) : view === "eval" ? (
         <EvalView
           onOpenNote={(noteId: number) =>
