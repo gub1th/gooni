@@ -24,10 +24,11 @@ interface HomeChromeState {
   voiceOn: boolean;
   /** mic is hot RIGHT NOW — the only thing that turns the glyph accent-green */
   listening: boolean;
-  /** today has a calendar event — the log button wears a dot */
-  hasEventToday: boolean;
-  /** today's events, from the ONE fetch the home already makes for the dot.
-      The notch reads them for UP NEXT rather than fetching a second time. */
+  /** today's events, from the ONE fetch the home makes. The notch reads them
+      for UP NEXT and the log sheet lists them, rather than either fetching
+      again — two requests for one day is two sources that can disagree.
+      `hasEventToday` lived here for the log button's dot; the dot is gone (the
+      notch names the event outright now) and the derived flag went with it. */
   events: CalendarEvent[];
   /** the log sheet is open — the header button reads as active */
   logOpen: boolean;
@@ -42,7 +43,6 @@ interface HomeChromeState {
 export const useHomeChromeStore = create<HomeChromeState>((set) => ({
   voiceOn: false,
   listening: false,
-  hasEventToday: false,
   events: [],
   logOpen: false,
   toggleVoice: null,

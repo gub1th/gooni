@@ -495,7 +495,6 @@ export function AmbientHome({
     publishChrome({
       voiceOn: voiceMode,
       listening,
-      hasEventToday: events.length > 0,
       events,
       logOpen: logSheet,
       toggleVoice: toggleVoiceMode,

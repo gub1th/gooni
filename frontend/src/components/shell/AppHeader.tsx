@@ -49,7 +49,6 @@ export function AppHeader({
 }) {
   const voiceOn = useHomeChromeStore((s) => s.voiceOn);
   const listening = useHomeChromeStore((s) => s.listening);
-  const hasEventToday = useHomeChromeStore((s) => s.hasEventToday);
   const logOpen = useHomeChromeStore((s) => s.logOpen);
   const toggleVoice = useHomeChromeStore((s) => s.toggleVoice);
   const toggleLog = useHomeChromeStore((s) => s.toggleLog);
@@ -103,13 +102,14 @@ export function AppHeader({
           </CornerButton>
         )}
 
+        {/* NO calendar dot. It used to wear an accent badge whenever the day
+            had an event, and the captain's verdict on using it was that a dot
+            says "something exists" without saying WHAT — you cannot decode it
+            without opening the log and hunting the event out of a list. The
+            notch now names the event outright, all day, so the dot has a
+            strictly more informative sibling and is gone rather than doubled. */}
         {toggleLog && (
-          <CornerButton
-            label={hasEventToday ? "log — the day has a calendar event" : "log"}
-            dot={hasEventToday}
-            active={logOpen}
-            onClick={toggleLog}
-          >
+          <CornerButton label="log" active={logOpen} onClick={toggleLog}>
             <ScrollText size={16} strokeWidth={1.7} />
           </CornerButton>
         )}
