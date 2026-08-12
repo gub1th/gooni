@@ -152,18 +152,12 @@ export const frost = {
   },
 } as const;
 
-// The frame every non-home view renders inside — a window floating on the
-// void. Content keeps its own themed background; the frame supplies the
-// inset, radius, and hairline that make it read as a summoned layer.
-export const sheetFrame = {
-  margin: 14,
-  borderRadius: 18,
-  // NO window border. The app sits on pure black; depth = radius + drop shadow
-  // + surface-vs-void contrast. A hard 1px stroke here was the most out-of-
-  // place thing on screen (nothing in the Whisper surfaces has one).
-  border: "none",
-  boxShadow: "0 24px 80px rgba(0,0,0,0.55)",
-} as const;
+// `sheetFrame` — the margin/radius/shadow frame every non-home view used to
+// render inside — is GONE (pass 7). It made each surface a window floating on
+// the void, which is what had them reading as a page stamped on the app; a
+// non-home surface is now a panel that slides in over a live home
+// (components/shell/SurfacePanel.tsx). Deleted rather than left exported,
+// because an unused frame token is an invitation to frame something again.
 
 // Translucent overlays (modal backdrops, hover scrims). Kept separate because
 // they're alpha layers, not solid tokens.
