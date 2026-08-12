@@ -58,7 +58,6 @@ function renderList(over: Partial<Parameters<typeof TodayList>[0]> = {}) {
     onTick: vi.fn(),
     onAdd: vi.fn(),
     onFocus: vi.fn(),
-    onResume: vi.fn(),
     onTogglePause: vi.fn(),
     onStop: vi.fn(),
     ...over,
@@ -98,18 +97,15 @@ function onRow(state: SessionRowState, label = "12:34"): SessionRow {
   return { promiseId: 2, state, label };
 }
 
-test("a running session shows its clock on ITS task and routes back to it", () => {
-  const props = renderList({ sessionRow: onRow("focus") });
+test("a running session shows its clock on ITS task", () => {
+  renderList({ sessionRow: onRow("focus") });
 
-  const back = screen.getByTitle("back to the session");
-  expect(back).toHaveTextContent("12:34");
-  fireEvent.click(back);
-  expect(props.onResume).toHaveBeenCalled();
-
+  expect(screen.getByText("12:34")).toBeInTheDocument();
   // the task with accrued-but-not-running time shows its total instead
   expect(screen.getByText("25m")).toBeInTheDocument();
-  // and the clock appears exactly once — it belongs to one promise
-  expect(screen.getAllByTitle("back to the session")).toHaveLength(1);
+  // the indicator is plain text now, not a door — the session occupies the
+  // wave's slot right above this list, so there is nowhere for it to go
+  expect(screen.queryByTitle("back to the session")).not.toBeInTheDocument();
 });
 
 test("focus is reachable per row — the one door", () => {
@@ -158,35 +154,28 @@ test("the later bucket is visible and expands in place", () => {
 // the one non-accruing state left — and it still must not borrow the clock.
 test.each([
   ["paused" as SessionRowState, "paused"],
-])("a %s session names itself instead of ticking, and still routes back", (state, label) => {
-  const props = renderList({ sessionRow: onRow(state) });
+])("a %s session names itself instead of ticking", (state, label) => {
+  renderList({ sessionRow: onRow(state) });
 
   expect(screen.queryByText("12:34")).not.toBeInTheDocument();
-  const back = screen.getByTitle("back to the session");
-  expect(back).toHaveTextContent(label);
-
-  fireEvent.click(back);
-  expect(props.onResume).toHaveBeenCalled();
+  expect(screen.getByText(label)).toBeInTheDocument();
 });
 
 test("a LIVE focus session shows its ticking clock and nothing else", () => {
   renderList({ sessionRow: onRow("focus") });
 
-  expect(screen.getByTitle("back to the session")).toHaveTextContent("12:34");
+  expect(screen.getByText("12:34")).toBeInTheDocument();
   expect(screen.queryByText("paused")).not.toBeInTheDocument();
 });
 
 test("a kept row with a running session shows BOTH the strike and the clock", () => {
-  const props = renderList({
+  renderList({
     rows: [{ item: reminder(3, "snakes and ladders", "kept"), minutes: 0 }],
     sessionRow: { promiseId: 3, state: "focus", label: "07:12" },
   });
 
   expect(screen.getByText("snakes and ladders")).toHaveStyle({ textDecoration: "line-through" });
-  const back = screen.getByTitle("back to the session");
-  expect(back).toHaveTextContent("07:12");
-  fireEvent.click(back);
-  expect(props.onResume).toHaveBeenCalled();
+  expect(screen.getByText("07:12")).toBeInTheDocument();
 });
 
 test("a row ticked in this sitting stays at its own index once the server drops it", () => {

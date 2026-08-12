@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Maximize2, Pause, Play, X } from "lucide-react";
+import { Pause, Play, X } from "lucide-react";
 import { FONT, frostInk, z } from "../../ui";
 import { ink } from "../ambient/ambientInk";
 import { elapsedMs, useFocusSessionStore } from "../../stores/useFocusSessionStore";
 import { endFocusSession } from "../../services/focusTime";
-import { useFocusOverlayStore } from "../../stores/useFocusOverlayStore";
-import { FocusExpanded } from "./FocusExpanded";
+import { MarkKeptOffer } from "./MarkKeptOffer";
 
 // THE session bar — a slim full-width band at the very top, its own row.
 //
@@ -70,8 +68,6 @@ function BarButton({
 
 export function FocusSessionBar() {
   const session = useFocusSessionStore((s) => s.session);
-  const expanded = useFocusOverlayStore((s) => s.open);
-  const setExpanded = useFocusOverlayStore((s) => s.setOpen);
   const [now, setNow] = useState(() => Date.now());
   const ending = useRef(false);
 
@@ -82,10 +78,6 @@ export function FocusSessionBar() {
     const iv = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(iv);
   }, [running]);
-
-  useEffect(() => {
-    if (session == null) setExpanded(false);
-  }, [session, setExpanded]);
 
   async function end() {
     if (ending.current) return;
@@ -100,7 +92,23 @@ export function FocusSessionBar() {
     }
   }
 
-  if (!session) return null;
+  // No session, but a just-stopped one may still be offering completion — the
+  // band is the natural place for it on surfaces that have no wave slot.
+  if (!session) {
+    return (
+      <div
+        style={{
+          position: "fixed", top: 0, left: 0, right: 0,
+          zIndex: z.overlay + 4, display: "flex", justifyContent: "center",
+          pointerEvents: "none", paddingTop: 8,
+        }}
+      >
+        <div style={{ pointerEvents: "auto" }}>
+          <MarkKeptOffer />
+        </div>
+      </div>
+    );
+  }
 
   const elapsed = elapsedMs(session, "focus", now);
   const remaining = Math.max(0, session.targetMs - elapsed);
@@ -139,12 +147,9 @@ export function FocusSessionBar() {
         )}
         <style>{`@keyframes gooni-bar-pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
 
-        <button
-          onClick={() => setExpanded(true)}
-          title="expand the session"
+        <div
           style={{
             display: "flex", alignItems: "baseline", gap: 10, minWidth: 0, flex: 1,
-            border: "none", background: "transparent", padding: 0, cursor: "pointer",
             fontFamily: FONT, textAlign: "left",
           }}
         >
@@ -170,7 +175,7 @@ export function FocusSessionBar() {
           {session.style === "timer" && (
             <span style={{ fontSize: 10, letterSpacing: "0.06em", color: ink(0.32), flex: "none" }}>timer</span>
           )}
-        </button>
+        </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 2, flex: "none" }}>
           <BarButton
@@ -184,49 +189,12 @@ export function FocusSessionBar() {
           >
             {running ? <Pause size={13} fill="currentColor" strokeWidth={0} /> : <Play size={13} fill="currentColor" strokeWidth={0} />}
           </BarButton>
-          <BarButton label="Expand the session" onClick={() => setExpanded(true)}>
-            <Maximize2 size={12} strokeWidth={1.9} />
-          </BarButton>
           <BarButton label="End the session" onClick={() => void end()}>
             <X size={13} strokeWidth={1.9} />
           </BarButton>
         </div>
       </div>
 
-      {expanded &&
-        createPortal(
-          <div
-            style={{
-              position: "fixed", inset: 0, zIndex: z.modalScrim,
-              // DIMMED, and the dim is VISUAL ONLY — the page behind stays live
-              // so a task can still be ticked off back there. Blocking it would
-              // make the overlay a place again, which is what was undone.
-              pointerEvents: "none",
-              background: "rgba(0,0,0,0.45)",
-              backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)",
-              display: "grid", placeItems: "center",
-              animation: "gooni-focus-overlay-in 180ms ease-out",
-            }}
-          >
-            <style>{`@keyframes gooni-focus-overlay-in{from{opacity:0}to{opacity:1}}`}</style>
-            <div
-              role="dialog"
-              aria-label="Focus session"
-              style={{
-                pointerEvents: "auto",
-                width: "min(560px, 92vw)", height: "min(620px, 88vh)",
-                background: "rgb(var(--gooni-surf, 11 15 13))",
-                border: `1px solid ${ink(0.12)}`,
-                borderRadius: 18, overflow: "hidden",
-                animation: "gooni-focus-card-in 200ms cubic-bezier(0.22,1,0.36,1)",
-              }}
-            >
-              <style>{`@keyframes gooni-focus-card-in{from{opacity:0;transform:translateY(8px) scale(0.98)}to{opacity:1;transform:none}}`}</style>
-              <FocusExpanded variant="overlay" onCollapse={() => setExpanded(false)} />
-            </div>
-          </div>,
-          document.body,
-        )}
     </>
   );
 }

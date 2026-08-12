@@ -10,11 +10,11 @@ import { useFocusSessionStore } from "../../stores/useFocusSessionStore";
 // monitor view of a session that is being driven from the banner on whatever
 // surface you are actually working on.
 //
-// It renders the same `FocusExpanded` the banner's overlay does, so there is one
-// implementation of the ring, the mode toggle and the sensor line. The kiosk
-// deliberately does NOT drive the focus-cam reconcile target — two windows
-// posting the same control would race, and a stale idle from the passive one
-// could put the sidecar to sleep mid-session. That gate lives in FocusExpanded.
+// It renders `FocusExpanded`, which since pass 5 exists for this route alone —
+// the dimmed overlay that also used it is gone, because on the home the session
+// takes the wave's slot instead of stacking a second main thing on top. The
+// kiosk deliberately does NOT drive the focus-cam reconcile target: that is
+// owned once by `useFocusCamControl` in AppShell.
 //
 // `GooniAsleep` is the idle state, and it stays HERE rather than moving to the
 // home: 2D SVG rather than WebGL because it paints for hours, slow full-figure
@@ -28,7 +28,7 @@ export function FocusKiosk() {
   return (
     <div style={{ position: "fixed", inset: 0, background: pal.paper, fontFamily: FONT, overflow: "hidden" }}>
       {session ? (
-        <FocusExpanded variant="kiosk" />
+        <FocusExpanded />
       ) : (
         <>
           <GooniAsleep pal={pal} />

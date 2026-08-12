@@ -52,7 +52,6 @@ export function TodayList({
   onTick,
   onAdd,
   onFocus,
-  onResume,
   onTogglePause,
   onStop,
   rowsMaxHeight,
@@ -65,7 +64,6 @@ export function TodayList({
   onTick: (item: FocusReminder) => void;
   onAdd: (title: string) => Promise<void> | void;
   onFocus: (item: FocusReminder) => void;
-  onResume: () => void;
   /** pause or resume the session on the running row */
   onTogglePause: () => void;
   /** end the session on the running row (writes its entry) */
@@ -124,7 +122,6 @@ export function TodayList({
             session={sessionRow?.promiseId === item.id ? sessionRow : null}
             onTick={() => onTick(item)}
             onFocus={() => onFocus(item)}
-            onResume={onResume}
             onTogglePause={onTogglePause}
             onStop={onStop}
           />
@@ -184,7 +181,6 @@ function TaskRow({
   session,
   onTick,
   onFocus,
-  onResume,
   onTogglePause,
   onStop,
 }: {
@@ -194,7 +190,6 @@ function TaskRow({
   session: SessionRow | null;
   onTick: () => void;
   onFocus: () => void;
-  onResume: () => void;
   onTogglePause: () => void;
   onStop: () => void;
 }) {
@@ -257,18 +252,16 @@ function TaskRow({
           row. Only live FOCUS gets the accruing presentation (pulse + ticking
           clock) — break and paused each accrue nothing toward focus, so they
           name themselves instead and still route back. */}
+      {/* Plain text, not a link. It used to route to the session; the session
+          now occupies the wave's slot directly above this list, so there is
+          nowhere for it to go — and a control that goes nowhere is worse than
+          no control. */}
       {session ? (
-        <button
-          onClick={onResume}
-          title="back to the session"
+        <span
           style={{
             display: "inline-flex",
             alignItems: "center",
             gap: 6,
-            border: "none",
-            background: "transparent",
-            padding: 0,
-            cursor: "pointer",
             fontFamily: FONT,
             fontSize: 14,
             color: session.state === "focus" ? accent : ink(0.42),
@@ -280,7 +273,7 @@ function TaskRow({
             pulse={session.state === "focus"}
           />
           {session.state === "focus" ? session.label : session.state}
-        </button>
+        </span>
       ) : (
         minutes > 0 && (
           <span style={{ fontSize: 14, color: ink(0.34), fontVariantNumeric: "tabular-nums" }}>

@@ -12,10 +12,11 @@ import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
 import { HomeCorner, HomeDate } from "./HomeCorners";
 import { LogSheet } from "./LogSheet";
 import { CalendarPanel } from "./CalendarPanel";
+import { SessionInWave } from "./SessionInWave";
+import { MarkKeptOffer } from "../focus/MarkKeptOffer";
 import { SESSION_BAR_H } from "../focus/FocusSessionBar";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
-import { useFocusOverlayStore } from "../../stores/useFocusOverlayStore";
 import {
   endFocusSession,
   fetchFocusTotals,
@@ -758,7 +759,29 @@ export function AmbientHome({
         background: "var(--gooni-void, #000000)", overflow: "hidden", fontFamily: FONT,
       }}
     >
-      <MorphLine boxMode={boxMode} rect={rect} thinking={thinking} dimmed={trackablesOpen} waveWidth={waveW} energyRef={energyRef} activeRef={activeRef} />
+      {/* While a session holds the slot the resting stroke stands down, but
+          MorphLine STAYS MOUNTED: it still owns the box the capture input
+          morphs into, so `/` and hover work exactly as before during a
+          session. The session display fades out as the box opens. */}
+      <MorphLine
+        boxMode={boxMode}
+        rect={rect}
+        thinking={thinking}
+        dimmed={trackablesOpen || (hasSession && !boxMode)}
+        waveWidth={waveW}
+        energyRef={energyRef}
+        activeRef={activeRef}
+      />
+
+      {hasSession && !covered && (
+        <SessionInWave
+          cx={rect.cx}
+          cy={rect.cy}
+          hidden={boxMode}
+          energyRef={energyRef}
+          onStop={() => void stopSession()}
+        />
+      )}
       <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={covered || logSheet} />
 
       <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
@@ -835,6 +858,38 @@ export function AmbientHome({
         )}
       </div>
 
+      {/* stopping OFFERS completion — right where you stopped, under the slot */}
+      {!covered && (
+        <div
+          style={{
+            position: "absolute", left: rect.cx, top: rect.cy + PEEK_H / 2 + 26,
+            transform: "translateX(-50%)", zIndex: 4,
+          }}
+        >
+          <MarkKeptOffer
+            onKept={(offer) => {
+              // Taking the offer completes the task, and `/focus/dashboard`
+              // serves ACTIVE rows only — so without retention the row would
+              // VANISH on the next poll instead of staying struck through in
+              // place, which is the rule everywhere else a task is completed.
+              const seen = retained.current.seen.get(offer.promiseId);
+              retainTicked(
+                retained.current,
+                seen
+                  ? { ...seen, state: "kept", done: true }
+                  : {
+                      id: offer.promiseId, type: "promise", content: offer.title,
+                      owed_to: null, due_at: null, due_is_default: true,
+                      done: true, state: "kept", resolved_at: null,
+                      age_days: 0, lasted_days: 0, thought_id: null,
+                    },
+              );
+              void loadCommitments();
+            }}
+          />
+        </div>
+      )}
+
       <QuickFind
         hidden={covered || logSheet}
         onOpenNote={openNote}
@@ -884,7 +939,6 @@ export function AmbientHome({
             onTick={(item) => void onTick(item)}
             onAdd={onAdd}
             onFocus={(item) => void startFocus(item)}
-            onResume={() => useFocusOverlayStore.getState().setOpen(true)}
             onTogglePause={() => {
               const st = useFocusSessionStore.getState();
               if (st.session?.running) st.pause();

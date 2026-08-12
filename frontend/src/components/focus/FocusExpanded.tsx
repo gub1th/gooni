@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pause, Play, X } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { FONT } from "../../ui";
 import { FOCUS_PALETTES } from "./focusPalette";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
@@ -27,11 +27,11 @@ import {
 // The expanded focus surface — the ring, FOCUS/BREAK, the sensor line, mark
 // kept. ONE component, two hosts:
 //
-//   overlay → summoned by `FocusBanner` as a dimmed layer over whatever page
-//             you are on. Deliberately NOT full-screen: the home stays visible
-//             behind it and a task can still be ticked off back there.
-//   kiosk   → the `/focus` route, chromeless, for a second monitor. A WINDOW
-//             onto the session rather than the place focus happens.
+// ONE host now: the `/focus` kiosk, chromeless, for a second monitor — a WINDOW
+// onto the session rather than the place focus happens. The dimmed overlay this
+// also served was deleted in pass 5: on the home the session takes the WAVE's
+// slot instead, so there is exactly one main thing on screen and no second
+// anchor stacked over the first.
 //
 // Focus is a STATE, not a PLACE (prototype pass 2). Making it a page conflated
 // BEING in focus with LOOKING AT focus, and the controls ended up stranded on a
@@ -119,14 +119,7 @@ function useSensors(active: boolean, sinceMs: number | null): Sensors {
   return s;
 }
 
-export function FocusExpanded({
-  variant,
-  onCollapse,
-}: {
-  variant: "overlay" | "kiosk";
-  /** overlay only — the strip is still there behind this, so this just closes */
-  onCollapse?: () => void;
-}) {
+export function FocusExpanded() {
   const theme = useGooniThemeStore((s) => s.theme);
   const pal = FOCUS_PALETTES[theme];
 
@@ -147,19 +140,6 @@ export function FocusExpanded({
     const iv = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(iv);
   }, [running]);
-
-  // Esc collapses the overlay back to the strip. The kiosk has nothing to
-  // collapse to, so it does not listen.
-  useEffect(() => {
-    if (variant !== "overlay" || !onCollapse) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      onCollapse!();
-    }
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [variant, onCollapse]);
 
   // NOTE: this component does NOT drive the focus-cam reconcile target. That
   // moved to `useFocusCamControl`, mounted once in AppShell — control follows
@@ -188,7 +168,6 @@ export function FocusExpanded({
     setSaveError(false);
     try {
       await endFocusSession();
-      onCollapse?.();
     } catch {
       setSaveError(true);
     } finally {
@@ -218,16 +197,6 @@ export function FocusExpanded({
     >
       <div style={{ position: "absolute", top: 22, right: 26, display: "flex", alignItems: "center", gap: 16, fontSize: 12, color: pal.ink3 }}>
         <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtMinutes(storedMinutes)}</span>
-        {variant === "overlay" && (
-          <button
-            onClick={onCollapse}
-            aria-label="Collapse to the strip"
-            title="collapse (esc)"
-            style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", color: pal.ink3, display: "grid", placeItems: "center" }}
-          >
-            <X size={15} strokeWidth={1.8} />
-          </button>
-        )}
       </div>
 
       <div role="tablist" style={{ display: "flex", gap: 26, marginBottom: 8 }}>
