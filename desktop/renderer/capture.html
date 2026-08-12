@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'" />
+    <title>Gooni capture</title>
+    <style>
+      /* Deliberately the ambient home's language: frost on the void, a hairline,
+         no drop shadow. The 2026-08-02 pass took shadows off every floating
+         thing on the home surface because a 60px black bloom is what made it
+         read heavy — a summoned overlay should read as a seam, not a control. */
+      :root {
+        --ink: 244 245 244;
+        --surf: 11 15 13;
+        --accent: 122 200 160;
+        --warn: 226 180 110;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        font: 15px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        color: rgb(var(--ink));
+        -webkit-user-select: none;
+        user-select: none;
+        overflow: hidden;
+      }
+      .panel {
+        margin: 10px;
+        border-radius: 16px;
+        background: rgb(var(--surf) / 0.72);
+        backdrop-filter: blur(28px) saturate(160%);
+        border: 1px solid rgb(var(--ink) / 0.12);
+        padding: 14px 16px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        -webkit-app-region: drag;
+      }
+      textarea {
+        -webkit-app-region: no-drag;
+        -webkit-user-select: text;
+        user-select: text;
+        width: 100%;
+        min-height: 62px;
+        max-height: 220px;
+        resize: none;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        padding: 0;
+      }
+      textarea::placeholder { color: rgb(var(--ink) / 0.34); }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 11.5px;
+        color: rgb(var(--ink) / 0.42);
+        border-top: 1px solid rgb(var(--ink) / 0.1);
+        padding-top: 8px;
+      }
+      .row kbd {
+        font: inherit;
+        background: rgb(var(--ink) / 0.09);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      .target { font-variant-numeric: tabular-nums; }
+      .reply {
+        -webkit-app-region: no-drag;
+        -webkit-user-select: text;
+        user-select: text;
+        font-size: 13.5px;
+        line-height: 1.55;
+        color: rgb(var(--ink) / 0.82);
+        border-top: 1px solid rgb(var(--ink) / 0.1);
+        padding-top: 9px;
+        max-height: 220px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+      .reply[hidden] { display: none; }
+      .reply.error { color: rgb(var(--warn)); }
+      .reply.muted { color: rgb(var(--ink) / 0.5); font-style: italic; }
+      .banner {
+        -webkit-app-region: no-drag;
+        font-size: 12px;
+        color: rgb(var(--warn));
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .banner[hidden] { display: none; }
+      .banner button {
+        font: inherit;
+        color: rgb(var(--ink) / 0.85);
+        background: rgb(var(--ink) / 0.1);
+        border: 1px solid rgb(var(--ink) / 0.16);
+        border-radius: 6px;
+        padding: 2px 8px;
+        cursor: pointer;
+      }
+      .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: rgb(var(--accent)); display: inline-block;
+        margin-right: 6px; vertical-align: 1px;
+      }
+      .dot.busy { animation: pulse 1.1s ease-in-out infinite; }
+      @keyframes pulse { 0%,100% { opacity: .3 } 50% { opacity: 1 } }
+      @media (prefers-reduced-motion: reduce) { .dot.busy { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="panel" id="panel">
+      <div class="banner" id="banner" hidden>
+        <span id="bannerText"></span>
+        <button type="button" id="bannerAction">Open Gooni</button>
+      </div>
+      <textarea id="input" placeholder="tell gooni…" spellcheck="false"></textarea>
+      <div class="reply" id="reply" hidden></div>
+      <div class="row">
+        <span><kbd>↵</kbd> send &nbsp; <kbd>⇧↵</kbd> newline &nbsp; <kbd>esc</kbd> close</span>
+        <span class="target" id="target"></span>
+      </div>
+    </div>
+    <script src="capture.js"></script>
+  </body>
+</html>

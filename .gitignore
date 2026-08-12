@@ -99,3 +99,8 @@ db/gooni-prod-snapshot.db
 # Internal handoff notes — local only, never in a public repo.
 PORTFOLIO_HANDOFF.md
 GOONI_BRIEFING.md
+
+# Electron shell build output (desktop/node_modules is covered by node_modules/)
+desktop/dist/
+desktop/release/
+desktop/out/

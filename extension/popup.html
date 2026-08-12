@@ -45,6 +45,16 @@
       }
       .periods button[aria-pressed="true"] { color: var(--ink); border-color: currentColor; font-weight: 600; }
 
+      /* The badge's explanation. The icon can only carry "!"; this is where the
+         "!" says what it means, so it sits above everything else in the popup. */
+      .alert { margin-top: 8px; padding: 7px 9px; border-radius: 6px; font-size: 11.5px;
+               line-height: 1.45; border: 1px solid transparent; }
+      .alert[hidden] { display: none; }
+      .alert strong { display: block; font-weight: 600; }
+      .alert.error { color: #ffb3a7; background: rgba(192, 57, 43, .16); border-color: rgba(192, 57, 43, .5); }
+      .alert.warn { color: #e8c27a; background: rgba(184, 134, 11, .14); border-color: rgba(184, 134, 11, .45); }
+      .alert.paused { color: var(--dim); background: rgba(128, 128, 128, .12); border-color: rgba(128, 128, 128, .35); }
+
       .notes { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
       .note { font-size: 11px; color: var(--dim); }
       .note.warn { color: var(--warn); }
@@ -102,6 +112,8 @@
         <button type="button" data-days="7" aria-pressed="false">Last 7 days</button>
       </div>
     </div>
+
+    <div class="alert" id="alert" hidden></div>
 
     <div class="notes" id="notes"></div>
 

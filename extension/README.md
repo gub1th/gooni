@@ -24,9 +24,9 @@ the extension.
 3. Click **Load unpacked** and choose this `extension/` directory.
 4. Click **Details ▸ Extension options** (or the puzzle-piece menu ▸ Gooni
    Browser Sensor ▸ Options).
-5. Set the **Gooni base URL** (`http://localhost:8000` for local dev,
-   `https://gooni-bot.fly.dev` for prod) and your **Gooni password**, then
-   **Save**.
+5. Enter your **Gooni password** and **Save**. The **Gooni base URL** already
+   defaults to `https://gooni-bot.fly.dev` — change it to `http://localhost:8000`
+   only when you are deliberately testing against a local backend.
 
 The password is exchanged once at `POST /auth` for the bearer token, exactly as
 the web app does; only the token is stored.
@@ -175,6 +175,46 @@ plausible:
 
 Intervals shorter than one second are dropped as tab-switch noise.
 
+## Noticing that it stopped delivering
+
+The delivery rules below are very careful never to **lose** data. What they had
+no way to say was that data had stopped **arriving**, and every failure mode was
+invisible unless you opened the options page and read a flush record:
+
+- the default `baseUrl` used to be `http://localhost:8000` — a backend that only
+  exists while `dev.sh` is running, so a fresh install buffered against nothing
+  and looked fine. **It now defaults to `https://gooni-bot.fly.dev`.** That is
+  the same choice `enabled` already makes: an installed sensor that senses
+  nothing is worse than no sensor. Refusing to run until configured fails in the
+  other direction — a fresh install would record nothing until someone visited
+  the options page, which is the same lost data with a better excuse. Nothing is
+  lost by a wrong-but-reachable default either, since everything is buffered
+  until the server confirms it; pointing it at the right place later delivers the
+  backlog.
+- with **no password saved**, `flushOnce` returns `not_configured` with
+  `sent: 0`, and `recordFlush` deliberately does not persist zero-sent flushes —
+  so `gooni_last_flush` stays null *forever* while the buffer grows. There was
+  literally nothing to read.
+
+So the toolbar icon now carries the answer. `src/health.js` computes it from
+**config and buffer state**, not from the last flush record, precisely because
+the worst states never write one:
+
+| State | Badge |
+|---|---|
+| Healthy | nothing — a permanent badge is one you stop reading |
+| No password saved | red **!**, "nothing can be delivered, N interval(s) waiting" |
+| Password rejected (`401`) | red **!**, distinct from having no password |
+| Send failing with a backlog ≥25 | red **!**, naming the host, since a wrong host *is* the bug |
+| One failed send | amber **!** |
+| `Retry-After` backpressure | nothing — the buffer holds, the next alarm delivers |
+| Past loss (`refused`/`dropped`) | amber **!**, and it stays visible after delivery recovers |
+| Paused in options | grey **‖**, never reported as broken |
+
+The popup repeats it as a banner at the top, rendered *before* the summary
+fetch — the states worth flagging are the ones where that fetch is about to
+fail, so the reason has to arrive with the failure rather than after it.
+
 ## Buffering and delivery
 
 Closed intervals go into `chrome.storage.local` and are flushed in batches —
@@ -301,7 +341,10 @@ its backdating, the poll-vs-event close distinction, orphan salvage, buffer
 persistence across a restart, which statuses retain vs drop a batch,
 `Retry-After` parsing, overflow accounting, URL scrubbing, the write queue
 (each race test asserts the unserialized control case loses/duplicates first, so
-it fails if the queue is removed), and the last-flush report's wording.
+it fails if the queue is removed), the last-flush report's wording, and the
+health/badge rule (`tests/health.test.js` — including that no-password is an
+error even though it never writes a flush record, that backpressure is not a
+failure, and that a live outage outranks historical loss).
 
 The idle tests drive the real `resolveAttention` + `applyAttention` +
 `FocusTracker` composition with only chrome's probes faked — the same path
@@ -334,6 +377,7 @@ src/scrub.js       URL scrubbing — the privacy model
 src/attention.js   "is the human here, and on what?" — the idle-aware decision
 src/serial.js      the one-writer queue every storage mutation goes through
 src/status.js      the options page's last-flush report (incl. rejected rows)
+src/health.js      "is this thing delivering?" → the toolbar badge + popup banner
 src/format.js      popup display formatting (durations, shares, honesty notes)
 src/config.js      stored settings
 ```

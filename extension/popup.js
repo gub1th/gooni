@@ -20,6 +20,7 @@
  */
 
 import { loadConfig } from "./src/config.js";
+import { sensorHealth } from "./src/health.js";
 import {
   barPercent,
   dayLabel,
@@ -72,6 +73,32 @@ function renderState(title, detail) {
   box.appendChild(el("strong", null, title));
   if (detail) box.appendChild(el("div", null, detail));
   $("body").replaceChildren(box);
+}
+
+/**
+ * The badge's explanation, at the top of the popup.
+ *
+ * The toolbar icon can only carry one character; this is the sentence behind
+ * it. Rendered BEFORE the summary fetch, because the states worth flagging
+ * (no token, wrong host) are the ones where that fetch is going to fail — the
+ * reason has to arrive with the failure rather than after it.
+ */
+function renderHealth(status) {
+  const alert = $("alert");
+  if (!status) {
+    // The worker was asleep or restarting. That is not evidence of a problem,
+    // and claiming one would be its own kind of lie.
+    alert.hidden = true;
+    return;
+  }
+  const health = sensorHealth(status);
+  if (health.level === "ok") {
+    alert.hidden = true;
+    return;
+  }
+  alert.className = `alert ${health.level}`;
+  alert.replaceChildren(el("strong", null, health.title), el("div", null, health.message || ""));
+  alert.hidden = false;
 }
 
 function renderNotes(lines) {
@@ -185,6 +212,7 @@ async function render() {
 
   const cfg = await loadConfig(storage);
   const status = await fetchStatus();
+  renderHealth(status);
 
   if (!cfg.token) {
     $("headline").textContent = "—";
