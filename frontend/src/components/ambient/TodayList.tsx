@@ -79,7 +79,7 @@ export function TodayList({
   /** cap for the ROWS region before it scrolls (the controls below never do) */
   rowsMaxHeight?: number | string;
   /** the daily trackable fill, offered as a task row until it is put away */
-  fill?: { onOpen: () => void; onDismiss: () => void } | null;
+  fill?: { onOpen: () => void; onDismiss: () => void; logged: boolean } | null;
 }) {
   const [adding, setAdding] = useState(false);
   const [laterOpen, setLaterOpen] = useState(false);
@@ -92,6 +92,19 @@ export function TodayList({
   // row would vanish from the day entirely rather than move down here.
   const active = rows.filter((r) => r.item.state !== "kept");
   const completed = rows.filter((r) => r.item.state === "kept");
+
+  // The task a session is RUNNING on pins to the top of TODAY, above even the
+  // daily-fill row. It is the one thing on this surface you are doing right
+  // now, and hunting for it down a ten-task list to pause or tick it is the
+  // whole reason it earns the position. Everything else keeps server order.
+  const runningId = sessionRow?.promiseId ?? null;
+  const ordered = runningId == null
+    ? active
+    : [
+        ...active.filter((r) => r.item.id === runningId),
+        ...active.filter((r) => r.item.id !== runningId),
+      ];
+  const runningIsPinned = runningId != null && ordered[0]?.item.id === runningId;
 
   return (
     <div
@@ -130,9 +143,23 @@ export function TodayList({
           display: "flex", flexDirection: "column", alignItems: "stretch",
         }}
       >
-        {fill && <DailyFillRow onOpen={fill.onOpen} onDismiss={fill.onDismiss} />}
+        {/* the running task, above the fill row */}
+        {runningIsPinned && ordered[0] && (
+          <TaskRow
+            key={ordered[0].item.id}
+            item={ordered[0].item}
+            minutes={ordered[0].minutes}
+            session={sessionRow}
+            onTick={() => onTick(ordered[0].item)}
+            onFocus={() => onFocus(ordered[0].item)}
+            onTogglePause={onTogglePause}
+            onStop={onStop}
+          />
+        )}
 
-        {active.map(({ item, minutes }) => (
+        {fill && <DailyFillRow onOpen={fill.onOpen} onDismiss={fill.onDismiss} logged={fill.logged} />}
+
+        {(runningIsPinned ? ordered.slice(1) : ordered).map(({ item, minutes }) => (
           <TaskRow
             key={item.id}
             item={item}
@@ -145,7 +172,7 @@ export function TodayList({
           />
         ))}
 
-        {active.length === 0 && !fill && !adding && (
+        {ordered.length === 0 && !fill && !adding && (
           <span style={{ fontSize: 14, color: ink(0.3), padding: "5px 0" }}>nothing today</span>
         )}
       </div>
@@ -297,8 +324,13 @@ function ListSection({
  * Ticking a task claims the work is done; putting this away only says you are
  * finished logging, and those are different claims (see `dailyFill.ts`).
  */
-function DailyFillRow({ onOpen, onDismiss }: { onOpen: () => void; onDismiss: () => void }) {
+function DailyFillRow({ onOpen, onDismiss, logged }: { onOpen: () => void; onDismiss: () => void; logged: boolean }) {
   const [hover, setHover] = useState(false);
+  // Done AT A GLANCE: once anything has been logged today the glyph takes the
+  // accent, so the row answers "have I done this?" without being opened. It is
+  // NOT struck through and does not disappear — more can always be logged, and
+  // a row that vanished would take the way back in with it.
+  const accent = frostInk.accent;
   return (
     <div
       onMouseEnter={() => setHover(true)}
@@ -313,19 +345,19 @@ function DailyFillRow({ onOpen, onDismiss }: { onOpen: () => void; onDismiss: ()
           background: "transparent",
           // DASHED, so it does not read as a task you can tick — the same shape
           // as the matrix's own "add a trackable" affordance.
-          border: `1.5px dashed ${hover ? frostInk.accent : ink(0.32)}`,
+          border: `1.5px dashed ${logged || hover ? accent : ink(0.32)}`,
           display: "grid", placeItems: "center",
           transition: "border-color 140ms ease",
         }}
       >
-        <ListChecks size={11} strokeWidth={2} color={hover ? frostInk.accent : ink(0.42)} />
+        <ListChecks size={11} strokeWidth={2} color={logged || hover ? accent : ink(0.42)} />
       </button>
       <button
         onClick={onOpen}
         style={{
           border: "none", background: "transparent", padding: 0, cursor: "pointer",
           fontFamily: FONT, fontSize: 19, letterSpacing: "-0.01em", textAlign: "left",
-          color: hover ? ink(0.8) : ink(0.55),
+          color: hover ? ink(0.8) : logged ? ink(0.68) : ink(0.55),
           transition: "color 140ms ease",
         }}
       >

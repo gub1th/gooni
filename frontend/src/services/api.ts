@@ -806,6 +806,8 @@ export interface Trackable {
   schema_hint: unknown;
   source: string;
   parent_promise_id: number | null;
+  /** today's folded value — present only when fetched with `?today=1` */
+  today?: number | boolean | unknown | null;
 }
 
 export interface TrackableDay {
@@ -817,8 +819,11 @@ export interface TrackableDay {
   entry_count: number;
 }
 
-export async function fetchTrackables(): Promise<Trackable[]> {
-  const res = await apiFetch(`${BASE}/trackables`);
+export async function fetchTrackables(withToday = false): Promise<Trackable[]> {
+  // `?today=1` attaches each definition's value for today. The ambient home
+  // uses it to mark the daily-fill row done at a glance without making the N+1
+  // entry requests the fill itself makes.
+  const res = await apiFetch(`${BASE}/trackables${withToday ? "?today=1" : ""}`);
   if (!res.ok) throw new Error("Failed to fetch trackables");
   return res.json();
 }

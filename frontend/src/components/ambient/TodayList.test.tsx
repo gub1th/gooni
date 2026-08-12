@@ -102,6 +102,36 @@ function onRow(state: SessionRowState, label = "12:34"): SessionRow {
   return { promiseId: 2, state, label };
 }
 
+test("the running task pins to the top, above the daily-fill row", () => {
+  // it is second in the served order — the pin is what moves it
+  renderList({
+    sessionRow: onRow("focus"),
+    fill: { onOpen: vi.fn(), onDismiss: vi.fn(), logged: false },
+  });
+
+  const labels = screen
+    .getAllByText(/leetcode|ship the home rebuild|log today/)
+    .map((n) => n.textContent);
+  expect(labels[0]).toBe("ship the home rebuild"); // promiseId 2, the running one
+  expect(labels[1]).toBe("log today");
+});
+
+test("the daily-fill glyph reads done once something is logged", () => {
+  // the whole `border` shorthand, not `borderColor`: the value contains a CSS
+  // var, which jsdom will not decompose, so `borderColor` reads "" in BOTH
+  // states and the assertion would pass while asserting nothing
+  renderList({ fill: { onOpen: vi.fn(), onDismiss: vi.fn(), logged: false } });
+  const plain = screen.getByLabelText("Log today's trackables").style.border;
+  cleanup();
+
+  renderList({ fill: { onOpen: vi.fn(), onDismiss: vi.fn(), logged: true } });
+  const done = screen.getByLabelText("Log today's trackables").style.border;
+
+  // the accent is the whole signal — it must not read the same as unlogged
+  expect(plain).not.toBe("");
+  expect(done).not.toBe(plain);
+});
+
 test("a running session shows its clock on ITS task", () => {
   renderList({ sessionRow: onRow("focus") });
 

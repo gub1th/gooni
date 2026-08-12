@@ -62,6 +62,18 @@ export function isDaily(t: Trackable): boolean {
   return true;
 }
 
+/**
+ * Has anything been logged today?
+ *
+ * Deliberately scoped to what the FILL actually offers (`isDaily`) minus the
+ * read-only rollups: `focus` is a trackable too, and it writes itself whenever a
+ * session ends — counting it would turn the daily-fill row green just for having
+ * focused, which is precisely the thing it is not claiming.
+ */
+export function hasLoggedToday(all: Trackable[]): boolean {
+  return all.some((t) => isDaily(t) && !isReadOnlyRollup(t) && t.today != null);
+}
+
 interface Row {
   t: Trackable;
   days: TrackableDay[]; // newest-first, gap-filled; today = days[0]

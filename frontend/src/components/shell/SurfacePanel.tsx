@@ -54,30 +54,45 @@ export function SurfacePanel({
   }, [open]);
 
   return (
+    // THE CLIP BOX. It occupies exactly the panel's slot and never moves, so
+    // nothing this component owns is ever geometry outside the viewport.
+    //
+    // The panel used to BE this element and park itself at `translateX(100%)`
+    // when closed — a fixed box the width of the viewport, translated a full
+    // viewport to the right. That is the classic phantom-horizontal-scrollbar
+    // shape: whether it produces a real scrollbar depends on the engine, so it
+    // was a latent bug on every surface rather than a Chrome-only one, and
+    // `overflow-x: hidden` on the document would have hidden the symptom while
+    // leaving a full-width box sitting off-screen. Clipping at the source is
+    // the fix: the child may translate as far as it likes inside this.
     <div
-      data-surface-panel
-      data-open={open ? "" : undefined}
+      data-surface-clip
       style={{
         position: "fixed",
-        // clears the rail lane, the session band and the sticky header — all
-        // three stay put while the panel slides under them
         left: 68,
         top: "calc(var(--gooni-bar-h, 0px) + var(--gooni-header-h, 0px))",
         right: 0,
         bottom: 0,
         zIndex: z.overlay - 20,
+        overflow: "hidden",
+        // a closed clip box must not swallow clicks meant for the home
+        pointerEvents: open ? "auto" : "none",
+        visibility: present || open ? "visible" : "hidden",
+      }}
+    >
+    <div
+      data-surface-panel
+      data-open={open ? "" : undefined}
+      style={{
+        position: "absolute",
+        inset: 0,
         display: "flex",
         minWidth: 0,
         overflow: "hidden",
         background: "var(--gooni-void, #000000)",
-        borderLeft: `1px solid ${ink(0.08)}`,
         transform: open ? "translateX(0)" : "translateX(100%)",
         transition: `transform ${SLIDE_MS}ms cubic-bezier(0.32, 0.72, 0, 1)`,
         willChange: "transform",
-        // Parked, it must not be findable: hidden takes it out of the a11y
-        // tree and out of the tab order, and the missing pointer events stop
-        // an off-screen panel from eating clicks meant for the home.
-        visibility: present || open ? "visible" : "hidden",
         pointerEvents: open ? "auto" : "none",
       }}
       onKeyDown={(e) => {
@@ -87,7 +102,23 @@ export function SurfacePanel({
         }
       }}
     >
+      {/* THE LEFT EDGE READS AS A LAYER, NOT A SEAM.
+          It used to be a 1px hairline between two surfaces painting the SAME
+          void colour, and a line with identical ground either side reads as a
+          crack in one surface rather than the boundary of two. A short
+          gradient falloff gives the edge depth instead — not a drop shadow,
+          which the 2026-08-02 pass ruled out, but light catching a lifted
+          edge. Non-interactive so it cannot intercept the content beneath. */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute", left: 0, top: 0, bottom: 0, width: 20,
+          pointerEvents: "none", zIndex: 1,
+          background: `linear-gradient(to right, ${ink(0.09)}, ${ink(0.02)} 45%, transparent)`,
+        }}
+      />
       {children}
+    </div>
     </div>
   );
 }

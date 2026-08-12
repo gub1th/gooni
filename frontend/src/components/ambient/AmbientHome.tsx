@@ -4,7 +4,7 @@ import { FONT, frostInk } from "../../ui";
 import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "../../services/speech";
 import { MorphLine, type MorphRect } from "./MorphLine";
 import { LimboCards } from "./LimboCards";
-import { LogDots } from "./LogDots";
+import { LogDots, hasLoggedToday } from "./LogDots";
 import { dismissFill, isFillDismissed } from "./dailyFill";
 import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
@@ -41,6 +41,7 @@ import {
   type CalendarEvent,
   type FocusReminder,
   type LogMessage,
+  fetchTrackables,
 } from "../../services/api";
 
 // THE home. One surface, Momentum's layout, in Gooni's palette on the void.
@@ -135,6 +136,14 @@ export function AmbientHome({
   // second copy of the day's state.
   const [fillOpen, setFillOpen] = useState(false);
   const [fillDismissed, setFillDismissed] = useState(isFillDismissed);
+  // Has anything been logged today — the daily-fill row reads done at a glance.
+  // One request (`/trackables?today=1`), refreshed when the fill closes, which
+  // is the only moment the answer can have changed from this surface.
+  const [loggedToday, setLoggedToday] = useState(false);
+  const refreshLogged = useCallback(() => {
+    fetchTrackables(true).then((all) => setLoggedToday(hasLoggedToday(all))).catch(() => {});
+  }, []);
+  useEffect(() => { refreshLogged(); }, [refreshLogged]);
   const [value, setValue] = useState("");
   const [boxH, setBoxH] = useState(PEEK_H);
   const [thinking, setThinking] = useState(false);
@@ -879,6 +888,7 @@ export function AmbientHome({
                 : {
                     onOpen: () => setFillOpen(true),
                     onDismiss: () => { dismissFill(); setFillDismissed(true); },
+                    logged: loggedToday,
                   }
             }
           />
@@ -888,7 +898,9 @@ export function AmbientHome({
       {/* the RECORD — opened from the rail when you want history */}
       {trackablesOpen && <LogDots mode="matrix" onClose={() => onCloseTrackables?.()} />}
       {/* the daily FILL — opened from its row in TODAY */}
-      {fillOpen && !trackablesOpen && <LogDots mode="fill" onClose={() => setFillOpen(false)} />}
+      {fillOpen && !trackablesOpen && (
+        <LogDots mode="fill" onClose={() => { setFillOpen(false); refreshLogged(); }} />
+      )}
 
 
       {peekNote && <NotePeek note={peekNote} onClose={() => setPeekNote(null)} />}

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..common import _parse_iso_date
 from ..db.database import get_db
+from ..db.models import TrackableEntry
 
 router = APIRouter()
 
@@ -47,10 +48,34 @@ def trackable_create(body: dict, db: Session = Depends(get_db)):
 
 
 @router.get("/trackables")
-def trackable_list(db: Session = Depends(get_db)):
-    from ..services import trackable_service
+def trackable_list(today: bool = False, db: Session = Depends(get_db)):
+    """All definitions. `?today=1` attaches each one's value for TODAY.
 
-    return [trackable_service.serialize(t) for t in trackable_service.list_all(db)]
+    Widened rather than given its own endpoint: the ambient home needs to know
+    whether anything has been logged today (to mark the daily-fill row done at a
+    glance), and the alternative was N+1 entry requests from a surface that
+    otherwise makes none. One extra query serves every trackable.
+    """
+    from ..services import trackable_service
+    from ..common import local_today
+
+    rows = trackable_service.list_all(db)
+    out = [trackable_service.serialize(t) for t in rows]
+    if not today:
+        return out
+
+    day = local_today(db)
+    entries = (
+        db.query(TrackableEntry)
+        .filter(TrackableEntry.trackable_id.in_([t.id for t in rows]), TrackableEntry.date == day)
+        .all()
+    ) if rows else []
+    by_id: dict[int, list[TrackableEntry]] = {}
+    for e in entries:
+        by_id.setdefault(e.trackable_id, []).append(e)
+    for t, payload in zip(rows, out):
+        payload["today"] = trackable_service.day_value(by_id.get(t.id, []), t)
+    return out
 
 
 @router.patch("/trackables/{trackable_id}")

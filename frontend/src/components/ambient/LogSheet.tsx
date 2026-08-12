@@ -222,19 +222,33 @@ export function LogSheet({
 
   return (
     <>
-      <aside
-        data-log-sheet
-        aria-hidden={!open}
+      {/* Clip box — same reason as SurfacePanel's. The sheet parks itself at
+          `translateX(101%)` when closed, which put a 360px fixed element
+          entirely outside the right edge of the viewport; measured at 1440 it
+          sat at x=1104..1501. Clipping it here keeps the slide and keeps the
+          geometry inside the window. */}
+      <div
         style={{
           position: "fixed",
-          // FLUSH with the toolbar, not under it. At `top: 0` the sheet slid up
-          // behind the sticky header and its own LOG label collided with the
-          // header's controls; it starts where the toolbar ends.
           top: "var(--gooni-header-h, 0px)",
           right: 0,
           bottom: 0,
           width: "min(360px, 88vw)",
+          overflow: "hidden",
           zIndex: z.overlay + 1,
+          pointerEvents: open ? "auto" : "none",
+        }}
+      >
+      <aside
+        data-log-sheet
+        aria-hidden={!open}
+        style={{
+          position: "absolute",
+          // FLUSH with the toolbar, not under it. At `top: 0` the sheet slid up
+          // behind the sticky header and its own LOG label collided with the
+          // header's controls; it starts where the toolbar ends — the clip box
+          // above owns that offset now.
+          inset: 0,
           fontFamily: FONT,
           display: "flex",
           flexDirection: "column",
@@ -347,6 +361,7 @@ export function LogSheet({
         </div>
         )}
       </aside>
+      </div>
       {traceId != null && <TurnTracePanel messageId={traceId} onClose={() => setTraceId(null)} />}
     </>
   );
