@@ -8,7 +8,6 @@ import {
   type TrackableEntryRow,
 } from "./api";
 import { useFocusSessionStore, type FocusSegment } from "../stores/useFocusSessionStore";
-import { useSessionEndOfferStore } from "../stores/useSessionEndOfferStore";
 
 // Focus time — ONE trackable, attribution on the ENTRY.
 //
@@ -251,12 +250,11 @@ export async function endFocusSession(): Promise<void> {
       writtenDates: useFocusSessionStore.getState().session?.writtenDates ?? [],
       onWritten: (date) => useFocusSessionStore.getState().markWritten(date),
     });
-    const kept = useFocusSessionStore.getState().session?.kept === true;
     useFocusSessionStore.getState().stop();
-    // Stopping OFFERS completion, it never performs it — see the offer store.
-    // Raised here because this is the one place a session legitimately ends, so
-    // every surface that can stop gets the offer without remembering to.
-    useSessionEndOfferStore.getState().raise({ promiseId: s.promiseId, title: s.title, alreadyKept: kept });
+    // No completion OFFER any more (pass 9). Stopping simply stops; ticking the
+    // running task's box is the deliberate way to finish, and it ends the
+    // session itself — so the post-stop "mark kept?" prompt was asking a
+    // question the gesture had already answered.
   })();
   try {
     await ending;
@@ -283,11 +281,6 @@ export async function switchFocusSession(promiseId: number, title: string): Prom
   const live = useFocusSessionStore.getState().session;
   if (live && live.promiseId === promiseId) return;
   await endFocusSession();
-  // A SWITCH is not a stop: you are carrying on working, just on something
-  // else. Offering to complete the task you just left would be the wrong
-  // question at the wrong moment, so the offer endFocusSession raised is
-  // dropped before the new session starts.
-  useSessionEndOfferStore.getState().clear();
   useFocusSessionStore.getState().start(promiseId, title);
 }
 

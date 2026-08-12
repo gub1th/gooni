@@ -10,7 +10,6 @@ import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
 import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { LogSheet } from "./LogSheet";
-import { MarkKeptOffer } from "../focus/MarkKeptOffer";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 import {
@@ -19,6 +18,7 @@ import {
   switchFocusSession,
   type FocusTotals,
 } from "../../services/focusTime";
+import { ding } from "../../services/ding";
 import {
   useFocusSessionStore,
   elapsedMs,
@@ -76,7 +76,6 @@ const MIN_UTTERANCE = 2; // ignore stray one-char finals / noise
 // to its own fraction (rather than stacking them in flow under the wave) is
 // what keeps the wave at true centre however long the line or the list runs.
 const WAVE_Y = 0.47;
-const QUIP_Y = 0.57;
 const TODAY_Y = 0.66;
 // What the ROWS may claim before they scroll instead of growing. Without a cap
 // a ten-task day walks off the bottom and takes `+ add`, `N later` and the
@@ -84,39 +83,11 @@ const TODAY_Y = 0.66;
 // hint, all of which have to stay on screen at any list length.
 const ROWS_MAX = `calc(${(1 - TODAY_Y) * 100}vh - 152px)`;
 
-// Deliberately a fixed string and deliberately a SLOT: this is the one thing on
-// the screen that could know something Daniel doesn't (what he kept, what's
-// slipping, what the sensors saw), and Gooni will write it later. No generator
-// and no quotes file in the meantime — a random quote would occupy the slot
-// while teaching nobody anything.
-const QUIP = "Another day of keeping the nose to the grindstone.";
-
-// It is a MOMENT, not furniture (pass 3). As a permanent fixture it was the
-// largest thing on the screen and never changed, which is the definition of
-// loud and saying nothing. It shows on the first load of the day and after
-// finishing something, then goes.
-//
-// The slot is absolutely positioned, so its absence collapses nothing — the
-// wave simply keeps the space, which is what was asked for.
-const QUIP_SEEN_KEY = "gooni_quip_day";
-const QUIP_MS = 12_000;
-
-function firstLoadToday(): boolean {
-  try {
-    const today = new Date().toDateString();
-    if (localStorage.getItem(QUIP_SEEN_KEY) === today) return false;
-    localStorage.setItem(QUIP_SEEN_KEY, today);
-    return true;
-  } catch {
-    return false; // private mode — better silent than shouting every load
-  }
-}
 
 // Evaluated at MODULE scope, once per page load. It cannot go in a useState
 // initializer: this check consumes the day's one showing as a side effect, and
 // StrictMode double-invokes initializers in dev — the second call would find
 // the key already written and answer false, so the phrase never appeared.
-const FIRST_LOAD_TODAY = firstLoadToday();
 
 function isGlowing(m: LogMessage): boolean {
   return Boolean(m.has_actionable_signal) && (m.signal_preview?.status ?? "pending") === "pending";
@@ -164,22 +135,6 @@ export function AmbientHome({
   const [replyShown, setReplyShown] = useState(false);
   const [peekNote, setPeekNote] = useState<ApiNote | null>(null);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
-  const [quipShown, setQuipShown] = useState(FIRST_LOAD_TODAY);
-  const quipTimer = useRef<number | null>(null);
-
-  const showQuip = useCallback(() => {
-    setQuipShown(true);
-    if (quipTimer.current) window.clearTimeout(quipTimer.current);
-    quipTimer.current = window.setTimeout(() => setQuipShown(false), QUIP_MS);
-  }, []);
-
-  useEffect(() => {
-    if (!quipShown) return;
-    if (quipTimer.current) window.clearTimeout(quipTimer.current);
-    quipTimer.current = window.setTimeout(() => setQuipShown(false), QUIP_MS);
-    return () => { if (quipTimer.current) window.clearTimeout(quipTimer.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickyRef = useRef<StickyHandle>(null);
   const focusedRef = useRef(false);
@@ -673,7 +628,6 @@ export function AmbientHome({
     const next = item.state === "kept" ? "active" : "kept";
     const updated: FocusReminder = { ...item, state: next, done: next === "kept" };
     const undoRetention = retainTicked(retained.current, updated);
-    if (next === "kept") showQuip(); // finishing something is the other moment
     setShortTerm((prev) => prev.map((r) => (r.id === item.id ? updated : r)));
     // If a session is running on this task, both surfaces have to agree about
     // it — the session store is where they meet.
@@ -688,8 +642,28 @@ export function AmbientHome({
       undoRetention();
       setShortTerm((prev) => prev.map((r) => (r.id === item.id ? item : r)));
       if (onRunningTask) useFocusSessionStore.getState().setKept(item.state === "kept");
+      return;
     } finally {
       void loadCommitments();
+    }
+    // TICKING A RUNNING TASK ALSO ENDS ITS SESSION (pass 9) — one gesture,
+    // finished and stopped. Written as a normal session end, so the entry and
+    // its attribution are identical to pressing stop.
+    //
+    // Only AFTER the completion write landed: ending is the irreversible half
+    // (it writes the trackable entry and drops the session), and doing it first
+    // would mean a failed tick left the work stopped but the task open, with no
+    // running session left to try again from.
+    if (onRunningTask && next === "kept") {
+      try {
+        await endFocusSession();
+        void loadTotals();
+        ding();
+      } catch {
+        // endFocusSession leaves the session PAUSED and retryable on a failed
+        // write rather than destroying it — say so, and leave it be.
+        flash("couldn't save that session — it's paused, not lost");
+      }
     }
   }
 
@@ -858,38 +832,6 @@ export function AmbientHome({
         )}
       </div>
 
-      {/* stopping OFFERS completion — right where you stopped, under the slot */}
-      {!covered && (
-        <div
-          style={{
-            position: "absolute", left: rect.cx, top: rect.cy + PEEK_H / 2 + 26,
-            transform: "translateX(-50%)", zIndex: 4,
-          }}
-        >
-          <MarkKeptOffer
-            onKept={(offer) => {
-              // Taking the offer completes the task, and `/focus/dashboard`
-              // serves ACTIVE rows only — so without retention the row would
-              // VANISH on the next poll instead of staying struck through in
-              // place, which is the rule everywhere else a task is completed.
-              const seen = retained.current.seen.get(offer.promiseId);
-              retainTicked(
-                retained.current,
-                seen
-                  ? { ...seen, state: "kept", done: true }
-                  : {
-                      id: offer.promiseId, type: "promise", content: offer.title,
-                      owed_to: null, due_at: null, due_is_default: true,
-                      done: true, state: "kept", resolved_at: null,
-                      age_days: 0, lasted_days: 0, thought_id: null,
-                    },
-              );
-              void loadCommitments();
-            }}
-          />
-        </div>
-      )}
-
       {/* ── the stage: line · TODAY · streaks, each pinned to its own % ─────── */}
       <div
         style={{
@@ -901,22 +843,6 @@ export function AmbientHome({
           opacity: stageHidden ? 0 : 1, transition: "opacity 220ms ease",
         }}
       >
-        <div
-          style={{
-            // CENTRE-anchored on its fraction, not top-anchored: the line is a
-            // slot Gooni will write into, so it has to grow both ways from its
-            // mark rather than only downward into the list.
-            position: "absolute", top: `${QUIP_Y * 100}%`, left: "50%", transform: "translate(-50%, -50%)",
-            width: "min(19ch, 86vw)", textAlign: "center",
-            fontSize: 33, fontWeight: 600, letterSpacing: "-0.022em", lineHeight: 1.18,
-            color: ink(0.92), pointerEvents: "none",
-            opacity: quipShown ? 1 : 0,
-            transition: "opacity 600ms ease",
-          }}
-        >
-          {QUIP}
-        </div>
-
         <div
           style={{
             position: "absolute", top: `${TODAY_Y * 100}%`, left: "50%", transform: "translateX(-50%)",

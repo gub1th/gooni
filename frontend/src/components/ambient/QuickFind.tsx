@@ -3,7 +3,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { Activity, Bell, Brain, CircleCheck, FileText, Pause, Play, Search, Square } from "lucide-react";
 import { elapsedMs, useFocusSessionStore } from "../../stores/useFocusSessionStore";
 import { endFocusSession } from "../../services/focusTime";
-import { MarkKeptOffer } from "../focus/MarkKeptOffer";
 import type { LucideIcon } from "lucide-react";
 import { FONT, frost, frostInk, z } from "../../ui";
 import {
@@ -533,13 +532,6 @@ export function QuickFind({
         )}
       </div>
 
-      {/* A just-stopped session may still be offering completion. The band used
-          to carry this; the notch inherits it, anchored under the bar. */}
-      {!session && (
-        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 6, display: "flex", justifyContent: "center" }}>
-          <MarkKeptOffer />
-        </div>
-      )}
 
       {/* results */}
       {showPanel && (
