@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
 import { GOONI_THEMES, GOONI_THEME_LABELS, THEME_PALETTES, useGooniThemeStore, type GooniTheme } from "../stores/useGooniThemeStore";
 import { useProfileStore } from "../stores/useProfileStore";
-import { uploadAvatarImage, updatePublicAvatar } from "../services/api";
+import { BASE as API_BASE, uploadAvatarImage, updatePublicAvatar } from "../services/api";
 import { SettingsPanel } from "./SettingsPanel";
 import { IntegrationSection } from "./IntegrationSection";
 import { CommentAvatar } from "./notes/CommentAvatar";
@@ -408,7 +408,6 @@ const VERCEL_DASHBOARD = "https://vercel.com/daniels-projects-eac22a07/gooni";
 const VERCEL_URL_KEY = "gooni_vercel_url";
 const env = import.meta.env as Record<string, string | undefined>;
 const VERCEL_DEFAULT_URL = "https://gooni.vercel.app";
-const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
 
 function withProtocol(host: string | undefined | null): string {
   if (!host) return "";

@@ -2,7 +2,23 @@
 // Exported so non-fetch consumers (iframe src, image previews, etc) can
 // build absolute URLs to the backend instead of relative paths that fall
 // through the Vite SPA index.html and return HTML.
-export const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+//
+// `__GOONI_API_URL__` is the Electron shell's runtime override (desktop/,
+// injected by src/preload-app.js before any page script runs). VITE_API_URL is
+// baked at BUILD time, so a bundle built for one environment and loaded by the
+// shell would otherwise fall through to localhost:8000 — a backend that only
+// exists while dev.sh is running, i.e. the silent-failure shape this project
+// keeps fighting. Undefined in a browser, so nothing changes there.
+declare global {
+  interface Window {
+    __GOONI_API_URL__?: string;
+  }
+}
+
+export const BASE =
+  (typeof window !== "undefined" ? window.__GOONI_API_URL__ : undefined) ||
+  import.meta.env.VITE_API_URL ||
+  "http://localhost:8000";
 
 export function getStoredToken(): string | null {
   return localStorage.getItem("gooni_token");

@@ -1,0 +1,27 @@
+{
+  "name": "gooni-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron shell: Gooni as a menu-bar app with a global capture hotkey, and the one owner that supervises the focus-cam Python sidecar.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test 'tests/*.test.js'",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "app.gooni.desktop",
+    "productName": "Gooni",
+    "files": ["src/**/*", "renderer/**/*", "assets/**/*"],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dir",
+      "identity": null
+    }
+  }
+}

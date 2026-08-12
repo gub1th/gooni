@@ -27,6 +27,7 @@ import { scrubUrl } from "./scrub.js";
 import { createSerializer } from "./serial.js";
 import { resolveAttention, applyAttention, makeIdleProbe } from "./attention.js";
 import { loadConfig, ingestEndpoint, IDLE_DETECTION_SEC } from "./config.js";
+import { sensorHealth } from "./health.js";
 
 const OPEN_KEY = "gooni_open_interval";
 const HEARTBEAT_ALARM = "gooni_heartbeat";
@@ -101,8 +102,62 @@ async function _flush() {
   return res;
 }
 
+/**
+ * The status blob the popup and the badge both read.
+ *
+ * Reads only, so it is safe to call OUTSIDE the serial queue — and it must be,
+ * because painting the badge would otherwise hold the one slot every tab
+ * switch, blur and heartbeat queues behind.
+ */
+async function collectStatus() {
+  const [cfg, size, dropped, refused, got] = await Promise.all([
+    loadConfig(storage),
+    buffer.size(),
+    buffer.droppedCount(),
+    buffer.refusedCount(),
+    storage.get([LAST_FLUSH_KEY, OPEN_KEY]),
+  ]);
+  return {
+    enabled: cfg.enabled,
+    baseUrl: cfg.baseUrl,
+    hasToken: Boolean(cfg.token),
+    buffered: size,
+    dropped,
+    refused,
+    lastFlush: got[LAST_FLUSH_KEY] || null,
+    open: got[OPEN_KEY] || null,
+  };
+}
+
+/**
+ * Put the sensor's health on the toolbar icon.
+ *
+ * The badge is the ONLY surface this extension has that you see without opening
+ * something. The states that most need saying — no token, wrong host — are
+ * precisely the ones that write no flush record, so before this they were
+ * indistinguishable from a healthy install right up until someone went looking.
+ * Silent when healthy: a permanent badge is a badge you stop reading.
+ */
+async function paintBadge() {
+  if (!chrome.action?.setBadgeText) return;
+  try {
+    const health = sensorHealth(await collectStatus());
+    await chrome.action.setBadgeText({ text: health.badge });
+    if (health.badge) await chrome.action.setBadgeBackgroundColor({ color: health.color });
+    await chrome.action.setTitle({
+      title: health.message ? `${health.title}\n${health.message}` : health.title,
+    });
+  } catch {
+    // Cosmetic by contract — a failed paint must never break the sensing path.
+  }
+}
+
 const withTracker = (fn) => serial(() => _withTracker(fn));
-const flush = () => serial(_flush);
+const flush = async () => {
+  const res = await serial(_flush);
+  await paintBadge();
+  return res;
+};
 
 /**
  * chrome.idle.queryState as an always-settling, fail-closed promise.
@@ -206,6 +261,9 @@ chrome.runtime.onInstalled.addListener(async () => {
   installAlarms();
   await bootSalvage();
   await reconcile();
+  // A fresh install with no password saved is the state most likely to be
+  // mistaken for a working one, and it is reached exactly here.
+  await paintBadge();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
@@ -262,23 +320,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === "gooni:status") {
     (async () => {
-      const [cfg, size, dropped, refused, got] = await Promise.all([
-        loadConfig(storage),
-        buffer.size(),
-        buffer.droppedCount(),
-        buffer.refusedCount(),
-        storage.get([LAST_FLUSH_KEY, OPEN_KEY]),
-      ]);
-      sendResponse({
-        enabled: cfg.enabled,
-        baseUrl: cfg.baseUrl,
-        hasToken: Boolean(cfg.token),
-        buffered: size,
-        dropped,
-        refused,
-        lastFlush: got[LAST_FLUSH_KEY] || null,
-        open: got[OPEN_KEY] || null,
-      });
+      const status = await collectStatus();
+      sendResponse(status);
+      // Options/popup opening is also the moment config may have just changed,
+      // so it is a good time to re-check what the icon is claiming.
+      await paintBadge();
     })();
     return true;
   }

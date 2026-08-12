@@ -56,6 +56,16 @@ cloudflared tunnel --url http://localhost:8001
 ```
 See `docs/focus_connector_instructions.md` for the full connect + auto-logging setup. The kiosk dashboard lives at http://localhost:5173/focus.
 
+### Desktop shell (menu-bar app + capture hotkey + focus-cam supervisor)
+```bash
+cd desktop && npm install && npm start
+```
+Runs against the **deployed** backend (`https://gooni-bot.fly.dev`) on purpose — a
+shell pointed at localhost captures nothing whenever `dev.sh` isn't running. It
+puts Gooni in the menu bar, binds a global capture hotkey, and supervises the
+focus-cam Python sidecar (start/restart/log/clean stop). Unsigned, so macOS
+re-prompts for permissions after each rebuild. See `desktop/README.md`.
+
 ---
 
 ## First-time setup
