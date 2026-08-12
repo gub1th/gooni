@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.231.0 — 2026-08-12 (minor)
+
+- feat(notch): UP NEXT all day, graded by the horizon — drop the calendar dot (#470)
+
 ## 0.230.0 — 2026-08-12 (minor)
 
 - feat(home): one home — ambient wave in a Momentum layout, focus is a timed session (#468)
