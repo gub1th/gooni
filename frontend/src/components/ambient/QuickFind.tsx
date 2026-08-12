@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Activity, Bell, Brain, CircleCheck, FileText, Search } from "lucide-react";
+import { Activity, Bell, Brain, CircleCheck, CornerLeftUp, FileText, Pause, Play, Search, X } from "lucide-react";
+import { elapsedMs, useFocusSessionStore } from "../../stores/useFocusSessionStore";
+import { useSessionAttachStore } from "../../stores/useSessionAttachStore";
+import { endFocusSession } from "../../services/focusTime";
+import { MarkKeptOffer } from "../focus/MarkKeptOffer";
 import type { LucideIcon } from "lucide-react";
 import { FONT, frost, frostInk, z } from "../../ui";
 import {
@@ -100,15 +104,56 @@ function reminderSub(r: FocusReminder): string {
   return bits.join(" · ");
 }
 
+function mmss(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** A control inside the notch — same bare treatment as the header glyphs. */
+function NotchButton({
+  label,
+  accent,
+  onClick,
+  children,
+}: {
+  label: string;
+  accent?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: 22, height: 22, padding: 0, borderRadius: 999, cursor: "pointer",
+        border: "none", background: "transparent",
+        display: "grid", placeItems: "center",
+        color: accent ? frostInk.accent : hover ? frostInk.text : frostInk.faint,
+        transition: "color 140ms ease",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function QuickFind({
   hidden,
   onOpenNote,
   onOpenTrackables,
+  onHome = false,
 }: {
   hidden?: boolean;
   onOpenNote: (note: ApiNote) => void;
   /** trackable hit → open the log matrix, which is home-local state */
   onOpenTrackables: () => void;
+  /** the home is the surface showing — decides whether re-attach has a slot here */
+  onHome?: boolean;
 }) {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -323,6 +368,72 @@ export function QuickFind({
     }
   }
 
+  // ── THE NOTCH ────────────────────────────────────────────────────────────
+  // One physical element, two payloads. The search bar is the only chrome that
+  // is present on every surface at all times, which makes it the one place a
+  // running session can live without adding a second thing to the top of the
+  // screen. While a session runs and you are not searching, the bar IS the
+  // session; click into it and it is a search bar again.
+  //
+  // This also kills a real dead end. `FocusSessionBar` owned the only
+  // `setAttached(true)`, and that band is deliberately not rendered on the home
+  // — so detaching on the home left no way back short of stopping the session.
+  // The re-attach control now lives in an element that is always present, so
+  // the dead end cannot exist by construction.
+  const session = useFocusSessionStore((s) => s.session);
+  const attached = useSessionAttachStore((s) => s.attached);
+  const setAttached = useSessionAttachStore((s) => s.setAttached);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const endingRef = useRef(false);
+
+  const sessionRunning = !!session?.running;
+  useEffect(() => {
+    if (!sessionRunning) return;
+    const iv = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(iv);
+  }, [sessionRunning]);
+
+  // Searching always wins: focus or a typed query swaps the payload back.
+  const searching = open || q.trim().length > 0;
+  const showSession = !!session && !searching;
+
+  // Focus the input the moment the search payload appears — the click that
+  // asked for it landed on the bar, not on an input that existed yet.
+  useEffect(() => {
+    if (!searching) return;
+    inputRef.current?.focus();
+  }, [searching]);
+
+  // Re-attach puts the session back in the wave's slot. Off the home there is
+  // no slot to return to, so it also takes you there — the band's old rule,
+  // kept because it is the one that makes the control mean something.
+  function reattach() {
+    setAttached(true);
+    if (!onHome) {
+      navigate({
+        to: "/",
+        search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined, calendar: undefined },
+      });
+    }
+  }
+
+  // Shown unless the session is ALREADY in the slot in front of you. Attached
+  // but on another surface still shows it, because clicking is what takes you
+  // back to the slot.
+  const canReattach = !attached || !onHome;
+
+  async function endSession() {
+    if (endingRef.current) return;
+    endingRef.current = true;
+    try {
+      await endFocusSession();
+    } catch {
+      /* the session survives a failed write by design — /focus explains it */
+    } finally {
+      endingRef.current = false;
+    }
+  }
+
   const showPanel = open && q.trim().length > 0;
 
   return (
@@ -343,34 +454,119 @@ export function QuickFind({
           ⌘K hint, no shadow: at rest this should read as a seam in the void,
           not a control asking to be used. */}
       <div
-        onClick={() => inputRef.current?.focus()}
+        onClick={() => {
+          // While the session payload is showing there IS no input to focus —
+          // it is not rendered — so the click has to flip the payload first and
+          // let the effect below focus it once it exists. Without this the notch
+          // was a one-way door: a running session meant no search.
+          if (showSession) { setOpen(true); void loadCaches(); return; }
+          inputRef.current?.focus();
+        }}
         style={{
           display: "flex", alignItems: "center", gap: 7,
-          height: 34, padding: "0 13px", borderRadius: 999, cursor: "text",
+          height: 34, padding: showSession ? "0 6px 0 13px" : "0 13px",
+          borderRadius: 999, cursor: "text",
           ...frost.chrome,
-          border: `1px solid ${frostInk.border}`,
+          // the accent border is the whole signal that this is a session, not a
+          // search field — the shape is deliberately identical
+          border: `1px solid ${showSession ? "rgb(74 222 128 / 0.45)" : frostInk.border}`,
+          transition: "border-color 180ms ease",
         }}
       >
-        <Search size={12} color={frostInk.faint} strokeWidth={1.8} />
-        <input
-          ref={inputRef}
-          value={q}
-          aria-label="quickfind"
-          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-          onFocus={() => { setOpen(true); void loadCaches(); }}
-          onBlur={() => {
-            // let a row's click land first (rows also preventDefault on mousedown)
-            if (blurRef.current) window.clearTimeout(blurRef.current);
-            blurRef.current = window.setTimeout(close, 140);
-          }}
-          onKeyDown={onKeyDown}
-          spellCheck={false}
-          style={{
-            flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none",
-            fontFamily: FONT, fontSize: 12.5, color: frostInk.text, caretColor: "#4ADE80",
-          }}
-        />
+        {showSession && session ? (
+          <>
+            {sessionRunning ? (
+              <span
+                aria-hidden
+                style={{
+                  width: 6, height: 6, borderRadius: 999, flex: "none",
+                  background: frostInk.accent,
+                  animation: "gooni-notch-pulse 1.8s ease-in-out infinite",
+                }}
+              />
+            ) : (
+              <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, flex: "none", border: `1px solid ${frostInk.faint}` }} />
+            )}
+            <style>{`@keyframes gooni-notch-pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
+            <span
+              style={{
+                fontSize: 12.5, color: frostInk.text, minWidth: 0,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                textDecoration: session.kept ? "line-through" : "none",
+              }}
+            >
+              {session.title}
+            </span>
+            <span
+              style={{
+                fontSize: 12.5, flex: "none", marginLeft: "auto", paddingLeft: 8,
+                fontVariantNumeric: "tabular-nums",
+                color: sessionRunning ? frostInk.accent : frostInk.faint,
+              }}
+            >
+              {mmss(
+                session.style === "timer"
+                  ? Math.max(0, session.targetMs - elapsedMs(session, "focus", nowMs))
+                  : elapsedMs(session, "focus", nowMs),
+              )}
+            </span>
+            {/* Controls stopPropagation: the bar itself is the way back to
+                search, so without it every click on pause would also open the
+                search field underneath. */}
+            <span style={{ display: "flex", alignItems: "center", gap: 1, flex: "none" }} onClick={(e) => e.stopPropagation()}>
+              <NotchButton
+                label={sessionRunning ? "Pause the session" : "Resume the session"}
+                accent={!sessionRunning}
+                onClick={() =>
+                  sessionRunning
+                    ? useFocusSessionStore.getState().pause()
+                    : useFocusSessionStore.getState().resume()
+                }
+              >
+                {sessionRunning ? <Pause size={12} fill="currentColor" strokeWidth={0} /> : <Play size={12} fill="currentColor" strokeWidth={0} />}
+              </NotchButton>
+              {canReattach && (
+                <NotchButton label="Put the session back in the wave" onClick={reattach}>
+                  <CornerLeftUp size={12} strokeWidth={2} />
+                </NotchButton>
+              )}
+              <NotchButton label="End the session" onClick={() => void endSession()}>
+                <X size={12} strokeWidth={2} />
+              </NotchButton>
+            </span>
+          </>
+        ) : (
+          <>
+            <Search size={12} color={frostInk.faint} strokeWidth={1.8} />
+            <input
+              ref={inputRef}
+              value={q}
+              aria-label="quickfind"
+              onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+              onFocus={() => { setOpen(true); void loadCaches(); }}
+              onBlur={() => {
+                // let a row's click land first (rows also preventDefault on mousedown)
+                if (blurRef.current) window.clearTimeout(blurRef.current);
+                blurRef.current = window.setTimeout(close, 140);
+              }}
+              onKeyDown={onKeyDown}
+              spellCheck={false}
+              style={{
+                flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none",
+                fontFamily: FONT, fontSize: 12.5, color: frostInk.text, caretColor: "#4ADE80",
+              }}
+            />
+          </>
+        )}
       </div>
+
+      {/* A just-stopped session may still be offering completion. The band used
+          to carry this; the notch inherits it, anchored under the bar. */}
+      {!session && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 6, display: "flex", justifyContent: "center" }}>
+          <MarkKeptOffer />
+        </div>
+      )}
 
       {/* results */}
       {showPanel && (

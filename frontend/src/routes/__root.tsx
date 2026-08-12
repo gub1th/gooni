@@ -22,9 +22,6 @@ import { Sidebar } from "../components/notes/Sidebar";
 // replaced was deleted with the widget system it hosted.
 import { IconRail } from "../components/ambient/IconRail";
 import { useFocusCamControl } from "../components/focus/useFocusCamControl";
-import { FocusSessionBar, SESSION_BAR_H } from "../components/focus/FocusSessionBar";
-import { useFocusSessionStore } from "../stores/useFocusSessionStore";
-import { useSessionAttachStore } from "../stores/useSessionAttachStore";
 import { SurfacePanel } from "../components/shell/SurfacePanel";
 import { AppHeader, HEADER_H } from "../components/shell/AppHeader";
 import { useHomeChromeStore } from "../stores/useHomeChromeStore";
@@ -128,10 +125,6 @@ function AppShell() {
   // ONE owner of the focus-cam reconcile target, mounted here because AppShell
   // survives every route change — see the hook for why no view may own it.
   useFocusCamControl();
-  // The session band owns its own row at the very top. Its height is reserved
-  // ONLY while a session runs, so the page returns to full height otherwise.
-  const hasSession = useFocusSessionStore((s) => s.session != null);
-  const attached = useSessionAttachStore((s) => s.attached);
   const location = useLocation();
   const navigate = useNavigate();
   const routerState = useRouterState();
@@ -183,17 +176,6 @@ function AppShell() {
   // URL. It paints its own void and owns its own corners, so the docked sidebar
   // and the shared top-right cluster stand down here.
   const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories && !isCalendar;
-
-  // Published as a CSS var because the elements that must clear the band are
-  // `position: fixed` with their own top offsets (QuickFind, the home corner
-  // cluster, the date, the theme toggle) — they do not inherit the shell's
-  // reserved padding, and prop-drilling a number into each is how they drift.
-  useEffect(() => {
-    // On the home the band shows only when the session is DETACHED — attached,
-    // it is in the wave's slot and a band would say the same thing twice.
-    const shows = hasSession && (!isHome || !attached);
-    document.documentElement.style.setProperty("--gooni-bar-h", shows ? `${SESSION_BAR_H}px` : "0px");
-  }, [hasSession, isHome, attached]);
 
   // The header's height, for the same reason the band publishes its own: the
   // things that must clear it are `position: fixed` with their own offsets and
@@ -381,9 +363,7 @@ function AppShell() {
           // underlaps it. STATIC (not hover-driven) → no reflow jank. Immersive
           // surfaces hide the rail, so no lane.
           paddingLeft: isImmersive ? 0 : 68,
-          paddingTop:
-            (isImmersive ? 0 : HEADER_H) +
-            (hasSession && !isImmersive && (!isHome || !attached) ? SESSION_BAR_H : 0),
+          paddingTop: isImmersive ? 0 : HEADER_H,
         }}
       >
         {/* Non-home surfaces SLIDE IN as one panel over a home that stays
@@ -441,10 +421,6 @@ function AppShell() {
           <Outlet />
         </div>
         </SurfaceHost>
-        {/* The band is for surfaces with no wave to take over — and for the
-            home too once the session is DETACHED from the slot. Attached, the
-            band would be the same session said twice. */}
-        {!isImmersive && (!isHome || !attached) && <FocusSessionBar />}
         {!isImmersive && <IconRail />}
         {/* ONE sticky header, on every non-immersive surface — date, quickfind,
             mic, log, theme. It replaces four separately-positioned fixed
@@ -454,6 +430,7 @@ function AppShell() {
           <AppHeader
             onOpenNote={(n) => useHomeChromeStore.getState().openNote?.(n)}
             onOpenTrackables={() => navigate({ to: "/", search: { trackables: true } })}
+            onHome={isHome}
           />
         )}
       </div>

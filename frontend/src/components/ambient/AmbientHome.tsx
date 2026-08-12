@@ -13,7 +13,6 @@ import { LogSheet } from "./LogSheet";
 import { SessionInWave } from "./SessionInWave";
 import { useSessionAttachStore } from "../../stores/useSessionAttachStore";
 import { MarkKeptOffer } from "../focus/MarkKeptOffer";
-import { SESSION_BAR_H } from "../focus/FocusSessionBar";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
 import {
@@ -787,11 +786,11 @@ export function AmbientHome({
   return (
     <div
       onDoubleClick={onRootDoubleClick}
-      // The home paints its own full-bleed void, so AppShell's reserved band
-      // height does not apply to it — it has to clear the bar itself.
+      // Full-bleed from the very top: the sticky header floats OVER the void
+      // rather than pushing it down, and the session band it used to clear is
+      // gone — the notch in the header carries the session now.
       style={{
-        position: "fixed", left: 0, right: 0, bottom: 0,
-        top: hasSession ? SESSION_BAR_H : 0,
+        position: "fixed", inset: 0,
         background: "var(--gooni-void, #000000)", overflow: "hidden", fontFamily: FONT,
       }}
     >
