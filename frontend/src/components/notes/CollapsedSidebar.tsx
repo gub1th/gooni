@@ -167,7 +167,7 @@ export function CollapsedSidebar({
       <RailButton
         Icon={Brain}
         title="Memories"
-        onClick={() => navigate({ to: "/memories", search: { focus: undefined } })}
+        onClick={() => navigate({ to: "/", search: { view: "memories" } })}
         color={ICON_TINT.memories}
       />
       <RailButton

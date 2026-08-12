@@ -38,7 +38,7 @@ export function IconRail() {
     { label: "Trackables", Icon: LayoutGrid, go: () => nav({ trackables: true }) },
     { label: "Calendar", Icon: CalendarDays, go: () => nav({ calendar: true }) },
     { label: "Notes", Icon: FileText, go: () => nav({ view: "notes" }) },
-    { label: "Memories", Icon: Brain, go: () => navigate({ to: "/memories", search: { focus: undefined } }) },
+    { label: "Memories", Icon: Brain, go: () => nav({ view: "memories" }) },
     { label: "Audit", Icon: SearchCheck, go: () => nav({ audit: true }) },
     { label: "Settings", Icon: SettingsIcon, go: () => setSettingsOpen(true) },
   ];

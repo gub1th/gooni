@@ -271,7 +271,7 @@ export function QuickFind({
         title: clean(m.content),
         sub: m.type ?? null,
         group: GROUP.memory,
-        open: () => void navigate({ to: "/memories", search: { focus: undefined } }),
+        open: () => void navigate({ to: "/", search: { view: "memories", focus: m.id } }),
       });
     }
 

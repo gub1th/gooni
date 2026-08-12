@@ -135,7 +135,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
       <div style={{ marginTop: 8, padding: "0 4px", fontSize: 12, color: "var(--gooni-faint, #94A3B8)" }}>
         Click a row to peek.{" "}
         <button
-          onClick={() => navigate({ to: "/memories", search: { focus: undefined } })}
+          onClick={() => navigate({ to: "/", search: { view: "memories" } })}
           style={{
             background: "none",
             border: "none",
@@ -221,7 +221,7 @@ export function NoteMemoriesPanel({ memories }: NoteMemoriesPanelProps) {
                 onClick={() => {
                   const id = selected.id;
                   setSelected(null);
-                  navigate({ to: "/memories", search: { focus: id } });
+                  navigate({ to: "/", search: { view: "memories", focus: id } });
                 }}
                 style={{
                   fontSize: 12,

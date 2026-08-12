@@ -64,9 +64,9 @@ export function QuickNav() {
     {
       key: "memories",
       label: "Memories",
-      hint: "/memories",
+      hint: "?view=memories",
       icon: <Brain size={14} strokeWidth={1.7} />,
-      onSelect: () => navigate({ to: "/memories", search: { focus: undefined } }),
+      onSelect: () => navigate({ to: "/", search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: "memories" } }),
     },
     {
       key: "audit",

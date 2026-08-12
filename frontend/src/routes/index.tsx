@@ -7,6 +7,7 @@ import { AllNotesDiscovery } from "../components/notes/AllNotesDiscovery";
 import { NoteEditor } from "../components/notes/NoteEditor";
 import { NotesList } from "../components/notes/NotesList";
 import { AmbientHome } from "../components/ambient/AmbientHome";
+import { MemoriesView } from "../components/memories/MemoriesView";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
 import { fetchNote } from "../services/api";
 
@@ -18,7 +19,7 @@ import { fetchNote } from "../services/api";
 // Everything else on this route (notes, log, audit) is a summoned sheet over
 // the same void, derived from the URL.
 
-type View = "home" | "notes" | "log" | "eval";
+type View = "home" | "notes" | "log" | "eval" | "memories";
 
 // Every key is OPTIONAL on purpose. TanStack replaces the whole search object
 // on an object-form navigate, so optionality changes nothing at runtime — but
@@ -30,7 +31,9 @@ interface HomeSearch {
   conv?: number;
   audit?: true;
   segment?: number;
-  view?: "notes" | "log";
+  view?: "notes" | "log" | "memories";
+  /** deep-link a single memory row — scroll + flash it (?view=memories only) */
+  focus?: number;
   /** the log matrix over the home */
   trackables?: true;
   /** the week-grid calendar over the home */
@@ -45,10 +48,16 @@ export const Route = createFileRoute("/")({
     audit: search.audit === true || search.audit === "true" || search.audit === "1" || undefined,
     // ?segment=<id> → auto-open that segment's drilldown in the audit view.
     segment: typeof search.segment === "number" ? search.segment : typeof search.segment === "string" ? Number(search.segment) : undefined,
-    // ?view=notes|log → force a view that has no other URL signal.
+    // ?view=notes|log|memories → force a view that has no other URL signal.
     view:
-      search.view === "notes" || search.view === "log"
-        ? (search.view as "notes" | "log")
+      search.view === "notes" || search.view === "log" || search.view === "memories"
+        ? (search.view as "notes" | "log" | "memories")
+        : undefined,
+    // ?focus=<id> → the memories view scrolls that row into view and flashes it.
+    focus: typeof search.focus === "number"
+      ? search.focus
+      : typeof search.focus === "string" && search.focus.length > 0
+        ? Number(search.focus) || undefined
         : undefined,
     // ?trackables=1 → the log matrix over the home. URL-driven so the rail can
     // open it from outside the home's own state (the widget-overlay store that
@@ -75,6 +84,7 @@ function LogPage() {
     search.note ? "notes" :
     search.view === "notes" ? "notes" :
     search.view === "log" ? "log" :
+    search.view === "memories" ? "memories" :
     "home";
 
   // ?note=<id> → fetch + seed the note into the store. View derives to
@@ -183,6 +193,8 @@ function LogPage() {
 
       {view === "home" ? null : view === "log" ? (
         <ChatLogView />
+      ) : view === "memories" ? (
+        <MemoriesView focusId={search.focus} />
       ) : view === "eval" ? (
         <EvalView
           onOpenNote={(noteId: number) =>

@@ -169,10 +169,15 @@ function AppShell() {
   const isNotes = onIndex && (hasNote || viewParam === "notes");
   const isEval = onIndex && auditFlag;
   const isLog = onIndex && viewParam === "log";
+  // Memories moved off its own `/memories` route onto the index route, so that
+  // the home is mounted behind it for the panel to slide over. It has to be
+  // named here for the same reason every other view is: without it `isHome`
+  // stays true and the home paints its void straight over the panel.
+  const isMemories = onIndex && viewParam === "memories";
   // The ambient home is the index default — active when nothing else claims the
   // URL. It paints its own void and owns its own corners, so the docked sidebar
   // and the shared top-right cluster stand down here.
-  const isHome = onIndex && !isNotes && !isEval && !isLog;
+  const isHome = onIndex && !isNotes && !isEval && !isLog && !isMemories;
 
   // Published as a CSS var because the elements that must clear the band are
   // `position: fixed` with their own top offsets (QuickFind, the home corner

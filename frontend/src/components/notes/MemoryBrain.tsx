@@ -276,7 +276,7 @@ export function MemoryBrain({
                 onClick={() => {
                   setSelected(null);
                   // Memories page reads ?focus= and opens the detail modal.
-                  navigate({ to: "/memories", search: { focus: selected.id } });
+                  navigate({ to: "/", search: { view: "memories", focus: selected.id } });
                 }}
                 style={{
                   fontSize: 11.5, fontWeight: 600, fontFamily: FONT,
