@@ -1,7 +1,7 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 import { GREEN, mixColor, roundedRectPoints } from "./wavePath";
 import { useReducedMotion } from "../creative/useReducedMotion";
-import { useGooniThemeStore, WAVE_REST_COLOR } from "../../stores/useGooniThemeStore";
+import { FOCUS_GLOW, useGooniThemeStore, WAVE_REST_COLOR } from "../../stores/useGooniThemeStore";
 
 // THE line. One continuous stroke that IS the waveform at rest and BENDS into
 // the input's rounded-rect outline when you capture — in place, so it reads as
@@ -32,6 +32,7 @@ export function MorphLine({
   thinking = false,
   dimmed = false,
   waveWidth = 380,
+  focus = false,
   energyRef,
   activeRef,
 }: {
@@ -40,6 +41,8 @@ export function MorphLine({
   thinking?: boolean;
   dimmed?: boolean;
   waveWidth?: number;
+  /** a focus session is running — the wave GLOWS rather than becoming a timer */
+  focus?: boolean;
   energyRef: MutableRefObject<number>;
   activeRef: MutableRefObject<number>;
 }) {
@@ -57,6 +60,15 @@ export function MorphLine({
   const rest = WAVE_REST_COLOR[theme];
   const restRef = useRef(rest);
   restRef.current = rest;
+  // Focus rides the HALO, pending rides the LINE. Two signals on one element
+  // stay legible only because they use different channels and different hues —
+  // see FOCUS_GLOW for why green and amber were both unavailable.
+  const focusColor = FOCUS_GLOW[theme];
+  const focusColorRef = useRef(focusColor);
+  focusColorRef.current = focusColor;
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
+  const fRef = useRef(0);
 
   const boxRef = useRef(boxMode);
   boxRef.current = boxMode;
@@ -78,6 +90,8 @@ export function MorphLine({
       if (!reduce) t += dt;
       e.cur += (energyRef.current - e.cur) * Math.min(1, dt * 3);
       a.cur += (activeRef.current - a.cur) * Math.min(1, dt * 5);
+      // eased so starting and ending a session is a fade, not a snap
+      fRef.current += ((focusRef.current ? 1 : 0) - fRef.current) * Math.min(1, dt * 2.5);
 
       // morph eases toward target; snap the last sliver so the box is a clean
       // rect (no residual wave wiggle in the corners)
@@ -125,14 +139,30 @@ export function MorphLine({
       d = d.trim();
 
       const restC = restRef.current;
+      // The LINE keeps the pending signal untouched: rest, tinted toward green
+      // by energy. Focus must not change this, or the two become one signal.
       const stroke = e.cur > 0.02 ? mixColor(restC, GREEN, Math.min(1, e.cur)) : restC;
+      // The HALO carries focus: it blends to the focus hue, brightens and
+      // breathes, so a running session reads at a glance without the wave
+      // stopping being a wave.
+      // Mixed from the REST colour, not from `stroke` — `mixColor` takes HEX and
+      // `stroke` is already an `rgb()` string once energy tints it, which
+      // produced `rgb(NaN,…)` and a halo that silently stopped painting. Mixing
+      // from rest is also the correct separation: the halo says "focus" without
+      // the pending green leaking into it.
+      const fc = fRef.current;
+      const glowStroke = fc > 0.01 ? mixColor(restC, focusColorRef.current, fc) : stroke;
+      const glowOpacity = 0.18 + fc * (0.34 + 0.12 * breathe);
       if (crispRef.current) {
         crispRef.current.setAttribute("d", d);
         crispRef.current.setAttribute("stroke", stroke);
       }
       if (glowRef.current) {
         glowRef.current.setAttribute("d", d);
-        glowRef.current.setAttribute("stroke", stroke);
+        glowRef.current.setAttribute("stroke", glowStroke);
+        glowRef.current.setAttribute("opacity", String(glowOpacity));
+        glowRef.current.style.filter = `blur(${(3 + fc * 5).toFixed(1)}px)`;
+        glowRef.current.setAttribute("stroke-width", String(3 + fc * 4));
       }
       raf = requestAnimationFrame(frame);
     }

@@ -40,15 +40,12 @@ export function AppHeader({
   onOpenTrackables,
   onOpenSettings,
   settingsActive,
-  onHome = false,
 }: {
   onOpenNote: (note: ApiNote) => void;
   onOpenTrackables: () => void;
   /** absent until settings becomes a surface — the rail still owns it until then */
   onOpenSettings?: () => void;
   settingsActive?: boolean;
-  /** the home is showing — the notch's re-attach control needs to know */
-  onHome?: boolean;
 }) {
   const voiceOn = useHomeChromeStore((s) => s.voiceOn);
   const listening = useHomeChromeStore((s) => s.listening);
@@ -92,7 +89,7 @@ export function AppHeader({
           running session. It is centred on the VIEWPORT rather than in the flex
           row so it does not shift when the date's width changes across days. */}
       <div style={{ flex: 1, display: "flex", justifyContent: "center", minWidth: 0 }}>
-        <QuickFind onOpenNote={onOpenNote} onOpenTrackables={onOpenTrackables} onHome={onHome} />
+        <QuickFind onOpenNote={onOpenNote} onOpenTrackables={onOpenTrackables} />
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 18, flex: "none" }}>

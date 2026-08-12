@@ -9,6 +9,7 @@ import {
 import {
   THEME_PALETTES,
   AMBIENT_PALETTES,
+  FOCUS_GLOW,
   FROST_INK_PALETTES,
   FROST_SURFACE_PALETTES,
   useGooniThemeStore,
@@ -69,6 +70,10 @@ function ThemeVarSync() {
       // --gooni-tint) / α)` hairline is visible in BOTH themes (the historical
       // hardcoded rgba(0,0,0,…) vanished on dark). NOT for shadows/scrims.
       "--gooni-tint":      theme === "dark" ? "255 255 255" : "0 0 0",
+      // The focus hue, as a real token rather than a literal — the wave reads it
+      // in JS, but anything else that ever needs "a session is running" should
+      // read the var rather than repeat the hex.
+      "--gooni-focus":     FOCUS_GLOW[theme],
     };
     // Frost-ink palette (audit/eval/memories chrome) → --gooni-fi-<key>.
     for (const [k, v] of Object.entries(FROST_INK_PALETTES[theme])) {
@@ -431,7 +436,6 @@ function AppShell() {
           <AppHeader
             onOpenNote={(n) => useHomeChromeStore.getState().openNote?.(n)}
             onOpenTrackables={() => navigate({ to: "/", search: { trackables: true } })}
-            onHome={isHome}
             onOpenSettings={() =>
               navigate({ to: "/", search: isSettings ? {} : { view: "settings" } })
             }

@@ -9,7 +9,6 @@ import {
 } from "./api";
 import { useFocusSessionStore, type FocusSegment } from "../stores/useFocusSessionStore";
 import { useSessionEndOfferStore } from "../stores/useSessionEndOfferStore";
-import { resetAttachedForNewSession } from "../stores/useSessionAttachStore";
 
 // Focus time — ONE trackable, attribution on the ENTRY.
 //
@@ -289,7 +288,6 @@ export async function switchFocusSession(promiseId: number, title: string): Prom
   // question at the wrong moment, so the offer endFocusSession raised is
   // dropped before the new session starts.
   useSessionEndOfferStore.getState().clear();
-  resetAttachedForNewSession();
   useFocusSessionStore.getState().start(promiseId, title);
 }
 

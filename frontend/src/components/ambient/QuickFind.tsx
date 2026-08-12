@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Activity, Bell, Brain, CircleCheck, CornerLeftUp, FileText, Pause, Play, Search, X } from "lucide-react";
+import { Activity, Bell, Brain, CircleCheck, FileText, Pause, Play, Search, Square } from "lucide-react";
 import { elapsedMs, useFocusSessionStore } from "../../stores/useFocusSessionStore";
-import { useSessionAttachStore } from "../../stores/useSessionAttachStore";
 import { endFocusSession } from "../../services/focusTime";
 import { MarkKeptOffer } from "../focus/MarkKeptOffer";
 import type { LucideIcon } from "lucide-react";
@@ -146,14 +145,11 @@ export function QuickFind({
   hidden,
   onOpenNote,
   onOpenTrackables,
-  onHome = false,
 }: {
   hidden?: boolean;
   onOpenNote: (note: ApiNote) => void;
   /** trackable hit → open the log matrix, which is home-local state */
   onOpenTrackables: () => void;
-  /** the home is the surface showing — decides whether re-attach has a slot here */
-  onHome?: boolean;
 }) {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -381,8 +377,6 @@ export function QuickFind({
   // The re-attach control now lives in an element that is always present, so
   // the dead end cannot exist by construction.
   const session = useFocusSessionStore((s) => s.session);
-  const attached = useSessionAttachStore((s) => s.attached);
-  const setAttached = useSessionAttachStore((s) => s.setAttached);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const endingRef = useRef(false);
 
@@ -403,24 +397,6 @@ export function QuickFind({
     if (!searching) return;
     inputRef.current?.focus();
   }, [searching]);
-
-  // Re-attach puts the session back in the wave's slot. Off the home there is
-  // no slot to return to, so it also takes you there — the band's old rule,
-  // kept because it is the one that makes the control mean something.
-  function reattach() {
-    setAttached(true);
-    if (!onHome) {
-      navigate({
-        to: "/",
-        search: { note: undefined, conv: undefined, audit: undefined, segment: undefined, view: undefined, trackables: undefined, calendar: undefined },
-      });
-    }
-  }
-
-  // Shown unless the session is ALREADY in the slot in front of you. Attached
-  // but on another surface still shows it, because clicking is what takes you
-  // back to the slot.
-  const canReattach = !attached || !onHome;
 
   async function endSession() {
     if (endingRef.current) return;
@@ -525,13 +501,10 @@ export function QuickFind({
               >
                 {sessionRunning ? <Pause size={12} fill="currentColor" strokeWidth={0} /> : <Play size={12} fill="currentColor" strokeWidth={0} />}
               </NotchButton>
-              {canReattach && (
-                <NotchButton label="Put the session back in the wave" onClick={reattach}>
-                  <CornerLeftUp size={12} strokeWidth={2} />
-                </NotchButton>
-              )}
-              <NotchButton label="End the session" onClick={() => void endSession()}>
-                <X size={12} strokeWidth={2} />
+              {/* A SQUARE, not an ✕ — an ✕ reads as dismiss, and this stops a
+                  session and writes its entry. */}
+              <NotchButton label="Stop the session" onClick={() => void endSession()}>
+                <Square size={10} fill="currentColor" strokeWidth={0} />
               </NotchButton>
             </span>
           </>

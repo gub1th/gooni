@@ -10,8 +10,6 @@ import { StickyLayer, type StickyHandle } from "./StickyLayer";
 import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
 import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { LogSheet } from "./LogSheet";
-import { SessionInWave } from "./SessionInWave";
-import { useSessionAttachStore } from "../../stores/useSessionAttachStore";
 import { MarkKeptOffer } from "../focus/MarkKeptOffer";
 import { ink } from "./ambientInk";
 import { emptyRetained, mergeTodayRows, retainTicked } from "./todayRows";
@@ -185,7 +183,6 @@ export function AmbientHome({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickyRef = useRef<StickyHandle>(null);
   const focusedRef = useRef(false);
-  const sessionInSlotRef = useRef(false);
   const boxModeRef = useRef(false);
   const hideTimer = useRef<number | null>(null);
   const enterTimer = useRef<number | null>(null);
@@ -200,11 +197,8 @@ export function AmbientHome({
 
   const session = useFocusSessionStore((s) => s.session);
   const hasSession = session != null;
-  const attached = useSessionAttachStore((s) => s.attached);
-  const setAttached = useSessionAttachStore((s) => s.setAttached);
   // ATTACHED means the session is holding the wave's slot. Detached, it lives
   // in the band and the wave comes back — the session runs either way.
-  const sessionInSlot = hasSession && attached;
   const accruing = isAccruingFocus(session);
   const [nowTick, setNowTick] = useState(() => Date.now());
   // The per-second cadence belongs to the ONE state that moves a number on this
@@ -227,7 +221,6 @@ export function AmbientHome({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  sessionInSlotRef.current = sessionInSlot;
   boxModeRef.current = boxMode;
 
   const boxW = Math.min(WAVE_WIDTH + 40, vp.w * 0.9);
@@ -543,14 +536,6 @@ export function AmbientHome({
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement;
       const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
-      // Esc is the keyboard way out of the slot — it detaches rather than
-      // stopping, because wanting your wave back is not wanting to end the
-      // session. It only fires when the session is actually in the slot and
-      // the box is closed, so it never steals Esc from the capture box.
-      if (e.key === "Escape" && sessionInSlotRef.current && !typing && !boxModeRef.current) {
-        setAttached(false);
-        return;
-      }
       if (e.key === "/" && !typing) {
         e.preventDefault();
         if (voiceModeRef.current && !armedRef.current) disableVoice();
@@ -578,12 +563,6 @@ export function AmbientHome({
   }
 
   function onHeroEnter() {
-    // While the session holds this slot, hover does NOT summon the box. The
-    // wave was the only cue that hovering here would do anything, and the
-    // session replaced it — so hovering became an ambush that swept the
-    // session away with nothing having advertised it. `/` still works, and it
-    // visibly displaces the session so the box has an origin.
-    if (sessionInSlotRef.current) return;
     clearHideTimer();
     clearEnterTimer();
     enterTimer.current = window.setTimeout(() => {
@@ -802,22 +781,17 @@ export function AmbientHome({
         boxMode={boxMode}
         rect={rect}
         thinking={thinking}
-        dimmed={trackablesOpen || (sessionInSlot && !boxMode)}
+        dimmed={trackablesOpen}
         waveWidth={waveW}
+        // THE WAVE STAYS A WAVE (pass 9). It used to be REPLACED by the running
+        // session, which meant the notch, the task row and the wave were three
+        // timers showing the same number. Now it only glows the focus hue, and
+        // that glow is the entire focus indication in this slot.
+        focus={hasSession}
         energyRef={energyRef}
         activeRef={activeRef}
       />
 
-      {sessionInSlot && !covered && (
-        <SessionInWave
-          cx={rect.cx}
-          cy={rect.cy}
-          hidden={boxMode}
-          energyRef={energyRef}
-          onStop={() => void stopSession()}
-          onDetach={() => setAttached(false)}
-        />
-      )}
       <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={covered || logSheet} />
 
       <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
