@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { ChatLogView } from "../components/ChatLogView";
 import { EvalView } from "../components/eval/EvalView";
@@ -143,10 +144,18 @@ function LogPage() {
   // Sidebar + PasswordGate live in __root.tsx's AppShell so they
   // persist across route changes. This route just renders the right-column
   // content into AppShell's <Outlet />.
+  // The home is ALWAYS mounted. A non-home view is a panel that slides in over
+  // it (see SurfacePanel), so the home has to still be there to slide over —
+  // swapping it out is what made every surface read as a page stamped on top
+  // of nothing. It is inert while covered: `covered` stands its chrome down.
   return (
     <>
-      {view === "home" ? (
-        <AmbientHome
+      {createPortal(
+        <div
+          aria-hidden={view !== "home"}
+          style={view === "home" ? undefined : { pointerEvents: "none" }}
+        >
+          <AmbientHome
           trackablesOpen={!!search.trackables}
           calendarOpen={!!search.calendar}
           onOpenCalendar={() =>
@@ -161,8 +170,18 @@ function LogPage() {
           onCloseTrackables={() =>
             navigate({ search: { ...search, trackables: undefined }, replace: true })
           }
-        />
-      ) : view === "log" ? (
+            covered={view !== "home"}
+          />
+        </div>,
+        // PORTALED to the body on purpose. The home and the non-home views both
+        // arrive through the same <Outlet />, so left in place the home would be
+        // a CHILD of the slide-in panel — painting its void over the panel's own
+        // content, which is exactly what it did. The home is app-level furniture
+        // that the panel slides over, not something inside it.
+        document.body,
+      )}
+
+      {view === "home" ? null : view === "log" ? (
         <ChatLogView />
       ) : view === "eval" ? (
         <EvalView

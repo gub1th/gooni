@@ -150,6 +150,7 @@ export function AmbientHome({
   onOpenTrackables,
   calendarOpen = false,
   onCloseCalendar,
+  covered: coveredBySurface = false,
 }: {
   /** the log matrix, opened from the rail (URL-driven) or the streak row */
   trackablesOpen?: boolean;
@@ -159,6 +160,8 @@ export function AmbientHome({
   calendarOpen?: boolean;
   onOpenCalendar?: () => void;
   onCloseCalendar?: () => void;
+  /** a surface panel is sliding over the home — stand every affordance down */
+  covered?: boolean;
 } = {}) {
   const energyRef = useRef(0);
   const activeRef = useRef(0);
@@ -761,7 +764,7 @@ export function AmbientHome({
   const needsWake = voiceMode && !armed; // show the tap-to-wake veil
 
   // Any full-screen surface owns the void; the stage stands down under it.
-  const covered = trackablesOpen || calendarOpen || !!peekNote || needsWake;
+  const covered = coveredBySurface || trackablesOpen || calendarOpen || !!peekNote || needsWake;
   // The stage yields to the capture box the moment it opens. It used to wait
   // for the box to GROW past its resting bounds, which read as the box and the
   // line briefly sharing the screen.

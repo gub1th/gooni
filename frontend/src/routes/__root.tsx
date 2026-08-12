@@ -26,7 +26,7 @@ import { useFocusCamControl } from "../components/focus/useFocusCamControl";
 import { FocusSessionBar, SESSION_BAR_H } from "../components/focus/FocusSessionBar";
 import { useFocusSessionStore } from "../stores/useFocusSessionStore";
 import { useSessionAttachStore } from "../stores/useSessionAttachStore";
-import { sheetFrame } from "../ui";
+import { SurfacePanel } from "../components/shell/SurfacePanel";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -365,25 +365,11 @@ function AppShell() {
           paddingTop: hasSession && !isImmersive && (!isHome || !attached) ? SESSION_BAR_H : 0,
         }}
       >
-        <div
-          style={
-            isSheet
-              ? {
-                  flex: 1, display: "flex", minWidth: 0, minHeight: 0,
-                  margin: sheetFrame.margin,
-                  borderRadius: sheetFrame.borderRadius,
-                  border: sheetFrame.border,
-                  boxShadow: sheetFrame.boxShadow,
-                  overflow: "hidden",
-                  // Transparent so the black canvas (not a theme-white) shows
-                  // at the rounded corners — each route paints its own bg
-                  // (dark audit/memories, light notes). White here bled through
-                  // the corners on the dark surfaces.
-                  background: "transparent",
-                }
-              : { flex: 1, display: "flex", minWidth: 0, minHeight: 0 }
-          }
-        >
+        {/* Non-home surfaces SLIDE IN as one panel over a home that stays
+            put; the home renders plainly underneath. `sheetFrame` is retired
+            as the page treatment — it framed every surface as a floating
+            window, which is what made them read as pasted on. */}
+        <SurfaceHost isSheet={isSheet} onDismiss={gotoBlank}>
         {isNotes && sidebarOpen && (
           <Sidebar
             isNotes={isNotes}
@@ -433,7 +419,7 @@ function AppShell() {
         >
           <Outlet />
         </div>
-        </div>
+        </SurfaceHost>
         {/* The band is for surfaces with no wave to take over — and for the
             home too once the session is DETACHED from the slot. Attached, the
             band would be the same session said twice. */}
@@ -445,6 +431,31 @@ function AppShell() {
         {!isImmersive && !isHome && <TopRightControls />}
       </div>
     </PasswordGate>
+  );
+}
+
+/**
+ * One host, two modes. On the home the surface IS the page, so it lays out
+ * plainly; everywhere else it is a panel sliding in over that home. Keeping
+ * both in one place is what makes the rail and the corner behave identically
+ * on every surface — the thing that used to differ per route.
+ */
+function SurfaceHost({
+  isSheet,
+  onDismiss,
+  children,
+}: {
+  isSheet: boolean;
+  onDismiss: () => void;
+  children: React.ReactNode;
+}) {
+  if (!isSheet) {
+    return <div style={{ flex: 1, display: "flex", minWidth: 0, minHeight: 0 }}>{children}</div>;
+  }
+  return (
+    <SurfacePanel open onDismiss={onDismiss}>
+      {children}
+    </SurfacePanel>
   );
 }
 
