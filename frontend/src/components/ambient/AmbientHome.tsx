@@ -7,9 +7,8 @@ import { LimboCards } from "./LimboCards";
 import { LogDots } from "./LogDots";
 import { NotePeek } from "./NotePeek";
 import { StickyLayer, type StickyHandle } from "./StickyLayer";
-import { QuickFind } from "./QuickFind";
 import { TodayList, type SessionRow, type TodayRow } from "./TodayList";
-import { HomeCorner, HomeDate } from "./HomeCorners";
+import { useHomeChromeStore } from "../../stores/useHomeChromeStore";
 import { LogSheet } from "./LogSheet";
 import { SessionInWave } from "./SessionInWave";
 import { useSessionAttachStore } from "../../stores/useSessionAttachStore";
@@ -146,13 +145,11 @@ function todayWindowISO(): { startISO: string; endISO: string } {
 export function AmbientHome({
   trackablesOpen = false,
   onCloseTrackables,
-  onOpenTrackables,
   covered: coveredBySurface = false,
 }: {
   /** the log matrix, opened from the rail (URL-driven) or the streak row */
   trackablesOpen?: boolean;
   onCloseTrackables?: () => void;
-  onOpenTrackables?: () => void;
   /** a surface panel is sliding over the home — stand every affordance down */
   covered?: boolean;
 } = {}) {
@@ -525,6 +522,24 @@ export function AmbientHome({
     inputRef.current?.blur();
   }, []);
 
+  // Publish the two HOME functions the sticky header renders buttons for, plus
+  // the state those buttons display. The header is mounted in AppShell and this
+  // component is portaled to the body, so there is no shared provider — and the
+  // mic's recogniser reads live refs that cannot move out of here. See
+  // stores/useHomeChromeStore.ts for why the seam is a store.
+  const publishChrome = useHomeChromeStore((s) => s.publish);
+  useEffect(() => {
+    publishChrome({
+      voiceOn: voiceMode,
+      listening,
+      hasEventToday: events.length > 0,
+      logOpen: logSheet,
+      toggleVoice: toggleVoiceMode,
+      toggleLog: () => setLogSheet((o) => !o),
+      openNote,
+    });
+  }, [publishChrome, voiceMode, listening, events.length, logSheet, toggleVoiceMode, openNote]);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement;
@@ -808,16 +823,6 @@ export function AmbientHome({
 
       <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
 
-      {!covered && <HomeDate />}
-      {!covered && (
-        <HomeCorner
-          voiceOn={voiceMode}
-          listening={listening}
-          onToggleVoice={toggleVoiceMode}
-          onOpenLog={() => setLogSheet((o) => !o)}
-          hasEventToday={events.length > 0}
-        />
-      )}
 
       {/* hero zone = the wave's bounding rectangle. Box the wave morphs into +
           the hover target. Focusing it PAUSES the mic (so voice doesn't hear you
@@ -911,12 +916,6 @@ export function AmbientHome({
           />
         </div>
       )}
-
-      <QuickFind
-        hidden={covered || logSheet}
-        onOpenNote={openNote}
-        onOpenTrackables={() => onOpenTrackables?.()}
-      />
 
       {/* ── the stage: line · TODAY · streaks, each pinned to its own % ─────── */}
       <div

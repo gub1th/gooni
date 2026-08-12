@@ -1,47 +1,29 @@
 import { useState } from "react";
 import { Moon, Sun } from "lucide-react";
-import { FONT, frostInk, z } from "../../ui";
+import { frostInk } from "../../ui";
 import { useGooniThemeStore } from "../../stores/useGooniThemeStore";
 import { ink } from "../ambient/ambientInk";
 
-// THE top-right corner, owned by the shell and shared by every surface.
+// The glyph vocabulary for the sticky header (`AppHeader`).
 //
-// It was written twice — once on the home (bare glyphs on the void, anchored
-// 20/26) and once for the panel surfaces (34px frosted rounded buttons,
-// anchored 14/14). Same slot, same job, two looks and two positions, so the
-// chrome visibly jumped and changed material the moment you opened a surface.
-// That is half of the "chrome behaves differently depending which surface you
-// are on" complaint, and it is why these primitives now live in one file.
+// These used to be the two top-right CORNER clusters — one on the home, one on
+// the panel surfaces — written twice with different anchors and materials, which
+// pass 7 collapsed into one shared set of primitives. Pass 8 finished the job by
+// deleting the floating corner outright: everything it held now sits in the
+// header row, so what survives here is the button and the theme toggle, not the
+// positioning.
 //
-// The home's treatment is the one that survived: bare glyph on the void, dim
-// at rest, brightening on hover. A frosted pill for a control that sits at an
-// edge is exactly the chrome-earns-a-surface-only-when-summoned rule inverted —
-// and it read as a second material floating over the panel behind it.
+// `CORNER_ANCHOR` and `CORNER_RESERVE` went with it. The reserve existed because
+// a fixed cluster floated ABOVE each surface and collided with whatever that
+// surface drew in its own top-right (the note editor's Publish button, the
+// ambient overlay's summon button). A header that occupies its own row and is
+// cleared by the shell's padding cannot collide with anything, so both call
+// sites went back to their natural insets.
 //
-// The home adds two glyphs of its own (mic, log) INSIDE this same cluster.
-// Those are home functions, not chrome, so they don't travel; the frame they
-// sit in does.
-
-// How much of the top-right a surface must leave alone, published by AppShell as
-// `--gooni-corner-w`. The cluster is `position: fixed` and floats ABOVE the
-// panel, so a surface that puts its own controls up there stacks them underneath
-// it — which is what the note editor's Publish button did, sitting directly on
-// top of `focused today`. Kept in this file with the anchor so the reserve and
-// the thing being reserved for can only be changed together. Generous on
-// purpose: `focused today` is as wide as its longest reading.
-export const CORNER_RESERVE = 180;
-
-/** Anchor every corner cluster identically — under the session band, same inset. */
-export const CORNER_ANCHOR: React.CSSProperties = {
-  position: "fixed",
-  top: "calc(var(--gooni-bar-h, 0px) + 20px)",
-  right: 26,
-  zIndex: z.overlay + 3,
-  display: "flex",
-  alignItems: "center",
-  gap: 20,
-  fontFamily: FONT,
-};
+// The treatment is the home's, which is the one that survived pass 7: a bare
+// glyph on the void, dim at rest, brightening on hover. A frosted pill for a
+// control at an edge inverts the rule that chrome only earns a surface when it
+// is summoned.
 
 export function CornerButton({
   label,

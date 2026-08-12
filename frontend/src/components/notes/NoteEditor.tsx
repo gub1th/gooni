@@ -1462,9 +1462,7 @@ export function NoteEditor({ variant = "full", onSubmitted, onEmptyChange, onFoc
           reads as two matched islands. */}
       {activeNote && activeNoteId && activeNoteId > 0 && (
         <div style={{
-          // Clears the shell's corner cluster, which floats above this panel —
-          // without it Publish sits straight on top of `focused today`.
-          position: "absolute", top: 14, right: "calc(14px + var(--gooni-corner-w, 180px))", zIndex: 20,
+          position: "absolute", top: 14, right: 14, zIndex: 20,
           display: "flex", alignItems: "center", gap: 6,
         }}>
           <EditedChip

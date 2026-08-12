@@ -90,12 +90,7 @@ export function AmbientOverlay() {
         onFocus={summon}
         onClick={() => (open ? retreat() : summon())}
         style={{
-          // Clears the shell's corner cluster, which floats above every surface
-          // — it used to sit directly on top of the light/dark toggle.
-          position: "fixed",
-          top: "calc(var(--gooni-bar-h, 0px) + 22px)",
-          right: "calc(16px + var(--gooni-corner-w, 180px))",
-          zIndex: z.overlay + 1,
+          position: "fixed", top: 14, right: 16, zIndex: z.overlay + 1,
           width: 26, height: 26, borderRadius: 999, padding: 0,
           border: `1px solid ${frostInk.hairline}`,
           background: frostInk.card,

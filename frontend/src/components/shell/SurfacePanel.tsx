@@ -59,9 +59,10 @@ export function SurfacePanel({
       data-open={open ? "" : undefined}
       style={{
         position: "fixed",
-        // clears the rail lane and the session band, both of which stay put
+        // clears the rail lane, the session band and the sticky header — all
+        // three stay put while the panel slides under them
         left: 68,
-        top: "var(--gooni-bar-h, 0px)",
+        top: "calc(var(--gooni-bar-h, 0px) + var(--gooni-header-h, 0px))",
         right: 0,
         bottom: 0,
         zIndex: z.overlay - 20,

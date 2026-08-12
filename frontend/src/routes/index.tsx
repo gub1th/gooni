@@ -169,9 +169,6 @@ function LogPage() {
         >
           <AmbientHome
           trackablesOpen={!!search.trackables}
-          onOpenTrackables={() =>
-            navigate({ search: { ...search, trackables: true }, replace: true })
-          }
           onCloseTrackables={() =>
             navigate({ search: { ...search, trackables: undefined }, replace: true })
           }

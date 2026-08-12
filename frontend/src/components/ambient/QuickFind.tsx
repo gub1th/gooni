@@ -329,8 +329,11 @@ export function QuickFind({
     <div
       data-quickfind
       style={{
-        position: "fixed", top: "calc(var(--gooni-bar-h, 0px) + 14px)", left: "50%", transform: "translateX(-50%)",
-        width: BAR_W, zIndex: z.overlay - 10, fontFamily: FONT,
+        // NOT self-positioned any more — it is a child of the sticky header, so
+        // the header owns where it sits. It used to be a fixed element floating
+        // at the top-centre, one of four separate fixed things along the top.
+        position: "relative",
+        width: BAR_W, maxWidth: "100%", fontFamily: FONT,
         opacity: hidden ? 0 : 1,
         pointerEvents: hidden ? "none" : "auto",
         transition: "opacity 220ms ease",
@@ -373,7 +376,11 @@ export function QuickFind({
       {showPanel && (
         <div
           style={{
+            // ABSOLUTE, so a long result list cannot grow the header row it now
+            // lives in. In its own fixed wrapper this was plain flow.
+            position: "absolute", top: "100%", left: 0, right: 0,
             marginTop: 6, padding: 6, borderRadius: 20,
+            zIndex: z.overlay - 10,
             display: "flex", flexDirection: "column", gap: 2,
             ...frost.panel,
             border: `1px solid ${frostInk.border}`,

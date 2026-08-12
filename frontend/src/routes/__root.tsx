@@ -21,13 +21,13 @@ import { Sidebar } from "../components/notes/Sidebar";
 // ONE app nav: the persistent IconRail pill. The hover-summoned SummonedNav it
 // replaced was deleted with the widget system it hosted.
 import { IconRail } from "../components/ambient/IconRail";
-import { TopRightControls } from "../components/ambient/TopRightControls";
 import { useFocusCamControl } from "../components/focus/useFocusCamControl";
 import { FocusSessionBar, SESSION_BAR_H } from "../components/focus/FocusSessionBar";
 import { useFocusSessionStore } from "../stores/useFocusSessionStore";
 import { useSessionAttachStore } from "../stores/useSessionAttachStore";
 import { SurfacePanel } from "../components/shell/SurfacePanel";
-import { CORNER_RESERVE } from "../components/shell/CornerChrome";
+import { AppHeader, HEADER_H } from "../components/shell/AppHeader";
+import { useHomeChromeStore } from "../stores/useHomeChromeStore";
 import { CollapsedSidebar } from "../components/notes/CollapsedSidebar";
 import { useWindowWidth } from "../hooks/useWindowWidth";
 import { useNotesContentStore } from "../stores/useNotesContentStore";
@@ -195,11 +195,13 @@ function AppShell() {
     document.documentElement.style.setProperty("--gooni-bar-h", shows ? `${SESSION_BAR_H}px` : "0px");
   }, [hasSession, isHome, attached]);
 
-  // Same reasoning on the other axis: the corner cluster floats above the panel,
-  // so a surface that draws its own top-right controls has to leave room or they
-  // stack underneath it. Published once rather than hardcoded per surface.
+  // The header's height, for the same reason the band publishes its own: the
+  // things that must clear it are `position: fixed` with their own offsets and
+  // never see the shell's padding. It replaces `--gooni-corner-w`, which existed
+  // only because a floating corner cluster could collide with a surface's own
+  // top-right controls — a header in its own row cannot.
   useEffect(() => {
-    document.documentElement.style.setProperty("--gooni-corner-w", `${CORNER_RESERVE}px`);
+    document.documentElement.style.setProperty("--gooni-header-h", `${HEADER_H}px`);
   }, []);
 
   // Compose / new-chat callbacks. The store actions live in Zustand
@@ -379,7 +381,9 @@ function AppShell() {
           // underlaps it. STATIC (not hover-driven) → no reflow jank. Immersive
           // surfaces hide the rail, so no lane.
           paddingLeft: isImmersive ? 0 : 68,
-          paddingTop: hasSession && !isImmersive && (!isHome || !attached) ? SESSION_BAR_H : 0,
+          paddingTop:
+            (isImmersive ? 0 : HEADER_H) +
+            (hasSession && !isImmersive && (!isHome || !attached) ? SESSION_BAR_H : 0),
         }}
       >
         {/* Non-home surfaces SLIDE IN as one panel over a home that stays
@@ -442,10 +446,16 @@ function AppShell() {
             band would be the same session said twice. */}
         {!isImmersive && (!isHome || !attached) && <FocusSessionBar />}
         {!isImmersive && <IconRail />}
-        {/* Corner theme toggle. NOT on the home: `/` owns its own top-right
-            cluster (focused-today · mic · log) and a second thing up there
-            would crowd it. Appearance in Settings is the home's route to it. */}
-        {!isImmersive && !isHome && <TopRightControls />}
+        {/* ONE sticky header, on every non-immersive surface — date, quickfind,
+            mic, log, theme. It replaces four separately-positioned fixed
+            elements plus the two rival corner clusters. Settings joins it when
+            it becomes a surface; the rail still owns it. */}
+        {!isImmersive && (
+          <AppHeader
+            onOpenNote={(n) => useHomeChromeStore.getState().openNote?.(n)}
+            onOpenTrackables={() => navigate({ to: "/", search: { trackables: true } })}
+          />
+        )}
       </div>
     </PasswordGate>
   );
