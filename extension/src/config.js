@@ -18,7 +18,28 @@ export const CONFIG_KEYS = {
   lastFlush: "gooni_last_flush",
 };
 
-export const DEFAULT_BASE_URL = "http://localhost:8000";
+/**
+ * The DEPLOYED backend, not localhost.
+ *
+ * This used to be `http://localhost:8000`, which is a backend that only exists
+ * while `dev.sh` is running. A fresh install therefore buffered against nothing
+ * for most of every day, retaining correctly and reporting nothing — the exact
+ * silent-failure shape the delivery rules in buffer.js exist to prevent, sitting
+ * one layer above them in the config.
+ *
+ * Defaulting to the deployed URL rather than refusing to run unconfigured is the
+ * deliberate choice, and it is the same one `enabled` already makes two fields
+ * down: an installed sensor that senses nothing is worse than no sensor.
+ * Refuse-until-configured fails in the other direction — a fresh install would
+ * record nothing until someone visits the options page, which is the same lost
+ * data with a better excuse. Localhost is still one edit away for dev work.
+ *
+ * A wrong-but-reachable default cannot silently eat data either: everything is
+ * buffered until the server confirms it, so pointing this at the right place
+ * later delivers the backlog. What was missing was any way to NOTICE, which is
+ * what health.js and the toolbar badge now provide.
+ */
+export const DEFAULT_BASE_URL = "https://gooni-bot.fly.dev";
 
 /** Seconds of no input before chrome.idle calls it idle. 60 is the API floor. */
 export const IDLE_DETECTION_SEC = 60;

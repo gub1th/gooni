@@ -5,6 +5,10 @@ Auto-maintained by `.github/workflows/version-bump.yml`. Each PR merge to
 (minor or patch); a `!:` suffix or `BREAKING CHANGE` in the body bumps
 major. Other prefixes (`chore:`, `docs:`, `refactor:`, etc.) skip the bump.
 
+## 0.229.0 — 2026-08-12 (minor)
+
+- feat(desktop): electron shell — menu bar, capture hotkey, focus-cam supervisor (#469)
+
 ## 0.228.2 — 2026-08-10 (patch)
 
 - fix: repair seven rot-audit findings, four of them wrong in prod (#467)
