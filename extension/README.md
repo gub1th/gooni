@@ -286,6 +286,12 @@ Durations are recomputed server-side from the timestamps — a client-supplied
 Rows land in the `browser_intervals` table and nowhere else. Read them back
 with `GET /browser/intervals?day=YYYY-MM-DD&limit=100`.
 
+Gooni derives its `opened <host>` log rows from those same rows at READ time —
+no extension change, no new storage, and no attribution (a row says what
+happened and when, nothing more). The rule lives server-side in
+`app/services/device_activity.py`; see the *Device rows* section of the
+repo-root `CLAUDE.md`.
+
 ## The popup (what you actually looked at)
 
 Clicking the toolbar icon opens `popup.html`: a headline total for the selected

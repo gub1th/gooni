@@ -39,7 +39,7 @@ What it buys is:
 cd desktop
 npm install
 npm start           # runs against https://gooni-bot.fly.dev
-npm test            # node:test, zero deps — 56 tests, no Electron needed
+npm test            # node:test, zero deps — 92 tests, no Electron needed
 
 npm start -- --capture   # open the capture overlay instead of the window
 ```
@@ -63,7 +63,8 @@ then **Reload config**.
     "args": [],
     "cwd": "",
     "env": {}
-  }
+  },
+  "appSensor": { /* … */ }                  // see The frontmost-app sensor
 }
 ```
 
