@@ -352,7 +352,23 @@ const FLY_DASHBOARD = "https://fly.io/apps/gooni-bot";
 const VERCEL_DASHBOARD = "https://vercel.com/daniels-projects-eac22a07/gooni";
 const VERCEL_URL_KEY = "gooni_vercel_url";
 const env = import.meta.env as Record<string, string | undefined>;
-const VERCEL_DEFAULT_URL = "https://gooni.vercel.app";
+/**
+ * The custom domain, not the Vercel project URL (`gooni-sigma.vercel.app`,
+ * which also serves Gooni) — the project URL changes if the project is renamed
+ * or moved. This used to read `gooni.vercel.app`, which belongs to an unrelated
+ * third party, so the panel linked somewhere that was never Gooni.
+ */
+const VERCEL_DEFAULT_URL = "https://gubith.com";
+
+/**
+ * Hosts that ARE this app, for the "am I looking at myself?" check below.
+ *
+ * The check used to be `.vercel.app` or `gooni.app` — which meant that served
+ * from the real custom domain the app failed to recognise its own address and
+ * fell through to the hardcoded default. A deploy panel naming the wrong host
+ * is worse than one naming none.
+ */
+const SELF_HOSTS = ["gubith.com", "gooni.app"];
 
 function withProtocol(host: string | undefined | null): string {
   if (!host) return "";
@@ -363,8 +379,14 @@ function detectVercelUrl(): string {
   const fromEnv = withProtocol(env.VITE_VERCEL_PROJECT_PRODUCTION_URL || env.VITE_VERCEL_URL);
   if (fromEnv) return fromEnv;
   if (typeof window !== "undefined") {
-    const host = window.location.hostname;
-    if (host.endsWith(".vercel.app") || host === "gooni.app") return window.location.origin.replace(/\/$/, "");
+    const host = window.location.hostname.toLowerCase();
+    // `www.` and any other subdomain of a self host count: gubith.com 307s to
+    // www.gubith.com, so the app is normally SERVED from the subdomain and an
+    // exact-match check would never fire where it matters most.
+    const isSelf =
+      host.endsWith(".vercel.app") ||
+      SELF_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+    if (isSelf) return window.location.origin.replace(/\/$/, "");
   }
   return localStorage.getItem(VERCEL_URL_KEY) || VERCEL_DEFAULT_URL;
 }

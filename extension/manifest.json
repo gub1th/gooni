@@ -18,7 +18,8 @@
   "host_permissions": [
     "http://localhost:8000/*",
     "https://gooni-bot.fly.dev/*",
-    "https://gooni.vercel.app/*"
+    "https://gubith.com/*",
+    "https://www.gubith.com/*"
   ],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "options_page": "options.html"

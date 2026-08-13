@@ -52,8 +52,18 @@ export const DEFAULT_BASE_URL = "https://gooni-bot.fly.dev";
  * Kept byte-identical to `desktop/src/config.js`'s `appUrl` on purpose — the
  * shell and the new tab frame the same surface, and two defaults that drift
  * would mean two answers to "where does Gooni live".
+ *
+ * The CUSTOM DOMAIN, not the Vercel project URL (`gooni-sigma.vercel.app`,
+ * which also serves Gooni): a project URL is a deployment detail that changes
+ * when the project is renamed or moved, and this default is baked into an
+ * unpacked extension that nobody re-installs.
+ *
+ * It is emphatically not `gooni.vercel.app` — that name belongs to an unrelated
+ * third party's project, and every place in this repo that used to name it was
+ * framing a stranger's site. Prod's own CORS allowlist is the tell: it accepts
+ * gubith.com, www.gubith.com and gooni-sigma.vercel.app, and refuses that one.
  */
-export const DEFAULT_APP_URL = "https://gooni.vercel.app";
+export const DEFAULT_APP_URL = "https://gubith.com";
 
 /** Seconds of no input before chrome.idle calls it idle. 60 is the API floor. */
 export const IDLE_DETECTION_SEC = 60;

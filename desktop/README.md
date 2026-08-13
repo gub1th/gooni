@@ -51,7 +51,7 @@ then **Reload config**.
 ```jsonc
 {
   "apiUrl": "https://gooni-bot.fly.dev",   // THE decision. See above.
-  "appUrl": "https://gooni.vercel.app",    // the frontend the window loads
+  "appUrl": "https://gubith.com",          // the frontend the window loads
   "hotkey": "CommandOrControl+Shift+Space",
   "launchAtLogin": true,
   "hideCaptureOnBlur": true,

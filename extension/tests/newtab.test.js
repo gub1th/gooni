@@ -21,7 +21,13 @@ const headers = (map) => ({
 });
 
 test("the app URL default matches the desktop shell's appUrl — one answer to where Gooni lives", () => {
-  assert.equal(DEFAULT_APP_URL, "https://gooni.vercel.app");
+  // The CUSTOM DOMAIN, not the Vercel project URL that also serves Gooni: a
+  // project URL changes when the project is renamed or moved, and this default
+  // is baked into an unpacked extension nobody re-installs.
+  assert.equal(DEFAULT_APP_URL, "https://gubith.com");
+  // And specifically NOT gooni.vercel.app, which is an unrelated third party's
+  // project — the default this repo carried in four places until 2026-08-13.
+  assert.doesNotMatch(DEFAULT_APP_URL, /gooni\.vercel\.app/);
 });
 
 test("the app URL is a SEPARATE key from the backend base URL — different hosts", () => {
@@ -55,7 +61,7 @@ test("normalizeAppUrl rejects what an iframe cannot load, rather than repairing 
   assert.equal(normalizeAppUrl(""), null);
   assert.equal(normalizeAppUrl(null), null);
   assert.equal(normalizeAppUrl("  http://localhost:5173/  "), "http://localhost:5173");
-  assert.equal(normalizeAppUrl("https://gooni.vercel.app/?view=log"), "https://gooni.vercel.app/?view=log");
+  assert.equal(normalizeAppUrl("https://gubith.com/?view=log"), "https://gubith.com/?view=log");
 });
 
 test("an unusable saved URL falls back for framing but is still reported verbatim", () => {
