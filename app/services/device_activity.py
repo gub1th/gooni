@@ -59,6 +59,8 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
+from .interval_ingest import MAX_INTERVAL_SEC
+
 # ── the two tuning knobs ─────────────────────────────────────────────────────
 #
 # How long you must be AWAY from an app or a host before returning to it counts
@@ -88,6 +90,32 @@ OPEN_GAP = timedelta(minutes=5)
 # all afternoon is one line that says so, which is the true shape of that
 # afternoon; six lines would be a worse description of the same fact.
 CLUSTER_GAP = timedelta(minutes=60)
+
+# ── the reach-back: how far before a window the evidence for it lives ────────
+#
+# How far back a read has to LOOK to judge the first open inside its window. An
+# interval that ENDED this recently is the evidence that makes the window's
+# first interval a continuation rather than an opening.
+GAP_REACH = OPEN_GAP + CLUSTER_GAP
+
+# …and how far back it has to QUERY to be certain of finding that evidence.
+#
+# Relevance as a predecessor is decided by when an interval ENDED, not when it
+# started, and a session longer than GAP_REACH is ordinary rather than exotic:
+# idle only closes an interval after ~a minute of no input, so Cursor frontmost
+# 21:30 → 00:20 is one row, and it is the true predecessor of a 00:22 focus. A
+# lower bound on `started_at` alone therefore misses it and manufactures exactly
+# the fake midnight "opened" the reach-back exists to prevent.
+#
+# The query is an INDEXED PREFILTER PLUS AN EXACT PREDICATE, not a swap to
+# `ended_at`: only `started_at` is indexed on both tables, so filtering on
+# `ended_at` alone would turn every derivation into a full table scan. The
+# indexed lower bound is widened by the longest interval the ingest can possibly
+# have accepted, and `ended_at >= start - GAP_REACH` does the real cutting.
+# That widening is provably sufficient ONLY because `interval_ingest` REJECTS
+# anything longer than MAX_INTERVAL_SEC — moving that cap moves this, which is
+# why it is imported rather than restated as a literal here.
+SCAN_REACH = GAP_REACH + timedelta(seconds=MAX_INTERVAL_SEC)
 
 # The most interval rows ONE sensor's derivation will pull into Python for ONE
 # read. Not a tuning knob for what the log says — a bound on what it costs to
@@ -255,24 +283,31 @@ def _sensor_rows(db: Session, model, name_col, *, start, end, layer):
     The query REACHES BACK before `start` so the gap rule can judge the first
     interval in the window. That grace is what stops a continuation from being
     reported as an opening at the window's leading edge, and under day-binding
-    the edge it protects is local midnight: an interval at 23:58 is exactly the
-    evidence that makes one at 00:01 a continuation, and without it every
-    midnight manufactures an "opened" for whatever was on screen.
+    the edge it protects is local midnight: an interval that ENDED at 23:58 is
+    exactly the evidence that makes one at 00:01 a continuation, and without it
+    every midnight manufactures an "opened" for whatever was on screen. The
+    predecessor is selected by `ended_at` (see SCAN_REACH for why the indexed
+    `started_at` bound is the prefilter and not the cut).
 
     Returns `(rows, floor)`. `floor` is the earliest moment this scan can speak
     for — normally `start`, but when `MAX_SCAN_INTERVALS` bites it rises to the
-    oldest surviving interval plus the same grace. Truncation takes the NEWEST
-    rows, and the caller derives only the days that begin at or after the floor
+    oldest surviving interval plus SCAN_REACH: a row cut away could itself have
+    run up to MAX_INTERVAL_SEC past its own start, so nothing within that span of
+    the truncation boundary can be judged. Truncation takes the NEWEST rows, and
+    the caller derives only the days that begin at or after the floor
     (`fully_derived_days`), because a predecessor that was cut away is not
     evidence of absence: counting it as one would put a fake "opened" at the
     truncation boundary, and reporting the day the floor cuts INTO would re-anchor
     its runs and undercount them. What survives is whole days of whole runs with
     whole counts — the cap can cost a row, never a wrong number.
     """
-    lookback = OPEN_GAP + CLUSTER_GAP
     newest_first = (
         db.query(model.id, name_col, model.started_at, model.ended_at)
-        .filter(model.started_at >= start - lookback, model.started_at < end)
+        .filter(
+            model.started_at >= start - SCAN_REACH,
+            model.started_at < end,
+            model.ended_at >= start - GAP_REACH,
+        )
         .order_by(model.started_at.desc())
         .limit(MAX_SCAN_INTERVALS + 1)
         .all()
@@ -281,7 +316,7 @@ def _sensor_rows(db: Session, model, name_col, *, start, end, layer):
     rows = list(reversed(newest_first[:MAX_SCAN_INTERVALS]))
     floor = start
     if capped and rows:
-        floor = max(start, rows[0][2] + lookback)
+        floor = max(start, rows[0][2] + SCAN_REACH)
         print(
             f"[device_activity] {layer} scan hit MAX_SCAN_INTERVALS "
             f"({MAX_SCAN_INTERVALS}); opens before {floor.isoformat()} are not "
@@ -295,9 +330,11 @@ def fully_derived_days(days, bounds, floor):
 
     `days` is the ascending day list, `bounds` maps each to its `[start, end)`
     in naive UTC. A day qualifies only when its own start is at or after the
-    floor — the floor already includes the `OPEN_GAP + CLUSTER_GAP` reach-back a
-    day needs to judge its first open, so a day at or above it was scanned
-    completely, evidence and all.
+    floor — the floor already carries the full `SCAN_REACH` a day needs to judge
+    its first open, so a day at or above it was scanned completely, evidence and
+    all. It is keyed to that reach rather than to the gap constants directly,
+    because the evidence a day needs includes a predecessor that may have
+    STARTED up to MAX_INTERVAL_SEC earlier.
 
     The boundary is a function rather than a comparison buried in the loop
     because it is the answer to "which is the oldest fully-derived day", and a

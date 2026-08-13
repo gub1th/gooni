@@ -567,10 +567,11 @@ def main():
 
     # …and the days that DO come back are byte-identical to an uncapped read of
     # them. The cap costs whole days at the old edge; it never changes what a
-    # surviving day says. Dense morning on the older day, one evening run on it,
-    # and the newer day's own runs: truncating to the newest few rows floors the
-    # scan inside the older day's evening, so the older day goes and the newer
-    # one — whose own reach-back evidence survived — stays exactly as it was.
+    # surviving day says. Dense morning on the older day, one afternoon run on
+    # it, and the newer day's own runs: truncating to the newest few rows floors
+    # the scan inside the older day's afternoon — far enough back that the newer
+    # day still has its full SCAN_REACH of evidence — so the older day goes and
+    # the newer one stays exactly as it was.
     cd1 = _day_of(T0) - timedelta(days=20)
     cd0 = cd1 - timedelta(days=1)
     app_activity_service.ingest_batch(
@@ -580,7 +581,7 @@ def main():
             for i in range(12)
         ]
         + [
-            _app("cd0-eve", app="Logic", start=_at(cd0, 22, 0), seconds=600),
+            _app("cd0-eve", app="Logic", start=_at(cd0, 16, 0), seconds=600),
             _app("cd1-a", app="Photos", start=_at(cd1, 9, 0), seconds=600),
             _app("cd1-b", app="Photos", start=_at(cd1, 9, 30), seconds=600),
         ],
@@ -610,6 +611,63 @@ def main():
         == row_key([it for it in full if it["day"] == cd1.isoformat()]),
         f"and the fully-scanned day is byte-identical to the uncapped read — "
         f"same key, same anchor, same count: {row_key(part)}",
+    )
+
+    # ── a predecessor LONGER than the reach-back ─────────────────────────────
+    #
+    # The reach-back exists to stop a fake "opened" at the window's leading edge,
+    # and relevance as a predecessor is decided by when an interval ENDED. A
+    # session longer than OPEN_GAP + CLUSTER_GAP is ordinary (idle only closes
+    # one after a minute of no input), so a lower bound on `started_at` alone
+    # loses exactly the row that proves a continuation.
+    print("\nleading-edge predecessor")
+
+    e0 = _day_of(T0) - timedelta(days=26)
+    e1 = e0 + timedelta(days=1)
+    long_min = int((device_activity.OPEN_GAP + device_activity.CLUSTER_GAP).total_seconds() // 60)
+    app_activity_service.ingest_batch(
+        db,
+        [
+            # One continuous 170-minute stretch across midnight — nearly three
+            # times the reach-back, and well inside what ingest accepts.
+            _app("e-cursor-long", app="Cursor", start=_at(e0, 21, 30), seconds=170 * 60),
+            _app("e-slack", app="Slack", start=_at(e1, 0, 20), seconds=120),
+            # …and back to Cursor two minutes after that stretch ended.
+            _app("e-cursor-back", app="Cursor", start=_at(e1, 0, 22), seconds=600),
+            # A name genuinely left alone across the same boundary.
+            _app("e-mail-before", app="Mail", start=_at(e0, 20, 0), seconds=600),
+            _app("e-mail-after", app="Mail", start=_at(e1, 0, 30), seconds=600),
+        ],
+    )
+    check(
+        170 > long_min,
+        f"the straddling interval is materially longer than the reach-back "
+        f"({long_min}m), which is the whole point of the case",
+    )
+
+    edge = device_activity.device_opens(db, start_day=e1, end_day=e1)
+    edge_texts = {it["text"] for it in edge}
+    check(
+        "opened cursor" not in edge_texts,
+        f"an interval that STARTED before the reach-back but ENDED inside it is "
+        f"still the predecessor — a return two minutes later is a continuation, "
+        f"not a fabricated midnight 'opened': {sorted(edge_texts)}",
+    )
+    check(
+        "opened mail" in edge_texts,
+        f"…and a real gap across the same boundary IS still an open, so the fix "
+        f"can't pass by suppressing boundary rows wholesale: {sorted(edge_texts)}",
+    )
+
+    edge_wide = [
+        it
+        for it in device_activity.device_opens(db, start_day=e0, end_day=e1)
+        if it["day"] == e1.isoformat()
+    ]
+    check(
+        row_key(edge) == row_key(edge_wide),
+        f"and the day reads identically whether or not the window itself "
+        f"contains the predecessor: {row_key(edge)} vs {row_key(edge_wide)}",
     )
 
     db.close()
