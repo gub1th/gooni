@@ -1,0 +1,338 @@
+"""Device-row net — the `opened X` gap rule, both sensor layers, one vocabulary.
+
+No LLM, no HTTP: exercises device_activity + app_activity_service +
+activity_service against a temp SQLite db (same harness as
+test_browser_intervals).
+
+The load-bearing assertions:
+
+  1. THE GAP RULE. A row saying "opened" must mean opened, not touched. Rapid
+     switching between two names emits ONE row per name, not one per switch;
+     a return after OPEN_GAP emits a second. If this regresses, an ordinary day
+     puts hundreds of rows in the log and the log stops being read.
+  2. THE LOOKBACK BOUNDARY. The feed derives opens over a sliding window, so an
+     interval just before the window has to be visible to the rule but must not
+     produce a row — otherwise every page of the log manufactures a fake
+     "opened" at its own edge.
+  3. ONE FEED SHAPE. Browser and app rows come out identical apart from their
+     layer, and identical in kind to what the frontend renders for the phone's
+     Shortcuts rows.
+  4. NO TRACKABLES. Ingesting attention must not mint a Trackable — that is the
+     whole reason these rows do not go through POST /events.
+
+Usage:
+  source venv/bin/activate
+  python tests/test_device_activity.py
+"""
+
+import os
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+
+_tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+os.environ["DATABASE_URL"] = f"sqlite:///{_tmp.name}"
+
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(os.path.join(_ROOT, ".env"))
+
+from app.db.database import SessionLocal, engine  # noqa: E402
+from app.db.models import AppInterval, Base, BrowserInterval, Trackable  # noqa: E402
+from app.services import activity_service, app_activity_service, device_activity  # noqa: E402
+
+T0 = datetime(2026, 8, 12, 17, 0, 0)
+
+_failures = []
+
+
+def check(cond, msg):
+    if cond:
+        print(f"  ✓ {msg}")
+    else:
+        print(f"  ✗ {msg}")
+        _failures.append(msg)
+
+
+def _rows(*specs):
+    """(name, start_offset_min, duration_min) → the tuple shape the rule eats."""
+    return [
+        (i, name, T0 + timedelta(minutes=off), T0 + timedelta(minutes=off + dur))
+        for i, (name, off, dur) in enumerate(specs)
+    ]
+
+
+def _app(client_id, *, app="cursor", start=T0, seconds=120, **extra):
+    return {
+        "client_id": client_id,
+        "app": app,
+        "started_at": start.isoformat(),
+        "ended_at": (start + timedelta(seconds=seconds)).isoformat(),
+        **extra,
+    }
+
+
+def main():
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+
+    # ── the gap rule, pure ───────────────────────────────────────────────────
+    print("\ngap rule")
+
+    # Rapid alt-tabbing: cursor → slack → cursor → slack, seconds apart. Two
+    # names touched four times; two rows, because nothing was ever left for
+    # long enough to have been re-opened.
+    opens = device_activity.opens_from_intervals(
+        _rows(("cursor", 0, 2), ("slack", 2, 1), ("cursor", 3, 2), ("slack", 5, 1))
+    )
+    check(
+        [(n, s) for _, n, s in opens] == [
+            ("cursor", T0),
+            ("slack", T0 + timedelta(minutes=2)),
+        ],
+        f"rapid switching emits one row per name, not per switch: {[n for _, n, _ in opens]}",
+    )
+
+    # Away for longer than the gap = a real return.
+    opens = device_activity.opens_from_intervals(
+        _rows(("cursor", 0, 2), ("slack", 2, 30), ("cursor", 40, 5))
+    )
+    check(
+        [n for _, n, _ in opens] == ["cursor", "slack", "cursor"],
+        f"a return after the gap opens again: {[n for _, n, _ in opens]}",
+    )
+
+    # Exactly at the boundary counts as an open (>= gap), one second under
+    # does not — the constant means what it says.
+    gap_min = int(device_activity.OPEN_GAP.total_seconds() // 60)
+    at_gap = device_activity.opens_from_intervals(
+        _rows(("cursor", 0, 1), ("cursor", 1 + gap_min, 1))
+    )
+    under_gap = device_activity.opens_from_intervals(
+        _rows(("cursor", 0, 1), ("cursor", gap_min, 1))
+    )
+    check(len(at_gap) == 2, f"a gap of exactly OPEN_GAP is an open: {at_gap}")
+    check(len(under_gap) == 1, f"a gap under OPEN_GAP is not: {under_gap}")
+
+    # `since` filters AFTER the rule ran: the pre-window interval is evidence,
+    # not a row. Without this every page of the log grows a fake open at its
+    # own leading edge.
+    windowed = device_activity.opens_from_intervals(
+        _rows(("cursor", 0, 2), ("cursor", 3, 2)), since=T0 + timedelta(minutes=1)
+    )
+    check(
+        windowed == [],
+        f"a continuation inside the window is not an open just because the "
+        f"evidence sits outside it: {windowed}",
+    )
+
+    # A double-reported (or clock-jumped) row must not drag the marker back.
+    backwards = device_activity.opens_from_intervals(
+        _rows(("cursor", 0, 30), ("cursor", 5, 1), ("cursor", 32, 1))
+    )
+    check(
+        len(backwards) == 1,
+        f"an overlapping row can't rewind the last-seen marker: {backwards}",
+    )
+
+    # ── clustering: how many ROWS a day of opens is worth ────────────────────
+    print("\nclustering")
+
+    # The gap rule alone is not enough, and this is the measured reason: with a
+    # dozen names in rotation you genuinely leave each of them for five minutes
+    # several times an hour. A simulated workday of 860 intervals across 14
+    # hosts and 8 apps yields 408 opens — and 39 rows once they are chained into
+    # runs. Here that fact is pinned in miniature.
+    hourly = [
+        (i, "github.com", T0 + timedelta(minutes=8 * i), T0 + timedelta(minutes=8 * i + 1))
+        for i in range(8)  # dipped into every 8 minutes for an hour
+    ]
+    opens = device_activity.opens_from_intervals(hourly)
+    check(len(opens) == 8, f"every one of those IS an open by the gap rule: {len(opens)}")
+    runs = device_activity.cluster_opens([(k, n, a) for k, n, a in opens])
+    check(
+        len(runs) == 1 and runs[0]["count"] == 8,
+        f"…and they are ONE row saying so, not eight: {runs}",
+    )
+    check(
+        runs[0]["at"] == opens[0][2] and runs[0]["key"] == opens[0][0],
+        "the run is timed (and keyed) at its FIRST open — a row saying 'opened' "
+        "belongs at the moment it was opened, and anchoring at the latest put "
+        "every all-day name at the end of the day",
+    )
+
+    # A name left alone for longer than CLUSTER_GAP starts a new row: coming
+    # back after lunch is a different thing from dipping in all morning.
+    gap_min = int(device_activity.CLUSTER_GAP.total_seconds() // 60)
+    split = device_activity.cluster_opens(
+        [("a", "slack", T0), ("b", "slack", T0 + timedelta(minutes=gap_min + 1))]
+    )
+    check(len(split) == 2, f"a run ends when the name is genuinely dropped: {split}")
+
+    # ── phrasing: one vocabulary across three sensors ────────────────────────
+    print("\nvocabulary")
+    check(
+        device_activity.event_phrase("instagram open") == "opened instagram",
+        "a Shortcuts ping reads as a sentence",
+    )
+    check(device_activity.host_label("www.leetcode.com") == "leetcode", "www + tld stripped")
+    check(
+        device_activity.host_label("mail.google.com") == "mail.google",
+        "a subdomain survives",
+    )
+    check(
+        device_activity.host_label("gooni-bot.fly.dev") == "gooni-bot.fly",
+        "a hyphenated host survives",
+    )
+    check(
+        device_activity.host_label("internal.corp.lan") == "internal.corp.lan",
+        "an unknown tld is left entirely alone rather than guessed at",
+    )
+
+    # ── ingest + derivation over real rows ───────────────────────────────────
+    print("\nend to end")
+
+    r = app_activity_service.ingest_batch(
+        db,
+        [
+            _app("a1", app="Cursor", start=T0, seconds=120),
+            _app("a2", app="Slack", start=T0 + timedelta(minutes=2), seconds=60),
+            _app("a3", app="Cursor", start=T0 + timedelta(minutes=3), seconds=120),
+            # after a real break
+            _app("a4", app="Slack", start=T0 + timedelta(minutes=40), seconds=60),
+        ],
+    )
+    check(r["accepted"] == 4, f"four app intervals stored: {r}")
+
+    replay = app_activity_service.ingest_batch(db, [_app("a1")])
+    check(
+        replay["accepted"] == 0 and replay["duplicates"] == 1,
+        f"a redelivered app interval dedups: {replay}",
+    )
+
+    bad = app_activity_service.ingest_batch(
+        db,
+        [
+            _app("bad-app", app="   "),
+            _app("bad-span", start=T0, seconds=0),
+            _app("bad-long", start=T0, seconds=7 * 3600),
+            _app("ok-after-bad", app="Finder", start=T0 + timedelta(minutes=1)),
+        ],
+    )
+    check(
+        sorted(x["reason"] for x in bad["rejected"])
+        == ["missing_app", "too_long", "too_short"],
+        f"malformed rows are rejected with reasons, one row each: {bad['rejected']}",
+    )
+    check(bad["accepted"] == 1, f"a good row rides alongside rejected ones: {bad}")
+
+    db.add_all(
+        [
+            BrowserInterval(
+                client_id="b1", host="leetcode.com", started_at=T0,
+                ended_at=T0 + timedelta(minutes=5), duration_sec=300,
+                source="chrome_extension",
+            ),
+            BrowserInterval(
+                client_id="b2", host="mail.google.com",
+                started_at=T0 + timedelta(minutes=5),
+                ended_at=T0 + timedelta(minutes=6), duration_sec=60,
+                source="chrome_extension",
+            ),
+            # straight back to leetcode — a switch, not an opening
+            BrowserInterval(
+                client_id="b3", host="leetcode.com",
+                started_at=T0 + timedelta(minutes=6),
+                ended_at=T0 + timedelta(minutes=20), duration_sec=840,
+                source="chrome_extension",
+            ),
+        ]
+    )
+    db.commit()
+
+    window = device_activity.device_opens(
+        db, start=T0 - timedelta(hours=1), end=T0 + timedelta(hours=2)
+    )
+    texts = [it["text"] for it in window]
+    check(
+        sorted(texts) == sorted(
+            # slack was opened TWICE (40 minutes apart), and that is one row
+            # carrying a count — the same shape the timeline gives a run of
+            # Shortcuts pings. See the clustering block below for why.
+            ["opened cursor", "opened slack ×2", "opened finder",
+             "opened leetcode", "opened mail.google"]
+        ),
+        f"both layers derive opens in one vocabulary: {texts}",
+    )
+    check(
+        [it["at"] for it in window] == sorted((it["at"] for it in window), reverse=True),
+        "device opens come back newest-first",
+    )
+    check(
+        {it["layer"] for it in window} == {"app", "browser"},
+        f"rows name their layer: {[it['layer'] for it in window]}",
+    )
+
+    # ── no Trackable was harmed ──────────────────────────────────────────────
+    print("\nno trackables")
+    names = {t.name for t in db.query(Trackable).all()}
+    check(
+        names == set(),
+        f"attention ingest mints NO Trackable — that is the whole reason these "
+        f"rows do not go through POST /events: {names}",
+    )
+    check(
+        db.query(AppInterval).count() == 5,
+        "app intervals live in their own table",
+    )
+
+    # ── the feed ─────────────────────────────────────────────────────────────
+    print("\nactivity feed")
+    feed = activity_service.build_activity_feed(
+        db, before=(T0 + timedelta(hours=2)).replace(tzinfo=timezone.utc), limit=40
+    )
+    device_rows = [it for it in feed if it["kind"] == "device"]
+    check(len(device_rows) == 5, f"device rows reach the feed: {len(device_rows)}")
+    check(
+        all(it["text"].startswith("opened ") for it in device_rows),
+        f"every device row is a sentence: {[it['text'] for it in device_rows]}",
+    )
+    check(
+        len({it["key"] for it in device_rows}) == len(device_rows),
+        "keys are unique (the log sheet dedups on them across pages)",
+    )
+    check(
+        all(it["at"].tzinfo is not None for it in device_rows),
+        "timestamps are tz-aware, like every other source in the merge",
+    )
+
+    excluded = activity_service.build_activity_feed(
+        db,
+        before=(T0 + timedelta(hours=2)).replace(tzinfo=timezone.utc),
+        limit=40,
+        exclude_kinds={"device"},
+    )
+    check(
+        not [it for it in excluded if it["kind"] == "device"],
+        "exclude_kinds={'device'} drops them (the pre-reply state block's read)",
+    )
+
+    db.close()
+    print()
+    if _failures:
+        print(f"FAIL — {len(_failures)} check(s) failed")
+        return 1
+    print("PASS — device rows (gap rule, both layers, feed shape, no trackables)")
+    return 0
+
+
+if __name__ == "__main__":
+    code = main()
+    try:
+        os.unlink(_tmp.name)
+    except OSError:
+        pass
+    sys.exit(code)

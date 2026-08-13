@@ -14,9 +14,15 @@ state block. As of the life-log Phase 3 rewrite this is a thin RENDERER over
 always-on activity rail — so the surface Daniel sees and the context Gooni
 reads before it answers are one stream (PRD note #397).
 
-Two deliberate narrowings vs the rail:
+Three deliberate narrowings vs the rail:
   - messages are excluded — they're already in Gooni's conversation history,
     so re-pushing them here would just be scrollback;
+  - `opened X` device rows are excluded at source — a handful of app/host
+    openings is a readable LOG for a human, but it is not state Gooni has to
+    reconcile a reply against, and letting them into a ~8-line budget would
+    push out the promise and trackable events that are. Excluding at the
+    source (rather than returning None from _render) keeps them from eating
+    the fetch budget too;
   - the food trackables (calories/protein) are dropped — the food-ledger
     section below surfaces them in richer form, and letting them in would
     double-surface AND eat the ~8-line budget, crowding out promise events;
@@ -116,7 +122,7 @@ def build_recent_activity_lines(
         from . import activity_service
 
         feed = activity_service.build_activity_feed(
-            db, before=None, limit=_FETCH_LIMIT, exclude_kinds={"message"}
+            db, before=None, limit=_FETCH_LIMIT, exclude_kinds={"message", "device"}
         )
     except Exception as e:  # pragma: no cover — defensive; state block must not die
         print(f"[recent_activity] activity feed failed: {e}")

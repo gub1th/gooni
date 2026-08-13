@@ -689,7 +689,12 @@ export async function fetchGlowingMessages(opts: { limit?: number } = {}): Promi
 // item `at`. Powers the always-on ambient activity rail.
 export interface ActivityItem {
   key: string;
-  kind: "message" | "note" | "promise" | "trackable";
+  // `device` = an "opened X" row DERIVED from an attention sensor (browser tab
+  // focus or frontmost macOS app). It has no Trackable behind it, which is the
+  // point — see app/services/device_activity.py. The phone's iOS Shortcuts
+  // pings still arrive as `trackable` with source `shortcuts`; the log renders
+  // all of them identically, since they are one vocabulary.
+  kind: "message" | "note" | "promise" | "trackable" | "device";
   at: string; // ISO (UTC)
   text: string;
   // message
@@ -703,7 +708,8 @@ export interface ActivityItem {
   verb?: string;
   // promise
   state?: string;
-  // trackable
+  // trackable / device (for device this is the raw host or app the row derived
+  // from — `text` is the rendered sentence)
   name?: string;
 }
 

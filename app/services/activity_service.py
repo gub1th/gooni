@@ -1,10 +1,14 @@
 """Unified activity stream — the "true log" substrate (PRD note #397).
 
 Merges the heterogeneous signals of Daniel's day into ONE recency-ordered
-feed: chat messages (every channel), notes, promise lifecycle events, and
-trackable measurements (which is how Whoop / LeetCode land too, since they
-store as trackable entries). Query-time union — NO new table — each source
-is over-fetched then k-way merged by timestamp in Python.
+feed: chat messages (every channel), notes, promise lifecycle events,
+trackable measurements (which is how Whoop / LeetCode and the iOS Shortcuts
+device pings land too, since they store as trackable entries), and the
+`opened X` rows DERIVED from the two attention sensors — browser tab focus and
+frontmost macOS app (see device_activity, which owns the shared 5-minute gap
+rule and the shared phrasing so all three device layers read as one
+vocabulary). Query-time union — NO new table — each source is over-fetched then
+k-way merged by timestamp in Python.
 
 The point of the union is that ONE stream powers two consumers: the always-on
 activity rail on the ambient home AND the pre-reply context feed (the
@@ -24,48 +28,12 @@ can't take down the whole feed (same posture as recent_activity.py).
 
 from __future__ import annotations
 
-import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 from ..common import stale_day_label as _stale_day_label
-
-
-# Shortcuts device pings store as a raw "{subject} {event}" trackable name
-# ("instagram open", "office arrive") with a meaningless per-ping +1 count.
-# Rephrase the common verbs into a sentence and drop the count. MIRROR of
-# frontend FocusStream.formatEventLabel — keep the two in sync. Unknown shapes
-# pass through untouched (the device vocab is open-ended server-side).
-# Match BASE and past forms: iOS Shortcuts sends the imperative ("instagram
-# open", "office arrive"), not past tense. `opened?`/`locked?` only reach
-# "opene"/"locke"+d, so the bare verbs slipped through untouched — hence
-# `(?:ed)?` on the consonant-final stems.
-_EVENT_VERB = re.compile(
-    r"^(.*?)\s+(arrived?|left|leave|open(?:ed)?|closed?|unlock(?:ed)?|lock(?:ed)?|charging|plugged)$",
-    re.IGNORECASE,
-)
-
-
-def _event_phrase(name: str) -> str:
-    s = (name or "").strip()
-    m = _EVENT_VERB.match(s)
-    if not m:
-        return s
-    subject, verb = m.group(1).strip(), m.group(2).lower()
-    if verb.startswith("arriv"):
-        return f"arrived at {subject}"
-    if verb in ("left", "leave"):
-        return f"left {subject}"
-    if verb.startswith("open"):
-        return f"opened {subject}"
-    if verb.startswith("close"):
-        return f"closed {subject}"
-    if verb.startswith("unlock"):
-        return f"unlocked {subject}"
-    if verb.startswith("lock"):
-        return f"locked {subject}"
-    return s
+from .device_activity import event_phrase as _event_phrase
 
 
 def _utc(dt: datetime | None) -> datetime | None:
@@ -321,6 +289,47 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
     return out
 
 
+# How far back one page of the feed looks for device opens.
+#
+# The other sources page by `ORDER BY … DESC LIMIT n`, which the gap rule can't
+# use: deciding whether an interval is an OPEN needs the interval BEFORE it, and
+# "before" is the direction a DESC-limited query throws away. So this source is
+# WINDOWED instead — it derives every open in `[before - LOOKBACK, before)` and
+# lets the merge take the newest. The window slides with the cursor, so paging
+# further back keeps finding device rows; the cost of a page is bounded by a
+# span of time rather than by however many tab switches happened to fit in it.
+_DEVICE_LOOKBACK = timedelta(days=3)
+
+
+def _device(db: Session, before_naive, limit: int) -> list[dict]:
+    from . import device_activity
+
+    end = before_naive or datetime.utcnow()
+    try:
+        opens = device_activity.device_opens(
+            db, start=end - _DEVICE_LOOKBACK, end=end
+        )
+    except Exception as e:  # pragma: no cover — defensive
+        print(f"[activity] device opens failed: {e}")
+        return []
+
+    return [
+        {
+            "key": it["key"],
+            "kind": "device",
+            "at": _utc(it["at"]),
+            "text": it["text"],
+            "name": it["name"],
+            # The LAYER, not a Trackable source — these rows have no Trackable.
+            # The frontend renders every device layer identically (the Shortcuts
+            # rows included), so this exists to make a row's origin greppable,
+            # not to make it look different.
+            "source": it["layer"],
+        }
+        for it in opens[:limit]
+    ]
+
+
 def build_activity_feed(
     db: Session,
     before: datetime | None = None,
@@ -351,6 +360,8 @@ def build_activity_feed(
         items += _promises(db, before_naive, limit)
     if "trackable" not in skip:
         items += _trackables(db, before_naive, limit)
+    if "device" not in skip:
+        items += _device(db, before_naive, limit)
 
     # drop anything undated, then k-way merge by the normalized UTC ts
     items = [it for it in items if it.get("at") is not None]

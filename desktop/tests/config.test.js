@@ -85,3 +85,25 @@ test("defaults() hands back a fresh object each time", () => {
   a.sidecar.args.push("mutated");
   assert.deepEqual(defaults().sidecar.args, []);
 });
+
+test("the app sensor is ON by default, like the browser extension", () => {
+  // An installed sensor that senses nothing until someone visits a settings
+  // screen is the same lost data with a better excuse — the reasoning the
+  // extension's `enabled` and `DEFAULT_BASE_URL` already encode.
+  const cfg = mergeConfig({}, {});
+  assert.equal(cfg.appSensor.enabled, true);
+  assert.equal(typeof cfg.appSensor.pollMs, "number");
+});
+
+test("app-sensor knobs are clamped, not trusted", () => {
+  // Hand-edited numbers, each with a range where it stops being the thing it is
+  // named: a 100ms poll spawns osascript ten times a second forever, and a
+  // 2-second idle threshold closes an interval every time you stop to read.
+  const fast = mergeConfig({ appSensor: { pollMs: 5, idleSec: 2, flushMs: 1 } }, {});
+  assert.equal(fast.appSensor.pollMs, 1000);
+  assert.equal(fast.appSensor.idleSec, 30);
+  assert.equal(fast.appSensor.flushMs, 5000);
+
+  const junk = mergeConfig({ appSensor: { pollMs: "soon" } }, {});
+  assert.equal(junk.appSensor.pollMs, 4000, "unusable falls back to the default");
+});

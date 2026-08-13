@@ -100,8 +100,26 @@ export function eventTime(ev: CalendarEvent): string {
   return `${h12}:${String(m).padStart(2, "0")}${suffix}`;
 }
 
-function labelFor(it: ActivityItem): { label: string; color: string } {
+/**
+ * The amber `device` row — one treatment for all three sensors.
+ *
+ * The phone's iOS Shortcuts pings arrive as a `trackable` with source
+ * `shortcuts` (each ping is a real +1 on a real Trackable). The browser and the
+ * desktop shell arrive as `device`, DERIVED from their raw attention intervals
+ * with no Trackable anywhere — high-cardinality names would have minted
+ * hundreds of them and flooded the log matrix, so the feed is where the two
+ * meet, not the Trackable table.
+ *
+ * That is a storage distinction, not a reading one: "opened hinge" from the
+ * phone and "opened cursor" from the Mac are the same fact about the day and
+ * must look the same. One constant, used by both arms, so they cannot drift.
+ */
+const DEVICE_ROW = { label: "device", color: "rgba(230,190,140,0.6)" };
+
+export function labelFor(it: ActivityItem): { label: string; color: string } {
   switch (it.kind) {
+    case "device":
+      return DEVICE_ROW;
     case "message":
       return it.role === "assistant"
         ? { label: "gooni", color: frostInk.accent }
@@ -119,8 +137,7 @@ function labelFor(it: ActivityItem): { label: string; color: string } {
       const src = it.source ?? "manual";
       if (src === "whoop" || src === "leetcode" || src === "derived")
         return { label: "synced", color: "rgba(150,180,255,0.5)" };
-      if (src === "shortcuts")
-        return { label: "device", color: "rgba(230,190,140,0.6)" };
+      if (src === "shortcuts") return DEVICE_ROW;
       return { label: "logged", color: frostInk.accent };
     }
     default:

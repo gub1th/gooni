@@ -940,10 +940,31 @@ def stream(
         for b, tp in rows
     ]
 
-    # Shortcuts device events (already tz-aware in value_json.at), clustered.
-    from . import event_service  # local import — avoids a module-load cycle
+    # Device events, all three layers, in ONE vocabulary:
+    #   - iOS Shortcuts pings (already tz-aware in value_json.at), clustered
+    #   - browser hosts and macOS apps, reduced to `opened X` by the shared
+    #     5-minute gap rule (device_activity.OPEN_GAP)
+    # The two interval sensors go through the same window as the thoughts above
+    # (naive-UTC bounds of the local-day range), and emit the same
+    # `{type:'event', label, kind, at, count}` card the Shortcuts pings do —
+    # the timeline renders one row shape and never has to know which sensor a
+    # row came from.
+    from . import device_activity, event_service  # local imports — module-load cycle
 
     items.extend(event_service.list_recent_events(db, start=start_date, end=end_date))
+    items.extend(
+        {
+            "type": "event",
+            # `label` carries the sentence WITHOUT the count — the timeline
+            # renders `×count` itself, so leaving it in `text` would print it
+            # twice ("opened reddit ×8 ×8").
+            "label": f"opened {open_row['label']}",
+            "kind": open_row["layer"],
+            "at": _iso(open_row["at"]),
+            "count": open_row["count"],
+        }
+        for open_row in device_activity.device_opens(db, start=start_utc, end=end_utc)
+    )
 
     items.sort(key=lambda it: _sort_key(it.get("at")), reverse=True)
     return {

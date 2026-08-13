@@ -8,7 +8,7 @@
  */
 import { expect, test } from "vitest";
 import type { CalendarEvent } from "../../services/api";
-import { loggedEvents } from "./LogSheet";
+import { labelFor, loggedEvents } from "./LogSheet";
 import { pickUpNext } from "./upNext";
 
 const NOW = new Date("2026-08-12T18:00:00Z").getTime();
@@ -68,4 +68,47 @@ test("an event crossing its start time moves from the notch to the log", () => {
   const later = NOW + 11 * 60_000;
   expect(pickUpNext(events, later)).toBeNull();
   expect(loggedEvents(events, later).map((e) => e.id)).toEqual(["a"]);
+});
+
+/**
+ * Device rows: three sensors, one row.
+ *
+ * The phone's iOS Shortcuts pings ride in as a `trackable` with source
+ * `shortcuts` (each ping really is a +1 on a real Trackable). The browser and
+ * the Mac ride in as `device`, derived from raw attention intervals with no
+ * Trackable behind them — high-cardinality names would have minted hundreds and
+ * flooded the log matrix. That difference is storage, and the captain's ask was
+ * explicitly that it not be visible: "opened hinge" from the phone and "opened
+ * cursor" from the Mac are the same fact about the day.
+ */
+test("every device layer renders as the same amber `device` row", () => {
+  const phone = labelFor({
+    key: "trackable-1", kind: "trackable", at: "", text: "opened instagram",
+    source: "shortcuts", name: "instagram open",
+  });
+  const browser = labelFor({
+    key: "device-browser-1", kind: "device", at: "", text: "opened leetcode",
+    source: "browser", name: "leetcode.com",
+  });
+  const desktop = labelFor({
+    key: "device-app-1", kind: "device", at: "", text: "opened cursor",
+    source: "app", name: "cursor",
+  });
+
+  expect(phone.label).toBe("device");
+  expect(browser).toEqual(phone);
+  expect(desktop).toEqual(phone);
+});
+
+test("a device row is not mistaken for a logged measurement", () => {
+  // `logged` (accent green) is a real measurement Daniel entered. A device row
+  // is telemetry — same feed, different claim, and the colours have to say so.
+  const logged = labelFor({
+    key: "trackable-2", kind: "trackable", at: "", text: "weight 178",
+    source: "manual", name: "weight",
+  });
+  expect(logged.label).toBe("logged");
+  expect(logged.color).not.toBe(labelFor({
+    key: "device-app-2", kind: "device", at: "", text: "opened slack",
+  }).color);
 });

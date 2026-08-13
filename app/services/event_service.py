@@ -22,13 +22,19 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from ..common import local_now
-from . import trackable_service
+from . import device_activity, trackable_service
 
 SOURCE = "shortcuts"
 
 # Same-trackable pings within this window collapse into ONE stream card — the
-# focus stream's "aggregate hard" rule (one card per run, not per app-switch).
-EVENT_CLUSTER_GAP = timedelta(minutes=60)
+# "aggregate hard" rule (one card per run, not per app-switch).
+#
+# The constant now lives in `device_activity`, which owns the whole device
+# vocabulary, because the browser and desktop sensors group their `opened X`
+# rows by exactly this rule and window. Two copies of the same 60 minutes is two
+# things that can drift; the name is kept as an alias so nothing else has to
+# move.
+EVENT_CLUSTER_GAP = device_activity.CLUSTER_GAP
 
 # Strip anything that isn't a letter/digit/space so subject/event stay clean,
 # human-readable trackable parts. "Instagram" → "instagram", "Gym!" → "gym".
@@ -157,6 +163,11 @@ def list_recent_events(db: Session, *, start, end) -> list[dict]:
             continue
         times.sort()
         kind = t.name.split()[-1] if t.name else ""
+        # Same sentence the log sheet shows ("opened instagram"), not the raw
+        # trackable key ("instagram open"). The timeline now interleaves opens
+        # from the browser and desktop sensors alongside these, and three
+        # sensors printing the same event three ways is three vocabularies.
+        label = device_activity.event_phrase(t.name)
 
         # Cluster the ping times into runs; emit one card per run.
         runs: list[tuple[datetime, int]] = []  # (latest_ping, count)
@@ -173,7 +184,7 @@ def list_recent_events(db: Session, *, start, end) -> list[dict]:
             items.append(
                 {
                     "type": "event",
-                    "label": t.name,
+                    "label": label,
                     "kind": kind,
                     "at": latest.isoformat(),
                     "count": count,

@@ -52,6 +52,28 @@ const DEFAULTS = Object.freeze({
     cwd: "",
     env: {},
   }),
+  /**
+   * The frontmost-app sensor — the OS half of "what did I actually do today".
+   *
+   * ON by default, for the same reason the browser extension's `enabled`
+   * defaults on and its `baseUrl` defaults to the deployed backend: an
+   * installed sensor that senses nothing until someone visits a settings screen
+   * is the same lost data with a better excuse. It records an application NAME
+   * and a duration — not window titles, not keystrokes, not content — and
+   * everything it produces is visible in Gooni's own log.
+   *
+   * `pollMs` is the cadence of the frontmost query (one `osascript` spawn
+   * each; see frontmost.js for that tradeoff). `idleSec` is how long without
+   * input before attention is considered gone — an interval that ends by
+   * walking away is closed BACKDATED by this amount, so a larger value is not
+   * "more forgiving", it is more guesswork.
+   */
+  appSensor: Object.freeze({
+    enabled: true,
+    pollMs: 4000,
+    idleSec: 90,
+    flushMs: 60_000,
+  }),
 });
 
 const ENV_KEYS = Object.freeze({
@@ -68,7 +90,22 @@ function defaults() {
   return {
     ...DEFAULTS,
     sidecar: { ...DEFAULTS.sidecar, args: [], env: {} },
+    appSensor: { ...DEFAULTS.appSensor },
   };
+}
+
+/**
+ * Clamp a numeric knob, falling back to the default on anything unusable.
+ *
+ * Bounded rather than trusted because these are hand-edited and each one has a
+ * range where it stops being the thing it is named: a 100ms poll spawns
+ * `osascript` ten times a second forever, and a 2-second idle threshold closes
+ * an interval every time you stop to read something.
+ */
+function clampNumber(raw, { min, max, fallback }) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
 }
 
 function stripTrailingSlash(url) {
@@ -129,6 +166,24 @@ function mergeConfig(fileConfig = {}, env = {}) {
       cwd: file.sidecar?.cwd ?? base.sidecar.cwd,
       env: asStringMap(file.sidecar?.env),
     },
+    appSensor: {
+      enabled: file.appSensor?.enabled ?? base.appSensor.enabled,
+      pollMs: clampNumber(file.appSensor?.pollMs ?? base.appSensor.pollMs, {
+        min: 1000,
+        max: 60_000,
+        fallback: base.appSensor.pollMs,
+      }),
+      idleSec: clampNumber(file.appSensor?.idleSec ?? base.appSensor.idleSec, {
+        min: 30,
+        max: 3600,
+        fallback: base.appSensor.idleSec,
+      }),
+      flushMs: clampNumber(file.appSensor?.flushMs ?? base.appSensor.flushMs, {
+        min: 5000,
+        max: 30 * 60_000,
+        fallback: base.appSensor.flushMs,
+      }),
+    },
   };
 
   for (const [envKey, cfgKey] of Object.entries(ENV_KEYS)) {
@@ -145,6 +200,7 @@ function mergeConfig(fileConfig = {}, env = {}) {
   merged.launchAtLogin = Boolean(merged.launchAtLogin);
   merged.hideCaptureOnBlur = Boolean(merged.hideCaptureOnBlur);
   merged.sidecar.enabled = Boolean(merged.sidecar.enabled);
+  merged.appSensor.enabled = Boolean(merged.appSensor.enabled);
   merged.sidecar.command = String(merged.sidecar.command || "").trim();
   merged.sidecar.cwd = String(merged.sidecar.cwd || "").trim();
   merged.token = String(merged.token || "").trim();
