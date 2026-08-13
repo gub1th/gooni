@@ -232,6 +232,75 @@ def messages_log(
     return out
 
 
+def _preview_is_pending(raw: str | None) -> bool:
+    """The one pendingness rule, over the RAW `signal_preview` column.
+
+    Flagged with no preview at all counts as pending — the same default the
+    FE's `isGlowing` applies. Dropping those would strand them identically to
+    the bug this read exists to fix, and so does an unparseable blob."""
+    if not raw:
+        return True
+    try:
+        preview = json.loads(raw)
+    except (ValueError, TypeError):
+        return True
+    if not isinstance(preview, dict):
+        return True
+    return preview.get("status", "pending") == "pending"
+
+
+@router.get("/messages/glowing")
+def messages_glowing(limit: int = 50, db: Session = Depends(get_db)):
+    """Every message whose glow is still PENDING — the ambient home's limbo
+    lane read. `{items, total}`, newest first.
+
+    Deliberately NOT a slice of `/messages/log`: the lane used to be fed by
+    filtering the newest 40 log rows client-side, so a pending glow that fell
+    past the tail of recent chatter had no surface left that could reach it —
+    it sat `pending` in the DB forever, never promoted and never dismissed.
+    Pendingness, not recency, is the question, so it is the query.
+
+    `signal_preview` is JSON text, so the LIKE is only a PREFILTER; the
+    authoritative check is `_preview_is_pending`. That parse runs over EVERY
+    candidate rather than over the page, for two reasons: `total` is what the
+    lane's `+N more waiting` line reports, so a number bounded by `limit`
+    would be a capped claim presented as complete; and applying `limit` before
+    the parse could under-fill a page (a prefilter false positive spends a
+    slot) while pending rows sat beyond the cut. Rows and total therefore come
+    from ONE list, under one predicate, and cannot disagree."""
+    from ..db.models import Message
+
+    limit = max(1, min(limit, 300))
+    candidates = (
+        db.query(Message.id, Message.signal_preview)
+        .filter(Message.has_actionable_signal.is_(True))
+        .filter(
+            (Message.signal_preview.is_(None))
+            | (Message.signal_preview.like('%"pending"%'))
+        )
+        .order_by(Message.id.desc())
+        .all()
+    )
+    pending_ids = [mid for mid, raw in candidates if _preview_is_pending(raw)]
+    page_ids = pending_ids[:limit]
+
+    rows = []
+    if page_ids:
+        rows = (
+            db.query(Message, Conversation.source)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .filter(Message.id.in_(page_ids))
+            .order_by(Message.id.desc())
+            .all()
+        )
+    out = []
+    for m, source in rows:
+        d = _serialize_message(m)
+        d["source"] = source
+        out.append(d)
+    return {"items": out, "total": len(pending_ids)}
+
+
 def _serialize_tool_call(t) -> dict:
     duration_ms = None
     if t.started_at and t.finished_at:

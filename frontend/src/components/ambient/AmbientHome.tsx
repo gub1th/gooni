@@ -3,7 +3,7 @@ import { Mic, StickyNote } from "lucide-react";
 import { FONT, frostInk } from "../../ui";
 import { speakText, isVoiceMode, setVoiceMode, stopSpeaking, primeAudio } from "../../services/speech";
 import { MorphLine, type MorphRect } from "./MorphLine";
-import { LimboCards } from "./LimboCards";
+import { LimboCards, MAX_CARDS } from "./LimboCards";
 import { LogDots, hasLoggedToday } from "./LogDots";
 import { dismissFill, isFillDismissed } from "./dailyFill";
 import { NotePeek } from "./NotePeek";
@@ -32,7 +32,7 @@ import {
   dismissMessageGlow,
   fetchCalendarEvents,
   fetchFocusDashboard,
-  fetchMessageLog,
+  fetchGlowingMessages,
   promoteMessage,
   sendConversationMessage,
   updateFocusReminder,
@@ -96,7 +96,7 @@ function isGlowing(m: LogMessage): boolean {
 }
 
 function energyFor(count: number): number {
-  return Math.min(1, 0.14 + count * 0.28);
+  return Math.min(1, 0.14 + Math.min(count, MAX_CARDS) * 0.28);
 }
 
 function mmss(ms: number): string {
@@ -128,6 +128,7 @@ export function AmbientHome({
 
   const [vp, setVp] = useState({ w: 1200, h: 800 });
   const [limbo, setLimbo] = useState<LogMessage[]>([]);
+  const [limboTotal, setLimboTotal] = useState(0);
   const [boxMode, setBoxMode] = useState(false);
   const [logSheet, setLogSheet] = useState(false);
   // The daily fill, offered in TODAY until it is put away for the day. The
@@ -200,9 +201,15 @@ export function AmbientHome({
 
   const reload = useCallback(async () => {
     try {
-      const rows = await fetchMessageLog({ limit: 40 });
-      const glowing = rows.filter(isGlowing);
+      // Pendingness, not recency: this used to scrape the newest 40 log rows
+      // and filter them here, so a pending glow that fell past the tail of a
+      // busy day's chatter vanished from the home for good — never promoted,
+      // never dismissed. The server now answers the actual question; the
+      // client-side `isGlowing` stays as the belt-and-braces check.
+      const { items, total } = await fetchGlowingMessages({ limit: 50 });
+      const glowing = items.filter(isGlowing);
       setLimbo(glowing);
+      setLimboTotal(Math.max(total, glowing.length));
       energyRef.current = energyFor(glowing.length);
     } catch {
       /* ambient surface — never throw at the user */
@@ -627,12 +634,17 @@ export function AmbientHome({
     }
   }
 
+  function dropFromLimbo(id: number) {
+    setLimbo((prev) => prev.filter((x) => x.id !== id));
+    setLimboTotal((t) => Math.max(0, t - 1));
+  }
+
   async function onPromote(m: LogMessage) {
-    setLimbo((prev) => prev.filter((x) => x.id !== m.id));
+    dropFromLimbo(m.id);
     try { await promoteMessage(m.id); } finally { void reload(); void loadCommitments(); }
   }
   async function onDismiss(m: LogMessage) {
-    setLimbo((prev) => prev.filter((x) => x.id !== m.id));
+    dropFromLimbo(m.id);
     try { await dismissMessageGlow(m.id); } finally { void reload(); }
   }
 
@@ -784,7 +796,12 @@ export function AmbientHome({
 
       <StickyLayer ref={stickyRef} vp={vp} center={{ cx: rect.cx, cy: rect.cy, w: boxW }} hidden={covered || logSheet} />
 
-      <LimboCards items={limbo} onPromote={onPromote} onDismiss={onDismiss} />
+      {/* Home furniture, same as the stickies: a pending-commitment card has
+          nothing to do with notes/memories/calendar/the log sheet, and the
+          panel slides in over a home that stays mounted. */}
+      {!covered && !logSheet && (
+        <LimboCards items={limbo} total={limboTotal} onPromote={onPromote} onDismiss={onDismiss} />
+      )}
 
 
       {/* hero zone = the wave's bounding rectangle. Box the wave morphs into +
