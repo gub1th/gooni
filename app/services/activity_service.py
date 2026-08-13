@@ -289,26 +289,74 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
     return out
 
 
-# How far back one page of the feed looks for device opens.
+# The MINIMUM span one page of the feed looks back for device opens.
 #
 # The other sources page by `ORDER BY … DESC LIMIT n`, which the gap rule can't
 # use: deciding whether an interval is an OPEN needs the interval BEFORE it, and
 # "before" is the direction a DESC-limited query throws away. So this source is
-# WINDOWED instead — it derives every open in `[before - LOOKBACK, before)` and
-# lets the merge take the newest. The window slides with the cursor, so paging
-# further back keeps finding device rows; the cost of a page is bounded by a
-# span of time rather than by however many tab switches happened to fit in it.
+# WINDOWED instead — it derives every open in `[start, before)` and lets the
+# merge take the newest. The cost of a page is bounded by a span of time rather
+# than by however many tab switches happened to fit in it.
 _DEVICE_LOOKBACK = timedelta(days=3)
 
+# The absolute floor under that window.
+#
+# A fixed lookback is not enough on its own, because the paging cursor is the
+# merged page's OLDEST item and the other sources can push it back further than
+# the lookback IN ONE STEP. Away from the machine for five days: page 1's window
+# is the last three days and finds nothing, the other sources return fewer than
+# `limit` items and the oldest is a note from eight days ago, so page 2 asks
+# `before = now-8d` and looks at `[now-11d, now-8d)`. Every device row in the
+# skipped `[now-8d, now-3d)` span is then unreachable on any page.
+#
+# So the window FOLLOWS THE STEP: it extends down to the page's own oldest
+# non-device item, and never further, so it can only grow when paging across a
+# quiet stretch — which is the case it exists for. This constant is what stops
+# "follows the step" from meaning "scans back to the beginning of time" when the
+# other sources are empty or the one item they returned is years old. Same
+# spirit as `browser_activity_service.MAX_SUMMARY_DAYS`.
+_DEVICE_MAX_LOOKBACK = timedelta(days=31)
 
-def _device(db: Session, before_naive, limit: int) -> list[dict]:
+
+def _page_reach(items: list[dict], limit: int, before) -> datetime | None:
+    """The naive-UTC timestamp this page's NON-device sources reach back to.
+
+    That is the `limit`-th newest of them (the oldest that can survive the
+    merge), or simply the oldest they returned when they returned fewer than
+    `limit` — in which case the next cursor lands exactly there. `None` when
+    they returned nothing at all: there is no step to follow, and the caller
+    falls back to the absolute floor.
+
+    The `before` guard is applied here as well as after the merge, because a
+    promise's effective ts is recomputed in Python and can land newer than the
+    cursor; counting one of those would make the reach look shallower than the
+    page's real step.
+    """
+    ats = sorted(
+        (
+            it["at"]
+            for it in items
+            if it.get("at") is not None and (before is None or it["at"] < before)
+        ),
+        reverse=True,
+    )
+    if not ats:
+        return None
+    at = ats[limit - 1] if len(ats) >= limit else ats[-1]
+    return at.replace(tzinfo=None)
+
+
+def _device(db: Session, before_naive, limit: int, *, reach=None) -> list[dict]:
     from . import device_activity
 
     end = before_naive or datetime.utcnow()
+    # `reach` is how far this page's other sources actually extend back. None
+    # means nothing bounds the step, so the window opens to the absolute floor
+    # rather than to a lookback that could sit entirely inside the jump.
+    start = end - _DEVICE_MAX_LOOKBACK if reach is None else min(end - _DEVICE_LOOKBACK, reach)
+    start = max(start, end - _DEVICE_MAX_LOOKBACK)
     try:
-        opens = device_activity.device_opens(
-            db, start=end - _DEVICE_LOOKBACK, end=end
-        )
+        opens = device_activity.device_opens(db, start=start, end=end)
     except Exception as e:  # pragma: no cover — defensive
         print(f"[activity] device opens failed: {e}")
         return []
@@ -361,7 +409,10 @@ def build_activity_feed(
     if "trackable" not in skip:
         items += _trackables(db, before_naive, limit)
     if "device" not in skip:
-        items += _device(db, before_naive, limit)
+        # Derived LAST, and that ordering is load-bearing: the device window has
+        # to know how far back this page will actually reach, which is a fact
+        # about what the other sources just returned.
+        items += _device(db, before_naive, limit, reach=_page_reach(items, limit, before))
 
     # drop anything undated, then k-way merge by the normalized UTC ts
     items = [it for it in items if it.get("at") is not None]

@@ -145,6 +145,41 @@ export function labelFor(it: ActivityItem): { label: string; color: string } {
   }
 }
 
+/**
+ * Fold a freshly-polled page into the rows already on screen.
+ *
+ * The key dedup is what stops a row appearing twice once paging has walked past
+ * it, so it stays — but a key is NOT a promise that the row is finished. A
+ * device run anchors at its FIRST open by design (a row saying "opened cursor"
+ * belongs at the moment it was opened), so its key and its `at` are stable for
+ * the whole run while its text keeps growing: `opened cursor` becomes
+ * `opened cursor ×8` as the day's opens chain into it. Dropping the re-fetched
+ * copy froze the first version on screen for as long as the sheet stayed
+ * mounted — which is all day, since it never remounts.
+ *
+ * So a known key REPLACES its row rather than being discarded, in place, and
+ * the sort only runs when something actually moved (JS sort is stable, so equal
+ * timestamps keep their order either way). Pure, so the rule is testable.
+ */
+export function mergeNewest(prev: ActivityItem[], rows: ActivityItem[], seen: Set<string>): ActivityItem[] {
+  if (prev.length === 0) {
+    rows.forEach((r) => seen.add(r.key));
+    return rows;
+  }
+  const byKey = new Map(rows.map((r) => [r.key, r]));
+  let changed = false;
+  const merged = prev.map((it) => {
+    const next = byKey.get(it.key);
+    if (!next || (next.text === it.text && next.at === it.at)) return it;
+    changed = true;
+    return next;
+  });
+  const fresh = rows.filter((r) => !seen.has(r.key));
+  if (fresh.length === 0) return changed ? merged : prev;
+  fresh.forEach((r) => seen.add(r.key));
+  return [...fresh, ...merged].sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
 /** `chat` keeps BOTH sides of a turn — a half-transcript isn't a log. */
 function passes(it: ActivityItem, filter: LogFilter): boolean {
   if (filter === "all") return true;
@@ -187,14 +222,8 @@ export function LogSheet({
         const rows = await fetchActivity({ limit: PAGE });
         if (cancelled) return;
         setItems((prev) => {
-          if (prev.length === 0) {
-            seen.current = new Set(rows.map((r) => r.key));
-            return rows;
-          }
-          const fresh = rows.filter((r) => !seen.current.has(r.key));
-          if (fresh.length === 0) return prev;
-          fresh.forEach((r) => seen.current.add(r.key));
-          return [...fresh, ...prev].sort((a, b) => (a.at < b.at ? 1 : -1));
+          if (prev.length === 0) seen.current = new Set();
+          return mergeNewest(prev, rows, seen.current);
         });
       } catch {
         /* transient — keep last good */

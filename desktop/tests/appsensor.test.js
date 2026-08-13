@@ -19,16 +19,28 @@ const T0 = 1_700_000_000_000;
 
 function memStore(initial = {}) {
   let state = { ...initial };
-  return { read: () => state, write: (s) => { state = s; }, peek: () => state };
+  let writes = 0;
+  return {
+    read: () => state,
+    write: (s) => { state = s; writes += 1; },
+    peek: () => state,
+    writes: () => writes,
+  };
 }
 
-function makeRig({ idle = () => 0, frontmost = ["Cursor"], store = memStore() } = {}) {
+function makeRig({
+  idle = () => 0,
+  frontmost = ["Cursor"],
+  store = memStore(),
+  openStore = memStore(),
+} = {}) {
   let now = T0;
   const queue = [...frontmost];
   const timers = [];
   let ids = 0;
   const reporter = new AppReporter({
     store,
+    openStore,
     getBaseUrl: () => "https://gooni-bot.fly.dev",
     getToken: () => "tok",
     fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ accepted: 0, duplicates: 0, rejected: [], stored_ids: [] }) }),
@@ -59,6 +71,7 @@ function makeRig({ idle = () => 0, frontmost = ["Cursor"], store = memStore() } 
     sensor,
     reporter,
     store,
+    openStore,
     recorded,
     advance: (ms) => { now += ms; },
     at: () => now,
@@ -163,15 +176,16 @@ test("a missing Accessibility grant is stated, not retried in silence", async ()
 
 test("a crash is salvaged on the next start, a clean stop is not", async () => {
   const store = memStore();
-  const first = makeRig({ store });
+  const openStore = memStore();
+  const first = makeRig({ store, openStore });
   await first.sensor.start();
   await first.sensor.tick();
   first.advance(120_000);
   await first.sensor.tick(); // confirms Cursor is still frontmost
-  assert.ok(store.peek().open, "the open interval is on disk for the salvage path");
+  assert.ok(openStore.peek().open, "the open interval is on disk for the salvage path");
 
-  // No stop() — the process was killed. A fresh sensor over the same store.
-  const second = makeRig({ store });
+  // No stop() — the process was killed. A fresh sensor over the same stores.
+  const second = makeRig({ store, openStore });
   second.advance(9 * 60 * 60 * 1000);
   await second.sensor.start();
   const salvaged = second.recorded.find((iv) => iv.truncated);
@@ -193,7 +207,45 @@ test("stop() closes with a real end time and flushes", async () => {
   const closed = rig.recorded.find((iv) => iv.end_reason === "shutdown");
   assert.ok(closed, "a clean quit closes the interval");
   assert.equal(closed.truncated, false, "a quit we were present for is a measurement");
-  assert.equal(rig.store.peek().open, null, "nothing left to salvage");
+  assert.equal(rig.openStore.peek().open, null, "nothing left to salvage");
+});
+
+test("a tick that only moves the anchor does not rewrite the interval buffer", async () => {
+  const rig = makeRig();
+  await rig.sensor.start();
+  // A day-long outage: the buffer is heavy and nothing is draining it.
+  for (let i = 0; i < 50; i += 1) rig.reporter.add(IV(`old-${i}`));
+  const bufferWrites = rig.store.writes();
+
+  rig.advance(60_000);
+  await rig.sensor.tick();
+  rig.advance(60_000);
+  await rig.sensor.tick();
+
+  assert.equal(
+    rig.store.writes(),
+    bufferWrites,
+    "the backlog is not re-serialised every poll — that is a megabyte of JSON " +
+      "written synchronously on the main process every few seconds"
+  );
+  assert.ok(rig.openStore.peek().open, "the salvage anchor is still persisted");
+  assert.equal(
+    new Date(rig.openStore.peek().open.lastSeenAt).getTime(),
+    rig.at(),
+    "and it is FRESH — a stale anchor credits everything up to the crash"
+  );
+});
+
+test("an unchanged anchor never touches the disk", async () => {
+  const rig = makeRig({ idle: () => 600 });
+  await rig.sensor.start();
+  const writes = rig.openStore.writes();
+  // Idle overnight: every tick calls setOpen with the same empty tracker.
+  for (let i = 0; i < 20; i += 1) {
+    rig.advance(4000);
+    await rig.sensor.tick();
+  }
+  assert.equal(rig.openStore.writes(), writes, "a byte-identical write is not a write");
 });
 
 // ── delivery ─────────────────────────────────────────────────────────────────
@@ -242,6 +294,39 @@ test("a server error RETAINS; only a permanently-refused body is destroyed", asy
   assert.equal(reporter.buffered.length, 0, "a body refused identically forever can't wedge the buffer");
   assert.equal(reporter.refused, 1, "and the loss is COUNTED, not swallowed as an http error");
   assert.equal(report.status, "refused");
+});
+
+test("a refused batch destroys what it SENT, not whatever sits in those slots now", async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const reporter = makeReporter({
+    fetchImpl: async () => {
+      await gate;
+      return { ok: false, status: 422, headers: { get: () => null } };
+    },
+  });
+  reporter.maxBuffered = 3;
+  for (const id of ["a", "b", "c"]) reporter.add(IV(id));
+
+  const pending = reporter.flush();
+  // A long outage with a full buffer: new intervals arrive mid-request and
+  // overflow splices the FRONT, shifting every index the batch was read at.
+  reporter.add(IV("d"));
+  reporter.add(IV("e"));
+  release();
+  const report = await pending;
+
+  assert.deepEqual(
+    reporter.buffered.map((i) => i.client_id),
+    ["d", "e"],
+    "the rows that were never sent survive; a positional slice would have eaten them"
+  );
+  // a and b were already gone to overflow and are counted THERE. Only c was
+  // still held, so only c is a refusal loss — counting the whole batch would
+  // book the same two intervals as lost twice.
+  assert.equal(report.destroyed, 1, "the destroyed count is what actually left");
+  assert.equal(reporter.refused, 1);
+  assert.equal(reporter.dropped, 2);
 });
 
 test("offline keeps the buffer", async () => {

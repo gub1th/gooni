@@ -41,7 +41,7 @@ from dotenv import load_dotenv  # noqa: E402
 load_dotenv(os.path.join(_ROOT, ".env"))
 
 from app.db.database import SessionLocal, engine  # noqa: E402
-from app.db.models import AppInterval, Base, BrowserInterval, Trackable  # noqa: E402
+from app.db.models import AppInterval, Base, BrowserInterval, Note, Trackable  # noqa: E402
 from app.services import activity_service, app_activity_service, device_activity  # noqa: E402
 
 T0 = datetime(2026, 8, 12, 17, 0, 0)
@@ -318,6 +318,75 @@ def main():
     check(
         not [it for it in excluded if it["kind"] == "device"],
         "exclude_kinds={'device'} drops them (the pre-reply state block's read)",
+    )
+
+    # ── paging over a quiet stretch ──────────────────────────────────────────
+    #
+    # The device source is WINDOWED while every other source pages by
+    # `ORDER BY … DESC LIMIT n`, so the cursor can step back further in one page
+    # than a fixed lookback covers. Five days away from the machine: nothing
+    # recent, the newest note is eight days old, and the device runs sit six days
+    # back — in the span between the two. A window pinned to the last three days
+    # finds nothing on page 1, and page 2 (cursor = the note, eight days back)
+    # starts BELOW the runs. They would then be on no page at all.
+    print("\npaging over a quiet stretch")
+
+    anchor = T0 - timedelta(days=1)  # the page-1 cursor; everything above is older
+
+    def _note(title, days_back):
+        return Note(
+            title=title,
+            content="…",
+            created_at=anchor - timedelta(days=days_back),
+            updated_at=anchor - timedelta(days=days_back),
+        )
+
+    db.add(_note("a note from the week before", 8))
+    db.commit()
+
+    quiet = anchor - timedelta(days=6)
+    app_activity_service.ingest_batch(
+        db,
+        [
+            _app("q1", app="Xcode", start=quiet, seconds=600),
+            _app("q2", app="Xcode", start=quiet + timedelta(minutes=30), seconds=600),
+        ],
+    )
+
+    def _paged_device_rows(limit=40, pages=6):
+        found: set[str] = set()
+        cursor = anchor.replace(tzinfo=timezone.utc)
+        for _ in range(pages):
+            page = activity_service.build_activity_feed(db, before=cursor, limit=limit)
+            if not page:
+                break
+            found |= {it["text"] for it in page if it["kind"] == "device"}
+            nxt = page[-1]["at"]
+            if nxt >= cursor:
+                break
+            cursor = nxt
+        return found
+
+    across_the_gap = _paged_device_rows()
+    check(
+        "opened xcode ×2" in across_the_gap,
+        f"a device run older than the fixed lookback but newer than the page's "
+        f"own oldest item is still reachable — the window follows the cursor's "
+        f"step instead of sitting inside it: {sorted(across_the_gap)}",
+    )
+
+    # …and it follows the step only as far as the floor. An ancient note is not
+    # a licence to derive opens back to the beginning of time.
+    db.add(_note("something from years ago", 900))
+    db.commit()
+    app_activity_service.ingest_batch(
+        db, [_app("q3", app="Preview", start=anchor - timedelta(days=40), seconds=600)]
+    )
+    beyond = _paged_device_rows()
+    check(
+        "opened xcode ×2" in beyond and "opened preview" not in beyond,
+        f"the window stops at the absolute floor: rows inside it still surface, "
+        f"one 40 days back does not: {sorted(beyond)}",
     )
 
     db.close()

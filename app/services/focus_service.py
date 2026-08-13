@@ -868,6 +868,22 @@ def _serialize_reminder(
 STREAM_DEFAULT_DAYS = 7
 STREAM_MAX_DAYS = 60
 
+# How much of a stream window the DEVICE derivation covers.
+#
+# Thought cards are read as cards — one row each, bounded by how many were
+# written. Device rows are DERIVED from raw attention intervals, so their cost
+# scales with how much the sensors recorded rather than with how many rows come
+# out: a busy day is ~900 intervals per sensor, and `days` is caller-controlled
+# up to STREAM_MAX_DAYS, so an unbounded derivation would materialise tens of
+# thousands of rows for one request on a small VM.
+#
+# So the device half of the window is bounded independently, and stated here
+# rather than applied silently: a stream longer than this still returns every
+# thought card in it, and its `opened X` rows stop at the last
+# DEVICE_STREAM_DAYS. The only in-repo caller (the day timeline) asks for one
+# day; raise it if a surface ever needs device rows deeper than a week.
+DEVICE_STREAM_DAYS = 7
+
 
 def stream(
     db: Session,
@@ -944,12 +960,14 @@ def stream(
     #   - iOS Shortcuts pings (already tz-aware in value_json.at), clustered
     #   - browser hosts and macOS apps, reduced to `opened X` by the shared
     #     5-minute gap rule (device_activity.OPEN_GAP)
-    # The two interval sensors go through the same window as the thoughts above
-    # (naive-UTC bounds of the local-day range), and emit the same
-    # `{type:'event', label, kind, at, count}` card the Shortcuts pings do —
-    # the timeline renders one row shape and never has to know which sensor a
-    # row came from.
+    # The two interval sensors emit the same `{type:'event', label, kind, at,
+    # count}` card the Shortcuts pings do — the timeline renders one row shape
+    # and never has to know which sensor a row came from. Their window is the
+    # thought window's tail, bounded by DEVICE_STREAM_DAYS (see there for why
+    # the derived source can't take the full range).
     from . import device_activity, event_service  # local imports — module-load cycle
+
+    device_start = max(start_utc, end_utc - timedelta(days=DEVICE_STREAM_DAYS))
 
     items.extend(event_service.list_recent_events(db, start=start_date, end=end_date))
     items.extend(
@@ -963,7 +981,7 @@ def stream(
             "at": _iso(open_row["at"]),
             "count": open_row["count"],
         }
-        for open_row in device_activity.device_opens(db, start=start_utc, end=end_utc)
+        for open_row in device_activity.device_opens(db, start=device_start, end=end_utc)
     )
 
     items.sort(key=lambda it: _sort_key(it.get("at")), reverse=True)

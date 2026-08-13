@@ -7,8 +7,8 @@
  * can drift into overlapping or into a gap.
  */
 import { expect, test } from "vitest";
-import type { CalendarEvent } from "../../services/api";
-import { labelFor, loggedEvents } from "./LogSheet";
+import type { ActivityItem, CalendarEvent } from "../../services/api";
+import { labelFor, loggedEvents, mergeNewest } from "./LogSheet";
 import { pickUpNext } from "./upNext";
 
 const NOW = new Date("2026-08-12T18:00:00Z").getTime();
@@ -98,6 +98,42 @@ test("every device layer renders as the same amber `device` row", () => {
   expect(phone.label).toBe("device");
   expect(browser).toEqual(phone);
   expect(desktop).toEqual(phone);
+});
+
+/**
+ * A device run's key is STABLE on purpose — it anchors at the run's first open
+ * — so the poll re-fetches the same key with a bigger count all day. The sheet
+ * never remounts, so a dedup that discarded the re-fetched copy froze the row.
+ */
+test("a re-fetched row updates in place; the key dedup still stops duplicates", () => {
+  const row = (over: Partial<ActivityItem> & { key: string; at: string }): ActivityItem =>
+    ({ kind: "device", text: "opened cursor", ...over }) as ActivityItem;
+
+  const seen = new Set<string>();
+  const first = mergeNewest([], [row({ key: "device-app-7", at: "2026-08-12T09:00:00Z" })], seen);
+  expect(first.map((r) => r.text)).toEqual(["opened cursor"]);
+
+  // …the run grows through the day. Same key, same anchor, bigger count.
+  const grown = mergeNewest(
+    first,
+    [row({ key: "device-app-7", at: "2026-08-12T09:00:00Z", text: "opened cursor ×8" })],
+    seen,
+  );
+  expect(grown.map((r) => r.text)).toEqual(["opened cursor ×8"]);
+  expect(grown).toHaveLength(1);
+
+  // An unchanged re-fetch is a no-op, and returns the SAME array so React
+  // doesn't re-render the sheet every 20 seconds for nothing.
+  const again = mergeNewest(grown, [row({ key: "device-app-7", at: "2026-08-12T09:00:00Z", text: "opened cursor ×8" })], seen);
+  expect(again).toBe(grown);
+
+  // A genuinely new row still lands, newest first.
+  const withNew = mergeNewest(
+    grown,
+    [row({ key: "device-app-9", at: "2026-08-12T11:00:00Z", text: "opened slack" })],
+    seen,
+  );
+  expect(withNew.map((r) => r.key)).toEqual(["device-app-9", "device-app-7"]);
 });
 
 test("a device row is not mistaken for a logged measurement", () => {

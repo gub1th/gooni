@@ -30,6 +30,7 @@ const { queryFrontmost } = require("./frontmost");
 
 const SIDECAR_LOG = "sidecar.log";
 const APP_SENSOR_STATE = "app-sensor.json";
+const APP_SENSOR_OPEN = "app-sensor-open.json";
 
 let config = configModule.defaults();
 let configPath = "";
@@ -119,16 +120,20 @@ function createSidecar() {
 // ── frontmost-app sensor ─────────────────────────────────────────────────────
 
 /**
- * The buffer's durable home.
+ * A durable JSON file under userData.
  *
- * A plain JSON file rather than anything cleverer: it holds a few thousand
- * small records at most, it is rewritten whole on every change, and it is
- * exactly what the extension's chrome.storage.local is. A read failure falls
- * back to empty — a corrupt buffer file must not stop the sensor from sensing
+ * Rather than anything cleverer: each holds a small whole-rewritten document,
+ * which is exactly what the extension's chrome.storage.local is. A read failure
+ * falls back to empty — a corrupt file must not stop the sensor from sensing
  * (the reporter's own counters are what admit the loss).
+ *
+ * TWO of them, and the split is the point: the buffer changes only when rows
+ * are added or delivered, while the open-interval anchor is rewritten on every
+ * poll. See AppReporter's header for why sharing one file made a long outage
+ * write the whole backlog to disk every few seconds.
  */
-function appSensorStore() {
-  const file = path.join(userDataDir(), APP_SENSOR_STATE);
+function jsonStore(name) {
+  const file = path.join(userDataDir(), name);
   return {
     read() {
       try {
@@ -142,7 +147,7 @@ function appSensorStore() {
         fs.mkdirSync(userDataDir(), { recursive: true });
         fs.writeFileSync(file, JSON.stringify(state), { mode: 0o600 });
       } catch (e) {
-        console.error("[gooni] could not persist app-sensor state:", e.message);
+        console.error(`[gooni] could not persist ${name}:`, e.message);
       }
     },
   };
@@ -150,7 +155,8 @@ function appSensorStore() {
 
 function createAppSensor() {
   const reporter = new AppReporter({
-    store: appSensorStore(),
+    store: jsonStore(APP_SENSOR_STATE),
+    openStore: jsonStore(APP_SENSOR_OPEN),
     getBaseUrl: () => config.apiUrl,
     getToken: () => currentToken().token,
   });

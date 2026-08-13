@@ -24,8 +24,19 @@
  *    twice. (Harmless on the server, which dedups — but it would double-count
  *    `sent` and make the health report lie.)
  *
- * `store` is injected (`{read(), write(state)}`) so all of this is testable
- * with a plain object, no fs and no Electron.
+ * TWO stores, because the two things persisted here change at wildly different
+ * rates. The interval buffer changes only when `add()` or a flush changes it.
+ * The open-interval pointer is rewritten on EVERY sensor tick — deliberately,
+ * since its `lastSeenAt` is the anchor a crash salvage closes at, and a stale
+ * one would credit everything between the last write and the crash. Sharing one
+ * file made every tick serialise and synchronously write the whole backlog: a
+ * day-long outage buffers ~1MB of JSON, so a 4s poll wrote a megabyte to disk
+ * every four seconds, on the main process, forever. `openStore` is optional —
+ * without it the two collapse back into one file, which is still correct, just
+ * expensive.
+ *
+ * Both are injected (`{read(), write(state)}`) so all of this is testable with
+ * a plain object, no fs and no Electron.
  */
 
 /** Past this many buffered intervals, the oldest are dropped and counted. */
@@ -66,6 +77,7 @@ class AppReporter {
   /**
    * @param {object} opts
    * @param {{read: () => object, write: (state: object) => void}} opts.store
+   * @param {{read: () => object, write: (state: object) => void}} [opts.openStore]
    * @param {() => string} opts.getBaseUrl
    * @param {() => string} opts.getToken
    * @param {Function} [opts.fetchImpl]
@@ -73,6 +85,7 @@ class AppReporter {
    */
   constructor({
     store,
+    openStore,
     getBaseUrl,
     getToken,
     fetchImpl = globalThis.fetch,
@@ -82,6 +95,7 @@ class AppReporter {
     flushTimeoutMs = FLUSH_TIMEOUT_MS,
   } = {}) {
     this.store = store;
+    this.openStore = openStore || null;
     this.getBaseUrl = getBaseUrl;
     this.getToken = getToken;
     this.fetchImpl = fetchImpl;
@@ -91,32 +105,53 @@ class AppReporter {
     this.flushTimeoutMs = flushTimeoutMs;
 
     const saved = store?.read?.() || {};
+    const savedOpen = (this.openStore ? this.openStore.read?.() : saved) || {};
     /** @type {object[]} */
     this.buffered = Array.isArray(saved.buffered) ? saved.buffered : [];
     /** Intervals lost to buffer overflow (a very long outage). */
     this.dropped = Number(saved.dropped) || 0;
     /** Intervals destroyed because the server refused the batch. */
     this.refused = Number(saved.refused) || 0;
-    /** The open interval, so a crash can be salvaged on the next launch. */
-    this.open = saved.open || null;
+    // The open interval, so a crash can be salvaged on the next launch.
+    // `saved.open` is where it lived before the split: read it as a fallback so
+    // the first launch after an upgrade still salvages whatever was open, and
+    // only until the open store has written a key of its own.
+    this.open = ("open" in savedOpen ? savedOpen.open : saved.open) || null;
+    this._openJson = JSON.stringify(this.open);
     this.retryAfter = 0;
     this.lastFlush = null;
     this._flushing = null;
   }
 
+  /** The batch state: the buffer and the two loss counters. */
   _persist() {
-    this.store?.write?.({
+    const state = {
       buffered: this.buffered,
       dropped: this.dropped,
       refused: this.refused,
-      open: this.open,
-    });
+    };
+    // Without a dedicated open store the two collapse back into one file, and
+    // the anchor has to keep riding along or a crash loses it.
+    if (!this.openStore) state.open = this.open;
+    this.store?.write?.(state);
+  }
+
+  /** The salvage anchor alone — small, and rewritten every tick. */
+  _persistOpen() {
+    if (!this.openStore) return this._persist();
+    this.openStore.write?.({ open: this.open });
   }
 
   /** Remember (or clear) the open interval so a crash is salvageable. */
   setOpen(open) {
-    this.open = open || null;
-    this._persist();
+    const next = open || null;
+    const json = JSON.stringify(next);
+    // A tick that moved nothing must not touch the disk at all: a machine
+    // sitting idle overnight calls this every poll period with the same `null`.
+    if (json === this._openJson) return;
+    this.open = next;
+    this._openJson = json;
+    this._persistOpen();
   }
 
   add(interval) {
@@ -192,10 +227,19 @@ class AppReporter {
         // The server will refuse this body identically forever. Destroy it —
         // and say so with a counter of its own, NOT the overflow counter: the
         // two are different losses and the report labels them differently.
-        this.buffered = this.buffered.slice(batch.length);
-        this.refused += batch.length;
+        //
+        // Removed by client_id, exactly the way the success path does it.
+        // `batch` was captured before the await and `add()` can splice the
+        // FRONT of the buffer for overflow while the request is in flight, so a
+        // positional slice would destroy that many rows that were never sent
+        // while leaving the same number of sent ones behind.
+        const refusedIds = new Set(batch.map((iv) => iv.client_id));
+        const heldBefore = this.buffered.length;
+        this.buffered = this.buffered.filter((iv) => !refusedIds.has(iv.client_id));
+        const destroyed = heldBefore - this.buffered.length;
+        this.refused += destroyed;
         this._persist();
-        return this._record({ at, status: "refused", httpStatus: res.status, destroyed: batch.length, sent: 0 });
+        return this._record({ at, status: "refused", httpStatus: res.status, destroyed, sent: 0 });
       }
       // 5xx, 429, 404, 401 — keep the buffer.
       return this._record({ at, status: "error", error: `http_${res.status}`, sent: 0 });
