@@ -21,7 +21,11 @@
  *    to is a bug report; a gap it hides is a wrong answer. The same reasoning
  *    gives a lost state FILE its own third counter (`corrupted`) — DERIVED from
  *    the stores rather than accumulated here, since after that loss the only
- *    record left is the quarantined bytes on disk.
+ *    record left is the quarantined bytes on disk. `unsaved` is the fourth and
+ *    is NOT a loss: it says the disk is refusing writes right now, so the
+ *    buffer in memory is ahead of the one on disk and a crash would take the
+ *    difference. Four causes, four labels — folding any two together is the
+ *    same wrong-number failure one level up.
  *  - **One flush at a time.** Flushes are triggered by a timer AND by quit AND
  *    by the buffer filling; two overlapping flushes would post the same rows
  *    twice. (Harmless on the server, which dedups — but it would double-count
@@ -73,6 +77,16 @@ const FLUSH_TIMEOUT_MS = 20_000;
  */
 function storeLosses(store) {
   const n = Number(store?.losses?.());
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Writes that have not landed on disk yet. A LIVE fault, not a historical
+ * count: nothing has been lost, but the buffer in memory is ahead of the buffer
+ * on disk and anything that ends the process now takes the difference with it.
+ */
+function storeUnsaved(store) {
+  const n = Number(store?.unsavedWrites?.());
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
@@ -193,6 +207,9 @@ class AppReporter {
       dropped: this.dropped,
       refused: this.refused,
       corrupted: this.corrupted,
+      // Asked at read time, not remembered: the stores own it, and it is a
+      // question about right now rather than about the run so far.
+      unsaved: storeUnsaved(this.store) + (this.openStore ? storeUnsaved(this.openStore) : 0),
       lastFlush: this.lastFlush,
       retryAfter: this.retryAfter,
     };
@@ -321,6 +338,9 @@ function describeReporter(status, { enabled, permission }) {
     return "App sensor: NEEDS ACCESSIBILITY — grant it in System Settings ▸ Privacy";
   }
   const parts = [];
+  // A live fault outranks every historical count: the others say something was
+  // lost, this one says something is ABOUT to be, and it is still fixable.
+  if (status.unsaved) parts.push(`NOT SAVING (${status.unsaved} writes failed)`);
   const last = status.lastFlush;
   if (last?.status === "not_authenticated") parts.push("not signed in");
   else if (last?.status === "refused") parts.push(`server refused ${last.destroyed}`);

@@ -39,7 +39,7 @@ What it buys is:
 cd desktop
 npm install
 npm start           # runs against https://gooni-bot.fly.dev
-npm test            # node:test, zero deps — 106 tests, no Electron needed
+npm test            # node:test, zero deps — 109 tests, no Electron needed
 
 npm start -- --capture   # open the capture overlay instead of the window
 ```
@@ -193,6 +193,17 @@ rebuild — see *Not in v1*.
   — a body the server would refuse identically forever. Offline, `5xx`, `429`,
   `404` and a bad token all keep the buffer, so a wrong `apiUrl` or an outage
   costs a retry rather than the day.
+- **Quit owes durability, not delivery.** The `shutdown` interval is closed and
+  written to disk first — that part is local and synchronous. Delivery then gets
+  2 seconds and the shell quits regardless: on a captive portal the POST hangs
+  until its own 20s abort, and a windowless menu-bar app must not sit there when
+  the rows are already durable and `client_id` makes the next launch's
+  redelivery a no-op. (The *sidecar* stop is still fully awaited — it holds the
+  camera.)
+- **A disk that refuses writes says so.** Nothing is lost when a write fails, so
+  it is not a loss counter but a liveness one: the tray leads with
+  `NOT SAVING (n writes failed)` while the document on disk is behind memory,
+  and one transient failure clears on the next write that lands.
 
 Config lives under `appSensor` in `config.json`:
 

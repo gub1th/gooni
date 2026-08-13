@@ -29,6 +29,16 @@
  *    admit a loss becomes a lie about it. The quarantine files outlive every
  *    state file, so counting them answers "how many times was this document
  *    lost" with no accumulator to disagree with.
+ *  - **A write that does not land is REPORTED.** The third state, and the one
+ *    that looks healthiest: `userData` fills up or loses permission, every
+ *    `write()` fails, and the document on disk quietly freezes at its last good
+ *    version while the caller's memory moves on. Nothing is lost YET — a crash
+ *    is what turns it into loss — so this is not a loss counter but a liveness
+ *    one: `write()` answers whether it landed, and `unsavedWrites()` is the run
+ *    of failures since the last one that did. A single transient failure
+ *    clears on the next success and never shouts; a persistent fault climbs and
+ *    stays on the tray. It cannot be persisted, by definition — persisting is
+ *    the thing that is broken.
  *
  * `fsImpl`, `now` and `log` are injected so all of it is testable without
  * Electron and without waiting for a real crash.
@@ -51,7 +61,8 @@ function stamp(ms) {
  * @param {typeof nodeFs} [opts.fsImpl]
  * @param {() => number} [opts.now]
  * @param {{error: Function}} [opts.log]
- * @returns {{read: () => object, write: (state: object) => void, losses: () => number, file: string}}
+ * @returns {{read: () => object, write: (state: object) => boolean, losses: () => number,
+ *   unsavedWrites: () => number, file: string}}
  */
 function createJsonStore({ dir, name, fsImpl = nodeFs, now = Date.now, log = console }) {
   const file = nodePath.join(dir, name);
@@ -59,6 +70,8 @@ function createJsonStore({ dir, name, fsImpl = nodeFs, now = Date.now, log = con
   // them. In memory only: the unreadable document is still sitting there and
   // the next read counts it again.
   let unpreserved = 0;
+  // Writes that have failed since the last one that landed.
+  let unsaved = 0;
 
   /** How many times this document has been lost — one quarantine file each. */
   function quarantineCount() {
@@ -103,6 +116,16 @@ function createJsonStore({ dir, name, fsImpl = nodeFs, now = Date.now, log = con
       return quarantineCount() + unpreserved;
     },
 
+    /**
+     * Writes that have not landed since the last one that did — 0 while the
+     * document on disk matches what was last handed over. NOT a loss count:
+     * nothing is gone until something ends the process, which is exactly why it
+     * has to be visible before that happens.
+     */
+    unsavedWrites() {
+      return unsaved;
+    },
+
     read() {
       let raw;
       try {
@@ -129,13 +152,17 @@ function createJsonStore({ dir, name, fsImpl = nodeFs, now = Date.now, log = con
         fsImpl.mkdirSync(dir, { recursive: true });
         fsImpl.writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
         fsImpl.renameSync(tmp, file);
+        unsaved = 0;
+        return true;
       } catch (e) {
-        log.error(`[gooni] could not persist ${name}:`, e?.message || e);
+        unsaved += 1;
+        log.error(`[gooni] could not persist ${name} (${unsaved} unsaved):`, e?.message || e);
         try {
           fsImpl.unlinkSync(tmp);
         } catch {
           /* nothing to clean up */
         }
+        return false;
       }
     },
   };

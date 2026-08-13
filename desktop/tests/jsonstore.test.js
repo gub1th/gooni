@@ -49,8 +49,83 @@ test("no file yet is the quiet normal path", () => {
 
 test("a write leaves no temp file behind", () => {
   const { store, dir } = rig();
-  store.write({ buffered: [] });
+  assert.equal(store.write({ buffered: [] }), true, "a write says whether it landed");
   assert.deepEqual(fs.readdirSync(dir), ["app-sensor.json"]);
+  assert.equal(store.unsavedWrites(), 0);
+});
+
+/**
+ * The third state, and the one that looks healthiest: the disk refuses writes
+ * (userData full, permission lost), so the document freezes at its last good
+ * version while the caller's memory moves on. Nothing is lost yet — which is
+ * exactly why it has to be visible before the crash that would lose it.
+ */
+test("a write that does not land is reported, and a transient one stops shouting", () => {
+  let failing = false;
+  const flaky = {
+    ...fs,
+    writeFileSync(target, data, opts) {
+      if (failing) throw new Error("ENOSPC");
+      return fs.writeFileSync(target, data, opts);
+    },
+  };
+  const { store, errors } = rig({ fsImpl: flaky });
+
+  store.write({ buffered: [] });
+  assert.equal(store.unsavedWrites(), 0, "a healthy store is silent");
+
+  failing = true;
+  assert.equal(store.write({ buffered: [1] }), false);
+  assert.equal(store.unsavedWrites(), 1);
+  assert.equal(store.write({ buffered: [1, 2] }), false);
+  assert.equal(store.unsavedWrites(), 2, "a persistent fault climbs");
+  assert.match(errors.join(" "), /could not persist/);
+
+  failing = false;
+  assert.equal(store.write({ buffered: [1, 2, 3] }), true);
+  assert.equal(
+    store.unsavedWrites(), 0,
+    "a single transient failure need not shout once the next write lands"
+  );
+  assert.deepEqual(store.read(), { buffered: [1, 2, 3] });
+});
+
+test("the tray says the disk is refusing writes, and which store it is not", () => {
+  const { store, dir } = rig({
+    fsImpl: { ...fs, writeFileSync() { throw new Error("EACCES"); } },
+  });
+  const openStore = createJsonStore({
+    dir,
+    name: "app-sensor-open.json",
+    log: { error: () => {} },
+  });
+  const reporter = new AppReporter({
+    store,
+    openStore,
+    getBaseUrl: () => "https://gooni-bot.fly.dev",
+    getToken: () => "tok",
+    now: () => T0,
+  });
+
+  reporter.add({ client_id: "a", app: "cursor", started_at: "x", ended_at: "y" });
+
+  const status = reporter.status();
+  assert.equal(status.unsaved, 1, "the buffer in memory is ahead of the buffer on disk");
+  assert.equal(status.dropped, 0, "a write that has not landed is not an overflow");
+  assert.equal(status.refused, 0, "nor a server refusal");
+  assert.equal(status.corrupted, 0, "nor a lost document — nothing is gone yet");
+  assert.match(
+    describeReporter(status, { enabled: true, permission: true }),
+    /NOT SAVING \(1 writes failed\)/
+  );
+
+  // The healthy store keeps working, and recovery clears the line.
+  reporter.setOpen({ app: "cursor", startedAt: T0, lastSeenAt: T0 });
+  assert.equal(reporter.status().unsaved, 1, "only the failing store counts");
+  assert.doesNotMatch(
+    describeReporter({ buffered: 0, dropped: 0, refused: 0, corrupted: 0, unsaved: 0 }, { enabled: true, permission: true }),
+    /NOT SAVING/
+  );
 });
 
 test("a write that dies midway leaves the PREVIOUS document intact", () => {

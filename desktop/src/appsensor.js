@@ -65,6 +65,20 @@ const OBSERVATION_GAP_POLLS = 5;
 // only how honest a duration is.
 const MIN_OBSERVATION_GAP_MS = 15_000;
 
+// How long a stop() waits for DELIVERY before giving up and letting the buffer
+// ride to the next launch. Deliberately NOT the reporter's FLUSH_TIMEOUT_MS
+// (20s), which is right for a background flush and wrong here: this budget is
+// spent while a windowless menu-bar app is quitting, with nothing on screen to
+// look at, and on a captive portal or a VPN blackhole the connect is accepted
+// and then hangs for the whole abort.
+//
+// Spending it at all is worth it because a normal quit on a working network
+// delivers in well under it. Not spending MORE is safe because the stop path's
+// obligation is that nothing is LOST, not that it has been delivered: every
+// interval is already durable (the store wrote it in `add()`), delivery is
+// retain-by-default, and `client_id` makes the redelivery a no-op.
+const STOP_FLUSH_BUDGET_MS = 2000;
+
 class AppSensor {
   /**
    * @param {object} opts
@@ -86,9 +100,13 @@ class AppSensor {
     pollMs = 4000,
     flushMs = 60_000,
     observationGapMs,
+    stopFlushMs = STOP_FLUSH_BUDGET_MS,
     now = Date.now,
     setTimer = setInterval,
     clearTimer = clearInterval,
+    // `unref` so a budget that outlives the flush it was bounding cannot be the
+    // thing holding the process open.
+    delay = (ms) => new Promise((resolve) => { const t = setTimeout(resolve, ms); t?.unref?.(); }),
     onStatus = () => {},
     log = () => {},
   } = {}) {
@@ -104,9 +122,11 @@ class AppSensor {
     // The tracker is pure and holds no cadence of its own, so the one place that
     // knows how often observation actually happens tells it.
     if (this.tracker) this.tracker.observationGapMs = this.observationGapMs;
+    this.stopFlushMs = stopFlushMs;
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
+    this.delay = delay;
     this.onStatus = onStatus;
     this.log = log;
 
@@ -168,7 +188,13 @@ class AppSensor {
    *
    * `shutdown` closes the open interval with a REAL end time (we are here, we
    * know when), which is what keeps a clean quit from producing a `truncated`
-   * row; the salvage path is for the deaths we don't get told about.
+   * row; the salvage path is for the deaths we don't get told about. That close
+   * is PERSISTED before anything touches the network — durability is local and
+   * synchronous, and it is the half of this that must not be skipped.
+   *
+   * DELIVERY gets a budget and no more (`stopFlushMs`). The caller is usually
+   * `before-quit` on a windowless menu-bar app, and waiting out a hung POST
+   * there buys nothing the next launch would not do anyway.
    */
   async stop({ flush = true } = {}) {
     if (!this.running) return;
@@ -181,8 +207,31 @@ class AppSensor {
 
     this._emit(this.tracker.shutdown(this.now()));
     this.reporter.setOpen(null);
-    if (flush) await this.reporter.flush();
+    if (flush) await this._flushWithinBudget();
     this.onStatus(this.status());
+  }
+
+  /**
+   * Flush, but return once the budget is spent whether or not it landed.
+   *
+   * The flush itself is NOT cancelled — it keeps its own 20s abort and finishes
+   * (or fails) on its own terms, which matters for `reloadConfig`, where the
+   * process carries on and a late success is a real delivery. Only the WAIT is
+   * bounded.
+   */
+  async _flushWithinBudget() {
+    const pending = this.reporter.flush().catch(() => null);
+    if (!this.stopFlushMs) return void (await pending);
+    const landed = await Promise.race([
+      pending.then(() => true),
+      this.delay(this.stopFlushMs).then(() => false),
+    ]);
+    if (!landed) {
+      this.log(
+        `delivery did not land in ${this.stopFlushMs}ms — ` +
+          `${this.reporter.status().buffered} buffered interval(s) ride to the next launch`
+      );
+    }
   }
 
   /** Screen locked — instantaneous, so the close needs no backdating. */

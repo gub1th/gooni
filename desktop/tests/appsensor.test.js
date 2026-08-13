@@ -36,17 +36,21 @@ function makeRig({
   frontmost = ["Cursor"],
   store = memStore(),
   openStore = memStore(),
+  fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ accepted: 0, duplicates: 0, rejected: [], stored_ids: [] }) }),
 } = {}) {
   let now = T0;
   const queue = [...frontmost];
   const timers = [];
   let ids = 0;
+  // The stop budget, fired by hand: a real 2s wait in a unit test is 2s of
+  // nothing, and the point of the assertion is the ORDERING, not the duration.
+  const budgets = [];
   const reporter = new AppReporter({
     store,
     openStore,
     getBaseUrl: () => "https://gooni-bot.fly.dev",
     getToken: () => "tok",
-    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ accepted: 0, duplicates: 0, rejected: [], stored_ids: [] }) }),
+    fetchImpl,
     now: () => now,
   });
   const sensor = new AppSensor({
@@ -63,6 +67,7 @@ function makeRig({
     // No real timers: ticks are driven by hand so the ordering is exact.
     setTimer: (fn) => { timers.push(fn); return timers.length; },
     clearTimer: () => {},
+    delay: () => new Promise((resolve) => budgets.push(resolve)),
   });
   // Every interval the sensor ever produced. The buffer alone is not enough to
   // assert on: a flush legitimately empties it, so a test about what was
@@ -82,6 +87,8 @@ function makeRig({
     push: (v) => queue.push(v),
     /** What every later query answers, from now on. */
     setFrontmost: (v) => { queue.splice(0, queue.length, v); },
+    /** Spend the stop path's delivery budget. */
+    expireBudget: () => { budgets.forEach((resolve) => resolve()); budgets.length = 0; },
     /**
      * Elapsed time WITH the sensor polling through it, one tick per poll period
      * — a stretch of ordinary use. `advance()` alone is the opposite claim: time
@@ -325,6 +332,44 @@ test("stop() closes with a real end time and flushes", async () => {
   assert.ok(closed, "a clean quit closes the interval");
   assert.equal(closed.truncated, false, "a quit we were present for is a measurement");
   assert.equal(rig.openStore.peek().open, null, "nothing left to salvage");
+  assert.equal(
+    rig.reporter.buffered.length, 0,
+    "a quit on a working network still delivers — arriving promptly is worth having when it is free"
+  );
+});
+
+/**
+ * A quit on a captive portal or a VPN blackhole: the connect is accepted and
+ * then hangs, so the POST resolves only when the reporter's own 20s abort fires.
+ * A windowless menu-bar app must not sit there — the stop path owes DURABILITY,
+ * not delivery, and the buffer is already on disk with `client_id`s that make
+ * the next launch's redelivery a no-op.
+ */
+test("a hung POST does not hold the quit — durability first, delivery on a budget", async () => {
+  let hangs = 0;
+  const rig = makeRig({
+    fetchImpl: () => new Promise(() => { hangs += 1; }), // never settles
+  });
+  await rig.sensor.start();
+  await rig.run(60_000);
+
+  const stopped = rig.sensor.stop();
+  // The shutdown interval is written to disk BEFORE anything touches the
+  // network: that half is synchronous and is the half that must not be skipped.
+  const persisted = rig.store.peek().buffered.filter((iv) => iv.end_reason === "shutdown");
+  assert.equal(persisted.length, 1, "the shutdown row is durable before the flush is even attempted");
+  assert.equal(rig.openStore.peek().open, null, "and the salvage anchor is cleared");
+
+  rig.expireBudget();
+  await stopped; // must resolve without the hung POST ever settling
+
+  assert.ok(hangs > 0, "delivery was still attempted — a normal quit should deliver");
+  assert.equal(
+    rig.reporter.buffered.length, 1,
+    "the undelivered row rides to the next launch rather than being destroyed"
+  );
+  const closed = rig.recorded.find((iv) => iv.end_reason === "shutdown");
+  assert.equal(closed.truncated, false, "a clean quit stays a measurement, not a salvage");
 });
 
 test("a tick that only moves the anchor does not rewrite the interval buffer", async () => {
