@@ -27,7 +27,7 @@ fixed floor.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import and_, case, func
@@ -306,12 +306,10 @@ def list_intervals(db: Session, *, day=None, limit: int = 100) -> list[dict]:
     limit = max(1, min(int(limit or 100), 1000))
     q = db.query(BrowserInterval)
     if day is not None:
-        tz = local_now(db).tzinfo
-        start_local = datetime(day.year, day.month, day.day, tzinfo=tz)
-        end_local = start_local + timedelta(days=1)
+        start, end = local_day_bounds(local_now(db).tzinfo, day)
         q = q.filter(
-            BrowserInterval.started_at >= start_local.astimezone(timezone.utc).replace(tzinfo=None),
-            BrowserInterval.started_at < end_local.astimezone(timezone.utc).replace(tzinfo=None),
+            BrowserInterval.started_at >= start,
+            BrowserInterval.started_at < end,
         )
     rows = q.order_by(BrowserInterval.started_at.desc()).limit(limit).all()
     return [serialize(r) for r in rows]

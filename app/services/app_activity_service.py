@@ -20,11 +20,10 @@ normalisation.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from ..common import local_now
+from ..common import local_day_bounds, local_now
 from ..db.models import AppInterval
 from .interval_ingest import (  # noqa: F401 — re-exported: the limits are this module's public contract
     MAX_BATCH,
@@ -44,12 +43,20 @@ SOURCE = "desktop_shell"
 # changed under a stationary tab). An unrecognised reason is nulled rather than
 # rejected — the reason is annotation, and losing the interval over it would be
 # the tail wagging the dog.
+#
+# It must cover EVERY reason `desktop/src/appfocus.js` can stamp, or the ingest
+# silently destroys an annotation the sensor went out of its way to make: an
+# `unobserved` close (the frontmost query went blind) still stores its
+# `truncated` flag, so the interval is right, but nulling the reason makes a
+# wedged sensor indistinguishable from a crash salvage in `GET /app/intervals`
+# — the exact silent-failure class this sensor keeps having to close.
 _END_REASONS = {
     "app_change",
     "idle",
     "locked",
     "suspended",
     "shutdown",
+    "unobserved",
     "truncated",
 }
 
@@ -136,12 +143,10 @@ def list_intervals(db: Session, *, day=None, limit: int = 100) -> list[dict]:
     limit = max(1, min(int(limit or 100), 1000))
     q = db.query(AppInterval)
     if day is not None:
-        tz = local_now(db).tzinfo
-        start_local = datetime(day.year, day.month, day.day, tzinfo=tz)
-        end_local = start_local + timedelta(days=1)
+        start, end = local_day_bounds(local_now(db).tzinfo, day)
         q = q.filter(
-            AppInterval.started_at >= start_local.astimezone(timezone.utc).replace(tzinfo=None),
-            AppInterval.started_at < end_local.astimezone(timezone.utc).replace(tzinfo=None),
+            AppInterval.started_at >= start,
+            AppInterval.started_at < end,
         )
     rows = q.order_by(AppInterval.started_at.desc()).limit(limit).all()
     return [serialize(r) for r in rows]

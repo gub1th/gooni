@@ -262,11 +262,12 @@ def _sensor_rows(db: Session, model, name_col, *, start, end, layer):
     Returns `(rows, floor)`. `floor` is the earliest moment this scan can speak
     for — normally `start`, but when `MAX_SCAN_INTERVALS` bites it rises to the
     oldest surviving interval plus the same grace. Truncation takes the NEWEST
-    rows and the caller reports nothing before the floor, because a predecessor
-    that was cut away is not evidence of absence: counting it as one would put a
-    fake "opened" at the truncation boundary, which is the failure the reach-back
-    exists to prevent. What survives is still whole runs with whole counts — the
-    cap can cost a row, never a wrong number.
+    rows, and the caller derives only the days that begin at or after the floor
+    (`fully_derived_days`), because a predecessor that was cut away is not
+    evidence of absence: counting it as one would put a fake "opened" at the
+    truncation boundary, and reporting the day the floor cuts INTO would re-anchor
+    its runs and undercount them. What survives is whole days of whole runs with
+    whole counts — the cap can cost a row, never a wrong number.
     """
     lookback = OPEN_GAP + CLUSTER_GAP
     newest_first = (
@@ -287,6 +288,26 @@ def _sensor_rows(db: Session, model, name_col, *, start, end, layer):
             f"derived on this read — a narrower read covers them"
         )
     return rows, floor
+
+
+def fully_derived_days(days, bounds, floor):
+    """The days a scan reaching back only to `floor` can speak for WHOLE.
+
+    `days` is the ascending day list, `bounds` maps each to its `[start, end)`
+    in naive UTC. A day qualifies only when its own start is at or after the
+    floor — the floor already includes the `OPEN_GAP + CLUSTER_GAP` reach-back a
+    day needs to judge its first open, so a day at or above it was scanned
+    completely, evidence and all.
+
+    The boundary is a function rather than a comparison buried in the loop
+    because it is the answer to "which is the oldest fully-derived day", and a
+    half-read day must be DROPPED, never reported: it would re-anchor its runs at
+    the first surviving open and undercount them, so the same local day would
+    read differently depending on how wide the read happened to be — the exact
+    bug day-binding exists to remove. A missing row is a gap the reader can see;
+    a half-counted day is a wrong number.
+    """
+    return [d for d in days if bounds[d][0] >= floor]
 
 
 def device_opens(db: Session, *, start_day, end_day) -> list[dict]:
@@ -338,7 +359,19 @@ def device_opens(db: Session, *, start_day, end_day) -> list[dict]:
             print(f"[device_activity] {layer} opens query failed: {e}")
             continue
 
-        for day in days:
+        derived = fully_derived_days(days, bounds, floor)
+        if len(derived) < len(days):
+            dropped = [d for d in days if d not in derived]
+            print(
+                f"[device_activity] {layer} scan can only speak from "
+                f"{floor.isoformat()}; dropped {len(dropped)} partially-scanned "
+                f"day(s) {dropped[0].isoformat()}..{dropped[-1].isoformat()} — "
+                f"oldest fully-derived day is "
+                f"{derived[0].isoformat() if derived else 'none'}; a narrower "
+                f"read covers the rest"
+            )
+
+        for day in derived:
             day_start, day_end = bounds[day]
             in_day = [
                 (f"{key}", name, at) for key, name, at in opens if day_start <= at < day_end

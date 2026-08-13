@@ -21,6 +21,10 @@ The load-bearing assertions:
      Shortcuts rows.
   4. NO TRACKABLES. Ingesting attention must not mint a Trackable — that is the
      whole reason these rows do not go through POST /events.
+  5. THE SCAN CAP COSTS DAYS, NEVER COUNTS. When MAX_SCAN_INTERVALS truncates,
+     the day it cut into is dropped WHOLE and the days that survive read exactly
+     as an uncapped read of them does. A half-counted day would put (2) back:
+     the same day answering differently depending on how wide the read was.
 
 Usage:
   source venv/bin/activate
@@ -251,6 +255,39 @@ def main():
     )
     check(bad["accepted"] == 1, f"a good row rides alongside rejected ones: {bad}")
 
+    # A sensor that went BLIND says so, and the ingest has to keep the word: the
+    # interval is still right (it closed at the last confirmed observation and
+    # carries `truncated`), but nulling the reason makes a wedged osascript
+    # indistinguishable from a crash salvage. An unknown reason is still nulled —
+    # annotation, never grounds to lose the interval.
+    reason_day = _day_of(T0) - timedelta(days=15)
+    app_activity_service.ingest_batch(
+        db,
+        [
+            _app("blind", app="Keynote", start=_at(reason_day, 11, 0),
+                 end_reason="unobserved", truncated=True),
+            _app("odd", app="Keynote", start=_at(reason_day, 13, 0),
+                 end_reason="who_knows"),
+        ],
+    )
+    day_rows = app_activity_service.list_intervals(db, day=reason_day)
+    by_id = {r["client_id"]: r for r in day_rows}
+    check(
+        by_id.get("blind", {}).get("end_reason") == "unobserved"
+        and by_id.get("blind", {}).get("truncated"),
+        f"an `unobserved` close survives ingest with its flag — a wedged sensor "
+        f"stays distinguishable from a crash salvage: {by_id.get('blind')}",
+    )
+    check(
+        "odd" in by_id and by_id["odd"]["end_reason"] is None,
+        f"an unrecognised reason is nulled, not rejected: {by_id.get('odd')}",
+    )
+    check(
+        len(day_rows) == 2,
+        f"`day=` filters to that LOCAL calendar day and nothing else: "
+        f"{[r['client_id'] for r in day_rows]}",
+    )
+
     db.add_all(
         [
             BrowserInterval(
@@ -319,7 +356,7 @@ def main():
         f"rows do not go through POST /events: {names}",
     )
     check(
-        db.query(AppInterval).count() == 5,
+        db.query(AppInterval).count() == 7,
         "app intervals live in their own table",
     )
 
@@ -329,7 +366,12 @@ def main():
         db, before=(T0 + timedelta(hours=2)).replace(tzinfo=timezone.utc), limit=40
     )
     device_rows = [it for it in feed if it["kind"] == "device"]
-    check(len(device_rows) == 5, f"device rows reach the feed: {len(device_rows)}")
+    todays = [it for it in device_rows if it["at"].astimezone(TZ).date() == _day_of(T0)]
+    check(
+        len(todays) == 5,
+        f"device rows reach the feed: {len(todays)} for today of "
+        f"{len(device_rows)} in the page",
+    )
     check(
         all(it["text"].startswith("opened ") for it in device_rows),
         f"every device row is a sentence: {[it['text'] for it in device_rows]}",
@@ -507,23 +549,67 @@ def main():
         f"uncapped, both names open exactly once: {sorted(uncapped)}",
     )
 
-    real_cap = device_activity.MAX_SCAN_INTERVALS
-    device_activity.MAX_SCAN_INTERVALS = 5
-    try:
-        capped = {it["text"] for it in device_activity.device_opens(db, **cap_window)}
-    finally:
-        device_activity.MAX_SCAN_INTERVALS = real_cap
+    def _capped(cap, **window):
+        real = device_activity.MAX_SCAN_INTERVALS
+        device_activity.MAX_SCAN_INTERVALS = cap
+        try:
+            return device_activity.device_opens(db, **window)
+        finally:
+            device_activity.MAX_SCAN_INTERVALS = real
 
+    capped = {it["text"] for it in _capped(5, **cap_window)}
     check(
-        "opened kept" in capped,
-        f"the cap truncates at the OLD edge — the recent span a page shows is "
-        f"still complete: {sorted(capped)}",
+        capped == set(),
+        f"a day the scan only HALF read is dropped WHOLE, not reported with a "
+        f"re-anchored run and a truncated count — a missing row is a gap the "
+        f"reader can see, a half-counted day is a wrong number: {sorted(capped)}",
+    )
+
+    # …and the days that DO come back are byte-identical to an uncapped read of
+    # them. The cap costs whole days at the old edge; it never changes what a
+    # surviving day says. Dense morning on the older day, one evening run on it,
+    # and the newer day's own runs: truncating to the newest few rows floors the
+    # scan inside the older day's evening, so the older day goes and the newer
+    # one — whose own reach-back evidence survived — stays exactly as it was.
+    cd1 = _day_of(T0) - timedelta(days=20)
+    cd0 = cd1 - timedelta(days=1)
+    app_activity_service.ingest_batch(
+        db,
+        [
+            _app(f"cd0-{i}", app="Numbers", start=_at(cd0, 9, i), seconds=60)
+            for i in range(12)
+        ]
+        + [
+            _app("cd0-eve", app="Logic", start=_at(cd0, 22, 0), seconds=600),
+            _app("cd1-a", app="Photos", start=_at(cd1, 9, 0), seconds=600),
+            _app("cd1-b", app="Photos", start=_at(cd1, 9, 30), seconds=600),
+        ],
+    )
+
+    two_days = dict(start_day=cd0, end_day=cd1)
+    full = device_activity.device_opens(db, **two_days)
+    row_key = lambda rows: sorted(  # noqa: E731
+        (r["key"], r["day"], r["text"], r["at"]) for r in rows
     )
     check(
-        "opened filler" not in capped,
-        f"and the row it truncated INTO is not reported as an opening: a "
-        f"predecessor that was cut is not evidence that there wasn't one "
-        f"{sorted(capped)}",
+        {it["text"] for it in full if it["day"] == cd0.isoformat()}
+        == {"opened numbers", "opened logic"}
+        and {it["text"] for it in full if it["day"] == cd1.isoformat()}
+        == {"opened photos ×2"},
+        f"uncapped, both days derive: {[(it['day'], it['text']) for it in full]}",
+    )
+
+    part = _capped(3, **two_days)
+    check(
+        not [it for it in part if it["day"] == cd0.isoformat()],
+        f"the day the truncation cut INTO is gone entirely: "
+        f"{[(it['day'], it['text']) for it in part]}",
+    )
+    check(
+        row_key(part)
+        == row_key([it for it in full if it["day"] == cd1.isoformat()]),
+        f"and the fully-scanned day is byte-identical to the uncapped read — "
+        f"same key, same anchor, same count: {row_key(part)}",
     )
 
     db.close()
