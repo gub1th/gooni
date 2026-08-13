@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Gooni</title>
+    <style>
+      /*
+        The app IS the page. No margin, no chrome, no scrollbar of our own —
+        anything this page draws is a second frame around a surface that already
+        has its own.
+
+        The background is the ambient home's void rather than the system canvas:
+        the app's theme lives in ITS origin's localStorage, which an extension
+        page cannot read, so there is no way to match a light-mode user before
+        the frame paints. Black matches the app's own `--gooni-void` fallback
+        and, more to the point, matches what the dark default actually looks
+        like — a white flash on every single tab open would be the loudest thing
+        about this feature.
+      */
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+      }
+      iframe {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+      /*
+        Hidden until something actually fails. A "loading…" line that flashes
+        before the app paints is the placeholder this page is supposed not to
+        have.
+      */
+      #failure {
+        display: none;
+        position: fixed;
+        inset: 0;
+        box-sizing: border-box;
+        padding: 12vh 8vw;
+        color: rgba(244, 245, 244, 0.86);
+        font: 15px/1.6 ui-sans-serif, -apple-system, system-ui, sans-serif;
+      }
+      #failure.shown { display: block; }
+      #failureTitle { font-size: 22px; font-weight: 600; margin: 0 0 10px; }
+      #failureDetail { margin: 0 0 18px; max-width: 46ch; opacity: 0.72; }
+      #failureUrl {
+        font-family: ui-monospace, monospace;
+        font-size: 13px;
+        word-break: break-all;
+        color: rgba(244, 245, 244, 0.6);
+      }
+      #failureActions { margin-top: 22px; }
+      #failureActions button {
+        font: inherit;
+        font-size: 13px;
+        padding: 6px 12px;
+        margin-right: 8px;
+        color: inherit;
+        background: rgba(244, 245, 244, 0.06);
+        border: 1px solid rgba(244, 245, 244, 0.18);
+        border-radius: 6px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <iframe
+      id="app"
+      allow="microphone; autoplay; clipboard-write"
+      title="Gooni"
+    ></iframe>
+
+    <div id="failure">
+      <p id="failureTitle"></p>
+      <p id="failureDetail"></p>
+      <div id="failureUrl"></div>
+      <div id="failureActions">
+        <button id="retry" type="button">Retry</button>
+        <button id="openOptions" type="button">Open settings</button>
+      </div>
+    </div>
+
+    <script type="module" src="newtab.js"></script>
+  </body>
+</html>

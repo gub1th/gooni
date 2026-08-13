@@ -12,6 +12,7 @@ import { SCRUB_SEGMENTS } from "./scrub.js";
 
 export const CONFIG_KEYS = {
   baseUrl: "gooni_base_url",
+  appUrl: "gooni_app_url",
   token: "gooni_token",
   enabled: "gooni_enabled",
   scrubSegments: "gooni_scrub_segments",
@@ -41,6 +42,19 @@ export const CONFIG_KEYS = {
  */
 export const DEFAULT_BASE_URL = "https://gooni-bot.fly.dev";
 
+/**
+ * The FRONTEND, which the new tab page frames. A different host from the
+ * backend — the app is on Vercel, the API is on Fly — so this cannot reuse
+ * `baseUrl`, and the same deployed-by-default reasoning applies twice over
+ * here: a new tab is opened dozens of times a day, and one pointed at a dev
+ * server that is not running is a blank tab every single time.
+ *
+ * Kept byte-identical to `desktop/src/config.js`'s `appUrl` on purpose — the
+ * shell and the new tab frame the same surface, and two defaults that drift
+ * would mean two answers to "where does Gooni live".
+ */
+export const DEFAULT_APP_URL = "https://gooni.vercel.app";
+
 /** Seconds of no input before chrome.idle calls it idle. 60 is the API floor. */
 export const IDLE_DETECTION_SEC = 60;
 
@@ -48,6 +62,7 @@ export async function loadConfig(storage) {
   const got = (await storage.get(Object.values(CONFIG_KEYS))) || {};
   return {
     baseUrl: (got[CONFIG_KEYS.baseUrl] || DEFAULT_BASE_URL).replace(/\/+$/, ""),
+    appUrl: (got[CONFIG_KEYS.appUrl] || DEFAULT_APP_URL).replace(/\/+$/, ""),
     token: got[CONFIG_KEYS.token] || "",
     // Default ON: an installed sensor that silently senses nothing is worse
     // than no sensor. The options page can pause it.

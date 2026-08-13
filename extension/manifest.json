@@ -12,9 +12,13 @@
     "default_popup": "popup.html",
     "default_title": "Gooni usage"
   },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
   "host_permissions": [
     "http://localhost:8000/*",
-    "https://gooni-bot.fly.dev/*"
+    "https://gooni-bot.fly.dev/*",
+    "https://gooni.vercel.app/*"
   ],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "options_page": "options.html"

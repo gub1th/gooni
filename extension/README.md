@@ -336,6 +336,57 @@ service: that would ship every host you visit to someone else, which is what
 this extension's privacy model exists to prevent. A host chrome has no icon for
 falls back to a letter chip.
 
+## The new tab page
+
+`chrome_url_overrides.newtab` points Chrome's new tab at `newtab.html`, whose
+only job is to frame the deployed Gooni frontend full-bleed. Open a tab, land on
+your own surface — the Momentum shape.
+
+The frontend is **not** bundled into the extension, deliberately. Bundling would
+force a build step onto a codebase that has none (see the top of this file), and
+MV3 forbids remote code in an extension besides, so every frontend change would
+mean repackaging. Framing gets the same result with no build and no repackage:
+inside the iframe the app runs on **its own origin**, so its auth token, its
+stored preferences and its calls to the backend are identical to a normal tab.
+Nothing on the backend changes — in particular the CORS allowlist is untouched,
+because the requests still come from the app's origin, not the extension's.
+
+**Pointing it at a local frontend.** The app URL is a setting, not a literal:
+options page → *Gooni app URL*. It defaults to the deployed app and is a
+separate field from the backend base URL, because they are different hosts (the
+app is on Vercel, the API is on Fly). Set it to `http://localhost:5173` to work
+against `npm run dev`.
+
+**It never sits blank.** A blank new tab is the worst failure this feature can
+have — it appears dozens of times a day and says nothing. So an unreachable URL,
+an unparseable one, a stalled load, or a frame-blocking header each produce an
+on-page message that names the URL it tried, plus Retry and Open settings. The
+reachability probe runs *alongside* the frame load rather than after it, because
+Chrome fires the iframe's `load` event for its own "refused to connect" page
+exactly as it does for the app — waiting on the frame to complain means never
+hearing about a dead frontend.
+
+**The microphone is delegated explicitly.** The ambient home is voice-first, and
+a cross-origin iframe gets no microphone unless the embedder hands it one, so
+the frame carries `allow="microphone; autoplay; clipboard-write"`. Without it
+the wave renders and simply never hears anything.
+
+### Two known behaviours — not bugs
+
+**Chrome focuses the address bar on a new tab.** Keystrokes go there, not into
+the capture box, until you click into the page once. This is Chrome's own
+behaviour for any new tab override and Momentum has it identically; nothing here
+tries to steal that focus back, because every way of doing so fights the browser
+and loses.
+
+**The framed app has its own storage partition.** Chrome partitions storage for
+a cross-site iframe by the embedding site, so the app's `localStorage` inside
+the new tab is a *different bucket* from the same app in a normal tab. In
+practice: you sign in once in the new tab even if you're already signed in
+elsewhere, and preferences that live in `localStorage` (theme, voice mode) are
+tracked separately for the two. Both persist normally within their own
+partition.
+
 ## Tests
 
 ```bash
@@ -345,7 +396,8 @@ cd extension && npm test      # node:test, no dependencies
 Covers interval closing (tab change, navigation, blur, lock), idle handling and
 its backdating, the poll-vs-event close distinction, orphan salvage, buffer
 persistence across a restart, which statuses retain vs drop a batch,
-`Retry-After` parsing, overflow accounting, URL scrubbing, the write queue
+`Retry-After` parsing, overflow accounting, URL scrubbing, the new tab page's
+failure wording and mic delegation (`tests/newtab.test.js`), the write queue
 (each race test asserts the unserialized control case loses/duplicates first, so
 it fails if the queue is removed), the last-flush report's wording, and the
 health/badge rule (`tests/health.test.js` — including that no-password is an
@@ -373,9 +425,12 @@ AND separately, a multi-hour total, and an empty period that stays empty).
 
 ```
 manifest.json      MV3 manifest — permissions: tabs, idle, storage, alarms,
-                   favicon; action → popup.html, options_page → options.html
+                   favicon; action → popup.html, options_page → options.html,
+                   chrome_url_overrides.newtab → newtab.html
 options.html/.js   connection + the editable scrub lists + status
 popup.html/.js     the toolbar glance: period total, trend, ranked hosts
+newtab.html/.js    the new tab: the app framed full-bleed (chrome glue only)
+src/newtab.js      new tab logic — URL resolution, failure wording, mic grant
 src/background.js  the ONLY file that touches chrome APIs (event wiring)
 src/tracker.js     the interval state machine (pure, fake-clock testable)
 src/buffer.js      chrome.storage.local buffer + flush/retry rules
