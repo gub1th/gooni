@@ -19,8 +19,9 @@
  *  - **The buffer is bounded, and overflow is COUNTED.** Past MAX_BUFFERED the
  *    oldest go, and the number that went is remembered — a gap the app admits
  *    to is a bug report; a gap it hides is a wrong answer. The same reasoning
- *    gives a lost state FILE its own third counter (`corrupted`), reported by
- *    the store: after that loss nothing else remembers it happened.
+ *    gives a lost state FILE its own third counter (`corrupted`) — DERIVED from
+ *    the stores rather than accumulated here, since after that loss the only
+ *    record left is the quarantined bytes on disk.
  *  - **One flush at a time.** Flushes are triggered by a timer AND by quit AND
  *    by the buffer filling; two overlapping flushes would post the same rows
  *    twice. (Harmless on the server, which dedups — but it would double-count
@@ -64,6 +65,16 @@ const MAX_RETRY_AFTER_MS = 15 * 60 * 1000;
 
 /** Bound on one flush. Everything in the sensor's path has to settle. */
 const FLUSH_TIMEOUT_MS = 20_000;
+
+/**
+ * How many times a store lost its document. Stores that predate `losses()` (and
+ * the plain objects the tests inject) simply report nothing rather than
+ * inventing a number.
+ */
+function storeLosses(store) {
+  const n = Number(store?.losses?.());
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 
 function parseRetryAfter(res, now) {
   const raw = res?.headers?.get?.("Retry-After");
@@ -115,12 +126,14 @@ class AppReporter {
     /** Intervals destroyed because the server refused the batch. */
     this.refused = Number(saved.refused) || 0;
     // A THIRD cause of loss, deliberately not folded into either of the other
-    // two: the state file itself was unreadable, so an unknown backlog went
-    // with it — along with whatever `dropped`/`refused` had counted. The store
-    // reports it (see jsonstore.js) because after that loss nothing else can.
-    // Summed across BOTH files, since either can be the one that was lost.
-    this.corrupted =
-      (Number(saved.corrupted) || 0) + (this.openStore ? Number(savedOpen.corrupted) || 0 : 0);
+    // two: a state file itself was unreadable, so an unknown backlog went with
+    // it — along with whatever `dropped`/`refused` had counted. It is DERIVED
+    // from the stores (jsonstore.js counts the quarantine files it left behind)
+    // and never persisted here, because a total this class wrote back would be
+    // a second opinion about a number whose only durable record is on disk, and
+    // the file it would be written into is the one corruption destroys. Both
+    // stores are asked, since either can be the one that was lost.
+    this.corrupted = storeLosses(this.store) + (this.openStore ? storeLosses(this.openStore) : 0);
     // The open interval, so a crash can be salvaged on the next launch.
     // `saved.open` is where it lived before the split: read it as a fallback so
     // the first launch after an upgrade still salvages whatever was open, and
@@ -130,12 +143,6 @@ class AppReporter {
     this.retryAfter = 0;
     this.lastFlush = null;
     this._flushing = null;
-
-    // Write the count back immediately. The file it came from is the one that
-    // was just lost, so a shell that senses nothing before quitting would
-    // otherwise forget the loss ever happened — and the next launch, reading a
-    // file it wrote itself, would look like a clean first run.
-    if (this.corrupted) this._persist();
   }
 
   /** The batch state: the buffer and the two loss counters. */
@@ -144,7 +151,6 @@ class AppReporter {
       buffered: this.buffered,
       dropped: this.dropped,
       refused: this.refused,
-      corrupted: this.corrupted,
     };
     // Without a dedicated open store the two collapse back into one file, and
     // the anchor has to keep riding along or a crash loses it.

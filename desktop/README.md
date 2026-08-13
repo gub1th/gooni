@@ -39,7 +39,7 @@ What it buys is:
 cd desktop
 npm install
 npm start           # runs against https://gooni-bot.fly.dev
-npm test            # node:test, zero deps — 92 tests, no Electron needed
+npm test            # node:test, zero deps — 106 tests, no Electron needed
 
 npm start -- --capture   # open the capture overlay instead of the window
 ```
@@ -237,6 +237,7 @@ src/frontmost.js       "which app is frontmost?" via osascript   (tested)
 src/appfocus.js        the frontmost-app interval state machine  (tested)
 src/appreporter.js     buffer + retain-by-default delivery       (tested)
 src/appsensor.js       the sensor loop that joins the three      (tested)
+src/jsonstore.js       durable state: atomic write, loud loss    (tested)
 src/preload-app.js     injects __GOONI_API_URL__, harvests the token
 src/preload-capture.js the narrow capture bridge (no token, no fetch)
 renderer/capture.*     the overlay

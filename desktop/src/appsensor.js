@@ -27,16 +27,22 @@
  *    the time it ran. A wedged `osascript` therefore costs one skipped tick,
  *    not a stalled sensor (the query bounds itself — see frontmost.js).
  *
- * 3. **A query that FAILS is an unobserved stretch, and it closes the
- *    interval.** `osascript` can wedge, and the Accessibility grant can be
- *    revoked mid-session; either way the frontmost read stops answering while
- *    an interval is open. Leaving it open hands the whole outage — possibly
- *    hours — to whatever was frontmost when the sensor went blind, and hands it
- *    over as a clean measurement. So once observation has been absent for longer
- *    than `observationGapMs`, the interval is closed at its last confirmed
- *    moment and flagged, without waiting for some later real event to do it.
- *    "The sensor is sitting on a stale open interval" is not allowed to be an
- *    invisible state.
+ * 3. **A LAPSE IN OBSERVATION closes the interval, however it happened.**
+ *    `osascript` can wedge and the Accessibility grant can be revoked
+ *    mid-session, so the frontmost read stops answering; but polling itself can
+ *    also stop — the machine sleeps without `suspend` landing (SIGSTOP, a
+ *    forward clock jump, a wedged main process) and ticks simply do not run.
+ *    Either way `lastSeenAt` stops advancing while an interval stays open, and
+ *    leaving it open hands the whole outage — possibly overnight — to whatever
+ *    was frontmost when observation stopped, as a clean measurement. So EVERY
+ *    tick checks the anchor first: once observation has been absent for longer
+ *    than `observationGapMs`, the interval closes at its last confirmed moment
+ *    and is flagged, and the app being frontmost NOW opens a fresh one starting
+ *    now. The same-app branch of `tracker.focus` deliberately does not close (a
+ *    real hour of work must not become poll-length slivers), which is exactly
+ *    why the staleness question is asked here, on both paths, and answered in
+ *    one place. "The sensor is sitting on a stale open interval" is not allowed
+ *    to be an invisible state.
  *
  * A tick's OS reads are async, so a lock or a suspend can land between the read
  * and its use. The generation counter is what makes that safe: a power event
@@ -248,6 +254,12 @@ class AppSensor {
       this.permission = true;
       this.lastError = null;
 
+      // A successful answer says who is frontmost NOW; it says nothing about the
+      // stretch since the last confirmed observation. If that stretch is past
+      // the tolerance the open interval is closed at its anchor first, so the
+      // same-app branch below cannot absorb an unobserved gap as continuity.
+      const lapsed = this._closeUnobserved();
+
       const closed = this.tracker.focus({ app: result.app, at: this.now() });
       this._emit(closed);
       this.tracker.seen(this.now());
@@ -255,15 +267,20 @@ class AppSensor {
       // salvage closes at, so a stale one would credit everything between the
       // last write and the crash.
       this.reporter.setOpen(this.tracker.toJSON());
-      return closed;
+      return closed || lapsed;
     } finally {
       this._ticking = false;
     }
   }
 
   /**
-   * The frontmost query has been failing long enough that the open interval is
-   * no longer a measurement. Close it at the last confirmed moment, flagged.
+   * Observation has been absent long enough that the open interval is no longer
+   * a measurement — the query kept failing, or ticks stopped running at all.
+   * Close it at the last confirmed moment, flagged.
+   *
+   * ONE owner for that predicate, called from both the query-failure branch and
+   * the success branch, because a lapse in polling and a lapse in answering are
+   * the same lie about attention and must not be judged by two rules.
    *
    * The anchor is cleared too: an interval this already closed must not also be
    * salvaged as an orphan on the next launch.

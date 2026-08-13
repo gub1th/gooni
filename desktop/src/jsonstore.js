@@ -16,12 +16,19 @@
  *  - **A missing file is normal; an unreadable one is LOUD.** Every first
  *    launch reads nothing, so that path stays quiet. Unreadable bytes are a
  *    real loss of a buffered backlog, so they are PRESERVED alongside
- *    (`<name>.corrupt-<stamp>`) rather than overwritten, logged, and COUNTED —
- *    the count is the number of quarantine files, which survives losing the
- *    very state file the counters lived in. That count is a THIRD cause of
- *    loss, distinct from the reporter's `dropped` (buffer overflow) and
- *    `refused` (the server refused the batch), and it is reported separately
- *    because the tray labels those two specifically.
+ *    (`<name>.corrupt-<stamp>`) rather than overwritten, logged, and COUNTED.
+ *    That count is a THIRD cause of loss, distinct from the reporter's
+ *    `dropped` (buffer overflow) and `refused` (the server refused the batch),
+ *    and it is reported separately because the tray labels those two
+ *    specifically.
+ *
+ *    `losses()` DERIVES the number from the quarantine files that exist, and
+ *    that is the whole design: a running total has to be written by somebody,
+ *    and the document it would live in is the one corruption destroys — two
+ *    writers with different notions of the total is how a number that exists to
+ *    admit a loss becomes a lie about it. The quarantine files outlive every
+ *    state file, so counting them answers "how many times was this document
+ *    lost" with no accumulator to disagree with.
  *
  * `fsImpl`, `now` and `log` are injected so all of it is testable without
  * Electron and without waiting for a real crash.
@@ -44,10 +51,14 @@ function stamp(ms) {
  * @param {typeof nodeFs} [opts.fsImpl]
  * @param {() => number} [opts.now]
  * @param {{error: Function}} [opts.log]
- * @returns {{read: () => object, write: (state: object) => void, file: string}}
+ * @returns {{read: () => object, write: (state: object) => void, losses: () => number, file: string}}
  */
 function createJsonStore({ dir, name, fsImpl = nodeFs, now = Date.now, log = console }) {
   const file = nodePath.join(dir, name);
+  // Losses whose bytes could NOT be preserved, so no quarantine file records
+  // them. In memory only: the unreadable document is still sitting there and
+  // the next read counts it again.
+  let unpreserved = 0;
 
   /** How many times this document has been lost — one quarantine file each. */
   function quarantineCount() {
@@ -70,17 +81,27 @@ function createJsonStore({ dir, name, fsImpl = nodeFs, now = Date.now, log = con
 
   function lost(reason) {
     const kept = preserve();
+    if (!kept) unpreserved += 1;
     log.error(
       `[gooni] ${name} was unreadable (${reason}) — buffered state lost; ` +
         (kept ? `the bytes are kept at ${kept}` : "the bytes could NOT be preserved")
     );
-    // At least one, even when the quarantine rename failed: the loss happened
-    // whether or not the evidence survived it.
-    return { corrupted: Math.max(1, quarantineCount()) };
+    // The state itself is gone; nothing about it is recoverable, and the loss is
+    // counted by `losses()` rather than smuggled back in as state.
+    return {};
   }
 
   return {
     file,
+
+    /**
+     * How many times this document has been lost, derived from what is on disk.
+     * The loss happened whether or not the evidence survived it, so a failed
+     * quarantine still counts.
+     */
+    losses() {
+      return quarantineCount() + unpreserved;
+    },
 
     read() {
       let raw;

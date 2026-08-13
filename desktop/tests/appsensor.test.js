@@ -17,16 +17,19 @@ const { parseFrontmost, isPermissionError, queryFrontmost } = require("../src/fr
 
 const T0 = 1_700_000_000_000;
 
-function memStore(initial = {}) {
+function memStore(initial = {}, { losses = 0 } = {}) {
   let state = { ...initial };
   let writes = 0;
   return {
     read: () => state,
     write: (s) => { state = s; writes += 1; },
+    losses: () => losses,
     peek: () => state,
     writes: () => writes,
   };
 }
+
+const POLL_MS = 4000;
 
 function makeRig({
   idle = () => 0,
@@ -55,6 +58,7 @@ function makeRig({
     },
     getIdleSeconds: idle,
     idleSec: 90,
+    pollMs: POLL_MS,
     now: () => now,
     // No real timers: ticks are driven by hand so the ordering is exact.
     setTimer: (fn) => { timers.push(fn); return timers.length; },
@@ -76,6 +80,20 @@ function makeRig({
     advance: (ms) => { now += ms; },
     at: () => now,
     push: (v) => queue.push(v),
+    /** What every later query answers, from now on. */
+    setFrontmost: (v) => { queue.splice(0, queue.length, v); },
+    /**
+     * Elapsed time WITH the sensor polling through it, one tick per poll period
+     * — a stretch of ordinary use. `advance()` alone is the opposite claim: time
+     * passing with nobody observing, which the sensor now treats as a lapse
+     * rather than as continuity.
+     */
+    async run(ms) {
+      for (let left = ms; left > 0; left -= POLL_MS) {
+        now += Math.min(POLL_MS, left);
+        await sensor.tick();
+      }
+    },
   };
 }
 
@@ -85,8 +103,7 @@ test("idle wins over frontmost — a machine nobody is at records nothing", asyn
   let idleSeconds = 0;
   const rig = makeRig({ idle: () => idleSeconds });
   await rig.sensor.start();
-  rig.advance(5 * 60_000);
-  await rig.sensor.tick(); // five minutes of real work on Cursor
+  await rig.run(5 * 60_000); // five minutes of real work on Cursor
   assert.equal(rig.sensor.status().current, "Cursor");
 
   // He walked away. Cursor is STILL frontmost — that is the whole trap.
@@ -161,12 +178,10 @@ test("a power event beats a query that resolves after it", async () => {
  */
 test("a query that keeps failing closes the interval instead of accruing it", async () => {
   const wedged = { app: null, error: "timeout" };
-  // The rig's queue holds its LAST entry forever, so this is: two answering
-  // queries, then a System Events that never answers again.
-  const rig = makeRig({ frontmost: ["Cursor", "Cursor", wedged] });
+  const rig = makeRig({ frontmost: ["Cursor"] });
   await rig.sensor.start(); // 09:00 — Cursor frontmost
-  rig.advance(60_000);
-  await rig.sensor.tick(); // 09:01 — the last query that answered
+  await rig.run(60_000); // a minute of polling that kept answering
+  rig.setFrontmost(wedged); // System Events stops answering from here
 
   rig.advance(4000);
   await rig.sensor.tick(); // first failure
@@ -193,13 +208,68 @@ test("a query that keeps failing closes the interval instead of accruing it", as
 
   // When the query recovers, the new interval starts at the recovery: the blind
   // stretch belongs to nobody, and is not handed to Chrome either.
-  rig.push("Google Chrome");
-  rig.advance(4000);
-  await rig.sensor.tick(); // drains the wedged answer
+  rig.setFrontmost("Google Chrome");
   rig.advance(4000);
   await rig.sensor.tick();
   assert.equal(rig.sensor.status().current, "Google Chrome");
   assert.equal(rig.recorded.length, 1);
+});
+
+/**
+ * The same lie through a different door: the QUERY keeps answering, but the
+ * POLLING stops. The machine sleeps at 18:00 with Cursor frontmost and
+ * `suspend` never lands (SIGSTOP, a forward clock jump, a wedged main process);
+ * ticks resume at 09:00 with Cursor STILL frontmost and the human back at the
+ * keyboard, so idle is small and the query answers normally.
+ *
+ * `focus`'s same-app branch is deliberately continuity-preserving, so nothing
+ * there can catch this — the staleness question has to be asked before it.
+ */
+test("a gap in POLLING is not absorbed as continuity by the same app", async () => {
+  const rig = makeRig({ frontmost: ["Cursor"] });
+  await rig.sensor.start(); // 17:59
+  await rig.run(60_000); // 18:00 — the last confirmed observation
+
+  rig.advance(15 * 60 * 60 * 1000); // the machine went away and came back
+  await rig.sensor.tick(); // 09:00 — Cursor still frontmost, human present
+
+  const [closed] = rig.recorded;
+  assert.ok(closed, "the overnight gap must not be absorbed into the open interval");
+  assert.equal(closed.end_reason, "unobserved");
+  assert.equal(closed.truncated, true);
+  assert.equal(
+    new Date(closed.ended_at).getTime() - new Date(closed.started_at).getTime(),
+    60_000,
+    "only the observed minute is credited — the 6h cap would have emitted six hours"
+  );
+
+  // ...and the app being frontmost NOW is a fresh interval starting now.
+  assert.equal(rig.sensor.status().current, "Cursor");
+  await rig.run(60_000);
+  await rig.sensor.stop({ flush: false });
+  const reopened = rig.recorded[1];
+  assert.equal(reopened.end_reason, "shutdown");
+  assert.equal(reopened.truncated, false, "a clean quit we were present for is a measurement");
+  assert.equal(
+    new Date(reopened.started_at).getTime(),
+    rig.at() - 60_000,
+    "it starts at the observation that reopened it, not back before the gap"
+  );
+});
+
+test("ordinary polling keeps one interval open — no slivers", async () => {
+  const rig = makeRig({ frontmost: ["Cursor"] });
+  await rig.sensor.start();
+  await rig.run(80_000);
+  assert.equal(
+    rig.recorded.length,
+    0,
+    "an hour of real work must not become poll-length slivers"
+  );
+  await rig.sensor.stop({ flush: false });
+  const [closed] = rig.recorded;
+  assert.equal(closed.truncated, false, "and it is a measurement, not a flagged row");
+  assert.equal(new Date(closed.ended_at).getTime() - new Date(closed.started_at).getTime(), 80_000);
 });
 
 test("a missing Accessibility grant is stated, not retried in silence", async () => {
@@ -229,9 +299,7 @@ test("a crash is salvaged on the next start, a clean stop is not", async () => {
   const openStore = memStore();
   const first = makeRig({ store, openStore });
   await first.sensor.start();
-  await first.sensor.tick();
-  first.advance(120_000);
-  await first.sensor.tick(); // confirms Cursor is still frontmost
+  await first.run(120_000); // two minutes of polling confirming Cursor
   assert.ok(openStore.peek().open, "the open interval is on disk for the salvage path");
 
   // No stop() — the process was killed. A fresh sensor over the same stores.
@@ -250,9 +318,7 @@ test("a crash is salvaged on the next start, a clean stop is not", async () => {
 test("stop() closes with a real end time and flushes", async () => {
   const rig = makeRig();
   await rig.sensor.start();
-  await rig.sensor.tick();
-  rig.advance(60_000);
-  await rig.sensor.tick(); // the poll was still confirming when he quit
+  await rig.run(60_000); // a minute of polling that kept confirming Cursor
   await rig.sensor.stop();
 
   const closed = rig.recorded.find((iv) => iv.end_reason === "shutdown");
@@ -406,48 +472,38 @@ test("overflow drops the oldest and counts the loss", () => {
 });
 
 test("a lost state file is counted apart from the other two losses", () => {
-  // The store reports it (jsonstore.js quarantines the bytes and counts them),
-  // because the file that was lost is where dropped/refused lived.
-  const store = memStore({ corrupted: 1 });
+  // The stores own the number (jsonstore.js counts the quarantined documents);
+  // the reporter reads it and never writes one back.
+  const store = memStore({}, { losses: 1 });
   const reporter = new AppReporter({
     store,
+    openStore: memStore({}, { losses: 2 }),
+    getBaseUrl: () => "https://gooni-bot.fly.dev",
+    getToken: () => "tok",
+    now: () => T0,
+  });
+
+  assert.equal(reporter.corrupted, 3, "either file can be the one that was lost");
+  assert.equal(reporter.dropped, 0, "a lost file is not a buffer overflow");
+  assert.equal(reporter.refused, 0, "and it is not a server refusal either");
+  assert.equal(reporter.status().corrupted, 3);
+
+  reporter.add(IV("a"));
+  assert.equal(
+    store.peek().corrupted, undefined,
+    "a persisted total would be a second opinion about a number the disk already owns"
+  );
+});
+
+test("a store that reports no losses contributes none", () => {
+  const reporter = new AppReporter({
+    store: memStore(),
     openStore: memStore(),
     getBaseUrl: () => "https://gooni-bot.fly.dev",
     getToken: () => "tok",
     now: () => T0,
   });
-
-  assert.equal(reporter.corrupted, 1);
-  assert.equal(reporter.dropped, 0, "a lost file is not a buffer overflow");
-  assert.equal(reporter.refused, 0, "and it is not a server refusal either");
-  assert.equal(
-    store.peek().corrupted, 1,
-    "written back at once: the file it came from is the one that was lost"
-  );
-
-  reporter.add(IV("a"));
-  assert.equal(store.peek().corrupted, 1, "and it survives every later persist");
-  assert.equal(reporter.status().corrupted, 1);
-});
-
-test("a lost OPEN-anchor file is counted too, and only once", () => {
-  const reporter = new AppReporter({
-    store: memStore({ corrupted: 1 }),
-    openStore: memStore({ corrupted: 2 }),
-    getBaseUrl: () => "https://gooni-bot.fly.dev",
-    getToken: () => "tok",
-    now: () => T0,
-  });
-  assert.equal(reporter.corrupted, 3, "either file can be the one that was lost");
-
-  const shared = memStore({ corrupted: 1 });
-  const collapsed = new AppReporter({
-    store: shared,
-    getBaseUrl: () => "https://gooni-bot.fly.dev",
-    getToken: () => "tok",
-    now: () => T0,
-  });
-  assert.equal(collapsed.corrupted, 1, "with one file there is one loss, not two");
+  assert.equal(reporter.corrupted, 0);
 });
 
 test("the tray says a state file was lost, and keeps saying it", () => {
