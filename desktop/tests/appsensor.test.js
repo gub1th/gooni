@@ -405,6 +405,62 @@ test("overflow drops the oldest and counts the loss", () => {
   assert.equal(reporter.dropped, 2, "a gap the app admits to is a bug report; a hidden one is a wrong answer");
 });
 
+test("a lost state file is counted apart from the other two losses", () => {
+  // The store reports it (jsonstore.js quarantines the bytes and counts them),
+  // because the file that was lost is where dropped/refused lived.
+  const store = memStore({ corrupted: 1 });
+  const reporter = new AppReporter({
+    store,
+    openStore: memStore(),
+    getBaseUrl: () => "https://gooni-bot.fly.dev",
+    getToken: () => "tok",
+    now: () => T0,
+  });
+
+  assert.equal(reporter.corrupted, 1);
+  assert.equal(reporter.dropped, 0, "a lost file is not a buffer overflow");
+  assert.equal(reporter.refused, 0, "and it is not a server refusal either");
+  assert.equal(
+    store.peek().corrupted, 1,
+    "written back at once: the file it came from is the one that was lost"
+  );
+
+  reporter.add(IV("a"));
+  assert.equal(store.peek().corrupted, 1, "and it survives every later persist");
+  assert.equal(reporter.status().corrupted, 1);
+});
+
+test("a lost OPEN-anchor file is counted too, and only once", () => {
+  const reporter = new AppReporter({
+    store: memStore({ corrupted: 1 }),
+    openStore: memStore({ corrupted: 2 }),
+    getBaseUrl: () => "https://gooni-bot.fly.dev",
+    getToken: () => "tok",
+    now: () => T0,
+  });
+  assert.equal(reporter.corrupted, 3, "either file can be the one that was lost");
+
+  const shared = memStore({ corrupted: 1 });
+  const collapsed = new AppReporter({
+    store: shared,
+    getBaseUrl: () => "https://gooni-bot.fly.dev",
+    getToken: () => "tok",
+    now: () => T0,
+  });
+  assert.equal(collapsed.corrupted, 1, "with one file there is one loss, not two");
+});
+
+test("the tray says a state file was lost, and keeps saying it", () => {
+  assert.match(
+    describeReporter({ buffered: 0, dropped: 0, refused: 0, corrupted: 2 }, { enabled: true, permission: true }),
+    /state lost 2×/
+  );
+  assert.doesNotMatch(
+    describeReporter({ buffered: 0, dropped: 0, refused: 0, corrupted: 0 }, { enabled: true, permission: true }),
+    /state lost/
+  );
+});
+
 test("concurrent flushes join instead of posting the batch twice", async () => {
   let calls = 0;
   const reporter = makeReporter({

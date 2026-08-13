@@ -27,6 +27,7 @@ const { AppFocusTracker } = require("./appfocus");
 const { AppReporter } = require("./appreporter");
 const { AppSensor } = require("./appsensor");
 const { queryFrontmost } = require("./frontmost");
+const { createJsonStore } = require("./jsonstore");
 
 const SIDECAR_LOG = "sidecar.log";
 const APP_SENSOR_STATE = "app-sensor.json";
@@ -120,37 +121,17 @@ function createSidecar() {
 // ── frontmost-app sensor ─────────────────────────────────────────────────────
 
 /**
- * A durable JSON file under userData.
- *
- * Rather than anything cleverer: each holds a small whole-rewritten document,
- * which is exactly what the extension's chrome.storage.local is. A read failure
- * falls back to empty — a corrupt file must not stop the sensor from sensing
- * (the reporter's own counters are what admit the loss).
+ * A durable JSON file under userData — atomic writes, loud corruption. The
+ * rules live in jsonstore.js, chrome-free so they are testable.
  *
  * TWO of them, and the split is the point: the buffer changes only when rows
  * are added or delivered, while the open-interval anchor is rewritten on every
  * poll. See AppReporter's header for why sharing one file made a long outage
- * write the whole backlog to disk every few seconds.
+ * write the whole backlog to disk every few seconds. Both are atomic — the
+ * anchor's write is tiny, so freshness costs nothing here.
  */
 function jsonStore(name) {
-  const file = path.join(userDataDir(), name);
-  return {
-    read() {
-      try {
-        return JSON.parse(fs.readFileSync(file, "utf8"));
-      } catch {
-        return {};
-      }
-    },
-    write(state) {
-      try {
-        fs.mkdirSync(userDataDir(), { recursive: true });
-        fs.writeFileSync(file, JSON.stringify(state), { mode: 0o600 });
-      } catch (e) {
-        console.error(`[gooni] could not persist ${name}:`, e.message);
-      }
-    },
-  };
+  return createJsonStore({ dir: userDataDir(), name });
 }
 
 function createAppSensor() {

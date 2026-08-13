@@ -1015,10 +1015,13 @@ class AppInterval(Base):
     duration_sec = Column(Float, nullable=False)
 
     # Why the interval closed: app_change | idle | locked | suspended |
-    # shutdown | truncated. `truncated` marks an interval closed at a heartbeat
-    # rather than a real end event (the shell was killed, or the machine slept,
-    # mid-interval), so downstream code can tell a measured span from a
-    # salvaged one.
+    # shutdown | unobserved | truncated — the full set the shell can stamp
+    # (`desktop/src/appfocus.js`) and the one `app_activity_service._END_REASONS`
+    # accepts. `truncated` marks an interval closed at a heartbeat rather than a
+    # real end event (the shell was killed, or the machine slept, mid-interval);
+    # `unobserved` marks one the sensor closed itself because the frontmost
+    # query went blind, which is a WEDGED sensor rather than a crash salvage.
+    # Both carry the `truncated` flag, so this column is what tells them apart.
     end_reason = Column(String, nullable=True)
     truncated = Column(Boolean, nullable=False, default=False)
 

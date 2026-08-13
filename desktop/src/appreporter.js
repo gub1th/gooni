@@ -18,7 +18,9 @@
  *    an under-eager one costs a redelivery that dedups on `client_id`.
  *  - **The buffer is bounded, and overflow is COUNTED.** Past MAX_BUFFERED the
  *    oldest go, and the number that went is remembered — a gap the app admits
- *    to is a bug report; a gap it hides is a wrong answer.
+ *    to is a bug report; a gap it hides is a wrong answer. The same reasoning
+ *    gives a lost state FILE its own third counter (`corrupted`), reported by
+ *    the store: after that loss nothing else remembers it happened.
  *  - **One flush at a time.** Flushes are triggered by a timer AND by quit AND
  *    by the buffer filling; two overlapping flushes would post the same rows
  *    twice. (Harmless on the server, which dedups — but it would double-count
@@ -112,6 +114,13 @@ class AppReporter {
     this.dropped = Number(saved.dropped) || 0;
     /** Intervals destroyed because the server refused the batch. */
     this.refused = Number(saved.refused) || 0;
+    // A THIRD cause of loss, deliberately not folded into either of the other
+    // two: the state file itself was unreadable, so an unknown backlog went
+    // with it — along with whatever `dropped`/`refused` had counted. The store
+    // reports it (see jsonstore.js) because after that loss nothing else can.
+    // Summed across BOTH files, since either can be the one that was lost.
+    this.corrupted =
+      (Number(saved.corrupted) || 0) + (this.openStore ? Number(savedOpen.corrupted) || 0 : 0);
     // The open interval, so a crash can be salvaged on the next launch.
     // `saved.open` is where it lived before the split: read it as a fallback so
     // the first launch after an upgrade still salvages whatever was open, and
@@ -121,6 +130,12 @@ class AppReporter {
     this.retryAfter = 0;
     this.lastFlush = null;
     this._flushing = null;
+
+    // Write the count back immediately. The file it came from is the one that
+    // was just lost, so a shell that senses nothing before quitting would
+    // otherwise forget the loss ever happened — and the next launch, reading a
+    // file it wrote itself, would look like a clean first run.
+    if (this.corrupted) this._persist();
   }
 
   /** The batch state: the buffer and the two loss counters. */
@@ -129,6 +144,7 @@ class AppReporter {
       buffered: this.buffered,
       dropped: this.dropped,
       refused: this.refused,
+      corrupted: this.corrupted,
     };
     // Without a dedicated open store the two collapse back into one file, and
     // the anchor has to keep riding along or a crash loses it.
@@ -170,6 +186,7 @@ class AppReporter {
       buffered: this.buffered.length,
       dropped: this.dropped,
       refused: this.refused,
+      corrupted: this.corrupted,
       lastFlush: this.lastFlush,
       retryAfter: this.retryAfter,
     };
@@ -305,6 +322,9 @@ function describeReporter(status, { enabled, permission }) {
   if (status.buffered) parts.push(`${status.buffered} buffered`);
   if (status.dropped) parts.push(`${status.dropped} dropped`);
   if (status.refused) parts.push(`${status.refused} destroyed`);
+  // Never clears on its own, so it stays on the line: a backlog was lost with
+  // the state file and the other two counts went with it.
+  if (status.corrupted) parts.push(`state lost ${status.corrupted}×`);
   return `App sensor: ${parts.length ? parts.join(" · ") : "running"}`;
 }
 
