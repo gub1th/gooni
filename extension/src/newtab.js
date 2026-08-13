@@ -138,6 +138,31 @@ export function probeVerdict({ reachable, blocked, framePainted }) {
   return null;
 }
 
+/**
+ * Whether the stall timeout still has anything to say, given everything known
+ * by the time it fires.
+ *
+ * The SAME rule as `probeVerdict`, on the other path — which is the whole
+ * reason it lives here instead of inline at the timer. The timeout catches a
+ * load that neither paints nor errors, and nothing else: a frame that has
+ * already painted, or a probe that already found something answering, has
+ * settled the question the timer was armed to ask. Letting it fire anyway
+ * replaces a live surface with an error panel and throws away whatever was
+ * typed into the capture box — a frame paints long before its `load` event
+ * does when one subresource hangs, so "no load event at 12s" is not evidence
+ * of a blank tab.
+ *
+ * `blocked` returns null because that verdict belongs to the probe, which
+ * words it precisely; "didn't finish loading" over a frame Chrome refused to
+ * embed is the wrong sentence, not a second opinion.
+ */
+export function stallVerdict({ reachable, blocked, framePainted } = {}) {
+  if (framePainted) return null;
+  if (blocked) return null;
+  if (reachable) return null;
+  return "timeout";
+}
+
 const REASONS = {
   invalid: {
     title: "That isn't a URL Gooni can open",
@@ -152,7 +177,7 @@ const REASONS = {
   timeout: {
     title: "Gooni didn't finish loading",
     detail:
-      "The page was reachable but never painted. It may be refusing to be framed, or the load stalled.",
+      "Nothing painted, and nothing confirmed the address was answering either. The load may have stalled, or the connection may be hanging.",
   },
   blocked: {
     title: "Gooni refused to be framed",

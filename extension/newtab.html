@@ -35,12 +35,19 @@
         before the app paints is the placeholder this page is supposed not to
         have.
       */
+      /*
+        The void is DRAWN here, not inherited from whatever the emptied iframe
+        happens to leave behind: an iframe's own base background is not
+        guaranteed transparent, and near-white text over a white leftover is an
+        invisible message on the one surface that has to be readable.
+      */
       #failure {
         display: none;
         position: fixed;
         inset: 0;
         box-sizing: border-box;
         padding: 12vh 8vw;
+        background: #000;
         color: rgba(244, 245, 244, 0.86);
         font: 15px/1.6 ui-sans-serif, -apple-system, system-ui, sans-serif;
       }

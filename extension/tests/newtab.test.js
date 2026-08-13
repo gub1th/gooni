@@ -8,6 +8,7 @@ import {
   normalizeAppUrl,
   probeVerdict,
   resolveAppUrl,
+  stallVerdict,
 } from "../src/newtab.js";
 import { DEFAULT_APP_URL, CONFIG_KEYS, loadConfig } from "../src/config.js";
 
@@ -175,6 +176,37 @@ test("a blocked frame is the one verdict a painted frame cannot overrule", () =>
   assert.equal(
     probeVerdict({ reachable: true, blocked: "X-Frame-Options: deny", framePainted: true }),
     "blocked",
+  );
+});
+
+test("the stall timeout stands down once the probe found something answering", () => {
+  // The regression: the timer is armed before either the frame or the probe has
+  // spoken, and a reachable probe produces no verdict — so it used to fire 12s
+  // later and empty the iframe under an app that had painted but whose `load`
+  // was still waiting on one hung subresource, taking the capture box's
+  // contents with it.
+  assert.equal(stallVerdict({ reachable: true, blocked: null, framePainted: false }), null);
+  // The same rule probeVerdict enforces, on the other path.
+  assert.equal(stallVerdict({ reachable: false, blocked: null, framePainted: true }), null);
+  // Still armed while nothing has settled it — a load that neither paints nor
+  // errors is exactly what the timeout is for.
+  assert.equal(stallVerdict({ reachable: false, blocked: null, framePainted: false }), "timeout");
+  // A probe that hasn't answered yet is not an answer.
+  assert.equal(stallVerdict({ framePainted: false }), "timeout");
+  assert.equal(stallVerdict({}), "timeout");
+});
+
+test("a blocked frame is worded by the probe, not by the stall timeout", () => {
+  // "didn't finish loading" over a frame Chrome refused to embed is the wrong
+  // sentence, not a second opinion — and `load` fires for the blocked page, so
+  // the two would otherwise contradict each other on screen.
+  assert.equal(
+    stallVerdict({ reachable: true, blocked: "X-Frame-Options: deny", framePainted: true }),
+    null,
+  );
+  assert.equal(
+    stallVerdict({ reachable: false, blocked: "X-Frame-Options: deny", framePainted: false }),
+    null,
   );
 });
 

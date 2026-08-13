@@ -22,6 +22,7 @@ import {
   normalizeAppUrl,
   probeVerdict,
   resolveAppUrl,
+  stallVerdict,
 } from "./src/newtab.js";
 
 const storage = { get: (keys) => chrome.storage.local.get(keys) };
@@ -39,6 +40,8 @@ let timer = null;
 /** Bumped per mount, so a slow probe from a previous attempt can't rule on this one. */
 let mountToken = 0;
 let framePainted = false;
+/** This mount's probe answer, or null while it is still outstanding. */
+let probeState = null;
 
 function showFailure(spec) {
   const f = frameFailure(spec);
@@ -119,6 +122,7 @@ async function probeApp(url) {
 async function mount() {
   const token = ++mountToken;
   framePainted = false;
+  probeState = null;
 
   const cfg = await loadConfig(storage);
 
@@ -136,9 +140,15 @@ async function mount() {
 
   clearTimeout(timer);
   // The timeout only catches a STALL — a load that neither paints nor errors.
-  // Everything else is settled by the probe below.
+  // Everything else is settled by the frame or the probe, and `stallVerdict` is
+  // how that is ENFORCED rather than merely intended: the timer is armed before
+  // either of them has spoken, so it has to re-read both when it fires. Firing
+  // on a frame that painted (or on a probe that found something answering) would
+  // empty the iframe and take the user's half-typed capture with it.
   timer = setTimeout(() => {
-    if (token === mountToken) showFailure({ reason: "timeout", url });
+    if (token !== mountToken) return;
+    if (!stallVerdict({ ...(probeState ?? {}), framePainted })) return;
+    showFailure({ reason: "timeout", url });
   }, LOAD_TIMEOUT_MS);
 
   frame.addEventListener(
@@ -166,6 +176,7 @@ async function mount() {
   // offers no way to reach the options page.
   const probe = await probeApp(url);
   if (token !== mountToken) return;
+  probeState = probe;
 
   if (!probe.reachable && !probe.blocked) {
     // Give a cached paint the chance to settle it before we call it dead.
@@ -174,7 +185,13 @@ async function mount() {
   }
 
   const verdict = probeVerdict({ ...probe, framePainted });
-  if (!verdict) return;
+  if (!verdict) {
+    // No verdict means the frame painted or something answered — either way the
+    // stall timer's question is answered, so it is disarmed rather than left to
+    // fire over a working surface twelve seconds later.
+    clearTimeout(timer);
+    return;
+  }
   clearTimeout(timer);
   showFailure({ reason: verdict, url, note: probe.blocked || undefined });
 }
