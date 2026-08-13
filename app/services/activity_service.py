@@ -289,33 +289,14 @@ def _trackables(db: Session, before_naive, limit: int) -> list[dict]:
     return out
 
 
-# The MINIMUM span one page of the feed looks back for device opens.
+# The FEWEST local days one page of the feed derives device rows for.
 #
 # The other sources page by `ORDER BY … DESC LIMIT n`, which the gap rule can't
 # use: deciding whether an interval is an OPEN needs the interval BEFORE it, and
-# "before" is the direction a DESC-limited query throws away. So this source is
-# WINDOWED instead — it derives every open in `[start, before)` and lets the
-# merge take the newest. The cost of a page is bounded by a span of time rather
-# than by however many tab switches happened to fit in it.
-_DEVICE_LOOKBACK = timedelta(days=3)
-
-# The absolute floor under that window.
-#
-# A fixed lookback is not enough on its own, because the paging cursor is the
-# merged page's OLDEST item and the other sources can push it back further than
-# the lookback IN ONE STEP. Away from the machine for five days: page 1's window
-# is the last three days and finds nothing, the other sources return fewer than
-# `limit` items and the oldest is a note from eight days ago, so page 2 asks
-# `before = now-8d` and looks at `[now-11d, now-8d)`. Every device row in the
-# skipped `[now-8d, now-3d)` span is then unreachable on any page.
-#
-# So the window FOLLOWS THE STEP: it extends down to the page's own oldest
-# non-device item, and never further, so it can only grow when paging across a
-# quiet stretch — which is the case it exists for. This constant is what stops
-# "follows the step" from meaning "scans back to the beginning of time" when the
-# other sources are empty or the one item they returned is years old. Same
-# spirit as `browser_activity_service.MAX_SUMMARY_DAYS`.
-_DEVICE_MAX_LOOKBACK = timedelta(days=31)
+# "before" is the direction a DESC-limited query throws away. So this source
+# derives whole LOCAL DAYS (see device_activity) and the page SELECTS which ones
+# — three at a minimum, which covers the ordinary read cheaply.
+_DEVICE_MIN_DAYS = 3
 
 
 def _page_reach(items: list[dict], limit: int, before) -> datetime | None:
@@ -326,6 +307,13 @@ def _page_reach(items: list[dict], limit: int, before) -> datetime | None:
     `limit` — in which case the next cursor lands exactly there. `None` when
     they returned nothing at all: there is no step to follow, and the caller
     falls back to the absolute floor.
+
+    Why a derived source needs this at all: the paging cursor is the merged
+    page's OLDEST item, and the other sources can push it back further in ONE
+    STEP than a fixed lookback covers. Away from the machine for five days, the
+    newest note is eight days old and page 2 asks `before = now-8d` — so unless
+    the day set follows the step, every device row in the skipped span is
+    derived by no page at all.
 
     The `before` guard is applied here as well as after the merge, because a
     promise's effective ts is recomputed in Python and can land newer than the
@@ -347,22 +335,34 @@ def _page_reach(items: list[dict], limit: int, before) -> datetime | None:
 
 
 def _device(db: Session, before_naive, limit: int, *, reach=None) -> list[dict]:
+    from ..common import local_day_of, local_now
     from . import device_activity
 
     end = before_naive or datetime.utcnow()
-    # `reach` is how far this page's other sources actually extend back. None
-    # means nothing bounds the step, so the window opens to the absolute floor
-    # rather than to a lookback that could sit entirely inside the jump.
-    start = end - _DEVICE_MAX_LOOKBACK if reach is None else min(end - _DEVICE_LOOKBACK, reach)
-    start = max(start, end - _DEVICE_MAX_LOOKBACK)
     try:
-        opens = device_activity.device_opens(db, start=start, end=end)
+        tz = local_now(db).tzinfo
+        end_day = local_day_of(end, tz)
+        # `reach` is how far this page's other sources actually extend back;
+        # None means nothing bounds the step, so the set opens to the absolute
+        # floor rather than to a few days that could sit inside the jump.
+        floor_day = end_day - timedelta(days=device_activity.MAX_DERIVED_DAYS - 1)
+        if reach is None:
+            start_day = floor_day
+        else:
+            start_day = min(local_day_of(reach, tz), end_day - timedelta(days=_DEVICE_MIN_DAYS - 1))
+        start_day = max(start_day, floor_day)
+        opens = device_activity.device_opens(db, start_day=start_day, end_day=end_day)
     except Exception as e:  # pragma: no cover — defensive
         print(f"[activity] device opens failed: {e}")
         return []
 
-    return [
-        {
+    # A day window reaches past the cursor by design — the run's count describes
+    # the DAY, not the page. Rows newer than the cursor belong to a newer page.
+    out: list[dict] = []
+    for it in opens:
+        if before_naive is not None and it["at"] >= before_naive:
+            continue
+        out.append({
             "key": it["key"],
             "kind": "device",
             "at": _utc(it["at"]),
@@ -373,9 +373,10 @@ def _device(db: Session, before_naive, limit: int, *, reach=None) -> list[dict]:
             # rows included), so this exists to make a row's origin greppable,
             # not to make it look different.
             "source": it["layer"],
-        }
-        for it in opens[:limit]
-    ]
+        })
+        if len(out) >= limit:
+            break
+    return out
 
 
 def build_activity_feed(

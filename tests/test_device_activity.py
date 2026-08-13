@@ -10,10 +10,12 @@ The load-bearing assertions:
      switching between two names emits ONE row per name, not one per switch;
      a return after OPEN_GAP emits a second. If this regresses, an ordinary day
      puts hundreds of rows in the log and the log stops being read.
-  2. THE LOOKBACK BOUNDARY. The feed derives opens over a sliding window, so an
-     interval just before the window has to be visible to the rule but must not
-     produce a row — otherwise every page of the log manufactures a fake
-     "opened" at its own edge.
+  2. THE DAY WINDOW. Opens are derived over whole LOCAL calendar days, never
+     around the reader's paging cursor, so "what opened on day D" has ONE answer
+     however the reader got there. An interval just before a day's start has to
+     be visible to the gap rule but must not produce a row, or every local
+     midnight manufactures a fake "opened"; a run crossing midnight splits into
+     one row per day, each anchored at its own first open.
   3. ONE FEED SHAPE. Browser and app rows come out identical apart from their
      layer, and identical in kind to what the frontend renders for the phone's
      Shortcuts rows.
@@ -44,9 +46,29 @@ from app.db.database import SessionLocal, engine  # noqa: E402
 from app.db.models import AppInterval, Base, BrowserInterval, Note, Trackable  # noqa: E402
 from app.services import activity_service, app_activity_service, device_activity  # noqa: E402
 
-T0 = datetime(2026, 8, 12, 17, 0, 0)
+from zoneinfo import ZoneInfo  # noqa: E402
+
+# The db has no Settings row, so local_now falls back to this — the same default
+# `common.local_now` uses. Day boundaries below are PT midnights, not UTC ones.
+TZ = ZoneInfo("America/Los_Angeles")
+
+T0 = datetime(2026, 8, 12, 17, 0, 0)  # 10:00 PDT
 
 _failures = []
+
+
+def _day_of(naive_utc):
+    """The LOCAL calendar day a stored (naive-UTC) timestamp falls on."""
+    return naive_utc.replace(tzinfo=timezone.utc).astimezone(TZ).date()
+
+
+def _at(day, hour, minute=0):
+    """A local wall-clock moment on `day`, as the naive UTC the DB stores."""
+    return (
+        datetime(day.year, day.month, day.day, hour, minute, tzinfo=TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
 
 
 def check(cond, msg):
@@ -254,7 +276,7 @@ def main():
     db.commit()
 
     window = device_activity.device_opens(
-        db, start=T0 - timedelta(hours=1), end=T0 + timedelta(hours=2)
+        db, start_day=_day_of(T0), end_day=_day_of(T0)
     )
     texts = [it["text"] for it in window]
     check(
@@ -274,6 +296,18 @@ def main():
     check(
         {it["layer"] for it in window} == {"app", "browser"},
         f"rows name their layer: {[it['layer'] for it in window]}",
+    )
+    # ONE place writes the verb. The timeline renders `×count` itself, so it
+    # needs the sentence WITHOUT the count; rebuilding `f"opened {label}"` there
+    # is the fork this module exists to prevent.
+    check(
+        all(it["text"].startswith(it["phrase"]) for it in window)
+        and {it["phrase"] for it in window} == {
+            "opened cursor", "opened slack", "opened finder",
+            "opened leetcode", "opened mail.google",
+        },
+        f"every row carries the countless phrase the timeline renders: "
+        f"{sorted({it['phrase'] for it in window})}",
     )
 
     # ── no Trackable was harmed ──────────────────────────────────────────────
@@ -320,15 +354,74 @@ def main():
         "exclude_kinds={'device'} drops them (the pre-reply state block's read)",
     )
 
+    # ── local-day windows ────────────────────────────────────────────────────
+    #
+    # The whole point of the seam: "what opened on day D" has ONE answer. A run
+    # crossing local midnight is two rows, one per day, each anchored at its own
+    # first open; an interval just before midnight is evidence, not a row; and a
+    # PAST day reads identically however wide a window asked about it.
+    print("\nlocal-day windows")
+
+    d1 = _day_of(T0) - timedelta(days=5)   # a quiet, finished day
+    d2 = d1 + timedelta(days=1)
+    app_activity_service.ingest_batch(
+        db,
+        [
+            # An evening run on d1 that carries on past midnight into d2.
+            _app("m1", app="Ableton", start=_at(d1, 22, 0), seconds=600),
+            _app("m2", app="Ableton", start=_at(d1, 23, 0), seconds=600),
+            _app("m3", app="Ableton", start=_at(d1, 23, 55), seconds=240),
+            # 00:01 — three minutes after the last one ended, so a CONTINUATION
+            # by the gap rule, not a new opening.
+            _app("m4", app="Ableton", start=_at(d2, 0, 1), seconds=600),
+            _app("m5", app="Ableton", start=_at(d2, 0, 40), seconds=600),
+        ],
+    )
+
+    both = device_activity.device_opens(db, start_day=d1, end_day=d2)
+    ableton = [it for it in both if it["name"] == "ableton"]
+    check(
+        [(it["day"], it["count"]) for it in sorted(ableton, key=lambda i: i["at"])]
+        == [(d1.isoformat(), 3), (d2.isoformat(), 1)],
+        f"a run across midnight is one row per LOCAL day, each with its own "
+        f"count: {[(it['day'], it['count'], it['at'].isoformat()) for it in ableton]}",
+    )
+    check(
+        sorted(it["at"] for it in ableton) == [_at(d1, 22, 0), _at(d2, 0, 40)],
+        "each day-part anchors at its FIRST open inside that day — and 00:01, "
+        "three minutes after 23:59, is a continuation rather than a fake "
+        "'opened' manufactured at midnight",
+    )
+    check(
+        len({it["key"] for it in ableton}) == 2,
+        f"the two day-parts have distinct, stable keys: {[it['key'] for it in ableton]}",
+    )
+
+    # THE property the seam buys: a past day does not depend on the window that
+    # asked about it.
+    narrow = [it for it in device_activity.device_opens(db, start_day=d1, end_day=d1)]
+    wide = [
+        it
+        for it in device_activity.device_opens(
+            db, start_day=d1 - timedelta(days=9), end_day=d2 + timedelta(days=2)
+        )
+        if it["day"] == d1.isoformat()
+    ]
+    key = lambda rows: sorted((r["key"], r["text"], r["at"]) for r in rows)  # noqa: E731
+    check(
+        key(narrow) == key(wide) and narrow,
+        f"a past day reads identically however wide the window: "
+        f"{len(narrow)} vs {len(wide)}",
+    )
+
     # ── paging over a quiet stretch ──────────────────────────────────────────
     #
-    # The device source is WINDOWED while every other source pages by
-    # `ORDER BY … DESC LIMIT n`, so the cursor can step back further in one page
-    # than a fixed lookback covers. Five days away from the machine: nothing
-    # recent, the newest note is eight days old, and the device runs sit six days
-    # back — in the span between the two. A window pinned to the last three days
-    # finds nothing on page 1, and page 2 (cursor = the note, eight days back)
-    # starts BELOW the runs. They would then be on no page at all.
+    # The feed SELECTS days; it does not define windows. But the paging cursor is
+    # still the merged page's OLDEST item, and the other sources can push it back
+    # further in one step than the minimum day set covers. Five days away from
+    # the machine: nothing recent, the newest note is eight days old, and the
+    # device runs sit six days back — in the span between the two. If the day set
+    # did not follow that step, those runs would be derived by no page at all.
     print("\npaging over a quiet stretch")
 
     anchor = T0 - timedelta(days=1)  # the page-1 cursor; everything above is older
@@ -370,8 +463,8 @@ def main():
     across_the_gap = _paged_device_rows()
     check(
         "opened xcode ×2" in across_the_gap,
-        f"a device run older than the fixed lookback but newer than the page's "
-        f"own oldest item is still reachable — the window follows the cursor's "
+        f"a device run older than the minimum day set but newer than the page's "
+        f"own oldest item is still reachable — the day set follows the cursor's "
         f"step instead of sitting inside it: {sorted(across_the_gap)}",
     )
 
@@ -391,7 +484,7 @@ def main():
 
     # ── the scan cap ─────────────────────────────────────────────────────────
     #
-    # The forward gap rule reads a WINDOW rather than paging, so a 31-day floor
+    # The forward gap rule reads a WINDOW rather than paging, so a month of days
     # over a dense sensor is tens of thousands of rows per read. The cap bounds
     # that — but a row cap is exactly the kind of thing that reintroduces the
     # fake `opened` at a boundary, because a truncated predecessor is
@@ -407,7 +500,7 @@ def main():
     filler.append(_app("cap-kept", app="Kept", start=cap_t0 + timedelta(minutes=300), seconds=600))
     app_activity_service.ingest_batch(db, filler)
 
-    cap_window = dict(start=cap_t0 - timedelta(minutes=10), end=cap_t0 + timedelta(hours=8))
+    cap_window = dict(start_day=_day_of(cap_t0), end_day=_day_of(cap_t0))
     uncapped = {it["text"] for it in device_activity.device_opens(db, **cap_window)}
     check(
         {"opened filler", "opened kept"} <= uncapped,

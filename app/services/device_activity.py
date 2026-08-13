@@ -35,6 +35,17 @@ The two knobs answer different questions and that is why there are two: the gap
 decides what an open IS ("opened" must mean opened, not touched), the cluster
 decides how many ROWS a day of opens is worth.
 
+**And the window is a LOCAL CALENDAR DAY, not the reader's paging cursor.**
+Derivation used to run over `[cursor - lookback, cursor)`, which made the answer
+a function of how you got there: a run's `×N` counted only the opens older than
+whatever cursor happened to ask, so the same afternoon read `×5` on one page and
+`×3` on the next, and a span the cursor jumped over was derived by no page at
+all. Both were the same bug wearing different clothes, so the seam moved instead
+of getting a third patch. "What opened on day D" now has ONE answer; callers
+SELECT days, they do not define windows. A run crossing local midnight splits
+into one row per day, each anchored at its own first open — the grammar
+`focusTime.ts::splitSegmentsByDay` already uses for focus sessions.
+
 Deliberately NOT attribution. These rows say what happened and when. Nothing
 here scores a day, binds attention to a Promise, or computes a percentage —
 `browser_intervals`/`app_intervals` stay the honest raw substrate a later
@@ -83,17 +94,28 @@ CLUSTER_GAP = timedelta(minutes=60)
 # say it.
 #
 # The gap rule is a forward scan, so unlike every other activity source this one
-# cannot page with `ORDER BY … DESC LIMIT n` (see `_interval_opens`); it reads a
-# WINDOW. That is affordable at the usual 3-day window (~2.6k rows at the
-# measured ~860 intervals/day), and it is the feed's 31-day floor — a real case,
-# reached by paging across a stretch with no other activity in it — that would
-# otherwise materialise ~27k rows per table per page.
+# cannot page with `ORDER BY … DESC LIMIT n` (see `_sensor_rows`); it reads a
+# WINDOW. That is affordable over the few days a page usually wants (~860
+# intervals/day measured), and it is the widest reads — a month at
+# MAX_DERIVED_DAYS — that would otherwise materialise ~27k rows per table.
 #
-# Truncation is at the OLD edge (the newest N survive), because the recent span
-# is the one the page actually shows and the dropped span is the one the NEXT
-# page's own window covers. Both tables are capped independently: either can be
-# the dense one, and a quiet browser is no reason to starve the app scan.
+# Truncation is at the OLD edge (the newest N survive), because the recent days
+# are the ones a reader is actually looking at. A day the scan only half read is
+# DROPPED rather than reported: a missing row is a gap, a half-counted day is a
+# wrong number, and a wrong number is what day-binding exists to remove. Both
+# tables are capped independently: either can be the dense one, and a quiet
+# browser is no reason to starve the app scan.
 MAX_SCAN_INTERVALS = 10_000
+
+# The most LOCAL DAYS one read will derive.
+#
+# Day-binding makes "what opened on day D" a fixed question, but it does not
+# bound how many days a caller may ask about, and a derived source's cost scales
+# with how much the sensors recorded rather than with how many rows come out.
+# Thirty-one days is the span `browser_activity_service.MAX_SUMMARY_DAYS` allows
+# its SQL fold, for the same reason. Excess is trimmed from the OLD end and
+# logged — an older read covers what was trimmed.
+MAX_DERIVED_DAYS = 31
 
 # ── the phrase ───────────────────────────────────────────────────────────────
 
@@ -207,11 +229,11 @@ def cluster_opens(opens, *, gap: timedelta = CLUSTER_GAP):
     as 18 of a 39-row day landing in one hour and reading as a burst of activity
     that never happened.
 
-    The first open is also the STABLE anchor, which is what makes it safe for a
-    feed that pages over a sliding window: a run's start is decided only by what
-    precedes it, and `device_opens` looks back far enough to see that. A run that
-    began before the window is re-anchored outside it and dropped — it belongs to
-    the older page, where it appears exactly once.
+    The first open is also the STABLE anchor, and with day-bound windows it is a
+    stable KEY: callers run this over one local day's opens, so a run's anchor is
+    its first open within that day and cannot move when a different reader asks
+    about the same day. A run that spans midnight yields one row per day, each
+    anchored at its own first open.
     """
     runs: dict[str, dict] = {}
     out: list[dict] = []
@@ -227,31 +249,24 @@ def cluster_opens(opens, *, gap: timedelta = CLUSTER_GAP):
     return out
 
 
-def _interval_opens(db: Session, model, name_col, *, start, end, layer, label_fn):
-    """Gap rule then clustering, over one interval table, for a naive-UTC window.
+def _sensor_rows(db: Session, model, name_col, *, start, end, layer):
+    """One interval table's rows for `[start, end)`, ascending, capped.
 
-    The query reaches back further than the window on purpose, and by two
-    different amounts for two different reasons:
+    The query REACHES BACK before `start` so the gap rule can judge the first
+    interval in the window. That grace is what stops a continuation from being
+    reported as an opening at the window's leading edge, and under day-binding
+    the edge it protects is local midnight: an interval at 23:58 is exactly the
+    evidence that makes one at 00:01 a continuation, and without it every
+    midnight manufactures an "opened" for whatever was on screen.
 
-      - `OPEN_GAP`, so the first interval inside the window can be JUDGED — a
-        continuation whose evidence sits outside the window would otherwise be
-        reported as an opening at every page's leading edge;
-      - `CLUSTER_GAP`, so an open at the window's leading edge can be recognised
-        as a CONTINUATION of a run that began just before it. Without that, the
-        same run starts again at every page boundary and prints twice.
-
-    Runs anchored before `start` are dropped at the end; they belong to the
-    older page, where their first open is inside the window.
-
-    The scan is capped at `MAX_SCAN_INTERVALS` rows, taken from the NEW edge and
-    reversed for the forward pass. When the cap bites, the window's own start is
-    raised to the oldest surviving interval PLUS the same reach-back grace, so a
-    predecessor that was truncated away can never be mistaken for absence and
-    manufacture a fake "opened" at the truncation boundary — the exact failure
-    the reach-back exists to prevent, which a row cap could otherwise reintroduce
-    through a side door. It costs the first `lookback` of the surviving span,
-    which the next page's window covers, and it says so in the log rather than
-    reading as complete coverage.
+    Returns `(rows, floor)`. `floor` is the earliest moment this scan can speak
+    for — normally `start`, but when `MAX_SCAN_INTERVALS` bites it rises to the
+    oldest surviving interval plus the same grace. Truncation takes the NEWEST
+    rows and the caller reports nothing before the floor, because a predecessor
+    that was cut away is not evidence of absence: counting it as one would put a
+    fake "opened" at the truncation boundary, which is the failure the reach-back
+    exists to prevent. What survives is still whole runs with whole counts — the
+    cap can cost a row, never a wrong number.
     """
     lookback = OPEN_GAP + CLUSTER_GAP
     newest_first = (
@@ -263,42 +278,51 @@ def _interval_opens(db: Session, model, name_col, *, start, end, layer, label_fn
     )
     capped = len(newest_first) > MAX_SCAN_INTERVALS
     rows = list(reversed(newest_first[:MAX_SCAN_INTERVALS]))
+    floor = start
     if capped and rows:
-        start = max(start, rows[0][2] + lookback)
+        floor = max(start, rows[0][2] + lookback)
         print(
             f"[device_activity] {layer} scan hit MAX_SCAN_INTERVALS "
-            f"({MAX_SCAN_INTERVALS}); opens before {start.isoformat()} are not "
-            f"derived on this read — an older page covers that span"
+            f"({MAX_SCAN_INTERVALS}); opens before {floor.isoformat()} are not "
+            f"derived on this read — a narrower read covers them"
+        )
+    return rows, floor
+
+
+def device_opens(db: Session, *, start_day, end_day) -> list[dict]:
+    """Every `opened X` row for the LOCAL days `[start_day, end_day]`, newest-first.
+
+    Days are `datetime.date` in Daniel's tz (`Settings.nudge_tz`), inclusive.
+    Each item: `{layer, day, key, name, label, at, count, phrase, text}` —
+    `phrase` is the sentence alone ("opened cursor") and `text` appends the
+    `×N` a clustered run carries. Two fields rather than two call sites building
+    the verb: the timeline renders `×count` itself and would otherwise print it
+    twice, and a second `f"opened {...}"` somewhere else is exactly the fork this
+    module exists to prevent.
+
+    The window is the DAY, never the caller's cursor, so a past day's rows do not
+    depend on how the reader arrived at them. Wrapped defensively per sensor: a
+    schema drift in one table must not take the whole feed down with it.
+    """
+    from ..common import local_day_bounds, local_now
+    from ..db.models import AppInterval, BrowserInterval
+
+    if end_day < start_day:
+        return []
+    span = (end_day - start_day).days + 1
+    if span > MAX_DERIVED_DAYS:
+        start_day = end_day - timedelta(days=MAX_DERIVED_DAYS - 1)
+        print(
+            f"[device_activity] read asked for {span} days; derived the newest "
+            f"{MAX_DERIVED_DAYS} (from {start_day.isoformat()}) — older days need "
+            f"a narrower read"
         )
 
-    opens = opens_from_intervals(rows, since=start - CLUSTER_GAP)
-    return [
-        {
-            "layer": layer,
-            "key": f"device-{layer}-{run['key']}",
-            "name": run["name"],
-            "label": label_fn(run["name"]),
-            "at": run["at"],
-            "count": run["count"],
-        }
-        for run in cluster_opens([(f"{key}", name, at) for key, name, at in opens])
-        if run["at"] >= start
-    ]
-
-
-def device_opens(db: Session, *, start: datetime, end: datetime) -> list[dict]:
-    """Every `opened X` row from BOTH interval sensors in `[start, end)`, newest-first.
-
-    `start`/`end` are naive UTC (the storage convention). Each item:
-    `{layer, key, name, label, at, count, text}` — `text` is the rendered
-    sentence (with a `×N` when the run is more than one open, exactly as the
-    timeline renders a clustered Shortcuts card), `name` the raw host/app.
-
-    Wrapped defensively per sensor: a schema drift in one table must not take
-    the whole activity feed down with it (the same posture every source in
-    `activity_service` takes).
-    """
-    from ..db.models import AppInterval, BrowserInterval
+    tz = local_now(db).tzinfo
+    days = [start_day + timedelta(days=i) for i in range((end_day - start_day).days + 1)]
+    bounds = {d: local_day_bounds(tz, d) for d in days}
+    span_start = bounds[days[0]][0]
+    span_end = bounds[days[-1]][1]
 
     items: list[dict] = []
     for model, col, layer, label_fn in (
@@ -306,13 +330,34 @@ def device_opens(db: Session, *, start: datetime, end: datetime) -> list[dict]:
         (AppInterval, AppInterval.app, "app", lambda n: n),
     ):
         try:
-            items += _interval_opens(
-                db, model, col, start=start, end=end, layer=layer, label_fn=label_fn
+            rows, floor = _sensor_rows(
+                db, model, col, start=span_start, end=span_end, layer=layer
             )
+            opens = opens_from_intervals(rows, since=max(span_start, floor))
         except Exception as e:  # pragma: no cover — defensive
             print(f"[device_activity] {layer} opens query failed: {e}")
+            continue
+
+        for day in days:
+            day_start, day_end = bounds[day]
+            in_day = [
+                (f"{key}", name, at) for key, name, at in opens if day_start <= at < day_end
+            ]
+            for run in cluster_opens(in_day):
+                items.append(
+                    {
+                        "layer": layer,
+                        "day": day.isoformat(),
+                        "key": f"device-{layer}-{run['key']}",
+                        "name": run["name"],
+                        "label": label_fn(run["name"]),
+                        "at": run["at"],
+                        "count": run["count"],
+                    }
+                )
 
     for it in items:
-        it["text"] = f"opened {it['label']}" + (f" ×{it['count']}" if it["count"] > 1 else "")
+        it["phrase"] = f"opened {it['label']}"
+        it["text"] = it["phrase"] + (f" ×{it['count']}" if it["count"] > 1 else "")
     items.sort(key=lambda it: it["at"], reverse=True)
     return items

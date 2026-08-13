@@ -868,7 +868,7 @@ def _serialize_reminder(
 STREAM_DEFAULT_DAYS = 7
 STREAM_MAX_DAYS = 60
 
-# How much of a stream window the DEVICE derivation covers.
+# How many LOCAL DAYS of a stream window the DEVICE derivation covers.
 #
 # Thought cards are read as cards — one row each, bounded by how many were
 # written. Device rows are DERIVED from raw attention intervals, so their cost
@@ -962,26 +962,30 @@ def stream(
     #     5-minute gap rule (device_activity.OPEN_GAP)
     # The two interval sensors emit the same `{type:'event', label, kind, at,
     # count}` card the Shortcuts pings do — the timeline renders one row shape
-    # and never has to know which sensor a row came from. Their window is the
-    # thought window's tail, bounded by DEVICE_STREAM_DAYS (see there for why
-    # the derived source can't take the full range).
+    # and never has to know which sensor a row came from. They derive in LOCAL
+    # DAYS, which is the window this whole function already works in, so the
+    # tail is simply the newest DEVICE_STREAM_DAYS of the requested range.
     from . import device_activity, event_service  # local imports — module-load cycle
 
-    device_start = max(start_utc, end_utc - timedelta(days=DEVICE_STREAM_DAYS))
+    device_first = max(start_date, end_date - timedelta(days=DEVICE_STREAM_DAYS - 1))
 
     items.extend(event_service.list_recent_events(db, start=start_date, end=end_date))
     items.extend(
         {
             "type": "event",
-            # `label` carries the sentence WITHOUT the count — the timeline
-            # renders `×count` itself, so leaving it in `text` would print it
-            # twice ("opened reddit ×8 ×8").
-            "label": f"opened {open_row['label']}",
+            # `phrase` is the sentence WITHOUT the count — the timeline renders
+            # `×count` itself, so `text` would print it twice ("opened reddit ×8
+            # ×8"). Read from device_activity rather than rebuilt here: the verb
+            # is written in exactly one place, which is the whole reason that
+            # module owns the vocabulary.
+            "label": open_row["phrase"],
             "kind": open_row["layer"],
             "at": _iso(open_row["at"]),
             "count": open_row["count"],
         }
-        for open_row in device_activity.device_opens(db, start=device_start, end=end_utc)
+        for open_row in device_activity.device_opens(
+            db, start_day=device_first, end_day=end_date
+        )
     )
 
     items.sort(key=lambda it: _sort_key(it.get("at")), reverse=True)

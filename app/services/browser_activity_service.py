@@ -33,7 +33,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
-from ..common import local_now
+from ..common import local_day_bounds, local_now
 from ..db.models import BrowserInterval
 from .interval_ingest import (  # noqa: F401 — re-exported: the limits are this module's public contract
     MAX_BATCH,
@@ -363,12 +363,7 @@ MAX_SUMMARY_DAYS = 31
 
 def _day_bounds(tz, day) -> tuple[datetime, datetime]:
     """One local calendar day → its [start, end) in naive UTC."""
-    start_local = datetime(day.year, day.month, day.day, tzinfo=tz)
-    end_local = start_local + timedelta(days=1)
-    return (
-        start_local.astimezone(timezone.utc).replace(tzinfo=None),
-        end_local.astimezone(timezone.utc).replace(tzinfo=None),
-    )
+    return local_day_bounds(tz, day)
 
 
 def _sum(col):
