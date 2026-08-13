@@ -27,12 +27,37 @@
  *    the time it ran. A wedged `osascript` therefore costs one skipped tick,
  *    not a stalled sensor (the query bounds itself — see frontmost.js).
  *
+ * 3. **A query that FAILS is an unobserved stretch, and it closes the
+ *    interval.** `osascript` can wedge, and the Accessibility grant can be
+ *    revoked mid-session; either way the frontmost read stops answering while
+ *    an interval is open. Leaving it open hands the whole outage — possibly
+ *    hours — to whatever was frontmost when the sensor went blind, and hands it
+ *    over as a clean measurement. So once observation has been absent for longer
+ *    than `observationGapMs`, the interval is closed at its last confirmed
+ *    moment and flagged, without waiting for some later real event to do it.
+ *    "The sensor is sitting on a stale open interval" is not allowed to be an
+ *    invisible state.
+ *
  * A tick's OS reads are async, so a lock or a suspend can land between the read
  * and its use. The generation counter is what makes that safe: a power event
  * closes the interval and bumps the counter, and a tick whose reads predate the
  * bump discards them instead of re-opening an interval for a machine that has
  * gone to sleep.
  */
+
+// How many poll periods of failed observation before an open interval stops
+// being credited. A single failed query is ordinary — one slow `osascript`, one
+// timeout — and closing on it would chop real sessions at every hiccup; a run of
+// them is the sensor going blind. Derived from `pollMs` rather than fixed,
+// because "how long is an ordinary gap" is entirely a question about the poll
+// cadence, and that cadence is configurable.
+const OBSERVATION_GAP_POLLS = 5;
+
+// …with a floor, because pollMs clamps as low as 1s and five seconds is inside
+// the noise of a single slow query. Well under the 5-minute OPEN_GAP the server
+// derives `opened X` rows with, so this can never change what the log says —
+// only how honest a duration is.
+const MIN_OBSERVATION_GAP_MS = 15_000;
 
 class AppSensor {
   /**
@@ -44,6 +69,7 @@ class AppSensor {
    * @param {number} [opts.idleSec]   no-input seconds before attention is gone
    * @param {number} [opts.pollMs]
    * @param {number} [opts.flushMs]
+   * @param {number} [opts.observationGapMs]  overrides the pollMs-derived default
    */
   constructor({
     tracker,
@@ -53,6 +79,7 @@ class AppSensor {
     idleSec = 90,
     pollMs = 4000,
     flushMs = 60_000,
+    observationGapMs,
     now = Date.now,
     setTimer = setInterval,
     clearTimer = clearInterval,
@@ -66,6 +93,11 @@ class AppSensor {
     this.idleSec = idleSec;
     this.pollMs = pollMs;
     this.flushMs = flushMs;
+    this.observationGapMs =
+      observationGapMs ?? Math.max(pollMs * OBSERVATION_GAP_POLLS, MIN_OBSERVATION_GAP_MS);
+    // The tracker is pure and holds no cadence of its own, so the one place that
+    // knows how often observation actually happens tells it.
+    if (this.tracker) this.tracker.observationGapMs = this.observationGapMs;
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
@@ -201,6 +233,7 @@ class AppSensor {
 
       if (!result || !result.app) {
         this.lastError = result?.error || "unknown";
+        this._closeUnobserved();
         if (result?.permission) {
           // Never clears by itself, so it is stated once, loudly, rather than
           // retried in silence forever.
@@ -226,6 +259,24 @@ class AppSensor {
     } finally {
       this._ticking = false;
     }
+  }
+
+  /**
+   * The frontmost query has been failing long enough that the open interval is
+   * no longer a measurement. Close it at the last confirmed moment, flagged.
+   *
+   * The anchor is cleared too: an interval this already closed must not also be
+   * salvaged as an orphan on the next launch.
+   */
+  _closeUnobserved() {
+    const open = this.tracker.open;
+    if (!open) return null;
+    if (this.now() - open.lastSeenAt <= this.observationGapMs) return null;
+    const closed = this.tracker.unobserved();
+    this.log(`observation lapsed — closed ${open.app} at its last confirmed moment`);
+    this._emit(closed);
+    this.reporter.setOpen(this.tracker.toJSON());
+    return closed;
   }
 
   _emit(interval) {

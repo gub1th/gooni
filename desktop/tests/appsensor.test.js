@@ -152,6 +152,56 @@ test("a power event beats a query that resolves after it", async () => {
   );
 });
 
+/**
+ * A wedged System Events (or an Accessibility grant revoked mid-session) is an
+ * UNOBSERVED stretch, not a long focus session. It can persist for hours, so the
+ * sensor must not sit on a stale open interval waiting for some later real event
+ * to close it — that event would credit the whole outage to whatever was
+ * frontmost when the sensor went blind.
+ */
+test("a query that keeps failing closes the interval instead of accruing it", async () => {
+  const wedged = { app: null, error: "timeout" };
+  // The rig's queue holds its LAST entry forever, so this is: two answering
+  // queries, then a System Events that never answers again.
+  const rig = makeRig({ frontmost: ["Cursor", "Cursor", wedged] });
+  await rig.sensor.start(); // 09:00 — Cursor frontmost
+  rig.advance(60_000);
+  await rig.sensor.tick(); // 09:01 — the last query that answered
+
+  rig.advance(4000);
+  await rig.sensor.tick(); // first failure
+  assert.equal(
+    rig.recorded.length,
+    0,
+    "one failed query is a hiccup, not blindness — closing on it would chop every real session"
+  );
+
+  rig.advance(2 * 60 * 60 * 1000); // two hours of a wedged osascript
+  await rig.sensor.tick();
+
+  const [closed] = rig.recorded;
+  assert.ok(closed, "the sensor does not sit on a stale open interval");
+  assert.equal(closed.end_reason, "unobserved");
+  assert.equal(closed.truncated, true);
+  assert.equal(
+    new Date(closed.ended_at).getTime() - new Date(closed.started_at).getTime(),
+    60_000,
+    "only the observed minute is credited, not the two blind hours"
+  );
+  assert.equal(rig.sensor.status().current, null);
+  assert.equal(rig.openStore.peek().open, null, "and it cannot also be salvaged as an orphan");
+
+  // When the query recovers, the new interval starts at the recovery: the blind
+  // stretch belongs to nobody, and is not handed to Chrome either.
+  rig.push("Google Chrome");
+  rig.advance(4000);
+  await rig.sensor.tick(); // drains the wedged answer
+  rig.advance(4000);
+  await rig.sensor.tick();
+  assert.equal(rig.sensor.status().current, "Google Chrome");
+  assert.equal(rig.recorded.length, 1);
+});
+
 test("a missing Accessibility grant is stated, not retried in silence", async () => {
   const said = [];
   let now = T0;
@@ -202,6 +252,7 @@ test("stop() closes with a real end time and flushes", async () => {
   await rig.sensor.start();
   await rig.sensor.tick();
   rig.advance(60_000);
+  await rig.sensor.tick(); // the poll was still confirming when he quit
   await rig.sensor.stop();
 
   const closed = rig.recorded.find((iv) => iv.end_reason === "shutdown");

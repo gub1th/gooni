@@ -14,6 +14,8 @@
  *   - the screen locks                          → locked
  *   - the machine sleeps                        → suspended
  *   - the shell quits cleanly                   → shutdown
+ *   - observation lapsed (the frontmost query
+ *     has been failing)                         → unobserved
  *   - the record is found orphaned on the next
  *     launch (shell killed, machine crashed)    → truncated
  *
@@ -26,14 +28,24 @@
  *    number and a systematic overcount on every interval that ends by walking
  *    away from the machine.
  *
- * 2. **A salvaged interval is labelled and closed at its last CONFIRMED
- *    observation.** If the shell is killed — or the Mac sleeps with the lid
- *    shut — there is no close event, and the honest end is the last poll that
- *    saw the app frontmost, NOT the time the shell next started. Without that,
- *    the single most common failure (quit the shell at 6pm, launch it at 9am)
- *    reports a fifteen-hour session on whatever was frontmost at the time. Such
- *    rows carry `truncated: true`, so downstream code can tell a measured span
- *    from a salvaged one — the same flag `/focus`'s 6h session cap uses.
+ * 2. **A span is only ever as long as OBSERVATION reaches**, and where it isn't,
+ *    it says so. If the shell is killed — or the Mac sleeps with the lid shut —
+ *    there is no close event, and the honest end is the last poll that saw the
+ *    app frontmost, NOT the time the shell next started. Without that, the
+ *    single most common failure (quit the shell at 6pm, launch it at 9am)
+ *    reports a fifteen-hour session on whatever was frontmost at the time.
+ *
+ *    That rule belongs to `_close`, not to the salvage path, because a crash is
+ *    not the only way observation stops. The frontmost query can simply FAIL —
+ *    System Events wedges, or the Accessibility grant is revoked mid-session —
+ *    and then `lastSeenAt` stops advancing while the interval keeps accruing.
+ *    A close arriving after that gap would otherwise credit hours nothing was
+ *    watching to whatever was frontmost when the sensor went blind, and hand it
+ *    over as a CLEAN measurement. So every close clamps down to the last
+ *    confirmed observation once the requested end runs past it by more than the
+ *    sensor's tolerance, and every such row carries `truncated: true` — the same
+ *    flag `/focus`'s 6h session cap uses, and the same flag the extension puts
+ *    on a poll-discovered blur.
  *
  * 3. **Sub-threshold intervals are dropped.** Flicking through apps with
  *    cmd-tab produces a burst of sub-second "attention" that is not attention.
@@ -54,6 +66,22 @@ const MIN_DURATION_MS = 2000;
 // (interval_ingest.MAX_INTERVAL_SEC) and the same cap /focus puts on a session.
 const MAX_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+// How far past the last CONFIRMED observation a close may land before the span
+// stops being a measurement.
+//
+// The sensor only knows an app was frontmost at the moments it successfully
+// asked, and asking can fail for hours at a stretch (see honesty rule 2). The
+// 6h cap above cannot catch that: a forty-minute hole sails straight through it
+// and lands in `app_intervals` as a clean row. This is the same cap at the
+// resolution the sensor actually observes at, so an unobserved stretch is
+// clamped away and flagged instead of being credited.
+//
+// The real value is INJECTED by the sensor, derived from its own poll cadence —
+// that cadence is what decides how big an ORDINARY gap is, and this module has
+// no business holding a second copy of it. This is only the fallback for a
+// tracker built without one.
+const OBSERVATION_GAP_MS = 30_000;
+
 function newId() {
   return globalThis.crypto.randomUUID();
 }
@@ -63,11 +91,18 @@ class AppFocusTracker {
    * @param {object} opts
    * @param {(interval: object) => void} opts.onInterval  called with each closed interval
    * @param {number} [opts.minDurationMs]
+   * @param {number} [opts.observationGapMs]  set by the sensor from its poll cadence
    * @param {() => string} [opts.idFactory]  client_id minting (injected in tests)
    */
-  constructor({ onInterval, minDurationMs = MIN_DURATION_MS, idFactory = newId } = {}) {
+  constructor({
+    onInterval,
+    minDurationMs = MIN_DURATION_MS,
+    observationGapMs = OBSERVATION_GAP_MS,
+    idFactory = newId,
+  } = {}) {
     this.onInterval = onInterval || (() => {});
     this.minDurationMs = minDurationMs;
+    this.observationGapMs = observationGapMs;
     this.idFactory = idFactory;
     /** @type {null | {app:string, title:string|null, startedAt:number, lastSeenAt:number}} */
     this.open = null;
@@ -139,6 +174,19 @@ class AppFocusTracker {
   }
 
   /**
+   * Observation has lapsed while the shell is still running: the frontmost
+   * query has been failing for longer than the sensor's tolerance. Close at the
+   * last confirmed moment and flag it — the gap is time nothing was watching,
+   * exactly like the salvage path, and leaving the interval open would let a
+   * wedged System Events hand the whole outage to whatever was frontmost when
+   * it broke.
+   */
+  unobserved() {
+    if (!this.open) return null;
+    return this._close(this.open.lastSeenAt, "unobserved", true);
+  }
+
+  /**
    * Called at startup when a snapshot was found on disk: the shell died (or the
    * machine did) mid-interval. Close it at the last confirmed observation, NOT
    * at now — the gap between them is time nothing was watching.
@@ -160,6 +208,13 @@ class AppFocusTracker {
 
     let endedAt = Math.max(open.startedAt, at);
     let flagged = truncated;
+    // Clamp DOWNWARD only, and only past the tolerance: a normal idle close
+    // already backdates to roughly the last observation, and a quit or a lock
+    // we were present for is a real end time we should keep.
+    if (endedAt - open.lastSeenAt > this.observationGapMs) {
+      endedAt = Math.max(open.startedAt, open.lastSeenAt);
+      flagged = true;
+    }
     if (endedAt - open.startedAt > MAX_INTERVAL_MS) {
       // The last confirmed observation is the newest moment we can prove the app
       // was frontmost; prefer it, then hard-clamp.
@@ -190,4 +245,4 @@ class AppFocusTracker {
   }
 }
 
-module.exports = { AppFocusTracker, MIN_DURATION_MS, MAX_INTERVAL_MS };
+module.exports = { AppFocusTracker, MIN_DURATION_MS, MAX_INTERVAL_MS, OBSERVATION_GAP_MS };
